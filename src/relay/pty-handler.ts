@@ -234,11 +234,9 @@ type ManagedStartupCommand = {
 function killPtyProcess(pty: IPty, signal: string): void {
   if (process.platform === 'win32') {
     pty.kill()
-    return
   }
   if (signal === 'SIGKILL') {
     forceKillPosixPtyProcessGroups(pty.pid, () => pty.kill(signal))
-    return
   }
   pty.kill(signal)
 }
@@ -270,7 +268,6 @@ function disposeManagedPty(managed: ManagedPty): void {
     ;(managed.pty as unknown as { kill: (sig?: string) => void }).kill = () => {}
   } else if (managed.gracefulKillSent || managed.forceKillSent) {
     // Why: WindowsTerminal.destroy() calls kill(); a prior bare kill already closed ConPTY, so skip to avoid double-close.
-    return
   }
   try {
     ;(managed.pty as unknown as { destroy?: () => void }).destroy?.()
@@ -979,7 +976,8 @@ export class PtyHandler {
     this.dispatcher.onRequest('pty.getCapabilities', async () => ({
       startupIngressVersion: PTY_STARTUP_INGRESS_VERSION,
       agentSessionClaimVersion: AGENT_SESSION_EXECUTION_OWNER_PROTOCOL_VERSION,
-      agentSessionCreateOperationVersion: AGENT_SESSION_CREATE_OPERATION_PROTOCOL_VERSION
+      agentSessionCreateOperationVersion: AGENT_SESSION_CREATE_OPERATION_PROTOCOL_VERSION,
+      incarnationFenceVersion: 1
     }))
     this.dispatcher.onRequest('pty.listProcesses', () => this.listProcesses())
     this.dispatcher.onRequest('pty.getDefaultShell', async () => resolveDefaultShell())
@@ -2073,7 +2071,9 @@ export class PtyHandler {
     return { cols: managed.pty.cols, rows: managed.pty.rows }
   }
 
-  private async shutdown(params: Record<string, unknown>): Promise<void> {
+  private async shutdown(
+    params: Record<string, unknown>
+  ): Promise<{ fenceUnavailable: true } | void> {
     const id = params.id as string
     const immediate = params.immediate as boolean
     const expectedIncarnationId = params.expectedIncarnationId
@@ -2083,12 +2083,18 @@ export class PtyHandler {
     ) {
       throw new Error('Invalid expectedIncarnationId')
     }
+    const incarnationId =
+      typeof params.incarnationId === 'string' ? params.incarnationId : undefined
     const managed = this.ptys.get(id)
     if (!managed) {
       return
     }
-    if (expectedIncarnationId !== undefined && expectedIncarnationId !== managed.incarnationId) {
-      throw new Error(`PTY incarnation mismatch for ${id}`)
+    if (
+      (expectedIncarnationId !== undefined && expectedIncarnationId !== managed.incarnationId) ||
+      (incarnationId !== undefined && incarnationId !== managed.incarnationId)
+    ) {
+      return { fenceUnavailable: true }
+    }
     }
     // Why: `pty.shutdown` is the only authoritative statement this host ever gets that a tab is
     // gone. Record it before the kill request, because the kill is the part that can fail: an agent

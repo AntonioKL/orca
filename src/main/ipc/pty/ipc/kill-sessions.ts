@@ -1,0 +1,141 @@
+import type { IPtyProvider, PtyProcessInfo } from '../../../providers/types'
+import type {
+  PtyKillIntent,
+  PtyKillSessionRef,
+  PtyKillSessionResult
+} from '../../../../shared/pty-kill-sessions'
+import type { PtyShutdownResult } from '../../../providers/pty-provider-contract'
+
+export type KillSessionsDeps = {
+  listProviders: () => readonly { provider: IPtyProvider; connectionId?: string | null }[]
+  providerForSession: (id: string) => IPtyProvider | undefined
+  /** Main-owned ownership evidence. `true` means the session is still claimed. */
+  isOwned?: (ref: PtyKillSessionRef) => { owned: boolean; reason?: string }
+  shutdown: (provider: IPtyProvider, ref: PtyKillSessionRef) => Promise<PtyShutdownResult | void>
+  supportsIncarnationFence?: (provider: IPtyProvider) => boolean | Promise<boolean>
+  concurrency?: number
+}
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  limit: number,
+  fn: (value: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const result: R[] = Array.from({ length: values.length })
+  let next = 0
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = next++
+      if (index >= values.length) {
+        return
+      }
+      result[index] = await fn(values[index], index)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()))
+  return result
+}
+
+/** Bulk kill coordinator. Authorization is evaluated for every attempt and
+ * owner-close deliberately bypasses orphan authorization. */
+export async function killPtySessions(
+  refs: readonly PtyKillSessionRef[],
+  intent: PtyKillIntent,
+  deps: KillSessionsDeps
+): Promise<PtyKillSessionResult[]> {
+  const auth = intent === 'orphan-cleanup' ? refs.map((ref) => deps.isOwned?.(ref)) : []
+  const shutdownResults = new Map<string, PtyShutdownResult | void>()
+  const fenceCapabilities = new Map<string, boolean>()
+  const results = await mapWithConcurrency<PtyKillSessionRef, PtyKillSessionResult>(
+    refs,
+    deps.concurrency ?? 4,
+    async (ref, index): Promise<PtyKillSessionResult> => {
+      const evidence = auth[index]
+      if (evidence?.owned) {
+        return { ...ref, verdict: 'refused', reason: evidence.reason ?? 'session is owned' }
+      }
+      const provider = deps.providerForSession(ref.id)
+      if (!provider) {
+        return { ...ref, verdict: 'unverifiable', reason: 'owning provider is unavailable' }
+      }
+      const fenceCapable = deps.supportsIncarnationFence
+        ? await deps.supportsIncarnationFence(provider)
+        : false
+      fenceCapabilities.set(ref.id, fenceCapable)
+      if (fenceCapable && !ref.incarnationId) {
+        return { ...ref, verdict: 'refused', reason: 'missing incarnation fence' }
+      }
+      try {
+        const shutdownResult = provider.shutdownWithOutcome
+          ? await provider.shutdownWithOutcome(ref.id, {
+              immediate: true,
+              intent,
+              incarnationId: ref.incarnationId
+            })
+          : await deps.shutdown(provider, ref)
+        shutdownResults.set(ref.id, shutdownResult)
+        return { ...ref, verdict: 'unverifiable' as const, reason: 'pending verification' }
+      } catch (error) {
+        return {
+          ...ref,
+          verdict: 'unverifiable',
+          reason: error instanceof Error ? error.message : String(error)
+        }
+      }
+    }
+  )
+  const snapshots = new Map<IPtyProvider, PtyProcessInfo[] | null>()
+  await Promise.all(
+    deps.listProviders().map(async ({ provider }) => {
+      snapshots.set(provider, await provider.listProcesses().catch(() => null))
+    })
+  )
+  return results.map((result) => {
+    if (result.verdict !== 'unverifiable' || result.reason !== 'pending verification') {
+      return result
+    }
+    const provider = deps.providerForSession(result.id)
+    const listed = provider ? snapshots.get(provider) : null
+    if (!listed) {
+      return { ...result, verdict: 'unverifiable', reason: 'inventory unavailable' }
+    }
+    const survivor = listed.find(
+      (row) =>
+        row.id === result.id &&
+        (!result.incarnationId || !row.incarnationId || row.incarnationId === result.incarnationId)
+    )
+    const sameId = listed.find((row) => row.id === result.id)
+    if (
+      fenceCapabilities.get(result.id) &&
+      result.incarnationId &&
+      sameId?.incarnationId &&
+      sameId.incarnationId !== result.incarnationId
+    ) {
+      return { ...result, verdict: 'refused', reason: 'session was replaced' }
+    }
+    const shutdownResult = shutdownResults.get(result.id)
+    const treeUnverified = Boolean(shutdownResult?.treeUnverified)
+    return survivor
+      ? {
+          ...result,
+          verdict: 'live' as const,
+          reason: 'session still running',
+          ...(treeUnverified ? { treeUnverified: true } : {})
+        }
+      : {
+          ...result,
+          verdict: 'exited' as const,
+          ...(treeUnverified
+            ? { treeUnverified: true, reason: 'descendant tree could not be verified' }
+            : {})
+        }
+  })
+}
+
+/** Utility used by the IPC adapter to take one pre-wave provider snapshot. */
+export async function listProviderSessions(deps: KillSessionsDeps): Promise<PtyProcessInfo[]> {
+  const snapshots = await Promise.all(
+    deps.listProviders().map(({ provider }) => provider.listProcesses().catch(() => []))
+  )
+  return snapshots.flat()
+}

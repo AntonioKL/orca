@@ -23,6 +23,7 @@ import { SshPtySpawnExitRaceTracker } from './ssh-pty-spawn-exit-race'
 import { SshAgentSessionCapabilities } from './ssh-agent-session-capabilities'
 import type { PtyProcessInspection } from './pty-process-inspection'
 import { writeToSshPty, writeToSshPtyWithSettlement } from './ssh-pty-write'
+import type { PtyShutdownResult } from './pty-provider-contract'
 
 // Why: sequential relay teardown calls share one absolute budget; convert to the mux-relative timeout only at dispatch.
 function relayTimeoutOptions(deadlineMs: number | undefined): { timeoutMs: number } | undefined {
@@ -150,6 +151,10 @@ export class SshPtyProvider implements IPtyProvider {
     return await this.agentSessionCapabilities.supportsCreateOperations(options)
   }
 
+  async supportsIncarnationFence(options: { signal?: AbortSignal } = {}): Promise<boolean> {
+    return await this.agentSessionCapabilities.supportsIncarnationFence(options)
+  }
+
   async attach(id: string): Promise<void> {
     const relayPtyId = this.toRelayPtyId(id)
     await requestSshPtyAttach({
@@ -206,19 +211,31 @@ export class SshPtyProvider implements IPtyProvider {
   }
 
   async shutdown(id: string, opts: Parameters<IPtyProvider['shutdown']>[1]): Promise<void> {
-    await this.mux.request(
+    await this.shutdownWithOutcome(id, opts)
+  }
+
+  async shutdownWithOutcome(
+    id: string,
+    opts: Parameters<IPtyProvider['shutdown']>[1]
+  ): Promise<PtyShutdownResult | void> {
+    const result = await this.mux.request(
       'pty.shutdown',
       {
         id: this.toRelayPtyId(id),
         immediate: opts.immediate ?? false,
         keepHistory: opts.keepHistory ?? false,
+        ...(opts.intent === undefined ? {} : { intent: opts.intent }),
+        ...(opts.incarnationId === undefined ? {} : { incarnationId: opts.incarnationId }),
         ...(opts.expectedIncarnationId === undefined
           ? {}
           : { expectedIncarnationId: opts.expectedIncarnationId })
       },
       relayTimeoutOptions(opts.deadlineMs)
     )
-    this.livePtyIds.delete(id)
+    if (result?.fenceUnavailable !== true) {
+      this.livePtyIds.delete(id)
+    }
+    return result as PtyShutdownResult | void
   }
 
   async sendSignal(id: string, signal: string): Promise<void> {

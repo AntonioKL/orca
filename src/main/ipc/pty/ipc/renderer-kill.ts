@@ -8,6 +8,7 @@ import { ptyOwnership } from '../provider/ownership-state'
 import { getProviderForPty, sshProviders, tryGetProviderForPty } from '../provider/registry'
 import { finishPtyShutdown, isPtyAlreadyGoneError } from '../provider/liveness'
 import { recordUndeliveredSshPtyKill } from '../runtime/undelivered-ssh-kill'
+import type { PtyKillIntent } from '../../../../shared/pty-kill-sessions'
 
 export type PtyKillIpcDeps = {
   store?: Store
@@ -16,7 +17,13 @@ export type PtyKillIpcDeps = {
   shutdownProviderAndDetectExit: (
     provider: IPtyProvider,
     id: string,
-    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      intent?: PtyKillIntent
+      incarnationId?: string
+    }
   ) => Promise<boolean>
   rememberSyntheticKillExit: (id: string) => void
   sendPtyExitToRenderer: (payload: { id: string; code: number; incarnationId?: string }) => void

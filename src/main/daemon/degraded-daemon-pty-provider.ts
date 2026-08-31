@@ -18,6 +18,7 @@ import {
   listProviderSessionIds
 } from './degraded-daemon-session-routing'
 import { DegradedDaemonFreshSpawnRouter } from './degraded-daemon-fresh-spawn-routing'
+import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
 import { DegradedDaemonOwnerRecovery } from './degraded-daemon-owner-recovery'
 
 export class DegradedDaemonPtyProvider implements IPtyProvider {
@@ -137,7 +138,13 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
 
   async shutdown(
     id: string,
-    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      intent?: PtyKillIntent
+      incarnationId?: string
+    }
   ): Promise<void> {
     await this.providerFor(id).shutdown(id, opts)
     if (!opts.keepHistory) {

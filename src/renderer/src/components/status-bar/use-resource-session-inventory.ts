@@ -16,6 +16,11 @@ type ResourceSessionInventory = {
   clearSessionsError: () => void
   removeSession: (sessionId: string) => void
   removeSessions: (sessionIds: ReadonlySet<string>) => void
+  setSessionVerdict: (
+    id: string,
+    verdict: 'live' | 'unverifiable' | 'refused',
+    reason?: string
+  ) => void
 }
 
 type ResourceSessionInventoryState = {
@@ -30,6 +35,9 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
   const lifecycleRevisionRef = useRef(0)
   const removedAtRevisionRef = useRef(new Map<string, number>())
   const knownSessionIdsRef = useRef(new Set<string>())
+  const verdictsRef = useRef(
+    new Map<string, { verdict: 'live' | 'unverifiable' | 'refused'; reason?: string }>()
+  )
   const [storedState, setStoredState] = useState<ResourceSessionInventoryState>(() => ({
     ready,
     sessionInventory: EMPTY_DAEMON_SESSION_INVENTORY,
@@ -63,9 +71,14 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
         return
       }
       const currentRemovedAtRevision = removedAtRevisionRef.current
-      const liveSessions = sessions.filter(
-        ({ id }) => (currentRemovedAtRevision.get(id) ?? 0) <= lifecycleRevision
-      )
+      const liveSessions = sessions
+        .filter(({ id }) => (currentRemovedAtRevision.get(id) ?? 0) <= lifecycleRevision)
+        .map((session) => {
+          const verdict = verdictsRef.current.get(session.id)
+          return verdict
+            ? { ...session, killVerdict: verdict.verdict, killReason: verdict.reason }
+            : session
+        })
       // Tombstones at or before this request cannot suppress later ID reuse;
       // only exits that raced this request must survive to the next refresh.
       for (const [id, removedAtRevision] of currentRemovedAtRevision) {
@@ -113,6 +126,22 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
       sessionInventory: removeSessionsFromInventory(current.sessionInventory, sessionIds)
     }))
   }, [])
+
+  const setSessionVerdict = useCallback(
+    (id: string, verdict: 'live' | 'unverifiable' | 'refused', reason?: string): void => {
+      verdictsRef.current.set(id, { verdict, ...(reason ? { reason } : {}) })
+      setStoredState((current) => ({
+        ...current,
+        sessionInventory: {
+          ...current.sessionInventory,
+          sessions: current.sessionInventory.sessions.map((session) =>
+            session.id === id ? { ...session, killVerdict: verdict, killReason: reason } : session
+          )
+        }
+      }))
+    },
+    []
+  )
 
   useEffect(() => {
     refreshGenerationRef.current += 1
@@ -203,6 +232,7 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
     refreshSessions,
     clearSessionsError,
     removeSession,
-    removeSessions
+    removeSessions,
+    setSessionVerdict
   }
 }

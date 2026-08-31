@@ -622,7 +622,7 @@ describe('killWithDescendantSweep', () => {
         killWindowsTree,
         verifyTreeKillTarget: async () => 'own'
       })
-    ).resolves.toBeUndefined()
+    ).resolves.toBe('tree_unavailable')
     expect(killRoot).toHaveBeenCalledOnce()
   })
 

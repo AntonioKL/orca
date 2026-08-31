@@ -12,6 +12,7 @@ import type { PtyProcessInspection } from '../providers/pty-process-inspection'
 import { shouldHandoffDaemonHistory } from './daemon-history-handoff'
 import type { DaemonPtyRouterDataEvent, DaemonPtyRouterExitEvent } from './daemon-pty-router-events'
 import { DaemonSessionOwnerResolver } from './daemon-session-owner-resolution'
+import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
 
 export class DaemonPtyRouter implements IPtyProvider {
   private current: DaemonPtyAdapter
@@ -115,7 +116,13 @@ export class DaemonPtyRouter implements IPtyProvider {
 
   async shutdown(
     id: string,
-    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      intent?: PtyKillIntent
+      incarnationId?: string
+    }
   ): Promise<void> {
     const adapter = this.adapterFor(id)
     const migrateHistory = shouldHandoffDaemonHistory(opts.keepHistory, adapter, this.current)

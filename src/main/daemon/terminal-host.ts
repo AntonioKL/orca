@@ -16,6 +16,7 @@ import {
 } from './terminal-host-agent-session-claim'
 import { TerminalHostAgentSessionGenerations } from './terminal-host-agent-session-generations'
 import { resolveTerminalHostSessionCwd } from './terminal-host-session-cwd'
+import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
 import { TerminalHostTombstones } from './terminal-host-tombstones'
 import { listLiveTerminalHostSessions } from './terminal-host-session-listing'
 import { createOrAttachTerminalSession } from './terminal-host-session-create'
@@ -163,7 +164,10 @@ export class TerminalHost {
     this.sessions.get(sessionId)?.resumeProducer()
   }
 
-  kill(sessionId: string, opts: { immediate?: boolean } = {}): Promise<void> {
+  kill(
+    sessionId: string,
+    opts: { immediate?: boolean; intent?: PtyKillIntent; incarnationId?: string } = {}
+  ): Promise<void> {
     const pending = this.sessionTeardown.get(sessionId)
     if (pending) {
       return Promise.resolve(
@@ -171,9 +175,14 @@ export class TerminalHost {
       )
     }
     const session = this.getAliveSession(sessionId)
-    const killed = this.sessionTeardown.killSession(sessionId, session, opts.immediate === true)
+    const killed = this.sessionTeardown.killSession(
+      sessionId,
+      session,
+      opts.immediate === true,
+      opts
+    )
     this.killedTombstones.record(sessionId)
-    return Promise.resolve(killed)
+    return Promise.resolve(killed).then(() => undefined)
   }
 
   // Why: dispose a dead session's emulator so exited terminals don't pin their scrollback window for the daemon's life.

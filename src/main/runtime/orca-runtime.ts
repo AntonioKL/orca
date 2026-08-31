@@ -3254,6 +3254,31 @@ type ProviderSnapshotReadOptions = {
 }
 
 export class OrcaRuntimeService {
+  /** Read-only ownership projection used by main-side PTY cleanup authorization. */
+  getPtySurfaceOwnershipEvidence(
+    ptyId: string,
+    incarnationId?: string
+  ): 'present' | 'absent' | 'unknown' {
+    const record = this.ptysById.get(ptyId)
+    if (!record) {
+      return 'unknown'
+    }
+    if (incarnationId && record.incarnationId && incarnationId !== record.incarnationId) {
+      return 'absent'
+    }
+    if (
+      record.tabId ||
+      record.paneKey ||
+      record.runtimeSessionOwned ||
+      record.agentSessionOwners.length > 0
+    ) {
+      return 'present'
+    }
+    if (this.mobileSubscribers.has(ptyId) || this.headlessTerminals.has(ptyId)) {
+      return 'present'
+    }
+    return 'absent'
+  }
   private readonly runtimeId = randomUUID()
   private readonly startedAt = Date.now()
   private readonly store: RuntimeStore | null

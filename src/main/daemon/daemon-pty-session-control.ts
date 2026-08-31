@@ -11,6 +11,8 @@ import { SessionNotFoundError, type ListSessionsResult } from './types'
 import { resolveSafePtyDefaultCwd } from '../providers/pty-default-cwd'
 import type { PtySpawnResult } from '../providers/types'
 import { PtyWriteUnavailableError } from '../providers/pty-write-unavailable-error'
+import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
+import type { PtyShutdownResult } from '../providers/pty-provider-contract'
 export const LIVENESS_PROBE_TIMEOUT_MS = 2_000
 
 const MAX_TOMBSTONES = 1000
@@ -172,15 +174,23 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
 
   async shutdown(
     id: string,
-    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      intent?: PtyKillIntent
+      incarnationId?: string
+    }
   ): Promise<void> {
     if (opts.keepHistory && this.disconnectOnlyPromise) {
       throw new Error('Cannot keep history after daemon disconnect has started')
     }
-    const shutdown = this.withHistorySpawnLock(id, () => this.shutdownWithHistoryLock(id, opts))
+    const shutdown = this.withHistorySpawnLock(
+      id,
+      () => this.shutdownWithHistoryLock(id, opts) as Promise<void>
+    )
     if (!opts.keepHistory) {
       await shutdown
-      return
     }
     this.keepHistoryShutdowns.add(shutdown)
     try {
@@ -190,9 +200,31 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
     }
   }
 
+  async shutdownWithOutcome(
+    id: string,
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      intent?: PtyKillIntent
+      incarnationId?: string
+    }
+  ): Promise<PtyShutdownResult | void> {
+    return await this.withHistorySpawnLock(
+      id,
+      () => this.shutdownWithHistoryLock(id, opts) as Promise<PtyShutdownResult | void>
+    )
+  }
+
   protected async shutdownWithHistoryLock(
     id: string,
-    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      intent?: PtyKillIntent
+      incarnationId?: string
+    }
   ): Promise<void> {
     // Why: shutdown can be the first lazy-client operation after restart; connect
     // before killing so a healthy daemon session is not orphaned (#7742). Connect,
@@ -245,9 +277,14 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
         this.historyManager?.suspendSession(id)
       }
     }
-    await this.client.request(
+    const result = await this.client.request(
       'kill',
-      { sessionId: id, immediate: opts.immediate ?? false },
+      {
+        sessionId: id,
+        immediate: opts.immediate ?? false,
+        intent: opts.intent,
+        incarnationId: opts.incarnationId
+      },
       remainingDaemonRequestTimeoutMs(opts.deadlineMs)
     )
     this.activeSessionIds.delete(id)
@@ -274,14 +311,15 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
         .removeSession(id)
         .catch((err) => console.warn('[history] removeSession failed:', id, err))
     }
+    void result
 
     // Why: the tombstone rejects reattach to a user-killed session; sleep legitimately reattaches on wake, so skip it under keepHistory.
     if (!opts.keepHistory) {
       this.killedSessionTombstones.delete(id)
       this.killedSessionTombstones.set(id, Date.now())
       if (this.killedSessionTombstones.size > MAX_TOMBSTONES) {
-        const oldest = this.killedSessionTombstones.keys().next().value
-        if (oldest) {
+        const oldest = this.killedSessionTombstones.keys().next().value as string | undefined
+        if (oldest !== undefined) {
           this.killedSessionTombstones.delete(oldest)
         }
       }

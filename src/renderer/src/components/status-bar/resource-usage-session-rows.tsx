@@ -62,6 +62,25 @@ export function SessionRow({
       <span className="text-[11px] text-muted-foreground truncate min-w-0 flex-1">
         {session.label}
       </span>
+      {session.killVerdict && (
+        <span className="text-[10px] text-amber-600 truncate max-w-[10rem]" role="status">
+          {session.killReason ||
+            (session.killVerdict === 'refused'
+              ? translate(
+                  'auto.components.status.bar.ResourceUsageStatusSegment.killRefused',
+                  'Kill refused'
+                )
+              : session.killVerdict === 'live'
+                ? translate(
+                    'auto.components.status.bar.ResourceUsageStatusSegment.killLive',
+                    'Still live'
+                  )
+                : translate(
+                    'auto.components.status.bar.ResourceUsageStatusSegment.killUnverifiable',
+                    "Couldn't verify"
+                  ))}
+        </span>
+      )}
       <MetricPair cpu={session.cpu} memory={session.memory} size="small" />
       {/* Why: kill X sits in the shared gutter for column alignment; bound rows reveal it on hover/focus, orphan rows always show it as reclaimable. */}
       <span className={ROW_TRAILING_GUTTER_CLS}>

@@ -12,6 +12,14 @@ import type {
 import type { PtyProcessInfo } from './pty-process-info'
 import type { TerminalExitCause } from '../../shared/terminal-exit-cause'
 import type { TerminalOwner } from '../../shared/terminal-owner'
+import type { PtyKillIntent, DescendantSweepOutcome } from '../../shared/pty-kill-sessions'
+
+export type PtyShutdownResult = {
+  /** Result of the descendant-tree door; absent for legacy providers. */
+  outcome?: DescendantSweepOutcome
+  treeUnverified?: true
+  fenceUnavailable?: true
+}
 
 export type {
   PtyBackgroundStreamEvent,
@@ -135,6 +143,7 @@ export type IPtyProvider = {
   providesAgentSessionOwnerListings?: (ptyId: string) => boolean
   /** Whether fresh structured creates can replay one spawn across a lost relay response. */
   supportsAgentSessionCreateOperations?: (options?: PtyProbeOptions) => boolean | Promise<boolean>
+  supportsIncarnationFence?: (options?: PtyProbeOptions) => boolean | Promise<boolean>
   attach(id: string): Promise<Pick<PtySpawnResult, 'providerSequence'> | void>
   hasPty?: (id: string) => boolean
   /** Exact provider readback: false only when the provider answered that the PTY is absent. */
@@ -204,8 +213,21 @@ export type IPtyProvider = {
       keepHistory?: boolean
       deadlineMs?: number
       expectedIncarnationId?: PtyIncarnationId
+      intent?: PtyKillIntent
+      incarnationId?: string
     }
   ): Promise<void>
+  shutdownWithOutcome?: (
+    id: string,
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      intent?: PtyKillIntent
+      incarnationId?: string
+      expectedIncarnationId?: PtyIncarnationId
+    }
+  ) => Promise<PtyShutdownResult | void>
   sendSignal(id: string, signal: string): Promise<void>
   getCwd(id: string): Promise<string>
   getInitialCwd(id: string): Promise<string>

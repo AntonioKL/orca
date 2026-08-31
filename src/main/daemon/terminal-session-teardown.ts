@@ -1,5 +1,7 @@
 import { killWithDescendantSweep } from '../pty-descendant-termination'
 import type { Session } from './session'
+import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
+import type { PtyShutdownResult } from '../providers/pty-provider-contract'
 
 type AgentTeardownOperation = {
   promise: Promise<void>
@@ -33,7 +35,12 @@ export class TerminalSessionTeardown {
     return pending?.promise
   }
 
-  killSession(sessionId: string, session: Session, immediate: boolean): void | Promise<void> {
+  killSession(
+    sessionId: string,
+    session: Session,
+    immediate: boolean,
+    _opts?: { intent?: PtyKillIntent; incarnationId?: string }
+  ): void | Promise<PtyShutdownResult | void> {
     if (session.launchAgent) {
       return this.killAgentSession(sessionId, session, immediate)
     }
@@ -53,16 +60,21 @@ export class TerminalSessionTeardown {
    * (#10004/#10100). POSIX shells already reach their child pgroup on forceKill, so they
    * stay on the plain force-kill path.
    */
-  private async forceKillPlainShellSession(sessionId: string, session: Session): Promise<void> {
+  private async forceKillPlainShellSession(
+    sessionId: string,
+    session: Session
+  ): Promise<PtyShutdownResult | void> {
     if (process.platform === 'win32') {
       // Why: forceKillAndWaitForExit claims termination synchronously; awaiting the sweep
       // ahead of it would leave attach open on a doomed session for the taskkill's duration.
       session.beginTermination()
-      await killWithDescendantSweep(session.pid, () => {}, {
+      const outcome = await killWithDescendantSweep(session.pid, () => {}, {
         // Why: the descendant tree is only ours while this Session still owns the live root PID.
         ownsRoot: () => this.sessions.get(sessionId) === session && session.isAlive,
         terminateOwnedTree: () => session.terminateOwnedTree()
       })
+      await session.forceKillAndWaitForExit()
+      return outcome === 'tree_terminated' ? { outcome } : { outcome, treeUnverified: true }
     }
     await session.forceKillAndWaitForExit()
   }

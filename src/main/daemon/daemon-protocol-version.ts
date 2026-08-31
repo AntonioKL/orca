@@ -1,6 +1,7 @@
 // Why: daemons survive app updates, so wire behavior must be version-gated.
 // v36 launches shells from content-addressed wrapper trees; older owners stay attachable.
-export const PROTOCOL_VERSION = 36
+export const PROTOCOL_VERSION = 37
+export const INCARNATION_FENCE_DAEMON_PROTOCOL_VERSION = 37
 export const CONTENT_ADDRESSED_SHELL_WRAPPER_DAEMON_PROTOCOL_VERSION = 36
 export const ASYNC_CWD_VALIDATION_DAEMON_PROTOCOL_VERSION = 35
 export const CODEX_SHELL_LAUNCH_PREFLIGHT_DAEMON_PROTOCOL_VERSION = 34

@@ -12,6 +12,7 @@ import type { DaemonTerminalAdmission } from './daemon-terminal-admission'
 import type { TerminalHistorySeedTransferRegistry } from './terminal-history-seed-transfer-registry'
 import type { TerminalHost } from './terminal-host'
 import { SessionNotFoundError, type DaemonRequest } from './types'
+import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
 
 type DaemonRequestRouterOptions = {
   host: TerminalHost
@@ -90,8 +91,19 @@ export class DaemonRequestRouter {
           request.payload.sessionId,
           request.payload.background === true
         )
-      case 'kill':
-        return this.kill(clientId, request.payload.sessionId, request.payload.immediate)
+      case 'kill': {
+        const payload = request.payload as typeof request.payload & {
+          intent?: PtyKillIntent
+          incarnationId?: string
+        }
+        return this.kill(
+          clientId,
+          payload.sessionId,
+          payload.immediate,
+          payload.intent,
+          payload.incarnationId
+        )
+      }
       case 'signal':
         this.options.host.signal(request.payload.sessionId, request.payload.signal)
         return {}
@@ -185,13 +197,15 @@ export class DaemonRequestRouter {
   private async kill(
     clientId: string,
     sessionId: string,
-    immediate: boolean | undefined
-  ): Promise<Record<string, never>> {
+    immediate: boolean | undefined,
+    intent?: PtyKillIntent,
+    incarnationId?: string
+  ): Promise<Record<string, unknown>> {
     const canceledPendingSpawn = this.options.preparations.cancel(sessionId)
     this.options.attachments.clearInput(sessionId)
     const attribution = { sessionId, immediate: immediate === true, clientId }
     try {
-      await this.options.host.kill(sessionId, { immediate })
+      await this.options.host.kill(sessionId, { immediate, intent, incarnationId })
     } catch (error) {
       if (!(canceledPendingSpawn && error instanceof SessionNotFoundError)) {
         this.options.log.log('session-kill-failed', attribution)

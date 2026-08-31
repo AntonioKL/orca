@@ -296,6 +296,7 @@ export function mergeSnapshotAndSessions(
 
     row.sessions.push({
       sessionId: session.id,
+      ...(session.incarnationId ? { incarnationId: session.incarnationId } : {}),
       paneKey: null,
       pid: 0,
       label: resolveDaemonSessionLabel(session, worktreeId, tabId, ctx),
