@@ -1,7 +1,5 @@
 import { toast } from 'sonner'
 import { launchStructuredAgentSession } from '@/lib/launch-structured-agent-session'
-import { refreshLocalStructuredSessionTabs } from '@/runtime/local-structured-session-tabs-sync'
-import { translate } from '@/i18n/i18n'
 import type { AgentSessionHandleProvider } from '../../../shared/agent-session-provider-handle'
 import { agentSessionProviderLabel } from '../../../shared/agent-session-provider-label'
 import {
@@ -10,6 +8,10 @@ import {
   StructuredAgentSessionCreateRefusalError,
   type StructuredAgentSessionLaunchIntent
 } from '@/lib/launch-structured-codex-session'
+import { refreshLocalStructuredSessionTabs } from '@/runtime/local-structured-session-tabs-sync'
+import { callStructuredAgentSession } from '@/runtime/structured-agent-session-client'
+import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
+import { translate } from '@/i18n/i18n'
 
 type StructuredLaunchState = {
   promise: Promise<string>
@@ -150,7 +152,15 @@ const pendingCodexLaunches = new Map<
 >()
 
 async function verifyCodexPublished(intent: StructuredAgentSessionLaunchIntent): Promise<string> {
-  const snapshots = await refreshLocalStructuredSessionTabs()
+  const target = intent.target ?? { kind: 'local' as const }
+  const snapshots =
+    target.kind === 'local'
+      ? await refreshLocalStructuredSessionTabs()
+      : await callStructuredAgentSession<{ snapshots?: RuntimeMobileSessionTabsResult[] }>(
+          target,
+          'session.tabs.listAll',
+          {}
+        ).then((result) => result.snapshots ?? [])
   if (
     !snapshots.some(
       (snapshot) =>

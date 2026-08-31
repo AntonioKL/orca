@@ -1,7 +1,11 @@
 import type { AppState } from '@/store/types'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
-import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
+import {
+  getExecutionHostIdForWorktree,
+  getRuntimeEnvironmentIdForWorktree
+} from '@/lib/worktree-runtime-owner'
 import { getRendererAppPlatform } from '@/lib/renderer-app-platform'
+import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 
 export function canUseStructuredNativeChat(state: AppState, worktreeId: string): boolean {
   if (state.settings?.experimentalStructuredNativeChat !== true) {
@@ -13,8 +17,19 @@ export function canUseStructuredNativeChat(state: AppState, worktreeId: string):
   if (state.settings?.openAgentTabsInChatByDefault !== true) {
     return false
   }
-  if (getExecutionHostIdForWorktree(state, worktreeId) !== 'local') {
-    return false
+  const executionHostId = getExecutionHostIdForWorktree(state, worktreeId)
+  if (executionHostId !== 'local') {
+    // Runtime-owned worktrees may use the paired structured host when its
+    // negotiated status is already known. SSH ownership deliberately remains
+    // on the legacy terminal bridge: it has no agent-session RPC transport.
+    if (!executionHostId.startsWith('runtime:')) {
+      return false
+    }
+    const environmentId = getRuntimeEnvironmentIdForWorktree(state, worktreeId)
+    const status = environmentId
+      ? state.runtimeStatusByEnvironmentId?.get(environmentId)?.status
+      : undefined
+    return status?.capabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY) === true
   }
   // The shipped Windows process-tree addon may not expose creation time. Until
   // the host advertises that proof, refuse every local Windows execution path —

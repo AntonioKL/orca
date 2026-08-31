@@ -16,6 +16,8 @@ import {
   resolveWebSessionVisibleTabId
 } from '@/runtime/web-session-focus-intent'
 import { LOCAL_STRUCTURED_SESSION_OWNER } from '@/runtime/local-structured-session-tabs-sync'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
 
 type StructuredAgentSessionCreateParams = {
   envelope: AgentSessionMutationEnvelope
@@ -26,6 +28,8 @@ type StructuredAgentSessionCreateParams = {
 export type StructuredAgentSessionLaunchIntent = {
   sessionId: string
   worktreeId: string
+  /** Execution host selected when the intent was created (old callers omit it). */
+  target?: RuntimeClientTarget
   params: StructuredAgentSessionCreateParams
 }
 
@@ -37,8 +41,12 @@ export function createStructuredCodexSessionLaunchIntent(
   const sessionId = `codex_${crypto.randomUUID().replaceAll('-', '_')}`
   const fields = { worktree: toRuntimeWorktreeSelector(worktreeId), agent: 'codex' as const }
   const state = useAppStore.getState()
+  const environmentId = getRuntimeEnvironmentIdForWorktree(state, worktreeId)
+  const target: RuntimeClientTarget = environmentId
+    ? { kind: 'environment', environmentId }
+    : { kind: 'local' }
   recordWebSessionFocusIntent(
-    { environmentId: LOCAL_STRUCTURED_SESSION_OWNER },
+    { environmentId: environmentId ?? LOCAL_STRUCTURED_SESSION_OWNER },
     worktreeId,
     `agent-session:${sessionId}`,
     undefined,
@@ -47,6 +55,7 @@ export function createStructuredCodexSessionLaunchIntent(
   return {
     sessionId,
     worktreeId,
+    target,
     params: {
       envelope: {
         sessionId,
@@ -67,7 +76,12 @@ export function abandonStructuredAgentSessionLaunchIntent(
   intent: StructuredAgentSessionLaunchIntent
 ): void {
   clearWebSessionFocusIntentIfMatches(
-    { environmentId: LOCAL_STRUCTURED_SESSION_OWNER },
+    {
+      environmentId:
+        intent.target?.kind === 'environment'
+          ? intent.target.environmentId
+          : LOCAL_STRUCTURED_SESSION_OWNER
+    },
     intent.worktreeId,
     `agent-session:${intent.sessionId}`
   )
@@ -78,7 +92,7 @@ export async function launchStructuredCodexSession(
 ): Promise<string> {
   const result = await callStructuredAgentSession<
     AgentSessionMutationResult<AgentSessionAttachResult>
-  >({ kind: 'local' }, 'agentSession.create', intent.params)
+  >(intent.target ?? { kind: 'local' }, 'agentSession.create', intent.params)
   if (!result.ok) {
     abandonStructuredAgentSessionLaunchIntent(intent)
     throw new StructuredAgentSessionCreateRefusalError(result.refusal.message)

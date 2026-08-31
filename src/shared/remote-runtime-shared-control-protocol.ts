@@ -95,6 +95,22 @@ export function getCleanupRequest(
       params: { subscriptionId: subscription.requestId }
     }
   }
+  // Structured agent sessions use a per-request subscription id so several
+  // surfaces can watch one session over a shared relay without evicting each
+  // other. Replay the exact id on close to release the host hold.
+  if (subscription.method === 'agentSession.subscribe') {
+    const sessionId =
+      typeof subscription.params === 'object' && subscription.params !== null
+        ? (subscription.params as { sessionId?: unknown }).sessionId
+        : undefined
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      return null
+    }
+    return {
+      method: 'agentSession.unsubscribe',
+      params: { sessionId, subscriptionId: subscription.requestId }
+    }
+  }
   return null
 }
 
