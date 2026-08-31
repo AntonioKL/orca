@@ -46,6 +46,12 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
   // Why (#8591): survives the unsubscribe/resubscribe the app performs on every
   // socket drop, so a reconnect still knows its watermark and that it reconnected.
   const session = getHostNotificationSession(hostId)
+  // Why retirement counts as stopped: unpair retires the session first and only then
+  // tears the socket down, so between the two `disposed` is still false. An event
+  // arriving in that window would push a banner for a host the user just removed.
+  function stopped(): boolean {
+    return disposed || session.retired
+  }
 
   /**
    * Queue one delivery on the host chain, dropping a show whose notificationId
@@ -60,6 +66,11 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
     type: 'notification' | 'dismiss',
     event: NotificationEvent | DismissNotificationEvent
   ): Promise<void> {
+    // Checked before the claim too: a claim taken past retirement is never released,
+    // since the task that would release it returns early.
+    if (stopped()) {
+      return Promise.resolve()
+    }
     if (
       type === 'notification' &&
       !shouldQueueShowForNotificationId(session, event.notificationId)
@@ -68,7 +79,8 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
     }
     return enqueueHostDelivery(session, async () => {
       try {
-        if (disposed) {
+        // Re-checked: retirement can land while this entry waits behind the tail.
+        if (stopped()) {
           return
         }
         await deliverLive(type, event)
@@ -87,6 +99,11 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
     type: 'notification' | 'dismiss',
     event: NotificationEvent | DismissNotificationEvent
   ): Promise<void> {
+    // The last gate before the OS call: every queued path funnels through here, and a
+    // show started past retirement still lands after the drain that was meant to bound it.
+    if (stopped()) {
+      return
+    }
     adoptNotificationEpoch(session, hostId, event.notificationEpoch)
     const epochAtDelivery = session.lastDeliveredEpoch
     if (type === 'notification') {
@@ -197,13 +214,13 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
       let contiguousSeq = askFrom
       let drained = false
       try {
-        if (disposed) {
+        if (stopped()) {
           return
         }
         for (const raw of missed) {
-          // Re-checked per event: the batch can start before a teardown and still be
-          // draining after it, and a torn-down host must stop pushing.
-          if (disposed) {
+          // Re-checked per event: the batch can start before a teardown or a retirement
+          // and still be draining after it, and a dropped host must stop pushing.
+          if (stopped()) {
             return
           }
           const event = raw as NotificationEvent | DismissNotificationEvent

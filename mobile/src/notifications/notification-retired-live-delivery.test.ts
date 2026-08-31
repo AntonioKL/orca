@@ -87,6 +87,111 @@ describe('retired host live delivery', () => {
     expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledOnce()
   })
 
+  it('drops a live event that arrives after retirement starts', async () => {
+    vi.mocked(loadPushNotificationsEnabled).mockResolvedValue(true)
+    vi.mocked(Notifications.getPermissionsAsync).mockResolvedValue({
+      status: 'granted',
+      canAskAgain: true
+    } as never)
+    let onEvent: ((data: unknown) => void) | null = null
+    const client = {
+      subscribe: vi.fn((_method, _params, callback: (data: unknown) => void) => {
+        onEvent = callback
+        return vi.fn()
+      }),
+      getState: vi.fn(() => 'connected'),
+      sendRequest: vi.fn()
+    } as unknown as RpcClient
+
+    // No unsubscribe: unpair retires the session before the socket teardown, so the
+    // subscription is still live and only `retired` can stop this delivery.
+    subscribeToDesktopNotifications(client, 'host-retired-live')
+    const retirement = retireHostNotificationState('host-retired-live')
+    onEvent?.({
+      type: 'notification',
+      source: 'agent-task-complete',
+      title: 'After retirement',
+      body: 'After retirement body',
+      notificationId: 'agent:after-retirement'
+    })
+    await retirement
+    await flushAsync()
+
+    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled()
+  })
+
+  it('stops draining a catch-up batch when retirement starts mid-batch', async () => {
+    vi.mocked(loadPushNotificationsEnabled).mockResolvedValue(true)
+    vi.mocked(Notifications.getPermissionsAsync).mockResolvedValue({
+      status: 'granted',
+      canAskAgain: true
+    } as never)
+    let finishFirstSchedule: (identifier: string) => void = () => {}
+    vi.mocked(Notifications.scheduleNotificationAsync).mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        finishFirstSchedule = resolve
+      })
+    )
+    let onEvent: ((data: unknown) => void) | null = null
+    const client = {
+      subscribe: vi.fn((_method, _params, callback: (data: unknown) => void) => {
+        onEvent = callback
+        return () => {
+          if (onEvent === callback) {
+            onEvent = null
+          }
+        }
+      }),
+      getState: vi.fn(() => 'connected'),
+      sendRequest: vi.fn((method: string) =>
+        Promise.resolve(
+          method === 'notifications.getMissedSince'
+            ? {
+                ok: true,
+                result: {
+                  notifications: [
+                    {
+                      type: 'notification',
+                      source: 'agent-task-complete',
+                      title: 'Missed first',
+                      body: 'Missed first body',
+                      notificationId: 'agent:missed-first',
+                      notificationSeq: 1
+                    },
+                    {
+                      type: 'notification',
+                      source: 'agent-task-complete',
+                      title: 'Missed second',
+                      body: 'Missed second body',
+                      notificationId: 'agent:missed-second',
+                      notificationSeq: 2
+                    }
+                  ]
+                }
+              }
+            : { ok: true, result: undefined }
+        )
+      )
+    } as unknown as RpcClient
+
+    // First ready only marks the host as connected before; the reconnect is what catches up.
+    const firstUnsubscribe = subscribeToDesktopNotifications(client, 'host-retired-catch-up-drain')
+    onEvent?.({ type: 'ready', subscriptionId: 'first' })
+    await flushAsync()
+    firstUnsubscribe()
+
+    subscribeToDesktopNotifications(client, 'host-retired-catch-up-drain')
+    onEvent?.({ type: 'ready', subscriptionId: 'second' })
+    await vi.waitFor(() => expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledOnce())
+
+    const retirement = retireHostNotificationState('host-retired-catch-up-drain')
+    finishFirstSchedule('scheduled-missed-first')
+    await retirement
+    await flushAsync()
+
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledOnce()
+  })
+
   it('does not recreate a watermark when catch-up resolves after retirement', async () => {
     let onEvent: ((data: unknown) => void) | null = null
     let resolveCatchUp: (response: { ok: true; result: unknown }) => void = () => {}
