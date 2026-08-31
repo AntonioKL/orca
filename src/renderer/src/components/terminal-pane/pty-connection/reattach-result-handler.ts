@@ -171,19 +171,31 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     session.reportPanePtyVisibility(ptyId, session.deps.isVisibleRef.current)
     session.registerSideEffectFactConsumerForPty(ptyId)
     session.syncHiddenRendererPtyDelivery()
-    session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
-    useAppStore.getState().restoreAgentPaneAuthority?.(session.cacheKey)
-    notifyCodexPaneBoundForStaleSweep(ptyId)
+    const currentTabPtyId = Object.values(useAppStore.getState().tabsByWorktree)
+      .flat()
+      .find((tab) => tab.id === session.deps.tabId)?.ptyId
+    const replacementPtyId =
+      staleSessionId && staleSessionId !== ptyId
+        ? staleSessionId
+        : currentTabPtyId && currentTabPtyId !== ptyId
+          ? currentTabPtyId
+          : undefined
     if (session.capturedDirectSshRetryPtyAccepted && session.directSshRetryAttempt) {
       session.deps.updateTabPtyId(
         session.deps.tabId,
         ptyId,
-        undefined,
+        replacementPtyId,
         session.directSshRetryAttempt.attemptId
       )
+    } else if (replacementPtyId) {
+      session.deps.updateTabPtyId(session.deps.tabId, ptyId, replacementPtyId)
     } else {
       session.deps.updateTabPtyId(session.deps.tabId, ptyId)
     }
+    // Keep layout sync after the identity commit; replacement paths are atomic.
+    session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
+    useAppStore.getState().restoreAgentPaneAuthority?.(session.cacheKey)
+    notifyCodexPaneBoundForStaleSweep(ptyId)
     session.agentCompletionCoordinator.startProcessTracking()
     session.sampleVisiblePaneForegroundAgent()
 
