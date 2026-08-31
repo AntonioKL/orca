@@ -59,6 +59,10 @@ export function startDeferredSessionReattach(
       : {}),
     callbacks: outputCallbacks.callbacks
   })
+  const isCurrentReattach = (): boolean =>
+    !session.disposed &&
+    session.deps.paneTransportsRef.current.get(session.pane.id) === session.transport &&
+    outputCallbacks.generation === session.transportStreamGeneration
 
   void Promise.resolve(reattachPromise)
     .catch(() => null)
@@ -67,7 +71,7 @@ export function startDeferredSessionReattach(
     })
   const trackedReattachPromise = Promise.resolve(reattachPromise)
     .then(async (result) => {
-      if (outputCallbacks.generation !== session.transportStreamGeneration) {
+      if (!isCurrentReattach()) {
         session.finishReattachLiveDataDeferral(false, outputCallbacks.generation)
         const gen = await preSignalPromise
         if (typeof gen === 'number') {
@@ -81,7 +85,7 @@ export function startDeferredSessionReattach(
         if (typeof gen === 'number') {
           void window.api.pty.clearPendingPaneSerializer(session.cacheKey, gen).catch(() => {})
         }
-        if (session.disposed) {
+        if (!isCurrentReattach()) {
           return
         }
         if (session.rejectObsoleteDirectSshReattach(deferredReattachSessionId)) {
@@ -127,7 +131,7 @@ export function startDeferredSessionReattach(
         void window.api.pty.clearPendingPaneSerializer(session.cacheKey, gen).catch(() => {})
       }
       const message = err instanceof Error ? err.message : String(err)
-      if (outputCallbacks.generation !== session.transportStreamGeneration) {
+      if (!isCurrentReattach()) {
         return
       }
       if (session.rejectObsoleteDirectSshReattach(deferredReattachSessionId)) {

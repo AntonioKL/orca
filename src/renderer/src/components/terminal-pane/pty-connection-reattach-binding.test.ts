@@ -258,6 +258,31 @@ describe('connectPanePty', () => {
     expect(deps.syncPanePtyLayoutBinding).not.toHaveBeenCalledWith(1, 'terminal-new')
   })
 
+  it('accepts an explicit reattach id before the transport publishes its id', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const reattach = createDeferred<{ id: string; isReattach: true }>()
+    const transport = createMockTransport()
+    let transportPtyId: string | null = null
+    transport.getPtyId.mockImplementation(() => transportPtyId)
+    transport.connect.mockImplementation(async () => reattach.promise)
+    transportFactoryQueue.push(transport)
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps({
+      restoredLeafId: LEAF_1,
+      restoredPtyIdByLeafId: { [LEAF_1]: 'terminal-old' }
+    })
+
+    connectPanePty(pane as never, manager as never, deps as never)
+    await flushAsyncTicks(4)
+    reattach.resolve({ id: 'terminal-new', isReattach: true })
+    await flushAsyncTicks(12)
+
+    expect(pane.container.dataset.ptyId).toBe('terminal-new')
+    expect(deps.updateTabPtyId).toHaveBeenCalledWith('tab-1', 'terminal-new', 'terminal-old')
+    expect(deps.syncPanePtyLayoutBinding).toHaveBeenCalledWith(1, 'terminal-new')
+  })
+
   it.each([
     ['session-expired', { id: 'terminal-new', isReattach: true, sessionExpired: true }],
     ['no-pty', undefined]

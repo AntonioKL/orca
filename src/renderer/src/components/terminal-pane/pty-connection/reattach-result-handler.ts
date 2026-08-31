@@ -94,6 +94,7 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     }
     const ptyId =
       connectResult?.id ?? (typeof result === 'string' ? result : session.transport.getPtyId())
+    const hasExplicitPtyId = Boolean(connectResult?.id || typeof result === 'string')
     if (!ptyId) {
       warnTerminalLifecycleAnomaly('restored PTY reattach returned no PTY id', {
         tabId: session.deps.tabId,
@@ -145,7 +146,9 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     }
     const isCurrentReattachPayload = (): boolean => {
       const currentPtyId = session.transport.getPtyId()
-      return isCurrentReattachTransport() && currentPtyId === ptyId
+      // Remote transports may publish the result object before their async
+      // bind callback updates getPtyId(); the explicit result is authoritative.
+      return isCurrentReattachTransport() && (currentPtyId === ptyId || hasExplicitPtyId)
     }
     if (!isCurrentReattachPayload()) {
       return false
