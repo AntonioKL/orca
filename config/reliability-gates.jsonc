@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-23",
+  "updatedAt": "2026-08-30",
   "policy": {
     "maturityLevels": ["experimental", "soak", "blocking", "accepted-gap", "deprecated"],
     "blockingPromotion": {
@@ -5718,6 +5718,140 @@
       "demotionRule": "Keep experimental or demote if ownership cardinality flakes, duplicate replay reaches a second renderer, active metadata or authority moves to the wrong leaf, deep normalization regresses, or a supported provider bypasses normalization."
     },
     {
+      "id": "terminal-session.split-activation-ordering",
+      "title": "Terminal splits activate before inherited-CWD lookup settles",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "terminal-renderer-lifecycle",
+      "layer": "renderer-unit-and-local-transport",
+      "surfaces": [
+        "terminal pane split",
+        "inherited working directory",
+        "pre-connect terminal input",
+        "split close cleanup",
+        "pre-bind pane detach"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "local-daemon", "ssh", "wsl", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": ["local", "remote-runtime"],
+      "coverageNotes": "Deterministic renderer contracts hold CWD resolution behind an explicit promise, require the new pane to be created synchronously, and prove that close cancels the pending connection. Detach contracts reject cwd-pending and cwd-resolved deferred splits before PTY bind without mutation, carry resolved cwd for other unbound panes, and preserve persisted or live PTY handoff. Local transport contracts exercise the real bounded pre-connect buffer and one live input FIFO across ordinary, acknowledged, and immediate writes, concurrent flushes, in-flight teardown, late spawn success or failure, attach failure, failed spawn, same-id reuse, stale-spawn retirement ownership, destroy, and mutable recovery metadata. Remote-runtime coverage proves delegation remains host-owned; physical daemon, SSH, WSL, Linux, and Windows journeys remain gaps.",
+      "motivatingLinks": ["https://github.com/stablyai/orca/commit/572ed1a8882"],
+      "invariant": "A terminal split creates and activates its renderer pane before an inherited-CWD lookup settles, starts its PTY only after the resolved directory is available, and cannot be externally detached while that deferred spawn remains unbound. Other unbound panes preserve resolved cwd as startupCwd when detached. Bounded pre-connect input and later live local input share byte order, and teardown settles acknowledged writes without creating or rebinding a stale PTY. A disconnected or detached pending connect cannot bind its late fresh spawn, report its late failure through current callbacks, or ID-retire a newer same-ID owner; natural exit cannot deliver queued work into a reused PTY id. Bound and remote-runtime splits remain owned by their execution host.",
+      "oracle": "Hold CWD resolution behind a controllable promise, invoke the production split path, and require manager.splitPane plus split telemetry before resolving it. Before PTY bind, require both cwd-pending and cwd-resolved deferred detach attempts to return null without layout, pane, tab, ownership, or focus mutation; separately require resolved cwd on an allowed unbound detach and unchanged persisted/live PTY adoption. At the PTY boundary, require zero connect calls while pending, the resolved CWD in spawn and local recovery metadata, one shared FIFO across pre-connect and live ordinary/acknowledged/immediate input, prompt acknowledged-promise settlement on teardown, retirement of an unowned late fresh spawn, preservation of a newer same-ID owner, and zero stale delivery after failure, close, destroy, detach, natural exit, or same-id reuse.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts src/renderer/src/components/terminal-pane/resolve-split-cwd.test.ts src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts src/renderer/src/components/terminal-pane/pty-preconnect-input-buffer.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts --reporter=dot"
+      ],
+      "testFiles": [
+        "src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts",
+        "src/renderer/src/components/terminal-pane/resolve-split-cwd.test.ts",
+        "src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts",
+        "src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts",
+        "src/renderer/src/components/terminal-pane/pty-preconnect-input-buffer.test.ts",
+        "src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts",
+          "assertions": [
+            "creates and focuses the split before pending CWD resolution",
+            "passes the resolved CWD promise without reviving a stale manager",
+            "rapid nested splits reuse one pending CWD lookup",
+            "keeps remote-runtime split ownership on its execution host"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/resolve-split-cwd.test.ts",
+          "assertions": [
+            "preserves a deferred split fence when OSC 7 updates cwd",
+            "clears a settled deferred entry only for matching promise identity",
+            "keeps a newer deferred lookup when an older cleanup callback arrives"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts",
+          "assertions": [
+            "starts no PTY connection before inherited CWD resolves",
+            "applies the resolved directory to transport options",
+            "disposing the split before resolution cancels the pending spawn"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts",
+          "assertions": [
+            "rejects a deferred split while inherited CWD is pending without mutation",
+            "continues rejecting after CWD resolves until PTY bind",
+            "carries resolved CWD as startupCwd for an allowed unbound detach",
+            "preserves persisted and live remote PTY detach handoff"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/pty-preconnect-input-buffer.test.ts",
+          "assertions": [
+            "concurrent flush calls share one worker and preserve mixed input order",
+            "clear settles an in-flight acknowledged write before its late resolve or reject",
+            "in-flight acknowledged input remains charged to entry and code-unit caps"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts",
+          "assertions": [
+            "ordinary, acknowledged, and immediate pre-connect input flushes in byte order",
+            "pending acknowledged input settles on connect, destroy, and spawn failure",
+            "disconnect, destroy, and natural exit cancel an in-flight acknowledged write without blocking connect",
+            "live acknowledged input blocks later ordinary and immediate writes at its invocation position",
+            "the preconnect-to-live transition preserves the same input FIFO",
+            "disconnect and detach retire a late fresh spawn and suppress late failures before they reach current callbacks",
+            "natural exit fences queued ordinary and acknowledged chunks across same-id reuse",
+            "buffered exit and attach failure clear retained input",
+            "ordinary and acknowledged write failures drop later input without leaving promises pending",
+            "entry and code-unit ceilings bound pre-connect input retention",
+            "local recovery metadata observes the resolved split CWD",
+            "a stale fresh-spawn completion cannot retire a newer same-ID owner"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-30",
+          "runner": "local",
+          "platform": "macos",
+          "result": "passed",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts src/renderer/src/components/terminal-pane/resolve-split-cwd.test.ts src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts src/renderer/src/components/terminal-pane/pty-preconnect-input-buffer.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts --reporter=dot",
+          "durationSeconds": 53,
+          "summary": "Six focused files and 75 tests passed. Vitest reported 48.18 seconds and the wall time was 53.29 seconds while the cooked-reply unit gate also ran; coverage includes split ordering, nested CWD lineage, promise-identity cleanup fencing, full pre-bind detach fencing, resolved-CWD detach handoff, close-cancellation, single-FIFO ordering, late-spawn retirement and error suppression, preservation of a newer same-ID owner, generation fencing, in-flight settlement across explicit teardown and natural exit, attach cleanup, bounded retention, and existing input-write contracts."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 45,
+        "scope": "six deterministic renderer and local-transport unit files"
+      },
+      "flakeHistory": {
+        "status": "not-started",
+        "evidence": "The focused promise-barrier suite passes locally; routed CI and soak history have not started."
+      },
+      "redGreenEvidence": {
+        "status": "partial",
+        "evidence": "Before the production seam landed, the split assertion failed with zero manager calls while CWD was pending, and the transport assertion rejected the first pre-connect input. Before the detach fence, a deferred split could be removed after CWD resolved but before PTY bind, dropping its pre-connect input. Before the single-flight hardening, the concurrent-flush oracle delivered ordinary input before the earlier acknowledged write and clear left the in-flight promise pending. Before stale-spawn ownership fencing, the combined deferred-connect and newer same-ID attach fixture called kill on the current PTY. Close, metadata, attach-failure, and remaining failure assertions are green on the candidate but have not each been recorded against an isolated intentional revert."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "Pane creation and focus add no timer, polling, provider inventory, or subprocess work. CWD resolution remains one existing bounded request off the visible activation path, and detach admission adds only bounded map and record lookups. Pre-connect input, including an in-flight acknowledged write, is capped at 1,024 entries and a conservative UTF-16 ceiling derived from the existing terminal-input byte limit, drains through one worker in order, and clears on teardown or failed connect. Across 20 fresh-source dev cycles, click-to-focused-first-frame changed from baseline p50/p95/max 63.8/72.1/78.3 ms to 56.0/60.5/63.1 ms; all 20 focused. Cold PTY binding changed from 194.2/255.2/303.1 ms to 231.4/337.2/371.9 ms, so the interaction budget is tracked separately from shell readiness. A second 20-cycle steady-source run measured focus 51.1/88.1/109.1 ms and PTY binding 186.6/285.7/1158.6 ms; the 1.16 s readiness outlier still focused in 85.6 ms."
+      },
+      "promotionCriteria": [
+        "Record complete red/green evidence for close, mixed-input ordering, metadata, and failure cleanup.",
+        "Collect 100 consecutive focused CI passes or 14 days without an unexplained flake.",
+        "Add a real-shortcut Electron sentinel with shortcut-to-focus, first-render, PTY-ready, and immediate typed-marker artifacts.",
+        "Collect physical SSH or WSL plus Linux and Windows evidence before claiming provider-complete coverage."
+      ],
+      "knownGaps": [
+        "Ad-hoc macOS Electron CDP proves real-control focus, pre-bind physical input, inherited cwd, close-before-bind cleanup, and rapid nested splits, but no committed Electron sentinel is registered yet.",
+        "Live daemon, SSH, WSL, Linux, and Windows split journeys have not run.",
+        "Local dev measurements establish a numeric first-focused-frame budget, but CI does not enforce it and PTY-ready latency remains diagnostic rather than blocking."
+      ],
+      "demotionRule": "Keep experimental or demote if pane activation waits on CWD, a deferred split can detach before PTY bind, detached cwd is lost, input reorders or remains pending after cleanup, a closed pane can spawn, stale retirement kills a newer same-ID owner, remote-runtime delegation creates a competing local pane, or the focused suite flakes without an identified product or harness cause."
+    },
+    {
       "id": "terminal-session.kill-all-surface-cleanup",
       "title": "Kill all sessions removes only the confirmed terminal surfaces and current bindings",
       "maturity": "experimental",
@@ -8189,9 +8323,7 @@
       "assertionRefs": [
         {
           "file": "tests/e2e/persisted-session-production-upgrade.spec.ts",
-          "assertions": [
-            "upgrades a legacy daemon session and keeps it stable after relaunch"
-          ]
+          "assertions": ["upgrades a legacy daemon session and keeps it stable after relaunch"]
         }
       ],
       "evidenceRuns": [
@@ -13838,14 +13970,14 @@
       "providers": ["local", "daemon", "ssh"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["local", "ssh"],
-      "coverageNotes": "Deterministic renderer and IPC-transport tests prove count and text ceilings, oldest-reply shedding, explicit query-reply source routing, ordinary-input preservation, one-reply-per-write delivery for OSC, DA1, and CPR replies, real xterm OSC reply generation, drain-failure containment, and clear/reuse generation fencing. Remote-runtime tests preserve separate query-reply writes across pending input, async validation, and viewport-claim buffering. Host-contract tests prove a later DA1/CPR reply cannot overtake a deferred OSC reply, including a coalesced legacy-client payload. Live macOS Electron tests cover local PTY OSC replies and interactive typing; a macOS-hosted Docker OpenSSH test proves an upstream-node-pty Linux relay keeps OSC/DA1 replies out of the next fish child's stdin. No live daemon, paired-runtime, WSL, physical Linux/Windows client, or binary mixed-version run is registered.",
+      "coverageNotes": "Deterministic renderer and IPC-transport tests prove count and text ceilings, oldest-reply shedding, explicit query-reply source routing, ordinary-input preservation, acknowledged-write FIFO barriers, single-worker drain reentrancy, one-reply-per-write delivery for OSC, DA1, and CPR replies, real xterm OSC reply generation, drain-failure containment, teardown settlement, and clear/reuse generation fencing. Remote-runtime tests preserve separate query-reply writes across pending input, async validation, and viewport-claim buffering. Host-contract tests prove a later DA1/CPR reply cannot overtake a deferred OSC reply, including a coalesced legacy-client payload. Live macOS Electron tests cover local PTY OSC replies and interactive typing; a macOS-hosted Docker OpenSSH test proves an upstream-node-pty Linux relay keeps OSC/DA1 replies out of the next fish child's stdin. No live daemon, paired-runtime, WSL, physical Linux/Windows client, or binary mixed-version run is registered.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/issues/13137",
         "https://github.com/stablyai/orca/issues/7329",
         "https://github.com/stablyai/orca/issues/13892"
       ],
-      "invariant": "The desktop PTY input queue retains at most 64 explicitly sourced pending terminal query replies and 4096 UTF-16 code units. Every retained reply reaches the provider as one atomic write, and the host writes each reply the moment it accepts it, so replies reach the PTY in the order they were produced with no queue that could reorder them. A reply's own echo is contained on the output side by projecting its known echo shapes; the ESC-initial verbatim shape is matched only when complete, never held as a partial, so a query torn at its own ESC is still answered. Overflow removes only the oldest query replies, never ordinary input except the documented modified-F3/CPR byte collision, and drain failures cannot clear a newer queue generation.",
-      "oracle": "Synchronously enqueue separate 10,000-entry OSC and DA1 reply floods before the scheduled drain and assert that only the initial immediate reply and newest 64 pending replies are written, each as one provider write, before a trailing keystroke. At the host boundary, defer an OSC reply and assert that separate or legacy-coalesced DA1/CPR replies flush after it in observed query order. At the remote-runtime boundary, preserve separate writes around pending ordinary input, async validation, and viewport-claim buffering. Repeat behind 10,000 ordinary inputs and exercise the text ceiling, real xterm generation, provider-write failure, rejected yield, and clear/reuse generation fencing.",
+      "invariant": "The desktop PTY input queue retains at most 64 explicitly sourced pending terminal query replies and 4096 UTF-16 code units. Every retained reply reaches the provider as one atomic write, and ordinary, acknowledged, and reply input share one invocation-ordered FIFO so no later write overtakes an acknowledged write. Reentrant write callbacks cannot start a second drain worker or strand input admitted after clear/reuse. A reply's own echo is contained on the output side by projecting its known echo shapes; the ESC-initial verbatim shape is matched only when complete, never held as a partial, so a query torn at its own ESC is still answered. Overflow removes only the oldest query replies, never ordinary input except the documented modified-F3/CPR byte collision, and failure or teardown cannot clear a newer queue generation or strand an acknowledged promise.",
+      "oracle": "Synchronously enqueue separate 10,000-entry OSC and DA1 reply floods before the scheduled drain and assert that only the initial immediate reply and newest 64 pending replies are written, each as one provider write, before a trailing keystroke. Stall an acknowledged write between earlier and later ordinary/reply input, then require teardown to settle it and same-id reuse to receive no stale tail. Reenter the queue synchronously from an acknowledged write with both enqueue and clear/reuse, requiring one drain and fresh input delivery only after the stale acknowledged write settles false. At the host boundary, defer an OSC reply and assert that separate or legacy-coalesced DA1/CPR replies flush after it in observed query order. At the remote-runtime boundary, preserve separate writes around pending ordinary input, async validation, and viewport-claim buffering. Repeat behind 10,000 ordinary inputs and exercise the text ceiling, real xterm generation, provider-write failure, rejected yield, and clear/reuse generation fencing.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-input-write-queue.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts src/shared/terminal-query-reply.test.ts src/shared/pty-startup-ingress-live-query-reply.test.ts src/shared/pty-startup-reply-echo-shapes.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-batching.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-query-reply-immediate.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-input-coalescing.test.ts",
@@ -13877,14 +14009,20 @@
             "real xterm OSC 10/11 query handlers remain subject to the same retention ceiling",
             "retained OSC, DA1, and CPR replies stay one provider write each and both OSC and DA1 floods remain bounded",
             "provider-write and yield failures settle without unhandled rejection, repeated same-generation admission, or stale-generation clearing",
-            "clear releases saturated reply accounting and fences in-flight validation before later input"
+            "clear releases saturated reply accounting and fences in-flight validation before later input",
+            "acknowledged input is serialized between earlier and later ordinary/reply writes",
+            "clear settles active and pending acknowledged input before same-id queue reuse",
+            "reentrant enqueue cannot start a second drain worker past an unacknowledged write",
+            "reentrant clear captures the stale cancellation and continues draining fresh input"
           ]
         },
         {
           "file": "src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts",
           "assertions": [
             "sendInputImmediate applies the reply ceiling while sendInput preserves a reply-shaped ordinary payload in exact IPC write order",
-            "a thrown renderer write triggers one owning-transport recovery callback and rejects later input in that queue generation"
+            "a thrown renderer write triggers one owning-transport recovery callback and rejects later input in that queue generation",
+            "live and preconnect acknowledged writes remain FIFO barriers for later ordinary and immediate input",
+            "disconnect, detach, and natural exit settle acknowledged writes and fence same-id stale chunks"
           ]
         },
         {
@@ -13940,13 +14078,13 @@
       ],
       "evidenceRuns": [
         {
-          "date": "2026-08-25",
+          "date": "2026-08-30",
           "runner": "local",
           "platform": "macos",
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-input-write-queue.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts src/shared/terminal-query-reply.test.ts src/shared/pty-startup-ingress-live-query-reply.test.ts src/shared/pty-startup-reply-echo-shapes.test.ts",
           "result": "passed",
-          "durationSeconds": 1.05,
-          "summary": "Five files and 92 tests passed, including the live-pty echo-shape transcript, including explicit IPC reply-source routing, the 10,000-reply count ceiling, text ceiling, 10,000-entry ordinary backlog preservation, real xterm OSC query flood, single-shot drain-failure recovery, one-reply-per-write echo containment, and clear/reuse generation fencing."
+          "durationSeconds": 15,
+          "summary": "Five files and 149 tests passed in 15.16 seconds, including explicit IPC reply-source routing, the 10,000-reply count and text ceilings, 10,000-entry ordinary backlog preservation, acknowledged-write FIFO barriers, synchronous reentrancy fencing, prompt teardown settlement, same-id generation fencing, real xterm OSC query floods, single-shot drain-failure recovery, and one-reply-per-write echo containment."
         },
         {
           "date": "2026-08-09",
@@ -13995,7 +14133,7 @@
       },
       "redGreenEvidence": {
         "status": "partial",
-        "evidence": "Without the branch's admission cap, the 10,000-reply fixture writes all replies before the trailing keystroke. Before the source-routing repair, the queue had no API capable of distinguishing reply-shaped ordinary input; before failure containment, a thrown provider write rejected waitForDrain and Vitest recorded an unhandled rejection; the first containment pass retried a failed generation and invoked recovery twice; before generation fencing, a rejected stale yield cleared fresh input. No saved intentional-break artifact is attached yet."
+        "evidence": "Without the branch's admission cap, the 10,000-reply fixture writes all replies before the trailing keystroke. Before the source-routing repair, the queue had no API capable of distinguishing reply-shaped ordinary input; before failure containment, a thrown provider write rejected waitForDrain and Vitest recorded an unhandled rejection; the first containment pass retried a failed generation and invoked recovery twice; before generation fencing, a rejected stale yield cleared fresh input. Before reentrancy fencing, a synchronous accepted-write callback started a second drain that falsely accepted the pending write; clear/reuse also captured the replacement generation's cancellation and stranded fresh input. No saved intentional-break artifact is attached yet."
       },
       "performanceBudget": {
         "required": true,

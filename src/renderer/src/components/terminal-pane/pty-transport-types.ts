@@ -227,6 +227,8 @@ export type PtyTransport = {
 
 export type IpcPtyTransportOptions = {
   cwd?: string
+  /** Retain bounded user input while a visible split waits to start its PTY. */
+  bufferInputUntilConnect?: boolean
   cwdFallback?: 'worktree'
   env?: Record<string, string>
   envToDelete?: string[]

@@ -3,46 +3,21 @@ import {
   isTerminalInputTooLargeWithDeferredMeasurement,
   iterateTerminalInputChunks
 } from '../../../../shared/terminal-input'
+import {
+  isCoalesciblePtyInput,
+  PTY_INPUT_WRITE_QUEUE_MAX_PENDING_REPLIES,
+  PTY_INPUT_WRITE_QUEUE_MAX_PENDING_REPLY_CODE_UNITS,
+  TERMINAL_INPUT_COALESCE_MAX_CODE_UNITS,
+  type PendingPtyInputWrite,
+  type PtyInputWriteQueue,
+  type PtyInputWriteQueueDeps
+} from './pty-input-write-queue-contract'
 
-// Why: 4096 UTF-16 code units encode to at most ~12KB UTF-8, safely under the
-// 16KB TERMINAL_INPUT_CHUNK_MAX_BYTES cap without paying byte measurement on
-// the hot input path.
-export const TERMINAL_INPUT_COALESCE_MAX_CODE_UNITS = 4096
-// Match host delivery's reply ceiling while keeping all retained reply text under one PTY chunk.
-export const PTY_INPUT_WRITE_QUEUE_MAX_PENDING_REPLIES = 64
-// Keep ≤ TERMINAL_INPUT_CHUNK_MAX_BYTES/3 so a reply is written and dropped in one drain step:
-// admitReply evicts the head, and a half-written entry would truncate. Guarded by a unit test.
-export const PTY_INPUT_WRITE_QUEUE_MAX_PENDING_REPLY_CODE_UNITS =
+export {
+  PTY_INPUT_WRITE_QUEUE_MAX_PENDING_REPLIES,
+  PTY_INPUT_WRITE_QUEUE_MAX_PENDING_REPLY_CODE_UNITS,
   TERMINAL_INPUT_COALESCE_MAX_CODE_UNITS
-
-type PendingPtyInputWrite = {
-  sequence: number
-  id: string
-  text: string
-  replyOnly: boolean
-  tooLarge: boolean | Promise<boolean>
-  chunks?: Iterator<string>
-  nextChunk?: string
-}
-
-export type PtyInputWriteQueue = {
-  enqueue: (id: string, data: string) => boolean
-  enqueueQueryReply: (id: string, data: string) => boolean
-  waitForDrain: () => Promise<void>
-  clear: () => void
-}
-
-export type PtyInputWriteQueueDeps = {
-  isWritable: (id: string) => boolean
-  write: (id: string, data: string) => void
-  yieldBetweenWrites?: () => Promise<void>
-  onDrainFailure?: (id: string) => void
-}
-
-function isCoalescibleInput(input: PendingPtyInputWrite): boolean {
-  // Echo-risk replies stay atomic so host classifiers cannot miss them (#13137).
-  return input.text.length <= TERMINAL_INPUT_COALESCE_MAX_CODE_UNITS && !input.replyOnly
-}
+} from './pty-input-write-queue-contract'
 
 export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInputWriteQueue {
   const yieldBetweenWrites = deps.yieldBetweenWrites ?? yieldToEventLoop
@@ -56,6 +31,10 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
   let generation = 0
   let failedGeneration: number | null = null
   let drainPromise: Promise<void> | null = null
+  let cancelAcceptedWrite = (): void => undefined
+  let acceptedWriteCancelled = new Promise<void>((resolve) => {
+    cancelAcceptedWrite = resolve
+  })
 
   function compactOrdinary(): void {
     if (pendingOrdinaryHead === pendingOrdinary.length) {
@@ -117,11 +96,14 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
     return removed
   }
 
-  function removePending(item: PendingPtyInputWrite): void {
+  function removePending(item: PendingPtyInputWrite, accepted?: boolean): void {
     if (item.replyOnly) {
       shiftReply()
     } else {
       shiftOrdinary()
+    }
+    if (accepted !== undefined) {
+      item.resolveAccepted?.(accepted)
     }
   }
 
@@ -141,6 +123,9 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
   }
 
   function clearPending(): void {
+    for (let index = pendingOrdinaryHead; index < pendingOrdinary.length; index += 1) {
+      pendingOrdinary[index]?.resolveAccepted?.(false)
+    }
     pendingOrdinary = []
     pendingOrdinaryHead = 0
     pendingReplies = []
@@ -160,7 +145,7 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
         failureGeneration = generation
         failingId = next.id
         if (!deps.isWritable(next.id)) {
-          removePending(next)
+          removePending(next, false)
           continue
         }
         if (next.tooLarge !== false) {
@@ -169,11 +154,11 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
             continue
           }
           if (next.tooLarge) {
-            removePending(next)
+            removePending(next, false)
             continue
           }
           if (!deps.isWritable(next.id)) {
-            removePending(next)
+            removePending(next, false)
             continue
           }
         }
@@ -184,7 +169,7 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
         // the gesture ended and the TUI visibly replays them one by one.
         // Coalescing consecutive validated small items into a single write keeps
         // the PTY byte stream identical while draining the backlog in one turn.
-        if (next.chunks === undefined && isCoalescibleInput(next)) {
+        if (next.chunks === undefined && isCoalesciblePtyInput(next)) {
           let payload = next.text
           removePending(next)
           let peek: PendingPtyInputWrite | undefined
@@ -193,7 +178,7 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
               peek.id !== next.id ||
               peek.tooLarge !== false ||
               peek.chunks !== undefined ||
-              !isCoalescibleInput(peek) ||
+              !isCoalesciblePtyInput(peek) ||
               payload.length + peek.text.length > TERMINAL_INPUT_COALESCE_MAX_CODE_UNITS
             ) {
               break
@@ -212,13 +197,29 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
           next.nextChunk === undefined ? next.chunks.next() : { done: false, value: next.nextChunk }
         next.nextChunk = undefined
         if (chunk.done) {
-          removePending(next)
+          removePending(next, true)
           continue
         }
-        deps.write(next.id, chunk.value)
+        const writeGeneration = generation
+        const accepted = next.resolveAccepted
+          ? await Promise.race([
+              // Register before a synchronous accepted-write callback can clear and reuse the queue.
+              acceptedWriteCancelled.then(() => false),
+              Promise.resolve(deps.writeAccepted?.(next.id, chunk.value) ?? false).catch(
+                () => false
+              )
+            ])
+          : (deps.write(next.id, chunk.value), true)
+        if (generation !== writeGeneration || firstPending() !== next) {
+          continue
+        }
+        if (!accepted) {
+          clearPending()
+          return
+        }
         const following = next.chunks.next()
         if (following.done) {
-          removePending(next)
+          removePending(next, true)
         } else {
           next.nextChunk = following.value
         }
@@ -253,12 +254,20 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
         scheduleDrain()
       }
     }
+    // Reserve the worker before drain() can invoke a reentrant write callback.
+    drainPromise = Promise.resolve()
     drainPromise = drain().finally(finishDrain)
   }
 
-  function enqueueInput(id: string, data: string, queryReply: boolean): boolean {
+  function enqueueInput(
+    id: string,
+    data: string,
+    queryReply: boolean,
+    resolveAccepted?: PendingPtyInputWrite['resolveAccepted']
+  ): boolean {
     try {
       if (failedGeneration === generation) {
+        resolveAccepted?.(false)
         return false
       }
       // Every query reply stays atomic so host-side ordering can classify it (#13892).
@@ -268,9 +277,10 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
       }
       const tooLarge = replyOnly ? false : isTerminalInputTooLargeWithDeferredMeasurement(data)
       if (tooLarge === true) {
+        resolveAccepted?.(false)
         return false
       }
-      const item = { sequence: nextSequence, id, text: data, replyOnly, tooLarge }
+      const item = { sequence: nextSequence, id, text: data, replyOnly, tooLarge, resolveAccepted }
       nextSequence += 1
       if (replyOnly) {
         pendingReplies.push(item)
@@ -282,6 +292,7 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
       scheduleDrain()
       return true
     } catch {
+      resolveAccepted?.(false)
       return false
     }
   }
@@ -295,6 +306,11 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
       return enqueueInput(id, data, true)
     },
 
+    enqueueAccepted: (id, data) =>
+      new Promise((resolve) => {
+        enqueueInput(id, data, false, resolve)
+      }),
+
     async waitForDrain(): Promise<void> {
       while (drainPromise) {
         await drainPromise
@@ -305,6 +321,10 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
       generation += 1
       failedGeneration = null
       clearPending()
+      cancelAcceptedWrite()
+      acceptedWriteCancelled = new Promise((resolve) => {
+        cancelAcceptedWrite = resolve
+      })
     }
   }
 }

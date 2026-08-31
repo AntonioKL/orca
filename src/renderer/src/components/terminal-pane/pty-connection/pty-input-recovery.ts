@@ -36,6 +36,7 @@ export function installPtyInputRecovery(session: ConnectPanePtySession): void {
   session.agentLaunchPreferences = toAgentLaunchPreferences(session.paneStartup?.sessionOptions)
   session.transportOptions = {
     cwd: session.deps.cwd,
+    ...(session.deps.cwdPromise ? { bufferInputUntilConnect: true } : {}),
     // Why: only fresh local IPC spawns may recover from a saved startup cwd
     // whose directory was deleted (#7239); remote-runtime and SSH spawns
     // resolve cwd on another host and must keep exact cwd semantics.

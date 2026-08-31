@@ -5,9 +5,43 @@
 // helper always finishes by returning the caller's worktree-root fallback.
 import { isRemoteRuntimePtyId } from '@/runtime/runtime-terminal-inspection'
 
-export type PaneCwdEntry = { cwd: string; confirmed: boolean }
+export type PaneCwdEntry = {
+  cwd: string
+  confirmed: boolean
+  /** Keeps a cwd-deferred split attached until its PTY binds. */
+  deferredSplitSpawn?: boolean
+  pendingCwd?: Promise<string>
+}
 
 export type PaneCwdMap = Map<number, PaneCwdEntry>
+
+/** Updates OSC 7 state without dropping a split's pre-bind admission fence. */
+export function mergePaneCwdFromOsc7(
+  existing: PaneCwdEntry | undefined,
+  cwd: string,
+  confirmed: boolean
+): PaneCwdEntry {
+  return {
+    cwd,
+    confirmed,
+    ...(existing?.deferredSplitSpawn ? { deferredSplitSpawn: true } : {}),
+    ...(existing?.pendingCwd ? { pendingCwd: existing.pendingCwd } : {})
+  }
+}
+
+/** Drops the pre-bind lookup metadata once a split either binds or definitively fails. */
+export function clearPaneCwdDeferredSpawn(
+  existing: PaneCwdEntry | undefined,
+  expectedPendingCwd?: Promise<string>
+): PaneCwdEntry | undefined {
+  if (!existing || (expectedPendingCwd && existing.pendingCwd !== expectedPendingCwd)) {
+    return existing
+  }
+  if (!existing.deferredSplitSpawn && !existing.pendingCwd) {
+    return existing
+  }
+  return { cwd: existing.cwd, confirmed: existing.confirmed }
+}
 
 // Why: sized to cover a cold `lsof -p <pid> -d cwd` on macOS (typically
 // 100–500ms, occasionally up to ~1s). Shorter budgets here would cause the

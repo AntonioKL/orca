@@ -119,7 +119,11 @@ import {
   shouldSuppressTerminalModifierKeyboardEvent,
   TERMINAL_INTERRUPT_INPUT
 } from './xterm-bypass-policy'
-import type { PaneCwdMap } from './resolve-split-cwd'
+import {
+  clearPaneCwdDeferredSpawn,
+  mergePaneCwdFromOsc7,
+  type PaneCwdMap
+} from './resolve-split-cwd'
 import { installMouseHideWhileTyping } from './mouse-hide-while-typing'
 import type { EffectiveMacOptionAsAlt } from '@/lib/keyboard-layout/detect-option-as-alt'
 import { connectPanePty } from './pty-connection'
@@ -977,7 +981,18 @@ export function useTerminalPaneLifecycle({
       onShowSessionRestoredBanner,
       dispatchNotification,
       setCacheTimerStartedAt,
-      syncPanePtyLayoutBinding,
+      syncPanePtyLayoutBinding: (paneId: number, ptyId: string | null) => {
+        const paneCwd = paneCwdRef.current.get(paneId)
+        if (ptyId) {
+          const settledPaneCwd = clearPaneCwdDeferredSpawn(paneCwd)
+          if (settledPaneCwd && settledPaneCwd !== paneCwd) {
+            // A concrete PTY settles the split admission fence; the lookup is
+            // no longer reusable once this pane owns a shell.
+            paneCwdRef.current.set(paneId, settledPaneCwd)
+          }
+        }
+        syncPanePtyLayoutBinding(paneId, ptyId)
+      },
       clearExitedPanePtyLayoutBinding,
       onStartupBound,
       deferPtyInput: (paneId, data, forward) => {
@@ -1021,7 +1036,7 @@ export function useTerminalPaneLifecycle({
     let releaseWebviewDragPassthrough: (() => void) | null = null
 
     const manager = new PaneManager(container, {
-      // `spawnHints.cwd` (from Split actions) lets the new PTY inherit the source pane's cwd — see docs/ssh-split-pane-inherit-cwd.md.
+      // Split spawn hints let the renderer pane appear before a slow inherited-cwd lookup finishes.
       onPaneCreated: (pane, spawnHints) => {
         // OSC 52 — TUI-initiated clipboard writes (Zellij/tmux/nvim/fzf/ssh).
         // Why: read settingsRef at fire time so mid-session gate toggles apply; return true in both paths so xterm doesn't fall through.
@@ -1042,11 +1057,50 @@ export function useTerminalPaneLifecycle({
 
         // OSC 7 — shell-reported cwd; drives split-pane cwd inheritance. Install MUST stay before connectPanePty:
         // cold-restore replays PTY output synchronously from the first read, so a later handler misses the first OSC 7.
-        if (!paneCwdRef.current.has(pane.id)) {
+        const existingPaneCwd = paneCwdRef.current.get(pane.id)
+        if (!existingPaneCwd) {
           paneCwdRef.current.set(pane.id, {
             cwd: resolvePaneSeedCwd(spawnHints?.cwd, ptyDeps.cwd),
-            confirmed: false
+            confirmed: false,
+            ...(spawnHints?.cwdPromise
+              ? { deferredSplitSpawn: true, pendingCwd: spawnHints.cwdPromise }
+              : {})
           })
+        } else if (spawnHints?.cwdPromise && !existingPaneCwd.confirmed) {
+          paneCwdRef.current.set(pane.id, {
+            ...existingPaneCwd,
+            deferredSplitSpawn: true,
+            pendingCwd: spawnHints.cwdPromise
+          })
+        }
+        if (spawnHints?.cwdPromise) {
+          const cwdPromise = spawnHints.cwdPromise
+          void cwdPromise.then(
+            (cwd) => {
+              const current = paneCwdRef.current.get(pane.id)
+              if (current && !current.confirmed && current.pendingCwd === cwdPromise) {
+                paneCwdRef.current.set(pane.id, {
+                  cwd,
+                  confirmed: false,
+                  ...(current.deferredSplitSpawn ? { deferredSplitSpawn: true } : {}),
+                  // Keep the settled identity until bind/failure so a stale
+                  // cleanup callback cannot clear a newer deferred lookup.
+                  pendingCwd: cwdPromise
+                })
+              }
+            },
+            () => {
+              const current = paneCwdRef.current.get(pane.id)
+              if (current && !current.confirmed && current.pendingCwd === cwdPromise) {
+                paneCwdRef.current.set(pane.id, {
+                  cwd: current.cwd,
+                  confirmed: false,
+                  ...(current.deferredSplitSpawn ? { deferredSplitSpawn: true } : {}),
+                  pendingCwd: cwdPromise
+                })
+              }
+            }
+          )
         }
         const osc7Disposable = pane.terminal.parser.registerOscHandler(
           7,
@@ -1054,7 +1108,10 @@ export function useTerminalPaneLifecycle({
             const parsedCwd = parseOsc7(data, { uncHost: osc7UncHost })
             if (parsedCwd) {
               const confirmed = !isPaneReplaying(replayingPanesRef, pane.id)
-              paneCwdRef.current.set(pane.id, { cwd: parsedCwd, confirmed })
+              paneCwdRef.current.set(
+                pane.id,
+                mergePaneCwdFromOsc7(paneCwdRef.current.get(pane.id), parsedCwd, confirmed)
+              )
             }
             return true
           })
@@ -1394,8 +1451,20 @@ export function useTerminalPaneLifecycle({
         const panePtyBinding = connectPanePty(pane, manager, {
           ...ptyDeps,
           ...(onQueuedStartupSpawned ? { onQueuedStartupSpawned } : {}),
+          ...(spawnHints?.cwdPromise
+            ? {
+                onDeferredCwdSpawnFailed: () => {
+                  const current = paneCwdRef.current.get(pane.id)
+                  const settled = clearPaneCwdDeferredSpawn(current, spawnHints.cwdPromise)
+                  if (settled && settled !== current) {
+                    paneCwdRef.current.set(pane.id, settled)
+                  }
+                }
+              }
+            : {}),
           // Why: spread order matters — spawnHints.cwd (source pane) must override ptyDeps.cwd (worktree root) so splits boot in the live cwd.
           ...(spawnHints?.cwd ? { cwd: spawnHints.cwd } : {}),
+          ...(spawnHints?.cwdPromise ? { cwdPromise: spawnHints.cwdPromise } : {}),
           restoredPtyIdByLeafId: spawnHints?.ptyId
             ? {
                 ...ptyDeps.restoredPtyIdByLeafId,

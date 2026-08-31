@@ -21,7 +21,17 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
     startupOverride?: PendingStartupCommand | null,
     options: FreshSpawnOptions = {}
   ): Promise<string | null> => {
+    const releaseDeferredCwdFence = (): void => {
+      if (!session.transport.getPtyId()) {
+        try {
+          session.deps.onDeferredCwdSpawnFailed?.()
+        } catch {
+          // A cleanup callback must not turn a settled spawn into an unhandled rejection.
+        }
+      }
+    }
     if (session.isLegacyWorkerAutomaticResumeBlocked()) {
+      releaseDeferredCwdFence()
       return Promise.resolve(null)
     }
     if (useAppStore.getState().deleteStateByWorktreeId?.[session.deps.worktreeId]?.isDeleting) {
@@ -29,6 +39,7 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
       // filesystem teardown. A fresh shell must not spawn into a directory the
       // removal is about to delete (main fences it anyway), and the pane is
       // about to unmount — so skip the doomed respawn instead of racing it.
+      releaseDeferredCwdFence()
       return Promise.resolve(null)
     }
     session.authoritativeReattachGeneration += 1
@@ -246,6 +257,7 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
           session.reconcilePtySizeAfterSpawn(resolvedPtyId, session.cols, session.rows)
         }
         if (!resolvedPtyId) {
+          releaseDeferredCwdFence()
           clearPreSignaledSerializer()
           session.finishReattachLiveDataDeferral(false, outputCallbacks.generation)
           return null
@@ -274,6 +286,7 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
         return resolvedPtyId
       })
       .catch(async () => {
+        releaseDeferredCwdFence()
         session.finishReattachLiveDataDeferral(false, outputCallbacks.generation)
         if (
           session.paneStartup?.launchConfig ||
