@@ -21,6 +21,9 @@ export function useWebSessionTabsSync(): void {
   const visibilitySnapshotReceiptRef = useRef<GlobalSubscriptionRefs['snapshotReceipt']['current']>(
     () => {}
   )
+  const visibilitySnapshotAcceptedRef = useRef<
+    GlobalSubscriptionRefs['snapshotAccepted']['current']
+  >(() => {})
   const visibilitySnapshotApplyRef = useRef<GlobalSubscriptionRefs['snapshotApply']['current']>(
     () => true
   )
@@ -82,6 +85,7 @@ export function useWebSessionTabsSync(): void {
         activeRuntimeWorktreeKey: activeRuntimeWorktreeKeyRef,
         visibilityResumeOmissions: visibilityResumeOmissionsRef,
         snapshotReceipt: visibilitySnapshotReceiptRef,
+        snapshotAccepted: visibilitySnapshotAcceptedRef,
         snapshotApply: visibilitySnapshotApplyRef,
         ownerRevisions: ownerRevisionsRef
       }
@@ -96,6 +100,7 @@ export function useWebSessionTabsSync(): void {
       activeWorktreeRuntimePairingRevision,
       workspaceSessionReady,
       visibilitySnapshotReceipt: visibilitySnapshotReceiptRef,
+      visibilitySnapshotAccepted: visibilitySnapshotAcceptedRef,
       visibilitySnapshotApply: visibilitySnapshotApplyRef
     })
   }, [

@@ -46,6 +46,9 @@ export type ActiveSubscriptionArgs = {
   visibilitySnapshotReceipt: Ref<
     (environmentId: string, snapshot: RuntimeMobileSessionTabsResult, receivedFrame: number) => void
   >
+  visibilitySnapshotAccepted: Ref<
+    (environmentId: string, snapshot: RuntimeMobileSessionTabsResult, receivedFrame: number) => void
+  >
   visibilitySnapshotApply: Ref<
     (
       environmentId: string,
@@ -63,6 +66,7 @@ export function installActiveSessionTabsSubscription({
   activeWorktreeRuntimePairingRevision,
   workspaceSessionReady,
   visibilitySnapshotReceipt,
+  visibilitySnapshotAccepted,
   visibilitySnapshotApply
 }: ActiveSubscriptionArgs): (() => void) | undefined {
   const environmentId = activeWorktreeRuntimeEnvironmentId?.trim()
@@ -153,7 +157,7 @@ export function installActiveSessionTabsSubscription({
         recovered,
         event.type === 'updated' && !replayed
       )
-      visibilitySnapshotReceipt.current(environmentId, recovered, receivedFrame)
+      visibilitySnapshotAccepted.current(environmentId, recovered, receivedFrame)
     }
     try {
       if (isCurrent() && bootstrap) {
