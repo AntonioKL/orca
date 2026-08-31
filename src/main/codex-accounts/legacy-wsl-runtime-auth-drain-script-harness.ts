@@ -169,6 +169,7 @@ process.exit(result.status ?? 1)
       ],
       {
         encoding: 'utf8',
+        windowsHide: true,
         env: {
           ...process.env,
           HASH_COUNTER: counterPath,
@@ -241,7 +242,7 @@ process.exit(result.status ?? 1)
           join(root, 'absent-active-home'),
           markerPath
         ],
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000 }
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, windowsHide: true }
       )
     } catch {
       // Recovery succeeds before inspect continues and emits the pending auth payload.

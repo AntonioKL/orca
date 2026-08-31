@@ -59,7 +59,7 @@ export function runRecoveryScript(options: {
     execFileSync(
       '/bin/sh',
       ['-c', options.script, 'sh', legacyHome, join(root, 'absent-active-home'), markerPath],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000 }
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, windowsHide: true }
     )
   } catch (error) {
     status = (error as { status?: number }).status ?? -1
@@ -99,6 +99,7 @@ export function runAbsentLegacyHomeScript(options: {
   try {
     execFileSync('/bin/sh', ['-c', options.script, 'sh', legacyHome, activeHome, markerPath], {
       encoding: 'utf8',
+      windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 20_000
     })
