@@ -69,6 +69,11 @@ export async function shutdownSinglePty(
     const detected = await shutdownProviderAndDetectOutcome(shutdownProvider, id, shutdownOpts)
     providerExitObserved = detected.providerExitObserved
     result = detected.result
+    // A pending daemon teardown can reject a stale incarnation without throwing.
+    // Keep client ownership intact until bulk verification classifies that refusal.
+    if (result?.fenceUnavailable) {
+      return result
+    }
   } catch (err) {
     if (!isPtyAlreadyGoneError(err)) {
       recordUndeliveredSshPtyKill({ store: deps.store, ptyId: id, connectionId, reversible })

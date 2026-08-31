@@ -15,7 +15,11 @@ export type KillSessionsDeps = {
   isOwned?: (ref: PtyKillSessionRef) => { owned: boolean; reason?: string }
   shutdown: (provider: IPtyProvider, ref: PtyKillSessionRef) => Promise<PtyShutdownResult | void>
   singleKill?: SinglePtyKillDeps
-  supportsIncarnationFence?: (provider: IPtyProvider) => boolean | Promise<boolean>
+  supportsIncarnationFence?: (
+    provider: IPtyProvider,
+    sessionId: string
+  ) => boolean | Promise<boolean>
+  ownershipUnavailable?: (provider: IPtyProvider) => boolean
   concurrency?: number
 }
 
@@ -58,14 +62,17 @@ export async function killPtySessions(
     acceptedRefs,
     deps.concurrency ?? 4,
     async (ref): Promise<PtyKillSessionResult> => {
+      const provider = deps.providerForSession(ref.id)
+      if (provider && deps.ownershipUnavailable?.(provider)) {
+        return { ...ref, verdict: 'unverifiable', reason: 'agent ownership unknown' }
+      }
       const evidence = intent === 'orphan-cleanup' ? deps.isOwned?.(ref) : undefined
       if (evidence?.owned) {
         return { ...ref, verdict: 'refused', reason: evidence.reason ?? 'session is owned' }
       }
-      const provider = deps.providerForSession(ref.id)
       const fenceCapable =
         provider && deps.supportsIncarnationFence
-          ? await deps.supportsIncarnationFence(provider)
+          ? await deps.supportsIncarnationFence(provider, ref.id)
           : false
       if (intent === 'orphan-cleanup') {
         const latest = deps.isOwned?.(ref)
@@ -87,6 +94,9 @@ export async function killPtySessions(
             ? await deps.shutdown(provider, ref)
             : undefined
         shutdownResults.set(ref.id, shutdownResult)
+        if (shutdownResult?.fenceUnavailable) {
+          return { ...ref, verdict: 'refused', reason: 'incarnation fence unavailable' }
+        }
         return { ...ref, verdict: 'unverifiable' as const, reason: 'pending verification' }
       } catch (error) {
         return {

@@ -16,6 +16,10 @@ const KILL_REASON_COPY: Record<string, { key: string; fallback: string }> = {
     key: 'auto.components.status.bar.ResourceUsageStatusSegment.killMissingFence',
     fallback: 'Kill refused: session identity is missing'
   },
+  'incarnation fence unavailable': {
+    key: 'auto.components.status.bar.ResourceUsageStatusSegment.killFenceUnavailable',
+    fallback: "Kill refused: couldn't verify session identity"
+  },
   'inventory unavailable': {
     key: 'auto.components.status.bar.ResourceUsageStatusSegment.killInventoryUnavailable',
     fallback: "Couldn't verify terminal state"

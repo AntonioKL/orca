@@ -6,7 +6,10 @@ import type { ColdRestoreInfo } from './history-reader'
 import { normalizeWslColdRestoreCwd } from './wsl-cold-restore-cwd'
 import { resolveSafePtyDefaultCwd } from '../providers/pty-default-cwd'
 import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
-import type { PtyShutdownResult } from '../providers/pty-provider-contract'
+import {
+  isPtyShutdownFenceUnavailable,
+  type PtyShutdownResult
+} from '../providers/pty-provider-contract'
 
 const MAX_TOMBSTONES = 1000
 
@@ -115,6 +118,9 @@ export abstract class DaemonPtySessionShutdown extends DaemonPtySessionSpawn {
       },
       remainingDaemonRequestTimeoutMs(opts.deadlineMs)
     )
+    if (isPtyShutdownFenceUnavailable(result)) {
+      return result as PtyShutdownResult
+    }
     this.activeSessionIds.delete(id)
     this.clearSessionAwaitingDaemonRecovery(id)
     this.dirtySessionVersions.delete(id)

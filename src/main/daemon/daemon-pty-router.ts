@@ -13,7 +13,10 @@ import { shouldHandoffDaemonHistory } from './daemon-history-handoff'
 import type { DaemonPtyRouterDataEvent, DaemonPtyRouterExitEvent } from './daemon-pty-router-events'
 import { DaemonSessionOwnerResolver } from './daemon-session-owner-resolution'
 import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
-import type { PtyShutdownResult } from '../providers/pty-provider-contract'
+import {
+  isPtyShutdownFenceUnavailable,
+  type PtyShutdownResult
+} from '../providers/pty-provider-contract'
 
 export class DaemonPtyRouter implements IPtyProvider {
   private current: DaemonPtyAdapter
@@ -75,8 +78,8 @@ export class DaemonPtyRouter implements IPtyProvider {
     return this.current.supportsAgentSessionCreateOperations()
   }
 
-  supportsIncarnationFence(): boolean {
-    return this.current.supportsIncarnationFence()
+  supportsIncarnationFence(options: { sessionId?: string } = {}): boolean {
+    return this.adapterFor(options.sessionId ?? '').supportsIncarnationFence()
   }
 
   async attach(id: string): ReturnType<IPtyProvider['attach']> {
@@ -129,17 +132,7 @@ export class DaemonPtyRouter implements IPtyProvider {
       incarnationId?: string
     }
   ): Promise<void> {
-    const adapter = this.adapterFor(id)
-    const migrateHistory = shouldHandoffDaemonHistory(opts.keepHistory, adapter, this.current)
-    await adapter.shutdown(id, opts)
-    if (!opts.keepHistory || migrateHistory) {
-      if (migrateHistory) {
-        adapter.ackColdRestore(id)
-      }
-      if (this.sessionAdapters.get(id) === adapter) {
-        this.ownerResolver.forgetRoute(id, adapter)
-      }
-    }
+    await this.shutdownWithOutcome(id, opts)
   }
 
   async shutdownWithOutcome(
@@ -158,6 +151,9 @@ export class DaemonPtyRouter implements IPtyProvider {
       ? await adapter.shutdownWithOutcome(id, opts)
       : await adapter.shutdown(id, opts)
     if (!opts.keepHistory || migrateHistory) {
+      if (isPtyShutdownFenceUnavailable(result)) {
+        return result
+      }
       if (migrateHistory) {
         adapter.ackColdRestore(id)
       }

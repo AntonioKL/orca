@@ -3549,6 +3549,7 @@
             "killLive": "Still live",
             "killUnverifiable": "Couldn't verify",
             "killMissingFence": "Kill refused: session identity is missing",
+            "killFenceUnavailable": "Kill refused: couldn't verify session identity",
             "killInventoryUnavailable": "Couldn't verify terminal state",
             "killIdentityUnavailable": "Couldn't verify session identity",
             "killSessionReplaced": "Session was replaced",

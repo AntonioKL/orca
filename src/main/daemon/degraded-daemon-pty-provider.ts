@@ -18,8 +18,9 @@ import {
   listProviderSessionIds
 } from './degraded-daemon-session-routing'
 import { DegradedDaemonFreshSpawnRouter } from './degraded-daemon-fresh-spawn-routing'
-import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
 import { DegradedDaemonOwnerRecovery } from './degraded-daemon-owner-recovery'
+import { shutdownDegradedDaemonWithOutcome } from './degraded-daemon-shutdown-outcome'
+import type { PtyShutdownOptions, PtyShutdownResult } from '../providers/pty-provider-contract'
 
 export class DegradedDaemonPtyProvider implements IPtyProvider {
   readonly isDegraded = true
@@ -81,7 +82,8 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
   supportsGitCredentialGuardHost = (id?: string): boolean =>
     this.freshSpawns.supportsGitGuardHost(id)
 
-  supportsIncarnationFence = (): boolean => this.current.supportsIncarnationFence()
+  supportsIncarnationFence = async (options: { sessionId?: string } = {}): Promise<boolean> =>
+    (await this.providerFor(options.sessionId ?? '').supportsIncarnationFence?.()) ?? false
 
   canProvideAuthoritativeBufferSnapshot = (id: string): boolean =>
     this.freshSpawns.canProvideSnapshot(id)
@@ -138,20 +140,20 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
     this.providerFor(id).setPtyBackgrounded?.(id, background)
   }
 
-  async shutdown(
+  async shutdown(id: string, opts: PtyShutdownOptions): Promise<void> {
+    await this.shutdownWithOutcome(id, opts)
+  }
+
+  async shutdownWithOutcome(
     id: string,
-    opts: {
-      immediate?: boolean
-      keepHistory?: boolean
-      deadlineMs?: number
-      intent?: PtyKillIntent
-      incarnationId?: string
-    }
-  ): Promise<void> {
-    await this.providerFor(id).shutdown(id, opts)
-    if (!opts.keepHistory) {
-      this.sessionProviders.delete(id)
-    }
+    opts: PtyShutdownOptions
+  ): Promise<PtyShutdownResult | void> {
+    return await shutdownDegradedDaemonWithOutcome(
+      id,
+      opts,
+      this.providerFor.bind(this),
+      this.sessionProviders
+    )
   }
 
   async sendSignal(id: string, signal: string): Promise<void> {
@@ -351,9 +353,7 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
     return adoptOwningProvider(this.sessionProviders, this.allProviders(), sessionId)
   }
 
-  private allProviders(): IPtyProvider[] {
-    return [this.fallback, ...this.allDaemonAdapters()]
-  }
+  private allProviders = (): IPtyProvider[] => [this.fallback, ...this.allDaemonAdapters()]
 
   private allDaemonAdapters(): DaemonPtyAdapter[] {
     return [this.current, ...this.legacy]

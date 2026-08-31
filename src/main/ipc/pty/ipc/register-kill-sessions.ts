@@ -36,15 +36,23 @@ export function installPtyKillSessionsHandler(args: {
         : []
       const intent = input?.intent === 'owner-close' ? 'owner-close' : 'orphan-cleanup'
       const claimed = new Set<string>()
+      const ownerInventoryUnavailable = new Set<IPtyProvider>()
       if (intent === 'orphan-cleanup') {
         const snapshots = await Promise.all(
-          args
-            .registeredPtyProviders()
-            .map(({ provider }) => provider.listProcesses().catch(() => []))
+          args.registeredPtyProviders().map(async ({ provider }) => {
+            try {
+              return { provider, rows: await provider.listProcesses() }
+            } catch {
+              ownerInventoryUnavailable.add(provider)
+              return { provider, rows: [] }
+            }
+          })
         )
-        for (const row of snapshots.flat()) {
-          if (row.agentSessionOwners?.length) {
-            claimed.add(row.id)
+        for (const { rows } of snapshots) {
+          for (const row of rows) {
+            if (row.agentSessionOwners?.length) {
+              claimed.add(row.id)
+            }
           }
         }
       }
@@ -81,7 +89,9 @@ export function installPtyKillSessionsHandler(args: {
           rememberSyntheticKillExit: args.rememberSyntheticKillExit,
           sendPtyExitToRenderer: args.sendPtyExitToRenderer
         },
-        supportsIncarnationFence: (provider) => provider.supportsIncarnationFence?.() ?? false
+        supportsIncarnationFence: (provider, sessionId) =>
+          provider.supportsIncarnationFence?.({ sessionId }) ?? false,
+        ownershipUnavailable: (provider) => ownerInventoryUnavailable.has(provider)
       })
     }
   )

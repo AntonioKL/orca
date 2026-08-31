@@ -21,6 +21,25 @@ export type PtyShutdownResult = {
   fenceUnavailable?: true
 }
 
+export type PtyShutdownOptions = {
+  immediate?: boolean
+  keepHistory?: boolean
+  deadlineMs?: number
+  intent?: PtyKillIntent
+  incarnationId?: string
+}
+
+export function isPtyShutdownFenceUnavailable(
+  result: unknown
+): result is PtyShutdownResult & { fenceUnavailable: true } {
+  return (
+    typeof result === 'object' &&
+    result !== null &&
+    'fenceUnavailable' in result &&
+    result.fenceUnavailable === true
+  )
+}
+
 export type {
   PtyBackgroundStreamEvent,
   PtyDataEvent,
@@ -120,7 +139,7 @@ export type PtySpawnOptions = {
 
 export type { PtyProcessInfo, PtySpawnResult }
 
-type PtyProbeOptions = { signal?: AbortSignal }
+type PtyProbeOptions = { signal?: AbortSignal; sessionId?: string }
 
 export type IPtyProvider = {
   requestHostRpc?: (

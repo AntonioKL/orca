@@ -23,4 +23,79 @@ describe('killPtySessions input bounds', () => {
       reason: 'kill request exceeded the maximum batch size'
     })
   })
+
+  it('surfaces a pending incarnation refusal instead of reporting an exit', async () => {
+    const result = await killPtySessions(
+      [{ id: 'session-1', incarnationId: 'stale-incarnation' }],
+      'orphan-cleanup',
+      {
+        listProviders: () => [],
+        providerForSession: () =>
+          ({
+            listProcesses: vi.fn(async () => []),
+            supportsIncarnationFence: () => true
+          }) as never,
+        isOwned: vi.fn(() => ({ owned: false })),
+        shutdown: vi.fn(async () => ({ fenceUnavailable: true as const }))
+      }
+    )
+
+    expect(result).toEqual([
+      {
+        id: 'session-1',
+        incarnationId: 'stale-incarnation',
+        verdict: 'refused',
+        reason: 'incarnation fence unavailable'
+      }
+    ])
+  })
+
+  it('resolves incarnation-fence capability per session route', async () => {
+    const provider = {
+      listProcesses: vi.fn(async () => []),
+      supportsIncarnationFence: vi.fn()
+    }
+    provider.supportsIncarnationFence.mockImplementation(
+      ({ sessionId }: { sessionId?: string }) => sessionId === 'current'
+    )
+    const shutdown = vi.fn(async () => undefined)
+    const results = await killPtySessions(
+      [{ id: 'legacy' }, { id: 'current', incarnationId: 'incarnation-current' }],
+      'orphan-cleanup',
+      {
+        listProviders: () => [{ provider: provider as never }],
+        providerForSession: () => provider as never,
+        isOwned: () => ({ owned: false }),
+        shutdown,
+        supportsIncarnationFence: (target, id) =>
+          target.supportsIncarnationFence?.({ sessionId: id }) ?? false
+      }
+    )
+
+    expect(shutdown).toHaveBeenCalledTimes(2)
+    expect(results.every((result) => result.verdict === 'exited')).toBe(true)
+    expect(provider.supportsIncarnationFence).toHaveBeenCalledWith({ sessionId: 'legacy' })
+    expect(provider.supportsIncarnationFence).toHaveBeenCalledWith({ sessionId: 'current' })
+  })
+
+  it('fails closed per ref when one provider inventory is unavailable', async () => {
+    const failed = {
+      listProcesses: vi.fn(async () => {
+        throw new Error('timeout')
+      })
+    }
+    const healthy = { listProcesses: vi.fn(async () => []) }
+    const shutdown = vi.fn(async () => undefined)
+    const results = await killPtySessions([{ id: 'failed' }, { id: 'healthy' }], 'orphan-cleanup', {
+      listProviders: () => [{ provider: failed as never }, { provider: healthy as never }],
+      providerForSession: (id) => (id === 'failed' ? failed : healthy) as never,
+      isOwned: () => ({ owned: false }),
+      shutdown,
+      ownershipUnavailable: (provider) => provider === failed
+    })
+
+    expect(shutdown).toHaveBeenCalledTimes(1)
+    expect(results[0]).toMatchObject({ id: 'failed', verdict: 'unverifiable' })
+    expect(results[1]).toMatchObject({ id: 'healthy', verdict: 'exited' })
+  })
 })
