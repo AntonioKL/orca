@@ -114,7 +114,7 @@ describe('AwakeEnginePicker', () => {
     const user = userEvent.setup()
     const onChange = renderPicker({ status: { amphetamineInstalled: true } })
 
-    await user.click(screen.getByRole('radio', { name: 'Add Amphetamine' }))
+    await user.click(screen.getByRole('radio', { name: 'Amphetamine (read-only)' }))
 
     expect(onChange).toHaveBeenCalledWith('amphetamine')
   })
@@ -122,7 +122,7 @@ describe('AwakeEnginePicker', () => {
   it('keeps an unknown installation inert and exposes a retry', async () => {
     const user = userEvent.setup()
     const onChange = renderPicker()
-    const amphetamine = screen.getByRole('radio', { name: 'Add Amphetamine' })
+    const amphetamine = screen.getByRole('radio', { name: 'Amphetamine (read-only)' })
 
     expect(amphetamine).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Get Amphetamine…' })).not.toBeInTheDocument()
@@ -137,7 +137,7 @@ describe('AwakeEnginePicker', () => {
     const user = userEvent.setup()
     const onChange = renderPicker({ status: { amphetamineInstalled: false } })
 
-    expect(screen.getByRole('radio', { name: 'Add Amphetamine' })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: 'Amphetamine (read-only)' })).toBeDisabled()
     const getAction = screen.getByRole('button', { name: 'Get Amphetamine…' })
     expect(getAction).toBeEnabled()
 
@@ -247,7 +247,7 @@ describe('AwakeEnginePicker', () => {
 
     expect(screen.getByText('When keep-awake is active, Orca uses Caffeinate.')).toBeInTheDocument()
     expect(
-      screen.getByText(/Observes a session you start manually or with a Trigger/)
+      screen.getByText(/Orca still uses Caffeinate; this only observes a session/)
     ).toBeInTheDocument()
     expect(document.body).not.toHaveTextContent('Works with the lid shut')
     expect(document.querySelector('[data-slot="tooltip-content"]')).toBeNull()

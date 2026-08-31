@@ -95,7 +95,7 @@ export function AwakeEnginePicker({
           value="amphetamine"
           aria-label={translate(
             'auto.components.status.bar.AwakeEnginePicker.addAmphetamine',
-            'Add Amphetamine'
+            'Amphetamine (read-only)'
           )}
           className="items-start py-1.5"
           disabled={!amphetamineSelectable}
@@ -109,13 +109,13 @@ export function AwakeEnginePicker({
             <span>
               {translate(
                 'auto.components.status.bar.AwakeEnginePicker.addAmphetamine',
-                'Add Amphetamine'
+                'Amphetamine (read-only)'
               )}
             </span>
             <span className="text-[11px] font-normal text-muted-foreground">
               {translate(
                 'auto.components.status.bar.AwakeEnginePicker.amphetamineDescription',
-                'Observes a session you start manually or with a Trigger. Closed-display behavior depends on Amphetamine and macOS settings.'
+                'Orca still uses Caffeinate; this only observes a session you start manually or with a Trigger. It never starts or stops Amphetamine.'
               )}
             </span>
           </span>
@@ -125,7 +125,7 @@ export function AwakeEnginePicker({
         <p className="px-2 py-1 text-[11px] leading-4 text-muted-foreground">
           {translate(
             'auto.components.status.bar.AwakeEnginePicker.missingDescription',
-            'Install Amphetamine to observe a session you start manually or with a Trigger. Closed-display behavior depends on Amphetamine and macOS settings.'
+            'Install Amphetamine to let Orca observe a session you start manually or with a Trigger; Orca never starts or stops it.'
           )}
         </p>
       ) : automationDenied ? (

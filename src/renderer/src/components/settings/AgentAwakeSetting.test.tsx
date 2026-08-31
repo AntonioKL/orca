@@ -68,7 +68,7 @@ describe('AgentAwakeSetting Amphetamine integration', () => {
 
     expect(screen.getByText('Amphetamine integration')).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: 'Built-in only' })).toBeChecked()
-    expect(screen.getByRole('radio', { name: 'Add Amphetamine' })).not.toBeChecked()
+    expect(screen.getByRole('radio', { name: 'Amphetamine (read-only)' })).not.toBeChecked()
     expect(screen.getByText(/When keep-awake is active, Orca uses Caffeinate/)).toBeInTheDocument()
   })
 
@@ -89,7 +89,7 @@ describe('AgentAwakeSetting Amphetamine integration', () => {
       }
     })
 
-    await user.click(screen.getByRole('radio', { name: 'Add Amphetamine' }))
+    await user.click(screen.getByRole('radio', { name: 'Amphetamine (read-only)' }))
 
     expect(updateSettings).toHaveBeenCalledWith({ computerAwakeMacosEngine: 'amphetamine' })
   })
@@ -97,7 +97,7 @@ describe('AgentAwakeSetting Amphetamine integration', () => {
   it('keeps an unknown installation inert and exposes a retry', async () => {
     const user = userEvent.setup()
     const updateSettings = renderSetting()
-    const amphetamine = screen.getByRole('radio', { name: 'Add Amphetamine' })
+    const amphetamine = screen.getByRole('radio', { name: 'Amphetamine (read-only)' })
 
     expect(amphetamine).toHaveAttribute('aria-disabled', 'true')
     expect(screen.queryByRole('button', { name: 'Get Amphetamine…' })).not.toBeInTheDocument()
@@ -125,7 +125,7 @@ describe('AgentAwakeSetting Amphetamine integration', () => {
         amphetamineInstalled: false
       }
     })
-    const amphetamine = screen.getByRole('radio', { name: 'Add Amphetamine' })
+    const amphetamine = screen.getByRole('radio', { name: 'Amphetamine (read-only)' })
 
     expect(amphetamine).toHaveAttribute('aria-disabled', 'true')
     await user.click(amphetamine)

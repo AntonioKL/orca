@@ -79,7 +79,7 @@ export function getAmphetamineIntegrationDescription(
   if (amphetamineInstalled === false || unavailableReason === 'not-installed') {
     return translate(
       'auto.components.settings.AgentAwakeSetting.integrationDescriptionMissing',
-      'When keep-awake is active, Orca uses Caffeinate. Install Amphetamine to observe a session you start manually or with a Trigger. Closed-display behavior depends on Amphetamine and macOS settings.'
+      'When keep-awake is active, Orca uses Caffeinate. Install Amphetamine to let Orca observe a session you start manually or with a Trigger; Orca never starts or stops it.'
     )
   }
   if (unavailableReason === 'automation-denied') {
@@ -90,7 +90,7 @@ export function getAmphetamineIntegrationDescription(
   }
   return translate(
     'auto.components.settings.AgentAwakeSetting.integrationDescription',
-    'When keep-awake is active, Orca uses Caffeinate. Add Amphetamine to observe a session you start manually or with a Trigger. Closed-display behavior depends on Amphetamine and macOS settings.'
+    'When keep-awake is active, Orca uses Caffeinate. Optionally observe a session you start manually or with an Amphetamine Trigger; Orca never starts or stops it.'
   )
 }
 

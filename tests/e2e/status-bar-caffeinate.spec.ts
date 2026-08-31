@@ -121,7 +121,9 @@ test.describe('macOS Amphetamine status-bar integration', () => {
     await engineMenu.hover()
     const enginePicker = orcaPage.getByRole('menu').filter({ hasText: 'Amphetamine integration' })
     const builtInOnly = enginePicker.getByRole('menuitemradio', { name: 'Built-in only' })
-    const addAmphetamine = enginePicker.getByRole('menuitemradio', { name: 'Add Amphetamine' })
+    const addAmphetamine = enginePicker.getByRole('menuitemradio', {
+      name: 'Amphetamine (read-only)'
+    })
     await expect(enginePicker.getByText('Amphetamine integration', { exact: true })).toBeVisible()
     await expect(builtInOnly).toHaveAttribute('aria-checked', 'true')
     await expect(addAmphetamine).toBeVisible()
@@ -129,7 +131,7 @@ test.describe('macOS Amphetamine status-bar integration', () => {
       enginePicker.getByText('When keep-awake is active, Orca uses Caffeinate.', { exact: true })
     ).toBeVisible()
     await expect(
-      enginePicker.getByText(/Observes a session you start manually or with a Trigger/)
+      enginePicker.getByText(/Orca still uses Caffeinate; this only observes a session/)
     ).toBeVisible()
     await expect(enginePicker).toContainText(
       'Closed-display behavior depends on Amphetamine and macOS settings.'
@@ -150,7 +152,7 @@ test.describe('macOS Amphetamine status-bar integration', () => {
     } else {
       await expect(addAmphetamine).toBeDisabled()
       await expect(
-        enginePicker.getByText(/Install Amphetamine to observe a session you start manually/)
+        enginePicker.getByText(/Install Amphetamine to let Orca observe a session/)
       ).toBeVisible()
       // Avoid opening the real App Store during E2E.
       await expect(enginePicker.getByRole('menuitem', { name: 'Get Amphetamine…' })).toBeVisible()
@@ -192,7 +194,7 @@ test.describe('macOS Amphetamine status-bar integration', () => {
     await menu.getByRole('menuitem', { name: /Caffeinate/ }).hover()
     const enginePicker = orcaPage.getByRole('menu').filter({ hasText: 'Amphetamine integration' })
     await expect(
-      enginePicker.getByRole('menuitemradio', { name: 'Add Amphetamine' })
+      enginePicker.getByRole('menuitemradio', { name: 'Amphetamine (read-only)' })
     ).toHaveAttribute('aria-checked', 'true')
   })
 })

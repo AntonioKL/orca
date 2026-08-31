@@ -220,7 +220,7 @@ function AmphetamineIntegrationSetting({
               value: 'amphetamine',
               label: translate(
                 'auto.components.settings.AgentAwakeSetting.addAmphetamine',
-                'Add Amphetamine'
+                'Amphetamine (read-only)'
               ),
               disabled: !amphetamineSelectable
             }
