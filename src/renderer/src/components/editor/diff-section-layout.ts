@@ -1,4 +1,6 @@
 import type { GitDiffResult } from '../../../../shared/git-diff-compare-types'
+import { shouldLoadCombinedDiffOnDemand } from './combined-diff-on-demand-load'
+import type { DiffSection } from './diff-section-types'
 import { countLinesLikeSplit, type DiffLineCounts } from './large-diff-render-limit'
 
 const DIFF_LINE_HEIGHT = 19
@@ -26,6 +28,25 @@ export function getLargeDiffFallbackBodyHeight(): number {
   // Why: section measurements may be stale Monaco heights from before a diff
   // crossed the render limit; the fallback must always stay bounded.
   return LARGE_DIFF_FALLBACK_BODY_HEIGHT
+}
+
+/**
+ * Rows that size from the bounded fallback instead of their (absent) content:
+ * render-limited rows, rows still waiting behind the load prompt, and — while
+ * the fetch is in flight — rows the user just loaded, so starting a load does
+ * not shrink the section to the empty-content minimum and shift the list.
+ */
+export function usesLargeDiffFallbackHeight(
+  section: Pick<
+    DiffSection,
+    'added' | 'area' | 'largeDiffRenderLimit' | 'loading' | 'loadOnDemand' | 'path' | 'removed'
+  >
+): boolean {
+  return (
+    section.largeDiffRenderLimit?.limited === true ||
+    section.loadOnDemand === true ||
+    (section.loading && shouldLoadCombinedDiffOnDemand(section))
+  )
 }
 
 export function getDiffSectionBodyHeight({

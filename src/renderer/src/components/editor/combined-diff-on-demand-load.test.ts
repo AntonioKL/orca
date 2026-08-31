@@ -23,8 +23,18 @@ describe('combined diff on-demand loading', () => {
     ).toBe(false)
   })
 
-  it('automatically loads diffs when line counts are unavailable', () => {
-    expect(shouldLoadCombinedDiffOnDemand({ added: undefined, removed: undefined })).toBe(false)
+  it('automatically loads tracked diffs when line counts are unavailable', () => {
+    expect(
+      shouldLoadCombinedDiffOnDemand({ added: undefined, removed: undefined, area: 'unstaged' })
+    ).toBe(false)
+  })
+
+  it('defers untracked files whose line counts were skipped as too large', () => {
+    expect(shouldLoadCombinedDiffOnDemand({ area: 'untracked', path: 'data/dump.json' })).toBe(true)
+  })
+
+  it('automatically loads untracked images that report no line counts', () => {
+    expect(shouldLoadCombinedDiffOnDemand({ area: 'untracked', path: 'docs/Shot.PNG' })).toBe(false)
   })
 
   it('defers untracked diffs when only additions are reported', () => {

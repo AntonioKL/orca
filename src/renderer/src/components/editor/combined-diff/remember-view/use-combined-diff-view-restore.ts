@@ -138,7 +138,9 @@ export function useCombinedDiffViewRestore({
       entries.map((entry) => {
         const loadOnDemand = shouldLoadCombinedDiffOnDemand({
           added: 'added' in entry ? entry.added : undefined,
-          removed: 'removed' in entry ? entry.removed : undefined
+          removed: 'removed' in entry ? entry.removed : undefined,
+          area: 'area' in entry ? entry.area : undefined,
+          path: entry.path
         })
         return {
           key: getCombinedDiffFileTreeSectionKey(treeMode, entry),

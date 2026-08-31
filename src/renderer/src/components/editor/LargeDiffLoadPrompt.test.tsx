@@ -16,7 +16,7 @@ describe('LargeDiffLoadPrompt', () => {
       </div>
     )
 
-    expect(screen.getByText('Large diffs are not rendered by default.')).toBeDefined()
+    screen.getByText('Large diffs are not rendered by default.')
     fireEvent.click(screen.getByRole('button', { name: 'Load diff' }))
 
     expect(onLoad).toHaveBeenCalledOnce()

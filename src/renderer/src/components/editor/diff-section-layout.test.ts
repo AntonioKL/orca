@@ -3,7 +3,8 @@ import {
   getDiffSectionBodyHeight,
   getLargeDiffFallbackBodyHeight,
   getDiffSectionEstimatedHeight,
-  isIntrinsicHeightImageDiff
+  isIntrinsicHeightImageDiff,
+  usesLargeDiffFallbackHeight
 } from './diff-section-layout'
 import type { GitDiffResult } from '../../../../shared/git-diff-compare-types'
 
@@ -225,6 +226,24 @@ describe('diff section layout', () => {
         isLargeDiffLimited: true
       })
     ).toBe(188)
+  })
+
+  it('keeps the deferred fallback height while a loaded-on-demand diff fetches', () => {
+    const section = {
+      path: 'big.txt',
+      added: 50_000,
+      removed: 0,
+      largeDiffRenderLimit: null
+    }
+    expect(usesLargeDiffFallbackHeight({ ...section, loading: false, loadOnDemand: true })).toBe(
+      true
+    )
+    expect(usesLargeDiffFallbackHeight({ ...section, loading: true, loadOnDemand: false })).toBe(
+      true
+    )
+    expect(
+      usesLargeDiffFallbackHeight({ ...section, added: 3, loading: true, loadOnDemand: false })
+    ).toBe(false)
   })
 
   it('estimates collapsed virtualized sections as header-only rows', () => {
