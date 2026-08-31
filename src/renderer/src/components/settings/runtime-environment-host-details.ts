@@ -184,7 +184,11 @@ export function getRuntimeServerConnectionState(
   }
   // A compatibility verdict is positive runtime evidence even when an older
   // client omitted the full status payload.
-  if (details.runtimeStatus === null && details.compatibility !== null) {
+  if (
+    details.status === 'ready' &&
+    details.runtimeStatus === null &&
+    details.compatibility !== null
+  ) {
     return 'connected'
   }
   return runtimeHostConnectionState({

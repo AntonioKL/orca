@@ -273,6 +273,22 @@ describe('RuntimeEnvironmentsPane host details', () => {
     }
   })
 
+  it('does not treat an errored probe with a stale compatibility verdict as connected', () => {
+    expect(
+      getRuntimeServerConnectionState(
+        details({
+          status: 'error',
+          compatibility: {
+            kind: 'ok',
+            clientProtocolVersion: RUNTIME_PROTOCOL_VERSION,
+            serverProtocolVersion: RUNTIME_PROTOCOL_VERSION
+          },
+          error: 'runtime.status.get failed'
+        })
+      )
+    ).toBe('disconnected')
+  })
+
   it('explains that selecting a saved server is the explicit default Host mode', () => {
     expect(getActiveServerModeDescription(true)).toContain('Use this computer by default')
     expect(getActiveServerModeDescription(true)).toContain('browser/mobile handoff')
