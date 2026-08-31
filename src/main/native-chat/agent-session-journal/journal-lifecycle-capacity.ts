@@ -153,7 +153,8 @@ export class JournalLifecycleCapacity {
             appendSlots: 1
           },
           currentPhysicalBytes,
-          maxBytes
+          maxBytes,
+          maxAppendSlots
         )
       ) {
         return false
