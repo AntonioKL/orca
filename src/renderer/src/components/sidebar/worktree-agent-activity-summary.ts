@@ -8,10 +8,17 @@ import {
 } from '@/lib/agent-status-worktree-attribution'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
-  type AgentStatusEntry,
   type AgentStatusOrchestrationContext
 } from '../../../../shared/agent-status-types'
-import type { PaneForegroundAgentEntry } from '@/store/slices/pane-foreground-agent'
+import type {
+  PaneForegroundAgentEntry,
+  PaneForegroundAgentObservation
+} from '@/store/slices/pane-foreground-agent'
+import {
+  agentStatusPaneIdsByTabIdEqual,
+  paneForegroundAgentsEqual
+} from './worktree-agent-activity-summary-equality'
+import { applyLiveAgentState } from './worktree-agent-state-flags'
 
 export type WorktreeAgentActivitySummary = {
   hasPermission: boolean
@@ -24,10 +31,12 @@ export type WorktreeAgentActivitySummary = {
   agentStatusPaneIdsByTabId: Record<string, ReadonlySet<string>>
   /** Process identity narrowed to this worktree's panes. */
   paneForegroundAgentByPaneKey: Record<string, PaneForegroundAgentEntry>
+  paneForegroundAgentObservationByPaneKey: Record<string, PaneForegroundAgentObservation>
 }
 
 const EMPTY_AGENT_STATUS_PANE_IDS_BY_TAB_ID: Record<string, ReadonlySet<string>> = {}
 export const EMPTY_PANE_FOREGROUND_AGENTS: Record<string, PaneForegroundAgentEntry> = {}
+export const EMPTY_PANE_FOREGROUND_OBSERVATIONS: Record<string, PaneForegroundAgentObservation> = {}
 
 const EMPTY_SUMMARY: WorktreeAgentActivitySummary = {
   hasPermission: false,
@@ -37,7 +46,8 @@ const EMPTY_SUMMARY: WorktreeAgentActivitySummary = {
   hasLiveDone: false,
   hasRetainedDone: false,
   agentStatusPaneIdsByTabId: EMPTY_AGENT_STATUS_PANE_IDS_BY_TAB_ID,
-  paneForegroundAgentByPaneKey: EMPTY_PANE_FOREGROUND_AGENTS
+  paneForegroundAgentByPaneKey: EMPTY_PANE_FOREGROUND_AGENTS,
+  paneForegroundAgentObservationByPaneKey: EMPTY_PANE_FOREGROUND_OBSERVATIONS
 }
 
 type AgentActivityTabsByWorktree = Record<string, readonly { id: string }[]>
@@ -52,6 +62,7 @@ export type AgentActivityInput = Pick<
   tabsByWorktree: AgentActivityTabsByWorktree
   runtimeAgentOrchestrationByPaneKey?: AppState['runtimeAgentOrchestrationByPaneKey']
   paneForegroundAgentByPaneKey?: AppState['paneForegroundAgentByPaneKey']
+  paneForegroundAgentObservationByPaneKey?: AppState['paneForegroundAgentObservationByPaneKey']
 }
 
 type AgentActivityCache = {
@@ -61,6 +72,9 @@ type AgentActivityCache = {
   retainedAgentsByPaneKey: AppState['retainedAgentsByPaneKey']
   runtimeAgentOrchestrationByPaneKey: AppState['runtimeAgentOrchestrationByPaneKey'] | undefined
   paneForegroundAgentByPaneKey: AppState['paneForegroundAgentByPaneKey'] | undefined
+  paneForegroundAgentObservationByPaneKey:
+    | AppState['paneForegroundAgentObservationByPaneKey']
+    | undefined
   summaries: Map<string, WorktreeAgentActivitySummary>
 }
 
@@ -78,6 +92,7 @@ function getWorktreeAgentActivitySummaries(
 ): Map<string, WorktreeAgentActivitySummary> {
   const runtimeAgentOrchestrationByPaneKey = state.runtimeAgentOrchestrationByPaneKey
   const paneForegroundAgentByPaneKey = state.paneForegroundAgentByPaneKey
+  const paneForegroundAgentObservationByPaneKey = state.paneForegroundAgentObservationByPaneKey
   if (
     agentActivityCache &&
     agentActivityCache.tabsByWorktree === state.tabsByWorktree &&
@@ -85,7 +100,9 @@ function getWorktreeAgentActivitySummaries(
     agentActivityCache.migrationUnsupportedByPtyId === state.migrationUnsupportedByPtyId &&
     agentActivityCache.retainedAgentsByPaneKey === state.retainedAgentsByPaneKey &&
     agentActivityCache.runtimeAgentOrchestrationByPaneKey === runtimeAgentOrchestrationByPaneKey &&
-    agentActivityCache.paneForegroundAgentByPaneKey === paneForegroundAgentByPaneKey
+    agentActivityCache.paneForegroundAgentByPaneKey === paneForegroundAgentByPaneKey &&
+    agentActivityCache.paneForegroundAgentObservationByPaneKey ===
+      paneForegroundAgentObservationByPaneKey
   ) {
     return agentActivityCache.summaries
   }
@@ -111,7 +128,7 @@ function getWorktreeAgentActivitySummaries(
   }
 
   const now = Date.now()
-  for (const [paneKey, entry] of Object.entries(state.agentStatusByPaneKey)) {
+  for (const [paneKey, entry] of Object.entries(state.agentStatusByPaneKey ?? {})) {
     const paneIdentity = parseAgentStatusPaneIdentity(paneKey)
     if (!paneIdentity) {
       continue
@@ -160,8 +177,13 @@ function getWorktreeAgentActivitySummaries(
     const summary = summaryForWorktree(worktreeId)
     if (summary.paneForegroundAgentByPaneKey === EMPTY_PANE_FOREGROUND_AGENTS) {
       summary.paneForegroundAgentByPaneKey = {}
+      summary.paneForegroundAgentObservationByPaneKey = {}
     }
     summary.paneForegroundAgentByPaneKey[paneKey] = entry
+    const observation = paneForegroundAgentObservationByPaneKey?.[paneKey]
+    if (observation) {
+      summary.paneForegroundAgentObservationByPaneKey[paneKey] = observation
+    }
   }
 
   for (const retained of Object.values(state.retainedAgentsByPaneKey ?? {})) {
@@ -197,6 +219,7 @@ function getWorktreeAgentActivitySummaries(
     retainedAgentsByPaneKey: state.retainedAgentsByPaneKey,
     runtimeAgentOrchestrationByPaneKey,
     paneForegroundAgentByPaneKey,
+    paneForegroundAgentObservationByPaneKey,
     summaries
   }
   return summaries
@@ -220,68 +243,12 @@ function summariesEqual(
     paneForegroundAgentsEqual(
       previous.paneForegroundAgentByPaneKey,
       next.paneForegroundAgentByPaneKey
+    ) &&
+    paneForegroundAgentsEqual(
+      previous.paneForegroundAgentObservationByPaneKey,
+      next.paneForegroundAgentObservationByPaneKey
     )
   )
-}
-
-function paneForegroundAgentsEqual(
-  previous: Record<string, PaneForegroundAgentEntry>,
-  next: Record<string, PaneForegroundAgentEntry>
-): boolean {
-  if (previous === next) {
-    return true
-  }
-  const previousKeys = Object.keys(previous)
-  if (previousKeys.length !== Object.keys(next).length) {
-    return false
-  }
-  return previousKeys.every((paneKey) => previous[paneKey] === next[paneKey])
-}
-
-function agentStatusPaneIdsByTabIdEqual(
-  previous: Record<string, ReadonlySet<string>>,
-  next: Record<string, ReadonlySet<string>>
-): boolean {
-  if (previous === next) {
-    return true
-  }
-  const previousKeys = Object.keys(previous)
-  if (previousKeys.length !== Object.keys(next).length) {
-    return false
-  }
-  for (const tabId of previousKeys) {
-    const previousPaneIds = previous[tabId]
-    const nextPaneIds = next[tabId]
-    if (!nextPaneIds || previousPaneIds.size !== nextPaneIds.size) {
-      return false
-    }
-    for (const paneId of previousPaneIds) {
-      if (!nextPaneIds.has(paneId)) {
-        return false
-      }
-    }
-  }
-  return true
-}
-
-function applyLiveAgentState(
-  summary: WorktreeAgentActivitySummary,
-  entry: Pick<AgentStatusEntry, 'state' | 'workingMode' | 'interrupted'>
-): void {
-  if (entry.state === 'blocked' || entry.state === 'waiting') {
-    summary.hasPermission = true
-  } else if (entry.interrupted === true) {
-    // Interrupted is encoded as done, so it must be checked first.
-    summary.hasInterrupted = true
-  } else if (entry.state === 'working') {
-    if (entry.workingMode === 'monitoring') {
-      summary.hasLiveMonitoring = true
-    } else {
-      summary.hasLiveWorking = true
-    }
-  } else if (entry.state === 'done') {
-    summary.hasLiveDone = true
-  }
 }
 
 function addAgentStatusPaneId(

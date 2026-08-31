@@ -158,10 +158,11 @@ describe('getWorktreeStatus', () => {
         paneForegroundAgentByPaneKey: {
           [makePaneKey('tab-1', LEAF_ID_1)]: {
             agent: 'claude',
-            shellForeground: false,
-            observedAt: 1_000,
-            ptyId: 'pty-old'
+            shellForeground: false
           }
+        },
+        paneForegroundAgentObservationByPaneKey: {
+          [makePaneKey('tab-1', LEAF_ID_1)]: { observedAt: 1_000, ptyId: 'pty-old' }
         },
         now: 2_000
       }

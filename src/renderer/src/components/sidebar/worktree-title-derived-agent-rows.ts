@@ -3,7 +3,10 @@ import { formatAgentTypeLabel, isClaudeManagementTitle } from '@/lib/agent-statu
 import { isCursorAgentTitle } from '../../../../shared/agent-title-core'
 import { classifyTitleActivity, resolveTitleActivityLabel } from '@/lib/pane-agent-evidence'
 import { tabHasLivePty } from '@/lib/tab-has-live-pty'
-import type { PaneForegroundAgentEntry } from '@/store/slices/pane-foreground-agent'
+import type {
+  PaneForegroundAgentEntry,
+  PaneForegroundAgentObservation
+} from '@/store/slices/pane-foreground-agent'
 import type {
   AgentStatusEntry,
   AgentStatusOrchestrationContext,
@@ -46,6 +49,7 @@ export function buildTitleDerivedAgentRows(args: {
   terminalLayoutsByTabId?: Record<string, TerminalLayoutSnapshot | undefined>
   runtimeAgentOrchestrationByPaneKey?: Record<string, AgentStatusOrchestrationContext>
   paneForegroundAgentByPaneKey?: Record<string, PaneForegroundAgentEntry>
+  paneForegroundAgentObservationByPaneKey?: Record<string, PaneForegroundAgentObservation>
   seenPaneKeys: Set<string>
   now: number
 }): DashboardAgentRow[] {
@@ -89,6 +93,7 @@ export function buildTitleDerivedAgentRows(args: {
             layout,
             livePtyIds: ptyIdsByTabId[tab.id],
             paneForegroundAgentByPaneKey: args.paneForegroundAgentByPaneKey,
+            paneForegroundAgentObservationByPaneKey: args.paneForegroundAgentObservationByPaneKey,
             now: args.now
           })
         })
@@ -118,6 +123,7 @@ export function buildTitleDerivedAgentRows(args: {
         layout,
         livePtyIds: ptyIdsByTabId[tab.id],
         paneForegroundAgentByPaneKey: args.paneForegroundAgentByPaneKey,
+        paneForegroundAgentObservationByPaneKey: args.paneForegroundAgentObservationByPaneKey,
         now: args.now
       })
     })
@@ -133,6 +139,7 @@ export function buildTitleDerivedAgentRows(args: {
     ptyIdsByTabId,
     terminalLayoutsByTabId,
     paneForegroundAgentByPaneKey: args.paneForegroundAgentByPaneKey,
+    paneForegroundAgentObservationByPaneKey: args.paneForegroundAgentObservationByPaneKey,
     seenPaneKeys: args.seenPaneKeys,
     rows,
     now: args.now

@@ -104,6 +104,9 @@ export function buildWorktreePurgeState(
     agentLaunchConfigByPaneKey: omitByPaneKeyTabPrefix(s.agentLaunchConfigByPaneKey),
     acknowledgedAgentsByPaneKey: omitByPaneKeyTabPrefix(s.acknowledgedAgentsByPaneKey),
     paneForegroundAgentByPaneKey: omitByPaneKeyTabPrefix(s.paneForegroundAgentByPaneKey),
+    paneForegroundAgentObservationByPaneKey: omitByPaneKeyTabPrefix(
+      s.paneForegroundAgentObservationByPaneKey
+    ),
     sleepingAgentSessionsByPaneKey: omitByPaneKeyTabPrefix(s.sleepingAgentSessionsByPaneKey),
     unreadTerminalTabs: omitByTabId(s.unreadTerminalTabs),
     unreadTerminalPanes: omitByPaneKeyTabPrefix(s.unreadTerminalPanes),

@@ -272,10 +272,17 @@ describe('connectPanePty', () => {
       await advanceVisibleForegroundRead()
 
       expect(foregroundReadCallsFor(ptyId)).toEqual([[ptyId]])
-      expect(mockStoreState.setPaneForegroundAgent).toHaveBeenCalledWith(cacheKey, {
-        agent: 'codex',
-        shellForeground: false
-      })
+      expect(mockStoreState.setPaneForegroundAgent).toHaveBeenCalledWith(
+        cacheKey,
+        {
+          agent: 'codex',
+          shellForeground: false
+        },
+        {
+          observedAt: expect.any(Number),
+          ptyId
+        }
+      )
     })
 
     it('does not sample hidden restored PTYs', async () => {
@@ -758,10 +765,17 @@ describe('connectPanePty', () => {
 
       await advanceVisibleForegroundRead()
 
-      expect(mockStoreState.setPaneForegroundAgent).toHaveBeenCalledWith(cacheKey, {
-        agent: null,
-        shellForeground: true
-      })
+      expect(mockStoreState.setPaneForegroundAgent).toHaveBeenCalledWith(
+        cacheKey,
+        {
+          agent: null,
+          shellForeground: true
+        },
+        {
+          observedAt: expect.any(Number),
+          ptyId
+        }
+      )
       expect(foregroundReadCallsFor(ptyId)).toHaveLength(0)
     })
 
@@ -807,11 +821,18 @@ describe('connectPanePty', () => {
         agent: null,
         shellForeground: true
       })
-      expect(mockStoreState.setPaneForegroundAgent).toHaveBeenCalledWith(cacheKey, {
-        agent: 'droid',
-        routingTrusted: true,
-        shellForeground: false
-      })
+      expect(mockStoreState.setPaneForegroundAgent).toHaveBeenCalledWith(
+        cacheKey,
+        {
+          agent: 'droid',
+          routingTrusted: true,
+          shellForeground: false
+        },
+        {
+          observedAt: expect.any(Number),
+          ptyId
+        }
+      )
     })
 
     it('never probes the foreground for a visible remote/SSH restored pane', async () => {

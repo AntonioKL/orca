@@ -3,7 +3,10 @@ import { applyAgentRowLineage } from '@/components/dashboard/agent-row-lineage'
 import type { TerminalLayoutSnapshot, TerminalTab } from '../../../../shared/terminal-tab-types'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import { makePaneKey } from '../../../../shared/stable-pane-id'
-import type { PaneForegroundAgentEntry } from '@/store/slices/pane-foreground-agent'
+import type {
+  PaneForegroundAgentEntry,
+  PaneForegroundAgentObservation
+} from '@/store/slices/pane-foreground-agent'
 import { buildWorktreeAgentRows } from './worktree-agent-rows'
 
 const LEAF_ID_1 = '77777777-7777-4777-8777-777777777777'
@@ -49,10 +52,9 @@ describe('buildTitleDerivedAgentRows', () => {
     const paneKey = makePaneKey('tab-1', LEAF_ID_1)
     const foreground: PaneForegroundAgentEntry = {
       agent: 'claude',
-      shellForeground: false,
-      observedAt: 1_000,
-      ptyId: 'pty-claude'
+      shellForeground: false
     }
+    const observation: PaneForegroundAgentObservation = { observedAt: 1_000, ptyId: 'pty-claude' }
     const rows = buildWorktreeAgentRows({
       tabs: [makeTab('tab-1', { title: 'zsh' })],
       entries: [],
@@ -60,6 +62,7 @@ describe('buildTitleDerivedAgentRows', () => {
       ptyIdsByTabId: { 'tab-1': ['pty-claude'] },
       terminalLayoutsByTabId: { 'tab-1': makeSingleLayout(LEAF_ID_1) },
       paneForegroundAgentByPaneKey: { [paneKey]: foreground },
+      paneForegroundAgentObservationByPaneKey: { [paneKey]: observation },
       now: 1_000 + 1_000
     })
 
@@ -79,10 +82,11 @@ describe('buildTitleDerivedAgentRows', () => {
       paneForegroundAgentByPaneKey: {
         [paneKey]: {
           agent: 'claude',
-          shellForeground: false,
-          observedAt: 1_000,
-          ptyId: 'pty-old'
+          shellForeground: false
         }
+      },
+      paneForegroundAgentObservationByPaneKey: {
+        [paneKey]: { observedAt: 1_000, ptyId: 'pty-old' }
       },
       now: 2_000
     })
@@ -101,10 +105,11 @@ describe('buildTitleDerivedAgentRows', () => {
       paneForegroundAgentByPaneKey: {
         [paneKey]: {
           agent: 'claude',
-          shellForeground: false,
-          observedAt: 1_000,
-          ptyId: 'pty-claude'
+          shellForeground: false
         }
+      },
+      paneForegroundAgentObservationByPaneKey: {
+        [paneKey]: { observedAt: 1_000, ptyId: 'pty-claude' }
       },
       now: 31_001
     })

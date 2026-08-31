@@ -23,7 +23,9 @@ type WorktreeActivityStatusState = Pick<
   | 'retainedAgentsByPaneKey'
   | 'runtimeAgentOrchestrationByPaneKey'
   | 'paneForegroundAgentByPaneKey'
->
+> & {
+  paneForegroundAgentObservationByPaneKey?: AppState['paneForegroundAgentObservationByPaneKey']
+}
 
 export function selectWorktreeActivityStatuses(
   statusInputs: WorktreeActivityStatusState,
@@ -39,7 +41,8 @@ export function selectWorktreeActivityStatuses(
       hasLiveDone,
       hasRetainedDone,
       agentStatusPaneIdsByTabId,
-      paneForegroundAgentByPaneKey
+      paneForegroundAgentByPaneKey,
+      paneForegroundAgentObservationByPaneKey
     } = selectWorktreeAgentActivitySummary(statusInputs, worktreeId)
     statuses.set(
       worktreeId,
@@ -51,6 +54,7 @@ export function selectWorktreeActivityStatuses(
         agentStatusPaneIdsByTabId,
         terminalLayoutsByTabId: selectTerminalLayoutsForWorktree(statusInputs, worktreeId),
         paneForegroundAgentByPaneKey,
+        paneForegroundAgentObservationByPaneKey,
         hasPermission,
         hasLiveWorking,
         hasLiveMonitoring,

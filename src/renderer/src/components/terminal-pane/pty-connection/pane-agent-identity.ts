@@ -15,7 +15,6 @@ import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { resolveCommittedTitleAgentType } from '@/lib/pane-agent-evidence'
 import type { TuiAgent } from '../../../../../shared/tui-agent'
 import { isTuiAgent, TUI_AGENT_CONFIG } from '../../../../../shared/tui-agent-config'
-import { createPaneForegroundAgentEntry } from '@/store/slices/pane-foreground-agent'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
@@ -159,13 +158,10 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     // Bind observations to the PTY that was inspected; a pane key may survive
     // a rebind while the old process identity is still in the store.
     publish: (entry) =>
-      useAppStore.getState().setPaneForegroundAgent(
-        session.cacheKey,
-        createPaneForegroundAgentEntry(entry, {
-          observedAt: Date.now(),
-          ptyId: session.transport.getPtyId() ?? undefined
-        })
-      ),
+      useAppStore.getState().setPaneForegroundAgent(session.cacheKey, entry, {
+        observedAt: Date.now(),
+        ptyId: session.transport.getPtyId() ?? undefined
+      }),
     hasKnownAgentIdentity: session.paneHasKnownAgentIdentity,
     onConfirmedShellForeground: (reason) => {
       session.clearStaleAgentTabTitleOnConfirmedShell()
@@ -199,17 +195,11 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
       if (foreground?.routingConfirmationPending !== true) {
         return
       }
-      useAppStore.getState().setPaneForegroundAgent(
-        session.cacheKey,
-        createPaneForegroundAgentEntry(
-          {
-            agent: foreground.agent,
-            routingRevoked: true,
-            shellForeground: foreground.shellForeground
-          },
-          { ptyId: session.transport.getPtyId() ?? undefined }
-        )
-      )
+      useAppStore.getState().setPaneForegroundAgent(session.cacheKey, {
+        agent: foreground.agent,
+        routingRevoked: true,
+        shellForeground: foreground.shellForeground
+      })
     }
   })
   // Why: one command-finished policy whether the signal arrives as bytes
@@ -303,33 +293,23 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     }
     // Why: cmd.exe and Git Bash have no OSC command boundaries. Keep the icon
     // as a hint, but revoke bytes until one current provider confirmation lands.
-    useAppStore
-      .getState()
-      .setPaneForegroundAgent(
-        session.cacheKey,
-        createPaneForegroundAgentEntry(
-          { agent: foreground.agent, routingRevoked: true, shellForeground: false },
-          { ptyId: session.transport.getPtyId() ?? undefined }
-        )
-      )
+    useAppStore.getState().setPaneForegroundAgent(session.cacheKey, {
+      agent: foreground.agent,
+      routingRevoked: true,
+      shellForeground: false
+    })
     session.visibleForegroundSamplePending = false
     session.visibleForegroundSampleSettled = false
     // Why: hook rows can suppress display-only sampling, but cannot restore
     // byte authority after this function explicitly revoked routing trust.
     session.sampleVisiblePaneForegroundAgent(true)
     if (session.paneForegroundAgentTracker.hasReadInFlight()) {
-      useAppStore.getState().setPaneForegroundAgent(
-        session.cacheKey,
-        createPaneForegroundAgentEntry(
-          {
-            agent: foreground.agent,
-            routingRevoked: true,
-            shellForeground: false,
-            routingConfirmationPending: true
-          },
-          { ptyId: session.transport.getPtyId() ?? undefined }
-        )
-      )
+      useAppStore.getState().setPaneForegroundAgent(session.cacheKey, {
+        agent: foreground.agent,
+        routingRevoked: true,
+        shellForeground: false,
+        routingConfirmationPending: true
+      })
     }
   }
   session.commandLifecycle = createTerminalCommandLifecycle({

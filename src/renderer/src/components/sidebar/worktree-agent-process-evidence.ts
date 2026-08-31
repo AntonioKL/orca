@@ -2,7 +2,8 @@ import type { DashboardAgentRow } from '@/components/dashboard/useDashboardData'
 import { formatAgentTypeLabel } from '@/lib/agent-status'
 import {
   resolveFreshPaneForegroundAgent,
-  type PaneForegroundAgentEntry
+  type PaneForegroundAgentEntry,
+  type PaneForegroundAgentObservation
 } from '@/store/slices/pane-foreground-agent'
 import type { AgentStatusEntry } from '../../../../shared/agent-status-types'
 import { isTerminalLeafId, makePaneKey, parsePaneKey } from '../../../../shared/stable-pane-id'
@@ -19,6 +20,9 @@ export function freshProcessAgentForLeaf(args: {
   layout: TerminalLayoutSnapshot | undefined
   livePtyIds: readonly string[] | undefined
   paneForegroundAgentByPaneKey: Record<string, PaneForegroundAgentEntry> | undefined
+  paneForegroundAgentObservationByPaneKey:
+    | Record<string, PaneForegroundAgentObservation>
+    | undefined
   now: number
 }): TuiAgent | null {
   if (!args.paneForegroundAgentByPaneKey || !isTerminalLeafId(args.leafId)) {
@@ -26,6 +30,7 @@ export function freshProcessAgentForLeaf(args: {
   }
   return resolveFreshPaneForegroundAgent(
     args.paneForegroundAgentByPaneKey[makePaneKey(args.tabId, args.leafId)],
+    args.paneForegroundAgentObservationByPaneKey?.[makePaneKey(args.tabId, args.leafId)],
     {
       now: args.now,
       paneBoundPtyId: args.layout?.ptyIdsByLeafId?.[args.leafId],
@@ -40,6 +45,9 @@ export function appendProcessDerivedAgentRows(args: {
   ptyIdsByTabId: Record<string, string[]>
   terminalLayoutsByTabId: Record<string, TerminalLayoutSnapshot | undefined>
   paneForegroundAgentByPaneKey: Record<string, PaneForegroundAgentEntry> | undefined
+  paneForegroundAgentObservationByPaneKey:
+    | Record<string, PaneForegroundAgentObservation>
+    | undefined
   seenPaneKeys: Set<string>
   rows: DashboardAgentRow[]
   now: number
@@ -62,6 +70,7 @@ export function appendProcessDerivedAgentRows(args: {
       layout: args.terminalLayoutsByTabId[tab.id],
       livePtyIds: args.ptyIdsByTabId[tab.id],
       paneForegroundAgentByPaneKey: args.paneForegroundAgentByPaneKey,
+      paneForegroundAgentObservationByPaneKey: args.paneForegroundAgentObservationByPaneKey,
       now: args.now
     })
     if (!processAgent) {

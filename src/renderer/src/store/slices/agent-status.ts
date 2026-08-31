@@ -1675,6 +1675,10 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
             s.paneForegroundAgentByPaneKey,
             retiredPaneKeySet
           ),
+          paneForegroundAgentObservationByPaneKey: removePaneKeys(
+            s.paneForegroundAgentObservationByPaneKey,
+            retiredPaneKeySet
+          ),
           unreadTerminalPanes: removePaneKeys(s.unreadTerminalPanes, retiredPaneKeySet),
           unreadAgentCompletionPanes: removePaneKeys(
             s.unreadAgentCompletionPanes,
@@ -1800,6 +1804,11 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         ),
         acknowledgedAgentsByPaneKey: movePaneKeyedRecord(s.acknowledgedAgentsByPaneKey, from, to),
         paneForegroundAgentByPaneKey: movePaneKeyedRecord(s.paneForegroundAgentByPaneKey, from, to),
+        paneForegroundAgentObservationByPaneKey: movePaneKeyedRecord(
+          s.paneForegroundAgentObservationByPaneKey,
+          from,
+          to
+        ),
         unreadTerminalPanes: movePaneKeyedRecord(s.unreadTerminalPanes, from, to),
         unreadAgentCompletionPanes: movePaneKeyedRecord(s.unreadAgentCompletionPanes, from, to),
         lastTerminalInputAtByPaneKey: movePaneKeyedRecord(s.lastTerminalInputAtByPaneKey, from, to),

@@ -26,7 +26,10 @@ import {
 } from './worktree-agent-row-fallback-tab'
 import { resolveRowAgentType } from './worktree-agent-row-type'
 import { entryWithRuntimeOrchestration } from './worktree-agent-row-orchestration'
-import type { PaneForegroundAgentEntry } from '@/store/slices/pane-foreground-agent'
+import type {
+  PaneForegroundAgentEntry,
+  PaneForegroundAgentObservation
+} from '@/store/slices/pane-foreground-agent'
 
 function countTerminalLayoutLeaves(node: TerminalPaneLayoutNode | null | undefined): number {
   if (!node) {
@@ -146,6 +149,7 @@ export function buildWorktreeAgentRows(args: {
   terminalLayoutsByTabId?: Record<string, TerminalLayoutSnapshot | undefined>
   runtimeAgentOrchestrationByPaneKey?: Record<string, AgentStatusOrchestrationContext>
   paneForegroundAgentByPaneKey?: Record<string, PaneForegroundAgentEntry>
+  paneForegroundAgentObservationByPaneKey?: Record<string, PaneForegroundAgentObservation>
   now: number
 }): DashboardAgentRow[] {
   const rows: DashboardAgentRow[] = []

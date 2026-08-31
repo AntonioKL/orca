@@ -6,7 +6,10 @@ import { classifyTitleActivity } from '@/lib/pane-agent-evidence'
 import { tabHasLivePty } from '@/lib/tab-has-live-pty'
 import { resolveRuntimePaneTitleLeafIdFromRoot } from '@/lib/runtime-pane-title-leaf-id'
 import { containsAgentSpinnerGlyph } from '../../../shared/agent-title-core'
-import type { PaneForegroundAgentEntry } from '@/store/slices/pane-foreground-agent'
+import type {
+  PaneForegroundAgentEntry,
+  PaneForegroundAgentObservation
+} from '@/store/slices/pane-foreground-agent'
 import type {
   TerminalLayoutSnapshot,
   TerminalPaneLayoutNode,
@@ -30,6 +33,7 @@ type WorktreeStatusHeuristicOptions = {
   terminalLayoutsByTabId?: Record<string, TerminalLayoutSnapshot | undefined>
   terminalLayoutRootsByTabId?: Record<string, TerminalPaneLayoutNode | null | undefined>
   paneForegroundAgentByPaneKey?: Record<string, PaneForegroundAgentEntry>
+  paneForegroundAgentObservationByPaneKey?: Record<string, PaneForegroundAgentObservation>
   now?: number
 }
 
@@ -92,6 +96,7 @@ function tabHasStatus(
           layout: options.terminalLayoutsByTabId?.[tab.id],
           livePtyIds: ptyIdsByTabId[tab.id],
           paneForegroundAgentByPaneKey: options.paneForegroundAgentByPaneKey,
+          paneForegroundAgentObservationByPaneKey: options.paneForegroundAgentObservationByPaneKey,
           now: options.now ?? Date.now()
         })
   const paneTitles = runtimePaneTitlesByTabId[tab.id]
@@ -178,6 +183,7 @@ export function resolveWorktreeStatus(args: {
   terminalLayoutsByTabId?: Record<string, TerminalLayoutSnapshot | undefined>
   terminalLayoutRootsByTabId?: Record<string, TerminalPaneLayoutNode | null | undefined>
   paneForegroundAgentByPaneKey?: Record<string, PaneForegroundAgentEntry>
+  paneForegroundAgentObservationByPaneKey?: Record<string, PaneForegroundAgentObservation>
   now?: number
   hasPermission: boolean
   hasLiveWorking: boolean
@@ -196,6 +202,7 @@ export function resolveWorktreeStatus(args: {
       terminalLayoutsByTabId: args.terminalLayoutsByTabId,
       terminalLayoutRootsByTabId: args.terminalLayoutRootsByTabId,
       paneForegroundAgentByPaneKey: args.paneForegroundAgentByPaneKey,
+      paneForegroundAgentObservationByPaneKey: args.paneForegroundAgentObservationByPaneKey,
       now: args.now
     }
   )

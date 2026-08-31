@@ -22,6 +22,7 @@ import {
 } from './worktree-agent-freshness-selector'
 import {
   EMPTY_PANE_FOREGROUND_AGENTS,
+  EMPTY_PANE_FOREGROUND_OBSERVATIONS,
   selectWorktreeAgentActivitySummary
 } from './worktree-agent-activity-summary'
 
@@ -85,6 +86,11 @@ export function useWorktreeAgentRows(worktreeId: string, active = true): Dashboa
       ? selectWorktreeAgentActivitySummary(s, worktreeId).paneForegroundAgentByPaneKey
       : EMPTY_PANE_FOREGROUND_AGENTS
   )
+  const paneForegroundAgentObservationByPaneKey = useAppStore((s) =>
+    active
+      ? selectWorktreeAgentActivitySummary(s, worktreeId).paneForegroundAgentObservationByPaneKey
+      : EMPTY_PANE_FOREGROUND_OBSERVATIONS
+  )
   const agentFreshnessSignature = useAppStore((s) =>
     active ? selectAgentFreshness(s) : EMPTY_WORKTREE_AGENT_FRESHNESS_SIGNATURE
   )
@@ -116,6 +122,7 @@ export function useWorktreeAgentRows(worktreeId: string, active = true): Dashboa
         terminalLayoutsByTabId,
         runtimeAgentOrchestrationByPaneKey,
         paneForegroundAgentByPaneKey,
+        paneForegroundAgentObservationByPaneKey,
         now
       })
     )
@@ -131,6 +138,7 @@ export function useWorktreeAgentRows(worktreeId: string, active = true): Dashboa
     terminalLayoutsByTabId,
     runtimeAgentOrchestrationByPaneKey,
     paneForegroundAgentByPaneKey,
+    paneForegroundAgentObservationByPaneKey,
     agentFreshnessSignature
   ])
 }

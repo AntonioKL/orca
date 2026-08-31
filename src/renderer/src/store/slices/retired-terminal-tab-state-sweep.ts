@@ -19,7 +19,7 @@ export type RetiredTerminalTabSweepActions = Pick<
 /** The state the sweep reduces over: the two store maps plus everything the
  *  agent-status drop reads. Narrow so a non-store caller can pass its own view. */
 export type RetiredTerminalTabSweepState = AgentStatusTabPrefixDropState &
-  Pick<AppState, 'paneForegroundAgentByPaneKey'>
+  Pick<AppState, 'paneForegroundAgentByPaneKey' | 'paneForegroundAgentObservationByPaneKey'>
 
 /**
  * The suppressor-aware store maps plus three module registries a retired terminal tab strands.
@@ -77,6 +77,7 @@ export function buildRetiredTerminalTabStateSweepPatch(
     )
     const foreground = buildPaneForegroundAgentTabPrefixClearPatch(
       swept.paneForegroundAgentByPaneKey,
+      swept.paneForegroundAgentObservationByPaneKey,
       [`${tabId}:`]
     )
     swept = { ...swept, ...patch, ...foreground }

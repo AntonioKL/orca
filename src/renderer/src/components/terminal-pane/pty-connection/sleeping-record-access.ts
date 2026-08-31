@@ -18,7 +18,6 @@ import {
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
 import { installCommandInferredPaneAgent } from './command-inferred-pane-agent'
-import { createPaneForegroundAgentEntry } from '@/store/slices/pane-foreground-agent'
 
 export function installSleepingRecordAccess(session: ConnectPanePtySession): void {
   session.getSleepingRecordForPane = (
@@ -160,15 +159,10 @@ export function installSleepingRecordAccess(session: ConnectPanePtySession): voi
       if (metadata?.launchAgent) {
         // Why: daemon launch identity can outlive the process while Orca is
         // closed. Use it to request confirmation, never as current byte authority.
-        useAppStore
-          .getState()
-          .setPaneForegroundAgent(
-            session.cacheKey,
-            createPaneForegroundAgentEntry(
-              { agent: metadata.launchAgent, shellForeground: false },
-              { ptyId: session.transport.getPtyId() ?? undefined }
-            )
-          )
+        useAppStore.getState().setPaneForegroundAgent(session.cacheKey, {
+          agent: metadata.launchAgent,
+          shellForeground: false
+        })
       }
       return
     }

@@ -21,33 +21,12 @@ export type PaneForegroundAgentEntry = {
   /** True once the foreground is proven back at the shell (OSC 133;D) —
    *  process-grade launched-agent exit evidence, independent of titles. */
   shellForeground: boolean
-  /** Main-clock timestamp for the process observation. */
-  observedAt?: number
-  /** PTY from which the process observation was read. */
-  ptyId?: string
 }
 
-/** Keep freshness metadata out of the long-standing identity record shape. */
-export function createPaneForegroundAgentEntry(
-  entry: PaneForegroundAgentEntry,
-  metadata: Pick<PaneForegroundAgentEntry, 'observedAt' | 'ptyId'> = entry
-): PaneForegroundAgentEntry {
-  const { observedAt: _ignoredObservedAt, ptyId: _ignoredPtyId, ...publicEntry } = entry
-  Object.defineProperties(publicEntry, {
-    observedAt: {
-      configurable: true,
-      enumerable: false,
-      value: metadata.observedAt,
-      writable: true
-    },
-    ptyId: {
-      configurable: true,
-      enumerable: false,
-      value: metadata.ptyId,
-      writable: true
-    }
-  })
-  return publicEntry
+/** PTY-bound, time-bounded process evidence kept separate from the public identity record. */
+export type PaneForegroundAgentObservation = {
+  observedAt: number
+  ptyId?: string
 }
 
 /**
@@ -57,7 +36,12 @@ export function createPaneForegroundAgentEntry(
  */
 export type PaneForegroundAgentSlice = {
   paneForegroundAgentByPaneKey: Record<string, PaneForegroundAgentEntry>
-  setPaneForegroundAgent: (paneKey: string, entry: PaneForegroundAgentEntry) => void
+  paneForegroundAgentObservationByPaneKey: Record<string, PaneForegroundAgentObservation>
+  setPaneForegroundAgent: (
+    paneKey: string,
+    entry: PaneForegroundAgentEntry,
+    observation?: PaneForegroundAgentObservation
+  ) => void
   refreshPaneForegroundAgentObservation: (paneKey: string, agent: TuiAgent, ptyId?: string) => void
   clearPaneForegroundAgent: (paneKey: string) => void
   /** Wholesale teardown sweeps (tab close, worktree sleep/remove) retire pane
@@ -73,47 +57,54 @@ export const createPaneForegroundAgentSlice: StateCreator<
   PaneForegroundAgentSlice
 > = (set) => ({
   paneForegroundAgentByPaneKey: {},
-  setPaneForegroundAgent: (paneKey, entry) => {
+  paneForegroundAgentObservationByPaneKey: {},
+  setPaneForegroundAgent: (paneKey, entry, observation) => {
     set((s) => {
-      const normalizedEntry = createPaneForegroundAgentEntry(entry)
       const current = s.paneForegroundAgentByPaneKey[paneKey]
       if (
         current &&
-        current.agent === normalizedEntry.agent &&
-        current.routingTrusted === normalizedEntry.routingTrusted &&
-        current.routingRevoked === normalizedEntry.routingRevoked &&
-        current.routingConfirmationPending === normalizedEntry.routingConfirmationPending &&
-        current.shellForeground === normalizedEntry.shellForeground &&
-        current.ptyId === normalizedEntry.ptyId
+        current.agent === entry.agent &&
+        current.routingTrusted === entry.routingTrusted &&
+        current.routingRevoked === entry.routingRevoked &&
+        current.routingConfirmationPending === entry.routingConfirmationPending &&
+        current.shellForeground === entry.shellForeground
       ) {
-        // Test/legacy callers may provide identity-only entries. Preserve the
-        // value-bail semantics for those records; only observed process
-        // evidence opts into the bounded freshness clock.
-        if (normalizedEntry.observedAt === undefined) {
+        if (!observation) {
           return s
         }
         const now = Date.now()
+        const currentObservation = s.paneForegroundAgentObservationByPaneKey[paneKey]
         if (
-          current.observedAt !== undefined &&
-          now - current.observedAt < OBSERVATION_REFRESH_QUANTUM_MS
+          currentObservation &&
+          currentObservation.ptyId === observation.ptyId &&
+          now - currentObservation.observedAt < OBSERVATION_REFRESH_QUANTUM_MS
         ) {
           return s
         }
         return {
-          paneForegroundAgentByPaneKey: {
-            ...s.paneForegroundAgentByPaneKey,
-            [paneKey]: createPaneForegroundAgentEntry(current, {
-              observedAt: now,
-              ptyId: current.ptyId
-            })
+          paneForegroundAgentObservationByPaneKey: {
+            ...s.paneForegroundAgentObservationByPaneKey,
+            [paneKey]: { ...observation, observedAt: now }
           }
         }
+      }
+      const nextObservation = observation
+        ? { ...observation }
+        : entry.agent !== current?.agent || entry.shellForeground
+          ? undefined
+          : s.paneForegroundAgentObservationByPaneKey[paneKey]
+      const nextObservations = { ...s.paneForegroundAgentObservationByPaneKey }
+      if (nextObservation) {
+        nextObservations[paneKey] = nextObservation
+      } else {
+        delete nextObservations[paneKey]
       }
       return {
         paneForegroundAgentByPaneKey: {
           ...s.paneForegroundAgentByPaneKey,
-          [paneKey]: normalizedEntry
-        }
+          [paneKey]: entry
+        },
+        paneForegroundAgentObservationByPaneKey: nextObservations
       }
     })
   },
@@ -126,26 +117,25 @@ export const createPaneForegroundAgentSlice: StateCreator<
           return {
             paneForegroundAgentByPaneKey: {
               ...s.paneForegroundAgentByPaneKey,
-              [paneKey]: createPaneForegroundAgentEntry(
-                { agent, shellForeground: false },
-                { observedAt: now, ptyId: ptyId ?? current.ptyId }
-              )
+              [paneKey]: { agent, shellForeground: false }
+            },
+            paneForegroundAgentObservationByPaneKey: {
+              ...s.paneForegroundAgentObservationByPaneKey,
+              [paneKey]: { observedAt: now, ptyId }
             }
           }
         }
+        const currentObservation = s.paneForegroundAgentObservationByPaneKey[paneKey]
         if (
-          current.observedAt !== undefined &&
-          now - current.observedAt < OBSERVATION_REFRESH_QUANTUM_MS
+          currentObservation &&
+          now - currentObservation.observedAt < OBSERVATION_REFRESH_QUANTUM_MS
         ) {
           return s
         }
         return {
-          paneForegroundAgentByPaneKey: {
-            ...s.paneForegroundAgentByPaneKey,
-            [paneKey]: createPaneForegroundAgentEntry(current, {
-              observedAt: now,
-              ptyId: ptyId ?? current.ptyId
-            })
+          paneForegroundAgentObservationByPaneKey: {
+            ...s.paneForegroundAgentObservationByPaneKey,
+            [paneKey]: { observedAt: now, ptyId: ptyId ?? currentObservation?.ptyId }
           }
         }
       }
@@ -153,30 +143,41 @@ export const createPaneForegroundAgentSlice: StateCreator<
       return {
         paneForegroundAgentByPaneKey: {
           ...s.paneForegroundAgentByPaneKey,
-          [paneKey]: createPaneForegroundAgentEntry(
-            { agent, shellForeground: false },
-            { observedAt: now, ptyId }
-          )
+          [paneKey]: { agent, shellForeground: false }
+        },
+        paneForegroundAgentObservationByPaneKey: {
+          ...s.paneForegroundAgentObservationByPaneKey,
+          [paneKey]: { observedAt: now, ptyId }
         }
       }
     })
   },
   clearPaneForegroundAgent: (paneKey) => {
     set((s) => {
-      if (!(paneKey in s.paneForegroundAgentByPaneKey)) {
+      if (
+        !(paneKey in s.paneForegroundAgentByPaneKey) &&
+        !(paneKey in s.paneForegroundAgentObservationByPaneKey)
+      ) {
         return s
       }
       const next = { ...s.paneForegroundAgentByPaneKey }
       delete next[paneKey]
-      return { paneForegroundAgentByPaneKey: next }
+      const nextObservations = { ...s.paneForegroundAgentObservationByPaneKey }
+      delete nextObservations[paneKey]
+      return {
+        paneForegroundAgentByPaneKey: next,
+        paneForegroundAgentObservationByPaneKey: nextObservations
+      }
     })
   },
   clearPaneForegroundAgentByTabPrefix: (tabIdPrefix) => {
     set(
       (s) =>
-        buildPaneForegroundAgentTabPrefixClearPatch(s.paneForegroundAgentByPaneKey, [
-          `${tabIdPrefix}:`
-        ]) ?? s
+        buildPaneForegroundAgentTabPrefixClearPatch(
+          s.paneForegroundAgentByPaneKey,
+          s.paneForegroundAgentObservationByPaneKey,
+          [`${tabIdPrefix}:`]
+        ) ?? s
     )
   },
   clearPaneForegroundAgentByWorktree: (worktreeId) => {
@@ -186,7 +187,11 @@ export const createPaneForegroundAgentSlice: StateCreator<
     set((s) => {
       const prefixes = (s.tabsByWorktree[worktreeId] ?? []).map((tab) => `${tab.id}:`)
       return (
-        buildPaneForegroundAgentTabPrefixClearPatch(s.paneForegroundAgentByPaneKey, prefixes) ?? s
+        buildPaneForegroundAgentTabPrefixClearPatch(
+          s.paneForegroundAgentByPaneKey,
+          s.paneForegroundAgentObservationByPaneKey,
+          prefixes
+        ) ?? s
       )
     })
   }
@@ -195,39 +200,55 @@ export const createPaneForegroundAgentSlice: StateCreator<
 /** Return process identity only while the evidence and its PTY are current. */
 export function resolveFreshPaneForegroundAgent(
   entry: PaneForegroundAgentEntry | undefined,
+  observation: PaneForegroundAgentObservation | undefined,
   args: { now: number; paneBoundPtyId?: string; liveTabPtyIds?: readonly string[] }
 ): TuiAgent | null {
-  if (!entry?.agent || entry.shellForeground || entry.observedAt === undefined) {
+  if (!entry?.agent || entry.shellForeground || !observation) {
     return null
   }
-  if (args.now - entry.observedAt > PANE_FOREGROUND_AGENT_EVIDENCE_TTL_MS) {
+  if (args.now - observation.observedAt > PANE_FOREGROUND_AGENT_EVIDENCE_TTL_MS) {
     return null
   }
   if (args.paneBoundPtyId !== undefined) {
-    return entry.ptyId === undefined || entry.ptyId === args.paneBoundPtyId ? entry.agent : null
+    return observation.ptyId === undefined || observation.ptyId === args.paneBoundPtyId
+      ? entry.agent
+      : null
   }
-  if (entry.ptyId !== undefined) {
-    return args.liveTabPtyIds?.includes(entry.ptyId) === true ? entry.agent : null
+  if (observation.ptyId !== undefined) {
+    return args.liveTabPtyIds?.includes(observation.ptyId) === true ? entry.agent : null
   }
   return (args.liveTabPtyIds?.length ?? 0) > 0 ? entry.agent : null
 }
 
 export function buildPaneForegroundAgentTabPrefixClearPatch(
   entries: Record<string, PaneForegroundAgentEntry>,
+  observations: Record<string, PaneForegroundAgentObservation>,
   tabPrefixes: readonly string[]
-): Pick<PaneForegroundAgentSlice, 'paneForegroundAgentByPaneKey'> | null {
+): Pick<
+  PaneForegroundAgentSlice,
+  'paneForegroundAgentByPaneKey' | 'paneForegroundAgentObservationByPaneKey'
+> | null {
   if (tabPrefixes.length === 0) {
     return null
   }
-  const staleKeys = Object.keys(entries).filter((paneKey) =>
-    tabPrefixes.some((prefix) => paneKey.startsWith(prefix))
-  )
+  const staleKeys = [
+    ...new Set(
+      [...Object.keys(entries), ...Object.keys(observations)].filter((paneKey) =>
+        tabPrefixes.some((prefix) => paneKey.startsWith(prefix))
+      )
+    )
+  ]
   if (staleKeys.length === 0) {
     return null
   }
   const next = { ...entries }
+  const nextObservations = { ...observations }
   for (const paneKey of staleKeys) {
     delete next[paneKey]
+    delete nextObservations[paneKey]
   }
-  return { paneForegroundAgentByPaneKey: next }
+  return {
+    paneForegroundAgentByPaneKey: next,
+    paneForegroundAgentObservationByPaneKey: nextObservations
+  }
 }

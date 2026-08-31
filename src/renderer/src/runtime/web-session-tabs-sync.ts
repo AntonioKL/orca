@@ -286,6 +286,7 @@ export type WebSessionTabsSyncState = Pick<
       | 'automaticAgentResumeClaimsByTabId'
       | 'migrationUnsupportedByPtyId'
       | 'paneForegroundAgentByPaneKey'
+      | 'paneForegroundAgentObservationByPaneKey'
       | 'pendingStartupByTabId'
       | 'recentlyClosedAgentStatusTabIds'
       | 'recentlyRetiredAgentStatusPaneKeys'
@@ -1400,6 +1401,7 @@ function buildRetractedMirroredTabSweepPatch(
     agentStatusEpoch: agentStatusPatch?.agentStatusEpoch ?? state.agentStatusEpoch,
     migrationUnsupportedByPtyId: state.migrationUnsupportedByPtyId ?? {},
     paneForegroundAgentByPaneKey: state.paneForegroundAgentByPaneKey ?? {},
+    paneForegroundAgentObservationByPaneKey: state.paneForegroundAgentObservationByPaneKey ?? {},
     recentlyClosedAgentStatusTabIds: state.recentlyClosedAgentStatusTabIds ?? {},
     recentlyRetiredAgentStatusPaneKeys: state.recentlyRetiredAgentStatusPaneKeys ?? {},
     retainedAgentsByPaneKey: state.retainedAgentsByPaneKey ?? {},
