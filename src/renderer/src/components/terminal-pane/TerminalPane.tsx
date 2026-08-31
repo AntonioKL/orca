@@ -108,6 +108,7 @@ import { resolveTerminalLayoutActiveLeafId } from './terminal-layout-leaf-ids'
 import { shouldIgnoreStalePanePtyLayoutBinding } from './pty-connection/pane-pty-layout-binding'
 import { shouldPreserveTerminalScrollbackBuffers } from '../../../../shared/workspace-session-terminal-buffers'
 import {
+  bindPanePtyId,
   getMobileFitOverridePtyIds,
   getFitOverrideForPty
 } from '@/lib/pane-manager/mobile-fit-overrides'
@@ -1746,6 +1747,29 @@ function TerminalPane(
   // driver instead (codex-detached-pane-restart), which leaves anything a live
   // transport owns to this effect.
   const panePtyLayoutBindings = savedLayout.ptyIdsByLeafId
+  useLayoutEffect(() => {
+    const manager = managerRef.current
+    if (!manager) {
+      return
+    }
+
+    // A replacement can commit tab/layout ownership while a remounted xterm
+    // is still carrying the previous DOM marker. Repair only when the current
+    // transport already owns the committed PTY; stale transports never win.
+    for (const pane of manager.getPanes()) {
+      const expectedPtyId = panePtyLayoutBindings?.[pane.leafId]
+      const transport = paneTransportsRef.current.get(pane.id)
+      if (!expectedPtyId || transport?.getPtyId() !== expectedPtyId) {
+        continue
+      }
+      if (pane.container.dataset.ptyId === expectedPtyId) {
+        continue
+      }
+      bindPanePtyId(pane.id, expectedPtyId, tabId)
+      pane.container.dataset.ptyId = expectedPtyId
+    }
+  }, [managerRef, panePtyLayoutBindings, paneTransportsRef, tabId])
+
   useEffect(() => {
     const manager = managerRef.current
     if (!manager) {
