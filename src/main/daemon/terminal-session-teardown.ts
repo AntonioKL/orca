@@ -4,7 +4,7 @@ import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
 import type { PtyShutdownResult } from '../providers/pty-provider-contract'
 
 type AgentTeardownOperation = {
-  promise: Promise<void>
+  promise: Promise<PtyShutdownResult | void>
   immediate: boolean
   rootSignalled: boolean
   rootCompletion: Promise<void>
@@ -18,11 +18,11 @@ export class TerminalSessionTeardown {
 
   constructor(private sessions: ReadonlyMap<string, Session>) {}
 
-  get(sessionId: string): Promise<void> | undefined {
+  get(sessionId: string): Promise<PtyShutdownResult | void> | undefined {
     return this.operations.get(sessionId)?.promise
   }
 
-  requestImmediate(sessionId: string): Promise<void> | undefined {
+  requestImmediate(sessionId: string): Promise<PtyShutdownResult | void> | undefined {
     const pending = this.operations.get(sessionId)
     if (pending) {
       pending.immediate = true
@@ -86,7 +86,7 @@ export class TerminalSessionTeardown {
     sessionId: string,
     session: Session,
     immediate: boolean
-  ): void | Promise<void> {
+  ): void | Promise<PtyShutdownResult | void> {
     const pending = this.operations.get(sessionId)
     if (pending) {
       // Why: an immediate caller is a stronger teardown request and must not
@@ -114,33 +114,35 @@ export class TerminalSessionTeardown {
       rootCompletion: Promise.resolve(),
       session
     }
-    const sweep = Promise.resolve(
-      killWithDescendantSweep(
-        session.pid,
-        () => {
-          // Why: natural exit reaps the PID while ps is running. Never signal that
-          // stale numeric PID after the Session no longer represents a live root.
-          if (!session.isAlive) {
-            return
-          }
-          entry.rootSignalled = true
-          if (entry.immediate) {
-            entry.rootCompletion = session.forceKillAndWaitForExit()
-          } else {
-            session.signalTerminationRoot()
-          }
-        },
-        {
-          // Why: the descendant rows are only authoritative while this exact
-          // Session still owns the root PID captured by ps.
-          ownsRoot: () => this.sessions.get(sessionId) === session && session.isAlive,
-          terminateOwnedTree: () => session.terminateOwnedTree()
+    const sweep = killWithDescendantSweep(
+      session.pid,
+      () => {
+        // Why: natural exit reaps the PID while ps is running. Never signal that
+        // stale numeric PID after the Session no longer represents a live root.
+        if (!session.isAlive) {
+          return
         }
-      )
+        entry.rootSignalled = true
+        if (entry.immediate) {
+          entry.rootCompletion = session.forceKillAndWaitForExit()
+        } else {
+          session.signalTerminationRoot()
+        }
+      },
+      {
+        // Why: the descendant rows are only authoritative while this exact
+        // Session still owns the root PID captured by ps.
+        ownsRoot: () => this.sessions.get(sessionId) === session && session.isAlive,
+        terminateOwnedTree: () => session.terminateOwnedTree()
+      }
     )
     // Why: descendant capture completion only proves signals were requested;
     // destructive callers must retain the native owner until OS-confirmed exit.
-    const operation = sweep.then(() => entry.rootCompletion)
+    const operation = sweep.then((outcome) =>
+      entry.rootCompletion.then(() =>
+        outcome === 'tree_terminated' ? { outcome } : { outcome, treeUnverified: true as const }
+      )
+    )
     entry.promise = operation
     this.operations.set(sessionId, entry)
     const clearOperation = (): void => {

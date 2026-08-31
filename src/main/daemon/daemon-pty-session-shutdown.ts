@@ -53,10 +53,26 @@ export abstract class DaemonPtySessionShutdown extends DaemonPtySessionSpawn {
       incarnationId?: string
     }
   ): Promise<PtyShutdownResult | void> {
-    return await this.withHistorySpawnLock(
+    if (opts.keepHistory && this.disconnectOnlyPromise) {
+      throw new Error('Cannot keep history after daemon disconnect has started')
+    }
+    const shutdown = this.withHistorySpawnLock(
       id,
       () => this.shutdownWithHistoryLock(id, opts) as Promise<PtyShutdownResult | void>
     )
+    if (!opts.keepHistory) {
+      return await shutdown
+    }
+    const tracked = shutdown.then(
+      () => undefined,
+      () => undefined
+    )
+    this.keepHistoryShutdowns.add(tracked)
+    try {
+      return await shutdown
+    } finally {
+      this.keepHistoryShutdowns.delete(tracked)
+    }
   }
 
   protected async shutdownWithHistoryLock(
@@ -70,6 +86,8 @@ export abstract class DaemonPtySessionShutdown extends DaemonPtySessionSpawn {
     }
   ): Promise<PtyShutdownResult | void> {
     await this.ensureConnected(opts.deadlineMs)
+    let coldRestore: ColdRestorePayload | null = null
+    let suspendHistory = false
     if (opts.keepHistory) {
       const committed = await this.runExclusiveCheckpoint(
         async () => {
@@ -94,19 +112,11 @@ export abstract class DaemonPtySessionShutdown extends DaemonPtySessionSpawn {
               }) ?? ''
           }
         : null
-      const coldRestore = restoreInfo ? this.buildColdRestorePayload(restoreInfo) : null
-      if (coldRestore) {
-        this.coldRestoreCache.set(id, coldRestore)
-        if (this.coldRestoreCache.has(id)) {
-          this.sleepRestoreSessionIds.add(id)
-        }
-        this.historyManager?.suspendSession(id)
-      } else if (
-        detection?.status === 'unreadable' ||
-        (detection?.status === 'restored' && detection.hasUnreadableRecovery)
-      ) {
-        this.historyManager?.suspendSession(id)
-      }
+      coldRestore = restoreInfo ? this.buildColdRestorePayload(restoreInfo) : null
+      suspendHistory =
+        !coldRestore &&
+        (detection?.status === 'unreadable' ||
+          (detection?.status === 'restored' && detection.hasUnreadableRecovery))
     }
     const result = await this.client.request(
       'kill',
@@ -120,6 +130,13 @@ export abstract class DaemonPtySessionShutdown extends DaemonPtySessionSpawn {
     )
     if (isPtyShutdownFenceUnavailable(result)) {
       return result as PtyShutdownResult
+    }
+    if (coldRestore) {
+      this.coldRestoreCache.set(id, coldRestore)
+      this.sleepRestoreSessionIds.add(id)
+      this.historyManager?.suspendSession(id)
+    } else if (suspendHistory) {
+      this.historyManager?.suspendSession(id)
     }
     this.activeSessionIds.delete(id)
     this.clearSessionAwaitingDaemonRecovery(id)
