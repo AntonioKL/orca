@@ -62,10 +62,11 @@ export function getServeFlagTypoError(argv: readonly string[]): string | null {
     }
     const name = flagName(token)
     let suggestion: string | null = null
-    let bestDistance = 3
+    let bestDistance = Number.POSITIVE_INFINITY
     for (const candidate of SERVE_SECURITY_FLAG_NAMES) {
       const distance = levenshtein(name, candidate)
-      if (distance > 0 && distance < bestDistance) {
+      const maxDistance = candidate.startsWith(name) ? 3 : 2
+      if (distance > 0 && distance <= maxDistance && distance < bestDistance) {
         suggestion = candidate
         bestDistance = distance
       }

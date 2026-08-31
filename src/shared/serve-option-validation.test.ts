@@ -39,12 +39,13 @@ describe('getServeFlagTypoError', () => {
         '--serve',
         '--serve-no-pairing',
         '--disable-gpu',
-        '--disable-features=Vulkan'
+        '--disable-features=Vulkan',
+        '--no-parent'
       ])
     ).toBeNull()
   })
 
-  it.each(['--no-pairng', '--no-paring', '--mobile-pairng'])(
+  it.each(['--no-pair', '--no-pairng', '--no-paring', '--mobile-pairng'])(
     'suggests the intended pairing flag for %s',
     (flag) => {
       expect(getServeFlagTypoError(['/opt/orca/orca-ide', '--serve', flag])).toMatch(
