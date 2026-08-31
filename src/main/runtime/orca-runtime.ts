@@ -33379,7 +33379,7 @@ export class OrcaRuntimeService {
     if (!worktreeId) {
       return () => {}
     }
-    const release = await this.acquireWorktreeTerminalMutation(worktreeId, 'spawn')
+    const release = await this.acquireWorktreeTerminalMutation(worktreeId, 'shared')
     const key = runtimeWorktreeIdentityKey(worktreeId)
     const sleepState = this.terminalSleepStateByWorktreeId.get(key)
     if (sleepState?.phase === 'sleeping' || sleepState?.phase === 'partial') {
@@ -33400,7 +33400,9 @@ export class OrcaRuntimeService {
     worktreeId: string,
     operation: () => Promise<T>
   ): Promise<T> {
-    const release = await this.acquireWorktreeTerminalMutation(worktreeId)
+    // Why exclusive: adoption reconciles this worktree's terminal records, so
+    // it must not interleave with a spawn registering a pty or with a sleep.
+    const release = await this.acquireWorktreeTerminalMutation(worktreeId, 'exclusive')
     try {
       return await operation()
     } finally {
@@ -33426,7 +33428,7 @@ export class OrcaRuntimeService {
     const sleepDeadline = Date.now() + WORKTREE_TERMINAL_SLEEP_TIMEOUT_MS
     const releaseMutation = await this.acquireWorktreeTerminalMutation(
       worktree.id,
-      'sleep',
+      'exclusive',
       sleepDeadline
     )
     const key = runtimeWorktreeIdentityKey(worktree.id)

@@ -12,7 +12,12 @@ import { settleBeforeDeadline } from './settle-before-deadline'
  * Writer-preferring: once a sleep is waiting, later spawns queue behind it, so
  * a steady stream of spawns can never starve a sleep into its 12s deadline.
  */
-export type WorktreeTerminalMutationKind = 'spawn' | 'sleep'
+/**
+ * `shared` — terminal spawn: many may run at once for one worktree.
+ * `exclusive` — sleep and orphan adoption: reconcile a worktree's terminal
+ * records, so they must not interleave with a spawn or with each other.
+ */
+export type WorktreeTerminalMutationKind = 'shared' | 'exclusive'
 
 type Waiter = {
   kind: WorktreeTerminalMutationKind
@@ -86,15 +91,15 @@ export class WorktreeTerminalMutationLock {
     if (entry.activeSleep) {
       return false
     }
-    if (kind === 'sleep') {
+    if (kind === 'exclusive') {
       return entry.activeSpawns === 0 && entry.queue.length === 0
     }
-    // Writer preference: a queued sleep blocks later spawns from jumping it.
-    return !entry.queue.some((waiter) => waiter.kind === 'sleep')
+    // Writer preference: a queued exclusive blocks later shared acquires.
+    return !entry.queue.some((waiter) => waiter.kind === 'exclusive')
   }
 
   private markActive(entry: LockEntry, kind: WorktreeTerminalMutationKind): void {
-    if (kind === 'sleep') {
+    if (kind === 'exclusive') {
       entry.activeSleep = true
       return
     }
@@ -112,7 +117,7 @@ export class WorktreeTerminalMutationLock {
         return
       }
       released = true
-      if (kind === 'sleep') {
+      if (kind === 'exclusive') {
         entry.activeSleep = false
       } else {
         entry.activeSpawns = Math.max(0, entry.activeSpawns - 1)
@@ -125,7 +130,7 @@ export class WorktreeTerminalMutationLock {
     // Granting a sleep sets activeSleep, which ends the loop on the next test.
     while (!entry.activeSleep && entry.queue.length > 0) {
       const next = entry.queue[0]!
-      if (next.kind === 'sleep' && entry.activeSpawns > 0) {
+      if (next.kind === 'exclusive' && entry.activeSpawns > 0) {
         break
       }
       entry.queue.shift()
