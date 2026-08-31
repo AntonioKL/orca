@@ -66,12 +66,14 @@ export function useRuntimeEnvironmentCatalog(): RuntimeEnvironmentCatalog {
                   ? {
                       status: 'ready',
                       runtimeStatus: verified.runtimeStatus,
+                      remoteControl: verified.runtimeStatus.remoteControl ?? null,
                       compatibility: evaluateHostDetails(verified.runtimeStatus),
                       error: null
                     }
                   : (current[environment.id] ?? {
                       status: 'loading',
                       runtimeStatus: null,
+                      remoteControl: null,
                       compatibility: null,
                       error: null
                     })
@@ -103,6 +105,7 @@ export function useRuntimeEnvironmentCatalog(): RuntimeEnvironmentCatalog {
                   [environment.id]: {
                     status: 'ready',
                     runtimeStatus,
+                    remoteControl: runtimeStatus.remoteControl ?? null,
                     compatibility: evaluateHostDetails(runtimeStatus),
                     error: null
                   }
@@ -124,6 +127,7 @@ export function useRuntimeEnvironmentCatalog(): RuntimeEnvironmentCatalog {
                   [environment.id]: {
                     status: 'error',
                     runtimeStatus: null,
+                    remoteControl: remoteControl ?? null,
                     compatibility: null,
                     error: error instanceof Error ? error.message : String(error)
                   }

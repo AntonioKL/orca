@@ -21,8 +21,14 @@ import {
 export type RuntimeHostDetails = {
   status: 'loading' | 'ready' | 'error'
   runtimeStatus: RuntimeStatus | null
+  /** Independent control-transport evidence when the status probe fails. */
+  remoteControl?: RuntimeStatus['remoteControl'] | null
   compatibility: RuntimeCompatVerdict | null
   error: string | null
+}
+
+function isTransportConnected(details: RuntimeHostDetails): boolean {
+  return details.remoteControl?.state === 'ready'
 }
 
 export function evaluateHostDetails(status: RuntimeStatus): RuntimeCompatVerdict {
@@ -39,7 +45,7 @@ export function getHostDetailsSummary(details: RuntimeHostDetails | undefined): 
   if (!details || details.status === 'loading') {
     return translate('auto.components.settings.RuntimeEnvironmentsPane.5120beaac6', 'Checking…')
   }
-  if (details.status === 'error') {
+  if (details.status === 'error' && !isTransportConnected(details)) {
     return translate(
       'auto.components.settings.RuntimeEnvironmentsPane.c8791efc45',
       'Status unavailable'
@@ -63,17 +69,18 @@ export function getHostDetailsDescription(details: RuntimeHostDetails | undefine
   if (!details || details.status === 'loading') {
     return null
   }
-  if (details.status === 'error') {
+  if (details.status === 'error' && !isTransportConnected(details)) {
     return details.error
   }
   if (details.compatibility?.kind === 'blocked') {
     return describeRuntimeCompatBlock(details.compatibility)
   }
   if (details.runtimeStatus === null && details.compatibility === null) {
-    return translate(
+    const unavailableDescription = translate(
       'auto.components.settings.RuntimeEnvironmentsPane.serverRuntimeUnavailableDescription',
       'SSH transport is connected, but the Orca runtime did not answer. The host may still be running.'
     )
+    return details.error ? `${unavailableDescription} ${details.error}` : unavailableDescription
   }
   return null
 }
@@ -172,7 +179,10 @@ export function getRuntimeServerConnectionState(
   if (!details || details.status === 'loading') {
     return 'checking'
   }
-  if (details.status !== 'ready' || details.compatibility?.kind === 'blocked') {
+  if (
+    (details.status !== 'ready' && !isTransportConnected(details)) ||
+    details.compatibility?.kind === 'blocked'
+  ) {
     return 'disconnected'
   }
   // A compatibility verdict is positive runtime evidence even when an older
@@ -183,6 +193,7 @@ export function getRuntimeServerConnectionState(
   return runtimeHostConnectionState({
     hasStatusEntry: true,
     status: details.runtimeStatus,
+    remoteControl: details.remoteControl,
     // A ready details phase is transport evidence only; status.get may still
     // have failed or been omitted by an older peer.
     transportStatus: 'connected'

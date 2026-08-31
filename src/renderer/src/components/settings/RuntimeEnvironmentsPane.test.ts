@@ -29,6 +29,18 @@ function details(overrides: Partial<RuntimeHostDetails>): RuntimeHostDetails {
   }
 }
 
+function readyTransport(): NonNullable<RuntimeHostDetails['remoteControl']> {
+  return {
+    state: 'ready',
+    pendingRequestCount: 0,
+    subscriptionCount: 0,
+    reconnectAttempt: 0,
+    lastConnectedAt: 1,
+    lastClose: null,
+    lastError: null
+  }
+}
+
 describe('RuntimeEnvironmentsPane host details', () => {
   it('summarizes loading, error, compatible, and blocked hosts', () => {
     expect(getHostDetailsSummary(undefined)).toBe('Checking…')
@@ -224,6 +236,23 @@ describe('RuntimeEnvironmentsPane host details', () => {
         })
       )
     ).toBe('disconnected')
+  })
+
+  it('keeps a transport-ready failed status probe available in Settings', () => {
+    const failedProbe = details({
+      status: 'error',
+      runtimeStatus: null,
+      remoteControl: readyTransport(),
+      error: 'runtime.status.get timed out'
+    })
+
+    expect(getHostDetailsSummary(failedProbe)).toBe('Orca unavailable')
+    expect(getHostDetailsDescription(failedProbe)).toContain('SSH transport is connected')
+    expect(getHostDetailsDescription(failedProbe)).toContain('runtime.status.get timed out')
+    expect(getRuntimeServerConnectionState(failedProbe)).toBe('runtime-unavailable')
+    expect(isRuntimeServerTransportConnected(getRuntimeServerConnectionState(failedProbe))).toBe(
+      true
+    )
   })
 
   it('explains that selecting a saved server is the explicit default Host mode', () => {

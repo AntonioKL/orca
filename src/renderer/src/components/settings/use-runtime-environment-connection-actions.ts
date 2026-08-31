@@ -53,6 +53,7 @@ export function useRuntimeEnvironmentConnectionActions({
           [environment.id]: {
             status: 'error',
             runtimeStatus: null,
+            remoteControl: null,
             compatibility: null,
             error: null
           }
@@ -104,6 +105,7 @@ export function useRuntimeEnvironmentConnectionActions({
           [environment.id]: {
             status: 'ready',
             runtimeStatus,
+            remoteControl: runtimeStatus.remoteControl ?? null,
             compatibility,
             error: null
           }
@@ -147,6 +149,7 @@ export function useRuntimeEnvironmentConnectionActions({
           [environment.id]: {
             status: 'error',
             runtimeStatus: null,
+            remoteControl: remoteControl ?? null,
             compatibility: null,
             error: message
           }
