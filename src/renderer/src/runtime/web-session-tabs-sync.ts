@@ -480,7 +480,23 @@ function isCurrentSessionTabsRuntimeFrame(environmentId: string, runtimeId?: str
 }
 
 /** Returns false for a runtime identity already superseded on this environment. */
-function acceptSessionTabsRuntimeId(environmentId: string, runtimeId: string): boolean {
+function acceptSessionTabsRuntimeId(
+  environmentId: string,
+  runtimeId: string,
+  receivedFrame?: number
+): boolean {
+  const history = sessionTabsRuntimeHistoryByEnvironment.get(environmentId)
+  const latestReceivedFrame = latestReceivedSessionTabsFrameByEnvironment.get(environmentId) ?? 0
+  // A late bootstrap response may carry the predecessor process id. Do not
+  // let that older frame retire the runtime that already published newer data.
+  if (
+    receivedFrame !== undefined &&
+    receivedFrame < latestReceivedFrame &&
+    history !== undefined &&
+    history.current !== runtimeId
+  ) {
+    return false
+  }
   if (isRetiredSessionTabsRuntimeId(environmentId, runtimeId)) {
     return false
   }
@@ -528,16 +544,16 @@ function recordReceivedWebSessionTabsSnapshot(
   const frame = receivedFrame ?? nextReceivedSessionTabsFrame()
   const key = sessionTabsFreshnessKey(environmentId, snapshot.worktree)
   const current = latestReceivedSessionTabsSnapshotByWorktree.get(key)
-  if (runtimeId && !acceptSessionTabsRuntimeId(environmentId, runtimeId)) {
-    return frame
-  }
-  recordReceivedWebSessionTabsEnvironmentFrame(environmentId, frame)
   // A bootstrap listAll reserves its frame before the request starts. If a
   // stream frame for this worktree arrived meanwhile, the late list is stale
   // evidence and must not advance epoch history.
   if (source === 'bootstrap' && current && frame < current.receivedFrame) {
     return frame
   }
+  if (runtimeId && !acceptSessionTabsRuntimeId(environmentId, runtimeId, frame)) {
+    return frame
+  }
+  recordReceivedWebSessionTabsEnvironmentFrame(environmentId, frame)
   const publicationEpoch = snapshot.publicationEpoch
   const history = sessionTabsPublicationEpochHistoryByWorktree.get(key)
   const isRetired = history?.retired.includes(publicationEpoch) ?? false
@@ -4785,7 +4801,13 @@ function loadInitialWebSessionTabs(
         return
       }
       const runtimeId = getSessionTabsRuntimeIdFromResponse(response)
-      if (runtimeId && !acceptSessionTabsRuntimeId(environmentId, runtimeId)) {
+      const latestReceivedFrame =
+        latestReceivedSessionTabsFrameByEnvironment.get(environmentId) ?? 0
+      if (
+        runtimeId &&
+        latestReceivedFrame <= requestReceivedFrame &&
+        !acceptSessionTabsRuntimeId(environmentId, runtimeId, requestReceivedFrame)
+      ) {
         return
       }
       recordReceivedWebSessionTabsEnvironmentFrame(environmentId, requestReceivedFrame)

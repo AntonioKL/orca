@@ -121,4 +121,35 @@ describe.skipIf(process.platform !== 'win32')('node-pty Windows input errors', (
       process.off('uncaughtException', uncaughtListener)
     }
   }, 20_000)
+
+  it('contains an output EPIPE that races with PTY shutdown', async () => {
+    const uncaught: unknown[] = []
+    const uncaughtListener = (error: unknown): void => {
+      uncaught.push(error)
+    }
+    process.on('uncaughtException', uncaughtListener)
+
+    let terminal: IPty | undefined
+    try {
+      terminal = spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/q'], {
+        cwd: process.cwd(),
+        env: process.env,
+        useConptyDll: false
+      })
+      const output = (terminal as WindowsPtyInternals)._socket
+      const exit = waitForExit(terminal)
+      expect(() => {
+        output.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }))
+        terminal?.kill()
+      }).not.toThrow()
+      await exit
+      expect(uncaught).toEqual([])
+    } finally {
+      try {
+        terminal?.kill()
+      } catch {}
+      await new Promise((resolve) => setTimeout(resolve, 1_500))
+      process.off('uncaughtException', uncaughtListener)
+    }
+  }, 20_000)
 })

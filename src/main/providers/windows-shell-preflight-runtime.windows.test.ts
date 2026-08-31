@@ -2,6 +2,7 @@ import {
   copyFileSync,
   existsSync,
   linkSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -155,10 +156,13 @@ describeWindows('Windows Codex shell preflight runtime', () => {
 
     const root = makeTempDir()
     const preflight = writeFailingPreflight(root)
-    const codexExecutable = join(root, 'codex.exe')
+    // Keep the fixture ahead of any host-global Codex installation in Git Bash.
+    const codexExecutable = join(root, '.local', 'bin', 'codex.exe')
+    mkdirSync(join(root, '.local', 'bin'), { recursive: true })
     linkNodeExecutable(codexExecutable)
     const preflightMarker = join(root, 'git-bash-preflight-ran')
     const codexMarker = join(root, 'git-bash-codex-ran')
+    const codexPathMarker = join(root, 'git-bash-codex-path')
     const previousUserDataPath = process.env.ORCA_USER_DATA_PATH
     process.env.ORCA_USER_DATA_PATH = join(root, 'user data')
 
@@ -176,7 +180,7 @@ describeWindows('Windows Codex shell preflight runtime', () => {
         shellArgs: resolved.shellArgs,
         cwd: root,
         env: {
-          ...withPathEntry(process.env, root),
+          ...withPathEntry(process.env, join(root, '.local', 'bin')),
           CHERE_INVOKING: '1',
           HOME: root,
           ORCA_CODEX_LAUNCH_PREFLIGHT: preflight,
@@ -185,7 +189,7 @@ describeWindows('Windows Codex shell preflight runtime', () => {
           TERM: 'xterm-256color'
         },
         input:
-          "codex -e \"require('node:fs').writeFileSync(process.env.ORCA_CODEX_MARKER,'ran')\"\nexit\n",
+          "type -P codex > git-bash-codex-path\ncodex -e \"require('node:fs').writeFileSync(process.env.ORCA_CODEX_MARKER,'ran')\"\nexit\n",
         // Paired "Windows low spec" QA measured 12.7–15.8s across four runs: Git Bash
         // cold-starts two large Node executables for AV scanning, so allow 25s without
         // inflating the faster cmd.exe budget.
@@ -200,6 +204,11 @@ describeWindows('Windows Codex shell preflight runtime', () => {
     }
 
     expect(existsSync(preflightMarker)).toBe(true)
+    const resolvedCodexPath = readFileSync(codexPathMarker, 'utf8')
+      .trim()
+      .replaceAll('\\', '/')
+      .toLowerCase()
+    expect(resolvedCodexPath).toMatch(/\/\.local\/bin\/codex(?:\.exe)?$/)
     expect(readFileSync(codexMarker, 'utf8')).toBe('ran')
   })
 })

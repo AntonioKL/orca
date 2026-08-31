@@ -815,18 +815,16 @@ diff --git a/lib/windowsTerminal.js b/lib/windowsTerminal.js
 index 3c38f89..e20b3e6 100644
 --- a/lib/windowsTerminal.js
 +++ b/lib/windowsTerminal.js
-@@ -50,6 +50,29 @@ var WindowsTerminal = /** @class */ (function (_super) {
+@@ -50,6 +50,27 @@ var WindowsTerminal = /** @class */ (function (_super) {
          // Create new termal.
          _this._agent = new windowsPtyAgent_1.WindowsPtyAgent(file, args, parsedEnv, cwd, _this._cols, _this._rows, false, opt.useConpty, opt.useConptyDll, opt.conptyInheritCursor);
          _this._socket = _this._agent.outSocket;
 +        // Attach before readiness so a broken ConPTY output pipe cannot be unhandled.
 +        _this._socket.on('error', function (err) {
-+            var code = err.code;
-+            var wasClosing = !_this._writable;
-+            // Node can report these duplicate stream errors after teardown; active
-+            // sockets still surface every other failure to the caller.
++            var code = err && err.code;
++            // PTY output can report EPIPE before `_close()` wins the race.
 +            _this._close();
-+            if (wasClosing && (code === 'EPIPE' || code === 'ERR_STREAM_PUSH_AFTER_EOF' || code === 'ERR_STREAM_DESTROYED')) {
++            if (code === 'EPIPE' || code === 'ERR_STREAM_PUSH_AFTER_EOF' || code === 'ERR_STREAM_DESTROYED') {
 +                return;
 +            }
 +            // EIO, happens when someone closes our child process: the only process
@@ -923,7 +921,7 @@ diff --git a/src/windowsTerminal.ts b/src/windowsTerminal.ts
 index 13f6c6d..eda63c8 100644
 --- a/src/windowsTerminal.ts
 +++ b/src/windowsTerminal.ts
-@@ -51,6 +51,32 @@ export class WindowsTerminal extends Terminal {
+@@ -51,6 +51,30 @@ export class WindowsTerminal extends Terminal {
      this._agent = new WindowsPtyAgent(file, args, parsedEnv, cwd, this._cols, this._rows, false, opt.useConpty, opt.useConptyDll, opt.conptyInheritCursor);
      this._socket = this._agent.outSocket;
 -
@@ -931,12 +929,10 @@ index 13f6c6d..eda63c8 100644
 +    // Attach before readiness so a broken ConPTY output pipe cannot be unhandled.
 +    this._socket.on('error', err => {
 +      const code = (<any>err).code;
-+      const wasClosing = !this._writable;
 +
-+      // Node can report these duplicate stream errors after teardown; active
-+      // sockets still surface every other failure to the caller.
++      // PTY output can report EPIPE before `_close()` wins the race.
 +      this._close();
-+      if (wasClosing && (code === 'EPIPE' || code === 'ERR_STREAM_PUSH_AFTER_EOF' || code === 'ERR_STREAM_DESTROYED')) {
++      if (code === 'EPIPE' || code === 'ERR_STREAM_PUSH_AFTER_EOF' || code === 'ERR_STREAM_DESTROYED') {
 +        return;
 +      }
 +
