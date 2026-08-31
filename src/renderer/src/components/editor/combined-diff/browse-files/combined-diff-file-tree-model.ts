@@ -131,7 +131,13 @@ export function getViewedCombinedDiffTreeVisibility({
     }
     const names = [projected.source.name]
     let compacted = projected
-    while (compacted.children.length === 1 && compacted.children[0]?.source.type === 'directory') {
+    // Keep a collapsed directory as a visible boundary; filtering must not compact it away and
+    // accidentally expose descendants that the user explicitly hid.
+    while (
+      !collapsedDirectoryKeys.has(compacted.source.key) &&
+      compacted.children.length === 1 &&
+      compacted.children[0]?.source.type === 'directory'
+    ) {
       compacted = compacted.children[0]
       names.push(compacted.source.name)
     }

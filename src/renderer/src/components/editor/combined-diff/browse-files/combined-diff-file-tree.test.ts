@@ -192,4 +192,27 @@ describe('CombinedDiffFileTree navigation mapping', () => {
     })
     expect(compactedDirectory && visibility.visibleFileCounts.get(compactedDirectory.key)).toBe(1)
   })
+
+  it('preserves a collapsed directory boundary while filtering viewed siblings', () => {
+    const entries: GitBranchChangeEntry[] = [
+      { path: 'src/a/one.ts', status: 'modified' },
+      { path: 'src/b/two.ts', status: 'modified' }
+    ]
+    const roots = buildCombinedDiffBranchTreeRoots('branch', entries)
+    const visibility = getViewedCombinedDiffTreeVisibility({
+      roots,
+      collapsedDirectoryKeys: new Set(['dir::combined-branch::src']),
+      mode: 'branch',
+      viewedSectionKeys: new Set(['combined-branch:src/b/two.ts'])
+    })
+
+    expect(visibility.rows).toEqual([
+      expect.objectContaining({
+        type: 'directory',
+        key: 'dir::combined-branch::src',
+        path: 'src'
+      })
+    ])
+    expect(visibility.visibleFileCount).toBe(1)
+  })
 })
