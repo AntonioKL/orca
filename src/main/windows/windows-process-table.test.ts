@@ -411,6 +411,9 @@ describe('resolving the native reader', () => {
       }
     ])
     expect(isWindowsProcessTableAvailable()).toBe(true)
+    // The pinned relay artifact exposes only getProcessList; it must not be
+    // mistaken for a PID-reuse-safe reader merely because rows are available.
+    expect(isWindowsProcessStartTimeAvailable()).toBe(false)
   })
 
   it('asks the addon for memory and command line, as the package path does', async () => {
@@ -425,6 +428,7 @@ describe('resolving the native reader', () => {
     // Memory | CommandLine. A bare snapshot would silently drop the command
     // line every agent-recognition caller matches on first.
     expect(addon.getProcessList).toHaveBeenCalledWith(expect.any(Function), 3)
+    expect(isWindowsProcessStartTimeAvailable()).toBe(false)
   })
 
   it('reaches the CIM scan when neither the package nor the addon is present', async () => {

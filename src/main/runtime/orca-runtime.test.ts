@@ -2126,6 +2126,13 @@ describe('OrcaRuntimeService', () => {
     expect(status.minCompatibleMobileVersion).toBeGreaterThanOrEqual(0)
   })
 
+  it('fails closed for structured sessions on Windows without native creation-time proof', () => {
+    setPlatform('win32')
+    onTestFinished(resetPlatform)
+
+    expect(createRuntime().getStatus().capabilities).not.toContain('agent-session.structured.v1')
+  })
+
   it('reports the configured Windows terminal shell on status', () => {
     const runtime = new OrcaRuntimeService({
       ...store,
