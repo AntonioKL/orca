@@ -258,6 +258,7 @@ export function createReplacementDeliveryRecord(
     .filter((span) => span.sourceEndSu > acceptedSourceEndSu)
     .map((span) => sliceAtSourceStart(span, Math.max(span.sourceStartSu, acceptedSourceEndSu)))
     .map((span) => Object.freeze({ ...span, ...replacement.identity }))
+  replacement.sendSpanIndex = 0
   replacement.retainedDataBytes = replacement.spans.reduce(
     (bytes, span) => bytes + chargedPtyRetainedStringBytes(span.data),
     0
