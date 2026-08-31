@@ -26381,14 +26381,23 @@ export class OrcaRuntimeService {
     // Why: a workspace provisioned in the background must not pull the sidebar
     // to itself; the user never asked to look at these tabs.
     surfaceOwner?: false
-  }): Promise<{ setupSpawned: boolean; setupTerminalHandle: string | null }> {
+  }): Promise<{
+    setupSpawned: boolean
+    setupTerminalHandle: string | null
+    /** True when this call claimed and attempted to materialize default tabs. */
+    didSpawnDefaultTabs: boolean
+  }> {
     if (!this.ptyController?.spawn) {
-      return { setupSpawned: false, setupTerminalHandle: null }
+      return { setupSpawned: false, setupTerminalHandle: null, didSpawnDefaultTabs: false }
     }
     const surfacing = ownerSurfacing(args.surfaceOwner !== false)
     let setupSpawned = false
     let setupTerminalHandle: string | null = null
+    let didSpawnDefaultTabs = false
     try {
+      // Claim ownership before the loop so a partial host spawn is not replayed
+      // by renderer activation as a second set of tabs.
+      didSpawnDefaultTabs = Boolean(args.defaultTabs && args.defaultTabs.tabs.length > 0)
       const defaultTabHandles = await this.createDefaultTabTerminals(
         args.worktreeSelector,
         args.worktreeId,
@@ -26473,7 +26482,7 @@ export class OrcaRuntimeService {
         `[worktree-create] Failed to create setup/default terminals for ${args.worktreePath}: ${message}`
       )
     }
-    return { setupSpawned, setupTerminalHandle }
+    return { setupSpawned, setupTerminalHandle, didSpawnDefaultTabs }
   }
 
   private async waitForStartupFollowupReady(
@@ -27609,6 +27618,7 @@ export class OrcaRuntimeService {
     // RPC return value must omit setup so the client does not spawn it a second
     // time. Mirrors the wait-for-agent setup contract from #6298.
     let didSpawnSetup = false
+    let didSpawnDefaultTabs = false
     let setupTerminalHandle: string | null = null
     let startupTerminalHandle: string | null = null
     let startupTerminalTabId: string | null = null
@@ -27717,6 +27727,7 @@ export class OrcaRuntimeService {
           ...(wrappedSetupCommandStr ? { wrappedSetupCommand: wrappedSetupCommandStr } : {})
         })
         didSpawnSetup = provisioned.setupSpawned
+        didSpawnDefaultTabs = provisioned.didSpawnDefaultTabs
         setupTerminalHandle = provisioned.setupTerminalHandle
         if (dependencySeedArgs && !didSpawnSetup) {
           // Renderer activation can retry the setup descriptor, but cannot
@@ -27782,6 +27793,7 @@ export class OrcaRuntimeService {
       if (args.awaitTerminalProvisioning || Boolean(dependencySeedArgs)) {
         const provisioned = await provisioning
         didSpawnSetup = provisioned.setupSpawned
+        didSpawnDefaultTabs = provisioned.didSpawnDefaultTabs
         setupTerminalHandle = provisioned.setupTerminalHandle
         if (dependencySeedArgs && !didSpawnSetup) {
           // A failed seed-owned spawn must fail open to ordinary setup retry;
@@ -27853,7 +27865,7 @@ export class OrcaRuntimeService {
             }
           }
         : {}),
-      ...(defaultTabs ? { defaultTabs } : {}),
+      ...(defaultTabs && !(forceSeedSetup && didSpawnDefaultTabs) ? { defaultTabs } : {}),
       ...(warning ? { warning } : {}),
       ...(addResult.localBaseRefRefresh
         ? { localBaseRefRefresh: addResult.localBaseRefRefresh }

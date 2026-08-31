@@ -53,6 +53,7 @@ import {
 import { clearSubmodulePathsCacheForTests, listSubmodulePaths } from '../git/status'
 import { getEffectiveHooks, hasHooksFile, loadHooks, parseOrcaYaml, runHook } from '../hooks'
 import { createSetupRunnerScript, resolveSetupRunnerShell } from '../worktree-runner-script'
+import * as worktreeDependencySeed from '../worktree-dependency-seed'
 import {
   getEffectiveHooksFromConfig,
   getDefaultTabsLaunch,
@@ -46666,6 +46667,114 @@ describe('OrcaRuntimeService', () => {
       result.worktree.id,
       expect.objectContaining({ title: 'Test', activate: false })
     )
+  })
+
+  it('omits host-materialized defaults from seeded local runtime results', async () => {
+    setPlatform('darwin')
+    const metaById: Record<string, WorktreeMeta> = {}
+    const runtimeStore = {
+      ...store,
+      getAllWorktreeMeta: () => metaById,
+      getWorktreeMeta: (worktreeId: string) => metaById[worktreeId],
+      setWorktreeMeta: (worktreeId: string, meta: Partial<WorktreeMeta>) => {
+        metaById[worktreeId] = { ...(metaById[worktreeId] ?? makeWorktreeMeta()), ...meta }
+        return metaById[worktreeId]
+      }
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    const spawn = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 'pty-seeded-default' })
+      .mockResolvedValueOnce({ id: 'pty-seeded-setup' })
+    const revealTerminalSession = vi.fn().mockResolvedValue({ tabId: 'tab-seeded' })
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.setNotifier({
+      worktreesChanged: vi.fn(),
+      reposChanged: vi.fn(),
+      activateWorktree: vi.fn(),
+      createTerminal: vi.fn(),
+      revealTerminalSession,
+      splitTerminal: vi.fn(),
+      renameTerminal: vi.fn(),
+      focusTerminal: vi.fn(),
+      closeTerminal: vi.fn(),
+      sleepWorktree: vi.fn(),
+      terminalFitOverrideChanged: vi.fn(),
+      terminalDriverChanged: vi.fn()
+    })
+    runtime.attachWindow(1)
+
+    computeWorktreePathMock.mockReturnValue('/tmp/workspaces/runtime-seeded-default-tabs')
+    ensurePathWithinWorkspaceMock.mockReturnValue('/tmp/workspaces/runtime-seeded-default-tabs')
+    vi.mocked(loadHooks).mockReturnValue({
+      scripts: { setup: 'pnpm install' },
+      worktree: {
+        dependencySeedPaths: ['node_modules'],
+        dependencySeedInputs: ['package-lock.json']
+      }
+    })
+    vi.mocked(getEffectiveHooks).mockReturnValue({ scripts: { setup: 'pnpm install' } })
+    vi.mocked(getDefaultTabsLaunch).mockReturnValue({
+      runCommands: true,
+      tabs: [{ title: 'Dev', command: 'pnpm dev' }]
+    })
+    vi.mocked(shouldRunSetupForCreate).mockReturnValue(true)
+    vi.mocked(createSetupRunnerScript).mockReturnValue({
+      runnerScriptPath: '/tmp/repo/.git/orca/setup-runner.sh',
+      envVars: {
+        ORCA_ROOT_PATH: '/tmp/repo',
+        ORCA_WORKTREE_PATH: '/tmp/workspaces/runtime-seeded-default-tabs'
+      }
+    })
+    vi.mocked(listWorktrees).mockResolvedValue([
+      {
+        path: '/tmp/workspaces/runtime-seeded-default-tabs',
+        head: 'def',
+        branch: 'runtime-seeded-default-tabs',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+
+    const readInputsSpy = vi
+      .spyOn(worktreeDependencySeed, 'readWorktreeDependencySeedInputs')
+      .mockResolvedValue([{ path: 'package-lock.json', bytes: '{}' }])
+    const hydrateSpy = vi
+      .spyOn(worktreeDependencySeed, 'hydrateWorktreeDependencies')
+      .mockResolvedValue({ status: 'miss', paths: [] })
+    const promoteSpy = vi
+      .spyOn(worktreeDependencySeed, 'promoteWorktreeDependencySeed')
+      .mockResolvedValue({ status: 'promoted', paths: [] })
+    const waitForSetupSpy = vi
+      .spyOn(runtime, 'waitForSetupTerminalCompletion')
+      .mockResolvedValue({ exitCode: null })
+    onTestFinished(() => {
+      readInputsSpy.mockRestore()
+      hydrateSpy.mockRestore()
+      promoteSpy.mockRestore()
+      waitForSetupSpy.mockRestore()
+    })
+
+    const result = await runtime.createManagedWorktree({
+      repoSelector: 'id:repo-1',
+      name: 'runtime-seeded-default-tabs',
+      setupDecision: 'run'
+    })
+
+    expect(result).not.toHaveProperty('defaultTabs')
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2))
+    expect(spawn.mock.calls[0]![0]).toMatchObject({ command: 'pnpm dev' })
+    expect(spawn.mock.calls[1]![0]).toMatchObject({
+      command: expect.stringContaining('bash /tmp/repo/.git/orca/setup-runner.sh')
+    })
+    expect(hydrateSpy).toHaveBeenCalledTimes(1)
+    expect(readInputsSpy).toHaveBeenCalledTimes(1)
+    expect(promoteSpy).not.toHaveBeenCalled()
   })
 
   it('uses desktop task agent selection and bracketed-pastes startup drafts for local worktrees', async () => {
