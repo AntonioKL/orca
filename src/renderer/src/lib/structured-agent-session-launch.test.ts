@@ -4,7 +4,8 @@ import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-ses
 
 const mocks = vi.hoisted(() => ({
   createIntent: vi.fn(),
-  launch: vi.fn()
+  launch: vi.fn(),
+  callStructuredAgentSession: vi.fn()
 }))
 
 vi.mock('sonner', () => ({
@@ -25,6 +26,10 @@ vi.mock('@/lib/launch-structured-codex-session', () => {
 
 vi.mock('@/runtime/local-structured-session-tabs-sync', () => ({
   refreshLocalStructuredSessionTabs: vi.fn()
+}))
+
+vi.mock('@/runtime/structured-agent-session-client', () => ({
+  callStructuredAgentSession: mocks.callStructuredAgentSession
 }))
 
 vi.mock('@/i18n/i18n', () => ({
@@ -89,6 +94,7 @@ describe('startStructuredCodexLaunch', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.createIntent.mockImplementation((worktreeId: string) => launchIntent(worktreeId))
+    mocks.callStructuredAgentSession.mockResolvedValue({ snapshots: [] })
   })
 
   it('opens the chat without an informational progress toast', async () => {
@@ -106,6 +112,29 @@ describe('startStructuredCodexLaunch', () => {
     expect(mocks.launch).toHaveBeenCalledOnce()
     expect(mocks.launch).toHaveBeenCalledWith(intent)
     expect(toast.message).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('verifies publication through the paired runtime that created the session', async () => {
+    const worktreeId = 'wt-remote-publication'
+    const intent = {
+      ...launchIntent(worktreeId, 'session-remote'),
+      target: { kind: 'environment' as const, environmentId: 'env-remote' }
+    }
+    mocks.createIntent.mockReturnValueOnce(intent)
+    mocks.launch.mockResolvedValue(intent.sessionId)
+    mocks.callStructuredAgentSession.mockResolvedValueOnce({
+      snapshots: [publishedSnapshot(worktreeId, intent.sessionId)]
+    })
+
+    startStructuredCodexLaunch(worktreeId)
+    await flushLaunchSettlement()
+
+    expect(mocks.callStructuredAgentSession).toHaveBeenCalledWith(
+      intent.target,
+      'session.tabs.listAll',
+      {}
+    )
     expect(toast.error).not.toHaveBeenCalled()
   })
 

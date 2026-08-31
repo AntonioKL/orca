@@ -1,4 +1,7 @@
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
+import { useAppStore } from '@/store'
+import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
+import { getStructuredAgentSessionTarget } from '@/runtime/structured-agent-session-target'
 
 export type StructuredActivationInventory = {
   snapshot: RuntimeMobileSessionTabsResult
@@ -17,11 +20,12 @@ export async function readWorktreeStructuredActivationInventory(
   if (typeof window === 'undefined') {
     return false
   }
-  const response = await window.api.runtime.call({ method: 'session.tabs.listAll', params: {} })
-  if (!response.ok) {
-    throw new Error('structured session inventory unavailable')
-  }
-  const result = response.result as { snapshots?: RuntimeMobileSessionTabsResult[] }
+  const target = getStructuredAgentSessionTarget(useAppStore.getState(), worktreeId)
+  const result = await callRuntimeRpc<{ snapshots?: RuntimeMobileSessionTabsResult[] }>(
+    target,
+    'session.tabs.listAll',
+    {}
+  )
   const snapshot = (result.snapshots ?? []).find(
     (candidate) =>
       candidate.worktree === worktreeId &&
@@ -41,16 +45,11 @@ export async function readWorktreeStructuredActivationInventory(
     snapshot.tabs.flatMap((tab) =>
       tab.type === 'agent-session'
         ? [
-            window.api.runtime
-              .call({ method: 'agentSession.handoffStatus', params: { sessionId: tab.sessionId } })
-              .then((statusResponse) => {
-                if (!statusResponse.ok) {
-                  return
-                }
-                const status = statusResponse.result as {
-                  owner?: unknown
-                  terminal?: { paneKey?: unknown; ptyId?: unknown; tabId?: unknown }
-                }
+            callRuntimeRpc<{
+              owner?: unknown
+              terminal?: { paneKey?: unknown; ptyId?: unknown; tabId?: unknown }
+            }>(target, 'agentSession.handoffStatus', { sessionId: tab.sessionId })
+              .then((status) => {
                 if (status.owner === 'native') {
                   ownerBySessionId.set(tab.sessionId, { owner: 'native' })
                 } else if (
@@ -70,6 +69,7 @@ export async function readWorktreeStructuredActivationInventory(
                   })
                 }
               })
+              .catch(() => undefined)
           ]
         : []
     )

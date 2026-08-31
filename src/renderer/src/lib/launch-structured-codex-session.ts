@@ -16,8 +16,8 @@ import {
   resolveWebSessionVisibleTabId
 } from '@/runtime/web-session-focus-intent'
 import { LOCAL_STRUCTURED_SESSION_OWNER } from '@/runtime/local-structured-session-tabs-sync'
-import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
+import { getStructuredAgentSessionTarget } from '@/runtime/structured-agent-session-target'
 
 type StructuredAgentSessionCreateParams = {
   envelope: AgentSessionMutationEnvelope
@@ -41,10 +41,8 @@ export function createStructuredCodexSessionLaunchIntent(
   const sessionId = `codex_${crypto.randomUUID().replaceAll('-', '_')}`
   const fields = { worktree: toRuntimeWorktreeSelector(worktreeId), agent: 'codex' as const }
   const state = useAppStore.getState()
-  const environmentId = getRuntimeEnvironmentIdForWorktree(state, worktreeId)
-  const target: RuntimeClientTarget = environmentId
-    ? { kind: 'environment', environmentId }
-    : { kind: 'local' }
+  const target: RuntimeClientTarget = getStructuredAgentSessionTarget(state, worktreeId)
+  const environmentId = target.kind === 'environment' ? target.environmentId : null
   recordWebSessionFocusIntent(
     { environmentId: environmentId ?? LOCAL_STRUCTURED_SESSION_OWNER },
     worktreeId,
