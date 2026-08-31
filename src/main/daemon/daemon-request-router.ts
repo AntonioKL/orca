@@ -13,6 +13,7 @@ import type { TerminalHistorySeedTransferRegistry } from './terminal-history-see
 import type { TerminalHost } from './terminal-host'
 import { SessionNotFoundError, type DaemonRequest } from './types'
 import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
+import { isPtyShutdownFenceUnavailable } from '../providers/pty-provider-contract'
 
 type DaemonRequestRouterOptions = {
   host: TerminalHost
@@ -201,13 +202,19 @@ export class DaemonRequestRouter {
     intent?: PtyKillIntent,
     incarnationId?: string
   ): Promise<Record<string, unknown>> {
-    const canceledPendingSpawn = this.options.preparations.cancel(sessionId)
-    this.options.attachments.clearInput(sessionId)
     const attribution = { sessionId, immediate: immediate === true, clientId }
     let result: Record<string, unknown> | void = undefined
     try {
       result = await this.options.host.kill(sessionId, { immediate, intent, incarnationId })
+      // A stale-incarnation refusal must leave a same-ID replacement untouched. Other outcomes
+      // retain the existing cleanup semantics, but only after the host has accepted this lease.
+      if (!isPtyShutdownFenceUnavailable(result)) {
+        this.options.preparations.cancel(sessionId)
+        this.options.attachments.clearInput(sessionId)
+      }
     } catch (error) {
+      const canceledPendingSpawn = this.options.preparations.cancel(sessionId)
+      this.options.attachments.clearInput(sessionId)
       if (!(canceledPendingSpawn && error instanceof SessionNotFoundError)) {
         this.options.log.log('session-kill-failed', attribution)
         throw error
