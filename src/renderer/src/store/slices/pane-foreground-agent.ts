@@ -27,6 +27,29 @@ export type PaneForegroundAgentEntry = {
   ptyId?: string
 }
 
+/** Keep freshness metadata out of the long-standing identity record shape. */
+export function createPaneForegroundAgentEntry(
+  entry: PaneForegroundAgentEntry,
+  metadata: Pick<PaneForegroundAgentEntry, 'observedAt' | 'ptyId'> = entry
+): PaneForegroundAgentEntry {
+  const { observedAt: _ignoredObservedAt, ptyId: _ignoredPtyId, ...publicEntry } = entry
+  Object.defineProperties(publicEntry, {
+    observedAt: {
+      configurable: true,
+      enumerable: false,
+      value: metadata.observedAt,
+      writable: true
+    },
+    ptyId: {
+      configurable: true,
+      enumerable: false,
+      value: metadata.ptyId,
+      writable: true
+    }
+  })
+  return publicEntry
+}
+
 /**
  * Process-table identity for local panes, read at OSC 133 command boundaries
  * (see pane-foreground-agent-tracker). Sits below hook rows in the tab-icon
@@ -52,20 +75,21 @@ export const createPaneForegroundAgentSlice: StateCreator<
   paneForegroundAgentByPaneKey: {},
   setPaneForegroundAgent: (paneKey, entry) => {
     set((s) => {
+      const normalizedEntry = createPaneForegroundAgentEntry(entry)
       const current = s.paneForegroundAgentByPaneKey[paneKey]
       if (
         current &&
-        current.agent === entry.agent &&
-        current.routingTrusted === entry.routingTrusted &&
-        current.routingRevoked === entry.routingRevoked &&
-        current.routingConfirmationPending === entry.routingConfirmationPending &&
-        current.shellForeground === entry.shellForeground &&
-        current.ptyId === entry.ptyId
+        current.agent === normalizedEntry.agent &&
+        current.routingTrusted === normalizedEntry.routingTrusted &&
+        current.routingRevoked === normalizedEntry.routingRevoked &&
+        current.routingConfirmationPending === normalizedEntry.routingConfirmationPending &&
+        current.shellForeground === normalizedEntry.shellForeground &&
+        current.ptyId === normalizedEntry.ptyId
       ) {
         // Test/legacy callers may provide identity-only entries. Preserve the
         // value-bail semantics for those records; only observed process
         // evidence opts into the bounded freshness clock.
-        if (current.observedAt === undefined && entry.observedAt === undefined) {
+        if (normalizedEntry.observedAt === undefined) {
           return s
         }
         const now = Date.now()
@@ -78,14 +102,17 @@ export const createPaneForegroundAgentSlice: StateCreator<
         return {
           paneForegroundAgentByPaneKey: {
             ...s.paneForegroundAgentByPaneKey,
-            [paneKey]: { ...current, observedAt: now }
+            [paneKey]: createPaneForegroundAgentEntry(current, {
+              observedAt: now,
+              ptyId: current.ptyId
+            })
           }
         }
       }
       return {
         paneForegroundAgentByPaneKey: {
           ...s.paneForegroundAgentByPaneKey,
-          [paneKey]: entry
+          [paneKey]: normalizedEntry
         }
       }
     })
@@ -99,12 +126,10 @@ export const createPaneForegroundAgentSlice: StateCreator<
           return {
             paneForegroundAgentByPaneKey: {
               ...s.paneForegroundAgentByPaneKey,
-              [paneKey]: {
-                agent,
-                shellForeground: false,
-                observedAt: now,
-                ptyId: ptyId ?? current.ptyId
-              }
+              [paneKey]: createPaneForegroundAgentEntry(
+                { agent, shellForeground: false },
+                { observedAt: now, ptyId: ptyId ?? current.ptyId }
+              )
             }
           }
         }
@@ -117,7 +142,10 @@ export const createPaneForegroundAgentSlice: StateCreator<
         return {
           paneForegroundAgentByPaneKey: {
             ...s.paneForegroundAgentByPaneKey,
-            [paneKey]: { ...current, observedAt: now }
+            [paneKey]: createPaneForegroundAgentEntry(current, {
+              observedAt: now,
+              ptyId: ptyId ?? current.ptyId
+            })
           }
         }
       }
@@ -125,7 +153,10 @@ export const createPaneForegroundAgentSlice: StateCreator<
       return {
         paneForegroundAgentByPaneKey: {
           ...s.paneForegroundAgentByPaneKey,
-          [paneKey]: { agent, shellForeground: false, observedAt: now }
+          [paneKey]: createPaneForegroundAgentEntry(
+            { agent, shellForeground: false },
+            { observedAt: now, ptyId }
+          )
         }
       }
     })

@@ -16,6 +16,22 @@ function terminalTab(id: string, worktreeId: string): TerminalTab {
 }
 
 describe('pane foreground agent slice', () => {
+  it('keeps process freshness metadata out of the public identity shape', () => {
+    const store = createTestStore()
+    store.getState().setPaneForegroundAgent('tab-1:leaf-1', {
+      agent: 'codex',
+      shellForeground: false,
+      observedAt: 1_000,
+      ptyId: 'pty-1'
+    })
+
+    const entry = store.getState().paneForegroundAgentByPaneKey['tab-1:leaf-1']
+    expect(entry).toMatchObject({ agent: 'codex', shellForeground: false })
+    expect(entry?.observedAt).toBe(1_000)
+    expect(entry?.ptyId).toBe('pty-1')
+    expect(Object.keys(entry ?? {})).toEqual(['agent', 'shellForeground'])
+  })
+
   it('sets, value-bails, and clears entries per pane key', () => {
     const store = createTestStore()
     store

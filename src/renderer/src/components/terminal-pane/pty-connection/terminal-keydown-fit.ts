@@ -213,7 +213,7 @@ export function installTerminalKeydownFit(session: ConnectPanePtySession): void 
       }
       useAppStore
         .getState()
-        .refreshPaneForegroundAgentObservation(session.cacheKey, process.agent, inspectedPtyId)
+        .refreshPaneForegroundAgentObservation?.(session.cacheKey, process.agent, inspectedPtyId)
     },
     dispatchCompletion: (title, meta) => {
       if (meta?.source === 'process-exit') {
