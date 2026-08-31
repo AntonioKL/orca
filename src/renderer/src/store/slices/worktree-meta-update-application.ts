@@ -3,6 +3,7 @@ import { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
 import type { Worktree } from '../../../../shared/worktree/types'
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import { worktreeRowMatchesMetaHost } from './worktrees/listing/worktree-meta-host-match'
+import { branchName } from '@/lib/git-utils'
 
 type RequiredKey<T> = { [K in keyof T]-?: undefined extends T[K] ? never : K }[keyof T]
 
@@ -62,6 +63,12 @@ export function applyWorktreeUpdates(
     const next = { ...worktree, ...updates }
     if (updates.displayNameIsPinned !== undefined) {
       next.displayNameMode = updates.displayNameIsPinned ? 'fixed' : 'automatic'
+      if (updates.displayNameIsPinned === false && !updates.displayName?.trim()) {
+        const automaticName = branchName(next.branch)
+        if (automaticName) {
+          next.displayName = automaticName
+        }
+      }
     }
     return next
   })

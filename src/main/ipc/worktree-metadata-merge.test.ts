@@ -12,6 +12,29 @@ const git: GitWorktreeInfo = {
 }
 
 describe('mergeWorktree identity projection', () => {
+  it('re-derives an automatic display name from the current branch', () => {
+    const worktree = mergeWorktree(
+      'repo-1',
+      { ...git, branch: 'refs/heads/main' },
+      {
+        displayName: 'feature',
+        displayNameIsPinned: false,
+        comment: '',
+        linkedIssue: null,
+        linkedPR: null,
+        linkedLinearIssue: null,
+        isArchived: false,
+        isUnread: false,
+        isPinned: false,
+        sortOrder: 0,
+        lastActivityAt: 0
+      }
+    )
+
+    expect(worktree.displayName).toBe('main')
+    expect(worktree.displayNameMode).toBe('automatic')
+  })
+
   it('publishes canonical identity when host and instance metadata are known', () => {
     const worktree = mergeWorktree('repo-1', git, {
       instanceId: '11111111-1111-4111-8111-111111111111',

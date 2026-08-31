@@ -28153,6 +28153,7 @@ export class OrcaRuntimeService {
       linkedTaskSourceContext?: TaskSourceContext | null
       comment?: string
       displayName?: string
+      displayNameKind?: CreateWorktreeArgs['displayNameKind']
       workspaceStatus?: string
       manualOrder?: number
       sparseCheckout?: { directories: string[]; presetId?: string }
@@ -28190,6 +28191,7 @@ export class OrcaRuntimeService {
         name: args.name,
         ...(args.nameWasGenerated === true ? { nameWasGenerated: true } : {}),
         ...(args.displayName ? { displayName: args.displayName } : {}),
+        ...(args.displayNameKind ? { displayNameKind: args.displayNameKind } : {}),
         ...(args.baseBranch ? { baseBranch: args.baseBranch } : {}),
         ...(args.compareBaseRef ? { compareBaseRef: args.compareBaseRef } : {}),
         ...(args.branchNameOverride ? { branchNameOverride: args.branchNameOverride } : {}),
