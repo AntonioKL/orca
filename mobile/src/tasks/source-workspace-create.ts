@@ -232,6 +232,7 @@ async function createNewBranchWorkspace(args: {
 }): Promise<WorktreeCreateResult> {
   const { client, selection, targetRepoId, setupDecision, agent, workspaceName, note } = args
   const createdWithAgentId = agent.choice === 'blank' ? undefined : agent.choice
+  const manualDisplayName = workspaceName?.trim()
   const comment = note?.trim()
   // A brand-new branch off the repo's default base. The typed name is kept as the
   // git branch (via branchNameOverride) so a slash like `feature/login` survives;
@@ -247,8 +248,8 @@ async function createNewBranchWorkspace(args: {
         name: candidate,
         setupDecision,
         branchNameOverride: candidate,
-        ...(workspaceName?.trim()
-          ? { displayName: workspaceName, displayNameKind: 'user' as const }
+        ...(manualDisplayName
+          ? { displayName: manualDisplayName, displayNameKind: 'user' as const }
           : {}),
         ...agentLaunchCreateFields(createdWithAgentId)
       }

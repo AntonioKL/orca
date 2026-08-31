@@ -130,6 +130,10 @@ describe('sanitizeWorktreeDisplayName', () => {
   it('returns undefined when nothing displayable remains', () => {
     expect(sanitizeWorktreeDisplayName('\u0000\n\t')).toBeUndefined()
   })
+
+  it('returns undefined for an unusable user label', () => {
+    expect(resolveWorktreeCreateDisplayName('\u0000\u202e', 'user')).toBeUndefined()
+  })
 })
 
 describe('worktree create display-name provenance', () => {
@@ -153,6 +157,15 @@ describe('worktree create display-name provenance', () => {
         sanitizedName: 'feature-login'
       })
     ).toEqual({ displayName: 'feature/login', displayNameIsPinned: false })
+  })
+
+  it('keeps a user label that sanitizes away automatic', () => {
+    expect(
+      resolveWorktreeCreateDisplayNameMeta(undefined, 'feature-2', 'user', {
+        requestedName: 'feature',
+        sanitizedName: 'feature-2'
+      })
+    ).toEqual({ displayNameIsPinned: false })
   })
 })
 

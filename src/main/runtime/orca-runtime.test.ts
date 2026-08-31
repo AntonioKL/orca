@@ -5234,6 +5234,8 @@ describe('OrcaRuntimeService', () => {
     const result = await runtime.createManagedWorktree({
       repoSelector: 'id:folder-repo',
       name: 'folder-session',
+      displayName: '\u0000\u202e',
+      displayNameKind: 'user',
       createdWithAgent: 'codex',
       startup: { command: 'codex', viewMode: 'chat' }
     })
@@ -5259,6 +5261,7 @@ describe('OrcaRuntimeService', () => {
       orcaCreationSource: 'runtime',
       createdWithAgent: 'codex'
     })
+    expect(metaById[result.worktree.id]).not.toHaveProperty('displayNameIsPinned')
     await expect(runtime.showManagedWorktree(`id:${result.worktree.id}`)).resolves.toMatchObject({
       id: result.worktree.id,
       repoId: 'folder-repo',

@@ -27050,12 +27050,15 @@ export class OrcaRuntimeService {
       const settings = createSettings
       const instanceId = randomUUID()
       const worktreeId = getRuntimeFolderWorkspaceInstanceId(repo, instanceId)
+      const resolvedFolderDisplayName = resolveWorktreeCreateDisplayName(
+        args.displayName,
+        args.displayNameKind
+      )
       const meta = this.store.setWorktreeMeta(worktreeId, {
         instanceId,
         ...getProjectHostSetupWorktreeMeta(this.store.getProjectHostSetups?.() ?? [], repo),
-        displayName:
-          resolveWorktreeCreateDisplayName(args.displayName, args.displayNameKind) ?? args.name,
-        ...(args.displayNameKind === 'user' && args.displayName?.trim()
+        displayName: resolvedFolderDisplayName ?? args.name,
+        ...(args.displayNameKind === 'user' && resolvedFolderDisplayName
           ? { displayNameIsPinned: true }
           : {}),
         lastActivityAt: now,

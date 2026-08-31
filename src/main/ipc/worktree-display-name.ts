@@ -7,6 +7,7 @@ export function sanitizeWorktreeDisplayName(input: string): string | undefined {
     return code <= 0x1f || (code >= 0x7f && code <= 0x9f) ? ' ' : char
   }).join('')
   const sanitized = withoutControls
+    // Why: titles come from external systems; bidi overrides could visually reorder sidebar text.
     .replace(/[\u202a-\u202e\u2066-\u2069]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -43,12 +44,17 @@ export function resolveWorktreeCreateDisplayNameMeta(
   fallback: { requestedName: string; sanitizedName: string }
 ): Partial<Pick<WorktreeMeta, 'displayName' | 'displayNameIsPinned'>> {
   if (requestedDisplayName !== undefined) {
+    // Generated labels equal to their branch stay automatic; user labels remain fixed even when equal.
     if (kind !== 'user' && requestedDisplayName === branchName) {
       return {}
     }
     return { displayName: requestedDisplayName, displayNameIsPinned: true }
   }
-  if (kind !== 'user' && fallback.requestedName === branchName) {
+  // A user label that sanitizes away is an empty label, so keep the generated fallback automatic.
+  if (kind === 'user') {
+    return { displayNameIsPinned: false }
+  }
+  if (fallback.requestedName === branchName) {
     return { displayName: fallback.requestedName, displayNameIsPinned: false }
   }
   return shouldSetDisplayName(fallback.requestedName, branchName, fallback.sanitizedName)

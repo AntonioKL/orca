@@ -201,7 +201,7 @@ describe('createWorkspaceFromComposerSource', () => {
       client,
       selection,
       ...baseArgs,
-      workspaceName: 'Login work'
+      workspaceName: '  Login work  '
     })
     expect(calls[0]!.params).toMatchObject({
       displayName: 'Login work',
