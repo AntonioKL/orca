@@ -60,4 +60,43 @@ describe('TerminalHost pending kill fences', () => {
       await host.dispose()
     }
   })
+
+  it('preserves a replacement session when a stale pending kill is fenced out', async () => {
+    const subprocess: SubprocessHandle = {
+      pid: 99999,
+      getForegroundProcess: () => null,
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(),
+      forceKill: vi.fn(),
+      terminateOwnedTree: () => 'unavailable',
+      signal: vi.fn(),
+      onData: vi.fn(),
+      onExit: vi.fn(),
+      dispose: vi.fn()
+    }
+    const host = new TerminalHost({ spawnSubprocess: () => subprocess })
+    try {
+      const replacement = await host.createOrAttach({
+        sessionId: 'replacement-fence',
+        cols: 80,
+        rows: 24,
+        streamClient: { onData: vi.fn(), onExit: vi.fn() }
+      })
+      await expect(
+        host.kill('replacement-fence', {
+          immediate: true,
+          incarnationId: 'stale-incarnation'
+        })
+      ).resolves.toEqual({ fenceUnavailable: true })
+      expect(host.listSessions()).toEqual([
+        expect.objectContaining({
+          id: 'replacement-fence',
+          incarnationId: replacement.incarnationId
+        })
+      ])
+    } finally {
+      await host.dispose()
+    }
+  })
 })

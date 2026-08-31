@@ -91,7 +91,7 @@ describe('killPtySessions input bounds', () => {
       providerForSession: (id) => (id === 'failed' ? failed : healthy) as never,
       isOwned: () => ({ owned: false }),
       shutdown,
-      ownershipUnavailable: (provider) => provider === failed
+      ownershipUnavailable: (provider) => provider === (failed as never)
     })
 
     expect(shutdown).toHaveBeenCalledTimes(1)
