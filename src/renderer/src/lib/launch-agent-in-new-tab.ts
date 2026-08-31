@@ -162,6 +162,27 @@ function launchAgentInNewTabWithStructuredEligibility(
     return null
   }
 
+  // Structured sessions are host-owned. Evaluate this before the web-terminal
+  // path so paired runtimes with structured capability do not get diverted to
+  // a legacy web tab.
+  const launchDirectStructuredChat =
+    allowStructuredLaunch &&
+    isAgentSessionHandleProvider(agent) &&
+    !hasPrompt &&
+    store.settings?.experimentalNativeChat === true &&
+    canUseStructuredNativeChat(store, worktreeId)
+  if (launchDirectStructuredChat) {
+    startStructuredAgentLaunch(worktreeId, agent, () => {
+      launchAgentInNewTabWithStructuredEligibility(args, false)
+    })
+    return {
+      tabId: null,
+      startupPlan,
+      pasteDraftAfterLaunch: false,
+      focusAfterMenuClose: 'structured-session'
+    }
+  }
+
   const runtimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(store, worktreeId)
   if (isWebRuntimeSessionActive(runtimeEnvironmentId)) {
     const webHostDelivery = launchAgentInWebHostTab({
@@ -188,24 +209,6 @@ function launchAgentInNewTabWithStructuredEligibility(
       ...(pasteDraftAfterLaunch !== null && promptDelivery === 'submit-after-ready'
         ? { promptDeliveryResult: webHostDelivery }
         : {})
-    }
-  }
-
-  const launchDirectStructuredChat =
-    allowStructuredLaunch &&
-    isAgentSessionHandleProvider(agent) &&
-    !hasPrompt &&
-    store.settings?.experimentalNativeChat === true &&
-    canUseStructuredNativeChat(store, worktreeId)
-  if (launchDirectStructuredChat) {
-    startStructuredAgentLaunch(worktreeId, agent, () => {
-      launchAgentInNewTabWithStructuredEligibility(args, false)
-    })
-    return {
-      tabId: null,
-      startupPlan,
-      pasteDraftAfterLaunch: false,
-      focusAfterMenuClose: 'structured-session'
     }
   }
 
