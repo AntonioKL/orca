@@ -4,7 +4,6 @@ import {
   FileText,
   GitCompare,
   Globe,
-  ExternalLink,
   Loader2,
   Search,
   Smartphone,
@@ -192,7 +191,7 @@ function getActionPresentation(option: ActiveOption): {
       // Why the title is detail, not label: the label span is shrink-0 whenever a
       // detail shows, so a variable-length title there would refuse to truncate.
       detail: entry.title ? `${entry.title} · ${url}` : url,
-      icon: <ExternalLink className="size-3.5 shrink-0" aria-hidden="true" />,
+      icon: <Globe className="size-3.5 shrink-0" aria-hidden="true" />,
       label: translate('auto.components.tab.bar.TabBarCreateEntry.openPage', 'Open page'),
       showDetail: true
     }
