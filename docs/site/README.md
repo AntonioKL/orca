@@ -55,21 +55,25 @@ repository so a docs-only pull request can be reviewed and built independently.
 
 The docs app is a separate Vercel project (the **docs zone**) and keeps the
 public `/docs` URL namespace. The marketing site remains the default zone for
-`www.onorca.dev`; configure its Next/Vercel proxy with these rewrites, replacing
-`DOCS_ORIGIN` with the docs project's production URL:
+`www.onorca.dev`; configure its Next/Vercel proxy with these `beforeFiles`
+rewrites, replacing `DOCS_ORIGIN` with the docs project's production URL:
 
 ```js
-{
-  source: '/docs',
-  destination: `${DOCS_ORIGIN}/docs`
-},
-{
-  source: '/docs/:path*',
-  destination: `${DOCS_ORIGIN}/docs/:path*`
-},
-{
-  source: '/docs-static/:path*',
-  destination: `${DOCS_ORIGIN}/docs-static/:path*`
+return {
+  beforeFiles: [
+    {
+      source: '/docs',
+      destination: `${DOCS_ORIGIN}/docs`
+    },
+    {
+      source: '/docs/:path*',
+      destination: `${DOCS_ORIGIN}/docs/:path*`
+    },
+    {
+      source: '/docs-static/:path*',
+      destination: `${DOCS_ORIGIN}/docs-static/:path*`
+    }
+  ]
 }
 ```
 
@@ -95,7 +99,14 @@ deployment needs `basePath`, first move the route tree to an unprefixed
 4. Protect the `docs-production` GitHub environment with required reviewers.
 5. Add the three rewrites above to the `www.onorca.dev` marketing project. A
    Vercel custom domain cannot delegate only `/docs` by itself; the default zone
-   must proxy both page/API/media requests and `/docs-static` assets.
+   must proxy both page/API/media requests and `/docs-static` assets. Remove the
+   marketing project's old docs routes after the proxy is verified; keeping the
+   rewrites in `beforeFiles` prevents those filesystem routes from winning during
+   the transition.
+6. Deploy a stable desktop tag that contains `docs/site` before enabling the
+   marketing rewrites. Tags cut before this package was added cannot bootstrap
+   the docs project because production intentionally checks out the tag's exact
+   commit.
 
 `.github/workflows/docs.yml` runs credential-free checks for every pull request.
 It intentionally does not deploy PR previews: a PR-controlled build must not
