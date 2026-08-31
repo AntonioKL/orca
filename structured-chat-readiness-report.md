@@ -1,7 +1,7 @@
 # Structured native-chat readiness report
 
 Integration branch: `brennanb2025/structured-chat-integration-latest`
-Implementation/test head (code): `1b4530ef75b8352b769a525a68586f30efabab43`
+Implementation/test head (code): `62521d69c6c0472d94695b5e92e6739fb9de7589`
 
 ## Architecture decision
 
