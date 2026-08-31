@@ -35,8 +35,12 @@ the recoverable legacy terminal path is retained.
 - **Paired remote Orca:** owning-host target resolution, publication/lifecycle routing, and
   cross-version unit coverage pass. A paired-host Electron run and live mixed-version run were
   unavailable.
-- **Electron:** exact-head Playwright CDP attachment previously became unresponsive, so no visible
-  exact-head UI proof is claimed. No computer-use or OS-level automation was used.
+- **Electron:** exact-head Playwright CDP proof passed from the integration worktree. The app
+  identity reported `structured-chat-integration-final` on this branch; Experimental settings
+  visibly exposed the Chat UI and structured-chat controls, the host-aware scope copy rendered,
+  and enabling the toggle set `experimentalStructuredNativeChat: true` with Chat UI as default.
+  Console errors: 0 (two pre-existing development warnings). No computer-use or OS-level
+  automation was used.
 
 ## Recommendation
 
