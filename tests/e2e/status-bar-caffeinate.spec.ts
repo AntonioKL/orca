@@ -113,18 +113,25 @@ test.describe('macOS Amphetamine status-bar integration', () => {
     await orcaPage.getByRole('button', { name: 'Caffeinate, Off · Inactive' }).click()
 
     const menu = orcaPage.getByRole('menu')
-    const builtInOnly = menu.getByRole('menuitemradio', { name: 'Built-in only' })
-    const addAmphetamine = menu.getByRole('menuitemradio', { name: 'Add Amphetamine' })
-    await expect(menu.getByText('Amphetamine integration', { exact: true })).toBeVisible()
+    const engineMenu = menu.getByRole('menuitem', { name: /Engine/ })
+    const beforeProofPath = process.env.ORCA_AMPHETAMINE_MENU_BEFORE_PROOF_PATH
+    if (beforeProofPath) {
+      await orcaPage.screenshot({ path: beforeProofPath, animations: 'disabled' })
+    }
+    await engineMenu.hover()
+    const enginePicker = orcaPage.getByRole('menu').filter({ hasText: 'Amphetamine integration' })
+    const builtInOnly = enginePicker.getByRole('menuitemradio', { name: 'Built-in only' })
+    const addAmphetamine = enginePicker.getByRole('menuitemradio', { name: 'Add Amphetamine' })
+    await expect(enginePicker.getByText('Amphetamine integration', { exact: true })).toBeVisible()
     await expect(builtInOnly).toHaveAttribute('aria-checked', 'true')
     await expect(addAmphetamine).toBeVisible()
     await expect(
-      menu.getByText('When keep-awake is active, Orca uses Caffeinate.', { exact: true })
+      enginePicker.getByText('When keep-awake is active, Orca uses Caffeinate.', { exact: true })
     ).toBeVisible()
     await expect(
-      menu.getByText(/Observes a session you start manually or with a Trigger/)
+      enginePicker.getByText(/Observes a session you start manually or with a Trigger/)
     ).toBeVisible()
-    await expect(menu).toContainText(
+    await expect(enginePicker).toContainText(
       'Closed-display behavior depends on Amphetamine and macOS settings.'
     )
 
@@ -132,7 +139,7 @@ test.describe('macOS Amphetamine status-bar integration', () => {
       await expect(addAmphetamine).toBeEnabled()
       await addAmphetamine.click()
       await expect(addAmphetamine).toHaveAttribute('aria-checked', 'true')
-      await expect(menu).toBeVisible()
+      await expect(enginePicker).toBeVisible()
       await expect
         .poll(
           async () =>
@@ -143,16 +150,16 @@ test.describe('macOS Amphetamine status-bar integration', () => {
     } else {
       await expect(addAmphetamine).toBeDisabled()
       await expect(
-        menu.getByText(/Install Amphetamine to observe a session you start manually/)
+        enginePicker.getByText(/Install Amphetamine to observe a session you start manually/)
       ).toBeVisible()
       // Avoid opening the real App Store during E2E.
-      await expect(menu.getByRole('menuitem', { name: 'Get Amphetamine…' })).toBeVisible()
-      await expect(menu.getByRole('menuitem', { name: 'Check again' })).toBeVisible()
+      await expect(enginePicker.getByRole('menuitem', { name: 'Get Amphetamine…' })).toBeVisible()
+      await expect(enginePicker.getByRole('menuitem', { name: 'Check again' })).toBeVisible()
     }
 
     const proofPath = process.env.ORCA_AMPHETAMINE_MENU_PROOF_PATH
     if (proofPath) {
-      await menu.screenshot({ path: proofPath, animations: 'disabled' })
+      await orcaPage.screenshot({ path: proofPath, animations: 'disabled' })
     }
   })
 
@@ -182,9 +189,10 @@ test.describe('macOS Amphetamine status-bar integration', () => {
       .locator('[data-slot="dropdown-menu-label"]')
       .filter({ hasText: 'Keep awake' })
     await expect(effectiveStatus).toContainText('Caffeinate')
-    await expect(menu.getByRole('menuitemradio', { name: 'Add Amphetamine' })).toHaveAttribute(
-      'aria-checked',
-      'true'
-    )
+    await menu.getByRole('menuitem', { name: /Engine/ }).hover()
+    const enginePicker = orcaPage.getByRole('menu').filter({ hasText: 'Amphetamine integration' })
+    await expect(
+      enginePicker.getByRole('menuitemradio', { name: 'Add Amphetamine' })
+    ).toHaveAttribute('aria-checked', 'true')
   })
 })

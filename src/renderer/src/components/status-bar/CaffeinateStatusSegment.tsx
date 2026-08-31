@@ -6,6 +6,9 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -176,11 +179,31 @@ export function CaffeinateStatusSegment({
         {isMac ? (
           <>
             <DropdownMenuSeparator />
-            <AwakeEnginePicker
-              engine={configuredEngine}
-              status={serviceStatus}
-              onChange={setEngine}
-            />
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                {configuredEngine === 'amphetamine' ? (
+                  <Pill className="size-3.5" />
+                ) : (
+                  <Coffee className="size-3.5" />
+                )}
+                <span>
+                  {translate(
+                    'auto.components.status.bar.CaffeinateStatusSegment.engineMenu',
+                    'Engine'
+                  )}
+                </span>
+                <span className="ml-auto text-[11px] font-normal text-muted-foreground">
+                  {configuredEngine === 'amphetamine' ? 'Orca + Amphetamine' : 'Orca'}
+                </span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-72">
+                <AwakeEnginePicker
+                  engine={configuredEngine}
+                  status={serviceStatus}
+                  onChange={setEngine}
+                />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
           </>
         ) : null}
       </DropdownMenuContent>
