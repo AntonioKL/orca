@@ -5,7 +5,7 @@ import {
   type PtySourceSpan
 } from '../shared/pty-source-credit-contract'
 import { RelayPtySourceCreditLedger } from './pty-source-credit-ledger'
-import { CLOSED_DELIVERY_TOMBSTONE_LIMIT } from './pty-source-credit-record'
+import { CLOSED_DELIVERY_TOMBSTONE_LIMIT, type DeliveryRecord } from './pty-source-credit-record'
 
 function identity(
   deliveryToken = 'token-1',
@@ -70,6 +70,19 @@ function getCursorRecord(
     throw new Error('test delivery record missing')
   }
   return record
+}
+
+// Why: retention totals are maintained incrementally, so recomputing from the live records is
+// the only independent check that no mutation path skipped a counter update.
+function expectRetentionMatchesRecords(ledger: RelayPtySourceCreditLedger): void {
+  const internals = ledger as unknown as { deliveries: Map<string, DeliveryRecord> }
+  const expected = { sourceSu: 0, dataBytes: 0, spans: 0 }
+  for (const record of internals.deliveries.values()) {
+    expected.sourceSu += record.receivedEndSu - record.creditedEndSu
+    expected.dataBytes += record.retainedDataBytes
+    expected.spans += record.spans.length
+  }
+  expect(ledger.retentionSnapshot()).toEqual(expected)
 }
 
 describe('RelayPtySourceCreditLedger', () => {
@@ -191,11 +204,16 @@ describe('RelayPtySourceCreditLedger', () => {
     })
     expect(ledger.snapshotIfKnown(replacement)?.state).toBe('closed')
 
+    expectRetentionMatchesRecords(ledger)
+
     const canceled = identity('token-canceled')
     ledger.open(canceled, 8)
     append(ledger, canceled, 'x', 'span-cancel')
+    expectRetentionMatchesRecords(ledger)
     ledger.cancel(canceled, 'test-close')
     expect(ledger.snapshotIfKnown(canceled)?.state).toBe('closed')
+    expectRetentionMatchesRecords(ledger)
+    expect(ledger.retentionSnapshot()).toEqual({ sourceSu: 0, dataBytes: 0, spans: 0 })
   })
 
   it('rebases the send cursor when ACK reclaim removes spans at or past it', () => {
@@ -256,6 +274,7 @@ describe('RelayPtySourceCreditLedger', () => {
             creditedEndSu: snapshot.sentEndSu
           })
         }
+        expectRetentionMatchesRecords(ledger)
         if (!reservation && snapshot.creditedEndSu === 100) {
           break
         }

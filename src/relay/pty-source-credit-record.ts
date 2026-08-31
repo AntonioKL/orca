@@ -200,30 +200,6 @@ export function matchingDeliverySnapshot(
   return closed && samePtySourceDelivery(closed, identity) ? closed : null
 }
 
-export function retainedSourceTotal(records: Iterable<DeliveryRecord>): number {
-  let total = 0
-  for (const record of records) {
-    total += record.receivedEndSu - record.creditedEndSu
-  }
-  return total
-}
-
-export function retainedDataBytesTotal(records: Iterable<DeliveryRecord>): number {
-  let total = 0
-  for (const record of records) {
-    total += record.retainedDataBytes
-  }
-  return total
-}
-
-export function retainedSpanTotal(records: Iterable<DeliveryRecord>): number {
-  let total = 0
-  for (const record of records) {
-    total += record.spans.length
-  }
-  return total
-}
-
 export function createReplacementDeliveryRecord(
   old: DeliveryRecord,
   newIdentity: PtySourceDeliveryIdentity,
