@@ -3,6 +3,7 @@ import { makePaneKey } from '../../../../shared/stable-pane-id'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 import type { FolderWorkspace } from '../../../../shared/folder-workspace-types'
 import type { ProjectGroup } from '../../../../shared/project-group-types'
+import type { Tab } from '../../../../shared/tab-types'
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import type { AgentStatusEntry } from '../../../../shared/agent-status-types'
 import { buildDashboardSnapshot, type DashboardSnapshotState } from './build-dashboard-snapshot'
@@ -203,6 +204,46 @@ describe('buildDashboardSnapshot folder workspaces', () => {
     })
 
     expect(buildDashboardBucketCounts(mixedState, NOW)).toEqual(expected)
+  })
+
+  it('keeps done structured sessions visible when their tab exists only in unified tabs', () => {
+    const structuredState = state()
+    structuredState.tabsByWorktree = { [WORKSPACE_ID]: [] }
+    structuredState.unifiedTabsByWorktree = {
+      [WORKSPACE_ID]: [
+        {
+          id: TAB_ID,
+          entityId: 'session-1',
+          groupId: 'group-1',
+          worktreeId: WORKSPACE_ID,
+          contentType: 'agent-session',
+          label: 'Codex Chat',
+          customLabel: null,
+          color: null,
+          sortOrder: 0,
+          createdAt: NOW,
+          isPinned: false,
+          agentSessionAgent: 'codex'
+        } satisfies Tab
+      ]
+    }
+    structuredState.agentStatusByPaneKey = {
+      [PANE_KEY]: {
+        ...entry(),
+        state: 'done',
+        sessionBoundary: true
+      }
+    }
+
+    const snapshot = buildDashboardSnapshot(structuredState, NOW)
+    const expected = { attention: 0, working: 0, done: 0, idle: 0 }
+    for (const card of snapshot.cards) {
+      expected[card.bucket] += 1
+    }
+
+    expect(snapshot.cards).toHaveLength(1)
+    expect(snapshot.cards[0]).toMatchObject({ paneKey: PANE_KEY, bucket: 'done' })
+    expect(buildDashboardBucketCounts(structuredState, NOW)).toEqual(expected)
   })
 
   it('places folder-workspace agents in their real project group without git assumptions', () => {
