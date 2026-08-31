@@ -1,6 +1,7 @@
 import { win32 as pathWin32 } from 'node:path'
 import type { SFTPWrapper } from 'ssh2'
 import type { AgentHookInstallStatus } from '../../shared/agent-hook-types'
+import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-path'
 import { refreshManagedScriptIfPresent } from '../agent-hooks/managed-hook-script-refresh'
 import { getOrcaManagedCodexHomePath } from './codex-home-paths'
 import { getManagedScriptPath } from './codex-hook-definition'
@@ -34,6 +35,7 @@ export class CodexHookService {
 
   private readonly wslReconciliationGeneration = new Map<string, number>()
   private readonly wslInstallsInFlight = new Map<string, Promise<AgentHookInstallStatus | null>>()
+  private readonly launchPrepInFlight = new Map<string, Promise<AgentHookInstallStatus>>()
 
   private supersedeWslReconciliation(runtimeHomePath: string | null | undefined): number {
     if (!runtimeHomePath) {
@@ -164,12 +166,12 @@ export class CodexHookService {
       // so hooks/trust must install there rather than the shared mirror.
       return (
         (await this.installForRuntimeHomeSerialized(runtimeHomePath, target)) ??
-        (await this.install(runtimeHomePath ?? undefined))
+        (await this.installForLaunchPrep(runtimeHomePath ?? undefined))
       )
     }
     return (
       this.refreshRuntimeUserHooksForRuntimeHome(runtimeHomePath, target) ??
-      (await this.refreshRuntimeUserHooks(runtimeHomePath ?? undefined))
+      (await this.refreshRuntimeUserHooksForLaunchPrep(runtimeHomePath ?? undefined))
     )
   }
 
@@ -203,6 +205,50 @@ export class CodexHookService {
     return runExclusivelyForRuntimeAndSystemTrustConfig(runtimeHomePath, () =>
       this.installExclusively(runtimeHomePath)
     )
+  }
+
+  /**
+   * Launch prep runs on every local PTY spawn, and both lanes below serialize
+   * globally per Codex home, so activating a multi-pane worktree used to pay one
+   * full hook install per pane back to back (measured ~790ms for 7 panes, and a
+   * resumed Codex pane prepares twice). Spawns racing for the same home all want
+   * the same on-disk outcome, so they share one run.
+   *
+   * Invalidation: the shared promise is dropped the moment it settles, so the
+   * next launch re-reads hooks.json and the user's trust state. Never widen this
+   * into a time-based cache — the hooks setting, ~/.codex approvals and the
+   * managed script can all change between spawns, and only a fresh run sees them.
+   * The key is the runtime home, so per-account homes never share a run.
+   */
+  installForLaunchPrep(runtimeHomePath?: string): Promise<AgentHookInstallStatus> {
+    const homePath = runtimeHomePath ?? getOrcaManagedCodexHomePath()
+    return this.shareLaunchPrep('install', homePath, () => this.install(homePath))
+  }
+
+  refreshRuntimeUserHooksForLaunchPrep(runtimeHomePath?: string): Promise<AgentHookInstallStatus> {
+    const homePath = runtimeHomePath ?? getOrcaManagedCodexHomePath()
+    return this.shareLaunchPrep('refresh', homePath, () => this.refreshRuntimeUserHooks(homePath))
+  }
+
+  private shareLaunchPrep(
+    lane: 'install' | 'refresh',
+    runtimeHomePath: string,
+    start: () => Promise<AgentHookInstallStatus>
+  ): Promise<AgentHookInstallStatus> {
+    const key = `${lane}\0${normalizeRuntimePathForComparison(runtimeHomePath)}`
+    const active = this.launchPrepInFlight.get(key)
+    if (active) {
+      return active
+    }
+    const run = start()
+    this.launchPrepInFlight.set(key, run)
+    const clear = (): void => {
+      if (this.launchPrepInFlight.get(key) === run) {
+        this.launchPrepInFlight.delete(key)
+      }
+    }
+    void run.then(clear, clear)
+    return run
   }
 
   private installExclusively(runtimeHomePath: string): Promise<AgentHookInstallStatus> {
