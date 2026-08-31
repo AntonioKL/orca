@@ -50,7 +50,8 @@ export function useResourceUsageActions({
   setSessionVerdict: (
     id: string,
     verdict: 'live' | 'unverifiable' | 'refused',
-    reason?: string
+    reason?: string,
+    incarnationId?: string
   ) => void
   sessions: readonly DaemonSession[]
   resourceSessionBindings: ResourceSessionBindingInputs
@@ -158,7 +159,12 @@ export function useResourceUsageActions({
             if (result?.verdict === 'exited') {
               removeSession(session.sessionId)
             } else if (result) {
-              setSessionVerdict(session.sessionId, result.verdict, result.reason)
+              setSessionVerdict(
+                session.sessionId,
+                result.verdict,
+                result.reason,
+                result.incarnationId
+              )
             }
           } catch {
             /* already dead */
@@ -196,7 +202,7 @@ export function useResourceUsageActions({
     }
     for (const result of results) {
       if (result.verdict !== 'exited') {
-        setSessionVerdict(result.id, result.verdict, result.reason)
+        setSessionVerdict(result.id, result.verdict, result.reason, result.incarnationId)
       }
     }
     await refreshSessions()
@@ -228,7 +234,7 @@ export function useResourceUsageActions({
       if (result?.verdict === 'exited') {
         removeSession(target.sessionId)
       } else if (result) {
-        setSessionVerdict(target.sessionId, result.verdict, result.reason)
+        setSessionVerdict(target.sessionId, result.verdict, result.reason, result.incarnationId)
       }
     } catch {
       /* already dead — fall through */

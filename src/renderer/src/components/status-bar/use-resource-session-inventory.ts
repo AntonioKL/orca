@@ -19,7 +19,8 @@ type ResourceSessionInventory = {
   setSessionVerdict: (
     id: string,
     verdict: 'live' | 'unverifiable' | 'refused',
-    reason?: string
+    reason?: string,
+    incarnationId?: string
   ) => void
 }
 
@@ -38,6 +39,7 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
   const verdictsRef = useRef(
     new Map<string, { verdict: 'live' | 'unverifiable' | 'refused'; reason?: string }>()
   )
+  const verdictKey = (id: string, incarnationId?: string): string => `${id}\0${incarnationId ?? ''}`
   const [storedState, setStoredState] = useState<ResourceSessionInventoryState>(() => ({
     ready,
     sessionInventory: EMPTY_DAEMON_SESSION_INVENTORY,
@@ -74,7 +76,7 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
       const liveSessions = sessions
         .filter(({ id }) => (currentRemovedAtRevision.get(id) ?? 0) <= lifecycleRevision)
         .map((session) => {
-          const verdict = verdictsRef.current.get(session.id)
+          const verdict = verdictsRef.current.get(verdictKey(session.id, session.incarnationId))
           return verdict
             ? { ...session, killVerdict: verdict.verdict, killReason: verdict.reason }
             : session
@@ -87,9 +89,10 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
         }
       }
       knownSessionIdsRef.current = new Set(liveSessions.map(({ id }) => id))
-      for (const id of verdictsRef.current.keys()) {
+      for (const key of verdictsRef.current.keys()) {
+        const id = key.split('\0', 1)[0]
         if (!knownSessionIdsRef.current.has(id)) {
-          verdictsRef.current.delete(id)
+          verdictsRef.current.delete(key)
         }
       }
       setStoredState({
@@ -114,7 +117,11 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
     const lifecycleRevision = ++lifecycleRevisionRef.current
     removedAtRevisionRef.current.set(sessionId, lifecycleRevision)
     knownSessionIdsRef.current.delete(sessionId)
-    verdictsRef.current.delete(sessionId)
+    for (const key of verdictsRef.current.keys()) {
+      if (key.startsWith(`${sessionId}\0`)) {
+        verdictsRef.current.delete(key)
+      }
+    }
     setStoredState((current) => ({
       ...current,
       sessionInventory: removeSessionFromInventory(current.sessionInventory, sessionId)
@@ -135,8 +142,16 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
   }, [])
 
   const setSessionVerdict = useCallback(
-    (id: string, verdict: 'live' | 'unverifiable' | 'refused', reason?: string): void => {
-      verdictsRef.current.set(id, { verdict, ...(reason ? { reason } : {}) })
+    (
+      id: string,
+      verdict: 'live' | 'unverifiable' | 'refused',
+      reason?: string,
+      incarnationId?: string
+    ): void => {
+      verdictsRef.current.set(verdictKey(id, incarnationId), {
+        verdict,
+        ...(reason ? { reason } : {})
+      })
       setStoredState((current) => ({
         ...current,
         sessionInventory: {
