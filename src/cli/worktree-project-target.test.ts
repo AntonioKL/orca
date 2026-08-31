@@ -103,4 +103,16 @@ describe('resolveProjectCreateTarget host selection', () => {
       expect.objectContaining({ repoSelector: 'id:repo-only' })
     )
   })
+
+  it('neutralises control characters in setup metadata before printing', async () => {
+    // Paths are persisted metadata and may contain newlines or ANSI; this message goes straight
+    // to a terminal, so an unescaped value could forge a line.
+    const client = clientReturning([
+      readySetup({ id: 'setup-a', repoId: 'repo-a', path: '/repo\n  forged  (fake setup)' }),
+      readySetup({ id: 'setup-b', repoId: 'repo-b', path: '/other' })
+    ])
+    const flags = new Map<string, string | boolean>([['project', 'github:stablyai/orca']])
+
+    await expect(resolveProjectCreateTarget(flags, client)).rejects.toThrow(/\/repo\?  forged/)
+  })
 })

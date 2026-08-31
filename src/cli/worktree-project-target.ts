@@ -89,7 +89,9 @@ function pickSingleSetup(
   }
   // Why: list the id alongside the path — the remedy we name is `--project-host-setup <id>`, so an
   // error that prints only paths asks for something it never showed.
-  const listed = matches.map((candidate) => `  ${candidate.id}  ${candidate.path}`).join('\n')
+  const listed = matches
+    .map((candidate) => `  ${terminalSafe(candidate.id)}  ${terminalSafe(candidate.path)}`)
+    .join('\n')
   const where = host ? ` on ${host.id}` : ''
   throw new RuntimeClientError(
     'invalid_argument',
@@ -137,4 +139,12 @@ export async function resolveProjectCreateTarget(
     repoSelector: `id:${setup.repoId}`,
     setup
   }
+}
+
+// Why: setup paths and ids come from persisted metadata and may legally contain newlines or
+// control characters. This message is printed straight to a terminal, so an unescaped value could
+// forge a line or emit ANSI. Keep it readable rather than fully quoting.
+function terminalSafe(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\u0000-\u001f\u007f]/g, '?')
 }
