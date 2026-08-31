@@ -104,6 +104,15 @@ describe('automation-list-last-run', () => {
     expect(getToneForAutomationRunStatus('completed')).toBe('succeeded')
     expect(getToneForAutomationRunStatus('dispatched')).toBe('running')
     expect(getToneForAutomationRunStatus('skipped_precheck')).toBe('skipped')
+    expect(getToneForAutomationRunStatus('dispatch_failed', 'unverifiable')).toBe('unknown')
+  })
+
+  it('renders additive unverifiable metadata without changing the legacy status', () => {
+    const snapshot = getLocalAutomationLastRunSnapshot(
+      makeAutomation(),
+      makeRun({ status: 'dispatch_failed', observationVerdict: 'unverifiable' })
+    )
+    expect(snapshot).toMatchObject({ tone: 'unknown', statusLabel: 'Unverifiable' })
   })
 
   it('prefers the latest run over lastRunAt-only metadata', () => {

@@ -15,6 +15,7 @@ export type HeadlessAutomationDispatchLaunch = {
   terminalPtyId?: string | null
   completion?: Promise<{
     status: 'completed' | 'dispatch_failed'
+    observationVerdict?: 'unverifiable' | null
     outputSnapshot?: AutomationRunOutputSnapshot | null
     error?: string | null
   }>

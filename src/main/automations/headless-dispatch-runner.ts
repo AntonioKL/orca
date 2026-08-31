@@ -11,6 +11,7 @@ import {
 import type { HeadlessAutomationDispatcher } from './headless-dispatch'
 import type { AutomationRunTargetResult } from './run-target-resolution'
 import type { AutomationRunWriter } from './automation-run-writer'
+import { observeHeadlessAutomationCompletion } from './headless-run-completion'
 
 export type HeadlessAutomationDispatchContext = {
   automation: Automation
@@ -63,25 +64,14 @@ export async function runHeadlessAutomationDispatch(
       ctx.watchRun(updated)
       return updated
     }
-    void launch.completion
-      .then((completion) =>
-        ctx.markDispatchResult({
-          runId: run.id,
-          status: completion.status,
-          ...launchRunTarget,
-          precheckResult,
-          outputSnapshot: completion.outputSnapshot ?? null,
-          error: completion.error ?? null
-        })
-      )
-      .catch((error) =>
-        ctx.markDispatchResult({
-          runId: run.id,
-          status: 'dispatch_failed',
-          ...launchRunTarget,
-          error: describeDispatchError(error)
-        })
-      )
+    observeHeadlessAutomationCompletion({
+      automation,
+      run,
+      launch,
+      target: launchRunTarget,
+      precheckResult,
+      markDispatchResult: ctx.markDispatchResult
+    })
     return updated
   } catch (error) {
     return runs.updateRun({

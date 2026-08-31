@@ -52,7 +52,13 @@ export function getAutomationRunLastRunAt(run: AutomationRun): number {
   return run.dispatchedAt ?? run.startedAt ?? run.createdAt
 }
 
-export function getToneForAutomationRunStatus(status: AutomationRunStatus): AutomationLastRunTone {
+export function getToneForAutomationRunStatus(
+  status: AutomationRunStatus,
+  observationVerdict?: AutomationRun['observationVerdict']
+): AutomationLastRunTone {
+  if (observationVerdict === 'unverifiable') {
+    return 'unknown'
+  }
   if (status === 'dispatch_failed') {
     return 'failed'
   }
@@ -95,8 +101,8 @@ export function getLocalAutomationLastRunSnapshot(
   if (lastRun) {
     return {
       at: getAutomationRunLastRunAt(lastRun),
-      tone: getToneForAutomationRunStatus(lastRun.status),
-      statusLabel: getAutomationRunStatusLabel(lastRun.status)
+      tone: getToneForAutomationRunStatus(lastRun.status, lastRun.observationVerdict),
+      statusLabel: getAutomationRunStatusLabel(lastRun.status, lastRun.observationVerdict)
     }
   }
   if (automation.lastRunAt) {

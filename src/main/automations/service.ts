@@ -1,6 +1,7 @@
 import type { WebContents } from 'electron'
 import type { Store } from '../persistence'
 import {
+  AUTOMATION_UNVERIFIABLE_WORKSPACE_ERROR,
   isFinalAutomationRunStatus,
   type Automation,
   type AutomationDispatchRequest,
@@ -30,6 +31,10 @@ import type {
   AutomationsChangedPayload,
   PublishAutomationsChanged
 } from '../../shared/runtime-client-events'
+import {
+  findPotentiallyLiveAutomationRun,
+  pinUnverifiableAutomationRun
+} from './potentially-live-run'
 
 const DEFAULT_TICK_MS = 60 * 1000
 
@@ -297,6 +302,20 @@ export class AutomationService {
     run: AutomationRun,
     target: AutomationRunTargetResult
   ): Promise<AutomationRun> {
+    const potentiallyLiveRun = findPotentiallyLiveAutomationRun(
+      automation,
+      run.id,
+      this.store.listAutomationRuns()
+    )
+    if (potentiallyLiveRun) {
+      pinUnverifiableAutomationRun(this.store, potentiallyLiveRun)
+      return this.store.updateAutomationRun({
+        runId: run.id,
+        status: 'skipped_unavailable',
+        workspaceId: automation.workspaceId,
+        error: AUTOMATION_UNVERIFIABLE_WORKSPACE_ERROR
+      })
+    }
     if (!target.ok) {
       return this.runs.updateRun({
         runId: run.id,

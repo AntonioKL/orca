@@ -169,6 +169,27 @@ describe('canRerunAutomationRun', () => {
     }
   )
 
+  it('hides rerun while the original run is unverifiable', () => {
+    expect(
+      canRerunAutomationRun({
+        automation: makeAutomation(),
+        run: makeRun({ status: 'dispatch_failed', observationVerdict: 'unverifiable' })
+      })
+    ).toBe(false)
+  })
+
+  it('hides rerun for a host-blocked retry row', () => {
+    expect(
+      canRerunAutomationRun({
+        automation: makeAutomation(),
+        run: makeRun({
+          status: 'skipped_unavailable',
+          error: 'A previous automation run may still be live in this workspace.'
+        })
+      })
+    ).toBe(false)
+  })
+
   it.each([
     'pending',
     'dispatching',

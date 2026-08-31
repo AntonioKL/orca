@@ -216,8 +216,10 @@ export function AutomationRunHistory({
                       )}
                 </div>
                 <div className="flex justify-start">
-                  <Badge variant={getAutomationRunStatusVariant(run.status)}>
-                    {getAutomationRunStatusLabel(run.status)}
+                  <Badge
+                    variant={getAutomationRunStatusVariant(run.status, run.observationVerdict)}
+                  >
+                    {getAutomationRunStatusLabel(run.status, run.observationVerdict)}
                   </Badge>
                 </div>
               </button>

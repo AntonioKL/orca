@@ -173,6 +173,9 @@ export function updateAutomationRun(
   const updated: AutomationRun = {
     ...current,
     status: result.status,
+    observationVerdict: Object.hasOwn(result, 'observationVerdict')
+      ? (result.observationVerdict ?? null)
+      : (current.observationVerdict ?? null),
     workspaceId,
     workspaceDisplayName:
       workspaceDisplayName ??
@@ -196,7 +199,8 @@ export function updateAutomationRun(
     usage: Object.hasOwn(result, 'usage') ? (result.usage ?? null) : (current.usage ?? null),
     error: result.error ?? null,
     startedAt: current.startedAt ?? now,
-    dispatchedAt: result.status === 'dispatched' ? now : current.dispatchedAt
+    dispatchedAt:
+      result.status === 'dispatched' ? (current.dispatchedAt ?? now) : current.dispatchedAt
   }
   // Replaced, not patched in place: the list projection caches on array identity.
   operations.state.automationRuns = operations.state.automationRuns.map((run) =>

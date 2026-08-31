@@ -1,5 +1,6 @@
 import { AutomationService } from '../automations/service'
 import { createHeadlessAutomationOutputSnapshotBuffer } from '../automations/headless-dispatch'
+import { waitForHeadlessAutomationCompletion } from '../automations/headless-completion-wait'
 import { buildHeadlessAutomationWorktreeCreateArgs } from '../automations/headless-workspace-create'
 import { createRuntimeAutomationRunTerminalObserver } from '../automations/runtime-terminal-run-observer'
 import { mainProcessState as state } from './main-process-state'
@@ -62,7 +63,13 @@ export function initializeMainProcessAutomations(): AutomationService {
             workspaceDisplayName = worktree.displayName ?? null
           }
           const completion = (async () => {
-            const wait = await runtime.waitForTerminal(terminalHandle, { condition: 'tui-idle' })
+            const wait = await waitForHeadlessAutomationCompletion(runtime, terminalHandle)
+            if (wait.status === 'exited') {
+              return {
+                status: 'dispatch_failed' as const,
+                error: 'Automation terminal exited before the agent reported completion.'
+              }
+            }
             const read = await runtime.readTerminal(terminalHandle, {
               limit: terminalSnapshotLimit
             })
@@ -77,10 +84,9 @@ export function initializeMainProcessAutomations(): AutomationService {
             }
             return {
               status: 'dispatch_failed' as const,
+              observationVerdict: 'unverifiable' as const,
               outputSnapshot: snapshotBuffer.snapshot(),
-              error: wait.blockedReason
-                ? `Automation agent is blocked: ${wait.blockedReason}.`
-                : 'Automation agent did not report completion.'
+              error: 'Orca never saw this run report completion, so its result is unknown.'
             }
           })()
           return {

@@ -6,6 +6,9 @@ export type AutomationWorkspaceMode = 'existing' | 'new_per_run'
 export type AutomationExecutionTargetType = 'local' | 'ssh'
 export type AutomationSchedulerOwner = 'local_host_service' | 'ssh_bridge' | 'remote_host_service'
 export type AutomationMissedRunPolicy = 'run_once_within_grace'
+export type AutomationRunObservationVerdict = 'unverifiable'
+export const AUTOMATION_UNVERIFIABLE_WORKSPACE_ERROR =
+  'A previous automation run may still be live in this workspace.'
 export type AutomationRunStatus =
   | 'pending'
   | 'dispatching'
@@ -140,6 +143,8 @@ export type AutomationRun = {
   title: string
   scheduledFor: number
   status: AutomationRunStatus
+  /** Additive refinement for legacy `dispatch_failed`; old builds safely ignore it. */
+  observationVerdict?: AutomationRunObservationVerdict | null
   trigger: AutomationRunTrigger
   workspaceId: string | null
   /** Why: run history must remain understandable after the backing workspace
@@ -232,6 +237,7 @@ export type AutomationDispatchRequest = {
 export type AutomationDispatchResult = {
   runId: string
   status: AutomationRunStatus
+  observationVerdict?: AutomationRunObservationVerdict | null
   workspaceId?: string | null
   workspaceDisplayName?: string | null
   terminalSessionId?: string | null

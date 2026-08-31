@@ -11,6 +11,8 @@ type AutomationRunPageFrameProps = {
   statusVariant: React.ComponentProps<typeof Badge>['variant']
   detail?: string | null
   actions?: React.ReactNode
+  /** Pinned under the header so the reason a run ended cannot scroll out of view. */
+  notice?: React.ReactNode
   children: React.ReactNode
   onBack: () => void
 }
@@ -22,6 +24,7 @@ export function AutomationRunPageFrame({
   statusVariant,
   detail,
   actions,
+  notice,
   children,
   onBack
 }: AutomationRunPageFrameProps): React.JSX.Element {
@@ -79,6 +82,7 @@ export function AutomationRunPageFrame({
           {actions}
         </div>
       </div>
+      {notice}
       <div className="scrollbar-sleek min-h-0 flex-1 overflow-auto p-4">{children}</div>
     </div>
   )

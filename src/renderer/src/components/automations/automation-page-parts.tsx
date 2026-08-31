@@ -54,8 +54,12 @@ export function formatAutomationDateTimeWithRelative(
 }
 
 export function getAutomationRunStatusVariant(
-  status: AutomationRun['status']
+  status: AutomationRun['status'],
+  observationVerdict?: AutomationRun['observationVerdict']
 ): React.ComponentProps<typeof Badge>['variant'] {
+  if (observationVerdict === 'unverifiable') {
+    return 'outline'
+  }
   if (status === 'dispatched' || status === 'completed') {
     return 'secondary'
   }
@@ -68,7 +72,13 @@ export function getAutomationRunStatusVariant(
   return 'dot'
 }
 
-export function getAutomationRunStatusLabel(status: AutomationRun['status']): string {
+export function getAutomationRunStatusLabel(
+  status: AutomationRun['status'],
+  observationVerdict?: AutomationRun['observationVerdict']
+): string {
+  if (observationVerdict === 'unverifiable') {
+    return 'Unverifiable'
+  }
   switch (status) {
     case 'pending':
       return 'Queued'

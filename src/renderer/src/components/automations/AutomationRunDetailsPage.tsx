@@ -6,7 +6,8 @@ import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import type { Automation, AutomationRun } from '../../../../shared/automations-types'
 import { AutomationRunPageFrame } from './AutomationRunPageFrame'
-import { getAutomationRunContent } from './automation-run-content'
+import { getAutomationRunContent, getAutomationRunNotice } from './automation-run-content'
+import { AutomationRunNoticeBand } from './AutomationRunNoticeBand'
 import type { AutomationRunViewState } from './automation-run-view-state'
 import type { AutomationRunWorkspaceDisplay } from './automation-run-workspace-display'
 import {
@@ -38,6 +39,7 @@ export function AutomationRunDetailsPage({
   onOpenWorkspace: () => void
   onBack: () => void
 }): React.JSX.Element {
+  const notice = getAutomationRunNotice(run)
   return (
     <section className="flex min-h-0 flex-1 p-5">
       <AutomationRunPageFrame
@@ -56,8 +58,9 @@ export function AutomationRunDetailsPage({
               )
             : null
         }
-        statusLabel={getAutomationRunStatusLabel(run.status)}
-        statusVariant={getAutomationRunStatusVariant(run.status)}
+        statusLabel={getAutomationRunStatusLabel(run.status, run.observationVerdict)}
+        statusVariant={getAutomationRunStatusVariant(run.status, run.observationVerdict)}
+        notice={notice ? <AutomationRunNoticeBand notice={notice} /> : null}
         actions={
           <>
             {canRerun && automation ? (

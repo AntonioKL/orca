@@ -132,6 +132,131 @@ describe('AutomationService', () => {
     )
   })
 
+  it('blocks a manual run when an existing workspace run is unverifiable', async () => {
+    vi.setSystemTime(new Date('2026-05-13T08:00:00Z'))
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    const automation = store.createAutomation({
+      name: 'Manual check',
+      prompt: 'Check the repo',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2026-05-14T00:00:00Z').getTime()
+    })
+    const previousRun = store.createAutomationRun(automation, Date.now() - 1_000, 'manual')
+    store.updateAutomationRun({
+      runId: previousRun.id,
+      status: 'dispatch_failed',
+      workspaceId: 'wt1',
+      error: 'terminal_handle_stale'
+    })
+    const send = vi.fn()
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    service.setWebContents({ isDestroyed: () => false, send } as never)
+    service.setRendererReady()
+
+    const run = await service.runNow(automation.id)
+
+    expect(run).toMatchObject({
+      status: 'skipped_unavailable',
+      error: 'A previous automation run may still be live in this workspace.'
+    })
+    expect(
+      store.listAutomationRuns(automation.id).find((entry) => entry.id === previousRun.id)
+    ).toMatchObject({
+      status: 'dispatched',
+      observationVerdict: 'unverifiable',
+      error: 'Orca stopped watching this run before it reported completion.'
+    })
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('blocks a scheduled run when an existing workspace run is unverifiable', async () => {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    const beforeRunAt = new Date(2026, 4, 13, 8, 59).getTime()
+    const scheduledRunAt = new Date(2026, 4, 13, 9, 0).getTime()
+    vi.setSystemTime(beforeRunAt)
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    const automation = store.createAutomation({
+      name: 'Scheduled check',
+      prompt: 'Check the repo',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone,
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date(2026, 4, 12, 0, 0).getTime()
+    })
+    const previousRun = store.createAutomationRun(automation, scheduledRunAt - 1_000, 'manual')
+    store.updateAutomationRun({
+      runId: previousRun.id,
+      status: 'dispatch_failed',
+      observationVerdict: 'unverifiable',
+      workspaceId: 'wt1',
+      error: 'Orca stopped watching this run before it reported completion.'
+    })
+    const headlessDispatcher = vi.fn()
+    const service = new AutomationService(store, {
+      tickMs: 60_000,
+      headlessDispatcher
+    })
+
+    vi.setSystemTime(new Date(2026, 4, 13, 9, 1).getTime())
+    service.start()
+    await vi.waitFor(() =>
+      expect(store.listAutomationRuns(automation.id)[0]).toMatchObject({
+        status: 'skipped_unavailable',
+        error: 'A previous automation run may still be live in this workspace.'
+      })
+    )
+    service.stop()
+    expect(
+      store.listAutomationRuns(automation.id).find((entry) => entry.id === previousRun.id)
+    ).toMatchObject({ status: 'dispatched', observationVerdict: 'unverifiable' })
+    expect(headlessDispatcher).not.toHaveBeenCalled()
+  })
+
+  it('blocks another automation targeting the same workspace', async () => {
+    vi.setSystemTime(new Date('2026-05-13T08:00:00Z'))
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    const base = {
+      prompt: 'Check the repo',
+      agentId: 'claude' as const,
+      projectId: 'r1',
+      workspaceMode: 'existing' as const,
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2026-05-14T00:00:00Z').getTime()
+    }
+    const first = store.createAutomation({ ...base, name: 'First check' })
+    const second = store.createAutomation({ ...base, name: 'Second check' })
+    const previousRun = store.createAutomationRun(first, Date.now() - 1_000, 'manual')
+    store.updateAutomationRun({
+      runId: previousRun.id,
+      status: 'dispatched',
+      observationVerdict: 'unverifiable',
+      workspaceId: 'wt1',
+      error: 'Orca stopped watching this run before it reported completion.'
+    })
+    const send = vi.fn()
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    service.setWebContents({ isDestroyed: () => false, send } as never)
+    service.setRendererReady()
+
+    const run = await service.runNow(second.id)
+
+    expect(run.status).toBe('skipped_unavailable')
+    expect(send).not.toHaveBeenCalled()
+  })
+
   it('skips dispatch when the selected project host setup is gone', async () => {
     vi.setSystemTime(new Date('2026-05-13T08:00:00Z'))
     const store = await createStore()
@@ -363,6 +488,47 @@ describe('AutomationService', () => {
         outputSnapshot: expect.objectContaining({ content: 'Done.' })
       })
     )
+  })
+
+  it('records a lost completion watch with an additive unverifiable verdict', async () => {
+    vi.setSystemTime(new Date('2026-05-13T08:00:00Z'))
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    const automation = store.createAutomation({
+      name: 'Nightly triage',
+      prompt: 'Triage',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'new_per_run',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2026-05-14T00:00:00Z').getTime()
+    })
+    const service = new AutomationService(store, {
+      tickMs: 60_000,
+      headlessDispatcher: vi.fn().mockResolvedValue({
+        workspaceId: 'wt-1',
+        terminalSessionId: 'tab-1',
+        terminalPaneKey: 'tab-1:11111111-1111-4111-8111-111111111111',
+        terminalPtyId: 'pty-1',
+        completion: Promise.reject(new Error('terminal_handle_stale'))
+      })
+    })
+
+    await service.runNow(automation.id)
+
+    await vi.waitFor(() =>
+      expect(store.listAutomationRuns(automation.id)[0]).toMatchObject({
+        status: 'dispatch_failed',
+        observationVerdict: 'unverifiable',
+        error: 'Orca stopped watching this run before it reported completion.'
+      })
+    )
+    // Why: the transport token is log material, never user copy.
+    expect(store.listAutomationRuns(automation.id)[0]!.error).not.toContain('terminal_handle_stale')
+    expect(consoleError).toHaveBeenCalled()
+    consoleError.mockRestore()
   })
 
   it('dispatches due scheduled automations headlessly', async () => {
