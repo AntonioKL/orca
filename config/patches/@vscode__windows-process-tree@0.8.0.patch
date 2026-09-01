@@ -27,44 +27,235 @@ index 855bd4b86f0a3c18c7594212c0e42b6e35bc4001..33774e7ae296f0de39dd94156673c9e7
                  "/guard:cf",
                  "/sdl",
 diff --git a/src/process.cc b/src/process.cc
-index 3eea92077c4d1d433119361d5c432881859131e9..18c406c4aaa7b73eb89ebedbfab6254fcc7b511a 100644
+index 3eea92077c4d1d433119361d5c432881859131e9..738775f6fcdfb676054386fe34c0380327ed1863 100644
 --- a/src/process.cc
 +++ b/src/process.cc
-@@ -37,7 +37,7 @@ uint32_t GetRawProcessList(std::vector<ProcessInfo>& process_info,
-         process_info.push_back(std::move(pinfo));
-         process_count++;
-       }
+@@ -1,108 +1,112 @@
+-/*---------------------------------------------------------------------------------------------
+- *  Copyright (c) Microsoft Corporation. All rights reserved.
+- *  Licensed under the MIT License. See License.txt in the project root for license information.
+- *--------------------------------------------------------------------------------------------*/
+-
+-#include "process.h"
+-#include "process_commandline.h"
+-
+-#include <tlhelp32.h>
+-#include <psapi.h>
+-#include <limits>
+-
+-uint32_t GetRawProcessList(std::vector<ProcessInfo>& process_info,
+-                           DWORD process_data_flags) {
+-  // Fetch the PID and PPIDs
+-  PROCESSENTRY32 process_entry = { 0 };
+-  DWORD parent_pid = 0;
+-  uint32_t process_count = 0;
+-  HANDLE snapshot_handle = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+-  process_entry.dwSize = sizeof(PROCESSENTRY32);
+-  if (Process32First(snapshot_handle, &process_entry)) {
+-    do {
+-      if (process_entry.th32ProcessID != 0) {
+-        ProcessInfo pinfo;
+-        pinfo.pid = process_entry.th32ProcessID;
+-        pinfo.ppid = process_entry.th32ParentProcessID;
+-
+-        if (MEMORY & process_data_flags) {
+-          GetProcessMemoryUsage(pinfo);
+-        }
+-
+-        if (COMMANDLINE & process_data_flags) {
+-          GetProcessCommandLine(pinfo);
+-        }
+-
+-        strcpy(pinfo.name, process_entry.szExeFile);
+-        process_info.push_back(std::move(pinfo));
+-        process_count++;
+-      }
 -    } while (process_count < 1024 && Process32Next(snapshot_handle, &process_entry));
-+    } while (Process32Next(snapshot_handle, &process_entry));
-   }
- 
-   CloseHandle(snapshot_handle);
-@@ -49,7 +49,9 @@ void GetProcessMemoryUsage(ProcessInfo& process_info) {
-   HANDLE hProcess;
-   PROCESS_MEMORY_COUNTERS pmc;
- 
+-  }
+-
+-  CloseHandle(snapshot_handle);
+-  return process_count;
+-}
+-
+-void GetProcessMemoryUsage(ProcessInfo& process_info) {
+-  DWORD pid = process_info.pid;
+-  HANDLE hProcess;
+-  PROCESS_MEMORY_COUNTERS pmc;
+-
 -  hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
+-
+-  if (hProcess == NULL) {
+-    return;
+-  }
+-
+-  if (GetProcessMemoryInfo(hProcess, &pmc, sizeof(pmc))) {
+-    process_info.memory = (DWORD)pmc.WorkingSetSize;
+-  }
+-
+-  CloseHandle(hProcess);
+-}
+-
+-// Per documentation, it is not recommended to add or subtract values from the FILETIME
+-// structure, or to cast it to ULARGE_INTEGER as this can cause alignment faults on 64-bit Windows.
+-// Copy the high and low part to a ULARGE_INTEGER and peform arithmetic on that instead.
+-// See https://msdn.microsoft.com/en-us/library/windows/desktop/ms724284(v=vs.85).aspx
+-ULONGLONG GetTotalTime(const FILETIME* kernelTime, const FILETIME* userTime) {
+-  ULARGE_INTEGER kt, ut;
+-  kt.LowPart = (*kernelTime).dwLowDateTime;
+-  kt.HighPart = (*kernelTime).dwHighDateTime;
+-
+-  ut.LowPart = (*userTime).dwLowDateTime;
+-  ut.HighPart = (*userTime).dwHighDateTime;
+-
+-  return kt.QuadPart + ut.QuadPart;
+-}
+-
+-void GetCpuUsage(Cpu& cpu_info, bool first_pass) {
+-  DWORD pid = cpu_info.pid;
+-  HANDLE hProcess;
+-
+-  hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
+-
+-  if (hProcess == NULL) {
+-    return;
+-  }
+-
+-  FILETIME creationTime, exitTime, kernelTime, userTime;
+-  FILETIME sysIdleTime, sysKernelTime, sysUserTime;
+-  if (GetProcessTimes(hProcess, &creationTime, &exitTime, &kernelTime, &userTime)
+-    && GetSystemTimes(&sysIdleTime, &sysKernelTime, &sysUserTime)) {
+-    if (first_pass) {
+-      cpu_info.initialProcRunTime = GetTotalTime(&kernelTime, &userTime);
+-      cpu_info.initialSystemTime = GetTotalTime(&sysKernelTime, &sysUserTime);
+-    } else {
+-      ULONGLONG endProcTime = GetTotalTime(&kernelTime, &userTime);
+-      ULONGLONG endSysTime = GetTotalTime(&sysKernelTime, &sysUserTime);
+-
+-      cpu_info.cpu = 100.0 * (endProcTime - cpu_info.initialProcRunTime) / (endSysTime - cpu_info.initialSystemTime);
+-    }
+-  } else {
+-    cpu_info.cpu = std::numeric_limits<double>::quiet_NaN();
+-  }
+-
+-  CloseHandle(hProcess);
++/*---------------------------------------------------------------------------------------------
++ *  Copyright (c) Microsoft Corporation. All rights reserved.
++ *  Licensed under the MIT License. See License.txt in the project root for license information.
++ *--------------------------------------------------------------------------------------------*/
++
++#include "process.h"
++#include "process_commandline.h"
++
++#include <tlhelp32.h>
++#include <psapi.h>
++#include <limits>
++
++uint32_t GetRawProcessList(std::vector<ProcessInfo>& process_info,
++                           DWORD process_data_flags) {
++  // Fetch the PID and PPIDs
++  PROCESSENTRY32 process_entry = { 0 };
++  DWORD parent_pid = 0;
++  uint32_t process_count = 0;
++  HANDLE snapshot_handle = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
++  process_entry.dwSize = sizeof(PROCESSENTRY32);
++  if (Process32First(snapshot_handle, &process_entry)) {
++    do {
++      if (process_entry.th32ProcessID != 0) {
++        // Value-initialize: `memory` is otherwise stack garbage when the flag is unset.
++        ProcessInfo pinfo{};
++        pinfo.pid = process_entry.th32ProcessID;
++        pinfo.ppid = process_entry.th32ParentProcessID;
++
++        if (MEMORY & process_data_flags) {
++          GetProcessMemoryUsage(pinfo);
++        }
++
++        if (COMMANDLINE & process_data_flags) {
++          GetProcessCommandLine(pinfo);
++        }
++
++        strcpy(pinfo.name, process_entry.szExeFile);
++        process_info.push_back(std::move(pinfo));
++        process_count++;
++      }
++    } while (Process32Next(snapshot_handle, &process_entry));
++  }
++
++  CloseHandle(snapshot_handle);
++  return process_count;
++}
++
++void GetProcessMemoryUsage(ProcessInfo& process_info) {
++  DWORD pid = process_info.pid;
++  HANDLE hProcess;
++  PROCESS_MEMORY_COUNTERS pmc;
++
 +  // PROCESS_VM_READ is never used here -- GetProcessMemoryInfo reads counters the
 +  // kernel keeps, not the address space -- and acquiring it is what EDR scores.
 +  hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
- 
-   if (hProcess == NULL) {
-     return;
-@@ -81,7 +83,8 @@ void GetCpuUsage(Cpu& cpu_info, bool first_pass) {
-   DWORD pid = cpu_info.pid;
-   HANDLE hProcess;
- 
--  hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
++
++  if (hProcess == NULL) {
++    return;
++  }
++
++  if (GetProcessMemoryInfo(hProcess, &pmc, sizeof(pmc))) {
++    process_info.memory = (DWORD)pmc.WorkingSetSize;
++  }
++
++  CloseHandle(hProcess);
++}
++
++// Per documentation, it is not recommended to add or subtract values from the FILETIME
++// structure, or to cast it to ULARGE_INTEGER as this can cause alignment faults on 64-bit Windows.
++// Copy the high and low part to a ULARGE_INTEGER and peform arithmetic on that instead.
++// See https://msdn.microsoft.com/en-us/library/windows/desktop/ms724284(v=vs.85).aspx
++ULONGLONG GetTotalTime(const FILETIME* kernelTime, const FILETIME* userTime) {
++  ULARGE_INTEGER kt, ut;
++  kt.LowPart = (*kernelTime).dwLowDateTime;
++  kt.HighPart = (*kernelTime).dwHighDateTime;
++
++  ut.LowPart = (*userTime).dwLowDateTime;
++  ut.HighPart = (*userTime).dwHighDateTime;
++
++  return kt.QuadPart + ut.QuadPart;
++}
++
++void GetCpuUsage(Cpu& cpu_info, bool first_pass) {
++  DWORD pid = cpu_info.pid;
++  HANDLE hProcess;
++
 +  // GetProcessTimes needs no more than PROCESS_QUERY_LIMITED_INFORMATION.
 +  hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
- 
-   if (hProcess == NULL) {
-     return;
++
++  if (hProcess == NULL) {
++    return;
++  }
++
++  FILETIME creationTime, exitTime, kernelTime, userTime;
++  FILETIME sysIdleTime, sysKernelTime, sysUserTime;
++  if (GetProcessTimes(hProcess, &creationTime, &exitTime, &kernelTime, &userTime)
++    && GetSystemTimes(&sysIdleTime, &sysKernelTime, &sysUserTime)) {
++    if (first_pass) {
++      cpu_info.initialProcRunTime = GetTotalTime(&kernelTime, &userTime);
++      cpu_info.initialSystemTime = GetTotalTime(&sysKernelTime, &sysUserTime);
++    } else {
++      ULONGLONG endProcTime = GetTotalTime(&kernelTime, &userTime);
++      ULONGLONG endSysTime = GetTotalTime(&sysKernelTime, &sysUserTime);
++
++      cpu_info.cpu = 100.0 * (endProcTime - cpu_info.initialProcRunTime) / (endSysTime - cpu_info.initialSystemTime);
++    }
++  } else {
++    cpu_info.cpu = std::numeric_limits<double>::quiet_NaN();
++  }
++
++  CloseHandle(hProcess);
+ }
+\ No newline at end of file
 diff --git a/src/process_commandline.cc b/src/process_commandline.cc
-index ea822b120e8038a4803e34647042f08f4aaf5ca1..5a616a6b9a88208e11df71fd779767b4b365b48c 100644
+index ea822b120e8038a4803e34647042f08f4aaf5ca1..25907c0bf542bed6c72b1b462b19bcf3210c3cfd 100644
 --- a/src/process_commandline.cc
 +++ b/src/process_commandline.cc
-@@ -1,67 +1,175 @@
+@@ -1,67 +1,125 @@
 -/*---------------------------------------------------------------------------------------------
 - *  Copyright (c) Microsoft Corporation. All rights reserved.
 - *  Licensed under the MIT License. See License.txt in the project root for license information.
@@ -146,17 +337,27 @@ index ea822b120e8038a4803e34647042f08f4aaf5ca1..5a616a6b9a88208e11df71fd779767b4
 +namespace {
 +
 +// Windows 8.1 and later hand back a process's command line as a UNICODE_STRING
-+// the kernel builds, needing only PROCESS_QUERY_LIMITED_INFORMATION. That is the
-+// whole point of preferring it: OpenProcess(PROCESS_VM_READ) plus a chain of
-+// ReadProcessMemory calls across every pid on a timer is the primitive
-+// credential dumpers use, and EDR scores it that way regardless of intent.
++// the kernel builds, needing only PROCESS_QUERY_LIMITED_INFORMATION.
++//
++// There is deliberately no PEB fallback. Reading the command line out of the
++// target's address space -- opening it for VM reads and then chaining
++// memory reads across every pid on a timer -- is the credential-dumping
++// primitive this reader exists to not perform, so it is absent from the binary
++// rather than one anomalous NTSTATUS away. Electron's floor is Windows 10, so
++// every OS Orca supports has this class; if a hooked ntdll refuses it anyway,
++// the command line comes back empty, which callers already handle, instead of
++// silently reinstating the primitive on exactly the instrumented machines this
++// reader was written for.
 +const ULONG kProcessCommandLineInformation = 60;
 +
-+const NTSTATUS kStatusNotImplemented = static_cast<NTSTATUS>(0xC0000002L);
-+const NTSTATUS kStatusInvalidInfoClass = static_cast<NTSTATUS>(0xC0000003L);
 +const NTSTATUS kStatusInfoLengthMismatch = static_cast<NTSTATUS>(0xC0000004L);
 +const NTSTATUS kStatusBufferTooSmall = static_cast<NTSTATUS>(0xC0000023L);
-+const NTSTATUS kStatusNotSupported = static_cast<NTSTATUS>(0xC00000BBL);
++
++// A command line is a UNICODE_STRING, whose Length is a USHORT, so the kernel
++// can never need more than the header plus 64 KiB. Refusing anything larger
++// keeps a bogus size from throwing bad_alloc out of a scan that has already
++// walked most of the table.
++const ULONG kMaxCommandLineBytes = sizeof(UNICODE_STRING) + 0xFFFF + sizeof(wchar_t);
 +
 +// winternl.h's PROCESSINFOCLASS does not name class 60 and its enumerator range
 +// stops far short of it, so the class travels as a ULONG rather than a cast enum.
@@ -177,16 +378,6 @@ index ea822b120e8038a4803e34647042f08f4aaf5ca1..5a616a6b9a88208e11df71fd779767b4
 +  return entry;
 +}
 +
-+// Latched once class 60 proves absent, so an older kernel pays that probe once
-+// rather than once per process per scan.
-+volatile LONG g_command_line_class_missing = 0;
-+
-+enum CommandLineOutcome {
-+  kCommandLineRecovered,
-+  kProcessUnreachable,
-+  kCommandLineClassMissing
-+};
-+
 +bool StoreCommandLineUtf8(ProcessInfo& process_info, const wchar_t* data, size_t wide_length) {
 +  if (wide_length == 0) {
 +    return false;
@@ -202,108 +393,58 @@ index ea822b120e8038a4803e34647042f08f4aaf5ca1..5a616a6b9a88208e11df71fd779767b4
 +  return true;
 +}
 +
-+CommandLineOutcome ClassifyQueryFailure(NTSTATUS status) {
-+  if (status == kStatusInvalidInfoClass || status == kStatusNotSupported ||
-+      status == kStatusNotImplemented) {
-+    return kCommandLineClassMissing;
-+  }
-+  return kProcessUnreachable;
-+}
++}  // namespace
 +
-+CommandLineOutcome ReadCommandLineWithoutPeb(ProcessInfo& process_info) {
-+  if (InterlockedCompareExchange(&g_command_line_class_missing, 0, 0) != 0) {
-+    return kCommandLineClassMissing;
-+  }
++bool GetProcessCommandLine(ProcessInfo& process_info) {
 +  NtQueryInformationProcessFn query = NtQueryInformationProcessEntry();
 +  if (!query) {
-+    return kCommandLineClassMissing;
++    return false;
 +  }
 +
-+  // PROCESS_QUERY_INFORMATION implicitly grants PROCESS_QUERY_LIMITED_INFORMATION,
-+  // so a pid that refuses this open cannot grant the stronger one the PEB read
-+  // needs. Reporting it unreachable rather than retrying is what keeps the
-+  // VM_READ open off the ~25% of the table that denies access on every scan.
 +  HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_info.pid);
 +  if (process == NULL) {
-+    return kProcessUnreachable;
++    return false;
 +  }
 +
 +  ULONG size = 0;
 +  NTSTATUS status = query(process, kProcessCommandLineInformation, nullptr, 0, &size);
++  if (NT_SUCCESS(status)) {
++    // Nothing was written, so there is no command line to read.
++    CloseHandle(process);
++    return false;
++  }
 +  if (status != kStatusInfoLengthMismatch && status != kStatusBufferTooSmall) {
 +    CloseHandle(process);
-+    return ClassifyQueryFailure(status);
++    return false;
 +  }
-+  if (size < sizeof(UNICODE_STRING)) {
++  if (size < sizeof(UNICODE_STRING) || size > kMaxCommandLineBytes) {
 +    CloseHandle(process);
-+    return kProcessUnreachable;
++    return false;
 +  }
 +
 +  std::vector<unsigned char> buffer(size);
 +  status = query(process, kProcessCommandLineInformation, &buffer[0], size, &size);
 +  CloseHandle(process);
 +  if (!NT_SUCCESS(status)) {
-+    return ClassifyQueryFailure(status);
++    return false;
 +  }
 +
-+  // Header and characters arrive in one allocation; Length is in bytes and
-+  // excludes any terminator, exactly what the PEB read used to copy.
++  // Header and characters arrive in one allocation, but treat the header as
++  // untrusted: a hooked ntdll is the case this reader is written for, and an
++  // unchecked Buffer/Length here would be an over-read encoded straight into JS.
++  // Bound against buffer.size(), never `size` -- the second query overwrote it.
 +  const UNICODE_STRING* command_line = reinterpret_cast<const UNICODE_STRING*>(&buffer[0]);
-+  if (command_line->Buffer != nullptr) {
-+    StoreCommandLineUtf8(process_info, command_line->Buffer,
-+                         command_line->Length / sizeof(wchar_t));
-+  }
-+  return kCommandLineRecovered;
-+}
-+
-+// The original reader. Only a kernel without class 60 reaches it.
-+bool ReadCommandLineFromPeb(ProcessInfo& process_info) {
-+  NtQueryInformationProcessFn query = NtQueryInformationProcessEntry();
-+  if (!query) {
++  const unsigned char* begin = &buffer[0];
++  const unsigned char* end = begin + buffer.size();
++  const unsigned char* chars = reinterpret_cast<const unsigned char*>(command_line->Buffer);
++  if (chars == nullptr || chars < begin + sizeof(UNICODE_STRING) || chars > end ||
++      command_line->Length > static_cast<ULONG>(end - chars)) {
 +    return false;
 +  }
 +
-+  HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE,
-+                               process_info.pid);
-+  if (process == NULL) {
-+    return false;
-+  }
-+
-+  PROCESS_BASIC_INFORMATION pbi = {};
-+  PEB peb = {};
-+  RTL_USER_PROCESS_PARAMETERS process_parameters = {};
-+  bool recovered = false;
-+
-+  NTSTATUS status = query(process, ProcessBasicInformation, &pbi, sizeof(pbi), nullptr);
-+  if (NT_SUCCESS(status) && pbi.PebBaseAddress &&
-+      ReadProcessMemory(process, pbi.PebBaseAddress, &peb, sizeof(peb), nullptr) &&
-+      ReadProcessMemory(process, peb.ProcessParameters, &process_parameters,
-+                        sizeof(RTL_USER_PROCESS_PARAMETERS), nullptr) &&
-+      process_parameters.CommandLine.Length > 0) {
-+    std::wstring buffer;
-+    buffer.resize(process_parameters.CommandLine.Length / sizeof(wchar_t));
-+    if (ReadProcessMemory(process, process_parameters.CommandLine.Buffer, &buffer[0],
-+                          process_parameters.CommandLine.Length, nullptr)) {
-+      StoreCommandLineUtf8(process_info, buffer.data(), buffer.length());
-+      recovered = true;
-+    }
-+  }
-+
-+  CloseHandle(process);
-+  return recovered;
-+}
-+
-+}  // namespace
-+
-+bool GetProcessCommandLine(ProcessInfo& process_info) {
-+  switch (ReadCommandLineWithoutPeb(process_info)) {
-+    case kCommandLineRecovered:
-+      return true;
-+    case kProcessUnreachable:
-+      return false;
-+    case kCommandLineClassMissing:
-+      break;
-+  }
-+  InterlockedExchange(&g_command_line_class_missing, 1);
-+  return ReadCommandLineFromPeb(process_info);
++  // True only when a command line was actually stored, so "empty" and "not
++  // recovered" stay the same answer they were before this reader replaced the
++  // PEB read. `src/process.cc` discards the result either way.
++  return StoreCommandLineUtf8(process_info, command_line->Buffer,
++                              command_line->Length / sizeof(wchar_t));
 +}

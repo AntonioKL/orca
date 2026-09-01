@@ -10,7 +10,7 @@
  * found" (run 32999886072).
  */
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 
@@ -50,41 +50,87 @@ export function nodeGypRebuildInvocation(arch, packageDir = WINDOWS_PROCESS_TREE
   }
 }
 
+/** The binary the addon actually loads. */
+export function windowsProcessTreeAddonPath(packageDir = WINDOWS_PROCESS_TREE_PACKAGE_DIR) {
+  return join(packageDir, 'build', 'Release', 'windows_process_tree.node')
+}
+
 /**
- * Refuse to compile the upstream command-line reader.
+ * Does this compiled addon still carry the flagged primitive?
  *
- * Unpatched, it opens every process with `PROCESS_VM_READ` and walks the PEB
- * with `ReadProcessMemory` to recover the command line -- the primitive MDE
- * scores as credential dumping, and the reason this package is patched at all.
- * pnpm has been seen materializing this CRLF package with its patch missing, so
- * repair from the patch file rather than silently building the flagged reader.
+ * The patched reader never calls `ReadProcessMemory`, so the symbol is absent
+ * from its import table; the upstream build imports it. That makes this a
+ * property of the binary rather than of the source next to it, which matters
+ * because the published tarball ships a *loadable* prebuilt built from
+ * unpatched source: it is node-addon-api, so it satisfies a bare `require()`
+ * under both Node and Electron, and a skipped rebuild would use it.
+ */
+export function windowsProcessTreeAddonReadsProcessMemory(
+  packageDir = WINDOWS_PROCESS_TREE_PACKAGE_DIR
+) {
+  const addonPath = windowsProcessTreeAddonPath(packageDir)
+  return existsSync(addonPath) && readFileSync(addonPath).includes('ReadProcessMemory')
+}
+
+/**
+ * Refuse to compile or load the upstream command-line reader.
+ *
+ * Unpatched, it opens every process with `PROCESS_VM_READ` and walks the PEB to
+ * recover the command line -- the primitive MDE scores as credential dumping,
+ * and the reason this package is patched at all. pnpm has been seen
+ * materializing this CRLF package with its patch missing, so repair the source
+ * from the patch file, and drop any binary that predates the repair.
  */
 export function ensureWindowsProcessTreeCommandLinePatch(
   packageDir = WINDOWS_PROCESS_TREE_PACKAGE_DIR
 ) {
   const source = join(packageDir, 'src', 'process_commandline.cc')
-  if (readFileSync(source, 'utf8').includes(COMMAND_LINE_PATCH_MARKER)) {
-    return false
-  }
-  try {
-    execFileSync(
-      'git',
-      ['apply', '--include=src/process_commandline.cc', WINDOWS_PROCESS_TREE_PATCH_PATH],
-      { cwd: realpathSync(packageDir), stdio: 'pipe' }
-    )
-  } catch (error) {
+  if (!existsSync(source)) {
     throw new Error(
-      `src/process_commandline.cc still reads the PEB with ReadProcessMemory, and repairing it from ` +
-        `${WINDOWS_PROCESS_TREE_PATCH_PATH} failed: ${error?.message ?? error}. Run pnpm install.`
+      `${source} is missing, so the command-line patch cannot be verified. Run pnpm install.`
     )
   }
+  let repaired = false
+
   if (!readFileSync(source, 'utf8').includes(COMMAND_LINE_PATCH_MARKER)) {
-    throw new Error(
-      'src/process_commandline.cc still reads the PEB with ReadProcessMemory after repair. ' +
-        'Run pnpm install.'
-    )
+    try {
+      execFileSync(
+        'git',
+        ['apply', '--include=src/process_commandline.cc', WINDOWS_PROCESS_TREE_PATCH_PATH],
+        {
+          cwd: realpathSync(packageDir),
+          stdio: 'pipe',
+          // Why blind git to the repo: run inside a work tree, `git apply`
+          // prefixes patch paths with the cwd-relative prefix, silently skips
+          // everything that does not match -- and still exits 0. The package
+          // dir is always under the project root, so without this the repair
+          // reports success and changes nothing.
+          env: { ...process.env, GIT_DIR: join(packageDir, '.orca-no-such-git-dir') }
+        }
+      )
+    } catch (error) {
+      throw new Error(
+        'src/process_commandline.cc still reads the PEB, and repairing it from ' +
+          `${WINDOWS_PROCESS_TREE_PATCH_PATH} failed: ${error?.message ?? error}. Run pnpm install.`
+      )
+    }
+    if (!readFileSync(source, 'utf8').includes(COMMAND_LINE_PATCH_MARKER)) {
+      throw new Error(
+        'src/process_commandline.cc still reads the PEB after repair, so the patch did not ' +
+          'apply. Run pnpm install.'
+      )
+    }
+    repaired = true
   }
-  return true
+
+  // A binary from before the repair -- or the tarball's own prebuilt -- would
+  // otherwise survive a skipped rebuild and load the flagged reader anyway.
+  if (windowsProcessTreeAddonReadsProcessMemory(packageDir)) {
+    rmSync(windowsProcessTreeAddonPath(packageDir), { force: true })
+    repaired = true
+  }
+
+  return repaired
 }
 
 // Patched binding.gyp includes deps/node-addon-api; the tarball does not ship those headers.

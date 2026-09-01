@@ -223,33 +223,79 @@ The same hunk drops `PROCESS_VM_READ` from `GetProcessMemoryUsage` and
 `PROCESS_QUERY_LIMITED_INFORMATION`. Measured, both return identical values
 under the weaker right on every process that opens at all.
 
-Measured on Windows 11, 514 processes, counted in-process by replacing the
+Measured on Windows 11, ~540 processes, counted in-process by replacing the
 addon's import table entries with counting stubs:
 
 | per `CommandLine` scan | before                                    | after                                  |
 | ---------------------- | ----------------------------------------- | -------------------------------------- |
-| `OpenProcess` calls    | 514                                       | 514                                    |
+| `OpenProcess` calls    | 543                                       | 543                                    |
 | desired access         | `0x0410` (`VM_READ \| QUERY_INFORMATION`) | `0x1000` (`QUERY_LIMITED_INFORMATION`) |
 | `ReadProcessMemory`    | 1128                                      | **0**                                  |
-| p50 / p95              | 12.7 / 14.1 ms                            | 9.3 / 10.0 ms                          |
+| p50 / p95              | 13.5 / 14.5 ms                            | 12.3 / 13.5 ms                         |
 
 Command lines were byte-identical on every process both readers recovered
-(376/376 and 379/379 across runs), including a 24,068-character argv with
-embedded quotes, non-ASCII characters and trailing whitespace, and a WOW64
-target. The weaker right is also a strict superset in reach: three processes
-that refused `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ` granted
+(405/405, and 399/399 and 376/376 on other runs), including a 24,087-character
+argv with embedded quotes, non-ASCII characters and trailing whitespace, and a
+WOW64 target. The weaker right is also a strict superset in reach: three
+processes that refused `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ` granted
 `PROCESS_QUERY_LIMITED_INFORMATION`, and none went the other way.
 
-The PEB reader is kept for a kernel without class 60, behind a process-wide
-latch set only by `STATUS_INVALID_INFO_CLASS`, `STATUS_NOT_SUPPORTED` or
-`STATUS_NOT_IMPLEMENTED`. A process that merely denied a handle does **not**
-reach it: `PROCESS_QUERY_INFORMATION` implicitly grants
-`PROCESS_QUERY_LIMITED_INFORMATION`, so a pid that refused the weaker open
-cannot grant the stronger one, and retrying would re-arm the `VM_READ` open
-against exactly the protected processes — a quarter of the table — that make the
-signal look like credential dumping.
+### There is no PEB fallback, deliberately
 
-What this does not do is narrow _which_ processes are asked. A detailed scan
+An earlier revision kept the PEB reader for a kernel without class 60, behind a
+latch. That was wrong, and the reason is worth recording: `ClassifyQueryFailure`
+mapped `STATUS_INVALID_INFO_CLASS` / `NOT_SUPPORTED` / `NOT_IMPLEMENTED` from
+**any single target** onto a process-wide, one-way switch back to
+`PROCESS_VM_READ` plus three `ReadProcessMemory` per pid per scan, for the life
+of the process, with nothing observable from JS.
+
+The environment this reader exists for is one where an EDR hooks `ntdll`. A hook
+that returns `STATUS_INVALID_INFO_CLASS` for a class it does not recognise would
+have silently reinstated the exact primitive the patch removes, on precisely the
+machines it was written for — and one stray status from one process was enough.
+The same applies under Wine or any instrumented `ntdll`.
+
+So the fallback is gone rather than guarded. `GetProcessCommandLine` returns
+false and leaves the command line empty, which is already a normal outcome
+(`WindowsProcessRow.command` is documented as empty when a process denies a
+query handle, and callers fall back to the image name). Degrading to no command
+line is recoverable; silently resuming address-space reads is not.
+
+This also makes the property checkable on the artifact rather than the source:
+the patched reader never calls `ReadProcessMemory`, so the symbol is absent from
+the compiled addon's import table. `windowsProcessTreeAddonReadsProcessMemory()`
+in `config/scripts/windows-process-tree-gyp-rebuild.mjs` is that check, and it
+is the only way to tell the two binaries apart — see below.
+
+Because the returned `UNICODE_STRING` comes from that same hookable boundary,
+its `Buffer` and `Length` are bounds-checked against the allocation before the
+characters are encoded, and the probed size is capped at the header plus 64 KiB
+(`Length` is a `USHORT`) so a bogus size cannot turn into a `bad_alloc` that
+fails an entire scan instead of one process.
+
+### The published tarball ships a loadable unpatched prebuilt
+
+`@vscode/windows-process-tree@0.8.0` publishes
+`build/Release/windows_process_tree.node` in the tarball. It is node-addon-api,
+so it is ABI-stable and loads cleanly under both Node and Electron — and it was
+built from unpatched source, so it performs 1179 `ReadProcessMemory` calls and
+opens every process at `0x0410` per scan.
+
+That matters because `allowBuilds` is `false` for this package and CI installs
+with `--ignore-scripts`, so nothing compiles it at install time. A `require()`
+health check cannot tell the two binaries apart, and a rebuild that is skipped —
+`rebuild-native-deps.mjs` soft-exits 0 on a Windows file lock during postinstall
+— leaves the upstream prebuilt in place and cached.
+
+Three checks close that, all keyed on the absent `ReadProcessMemory` import:
+
+- `ensureWindowsProcessTreeCommandLinePatch()` deletes a binary that still has
+  it, so a skipped rebuild fails loudly instead of using the prebuilt;
+- `ensure-native-runtime.mjs` treats such a binary as a load failure, which is
+  what triggers the rebuild;
+- the relay build asserts it on the artifact it just produced.
+
+What none of this does is narrow _which_ processes are asked. A detailed scan
 still queries every pid, including `lsass.exe`; it now asks with the same right
 Task Manager uses instead of `PROCESS_VM_READ`. Restricting the command-line
 pass to Orca's own subtree is the complementary change, and it belongs with the

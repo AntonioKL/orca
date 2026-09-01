@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
+  initGitWorkTree,
   mkTempProject,
   runRebuildScript,
   writeFakeElectronRebuild,
@@ -14,7 +15,8 @@ import {
   writeFakeWindowsProcessTreeWithNodeAddonApi,
   writeFakeWindowsRegistry,
   writeNodePtyPatchFile,
-  writePatchedNodePtyBuildArtifacts
+  writePatchedNodePtyBuildArtifacts,
+  writeWindowsProcessTreePatchFile
 } from './rebuild-native-deps-test-fixtures.mjs'
 
 describe('rebuild-native-deps patched node-pty rebuild', () => {
@@ -85,17 +87,59 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
     }
   })
 
-  // Why fail rather than build: an unpatched command-line reader compiles fine
-  // and then opens every process with PROCESS_VM_READ to walk its PEB, which is
-  // the primitive the patch exists to remove.
-  it('refuses a Windows rebuild when the command-line patch is missing', () => {
+  const commandLineSourcePath = (projectDir) =>
+    join(
+      projectDir,
+      'node_modules',
+      '@vscode',
+      'windows-process-tree',
+      'src',
+      'process_commandline.cc'
+    )
+
+  // Why inside a git work tree: `git apply` run under one prefixes patch paths
+  // with the cwd-relative prefix, silently skips what does not match, and still
+  // exits 0. The package dir is always under the project root in production, so
+  // a fixture in %TEMP% alone would pass while the real repair did nothing.
+  it('repairs an un-applied command-line patch inside a git work tree', () => {
     const projectDir = mkTempProject()
 
     try {
+      initGitWorkTree(projectDir)
       writeFakeUsableElectronPackage(projectDir, { platform: 'win32' })
       writeFakeElectronRebuild(projectDir)
       writeFakeNodePtyConptyPayload(projectDir, 'x64')
       writeFakeWindowsProcessTreeWithNodeAddonApi(projectDir, { commandLinePatchApplied: false })
+      writeWindowsProcessTreePatchFile(projectDir)
+
+      const result = runRebuildScript(
+        projectDir,
+        { npm_config_platform: 'win32', npm_config_arch: 'x64' },
+        ['--platform=win32', '--arch=x64', '--force']
+      )
+
+      expect(result.status, result.stderr).toBe(0)
+      expect(readFileSync(commandLineSourcePath(projectDir), 'utf8')).toContain(
+        'kProcessCommandLineInformation'
+      )
+    } finally {
+      removeTreeSync(projectDir)
+    }
+  })
+
+  // Why fail rather than build: an unpatched command-line reader compiles fine
+  // and then opens every process with PROCESS_VM_READ to walk its PEB, which is
+  // the primitive the patch exists to remove.
+  it('refuses a Windows rebuild when the command-line patch cannot be applied', () => {
+    const projectDir = mkTempProject()
+
+    try {
+      initGitWorkTree(projectDir)
+      writeFakeUsableElectronPackage(projectDir, { platform: 'win32' })
+      writeFakeElectronRebuild(projectDir)
+      writeFakeNodePtyConptyPayload(projectDir, 'x64')
+      writeFakeWindowsProcessTreeWithNodeAddonApi(projectDir, { commandLinePatchApplied: false })
+      // No patch file, so the repair has nothing to apply.
 
       const result = runRebuildScript(
         projectDir,
@@ -105,6 +149,9 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
 
       expect(result.status).not.toBe(0)
       expect(result.stderr).toContain('process_commandline.cc')
+      expect(readFileSync(commandLineSourcePath(projectDir), 'utf8')).not.toContain(
+        'kProcessCommandLineInformation'
+      )
     } finally {
       removeTreeSync(projectDir)
     }

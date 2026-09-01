@@ -191,11 +191,11 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
   const readId = ++readSequence
   const readerEpoch = nativeReaderEpoch
   // Why always both flags: each adds an OpenProcess per process (Memory a
-  // GetProcessMemoryInfo, CommandLine a PEB read), so asking for less would be
-  // cheaper -- 15.9ms p50 versus 30.6ms at 1050 processes. But every read shares
-  // one snapshot so a 32-wide teardown collapses into a single scan, and that
-  // snapshot has to satisfy every caller. Splitting the cache per field set
-  // would restore exactly the fan-out it exists to prevent.
+  // GetProcessMemoryInfo, CommandLine a kernel command-line query), so asking
+  // for less would be cheaper -- 15.9ms p50 versus 30.6ms at 1050 processes.
+  // But every read shares one snapshot so a 32-wide teardown collapses into a
+  // single scan, and that snapshot has to satisfy every caller. Splitting the
+  // cache per field set would restore exactly the fan-out it exists to prevent.
   const flags =
     native.ProcessDataFlag.Memory |
     native.ProcessDataFlag.CommandLine |

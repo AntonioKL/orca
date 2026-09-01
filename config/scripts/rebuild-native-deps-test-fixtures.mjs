@@ -1,5 +1,12 @@
 import { spawnSync } from 'node:child_process'
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,6 +22,47 @@ const sourceNodePtyJobOwnershipPath = fileURLToPath(
 const sourceWindowsProcessTreeGypRebuildPath = fileURLToPath(
   new URL('./windows-process-tree-gyp-rebuild.mjs', import.meta.url)
 )
+const sourceWindowsProcessTreePatchPath = fileURLToPath(
+  new URL('../patches/@vscode__windows-process-tree@0.8.0.patch', import.meta.url)
+)
+
+/**
+ * The command-line reader as it is *before* the patch, taken from the patch's
+ * own pre-image so no upstream copy has to be vendored, and the bytes are
+ * exactly what `git apply` will look for.
+ */
+function unpatchedWindowsProcessTreeCommandLineSource() {
+  const newline = '\n'
+  const lines = readFileSync(sourceWindowsProcessTreePatchPath, 'utf8').split(newline)
+  const start = lines.findIndex((line) =>
+    line.startsWith('diff --git a/src/process_commandline.cc ')
+  )
+  const rest = lines.slice(start + 1)
+  const end = rest.findIndex((line) => line.startsWith('diff --git '))
+  const preImage = (end === -1 ? rest : rest.slice(0, end))
+    .filter((line) => line.startsWith(' ') || line.startsWith('-'))
+    .filter((line) => !line.startsWith('---'))
+    .map((line) => line.slice(1))
+    .join(newline)
+  // Splitting drops the file's own trailing newline as an empty element, and
+  // `git apply` needs the bytes exact.
+  return `${preImage}${newline}`
+}
+
+/** Production always runs the repair from inside a work tree; `git apply` behaves differently there. */
+export function initGitWorkTree(projectDir) {
+  for (const args of [['init'], ['config', 'user.email', 'a@b.c'], ['config', 'user.name', 't']]) {
+    spawnSync('git', args, { cwd: projectDir, encoding: 'utf8' })
+  }
+}
+
+export function writeWindowsProcessTreePatchFile(projectDir) {
+  mkdirSync(join(projectDir, 'config', 'patches'), { recursive: true })
+  copyFileSync(
+    sourceWindowsProcessTreePatchPath,
+    join(projectDir, 'config', 'patches', '@vscode__windows-process-tree@0.8.0.patch')
+  )
+}
 
 export function mkTempProject() {
   const projectDir = mkdtempSync(join(tmpdir(), 'orca-rebuild-native-deps-'))
@@ -285,7 +333,7 @@ export function writeFakeWindowsProcessTreeWithNodeAddonApi(
     join(processTreeDir, 'src', 'process_commandline.cc'),
     commandLinePatchApplied
       ? '// kProcessCommandLineInformation = 60\n'
-      : '// OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid)\n'
+      : unpatchedWindowsProcessTreeCommandLineSource()
   )
   writeFileSync(join(nodeAddonApiDir, 'package.json'), '{"name":"node-addon-api"}\n')
   writeFileSync(join(nodeAddonApiDir, 'napi.h'), '// napi.h\n')

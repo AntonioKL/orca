@@ -35,6 +35,7 @@ import {
   ensureWindowsProcessTreeCommandLinePatch,
   nodeGypRebuildInvocation,
   stageWindowsProcessTreeNodeAddonApiHeaders,
+  windowsProcessTreeAddonReadsProcessMemory,
   WINDOWS_PROCESS_TREE_PACKAGE_DIR as PACKAGE_DIR
 } from './windows-process-tree-gyp-rebuild.mjs'
 
@@ -188,6 +189,14 @@ function main() {
   const built = join(PACKAGE_DIR, 'build', 'Release', 'windows_process_tree.node')
   if (!existsSync(built)) {
     throw new Error(`node-gyp reported success but ${built} is missing.`)
+  }
+  // Why check the artifact and not only the source: the source checks above run
+  // before node-gyp, and a stale build directory can outlive them.
+  if (windowsProcessTreeAddonReadsProcessMemory()) {
+    throw new Error(
+      'The built addon still calls ReadProcessMemory, so it did not come from the patched ' +
+        'command-line reader. A relay would get the primitive MDE scores as credential dumping.'
+    )
   }
   const machine = readPeMachine(built)
   if (machine !== PE_MACHINE[arch]) {
