@@ -1,4 +1,4 @@
-import { queryWindowsProcessRowsFresh } from './providers/windows-foreground-process-rows'
+import { queryWindowsProcessLinksFresh } from './providers/windows-foreground-process-rows'
 
 /**
  * Whether a PID still sits inside this process's own subtree. Note this is
@@ -128,7 +128,7 @@ export async function verifyWindowsTreeKillTarget(
     return 'unknown'
   }
   const rows = await readLinksBeforeDeadline(
-    deps.readRows ?? queryWindowsProcessRowsFresh,
+    deps.readRows ?? queryWindowsProcessLinksFresh,
     deps.timeoutMs ?? WINDOWS_ROOT_IDENTITY_TIMEOUT_MS
   )
   if (!rows) {

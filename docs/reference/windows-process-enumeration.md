@@ -16,29 +16,86 @@ table. It wraps a Toolhelp32 snapshot from `@vscode/windows-process-tree`.
 
 ```ts
 import {
+  readWindowsProcessIdentityTable,
+  readWindowsProcessIdentityTableFresh,
   readWindowsProcessTable,
   readWindowsProcessTableFresh
 } from '../windows/windows-process-table'
 ```
 
-- `readWindowsProcessTable()` — shared TTL cache. Use for anything periodic.
-- `readWindowsProcessTableFresh()` — a snapshot that starts after the call. Use
-  for teardown identity, where a cached row can predate the exit it is being
-  asked about.
+Each pair is a shared TTL cache plus a `Fresh` variant that starts its scan
+after the call. Use `Fresh` for teardown identity, where a cached row can
+predate the exit it is being asked about, and the cached one for anything
+periodic.
 
-Both **reject** when the table cannot be read. Do not convert that into an empty
-array. An empty table is a claim that nothing is running, and callers act on
-that claim by declaring a tree dead or a shell childless. "Unavailable" has to
-stay distinguishable from "empty" — collapsing the two is how a PTY tree
+All four **reject** when the table cannot be read. Do not convert that into an
+empty array. An empty table is a claim that nothing is running, and callers act
+on that claim by declaring a tree dead or a shell childless. "Unavailable" has
+to stay distinguishable from "empty" — collapsing the two is how a PTY tree
 survived its own teardown (#9045).
 
-Measured on Windows 11 with 1050 processes (p50 / p95):
+## Two flag sets: ask for a command line only if you read one
+
+`ProcessDataFlag.CommandLine` is not a wider column on the same query. For every
+process on the box the addon opens a handle —
+`OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)` — then
+`NtQueryInformationProcess` for the PEB address and three `ReadProcessMemory`
+calls to pull the command line out of the target's address space. On a repeating
+cadence that is the same primitive a credential dumper uses, and Microsoft
+Defender for Endpoint scores it as suspicious memory activity. `Memory` costs a
+second handle of exactly that shape.
+
+So the module exposes two snapshots, and the row types differ so a cheap caller
+cannot read what its flag set did not pay for:
+
+| reader                                     | row type                     | flags                       | per-process handles |
+| ------------------------------------------ | ---------------------------- | --------------------------- | ------------------- |
+| `readWindowsProcessIdentityTable[Fresh]()` | `WindowsProcessIdentityRow`  | `None \| CreationTime`      | none                |
+| `readWindowsProcessTable[Fresh]()`         | `WindowsProcessRow`          | `+ CommandLine`             | one `OpenProcess`   |
+
+`Memory` is requested by neither. Nothing reads a working set off this table —
+`windows-process-resource-collector.ts` runs its own sweep because it needs
+commit and CPU counters in the same pass, and the addon stores `WorkingSetSize`
+into a `DWORD` so anything above 4 GB wraps anyway.
+
+Measured on Windows 11 with 492 processes (p50 / p95):
 
 |                                  | p50     | p95     |
 | -------------------------------- | ------- | ------- |
-| pid + ppid + name                | 15.9 ms | 17.5 ms |
-| + memory + command line          | 30.6 ms | 33.7 ms |
+| identity (pid + ppid + name)     | 6.3 ms  | 7.0 ms  |
+| detailed (+ command line)        | 12.3 ms | 13.4 ms |
+| _retired_ (+ memory)             | 13.1 ms | 14.1 ms |
 | `Get-CimInstance` via PowerShell | 706 ms  | 723 ms  |
+
+There are exactly **two** caches, never one per caller. The fan-out this module
+exists to prevent is one scan per _caller_, and each reader still serves every
+caller wanting its flag set, so a 32-wide teardown still collapses into one scan
+of each. A third cache would need a third flag set, not a third caller.
+
+The wedge gate and the 3 s deadline below are **shared** between them, because
+both call the same addon: one wedged read latches the one `requestInProgress`
+and pins the one libuv slot whichever flags asked for it.
+
+With no native binding there is only one scan to run and it is the 1.4 s
+PowerShell one, so the identity view rides the detailed snapshot rather than
+forking a second `powershell.exe`.
+
+### Which callers need which
+
+| caller                                        | reads              | flag set |
+| --------------------------------------------- | ------------------ | -------- |
+| `windows-agent-foreground-process.ts`         | `command` (agent recognition) | detailed |
+| `local-workspace-platform-port-scanner.ts`    | `command` (port attribution)  | detailed |
+| `codex-structured-turn-processes.ts`          | `command` (turn-process identity) | detailed |
+| `structured-tui-process-identity.ts`          | `command` (child match)       | detailed |
+| `windows-pty-root-identity.ts`                | `pid` / `ppid` only           | identity |
+| `agent-session-process-identity-probe.ts`     | `creationTimeMs` only         | identity |
+
+The per-pane foreground tracker is the hot one (750 ms / 2 s cadence) and it
+genuinely needs the command line, so the repeating PEB read is not something the
+split removes. What the split removes is the PEB read from teardown identity and
+from the owner probe, and dropping `Memory` removes one of the two handles from
+every scan including the hot one.
 
 Those CIM numbers are from a 1050-process host. The scan scales with process
 count: on a 1486-process Windows SSH host it measured **1.36 s** and produced
@@ -220,9 +277,10 @@ ownership, and CPU accounting in the memory collector — still reads it through
 its own query. Those callers are not migrated.
 
 Committed private bytes have no equivalent either, and the one memory value the
-snapshot does carry is unusable for the sizes Orca now sees: `process.cc` stores
-`pmc.WorkingSetSize` into a `DWORD`, so anything above 4 GB wraps. That is the
-second reason `windows-process-resource-collector.ts` still runs its own
+addon can produce is unusable for the sizes Orca now sees: `process.cc` stores
+`pmc.WorkingSetSize` into a `DWORD`, so anything above 4 GB wraps — which is why
+neither flag set asks for it. That is the second reason
+`windows-process-resource-collector.ts` still runs its own
 `Get-CimInstance` sweep — it needs `PageFileUsage` (commit) and the CPU-time
 counters in the same pass. Migrating it to the native table would cost both.
 

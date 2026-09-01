@@ -5,10 +5,16 @@ import {
   __setWindowsProcessTreeRequireForTests,
   isWindowsProcessTableAvailable,
   isWindowsProcessStartTimeAvailable,
+  readWindowsProcessIdentityTable,
+  readWindowsProcessIdentityTableFresh,
   readWindowsProcessTable,
   readWindowsProcessTableFresh,
   resetWindowsProcessTableForTests
 } from './windows-process-table'
+
+/** None | CreationTime, and CommandLine on top of it. Memory (1) is never asked for. */
+const IDENTITY_FLAGS = 4
+const DETAILED_FLAGS = 6
 
 const getAllProcesses = vi.fn()
 
@@ -52,21 +58,92 @@ describe('windows process table', () => {
   it('maps native rows, defaulting an unreadable command line to empty', async () => {
     const rows = await readWindowsProcessTableFresh()
     expect(rows).toEqual([
-      { pid: process.pid, ppid: 0, name: 'vitest.exe', command: '', memoryBytes: undefined },
+      { pid: process.pid, ppid: 0, name: 'vitest.exe', command: '' },
       {
         pid: 100,
         ppid: 4,
         name: 'orca.exe',
         command: '"C:/a b/orca.exe" --x',
-        memoryBytes: 4096,
         creationTimeMs: 1_700_000_000_000
       }
     ])
   })
 
-  it('requests memory and command line together', async () => {
+  it('asks for the command line but never for memory', async () => {
+    // Memory costs a second OpenProcess(PROCESS_VM_READ) per process and no
+    // caller reads a working set off this table.
     await readWindowsProcessTableFresh()
-    expect(getAllProcesses.mock.calls[0]?.[1]).toBe(7)
+    expect(getAllProcesses.mock.calls[0]?.[1]).toBe(DETAILED_FLAGS)
+  })
+
+  it('reads the identity table with no per-process handle flag at all', async () => {
+    await readWindowsProcessIdentityTableFresh()
+    expect(getAllProcesses.mock.calls[0]?.[1]).toBe(IDENTITY_FLAGS)
+  })
+
+  it('drops the command line from identity rows rather than leaving it empty', async () => {
+    const rows = await readWindowsProcessIdentityTableFresh()
+    expect(rows).toEqual([
+      { pid: process.pid, ppid: 0, name: 'vitest.exe' },
+      { pid: 100, ppid: 4, name: 'orca.exe', creationTimeMs: 1_700_000_000_000 }
+    ])
+    expect(rows.every((row) => !('command' in row))).toBe(true)
+  })
+
+  it('single-flights each flag set independently', async () => {
+    const [identity, detailed] = await Promise.all([
+      Promise.all(Array.from({ length: 16 }, () => readWindowsProcessIdentityTable())),
+      Promise.all(Array.from({ length: 16 }, () => readWindowsProcessTable()))
+    ])
+    // A 32-wide teardown still collapses to one scan per flag set, not per caller.
+    expect(getAllProcesses).toHaveBeenCalledTimes(2)
+    expect(getAllProcesses.mock.calls.map((call) => call[1]).sort()).toEqual([
+      IDENTITY_FLAGS,
+      DETAILED_FLAGS
+    ])
+    expect(identity).toHaveLength(16)
+    expect(detailed).toHaveLength(16)
+  })
+
+  it('does not serve one flag set from the other cache', async () => {
+    await readWindowsProcessTable()
+    await readWindowsProcessIdentityTable()
+    expect(getAllProcesses).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects an empty identity snapshot rather than reporting an idle machine', async () => {
+    getAllProcesses.mockImplementation((cb: (rows: unknown) => void) => cb([]))
+    resetWindowsProcessTableForTests()
+    await expect(readWindowsProcessIdentityTableFresh()).rejects.toThrow(/unreadable/)
+  })
+
+  it('applies the deadline to the identity read too', async () => {
+    vi.useFakeTimers()
+    getAllProcesses.mockImplementation(() => {})
+    resetWindowsProcessTableForTests()
+    const pending = readWindowsProcessIdentityTableFresh()
+    const assertion = expect(pending).rejects.toThrow(/timed out/)
+    await vi.advanceTimersByTimeAsync(3_000)
+    await assertion
+    vi.useRealTimers()
+  })
+
+  it('shares the wedge gate across flag sets, because they share one addon', async () => {
+    // One wedged read latches the vendored `requestInProgress` and pins the one
+    // libuv slot whichever flags asked for it, so a per-flag-set gate would let
+    // the other reader keep parking callbacks behind it.
+    vi.useFakeTimers()
+    getAllProcesses.mockImplementation(() => {})
+    resetWindowsProcessTableForTests()
+    const wedge = readWindowsProcessIdentityTableFresh()
+    const wedgeAssertion = expect(wedge).rejects.toThrow(/timed out/)
+    await vi.advanceTimersByTimeAsync(3_000)
+    await wedgeAssertion
+
+    await expect(readWindowsProcessTableFresh()).rejects.toThrow(/wedged/)
+    await expect(readWindowsProcessIdentityTableFresh()).rejects.toThrow(/wedged/)
+    expect(getAllProcesses).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
   })
 
   it('only advertises PID-safe ownership when the native creation-time field exists', () => {
@@ -162,6 +239,24 @@ describe('PowerShell fallback when the native binding is absent', () => {
     __setWindowsProcessTreeLoaderForTests(() => null)
     await expect(readWindowsProcessTableFresh()).resolves.toEqual(CIM_ROWS)
     expect(cimScan).toHaveBeenCalledTimes(1)
+  })
+
+  it('serves the identity view from the one scan a relay can afford', async () => {
+    // With no binding there is only one scan to run and it costs ~1.4s and a
+    // powershell.exe, so the cheap view must ride it rather than fork a second.
+    __setWindowsProcessTreeLoaderForTests(() => null)
+    await expect(readWindowsProcessIdentityTableFresh()).resolves.toEqual([
+      { pid: process.pid, ppid: 0, name: 'node.exe', command: 'node relay.js' },
+      { pid: 200, ppid: process.pid, name: 'claude.exe', command: 'claude --resume' }
+    ])
+    await readWindowsProcessTable()
+    expect(cimScan).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects an identity read that omits our own pid', async () => {
+    __setWindowsProcessTreeLoaderForTests(() => null)
+    cimScan.mockResolvedValue([{ pid: 200, ppid: 4, name: 'claude.exe', command: 'claude' }])
+    await expect(readWindowsProcessIdentityTableFresh()).rejects.toThrow(/unreadable/)
   })
 
   it('does not engage when the native binding is present', async () => {
@@ -400,20 +495,19 @@ describe('resolving the native reader', () => {
     })
     const rows = await readWindowsProcessTableFresh()
     expect(rows).toEqual([
-      { pid: process.pid, ppid: 0, name: 'vitest.exe', command: '', memoryBytes: undefined },
+      { pid: process.pid, ppid: 0, name: 'vitest.exe', command: '' },
       {
         pid: 100,
         ppid: 4,
         name: 'orca.exe',
         command: '"C:/a b/orca.exe" --x',
-        memoryBytes: 4096,
         creationTimeMs: 1_700_000_000_000
       }
     ])
     expect(isWindowsProcessTableAvailable()).toBe(true)
   })
 
-  it('asks the addon for memory and command line, as the package path does', async () => {
+  it('asks the addon for the command line, as the package path does', async () => {
     const addon = addonReturning(NATIVE)
     __setWindowsProcessTreeRequireForTests((specifier: string) => {
       if (specifier === ADDON_SPECIFIER) {
@@ -422,9 +516,24 @@ describe('resolving the native reader', () => {
       throw new Error('MODULE_NOT_FOUND')
     })
     await readWindowsProcessTableFresh()
-    // Memory | CommandLine. A bare snapshot would silently drop the command
-    // line every agent-recognition caller matches on first.
-    expect(addon.getProcessList).toHaveBeenCalledWith(expect.any(Function), 3)
+    // CommandLine alone: a bare snapshot would silently drop the command line
+    // every agent-recognition caller matches on first, and Memory would add a
+    // second per-process handle nothing reads.
+    expect(addon.getProcessList).toHaveBeenCalledWith(expect.any(Function), 2)
+  })
+
+  it('asks the addon for nothing per-process on the identity path', async () => {
+    const addon = addonReturning(NATIVE)
+    __setWindowsProcessTreeRequireForTests((specifier: string) => {
+      if (specifier === ADDON_SPECIFIER) {
+        return addon
+      }
+      throw new Error('MODULE_NOT_FOUND')
+    })
+    await readWindowsProcessIdentityTableFresh()
+    // The relay addon exposes no CreationTime bit, so this is a bare Toolhelp32
+    // walk: zero OpenProcess calls.
+    expect(addon.getProcessList).toHaveBeenCalledWith(expect.any(Function), 0)
   })
 
   it('reaches the CIM scan when neither the package nor the addon is present', async () => {
