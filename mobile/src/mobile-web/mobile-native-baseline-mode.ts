@@ -2,8 +2,6 @@ const NATIVE_BASELINE_FLAG = '1'
 const NATIVE_ARCHITECTURE = 'native'
 const HYBRID_ARCHITECTURE = 'hybrid'
 
-export type MobileArchitecture = 'native' | 'hybrid'
-
 export function mobileNativeBaselineMode(args: {
   developmentBuild: boolean
   requested: string | undefined
@@ -30,7 +28,3 @@ export const MOBILE_NATIVE_BASELINE_MODE = mobileNativeBaselineMode({
   requested: process.env.EXPO_PUBLIC_ORCA_E2E_MOBILE_NATIVE_BASELINE,
   architecture: process.env.EXPO_PUBLIC_ORCA_MOBILE_ARCHITECTURE
 })
-
-export const MOBILE_ARCHITECTURE: MobileArchitecture = MOBILE_NATIVE_BASELINE_MODE
-  ? 'native'
-  : 'hybrid'
