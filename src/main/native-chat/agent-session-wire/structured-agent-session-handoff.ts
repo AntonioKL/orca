@@ -20,6 +20,7 @@ import {
 import { StructuredAgentSessionHandoffFlowRunner } from './structured-agent-session-handoff-flow-runner'
 import { StructuredAgentSessionHandoffOperationGuard } from './structured-agent-session-handoff-operation-guard'
 import { StructuredAgentSessionHandoffQueue } from './structured-agent-session-handoff-queue'
+import { queueStructuredHandoffAfterTurn } from './structured-agent-session-handoff-queue-start'
 import { closeRetainedTuiOwner } from './structured-agent-session-handoff-owner-close'
 import { requestStructuredManualRecovery } from './structured-agent-session-handoff-recover'
 import { restoreStructuredAgentSessionHandoff } from './structured-agent-session-handoff-restart'
@@ -185,7 +186,16 @@ export class StructuredAgentSessionHandoffCoordinator {
       )
     }
     if (busy && params.mode === 'after-turn') {
-      this.queueAfterTurn(callerKey, params, fingerprint)
+      queueStructuredHandoffAfterTurn({
+        callerKey,
+        params,
+        deps: this.deps,
+        queue: this.queue,
+        owner: (sessionId) => this.state.owner(sessionId),
+        setStatus: this.setStatus,
+        begin: (key, next, tuiAlreadyExited) =>
+          this.begin(key, next, null, fingerprint, tuiAlreadyExited)
+      })
       return this.success(record.sessionId, false)
     }
     if (busy && expectedOwner === 'tui' && params.mode === 'stop-turn') {
@@ -229,41 +239,6 @@ export class StructuredAgentSessionHandoffCoordinator {
     replayed: boolean
   ): AgentSessionMutationResult<AgentSessionHandoffResult> {
     return structuredHandoffSuccess(this.deps, sessionId, replayed, this.status(sessionId))
-  }
-  private queueAfterTurn(
-    callerKey: string,
-    params: AgentSessionHandoffRequest,
-    fingerprint: string
-  ): void {
-    const sessionId = params.envelope.sessionId
-    let tuiReadiness: 'idle' | 'exited' | null = null
-    this.setStatus(sessionId, {
-      owner: params.direction === 'to-tui' ? 'native' : 'tui',
-      direction: params.direction,
-      phase: 'queued',
-      stage: null,
-      operationId: params.envelope.clientOperationId,
-      hostLabel: this.deps.transport?.hostLabel
-    })
-    const tuiOwner = this.state.owner(sessionId)
-    this.queue.enqueue(
-      sessionId,
-      async (signal) => {
-        if (params.direction === 'to-tui') {
-          return !activeStructuredAgentSessionTurnId(
-            this.deps.session(sessionId).journal.snapshot().items
-          )
-        }
-        tuiReadiness = tuiOwner
-          ? ((await this.deps.transport?.waitForTuiIdleOrExit(tuiOwner, signal)) ?? null)
-          : null
-        return tuiReadiness !== null
-      },
-      () => {
-        const next = { ...params, mode: 'now' as const }
-        this.begin(callerKey, next, null, fingerprint, tuiReadiness === 'exited')
-      }
-    )
   }
   private begin(
     callerKey: string,
