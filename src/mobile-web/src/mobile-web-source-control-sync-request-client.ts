@@ -21,6 +21,7 @@ import {
   type MobileWebSourceControlUpstreamPayload
 } from '../../shared/mobile-web/source-control-sync-contract'
 import { MobileWebBridgeClientError } from './mobile-web-bridge-client-error'
+import { requireEchoedWorkspaceId } from './mobile-web-result-echo'
 import type { MobileWebBridgeRequestOptions } from './mobile-web-bridge-request-state'
 import type { MobileWebOneShotRequestClient } from './mobile-web-one-shot-request-client'
 
@@ -40,7 +41,7 @@ export class MobileWebSourceControlSyncRequestClient {
         MobileWebSourceControlRepositoryStateSchema,
         options
       )
-      .then((result) => matchingWorkspace(payload, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   checkout(
@@ -124,17 +125,7 @@ export class MobileWebSourceControlSyncRequestClient {
         ) {
           throw new MobileWebBridgeClientError('invalid_message', false)
         }
-        return matchingWorkspace(payload, result)
+        return requireEchoedWorkspaceId(payload.workspaceId, result)
       })
   }
-}
-
-function matchingWorkspace<
-  TPayload extends { workspaceId: string },
-  TResult extends { workspaceId: string }
->(payload: TPayload, result: TResult): TResult {
-  if (result.workspaceId !== payload.workspaceId) {
-    throw new MobileWebBridgeClientError('invalid_message', false)
-  }
-  return result
 }

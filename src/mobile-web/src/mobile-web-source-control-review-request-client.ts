@@ -24,6 +24,7 @@ import {
   type MobileWebSourceControlReviewTerminalSendResult
 } from '../../shared/mobile-web/source-control-review-contract'
 import { MobileWebBridgeClientError } from './mobile-web-bridge-client-error'
+import { requireEchoedWorkspaceId } from './mobile-web-result-echo'
 import type { MobileWebBridgeRequestOptions } from './mobile-web-bridge-request-state'
 import type { MobileWebOneShotRequestClient } from './mobile-web-one-shot-request-client'
 
@@ -43,7 +44,7 @@ export class MobileWebSourceControlReviewRequestClient {
         MobileWebSourceControlReviewMetadataResultSchema,
         options
       )
-      .then((result) => matchingWorkspace(payload.workspaceId, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   metadataUpdate(
@@ -59,7 +60,7 @@ export class MobileWebSourceControlReviewRequestClient {
         MobileWebSourceControlReviewMetadataResultSchema,
         options
       )
-      .then((result) => matchingWorkspace(payload.workspaceId, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   link(
@@ -75,7 +76,7 @@ export class MobileWebSourceControlReviewRequestClient {
         MobileWebSourceControlReviewLinkResultSchema,
         options
       )
-      .then((result) => matchingWorkspace(payload.workspaceId, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   linkUpdate(
@@ -91,7 +92,7 @@ export class MobileWebSourceControlReviewRequestClient {
         MobileWebSourceControlReviewLinkResultSchema,
         options
       )
-      .then((result) => matchingWorkspace(payload.workspaceId, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   diff(
@@ -146,11 +147,4 @@ export class MobileWebSourceControlReviewRequestClient {
       options
     )
   }
-}
-
-function matchingWorkspace<T extends { workspaceId: string }>(workspaceId: string, result: T): T {
-  if (result.workspaceId !== workspaceId) {
-    throw new MobileWebBridgeClientError('invalid_message', false)
-  }
-  return result
 }

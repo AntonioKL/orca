@@ -91,6 +91,12 @@ const EXPECTED_ECHO_FIELDS: Record<string, readonly string[]> = {
   'workspace.update': ['workspaceId']
 }
 
+/** Echo helpers shared across request clients, and the result fields each one compares. Resolved
+ * by name because the derivation below only walks helpers defined in the same file. */
+const SHARED_ECHO_HELPERS: Record<string, readonly string[]> = {
+  requireEchoedWorkspaceId: ['workspaceId']
+}
+
 function balancedBody(text: string, from: number): string | null {
   let depth = 0
   let index = from
@@ -180,6 +186,13 @@ function echoFields(body: string, helpers: Method[], seen: Set<string>): Set<str
   for (const match of body.matchAll(/\becho:\s*\[([^\]]*)\]/g)) {
     for (const field of match[1]!.matchAll(/'([A-Za-z0-9_.]+)'/g)) {
       fields.add(field[1]!)
+    }
+  }
+  for (const [helper, declared] of Object.entries(SHARED_ECHO_HELPERS)) {
+    if (new RegExp(`\\b${helper}\\(`).test(body)) {
+      for (const field of declared) {
+        fields.add(field)
+      }
     }
   }
   for (const match of body.matchAll(/\b((?:matching|same)[A-Za-z0-9_]*)\s*\(/g)) {
@@ -277,6 +290,17 @@ describe('mobile web bridge operation echo census', () => {
         Object.entries(EXPECTED_ECHO_FIELDS).map(([operation, fields]) => [operation, [...fields]])
       )
     )
+  })
+
+  it('keeps every shared echo helper checking the fields it is credited with', () => {
+    const text = readFileSync(join(PAGE_DIR, 'mobile-web-result-echo.ts'), 'utf8')
+
+    for (const [helper, declared] of Object.entries(SHARED_ECHO_HELPERS)) {
+      expect(text).toContain(`export function ${helper}`)
+      for (const field of declared) {
+        expect(text).toContain(`result.${field} !==`)
+      }
+    }
   })
 
   it('records echo fields only for registered operations', () => {

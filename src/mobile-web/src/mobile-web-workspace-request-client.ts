@@ -25,6 +25,7 @@ import {
   type MobileWebWorkspaceViewSettings
 } from '../../shared/mobile-web/bridge-operation-contract'
 import { MobileWebBridgeClientError } from './mobile-web-bridge-client-error'
+import { requireEchoedWorkspaceId } from './mobile-web-result-echo'
 import type { MobileWebOneShotRequestClient } from './mobile-web-one-shot-request-client'
 
 export class MobileWebWorkspaceRequestClient {
@@ -58,7 +59,7 @@ export class MobileWebWorkspaceRequestClient {
         MobileWebWorkspaceActivationPayloadSchema,
         MobileWebWorkspaceActivationResultSchema
       )
-      .then((result) => matchingWorkspace(payload, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   repositories(): Promise<MobileWebWorkspaceRepositoriesResult> {
@@ -80,7 +81,7 @@ export class MobileWebWorkspaceRequestClient {
         MobileWebWorkspaceUpdatePayloadSchema,
         MobileWebWorkspaceUpdateResultSchema
       )
-      .then((result) => matchingWorkspace(payload, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   remove(payload: MobileWebWorkspaceRemovePayload): Promise<MobileWebWorkspaceRemoveResult> {
@@ -92,7 +93,7 @@ export class MobileWebWorkspaceRequestClient {
         MobileWebWorkspaceRemovePayloadSchema,
         MobileWebWorkspaceRemoveResultSchema
       )
-      .then((result) => matchingWorkspace(payload, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   settingsSnapshot(): Promise<{ settings: MobileWebWorkspaceViewSettings | null }> {
@@ -114,14 +115,4 @@ export class MobileWebWorkspaceRequestClient {
       MobileWebWorkspaceSettingsUpdateResultSchema
     )
   }
-}
-
-function matchingWorkspace<TResult extends { workspaceId: string }>(
-  payload: { workspaceId: string },
-  result: TResult
-): TResult {
-  if (result.workspaceId !== payload.workspaceId) {
-    throw new MobileWebBridgeClientError('invalid_message', false)
-  }
-  return result
 }
