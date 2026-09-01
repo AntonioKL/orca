@@ -131,6 +131,21 @@ describe('Claude structured journal translation', () => {
       )
     ).toBe(true)
 
+    translator.handle(
+      message(
+        'user',
+        'tool-result-2',
+        [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'done again' }],
+        'tool-1'
+      )
+    )
+    expect(state.items.at(-1)?.body).toMatchObject({
+      kind: 'tool-call',
+      name: 'tool',
+      input: null,
+      output: { head: 'done again' }
+    })
+
     translator.handle({
       type: 'message',
       sessionId: 'orca-session',

@@ -125,10 +125,12 @@ function fakeClaude() {
 }
 
 let operations = 0
+// Keep IDs unique without making each assertion depend on a wall-clock tick.
+const TEST_OPERATION_TIMESTAMP = Date.now().toString()
 
 function operationId(): string {
   operations += 1
-  return `${Date.now()}-${operations.toString(16).padStart(32, '0')}`
+  return `${TEST_OPERATION_TIMESTAMP}-${operations.toString(16).padStart(32, '0')}`
 }
 
 function envelope(method: string, fields: Record<string, unknown>, fence: number | null) {
@@ -294,7 +296,7 @@ beforeEach(async () => {
           leafUuid: head?.provider === 'claude' ? head.leafUuid : null,
           resumed: true,
           fence,
-          observedAt: Date.now()
+          observedAt: 1
         }),
         transcriptPath
       }
@@ -311,7 +313,7 @@ beforeEach(async () => {
           leafUuid: await readClaudeTranscriptLeafUuid(owner.transcriptPath),
           resumed: true,
           fence: owner.link.mintedAtFence,
-          observedAt: Date.now()
+          observedAt: 1
         })
       }
     },

@@ -349,7 +349,7 @@ describe('MobileSocketWiring', () => {
     expect(ws.close).toHaveBeenCalledWith(4001, 'Unauthorized')
   })
 
-  it('projects post-auth v2 capabilities into later RPC dispatches', () => {
+  it('keeps post-auth v2 capability-shaped frames on the RPC path', () => {
     const desktop = nacl.box.keyPair.fromSecretKey(new Uint8Array(32).fill(1))
     const phone = nacl.box.keyPair.fromSecretKey(new Uint8Array(32).fill(2))
     const ws = new FakeSocket()
@@ -417,17 +417,17 @@ describe('MobileSocketWiring', () => {
       },
       0n
     )
-    send(
-      {
-        type: 'e2ee_client_capabilities',
-        v: 1,
-        clientCapabilities: ['agent-session.structured.v1']
-      },
-      1n
-    )
+    const capabilityFrame = {
+      type: 'e2ee_client_capabilities',
+      v: 1,
+      clientCapabilities: ['agent-session.structured.v1']
+    }
+    send(capabilityFrame, 1n)
     send({ id: 'rpc-1', method: 'agentSession.history', params: {} }, 2n)
 
-    expect(onText).toHaveBeenCalledOnce()
-    expect(onText.mock.calls[0]?.[0].clientCapabilities).toEqual(['agent-session.structured.v1'])
+    expect(onText).toHaveBeenCalledTimes(2)
+    expect(onText.mock.calls[0]?.[0].clientCapabilities).toEqual([])
+    expect(JSON.parse(onText.mock.calls[0]?.[1] ?? '')).toEqual(capabilityFrame)
+    expect(onText.mock.calls[1]?.[0].clientCapabilities).toEqual([])
   })
 })

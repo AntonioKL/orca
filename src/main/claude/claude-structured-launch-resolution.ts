@@ -96,6 +96,7 @@ export function createClaudeStructuredLaunchResolver(
         : ['--session-id', providerSessionId]
     const command = (deps.resolveCommand ?? resolveClaudeCommand)()
     const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(command, [
+      ...(record.launchArgs ?? []),
       ...CLAUDE_STRUCTURED_BASE_ARGS,
       ...providerArgs
     ])

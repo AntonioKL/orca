@@ -162,10 +162,10 @@ describe('registerRuntimeHandlers', () => {
 
     registerRuntimeHandlers(runtime as never)
     const callRegistration = handleMock.mock.calls.find(([channel]) => channel === 'runtime:call')
-    const result = await callRegistration![1](
-      { sender: {} },
-      { method: 'session.tabs.list', params: { worktree: 'id:workspace-1' } }
-    )
+    const result = await callRegistration![1](runtimeCallEvent(), {
+      method: 'session.tabs.list',
+      params: { worktree: 'id:workspace-1' }
+    })
 
     expect(result).toMatchObject({ ok: true, result: { tabs: [claudeTab] } })
   })

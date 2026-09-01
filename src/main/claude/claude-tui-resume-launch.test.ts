@@ -142,6 +142,21 @@ describe('Claude TUI resume launch', () => {
     })
   })
 
+  it('preserves durable Claude launch arguments before resume defaults', async () => {
+    const build = createClaudeTuiResumeLaunchBuilder({
+      resolveWorkspacePath: async () => '/workspace',
+      resolveCommand: () => 'claude',
+      inheritedEnv: {}
+    })
+
+    const launch = await build({
+      record: record({ launchArgs: ['--model', 'claude-sonnet-4-5'] }),
+      spawnToken: 'spawn'
+    })
+
+    expect(launch.args.slice(0, 3)).toEqual(['--model', 'claude-sonnet-4-5', '--setting-sources'])
+  })
+
   it('rejects missing Claude handles and unpinned account homes', async () => {
     const build = createClaudeTuiResumeLaunchBuilder({
       resolveWorkspacePath: async () => '/workspace',

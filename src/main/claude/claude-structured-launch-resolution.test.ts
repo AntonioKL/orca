@@ -97,6 +97,19 @@ describe('claude structured launch resolution', () => {
     expect(launch.args.slice(-2)).toEqual(['--resume', 'provider-current'])
   })
 
+  it('preserves durable Claude launch arguments before structured defaults', async () => {
+    const launch = await resolverFor(
+      record({ launchArgs: ['--model', 'claude-sonnet-4-5', '--dangerously-skip-permissions'] })
+    )({ identity: IDENTITY })
+
+    expect(launch.args.slice(0, 4)).toEqual([
+      '--model',
+      'claude-sonnet-4-5',
+      '--dangerously-skip-permissions',
+      '-p'
+    ])
+  })
+
   it('keeps the session launch environment pinned after account settings change', async () => {
     const resolver = resolverFor(record(), () => ({
       ANTHROPIC_AUTH_TOKEN: 'rotated-token',

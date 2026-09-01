@@ -67,12 +67,12 @@ describe('session tab structured capability mutations', () => {
       expect(fixture.calls[method.runtimeMethod]).toHaveBeenCalledOnce()
     })
 
-    it(`rejects ${method.name} for a legacy Claude row`, async () => {
+    it(`allows ${method.name} for a capable Claude client`, async () => {
       const fixture = createFixture([STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY])
       const response = await fixture.dispatch(method.name, method.params('claude-session'))
 
-      expect(response.ok).toBe(false)
-      expect(fixture.calls[method.runtimeMethod]).not.toHaveBeenCalled()
+      expect(response.ok).toBe(true)
+      expect(fixture.calls[method.runtimeMethod]).toHaveBeenCalledOnce()
     })
   }
 })

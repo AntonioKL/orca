@@ -198,6 +198,8 @@ export function createClaudeJournalTranslator(
         claudeToolIdentity(envelope.sessionId, result.toolUseId),
         claudeToolBody({ tool, result })
       )
+      // Tool inputs are only needed until their matching result arrives.
+      tools.delete(result.toolUseId)
       changed = true
     }
     const thinking = claudeThinkingText(envelope)

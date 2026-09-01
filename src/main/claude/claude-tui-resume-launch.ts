@@ -45,6 +45,7 @@ export function createClaudeTuiResumeLaunchBuilder(
 
     const command = (deps.resolveCommand ?? resolveClaudeCommand)()
     const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(command, [
+      ...(record.launchArgs ?? []),
       ...CLAUDE_TUI_RESUME_BASE_ARGS,
       '--resume',
       head.handle.sessionId
