@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useAppStore } from '@/store'
+import { ActivityScopeFilterChips } from '@/components/activity/activity-scope-filter-controls'
 import {
   clearCompletedActivity,
   isClearableActivityThread
@@ -46,8 +48,11 @@ export default function SidebarAgentsList({
   unreadOnly = false,
   onToggleUnread
 }: SidebarAgentsListProps): React.JSX.Element {
-  const [compactMode, setCompactMode] = useState(true)
-  const [showChildAgents, setShowChildAgents] = useState(false)
+  // Why store-backed: these are persisted preferences (agents* UI fields), unlike the momentary read filter/search.
+  const compactMode = useAppStore((s) => s.agentsCompactMode)
+  const setCompactMode = useAppStore((s) => s.setAgentsCompactMode)
+  const showChildAgents = useAppStore((s) => s.agentsShowChildAgents)
+  const setShowChildAgents = useAppStore((s) => s.setAgentsShowChildAgents)
   const [selectedPaneKey, setSelectedPaneKey] = useState<string | null>(null)
   const [internalCollapsedGroupKeys, setInternalCollapsedGroupKeys] = useState<Set<string>>(
     () => new Set()
@@ -76,7 +81,8 @@ export default function SidebarAgentsList({
     selectedPaneKeyIsLive,
     effectiveSelectedPaneKey,
     visibleThreads,
-    visibleThreadGroups
+    visibleThreadGroups,
+    scopeHiddenThreadCount
   } = useAgentPaneThreads({ query, readFilter, groupBy, selectedPaneKey, showChildAgents })
 
   useEffect(() => {
@@ -139,6 +145,7 @@ export default function SidebarAgentsList({
         showJumpAction={false}
         showFilterControls={false}
         showOptionsMenu={false}
+        scopeFilterRow={<ActivityScopeFilterChips hiddenThreadCount={scopeHiddenThreadCount} />}
         collapsedGroupKeys={effectiveCollapsedGroupKeys}
         onToggleGroupCollapse={handleToggleGroup}
       />

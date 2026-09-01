@@ -62,6 +62,15 @@ export type UISlicePreferences = {
   toggleShowDotfilesForWorktree: (worktreeId: string) => void
   filterRepoIds: readonly string[]
   setFilterRepoIds: (ids: readonly string[]) => void
+  /** Agents-view scope filters, independent from workspace navigation filters. */
+  agentsVisibleHostIds: VisibleWorkspaceHostIds
+  setAgentsVisibleHostIds: (ids: VisibleWorkspaceHostIds) => void
+  agentsFilterRepoIds: readonly string[]
+  setAgentsFilterRepoIds: (ids: readonly string[]) => void
+  agentsShowChildAgents: boolean
+  setAgentsShowChildAgents: (v: boolean) => void
+  agentsCompactMode: boolean
+  setAgentsCompactMode: (v: boolean) => void
   collapsedGroups: Set<string>
   toggleCollapsedGroup: (key: string) => void
   worktreeCardProperties: WorktreeCardProperty[]

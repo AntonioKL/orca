@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
+import { ActivityScopeFilterMenuSections } from './activity-scope-filter-controls'
 import type { ActivityGroupBy } from './activity-thread-types'
 
 const ALIGNED_CHECKBOX_ITEM_CLASS = 'pl-2 [&>span.absolute]:hidden'
@@ -166,6 +167,7 @@ export function ActivityThreadOptionsMenu({
             <DropdownMenuSeparator />
           </>
         ) : null}
+        <ActivityScopeFilterMenuSections />
         {groupBy && onGroupByChange ? (
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>

@@ -75,6 +75,7 @@ export function ActivityThreadListPane({
   onResizeStart,
   showFilterControls = true,
   showOptionsMenu = true,
+  scopeFilterRow,
   collapsedGroupKeys,
   onToggleGroupCollapse
 }: {
@@ -107,6 +108,8 @@ export function ActivityThreadListPane({
   onResizeStart?: React.MouseEventHandler<HTMLDivElement>
   showFilterControls?: boolean
   showOptionsMenu?: boolean
+  /** Rendered between the toolbar and the list; carries the active-scope chips row. */
+  scopeFilterRow?: React.ReactNode
   collapsedGroupKeys?: ReadonlySet<string>
   onToggleGroupCollapse?: (groupKey: string) => void
 }): React.JSX.Element {
@@ -331,6 +334,7 @@ export function ActivityThreadListPane({
           </div>
         </div>
       ) : null}
+      {scopeFilterRow}
       <div className="relative min-h-0 flex-1">
         <div
           ref={scrollContainerRef}

@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useAppStore } from '@/store'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
+import { ActivityScopeFilterChips } from './activity-scope-filter-controls'
 import {
   setActivityTerminalPortals,
   type ActivityTerminalPortalTarget
@@ -35,8 +37,11 @@ export default function ActivityPrototypePage(): React.JSX.Element {
   const activityFilterInputRef = useRef<HTMLInputElement | null>(null)
   // Why: bounds auto mark-read to one acknowledgement per selected thread turn.
   const autoAcknowledgedTurnRef = useRef<string | null>(null)
-  const [compactMode, setCompactMode] = useState(true)
-  const [showChildAgents, setShowChildAgents] = useState(false)
+  // Why store-backed: persisted preferences shared with the sidebar agents list.
+  const compactMode = useAppStore((s) => s.agentsCompactMode)
+  const setCompactMode = useAppStore((s) => s.setAgentsCompactMode)
+  const showChildAgents = useAppStore((s) => s.agentsShowChildAgents)
+  const setShowChildAgents = useAppStore((s) => s.setAgentsShowChildAgents)
   const [selectedPaneKey, setSelectedPaneKey] = useState<string | null>(null)
   const [displayedPaneKey, setDisplayedPaneKey] = useState<string | null>(null)
   const [activePortalSlotId, setActivePortalSlotId] =
@@ -64,7 +69,8 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     selectedPaneKeyIsLive,
     effectiveSelectedPaneKey,
     visibleThreads,
-    visibleThreadGroups
+    visibleThreadGroups,
+    scopeHiddenThreadCount
   } = useAgentPaneThreads({ query, readFilter, groupBy, selectedPaneKey, showChildAgents })
   if (!selectedPaneKeyIsLive) {
     // Why: rows disappear when agent retention or tab state changes; clear stale selection before detail/portal rendering targets it.
@@ -326,6 +332,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
           canJumpToWorkspace={canJumpToWorkspace}
           isThreadListResizing={isThreadListResizing}
           onResizeStart={onResizeStart}
+          scopeFilterRow={<ActivityScopeFilterChips hiddenThreadCount={scopeHiddenThreadCount} />}
         />
         <ActivityThreadDetailPane
           selectedThread={selectedThread}

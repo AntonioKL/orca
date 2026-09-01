@@ -184,6 +184,15 @@ export function createUiHydrationActions(set: UISliceSet, _get: UISliceGet): Par
             validRepoIds.size === 0
               ? persistedFilterRepoIds
               : persistedFilterRepoIds.filter((repoId) => validRepoIds.has(repoId)),
+          agentsVisibleHostIds: normalizeVisibleExecutionHostIds(ui.agentsVisibleHostIds),
+          agentsFilterRepoIds:
+            validRepoIds.size === 0
+              ? sanitizePersistedRepoIds(ui.agentsFilterRepoIds)
+              : sanitizePersistedRepoIds(ui.agentsFilterRepoIds).filter((repoId) =>
+                  validRepoIds.has(repoId)
+                ),
+          agentsShowChildAgents: ui.agentsShowChildAgents === true,
+          agentsCompactMode: ui.agentsCompactMode !== false,
           collapsedGroups: new Set(ui.collapsedGroups ?? []),
           uiZoomLevel: ui.uiZoomLevel ?? 0,
           editorFontZoomLevel: ui.editorFontZoomLevel ?? 0,

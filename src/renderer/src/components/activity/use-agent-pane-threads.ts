@@ -3,9 +3,15 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
 import { getRepoMapFromState, getWorktreeMapFromState } from '@/store/selectors'
 import type { AppState } from '@/store/types'
+import { getSettingsFocusedExecutionHostId } from '../../../../shared/execution-host'
 import { buildActivityEvents, createActivityEventBuildCache } from './activity-event-builder'
 import { buildAgentPaneThreads, createAgentPaneThreadReuseCache } from './activity-thread-builder'
 import { isChildAgentThread } from './activity-thread-child-agent'
+import {
+  resolveActivityScopeRepoIds,
+  threadMatchesActivityScope,
+  type ActivityScopeFilter
+} from './activity-scope-filter'
 import {
   activityThreadMatchesSearchQuery,
   buildActivityThreadGroups,
@@ -50,8 +56,13 @@ export function useAgentPaneThreads(args: {
   effectiveSelectedPaneKey: string | null
   visibleThreads: AgentPaneThread[]
   visibleThreadGroups: ActivityThreadGroup[]
+  /** Threads excluded by the persisted host/project scope — the chips row shows this so scope filtering is never silent. */
+  scopeHiddenThreadCount: number
 } {
   const { query, readFilter, groupBy, selectedPaneKey, showChildAgents = false } = args
+  const agentsVisibleHostIds = useAppStore((s) => s.agentsVisibleHostIds)
+  const agentsFilterRepoIds = useAppStore((s) => s.agentsFilterRepoIds)
+  const defaultHostId = useAppStore((s) => getSettingsFocusedExecutionHostId(s.settings))
   const storeData = useAppStore(
     useShallow((s) => ({
       agentStatusByPaneKey: s.agentStatusByPaneKey,
@@ -117,6 +128,30 @@ export function useAgentPaneThreads(args: {
     selectedPaneKey === null || allThreads.some((thread) => thread.paneKey === selectedPaneKey)
   const effectiveSelectedPaneKey = selectedPaneKeyIsLive ? selectedPaneKey : null
 
+  // Why scope runs before the per-view filters: its hidden count must mean "hidden by
+  // the persisted host/project scope alone", not folded into unread/search misses.
+  const { scopedThreads, scopeHiddenThreadCount } = useMemo(() => {
+    const scope: ActivityScopeFilter = {
+      visibleHostIds: agentsVisibleHostIds,
+      filterRepoIds: resolveActivityScopeRepoIds(agentsFilterRepoIds, storeData.repoMap),
+      defaultHostId
+    }
+    const scoped = allThreads.filter(
+      (thread) =>
+        threadMatchesActivityScope(thread, scope) ||
+        // Why: keep the just-selected thread visible so changing scope can't vanish the open row.
+        thread.paneKey === effectiveSelectedPaneKey
+    )
+    return { scopedThreads: scoped, scopeHiddenThreadCount: allThreads.length - scoped.length }
+  }, [
+    allThreads,
+    agentsVisibleHostIds,
+    agentsFilterRepoIds,
+    storeData.repoMap,
+    defaultHostId,
+    effectiveSelectedPaneKey
+  ])
+
   // Why deferred: filtering hundreds of threads is interruptible background work; the input
   // echoes the keystroke at full priority while the list catches up on the deferred value.
   const deferredQuery = useDeferredValue(query)
@@ -124,7 +159,7 @@ export function useAgentPaneThreads(args: {
     const normalizedQuery = isActivitySearchQueryTooLarge(deferredQuery)
       ? null
       : deferredQuery.trim().toLowerCase()
-    return allThreads.filter((thread) => {
+    return scopedThreads.filter((thread) => {
       // Why: keep the just-selected thread visible after auto-mark-read flips it to read, else unread-only mode makes the clicked row vanish from the list.
       if (
         readFilter === 'unread' &&
@@ -146,7 +181,7 @@ export function useAgentPaneThreads(args: {
       }
       return activityThreadMatchesSearchQuery({ thread, searchQuery: normalizedQuery })
     })
-  }, [allThreads, readFilter, deferredQuery, effectiveSelectedPaneKey, showChildAgents])
+  }, [scopedThreads, readFilter, deferredQuery, effectiveSelectedPaneKey, showChildAgents])
 
   const visibleThreadGroups = useMemo(
     () => buildActivityThreadGroups(visibleThreads, groupBy),
@@ -159,6 +194,7 @@ export function useAgentPaneThreads(args: {
     selectedPaneKeyIsLive,
     effectiveSelectedPaneKey,
     visibleThreads,
-    visibleThreadGroups
+    visibleThreadGroups,
+    scopeHiddenThreadCount
   }
 }
