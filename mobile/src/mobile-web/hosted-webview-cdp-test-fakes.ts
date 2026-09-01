@@ -1,9 +1,3 @@
-import { describe, expect, it } from 'vitest'
-
-describe('hosted WebView CDP test fakes', () => {
-  it('exports reusable socket doubles', () => expect(FakeCdpSocket).toBeDefined())
-})
-
 export class FakeCdpSocket {
   evaluations: {
     id: number
