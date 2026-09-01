@@ -6,7 +6,7 @@ import { computeAgentSessionPayloadFingerprint } from '../../../shared/agent-ses
 import type { AgentSessionHandoffRequest } from '../../../shared/agent-session-wire'
 import { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import { recoverStoredDeadTuiOwnerForHandoff } from '../../runtime/agent-session-handoff-record-transitions'
-import { openAgentSessionJournal } from '../agent-session-journal/journal-store'
+import { openAgentSessionJournal } from '../agent-session-journal/journal-store-factory'
 import { StructuredAgentSessionHandoffCoordinator } from './structured-agent-session-handoff'
 import type { StructuredAgentSessionHandoffTransport } from './structured-agent-session-handoff-types'
 

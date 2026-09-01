@@ -11,7 +11,7 @@ import type {
   AgentSessionHandoffStatus
 } from '../../../shared/agent-session-wire'
 import { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
-import { openAgentSessionJournal } from '../agent-session-journal/journal-store'
+import { openAgentSessionJournal } from '../agent-session-journal/journal-store-factory'
 import {
   queuedStructuredHandoffCanBegin,
   StructuredAgentSessionHandoffQueue
