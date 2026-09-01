@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   defaultRangeExtractor,
   measureElement as measureVirtualElementSize,
@@ -8,16 +8,13 @@ import {
 } from '@tanstack/react-virtual'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
-import { getActiveStickyHeaderIndex } from '../sidebar/worktree-list/viewport/virtual-rows'
 import { ActivityThreadListToolbar } from './activity-thread-list-toolbar'
 import { ActivityThreadVirtualRow } from './activity-thread-virtual-row'
 import { ActivityThreadListResizeHandle } from './activity-thread-list-resize-handle'
-import { ActivityThreadStickyHeader } from './activity-thread-sticky-header'
 import {
   buildActivityVirtualItems,
   estimateActivityVirtualItemSize,
   findActivityThreadItemIndex,
-  getActivityHeaderItemIndexes,
   getActivityVirtualItemKey
 } from './activity-thread-virtual-items'
 import type {
@@ -67,7 +64,8 @@ export function ActivityThreadListPane({
   showOptionsMenu = true,
   scopeFilterRow,
   collapsedGroupKeys,
-  onToggleGroupCollapse
+  onToggleGroupCollapse,
+  scrollTopRef
 }: {
   threadListRef?: React.RefObject<HTMLDivElement | null>
   threadListWidth?: number
@@ -104,6 +102,8 @@ export function ActivityThreadListPane({
   scopeFilterRow?: React.ReactNode
   collapsedGroupKeys?: ReadonlySet<string>
   onToggleGroupCollapse?: (groupKey: string) => void
+  /** Optional view-local scroll memory; updated without triggering React renders. */
+  scrollTopRef?: React.MutableRefObject<number>
 }): React.JSX.Element {
   const [internalCollapsedGroupKeys, setInternalCollapsedGroupKeys] = useState<Set<string>>(
     () => new Set()
@@ -125,6 +125,19 @@ export function ActivityThreadListPane({
       }
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const handleScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (scrollTopRef) {
+        scrollTopRef.current = event.currentTarget.scrollTop
+      }
+    },
+    [scrollTopRef]
+  )
+  useEffect(() => {
+    if (scrollContainerRef.current && scrollTopRef) {
+      scrollContainerRef.current.scrollTop = scrollTopRef.current
+    }
+  }, [scrollTopRef])
   const virtualItems = useMemo(
     () =>
       buildActivityVirtualItems({
@@ -133,10 +146,6 @@ export function ActivityThreadListPane({
         collapsedGroupKeys: effectiveCollapsedGroupKeys
       }),
     [visibleThreadGroups, groupBy, effectiveCollapsedGroupKeys]
-  )
-  const headerItemIndexes = useMemo(
-    () => getActivityHeaderItemIndexes(virtualItems),
-    [virtualItems]
   )
   const selectedItemIndex = useMemo(
     () => findActivityThreadItemIndex(virtualItems, selectedPaneKey),
@@ -182,11 +191,6 @@ export function ActivityThreadListPane({
     useFlushSync: false
   })
 
-  const rangeStartIndex = virtualizer.range?.startIndex ?? 0
-  const stickyHeaderIndex =
-    groupBy !== 'none' ? getActiveStickyHeaderIndex(headerItemIndexes, rangeStartIndex) : null
-  const stickyHeaderItem = stickyHeaderIndex === null ? null : virtualItems[stickyHeaderIndex]
-
   const resizable = onResizeStart !== undefined
   return (
     <aside
@@ -221,6 +225,7 @@ export function ActivityThreadListPane({
       <div className="relative min-h-0 flex-1">
         <div
           ref={scrollContainerRef}
+          onScroll={scrollTopRef ? handleScroll : undefined}
           className="h-full overflow-y-auto overflow-x-hidden p-1.5 scrollbar-sleek"
         >
           <div
@@ -270,13 +275,6 @@ export function ActivityThreadListPane({
             </div>
           ) : null}
         </div>
-        {stickyHeaderItem?.type === 'header' ? (
-          <ActivityThreadStickyHeader
-            group={stickyHeaderItem.group}
-            collapsed={effectiveCollapsedGroupKeys.has(stickyHeaderItem.group.key)}
-            onToggle={() => handleToggleGroup(stickyHeaderItem.group.key)}
-          />
-        ) : null}
       </div>
       {resizable ? (
         <ActivityThreadListResizeHandle

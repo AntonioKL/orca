@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from 'react'
+import { act, type MutableRefObject } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -43,6 +43,7 @@ function renderPane(
   args: {
     threads: AgentPaneThread[]
     selectedPaneKey?: string | null
+    scrollTopRef?: MutableRefObject<number>
   }
 ): void {
   act(() => {
@@ -70,6 +71,7 @@ function renderPane(
           canJumpToWorkspace={() => true}
           showFilterControls={false}
           showOptionsMenu={false}
+          scrollTopRef={args.scrollTopRef}
         />
       </TooltipProvider>
     )
@@ -136,5 +138,25 @@ describe('ActivityThreadListPane virtualization', () => {
     expect(mountedRowCount()).toBe(3)
     expect(container.textContent).toContain('Virtual agent 0')
     expect(container.textContent).toContain('Virtual agent 2')
+  })
+
+  it('restores the Agents scroll position without storing it in React state', () => {
+    const scrollTopRef = { current: 240 }
+    renderPane(root, { threads: makeManyThreads(), scrollTopRef })
+    const scrollContainer = container.querySelector<HTMLElement>('.overflow-y-auto')
+    expect(scrollContainer?.scrollTop).toBe(240)
+
+    act(() => {
+      if (scrollContainer) {
+        scrollContainer.scrollTop = 360
+        scrollContainer.dispatchEvent(new Event('scroll', { bubbles: true }))
+      }
+    })
+    expect(scrollTopRef.current).toBe(360)
+
+    act(() => root.unmount())
+    root = createRoot(container)
+    renderPane(root, { threads: makeManyThreads(), scrollTopRef })
+    expect(container.querySelector<HTMLElement>('.overflow-y-auto')?.scrollTop).toBe(360)
   })
 })

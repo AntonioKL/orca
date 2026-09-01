@@ -68,6 +68,7 @@ function Sidebar({
   const [agentQuery, setAgentQuery] = React.useState('')
   const [agentSearchOpen, setAgentSearchOpen] = React.useState(false)
   const [agentOptionsTarget, setAgentOptionsTarget] = React.useState<HTMLDivElement | null>(null)
+  const agentsScrollTopRef = React.useRef(0)
   const agentSearchInputRef = React.useRef<HTMLInputElement>(null)
   const compactHeader = sidebarWidth < SIDEBAR_HEADER_WIDE_MIN_WIDTH
   const fetchAllWorktrees = useAppStore((s) => s.fetchAllWorktrees)
@@ -269,6 +270,7 @@ function Sidebar({
                           setAgentReadFilter((filter) => (filter === 'unread' ? 'all' : 'unread'))
                       : undefined
                   }
+                  scrollTopRef={agentsScrollTopRef}
                 />
               </React.Suspense>
             ) : (

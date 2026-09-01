@@ -34,6 +34,7 @@ export type SidebarAgentsListProps = {
   onSearch?: () => void
   unreadOnly?: boolean
   onToggleUnread?: () => void
+  scrollTopRef?: React.MutableRefObject<number>
 }
 
 export default function SidebarAgentsList({
@@ -48,7 +49,8 @@ export default function SidebarAgentsList({
   onToggleGroupCollapse,
   onSearch,
   unreadOnly = false,
-  onToggleUnread
+  onToggleUnread,
+  scrollTopRef
 }: SidebarAgentsListProps): React.JSX.Element {
   // Why store-backed: these are persisted preferences (agents* UI fields), unlike the momentary read filter/search.
   const compactMode = useAppStore((s) => s.agentsCompactMode)
@@ -155,6 +157,7 @@ export default function SidebarAgentsList({
         scopeFilterRow={<ActivityScopeFilterChips hiddenThreadCount={scopeHiddenThreadCount} />}
         collapsedGroupKeys={effectiveCollapsedGroupKeys}
         onToggleGroupCollapse={handleToggleGroup}
+        scrollTopRef={scrollTopRef}
       />
       {optionsTarget
         ? createPortal(

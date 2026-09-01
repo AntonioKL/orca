@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ActivityStatusGroupHeader } from './activity-thread-controls'
 import { ActivityThreadListPane } from './activity-thread-list-pane'
-import { ActivityThreadStickyHeader } from './activity-thread-sticky-header'
 import type { ActivityThreadGroup, AgentPaneThread } from './activity-thread-types'
 import { makeTab, makeWorktree } from './ActivityPrototypePage-test-fixtures'
 
@@ -125,20 +124,6 @@ describe('ActivityStatusGroupHeader', () => {
     const header = container.querySelector('div')
     expect(header?.className).toContain('custom-header-class')
     expect(header?.className).not.toContain('bg-background/95')
-  })
-
-  it('renders ActivityThreadStickyHeader with top-1.5 spacing to provide a gap from the container top', () => {
-    act(() => {
-      root.render(
-        <TooltipProvider>
-          <ActivityThreadStickyHeader group={mockGroup} collapsed={false} onToggle={vi.fn()} />
-        </TooltipProvider>
-      )
-    })
-
-    const header = container.firstElementChild as HTMLElement
-    expect(header?.className).toContain('top-1.5')
-    expect(header?.className).toContain('inset-x-1.5')
   })
 })
 
