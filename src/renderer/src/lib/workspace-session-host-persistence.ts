@@ -15,6 +15,7 @@ import {
   attachHostSessionShadow,
   indexWorktreeHostClaims,
   pickPrimaryHostForClaims,
+  type HostSessionWriteMode,
   type WorktreeHostClaims
 } from './workspace-session-host-contention'
 import {
@@ -169,11 +170,12 @@ export function buildHostIdByWorktreeId(state: HostPersistenceState): HostIdByWo
  *  rows of every host that lost a contested id so this write cannot erase them. */
 function splitWorkspaceSessionForWrite(
   payload: WorkspaceSessionState,
-  state: HostPersistenceState
+  state: HostPersistenceState,
+  mode: HostSessionWriteMode
 ): HostSessionSlices {
   const routing = buildHostSessionRouting(state)
   const slices = splitWorkspaceSessionByHost(payload, routing.hostIdByWorktreeId)
-  attachHostSessionShadow(slices, state.contestedHostWorkspaceSessions, routing.claims)
+  attachHostSessionShadow(slices, state.contestedHostWorkspaceSessions, routing.claims, mode)
   return slices
 }
 
@@ -185,7 +187,7 @@ export function patchWorkspaceSessionByHost(
   patch: WorkspaceSessionPatch,
   state: HostPersistenceState
 ): Promise<void> {
-  const slices = splitWorkspaceSessionForWrite(patch as WorkspaceSessionState, state)
+  const slices = splitWorkspaceSessionForWrite(patch as WorkspaceSessionState, state, 'patch')
   const local = (slices[LOCAL_EXECUTION_HOST_ID] ?? patch) as WorkspaceSessionPatch
   const localWrite = api.patch(local)
   for (const [hostId, slice] of nonLocalHostSessionEntries(slices)) {
@@ -205,7 +207,9 @@ export async function persistWorkspaceSessionByHost(
   payload: WorkspaceSessionState,
   state: HostPersistenceState
 ): Promise<void> {
-  const slices = splitWorkspaceSessionForWrite(payload, state)
+  // Why 'replace': api.set swaps the whole partition, so parked rows must ride along even for
+  // fields nothing else routed to this host.
+  const slices = splitWorkspaceSessionForWrite(payload, state, 'replace')
   const writes: Promise<void>[] = [api.set(slices[LOCAL_EXECUTION_HOST_ID] ?? payload)]
   for (const [hostId, slice] of nonLocalHostSessionEntries(slices)) {
     writes.push(api.set(slice, hostId))
@@ -219,7 +223,8 @@ export function buildWorkspaceSessionHostSnapshots(
   payload: WorkspaceSessionState,
   state: HostPersistenceState
 ): WorkspaceSessionHostSnapshot[] {
-  const slices = splitWorkspaceSessionForWrite(payload, state)
+  // Why 'replace': quit snapshots are applied as full partition sets.
+  const slices = splitWorkspaceSessionForWrite(payload, state, 'replace')
   return [
     { state: slices[LOCAL_EXECUTION_HOST_ID] ?? payload },
     ...nonLocalHostSessionEntries(slices).map(([hostId, hostState]) => ({

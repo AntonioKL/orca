@@ -212,6 +212,31 @@ describe('writing a contested workspace id back', () => {
     expect(tabIds(localWrite, SHARED_ID)).toEqual(['local-tab'])
   })
 
+  it('carries a parked field the slice never seeded through a full partition replace', async () => {
+    // Why: api.set swaps the whole partition, so a field with no live entry routing to the
+    // co-claimant would otherwise be written without its parked rows and erased on disk.
+    const set: SessionWriteMock = vi.fn(async () => {})
+    await persistWorkspaceSessionByHost(
+      {
+        set,
+        get: vi.fn(),
+        patch: vi.fn(),
+        setSync: vi.fn(),
+        flush: vi.fn(async () => {})
+      },
+      {
+        ...sessionWithTabs({ [SHARED_ID]: [tab('local-tab')] }),
+        // Seeds the runtime slice (so its partition IS rewritten) without seeding tabsByWorktree.
+        lastVisitedAtByWorktreeId: { [RUNTIME_ONLY_ID]: 1 }
+      },
+      runtimeCoClaimantState()
+    )
+
+    const runtimeWrite = set.mock.calls.find(([, hostId]) => hostId === RUNTIME_HOST)?.[0]
+    expect(runtimeWrite).toBeDefined()
+    expect(tabIds(runtimeWrite, SHARED_ID)).toEqual(['runtime-tab'])
+  })
+
   it('restores the parked rows on the debounced patch path too', () => {
     const patch: SessionPatchMock = vi.fn(async () => {})
     patchWorkspaceSessionByHost(

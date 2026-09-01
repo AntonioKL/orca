@@ -225,12 +225,16 @@ function hostStillClaimsKey(
   return !claimed || claimed.has(hostId)
 }
 
+/** Whether the slices will be applied as a merge-by-field patch or a full partition replace. */
+export type HostSessionWriteMode = 'patch' | 'replace'
+
 /** Write parked entries back into their own host's slice so a write for the primary host cannot
  *  erase a co-claimant's persisted session. Mutates the slices produced by the split. */
 export function attachHostSessionShadow(
   slices: HostSessionSlices,
   shadow: HostSessionSlices | undefined,
-  claims: WorktreeHostClaims
+  claims: WorktreeHostClaims,
+  mode: HostSessionWriteMode
 ): void {
   if (!shadow) {
     return
@@ -245,11 +249,18 @@ export function attachHostSessionShadow(
     }
     for (const field of WORKTREE_KEYED_FIELDS) {
       const parked = shadowSlice[field]
-      const target = slice[field]
-      // Why present-only: a patch that omits the field leaves the partition's own copy untouched,
-      // so nothing needs restoring there.
-      if (!isWorkspaceSessionRecord(parked) || !isWorkspaceSessionRecord(target)) {
+      if (!isWorkspaceSessionRecord(parked)) {
         continue
+      }
+      let target = slice[field]
+      if (!isWorkspaceSessionRecord(target)) {
+        // Why the mode split: a patch that omits the field leaves the partition's own copy
+        // untouched, but a full set erases omitted fields, so the parked rows must ride along.
+        if (mode === 'patch') {
+          continue
+        }
+        target = {}
+        ;(slice as WorkspaceSessionRecord)[field] = target
       }
       for (const [key, entry] of Object.entries(parked)) {
         if (Object.hasOwn(target, key) || !hostStillClaimsKey(claims, key, hostId)) {
