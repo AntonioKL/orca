@@ -601,6 +601,112 @@ describe('resolved-path classification', () => {
   })
 })
 
+// Why: `preserveSymlink` keeps the leaf on purpose so rename/delete act on the link itself, but
+// copyFile reads and writes THROUGH the leaf, so for copy the link's target is the real object.
+describe.skipIf(process.platform === 'win32')(
+  'files.copy refuses a .git aliased through a leaf symlink',
+  () => {
+    beforeEach(async () => {
+      await buildRepo()
+      await mkdir(join(repoPath, '.git', 'hooks'), { recursive: true })
+      await writeFile(
+        join(repoPath, '.git', 'hooks', 'pre-commit'),
+        '#!/bin/sh\nreal hook\n',
+        'utf-8'
+      )
+      await symlink(
+        join(repoPath, '.git', 'hooks', 'pre-commit'),
+        join(repoPath, 'hook-link'),
+        'file'
+      )
+      await symlink(join(repoPath, '.git', 'config'), join(repoPath, 'config-link'), 'file')
+    })
+
+    afterEach(async () => {
+      await rm(repoPath, { recursive: true, force: true })
+    })
+
+    it('refuses a leaf symlink to a hook as the source', async () => {
+      const response = await dispatchFileMethod('files.copy', {
+        sourceRelativePath: 'hook-link',
+        destinationRelativePath: 'stolen'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, 'stolen'))).toBe(false)
+    })
+
+    it('refuses a leaf symlink to .git/config as the source', async () => {
+      const response = await dispatchFileMethod('files.copy', {
+        sourceRelativePath: 'config-link',
+        destinationRelativePath: 'stolen-config'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, 'stolen-config'))).toBe(false)
+    })
+
+    // Why also the destination: COPYFILE_EXCL happens to block this today, and it is the only thing
+    // that does. Classifying it too keeps the guard from depending on that flag staying put.
+    it('refuses a leaf symlink into .git as the destination', async () => {
+      const response = await dispatchFileMethod('files.copy', {
+        sourceRelativePath: 'tracked.txt',
+        destinationRelativePath: 'hook-link'
+      })
+
+      expectRefused(response)
+      expect(await readFile(join(repoPath, '.git', 'hooks', 'pre-commit'), 'utf-8')).toBe(
+        '#!/bin/sh\nreal hook\n'
+      )
+    })
+
+    // Why: a symlink loop makes realpath fail with ELOOP, not ENOENT — the leaf exists but what it
+    // points at is unknowable, so the copy is refused rather than attempted.
+    it('fails closed when the leaf cannot be canonicalized', async () => {
+      await symlink(join(repoPath, 'loop-b'), join(repoPath, 'loop-a'), 'file')
+      await symlink(join(repoPath, 'loop-a'), join(repoPath, 'loop-b'), 'file')
+
+      const response = await dispatchFileMethod('files.copy', {
+        sourceRelativePath: 'loop-a',
+        destinationRelativePath: 'looped-copy'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, 'looped-copy'))).toBe(false)
+    })
+
+    it('still copies through a leaf symlink that stays in the working tree', async () => {
+      await symlink(join(repoPath, 'tracked.txt'), join(repoPath, 'plain-link'), 'file')
+
+      const response = await dispatchFileMethod('files.copy', {
+        sourceRelativePath: 'plain-link',
+        destinationRelativePath: 'copied.txt'
+      })
+
+      expect(response.ok).toBe(true)
+      expect(await readFile(join(repoPath, 'copied.txt'), 'utf-8')).toBe('working tree content\n')
+    })
+
+    // Why: rename and delete act on the directory entry, never on what the link points at.
+    it('still renames and deletes the link itself, leaving the hook intact', async () => {
+      const renamed = await dispatchFileMethod('files.rename', {
+        oldRelativePath: 'hook-link',
+        newRelativePath: 'hook-link-moved'
+      })
+      const deleted = await dispatchFileMethod('files.delete', {
+        relativePath: 'hook-link-moved',
+        recursive: false
+      })
+
+      expect(renamed.ok).toBe(true)
+      expect(deleted.ok).toBe(true)
+      expect(await readFile(join(repoPath, '.git', 'hooks', 'pre-commit'), 'utf-8')).toBe(
+        '#!/bin/sh\nreal hook\n'
+      )
+    })
+  }
+)
+
 // Why: the SSH branch returns before the local gate, so the canonical-path check never runs there.
 // The relative-path guard at the RPC boundary is the only thing covering it.
 describe('files.* RPCs refuse repository admin paths on the SSH branch', () => {

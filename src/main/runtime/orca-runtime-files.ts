@@ -2082,11 +2082,15 @@ export class RuntimeFileCommands {
     }
 
     const store = this.host.requireStore()
+    // Why followsLeafSymlink: copyFile reads and writes *through* a leaf symlink, so the link's
+    // target is the object it touches — unlike rename/delete, which act on the entry itself.
     const sourcePath = await resolveAuthorizedMutablePath(sourceTarget.path, store, {
-      preserveSymlink: true
+      preserveSymlink: true,
+      followsLeafSymlink: true
     })
     const destinationPath = await resolveAuthorizedMutablePath(destinationTarget.path, store, {
-      preserveSymlink: true
+      preserveSymlink: true,
+      followsLeafSymlink: true
     })
     await mkdir(dirname(destinationPath), { recursive: true })
     // Why: COPYFILE_EXCL preserves the no-clobber invariant of the local shell copy IPC (caller already deconflicts names).
