@@ -3,7 +3,10 @@ import { utils, type BaseAgent, type ParsedKey } from 'ssh2'
 import type { SshTarget } from '../../shared/ssh-types'
 import type { SshResolvedConfig } from './ssh-config-parser'
 import { createIdentityFilteredAgent } from './ssh-agent-identity-filter'
-import { discoverNativeAgentSocket } from './ssh-agent-socket-discovery'
+import {
+  discoverNativeAgentSocket,
+  primeNativeAgentSocketPreference
+} from './ssh-agent-socket-discovery'
 import { resolveSshConfigHomePath } from './ssh-config-path-expansion'
 import { isOpenSshConfigBackedTarget } from './system-ssh-args'
 
@@ -63,15 +66,41 @@ function expandIdentityAgentEnv(value: string): string | undefined {
   return missingEnv ? undefined : expanded
 }
 
-export function resolveAgentSocket(
-  target: Pick<SshTarget, 'identityAgent' | 'configHost' | 'source' | 'host'>,
-  resolved: Pick<SshResolvedConfig, 'identityAgent'> | null
+type AgentSocketTarget = Pick<SshTarget, 'identityAgent' | 'configHost' | 'source' | 'host'>
+type AgentSocketResolvedConfig = Pick<SshResolvedConfig, 'identityAgent'>
+
+function configuredIdentityAgentFor(
+  target: AgentSocketTarget,
+  resolved: AgentSocketResolvedConfig | null
 ): string | undefined {
   // Why: imported config-host targets may contain raw OpenSSH tokens like %d.
   // ssh -G resolves those tokens, so its value must win when available.
-  const configuredIdentityAgent = isOpenSshConfigBackedTarget(target)
+  return isOpenSshConfigBackedTarget(target)
     ? (resolved?.identityAgent ?? target.identityAgent)
     : (target.identityAgent ?? resolved?.identityAgent)
+}
+
+/**
+ * Settle anything {@link resolveAgentSocket} needs but cannot ask for synchronously.
+ *
+ * Only reached when the target leaves the agent to discovery — an explicit
+ * `IdentityAgent`, `none` included, is answered without opening any socket at all.
+ */
+export async function prepareAgentSocketResolution(
+  target: AgentSocketTarget,
+  resolved: AgentSocketResolvedConfig | null
+): Promise<void> {
+  if (configuredIdentityAgentFor(target, resolved) != null) {
+    return
+  }
+  await primeNativeAgentSocketPreference()
+}
+
+export function resolveAgentSocket(
+  target: AgentSocketTarget,
+  resolved: AgentSocketResolvedConfig | null
+): string | undefined {
+  const configuredIdentityAgent = configuredIdentityAgentFor(target, resolved)
   if (configuredIdentityAgent != null) {
     const trimmed = configuredIdentityAgent.trim()
     if (!trimmed || trimmed.toLowerCase() === 'none') {

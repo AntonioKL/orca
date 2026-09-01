@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, posix } from 'node:path'
+import { probeAgentIdentityCount } from './ssh-agent-identity-probe'
 import { joinRemotePath, type RemoteHostPlatform } from './ssh-remote-platform'
 
 /**
@@ -110,15 +111,88 @@ function nativeAgentEndpointExists(endpoint: string): boolean {
 }
 
 /**
+ * The socket launchd hands every macOS GUI process. `/tmp` is a symlink to
+ * `/private/tmp`, so both spellings name the same listener.
+ *
+ * Because launchd always sets it, its presence says nothing about whether the user
+ * chose it — unlike any other `$SSH_AUTH_SOCK` value, which someone had to write.
+ */
+const APPLE_LAUNCHD_AGENT_SOCKET = /^\/(?:private\/)?tmp\/com\.apple\.launchd\.[^/]+\/Listeners$/
+
+export function isAppleLaunchdAgentSocket(socketPath: string): boolean {
+  return APPLE_LAUNCHD_AGENT_SOCKET.test(socketPath)
+}
+
+/**
+ * The launchd socket last proven to offer nothing, and the ones that would not say.
+ *
+ * An agent that answered is re-asked on the next attempt, so an `ssh-add` takes effect
+ * immediately. One that timed out is not: retrying it would only re-pay the timeout on
+ * every connect, and the incumbent stands either way.
+ */
+let emptyLaunchdAgentSocket: string | undefined
+const unreadableLaunchdAgentSockets = new Set<string>()
+
+/** The 1Password socket worth displacing an unchosen, empty launchd agent for. */
+function installedOnePasswordSocketOverLaunchd(envSocket: string | undefined): string | undefined {
+  if (process.platform !== 'darwin' || !envSocket || !isAppleLaunchdAgentSocket(envSocket)) {
+    return undefined
+  }
+  const endpoint = onePasswordAgentEndpoint({ kind: 'native' })
+  return endpoint && nativeAgentEndpointExists(endpoint) ? endpoint : undefined
+}
+
+/**
+ * Ask the incumbent macOS agent whether it has anything to offer, before
+ * {@link discoverNativeAgentSocket} has to choose.
+ *
+ * Deliberately not a "first socket with keys wins" sweep: it probes one socket, in the
+ * single ambiguous case where the user never picked the incumbent and a 1Password agent
+ * is installed beside it. Everywhere else — a populated agent, a socket the user pointed
+ * somewhere themselves, no 1Password — nothing is opened and nothing is overridden.
+ *
+ * Skipping this leaves resolution exactly as it was: `$SSH_AUTH_SOCK` wins.
+ */
+export async function primeNativeAgentSocketPreference(): Promise<void> {
+  emptyLaunchdAgentSocket = undefined
+  const envSocket = process.env.SSH_AUTH_SOCK
+  if (!envSocket || !installedOnePasswordSocketOverLaunchd(envSocket)) {
+    return
+  }
+  if (unreadableLaunchdAgentSockets.has(envSocket)) {
+    return
+  }
+  const identityCount = await probeAgentIdentityCount(envSocket)
+  if (identityCount === undefined) {
+    unreadableLaunchdAgentSockets.add(envSocket)
+    return
+  }
+  if (identityCount === 0) {
+    emptyLaunchdAgentSocket = envSocket
+  }
+}
+
+export function resetNativeAgentSocketPreference(): void {
+  emptyLaunchdAgentSocket = undefined
+  unreadableLaunchdAgentSockets.clear()
+}
+
+/**
  * The agent socket on the machine running this process — the only host ssh2 can reach.
  *
  * `$SSH_AUTH_SOCK` is returned as the user set it; the 1Password endpoint is a guess,
  * so it is only returned once proven present rather than handed over as a dead path.
+ * The one exception is the macOS agent nobody chose and that has already been proven
+ * empty — see {@link primeNativeAgentSocketPreference}.
  */
 export function discoverNativeAgentSocket(): string | undefined {
   const envSocket = process.env.SSH_AUTH_SOCK
   if (envSocket) {
-    return envSocket
+    return (
+      (emptyLaunchdAgentSocket === envSocket
+        ? installedOnePasswordSocketOverLaunchd(envSocket)
+        : undefined) ?? envSocket
+    )
   }
   const endpoint = onePasswordAgentEndpoint({ kind: 'native' })
   return endpoint && nativeAgentEndpointExists(endpoint) ? endpoint : undefined

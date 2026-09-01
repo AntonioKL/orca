@@ -39,6 +39,7 @@ import {
   isPassphraseError,
   sleep,
   buildConnectConfig,
+  prepareAgentSocketResolution,
   wrapRemoteCommandForPosixShell,
   createSshOperationAbortError,
   type SshExecOptions,
@@ -818,6 +819,12 @@ export class SshConnection {
     this.systemSshGssapiOnlyForSession = false
     this.useSystemSshTransport = false
 
+    // Why: buildConnectConfig is synchronous, so the one agent question that needs I/O
+    // has to be settled first; skipping it just leaves $SSH_AUTH_SOCK winning as before.
+    await prepareAgentSocketResolution(this.target, resolved)
+    if (!this.isCurrentConnectAttempt(connectGeneration)) {
+      throw this.createCancelledConnectAttemptError()
+    }
     const config = buildConnectConfig(this.target, resolved)
 
     // Why: ssh2 doesn't support ProxyCommand/ProxyJump natively; spawn the resolved proxy and pipe its stdin/stdout as config.sock.

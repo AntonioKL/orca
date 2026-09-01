@@ -12,9 +12,17 @@ vi.mock('node:os', () => ({
   homedir: () => TEST_HOME
 }))
 
+const mockProbeAgentIdentityCount = vi.fn<(socketPath: string) => Promise<number | undefined>>()
+vi.mock('./ssh-agent-identity-probe', () => ({
+  probeAgentIdentityCount: (socketPath: string) => mockProbeAgentIdentityCount(socketPath)
+}))
+
 import {
   discoverNativeAgentSocket,
+  isAppleLaunchdAgentSocket,
   listAgentSocketCandidates,
+  primeNativeAgentSocketPreference,
+  resetNativeAgentSocketPreference,
   WINDOWS_OPENSSH_AGENT_PIPE
 } from './ssh-agent-socket-discovery'
 import { getRemoteHostPlatform } from './ssh-remote-platform'
@@ -38,6 +46,9 @@ function usePlatform(platform: NodeJS.Platform): void {
 beforeEach(() => {
   mockExistsSync.mockReset()
   mockExistsSync.mockReturnValue(false)
+  mockProbeAgentIdentityCount.mockReset()
+  mockProbeAgentIdentityCount.mockResolvedValue(undefined)
+  resetNativeAgentSocketPreference()
   delete process.env.SSH_AUTH_SOCK
 })
 
@@ -171,5 +182,142 @@ describe('listAgentSocketCandidates host boundary', () => {
         remoteEnv: {}
       })
     ).toEqual([])
+  })
+})
+
+const LAUNCHD_AGENT_SOCKET = '/private/tmp/com.apple.launchd.aGt5gwfoiK/Listeners'
+
+function useMacOsWithOnePasswordInstalled(): void {
+  usePlatform('darwin')
+  mockExistsSync.mockImplementation((path) => path === MACOS_ONEPASSWORD_SOCKET)
+}
+
+describe('isAppleLaunchdAgentSocket', () => {
+  it('matches both spellings of the launchd listener, since /tmp is a symlink', () => {
+    expect(isAppleLaunchdAgentSocket(LAUNCHD_AGENT_SOCKET)).toBe(true)
+    expect(isAppleLaunchdAgentSocket('/tmp/com.apple.launchd.aGt5gwfoiK/Listeners')).toBe(true)
+  })
+
+  it('does not match a socket the user pointed somewhere themselves', () => {
+    expect(isAppleLaunchdAgentSocket('/Users/dev/.gnupg/S.gpg-agent.ssh')).toBe(false)
+    expect(isAppleLaunchdAgentSocket('/private/tmp/com.apple.launchd.aGt5gwfoiK/Other')).toBe(false)
+    expect(isAppleLaunchdAgentSocket('/private/tmp/com.apple.launchd.aGt/nested/Listeners')).toBe(
+      false
+    )
+  })
+})
+
+describe('the macOS launchd discriminator', () => {
+  it('prefers 1Password when the unchosen launchd agent proves it has nothing', async () => {
+    useMacOsWithOnePasswordInstalled()
+    process.env.SSH_AUTH_SOCK = LAUNCHD_AGENT_SOCKET
+    mockProbeAgentIdentityCount.mockResolvedValue(0)
+
+    await primeNativeAgentSocketPreference()
+
+    expect(discoverNativeAgentSocket()).toBe(MACOS_ONEPASSWORD_SOCKET)
+    expect(mockProbeAgentIdentityCount).toHaveBeenCalledWith(LAUNCHD_AGENT_SOCKET)
+  })
+
+  it('never overrides an agent the user actually populated', async () => {
+    useMacOsWithOnePasswordInstalled()
+    process.env.SSH_AUTH_SOCK = LAUNCHD_AGENT_SOCKET
+    mockProbeAgentIdentityCount.mockResolvedValue(1)
+
+    await primeNativeAgentSocketPreference()
+
+    expect(discoverNativeAgentSocket()).toBe(LAUNCHD_AGENT_SOCKET)
+  })
+
+  it('treats an agent that will not answer as unknown, not as empty', async () => {
+    useMacOsWithOnePasswordInstalled()
+    process.env.SSH_AUTH_SOCK = LAUNCHD_AGENT_SOCKET
+    mockProbeAgentIdentityCount.mockResolvedValue(undefined)
+
+    await primeNativeAgentSocketPreference()
+
+    expect(discoverNativeAgentSocket()).toBe(LAUNCHD_AGENT_SOCKET)
+  })
+
+  it('stops re-probing a socket that timed out, but keeps asking one that answered', async () => {
+    useMacOsWithOnePasswordInstalled()
+    process.env.SSH_AUTH_SOCK = LAUNCHD_AGENT_SOCKET
+
+    mockProbeAgentIdentityCount.mockResolvedValue(0)
+    await primeNativeAgentSocketPreference()
+    await primeNativeAgentSocketPreference()
+    expect(mockProbeAgentIdentityCount).toHaveBeenCalledTimes(2)
+
+    resetNativeAgentSocketPreference()
+    mockProbeAgentIdentityCount.mockReset()
+    mockProbeAgentIdentityCount.mockResolvedValue(undefined)
+    await primeNativeAgentSocketPreference()
+    await primeNativeAgentSocketPreference()
+    expect(mockProbeAgentIdentityCount).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-reads an agent that has since been given a key', async () => {
+    useMacOsWithOnePasswordInstalled()
+    process.env.SSH_AUTH_SOCK = LAUNCHD_AGENT_SOCKET
+
+    mockProbeAgentIdentityCount.mockResolvedValue(0)
+    await primeNativeAgentSocketPreference()
+    expect(discoverNativeAgentSocket()).toBe(MACOS_ONEPASSWORD_SOCKET)
+
+    mockProbeAgentIdentityCount.mockResolvedValue(1)
+    await primeNativeAgentSocketPreference()
+    expect(discoverNativeAgentSocket()).toBe(LAUNCHD_AGENT_SOCKET)
+  })
+
+  it('opens nothing when 1Password is not installed', async () => {
+    usePlatform('darwin')
+    process.env.SSH_AUTH_SOCK = LAUNCHD_AGENT_SOCKET
+    mockProbeAgentIdentityCount.mockResolvedValue(0)
+
+    await primeNativeAgentSocketPreference()
+
+    expect(mockProbeAgentIdentityCount).not.toHaveBeenCalled()
+    expect(discoverNativeAgentSocket()).toBe(LAUNCHD_AGENT_SOCKET)
+  })
+
+  it('opens nothing when the user pointed SSH_AUTH_SOCK somewhere themselves', async () => {
+    useMacOsWithOnePasswordInstalled()
+    process.env.SSH_AUTH_SOCK = '/Users/dev/.gnupg/S.gpg-agent.ssh'
+    mockProbeAgentIdentityCount.mockResolvedValue(0)
+
+    await primeNativeAgentSocketPreference()
+
+    expect(mockProbeAgentIdentityCount).not.toHaveBeenCalled()
+    expect(discoverNativeAgentSocket()).toBe('/Users/dev/.gnupg/S.gpg-agent.ssh')
+  })
+
+  it('leaves Linux alone: no launchd agent means no discriminator', async () => {
+    usePlatform('linux')
+    mockExistsSync.mockImplementation((path) => path === LINUX_ONEPASSWORD_SOCKET)
+    process.env.SSH_AUTH_SOCK = '/run/user/1000/keyring/ssh'
+    mockProbeAgentIdentityCount.mockResolvedValue(0)
+
+    await primeNativeAgentSocketPreference()
+
+    expect(mockProbeAgentIdentityCount).not.toHaveBeenCalled()
+    expect(discoverNativeAgentSocket()).toBe('/run/user/1000/keyring/ssh')
+  })
+
+  it('leaves Windows alone, whose pipe 1Password already serves', async () => {
+    usePlatform('win32')
+    process.env.SSH_AUTH_SOCK = WINDOWS_OPENSSH_AGENT_PIPE
+    mockProbeAgentIdentityCount.mockResolvedValue(0)
+
+    await primeNativeAgentSocketPreference()
+
+    expect(mockProbeAgentIdentityCount).not.toHaveBeenCalled()
+    expect(discoverNativeAgentSocket()).toBe(WINDOWS_OPENSSH_AGENT_PIPE)
+  })
+
+  it('holds to $SSH_AUTH_SOCK when nothing primed the decision', () => {
+    useMacOsWithOnePasswordInstalled()
+    process.env.SSH_AUTH_SOCK = LAUNCHD_AGENT_SOCKET
+
+    expect(discoverNativeAgentSocket()).toBe(LAUNCHD_AGENT_SOCKET)
   })
 })
