@@ -30,7 +30,10 @@ export function isModeledClaudeContent(value: unknown): boolean {
   return part.type === 'thinking' && claudeText(part.thinking) !== null
 }
 
-export function createClaudeProviderFrameFallback(sink: StructuredAgentSessionEventSink): {
+export function createClaudeProviderFrameFallback(
+  sink: StructuredAgentSessionEventSink,
+  acquisitionId: string
+): {
   append: (kind: string, payload: unknown) => void
 } {
   let sequence = 0
@@ -38,8 +41,14 @@ export function createClaudeProviderFrameFallback(sink: StructuredAgentSessionEv
     append: (kind, payload) => {
       sequence += 1
       const translated = unhandledProviderFrameJournalItem('claude', kind, payload)
+      if (!translated) {
+        return
+      }
       sink.appendItem(
-        { provider: 'orca', clientMessageId: `provider-frame:claude:${sequence}` },
+        {
+          provider: 'orca',
+          clientMessageId: `provider-frame:claude:${acquisitionId}:${sequence}`
+        },
         translated.body,
         translated.blobs
       )

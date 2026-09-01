@@ -70,7 +70,11 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
   async acquire(input: StructuredAgentSessionAcquireInput): Promise<AgentSessionAcquisition> {
     const sessionId = input.identity.sessionId
     const prompts = new ClaudePromptRegistry()
-    const translator = createClaudeSessionJournalTranslator(input.events, prompts)
+    const translator = createClaudeSessionJournalTranslator(
+      input.events,
+      prompts,
+      String(input.fence)
+    )
     const { previous, attempt } = this.acquisitions.start(sessionId, prompts)
     let liveSession: ClaudeSession | null = null
     let observedLeafUuid: string | null = null
@@ -278,11 +282,11 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
   readOptions = (input: { sessionId: string; fence: number }) =>
     readClaudeStructuredSessionOptions(this.session(input.sessionId), this.deps.requestTimeoutMs)
 
-  releaseAcquisition(input: { sessionId: string }): Promise<void> {
+  releaseAcquisition(input: { sessionId: string }): Promise<boolean> {
     return this.closeSession(input.sessionId)
   }
 
-  async closeSession(sessionId: string): Promise<void> {
+  async closeSession(sessionId: string): Promise<boolean> {
     const attempt = this.acquisitions.get(sessionId)
     if (attempt) {
       attempt.cancelled = true
@@ -290,6 +294,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       await attempt.finished
     }
     await this.closePublishedSession(sessionId)
+    return true
   }
 
   private async closePublishedSession(sessionId: string): Promise<void> {

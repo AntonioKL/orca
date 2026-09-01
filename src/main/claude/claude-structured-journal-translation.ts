@@ -42,6 +42,7 @@ export type ClaudeJournalTranslatorDeps = {
   bindPromptItemId?: (journalItemId: string, promptKey: string, questionId?: string) => void
   coalesceMs?: number
   schedule?: AgentSessionDeltaCoalescerDeps['schedule']
+  fallbackIdPrefix?: string
 }
 
 export type ClaudeJournalTranslator = {
@@ -52,11 +53,13 @@ export type ClaudeJournalTranslator = {
 
 export function createClaudeSessionJournalTranslator(
   sink: StructuredAgentSessionEventSink | undefined,
-  prompts: ClaudePromptRegistry
+  prompts: ClaudePromptRegistry,
+  fallbackIdPrefix: string
 ): ClaudeJournalTranslator | null {
   return sink
     ? createClaudeJournalTranslator({
         sink,
+        fallbackIdPrefix,
         bindPromptItemId: (itemId, promptKey, questionId) =>
           prompts.bindJournalItemId(itemId, promptKey, questionId)
       })
@@ -96,7 +99,10 @@ export function createClaudeJournalTranslator(
   const latestStreamText = new Map<string, string>()
   const checkpointLengths = new Map<string, number>()
   let currentTurn: { sessionId: string; turnId: string } | null = null
-  const providerFallback = createClaudeProviderFrameFallback(deps.sink)
+  const providerFallback = createClaudeProviderFrameFallback(
+    deps.sink,
+    deps.fallbackIdPrefix ?? 'acquisition'
+  )
 
   const publishLifecycle = (sessionId: string, turnId: string, running: boolean): void => {
     const identity = lifecycleIdentity(sessionId, turnId)
