@@ -205,6 +205,71 @@ describe('AgentHookServer listener replay', () => {
     expect(listener).toHaveBeenNthCalledWith(4, [])
   })
 
+  it('evicts only the matching persisted status identity', () => {
+    const server = new AgentHookServer()
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        providerSession: { key: 'session_id', id: 'resume-me' },
+        payload: { state: 'done', prompt: 'old run', agentType: 'claude' }
+      },
+      'conn-1'
+    )
+    const old = server.getStatusSnapshot()[0]
+    expect(old).toBeDefined()
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        payload: { state: 'working', prompt: 'new run', agentType: 'claude' }
+      },
+      'conn-1'
+    )
+    server.dropPersistedStatusEntry({
+      paneKey: old!.paneKey,
+      state: old!.state,
+      prompt: old!.prompt,
+      agentType: old!.agentType,
+      receivedAt: old!.receivedAt,
+      stateStartedAt: old!.stateStartedAt
+    })
+
+    expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working', prompt: 'new run' })
+
+    // A matching eviction follows ordinary dismissal semantics, including
+    // preserving a resumable provider session for the still-live TUI.
+    const resumed = new AgentHookServer()
+    resumed.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        providerSession: { key: 'session_id', id: 'resume-me' },
+        payload: { state: 'done', prompt: 'old run', agentType: 'claude' }
+      },
+      'conn-1'
+    )
+    const resumedIdentity = resumed.getStatusSnapshot()[0]!
+    expect(
+      resumed.dropPersistedStatusEntry({
+        paneKey: resumedIdentity.paneKey,
+        state: resumedIdentity.state,
+        prompt: resumedIdentity.prompt,
+        agentType: resumedIdentity.agentType,
+        receivedAt: resumedIdentity.receivedAt,
+        stateStartedAt: resumedIdentity.stateStartedAt
+      })
+    ).toBe(true)
+    expect(resumed.getStatusSnapshot()[0]).toMatchObject({
+      providerSessionOnly: true,
+      providerSession: { id: 'resume-me' }
+    })
+  })
+
   it('notifies pane-status-clear listener when pane teardown evicts a cached status', () => {
     const server = new AgentHookServer()
     const listener = vi.fn()

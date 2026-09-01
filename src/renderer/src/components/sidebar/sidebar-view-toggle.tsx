@@ -12,7 +12,7 @@ type SidebarViewToggleOption = {
 type SidebarViewToggleProps = {
   ariaLabel: string
   value: string
-  options: readonly [SidebarViewToggleOption, SidebarViewToggleOption]
+  options: readonly SidebarViewToggleOption[]
   onSelect: (value: string) => void
   className?: string
 }
@@ -45,7 +45,7 @@ export function SidebarViewToggle({
             data-sidebar-section-title={option.sectionTitle}
             onClick={() => onSelect(option.value)}
             className={cn(
-              'relative grid grid-cols-1 rounded-md border px-2 py-0.5 text-center text-xs outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring/50 motion-reduce:transition-none',
+              'relative grid grid-cols-1 rounded-md border px-1.5 py-0.5 text-center text-xs outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring/50 motion-reduce:transition-none',
               active
                 ? 'border-black/[0.06] bg-background font-semibold text-foreground shadow-xs dark:border-white/10 dark:bg-worktree-sidebar-accent dark:text-worktree-sidebar-foreground'
                 : 'border-transparent font-medium text-worktree-sidebar-foreground/65 hover:text-worktree-sidebar-foreground'

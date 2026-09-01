@@ -72,6 +72,10 @@ export function createAgentStatusAuthorityActions(
             s.acknowledgedAgentsByPaneKey,
             retiredPaneKeySet
           ),
+          activityClearedAtByPaneKey: removePaneKeys(
+            s.activityClearedAtByPaneKey,
+            retiredPaneKeySet
+          ),
           paneForegroundAgentByPaneKey: removePaneKeys(
             s.paneForegroundAgentByPaneKey,
             retiredPaneKeySet

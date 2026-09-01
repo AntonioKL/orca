@@ -4,6 +4,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
 import SidebarHeader from './SidebarHeader'
 import SidebarNav from './SidebarNav'
+import { shouldShowAgentDashboardSidebarButton } from './agent-dashboard-sidebar-visibility'
 import SetupScriptPromptCard from './SetupScriptPromptCard'
 import WorktreeList from './WorktreeList'
 import SidebarToolbar from './SidebarToolbar'
@@ -21,6 +22,7 @@ import { useWorkspaceBoardPanel } from './useWorkspaceBoardPanel'
 import { resolveLeftSidebarStyleVariables } from '@/lib/left-sidebar-appearance'
 import { useSystemPrefersDark } from '@/components/terminal-pane/use-system-prefers-dark'
 import { lazyWithRetry } from '@/lib/lazy-with-retry'
+import { translate } from '@/i18n/i18n'
 
 // Why lazy: the Agents list pulls the whole activity pipeline (virtualizer, markdown
 // previews, thread derivation); users on the workspace view should not load or render any of it.
@@ -58,6 +60,9 @@ function Sidebar({
   const startupWorktreeRefreshCompleted = useAppStore((s) => s.startupWorktreeRefreshCompleted)
   const settings = useAppStore((s) => s.settings)
   const sidebarBody = useAppStore((s) => s.sidebarBody ?? 'workspaces')
+  const showAgentsSidebar = shouldShowAgentDashboardSidebarButton(settings)
+  const agentDashboardDrawerOpen = useAppStore((s) => s.agentDashboardDrawerOpen)
+  const setAgentDashboardDrawerOpen = useAppStore((s) => s.setAgentDashboardDrawerOpen)
   const [agentReadFilter, setAgentReadFilter] = React.useState<ThreadReadFilter>('all')
   const [agentGroupBy, setAgentGroupBy] = React.useState<ActivityGroupBy>('status')
   const [agentQuery, setAgentQuery] = React.useState('')
@@ -109,6 +114,12 @@ function Sidebar({
     }
   }, [closeWorkspaceBoard, sidebarOpen, workspaceBoardRenderedOpen])
 
+  useEffect(() => {
+    if (!showAgentsSidebar && agentDashboardDrawerOpen) {
+      setAgentDashboardDrawerOpen(false)
+    }
+  }, [agentDashboardDrawerOpen, setAgentDashboardDrawerOpen, showAgentsSidebar])
+
   const { containerRef, onResizeStart, isResizing } = useSidebarResize<HTMLDivElement>({
     isOpen: sidebarOpen,
     width: sidebarWidth,
@@ -134,6 +145,7 @@ function Sidebar({
             <SidebarNav />
             <SidebarHeader
               onWorkspaceBoardMenuOpenChange={setWorkspaceBoardMenuOpen}
+              showAgentsSidebar={showAgentsSidebar}
               agentToolbar={
                 <div className="flex items-center gap-1 shrink-0">
                   {compactHeader ? null : (
@@ -144,8 +156,15 @@ function Sidebar({
                             type="button"
                             variant="ghost"
                             size="icon-xs"
-                            className="text-muted-foreground"
-                            aria-label="Search agent activity"
+                            className={cn(
+                              'text-muted-foreground',
+                              agentSearchOpen &&
+                                'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
+                            )}
+                            aria-label={translate(
+                              'auto.components.activity.ActivityPrototypePage.search',
+                              'Search'
+                            )}
                             aria-pressed={agentSearchOpen}
                             onClick={() => setAgentSearchOpen((open) => !open)}
                           >
@@ -153,7 +172,10 @@ function Sidebar({
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent side="bottom" sideOffset={6}>
-                          Search agent activity
+                          {translate(
+                            'auto.components.activity.ActivityPrototypePage.search',
+                            'Search'
+                          )}
                         </TooltipContent>
                       </Tooltip>
                       <Tooltip>
@@ -173,13 +195,19 @@ function Sidebar({
                               agentReadFilter === 'unread' &&
                                 'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
                             )}
-                            aria-label="Show unread threads only"
+                            aria-label={translate(
+                              'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
+                              'Show unread threads only'
+                            )}
                           >
                             <BellDot className="size-3.5" strokeWidth={2.25} />
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent side="bottom" sideOffset={6}>
-                          Show unread threads only
+                          {translate(
+                            'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
+                            'Show unread threads only'
+                          )}
                         </TooltipContent>
                       </Tooltip>
                     </>
@@ -200,15 +228,21 @@ function Sidebar({
                           setAgentSearchOpen(false)
                         }
                       }}
-                      placeholder="Filter..."
+                      placeholder={translate(
+                        'auto.components.activity.ActivityPrototypePage.795cbf26e2',
+                        'Filter...'
+                      )}
                       className="h-7 w-full text-[11px]"
-                      aria-label="Search"
+                      aria-label={translate(
+                        'auto.components.activity.ActivityPrototypePage.search',
+                        'Search'
+                      )}
                     />
                   </div>
                 ) : null
               }
             />
-            {sidebarBody === 'agents' ? (
+            {sidebarBody === 'agents' && showAgentsSidebar ? (
               <React.Suspense fallback={<div className="min-h-0 flex-1" />}>
                 <SidebarAgentsList
                   readFilter={agentReadFilter}
@@ -317,7 +351,7 @@ function Sidebar({
           onMenuOpenChange={setWorkspaceBoardMenuOpen}
         />
       ) : null}
-      {(settings?.showAgentsSidebar ?? settings?.experimentalAgentDashboardPopout ?? true) ? (
+      {showAgentsSidebar ? (
         <React.Suspense fallback={null}>
           <AgentDashboardSidebarHost
             sidebarOpen={sidebarOpen}

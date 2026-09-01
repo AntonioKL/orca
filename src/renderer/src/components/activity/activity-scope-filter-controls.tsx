@@ -101,8 +101,26 @@ function ScopeFilterChip({
  * Dismissible chips naming the active persisted scope, with a hidden count.
  * Why always shown while a scope is active: the filter survives restarts, so an
  * invisible one would silently hide running agents from a monitoring surface.
+ *
+ * Why the outer/inner split: this stays mounted on every activity surface, so
+ * while no scope is set it must subscribe only to the two filter fields — the
+ * host-registry derivation (settings, SSH/runtime status churn) lives in the
+ * inner row and mounts only for an active filter.
  */
 export function ActivityScopeFilterChips({
+  hiddenThreadCount
+}: {
+  hiddenThreadCount: number
+}): React.JSX.Element | null {
+  const agentsVisibleHostIds = useAppStore((s) => s.agentsVisibleHostIds)
+  const agentsFilterRepoIds = useAppStore((s) => s.agentsFilterRepoIds)
+  if (agentsVisibleHostIds === null && agentsFilterRepoIds.length === 0) {
+    return null
+  }
+  return <ActiveScopeFilterChipsRow hiddenThreadCount={hiddenThreadCount} />
+}
+
+function ActiveScopeFilterChipsRow({
   hiddenThreadCount
 }: {
   hiddenThreadCount: number
@@ -121,6 +139,7 @@ export function ActivityScopeFilterChips({
   )
   const hasHostFilter = agentsVisibleHostIds !== null
   const hasRepoFilter = selectedRepoNames.length > 0
+  // Why: a repo filter of only-stale ids renders nothing; the outer gate is a fast path, not the authority.
   if (!hasHostFilter && !hasRepoFilter) {
     return null
   }

@@ -1,4 +1,5 @@
 import { paneHasStateClaims } from '../../../shared/agent-hook-listener/listener-state'
+import type { AgentStatusCacheIdentity } from '../../../shared/agent-status-types'
 import type { EnrichedAgentHookEventPayload } from './server-types'
 import { AgentHookServerAuthorityFences } from './server-authority-fences'
 
@@ -33,6 +34,29 @@ export abstract class AgentHookServerCleanup extends AgentHookServerAuthorityFen
     this.scheduleStatusPersist()
     this.notifyStatusChangeListeners()
     this.emitStatusDropped(deleted.paneKey)
+  }
+
+  /** Evict a UI-cleared status only if no newer status has replaced it. */
+  dropPersistedStatusEntry(identity: AgentStatusCacheIdentity): boolean {
+    const resolvedPaneKey = this.resolvePaneKeyAlias(identity.paneKey)
+    const existing = this.state.lastStatusByPaneKey.get(resolvedPaneKey) as
+      | EnrichedAgentHookEventPayload
+      | undefined
+    if (
+      !existing ||
+      existing.receivedAt !== identity.receivedAt ||
+      existing.stateStartedAt !== identity.stateStartedAt ||
+      existing.payload.state !== identity.state ||
+      existing.payload.prompt !== identity.prompt ||
+      existing.payload.agentType !== identity.agentType ||
+      (identity.tabId !== undefined && existing.tabId !== identity.tabId) ||
+      (identity.worktreeId !== undefined && existing.worktreeId !== identity.worktreeId) ||
+      (identity.connectionId !== undefined && existing.connectionId !== identity.connectionId)
+    ) {
+      return false
+    }
+    this.dropStatusEntry(resolvedPaneKey)
+    return true
   }
 
   /** Retire panes whose owning process is certifiably dead.

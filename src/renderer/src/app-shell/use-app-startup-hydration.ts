@@ -35,6 +35,7 @@ import {
 import { mapWithConcurrency } from '../../../shared/map-with-concurrency'
 import type { OnboardingState } from '../../../shared/onboarding-state-types'
 import { restoreLocalStructuredSessionTabsOnce } from '../runtime/local-structured-session-tabs-sync'
+import { seedDevActivityFixture } from '../components/activity/dev-activity-fixture'
 
 async function listRuntimeSessionHostIdsForStartup(): Promise<ExecutionHostId[]> {
   try {
@@ -269,6 +270,9 @@ export function useAppStartupHydration(onOnboardingLoaded: (state: OnboardingSta
           // Why (issue #1158): unlock the session writer only after hydration and all dependent steps succeeded, so a mid-startup throw can't serialize partially-mutated state to disk.
           actions.setHydrationSucceeded(true)
           actions.setTerminalStartupRestorationReady(true)
+          if (import.meta.env.DEV) {
+            seedDevActivityFixture()
+          }
           logRendererStartupDiagnostic('startup-hydration-done', {
             durationMs: Math.round(performance.now() - startupStartedAt)
           })

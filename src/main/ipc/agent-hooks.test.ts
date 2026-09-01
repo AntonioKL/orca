@@ -8,6 +8,7 @@ import { makePaneKey } from '../../shared/stable-pane-id'
 // evicts the entry.
 
 const dropStatusEntry = vi.fn()
+const dropPersistedStatusEntry = vi.fn()
 const dropStatusEntriesByTabPrefix = vi.fn()
 const retirePaneAuthority = vi.fn()
 const transferPaneAuthority = vi.fn()
@@ -44,6 +45,7 @@ vi.mock('../agent-hooks/server', async () => {
     ...actual,
     agentHookServer: {
       dropStatusEntry,
+      dropPersistedStatusEntry,
       dropStatusEntriesByTabPrefix,
       retirePaneAuthority,
       transferPaneAuthority,
@@ -105,6 +107,7 @@ vi.mock('../kimi/hook-service', () => ({
 
 beforeEach(() => {
   dropStatusEntry.mockReset()
+  dropPersistedStatusEntry.mockReset()
   dropStatusEntriesByTabPrefix.mockReset()
   retirePaneAuthority.mockReset()
   transferPaneAuthority.mockReset()
@@ -276,6 +279,65 @@ describe('agentStatus:drop IPC', () => {
       expect(() => handler({}, value)).not.toThrow()
     }
     expect(dropStatusEntry).not.toHaveBeenCalled()
+  })
+})
+
+describe('agentStatus:dropPersisted IPC', () => {
+  it('forwards a validated cache identity without clearing pane state', async () => {
+    const { registerAgentHookHandlers } = await import('./agent-hooks')
+    registerAgentHookHandlers()
+
+    const handler = onHandlers.get('agentStatus:dropPersisted')
+    expect(handler).toBeDefined()
+    const identity = {
+      paneKey: PANE_KEY,
+      state: 'done',
+      prompt: 'completed run',
+      agentType: 'claude',
+      receivedAt: 2_000,
+      stateStartedAt: 1_000
+    }
+    handler!({}, identity)
+    expect(dropPersistedStatusEntry).toHaveBeenCalledWith(identity)
+    expect(dropStatusEntry).not.toHaveBeenCalled()
+  })
+
+  it('rejects malformed cache identities', async () => {
+    const { registerAgentHookHandlers } = await import('./agent-hooks')
+    registerAgentHookHandlers()
+
+    const handler = onHandlers.get('agentStatus:dropPersisted')!
+    for (const value of [
+      null,
+      undefined,
+      {},
+      { paneKey: PANE_KEY },
+      {
+        paneKey: PANE_KEY,
+        state: 'working',
+        prompt: '',
+        receivedAt: Number.NaN,
+        stateStartedAt: 1
+      },
+      {
+        paneKey: PANE_KEY,
+        state: 'done',
+        prompt: 'x'.repeat(201),
+        receivedAt: 2,
+        stateStartedAt: 1
+      },
+      {
+        paneKey: PANE_KEY,
+        state: 'done',
+        prompt: '',
+        agentType: 'x'.repeat(41),
+        receivedAt: 2,
+        stateStartedAt: 1
+      }
+    ]) {
+      expect(() => handler({}, value)).not.toThrow()
+    }
+    expect(dropPersistedStatusEntry).not.toHaveBeenCalled()
   })
 })
 

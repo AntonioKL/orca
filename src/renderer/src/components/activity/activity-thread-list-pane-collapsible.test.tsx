@@ -165,6 +165,7 @@ describe('ActivityThreadListPane collapsible sections', () => {
             selectedPaneKey={null}
             onSelectThread={vi.fn()}
             onJumpToWorkspace={vi.fn()}
+            onMarkThreadRead={vi.fn()}
             onMarkThreadUnread={vi.fn()}
             canJumpToWorkspace={() => true}
             showFilterControls={false}
@@ -219,6 +220,7 @@ describe('ActivityThreadListPane collapsible sections', () => {
             selectedPaneKey={null}
             onSelectThread={vi.fn()}
             onJumpToWorkspace={vi.fn()}
+            onMarkThreadRead={vi.fn()}
             onMarkThreadUnread={vi.fn()}
             canJumpToWorkspace={() => true}
             showFilterControls={false}
@@ -242,8 +244,9 @@ describe('ActivityThreadListPane collapsible sections', () => {
     expect(onToggleGroup).toHaveBeenCalledWith('done')
   })
 
-  it('disables mark-unread for the thread whose terminal pane is selected', () => {
+  it('keeps mark-unread enabled for the thread whose terminal pane is selected', () => {
     const inputRef = { current: null }
+    const onMarkThreadUnread = vi.fn()
     act(() => {
       root.render(
         <TooltipProvider>
@@ -264,8 +267,10 @@ describe('ActivityThreadListPane collapsible sections', () => {
             selectedPaneKey={mockThread.paneKey}
             onSelectThread={vi.fn()}
             onJumpToWorkspace={vi.fn()}
-            onMarkThreadUnread={vi.fn()}
+            onMarkThreadRead={vi.fn()}
+            onMarkThreadUnread={onMarkThreadUnread}
             canJumpToWorkspace={() => true}
+            allowMarkUnreadWhenSelected
             showFilterControls={false}
             showOptionsMenu={false}
           />
@@ -277,6 +282,11 @@ describe('ActivityThreadListPane collapsible sections', () => {
       'button[aria-label="Mark thread unread"]'
     ) as HTMLButtonElement | null
     expect(markUnreadButton).not.toBeNull()
-    expect(markUnreadButton?.disabled).toBe(true)
+    expect(markUnreadButton?.disabled).toBe(false)
+
+    act(() => {
+      markUnreadButton?.click()
+    })
+    expect(onMarkThreadUnread).toHaveBeenCalledWith(mockThread)
   })
 })

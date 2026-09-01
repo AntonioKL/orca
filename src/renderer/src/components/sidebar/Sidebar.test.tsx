@@ -3,7 +3,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { tmpdir } from 'node:os'
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDefaultSettings } from '../../../../shared/constants'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
@@ -221,5 +221,19 @@ describe('Sidebar', () => {
     }
 
     expect(fetchAllWorktrees).not.toHaveBeenCalled()
+  })
+
+  it('closes the dashboard drawer when the Agents sidebar is disabled', async () => {
+    setSidebarState({ ...getDefaultSettings(tmpdir()), showAgentsSidebar: false })
+    const setAgentDashboardDrawerOpen = vi.fn()
+    mocks.state = {
+      ...mocks.state,
+      agentDashboardDrawerOpen: true,
+      setAgentDashboardDrawerOpen
+    }
+
+    render(sidebarElement())
+
+    await waitFor(() => expect(setAgentDashboardDrawerOpen).toHaveBeenCalledWith(false))
   })
 })

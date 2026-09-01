@@ -89,8 +89,6 @@ vi.mock('@/components/ui/context-menu', () => ({
 
 import SidebarNav, {
   getSetupGuideSidebarEntryReady,
-  shouldShowAgentDashboardButton,
-  shouldShowAgentsButton,
   shouldShowAutomationsButton,
   shouldShowArtifactsButton,
   shouldShowMobileButton,
@@ -220,52 +218,24 @@ describe('SidebarNav', () => {
     setSidebarState()
   })
 
-  it('hides the Agents entry while settings are loading', () => {
-    expect(shouldShowAgentsButton(null)).toBe(false)
-  })
-
-  it('hides the Agents entry while the experimental Agents view is off', () => {
-    expect(
-      shouldShowAgentsButton({
-        ...getDefaultSettings('/tmp'),
-        experimentalActivity: false
-      })
-    ).toBe(false)
-  })
-
-  it('shows the Agents entry when the experimental Agents view is on', () => {
-    expect(
-      shouldShowAgentsButton({
-        ...getDefaultSettings('/tmp'),
-        experimentalActivity: true
-      })
-    ).toBe(true)
-  })
-
-  it('shows the Agent Dashboard entry only when its experiment is enabled', () => {
-    expect(shouldShowAgentDashboardButton(null)).toBe(false)
-    expect(shouldShowAgentDashboardButton({ experimentalAgentDashboardPopout: false })).toBe(false)
-    expect(shouldShowAgentDashboardButton({ experimentalAgentDashboardPopout: true })).toBe(true)
-  })
-
-  it('keeps the Agent Dashboard row unmounted by default', async () => {
+  it('mounts the Agent Dashboard row by default', async () => {
     const container = await renderSidebarNav()
 
-    expect(queryButtonByText(container, 'Agents')).toBeNull()
-    expect(mocks.getAgentBucketCounts).not.toHaveBeenCalled()
+    await waitFor(() => expect(queryButtonByText(container, 'Agent Dashboard')).not.toBeNull())
+    expect(mocks.getAgentBucketCounts).toHaveBeenCalledTimes(1)
   })
 
-  it('mounts the Agent Dashboard row after opt-in', async () => {
+  it('keeps the Agent Dashboard row unmounted after an explicit opt-out', async () => {
     setSidebarState({
       settings: {
         ...getDefaultSettings('/tmp'),
-        experimentalAgentDashboardPopout: true
+        showAgentsSidebar: false
       }
     })
     const container = await renderSidebarNav()
 
-    await waitFor(() => expect(queryButtonByText(container, 'Agents')).not.toBeNull())
-    expect(mocks.getAgentBucketCounts).toHaveBeenCalledTimes(1)
+    expect(queryButtonByText(container, 'Agent Dashboard')).toBeNull()
+    expect(mocks.getAgentBucketCounts).not.toHaveBeenCalled()
   })
 
   it('uses a question glyph only for the Needs You count', async () => {

@@ -7,6 +7,8 @@ import type { AgentProviderSessionMetadata } from './agent-session-resume'
 import type { WithAgentStatusObservation } from './agent-status-observation'
 import type {
   AgentStatusOrchestrationContext,
+  AgentStatusState,
+  AgentType,
   ParsedAgentStatusPayload
 } from './agent-status-types'
 
@@ -50,6 +52,19 @@ export type AgentStatusIpcPayload = ParsedAgentStatusPayload & {
   /** See AgentStatusEntry.restoredUnconfirmed — hydrated nonterminal provenance. */
   restoredUnconfirmed?: boolean
 } & WithAgentStatusObservation
+
+/** Identity used by UI-only cleanup to evict exactly the status it cleared. */
+export type AgentStatusCacheIdentity = {
+  paneKey: string
+  state: AgentStatusState
+  prompt: string
+  agentType?: AgentType
+  tabId?: string
+  worktreeId?: string
+  connectionId?: string | null
+  receivedAt: number
+  stateStartedAt: number
+}
 
 /** Wire shape for ordinary pane teardown or a stamped SSH disconnect batch. */
 export type AgentStatusClearIpcPayload =

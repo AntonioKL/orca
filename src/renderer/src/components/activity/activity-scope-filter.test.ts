@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { LOCAL_EXECUTION_HOST_ID, type ExecutionHostId } from '../../../../shared/execution-host'
 import type { Repo } from '../../../../shared/repo-types'
 import {
+  filterThreadsByActivityScope,
   resolveActivityScopeRepoIds,
   threadMatchesActivityScope,
   type ActivityScopeFilter
@@ -71,6 +72,52 @@ describe('threadMatchesActivityScope', () => {
       threadMatchesActivityScope(makeThread({ repo: { ...makeRepo(), id: 'repo-2' } }), scope)
     ).toBe(false)
     expect(threadMatchesActivityScope(makeThread({ repo: null }), scope)).toBe(false)
+  })
+})
+
+describe('filterThreadsByActivityScope', () => {
+  it('returns the input array by identity when the scope is inactive', () => {
+    const threads = [makeThread(), makeThread({ paneKey: 'pane-2', repo: null })]
+    const result = filterThreadsByActivityScope({
+      threads,
+      scope: makeScope(),
+      exemptPaneKey: null
+    })
+    expect(result.threads).toBe(threads)
+    expect(result.matchingThreads).toBe(threads)
+    expect(result.hiddenCount).toBe(0)
+  })
+
+  it('returns the input array by identity when an active scope hides nothing', () => {
+    const threads = [makeThread()]
+    const result = filterThreadsByActivityScope({
+      threads,
+      scope: makeScope({ visibleHostIds: [LOCAL_EXECUTION_HOST_ID] }),
+      exemptPaneKey: null
+    })
+    expect(result.threads).toBe(threads)
+    expect(result.matchingThreads).toBe(threads)
+    expect(result.hiddenCount).toBe(0)
+  })
+
+  it('hides scoped-out threads but keeps the exempt pane, counting only real hides', () => {
+    const local = makeThread()
+    const remote = makeThread({
+      paneKey: 'pane-remote',
+      worktree: { ...makeWorktree(), hostId: SSH_HOST }
+    })
+    const exemptRemote = makeThread({
+      paneKey: 'pane-exempt',
+      worktree: { ...makeWorktree(), hostId: SSH_HOST }
+    })
+    const result = filterThreadsByActivityScope({
+      threads: [local, remote, exemptRemote],
+      scope: makeScope({ visibleHostIds: [LOCAL_EXECUTION_HOST_ID] }),
+      exemptPaneKey: 'pane-exempt'
+    })
+    expect(result.threads).toEqual([local, exemptRemote])
+    expect(result.matchingThreads).toEqual([local])
+    expect(result.hiddenCount).toBe(1)
   })
 })
 

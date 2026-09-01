@@ -14147,6 +14147,7 @@
           "770d458144": "Agrupar actividad del agente por",
           "795cbf26e2": "Filtrar...",
           "4616ea39fd": "Ir al workspace",
+          "markThreadRead": "Marcar hilo como leído",
           "59b131fbd9": "Marcar hilo como no leído",
           "beb2c19173": "No leído",
           "5651b216c6": "Proyecto desconocido",
@@ -14796,7 +14797,8 @@
   },
   "dashboard": {
     "sidebar": {
-      "label": "Agentes"
+      "label": "Agentes",
+      "dashboardLabel": "Panel de agentes"
     }
   },
   "browser": {

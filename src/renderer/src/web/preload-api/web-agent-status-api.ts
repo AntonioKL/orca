@@ -14,6 +14,7 @@ export function createWebAgentStatusApi(): Partial<PreloadApi> {
       onLegacyWorkerTerminalRecovery: () => noopUnsubscribe,
       getMigrationUnsupportedSnapshot: () => Promise.resolve([]),
       drop: () => {},
+      dropPersisted: () => {},
       reconcileEndedProcess: () => {},
       dropByTabPrefix: () => {},
       retirePaneAuthority: () => {},

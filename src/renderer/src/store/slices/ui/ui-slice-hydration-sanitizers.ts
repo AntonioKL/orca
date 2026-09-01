@@ -20,6 +20,19 @@ import type { UISlice } from './ui-slice-contract'
 
 const MIN_SIDEBAR_WIDTH = 220
 const HYDRATE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+export function preserveStringArrayIdentity<T extends string>(
+  current: readonly T[] | null,
+  next: T[] | null
+): T[] | null {
+  if (!current || !next) {
+    return next
+  }
+  return current.length === next.length && current.every((value, index) => value === next[index])
+    ? (current as T[])
+    : next
+}
+
 export function isPlainPersistedRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }

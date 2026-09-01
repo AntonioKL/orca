@@ -1,9 +1,20 @@
 import { activateTabAndFocusPane } from '@/lib/activate-tab-and-focus-pane'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { useAppStore } from '@/store'
-import { getWorktreeMapFromState } from '@/store/selectors'
+import { getWorktreeExecutionHostId } from '../../../../shared/execution-host'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
 import type { AgentPaneThread } from './activity-thread-types'
+
+function getActivityThreadExecutionHostId(thread: AgentPaneThread) {
+  return getWorktreeExecutionHostId(thread.worktree, thread.repo ?? undefined)
+}
+
+export function hasActivityThreadWorkspace(thread: AgentPaneThread): boolean {
+  const state = useAppStore.getState()
+  return Boolean(
+    state.getKnownWorktreeById(thread.worktree.id, getActivityThreadExecutionHostId(thread))
+  )
+}
 
 export function createActivityThreadActions({
   allThreads,
@@ -17,6 +28,7 @@ export function createActivityThreadActions({
   setSelectedPaneKey: (paneKey: string | null) => void
 }): {
   hasUnreadThreads: boolean
+  markThreadRead: (thread: AgentPaneThread) => void
   markThreadUnread: (thread: AgentPaneThread) => void
   selectThread: (thread: AgentPaneThread) => void
   jumpToWorkspace: (thread: AgentPaneThread) => void
@@ -32,7 +44,8 @@ export function createActivityThreadActions({
 
   const activateThreadTerminal = (thread: AgentPaneThread): void => {
     const state = useAppStore.getState()
-    const worktree = getWorktreeMapFromState(state).get(thread.worktree.id)
+    const executionHostId = getActivityThreadExecutionHostId(thread)
+    const worktree = state.getKnownWorktreeById(thread.worktree.id, executionHostId)
     if (!worktree) {
       return
     }
@@ -45,8 +58,11 @@ export function createActivityThreadActions({
     if (state.activeRepoId !== worktree.repoId) {
       state.setActiveRepo(worktree.repoId)
     }
-    if (state.activeWorktreeId !== worktree.id) {
-      state.setActiveWorktree(worktree.id)
+    if (
+      state.activeWorktreeId !== worktree.id ||
+      state.activeWorkspaceExecutionHostId !== executionHostId
+    ) {
+      state.setActiveWorktree(worktree.id, executionHostId)
     }
     state.setActiveTabType('terminal')
     const parsed = parsePaneKey(thread.paneKey)
@@ -63,12 +79,13 @@ export function createActivityThreadActions({
   }
 
   const jumpToWorkspace = (thread: AgentPaneThread): void => {
-    const state = useAppStore.getState()
-    if (!getWorktreeMapFromState(state).has(thread.worktree.id)) {
+    if (!hasActivityThreadWorkspace(thread)) {
       return
     }
     markThreadRead(thread)
-    activateAndRevealWorktree(thread.worktree.id)
+    activateAndRevealWorktree(thread.worktree.id, {
+      executionHostId: getActivityThreadExecutionHostId(thread)
+    })
   }
 
   const hasUnreadThreads = allThreads.some((thread) => thread.unread)
@@ -83,6 +100,7 @@ export function createActivityThreadActions({
 
   return {
     hasUnreadThreads,
+    markThreadRead,
     markThreadUnread,
     selectThread,
     jumpToWorkspace,

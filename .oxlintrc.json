@@ -162,12 +162,6 @@
       }
     },
     {
-      "files": ["src/renderer/src/components/activity/activity-thread-hover-card.tsx"],
-      "rules": {
-        "max-lines": ["error", { "max": 600, "skipBlankLines": true, "skipComments": true }]
-      }
-    },
-    {
       "files": ["**/*.mjs"],
       "rules": {
         "max-lines": ["error", { "max": 600, "skipBlankLines": true, "skipComments": true }]

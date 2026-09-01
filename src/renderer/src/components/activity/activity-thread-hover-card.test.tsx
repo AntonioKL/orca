@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, type ReactElement, type ReactNode } from 'react'
+import React, { act, type ReactElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -12,7 +12,16 @@ import type { AgentPaneThread } from './activity-thread-types'
 import { makeRepo, makeTab, makeWorktree } from './ActivityPrototypePage-test-fixtures'
 
 vi.mock('@/components/ui/hover-card', () => ({
-  HoverCard: ({ children }: { children: ReactNode }) => <>{children}</>,
+  HoverCard: ({
+    children,
+    onOpenChange
+  }: {
+    children: ReactNode
+    onOpenChange?: (open: boolean) => void
+  }) => {
+    React.useEffect(() => onOpenChange?.(true), [onOpenChange])
+    return <>{children}</>
+  },
   HoverCardContent: ({ children, className }: { children: ReactNode; className?: string }) => (
     <div data-testid="hover-card-content" className={className}>
       {children}
@@ -58,12 +67,14 @@ function Harness({
   selected = false,
   onSelect = vi.fn(),
   onJump = vi.fn(),
+  onMarkRead = vi.fn(),
   onMarkUnread = vi.fn()
 }: {
   thread: AgentPaneThread
   selected?: boolean
   onSelect?: () => void
   onJump?: () => void
+  onMarkRead?: () => void
   onMarkUnread?: () => void
 }): ReactElement {
   return (
@@ -73,6 +84,7 @@ function Harness({
         selected={selected}
         onSelect={onSelect}
         onJump={onJump}
+        onMarkRead={onMarkRead}
         onMarkUnread={onMarkUnread}
         canJump={true}
         compactMode={false}
@@ -108,6 +120,28 @@ describe('ActivityThreadHoverCard and ActivityThreadRow', () => {
     expect(card).not.toBeNull()
     expect(card?.textContent).toContain('Audit current HEAD on m4air environment')
     expect(card?.textContent).toContain('m4air-audit')
+  })
+
+  it('marks an unread thread as read from its bell without selecting the row', async () => {
+    const thread = createTestThread({ unread: true })
+    const onMarkRead = vi.fn()
+    const onSelect = vi.fn()
+
+    await act(async () => {
+      root.render(<Harness thread={thread} onMarkRead={onMarkRead} onSelect={onSelect} />)
+    })
+
+    const markReadButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Mark thread as read"]'
+    )
+    expect(markReadButton).not.toBeNull()
+
+    act(() => {
+      markReadButton?.click()
+    })
+
+    expect(onMarkRead).toHaveBeenCalledWith(thread)
+    expect(onSelect).not.toHaveBeenCalled()
   })
 
   it('renders hover card content with workspace info, host, task details, and notes', async () => {
@@ -166,5 +200,35 @@ describe('ActivityThreadHoverCard and ActivityThreadRow', () => {
     })
 
     expect(onSelect).toHaveBeenCalledTimes(1)
+  })
+
+  it('triggers jump to workspace from the hover card crosshair locator button', async () => {
+    const onJump = vi.fn()
+    const thread = createTestThread()
+
+    await act(async () => {
+      root.render(
+        <TooltipProvider>
+          <ActivityThreadHoverCard
+            thread={thread}
+            onJumpToWorkspace={onJump}
+            canJumpToWorkspace={true}
+          >
+            <div data-testid="hover-trigger">Hover Target</div>
+          </ActivityThreadHoverCard>
+        </TooltipProvider>
+      )
+    })
+
+    const jumpButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Jump to workspace"]'
+    )
+    expect(jumpButton).not.toBeNull()
+
+    act(() => {
+      jumpButton?.click()
+    })
+
+    expect(onJump).toHaveBeenCalledWith(thread)
   })
 })

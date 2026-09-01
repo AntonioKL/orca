@@ -1,11 +1,12 @@
 import { migrationUnsupportedToAgentStatusEntry } from '@/lib/migration-unsupported-agent-entry'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
+import type { AgentStatusEntry } from '../../../../shared/agent-status-types'
+import type { Repo } from '../../../../shared/repo-types'
 import type { Worktree } from '../../../../shared/worktree/types'
 import type { ActivityLiveAgentSnapshot, ActivityEvent } from './activity-thread-types'
 import type { ActivityEventBuildCache } from './activity-event-build-cache'
 import { resolvePaneBuild } from './activity-event-build-cache'
-import { standaloneActivityWorktree } from './activity-standalone-worktree'
 import type { BuildActivityEventsArgs } from './activity-event-builder'
 
 export function appendUnsupportedAndRetainedEvents(context: {
@@ -13,10 +14,23 @@ export function appendUnsupportedAndRetainedEvents(context: {
   cache: ActivityEventBuildCache | undefined
   seenCacheKeys: Set<string> | null
   liveAgentByPaneKey: Record<string, ActivityLiveAgentSnapshot>
-  tabContext: Map<string, { worktree: Worktree; tab: TerminalTab }>
+  tabContext: Map<string, { worktreeId: string; tab: TerminalTab }>
+  resolveOwner: (
+    context: { worktreeId: string; tab: TerminalTab },
+    entry: AgentStatusEntry,
+    terminalPtyId?: string | null
+  ) => { worktree: Worktree; repo: Repo | null; knownWorktree: boolean }
   pushPaneEvents: (paneEvents: ActivityEvent[]) => void
 }): void {
-  const { args, cache, seenCacheKeys, liveAgentByPaneKey, tabContext, pushPaneEvents } = context
+  const {
+    args,
+    cache,
+    seenCacheKeys,
+    liveAgentByPaneKey,
+    tabContext,
+    resolveOwner,
+    pushPaneEvents
+  } = context
 
   for (const unsupported of Object.values(args.migrationUnsupportedByPtyId ?? {})) {
     const cacheKey = `unsupported:${unsupported.paneKey ?? unsupported.ptyId}`
@@ -30,14 +44,15 @@ export function appendUnsupportedAndRetainedEvents(context: {
     if (!entry || !tabEntry) {
       continue
     }
+    const owner = resolveOwner(tabEntry, entry, unsupported.ptyId)
     const { events: paneEvents, live } = resolvePaneBuild(
       {
         cacheKey,
         source: unsupported,
         entry,
         orchestration: undefined,
-        worktree: tabEntry.worktree,
-        repo: args.repoMap.get(tabEntry.worktree.repoId) ?? null,
+        worktree: owner.worktree,
+        repo: owner.repo,
         tab: tabEntry.tab,
         agentType: entry.agentType ?? 'unknown',
         agentAlive: false,
@@ -58,12 +73,11 @@ export function appendUnsupportedAndRetainedEvents(context: {
     if (!parsePaneKey(paneKey)) {
       continue
     }
-    const worktree =
-      args.worktreeMap.get(retained.worktreeId) ??
-      (args.tabsByWorktree[retained.worktreeId]
-        ? standaloneActivityWorktree(retained.worktreeId)
-        : null)
-    if (!worktree) {
+    const owner = resolveOwner(
+      { worktreeId: retained.worktreeId, tab: retained.tab },
+      retained.entry
+    )
+    if (!owner.knownWorktree) {
       continue
     }
     const { events: paneEvents } = resolvePaneBuild(
@@ -72,8 +86,8 @@ export function appendUnsupportedAndRetainedEvents(context: {
         source: retained,
         entry: retained.entry,
         orchestration: args.runtimeAgentOrchestrationByPaneKey?.[paneKey],
-        worktree,
-        repo: args.repoMap.get(worktree.repoId) ?? null,
+        worktree: owner.worktree,
+        repo: owner.repo,
         tab: retained.tab,
         agentType: retained.agentType,
         agentAlive: false,

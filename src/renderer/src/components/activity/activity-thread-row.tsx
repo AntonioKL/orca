@@ -38,18 +38,22 @@ export const ActivityThreadRow = React.memo(function ActivityThreadRow({
   selected,
   onSelect,
   onJump,
+  onMarkRead,
   onMarkUnread,
   canJump,
   compactMode,
+  disableMarkUnread = false,
   showJumpAction = true
 }: {
   thread: AgentPaneThread
   selected: boolean
   onSelect: (thread: AgentPaneThread) => void
   onJump: (thread: AgentPaneThread) => void
+  onMarkRead: (thread: AgentPaneThread) => void
   onMarkUnread: (thread: AgentPaneThread) => void
   canJump: boolean
   compactMode: boolean
+  disableMarkUnread?: boolean
   showJumpAction?: boolean
 }): React.JSX.Element {
   const { taskTitle, statusLine, statusKind, needsAttention, workspaceLabel } =
@@ -58,7 +62,11 @@ export const ActivityThreadRow = React.memo(function ActivityThreadRow({
   const agentLabel = formatAgentTypeLabel(thread.agentType)
 
   return (
-    <ActivityThreadHoverCard thread={thread}>
+    <ActivityThreadHoverCard
+      thread={thread}
+      onJumpToWorkspace={onJump}
+      canJumpToWorkspace={canJump}
+    >
       <div
         data-current={selected ? 'true' : undefined}
         data-worktree-card-surface="true"
@@ -168,19 +176,40 @@ export const ActivityThreadRow = React.memo(function ActivityThreadRow({
               ) : null}
               <span className="inline-flex size-3.5 shrink-0 items-center justify-center">
                 {thread.unread ? (
-                  <FilledBellIcon
-                    className="size-3 shrink-0 text-amber-500 drop-shadow-sm"
-                    aria-label={translate(
-                      'auto.components.activity.ActivityPrototypePage.beb2c19173',
-                      'Unread'
-                    )}
-                  />
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onMarkRead(thread)
+                        }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded hover:bg-accent/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        aria-label={translate(
+                          'auto.components.activity.ActivityPrototypePage.markThreadRead',
+                          'Mark thread as read'
+                        )}
+                      >
+                        <FilledBellIcon
+                          className="size-3 shrink-0 text-amber-500 drop-shadow-sm"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="left">
+                      {translate(
+                        'auto.components.activity.ActivityPrototypePage.markThreadRead',
+                        'Mark thread as read'
+                      )}
+                    </TooltipContent>
+                  </Tooltip>
                 ) : (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
-                        disabled={selected}
+                        disabled={disableMarkUnread}
                         onClick={(event) => {
                           event.stopPropagation()
                           onMarkUnread(thread)

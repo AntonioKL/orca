@@ -137,6 +137,10 @@
       "menuBarIcon": {
         "title": "Show Menu Bar Icon",
         "description": "Keep an Orca shortcut and activity indicator in the macOS menu bar."
+      },
+      "agentsSidebar": {
+        "title": "Agents tab",
+        "description": "Show the Agents tab in the left sidebar."
       }
     },
     "browser": {
@@ -5232,12 +5236,15 @@
         },
         "SidebarHeader": {
           "projects": "Projects",
+          "spaces": "Spaces",
           "25a95899c9": "Add Project",
           "92154beb7e": "New workspace",
           "49f62c5665": "Workspace board",
           "5c9c7c16aa": "Add a project to create workspaces",
           "ca6f729da2": "New workspace ({{value0}})",
-          "a30e34eb5c": "Close workspace board"
+          "a30e34eb5c": "Close workspace board",
+          "views": "Sidebar view",
+          "moreActions": "More workspace actions"
         },
         "SidebarNav": {
           "80611a8b10": "Search",
@@ -5369,7 +5376,8 @@
           "65a9820bd1": "Agent statuses",
           "219ebf1961": "Branch name",
           "folderPathIdentity": "Branch / folder path",
-          "cli": "Orca CLI"
+          "cli": "Orca CLI",
+          "workspaceOptions": "Workspace options"
         },
         "SshTargetRow": {
           "4677394048": "Connecting…",
@@ -15913,6 +15921,7 @@
           "770d458144": "Group by",
           "795cbf26e2": "Filter...",
           "4616ea39fd": "Jump to workspace",
+          "markThreadRead": "Mark thread as read",
           "59b131fbd9": "Mark thread unread",
           "beb2c19173": "Unread",
           "5651b216c6": "Unknown project",
@@ -15920,7 +15929,11 @@
           "afdc2139a8": "Agent terminal closed. Open a new terminal in this workspace to continue.",
           "compactModeDescription": "Shows shorter thread rows with one-line titles and two-line status messages.",
           "unreadOnlyDescription": "Filters the activity list to show only threads with unread updates.",
-          "clearCompleted": "Clear completed"
+          "clearCompleted": "Clear completed",
+          "none": "None",
+          "search": "Search",
+          "showUnreadOnly": "Show unread only",
+          "showChildAgents": "Show child agents"
         },
         "clearCompleted": {
           "clearedOne": "Cleared 1 completed agent",
@@ -15931,6 +15944,18 @@
           "f915168c8e": "unread",
           "d6a8de3934": "agents",
           "dc708f3eff": "Close agents"
+        },
+        "ActivityScopeFilterControls": {
+          "clearHostFilter": "Show all hosts",
+          "clearProjectFilter": "Show all projects",
+          "hiddenCount": "{{value0}} hidden"
+        },
+        "ActivityThreadHoverCard": {
+          "pathCopied": "Path copied to clipboard",
+          "copyPathFailed": "Failed to copy path",
+          "workspace": "Workspace",
+          "copyPath": "Copy path",
+          "jumpToWorkspace": "Jump to workspace"
         }
       },
       "confirmation": {
@@ -17195,7 +17220,8 @@
   },
   "dashboard": {
     "sidebar": {
-      "label": "Agents"
+      "label": "Agents",
+      "dashboardLabel": "Agent Dashboard"
     }
   },
   "runtimeRpc": {

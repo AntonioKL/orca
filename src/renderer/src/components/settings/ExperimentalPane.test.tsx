@@ -132,36 +132,18 @@ describe('ExperimentalPane', () => {
     )
   })
 
-  it('renders the agent dashboard as an off-by-default searchable experiment', () => {
+  it('does not expose graduated Agents surfaces as experimental settings', () => {
     const settings = getDefaultSettings('/tmp')
     const markup = renderToStaticMarkup(
       <ExperimentalPane settings={settings} updateSettings={vi.fn()} />
     )
 
     expect(settings.experimentalAgentDashboardPopout).toBeUndefined()
-    expect(markup).toContain('Agent Dashboard')
-    expect(markup).toContain('Monitor agents that need you, are working, or are done')
-    expect(getExperimentalPaneSearchEntries().map((entry) => entry.title)).toContain(
-      'Agent Dashboard'
+    expect(markup).not.toContain('Agent Dashboard')
+    expect(markup).not.toContain('Agents View')
+    expect(getExperimentalPaneSearchEntries().map((entry) => entry.title)).not.toEqual(
+      expect.arrayContaining(['Agent Dashboard', 'Agents View'])
     )
-  })
-
-  it('enables the agent dashboard through its experimental switch', async () => {
-    const updateSettings = vi.fn()
-    const { root, container } = await renderExperimentalPane({ updateSettings })
-    const switchButton = container.querySelector<HTMLButtonElement>(
-      '#experimental-agent-dashboard button[role="switch"]'
-    )
-    if (!switchButton) {
-      throw new Error('Agent Dashboard switch was not rendered')
-    }
-
-    await act(async () => {
-      switchButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-
-    expect(updateSettings).toHaveBeenCalledWith({ experimentalAgentDashboardPopout: true })
-    root.unmount()
   })
 
   it('keeps idle-agent visibility out of global settings', () => {

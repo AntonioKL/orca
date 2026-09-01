@@ -67,6 +67,20 @@ export function computeViewedAgentCompletionPaneKey(
   return state.unreadAgentCompletionPanes[targetKey] ? targetKey : null
 }
 
+function getAgentTurnTimestamp(
+  state: {
+    agentStatusByPaneKey: Record<string, AgentStatusEntry>
+    retainedAgentsByPaneKey: Record<string, RetainedAgentEntry>
+  },
+  paneKey: string
+): number | null {
+  return (
+    state.agentStatusByPaneKey[paneKey]?.stateStartedAt ??
+    state.retainedAgentsByPaneKey[paneKey]?.entry.stateStartedAt ??
+    null
+  )
+}
+
 export function shouldClearViewedAgentWorktreeUnread(
   state: {
     tabsByWorktree: Record<string, { id: string }[]>
@@ -198,12 +212,23 @@ export function useAutoAckViewedAgent(floatingPanelVisible: boolean): void {
     let lastAcknowledged: unknown = undefined
     let lastLayouts: unknown = undefined
     let lastUnreadAgentCompletionPanes: unknown = undefined
+    const manuallyUnreadTurns = new Map<string, number>()
 
     // `force` re-scans after a signal the store never sees: panel open/closed is React-local state.
     const maybeAck = (options?: { force?: boolean }): void => {
       const s = useAppStore.getState()
       const floatingWorkspaceActiveTabId =
         s.activeTabIdByWorktree[FLOATING_TERMINAL_WORKTREE_ID] ?? null
+      if (lastAcknowledged && s.acknowledgedAgentsByPaneKey !== lastAcknowledged) {
+        for (const paneKey of Object.keys(lastAcknowledged as Record<string, number>)) {
+          if (s.acknowledgedAgentsByPaneKey[paneKey] === undefined) {
+            const turnTimestamp = getAgentTurnTimestamp(s, paneKey)
+            if (turnTimestamp !== null) {
+              manuallyUnreadTurns.set(paneKey, turnTimestamp)
+            }
+          }
+        }
+      }
       if (
         !options?.force &&
         s.activeView === lastActiveView &&
@@ -231,6 +256,7 @@ export function useAutoAckViewedAgent(floatingPanelVisible: boolean): void {
         floatingPanelVisible: floatingPanelVisibleRef.current
       })
       if (targets.length === 0) {
+        manuallyUnreadTurns.clear()
         return
       }
       // Why: advance refs only after gates pass, else the diff is consumed and a gated-out transition never re-acks when focus returns.
@@ -243,13 +269,28 @@ export function useAutoAckViewedAgent(floatingPanelVisible: boolean): void {
       lastLayouts = s.terminalLayoutsByTabId
       lastUnreadAgentCompletionPanes = s.unreadAgentCompletionPanes
 
+      const activePaneKeys = new Set<string>()
+      for (const target of targets) {
+        const activeLeafId = resolveActiveLeafId(s, target.tabId)
+        if (activeLeafId) {
+          activePaneKeys.add(makePaneKey(target.tabId, activeLeafId))
+        }
+      }
+      for (const [paneKey, turnTimestamp] of manuallyUnreadTurns) {
+        if (!activePaneKeys.has(paneKey) || getAgentTurnTimestamp(s, paneKey) !== turnTimestamp) {
+          manuallyUnreadTurns.delete(paneKey)
+        }
+      }
+
       for (const target of targets) {
         // Why re-read: acking target[0] writes to the store, which re-enters this scan synchronously
         // and may already have handled target[1]; `s` is a pre-write snapshot that would re-ack it.
         const current = useAppStore.getState()
         const tabId = target.tabId
         const activeLeafId = resolveActiveLeafId(current, tabId)
-        const toAck = computeAutoAckTargets(current, tabId, activeLeafId)
+        const toAck = computeAutoAckTargets(current, tabId, activeLeafId).filter(
+          (paneKey) => !manuallyUnreadTurns.has(paneKey)
+        )
         const activePaneKey = computeViewedAgentCompletionPaneKey(current, tabId, activeLeafId)
         if (toAck.length > 0 || activePaneKey) {
           const paneKeysToClear = new Set(toAck)

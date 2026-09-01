@@ -1,61 +1,74 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '@/store'
 import { translate } from '@/i18n/i18n'
 import { SidebarViewToggle } from './sidebar-view-toggle'
 import { SidebarHeaderActions } from './sidebar-header-actions'
+import { shouldShowAgentDashboardSidebarButton } from './agent-dashboard-sidebar-visibility'
 
 type SidebarHeaderProps = {
   onWorkspaceBoardMenuOpenChange: (open: boolean) => void
   agentToolbar?: React.ReactNode
   agentSearchRow?: React.ReactNode
+  showAgentsSidebar?: boolean
 }
 
 const SidebarHeader = React.memo(function SidebarHeader({
   onWorkspaceBoardMenuOpenChange,
   agentToolbar,
-  agentSearchRow
+  agentSearchRow,
+  showAgentsSidebar: showAgentsSidebarProp
 }: SidebarHeaderProps) {
   // Subscribe this memoized header to locale changes before using translate().
   useTranslation()
   const sidebarBody = useAppStore((s) => s.sidebarBody ?? 'workspaces')
+  const settings = useAppStore((s) => s.settings)
+  const showAgentsSidebar = showAgentsSidebarProp ?? shouldShowAgentDashboardSidebarButton(settings)
   const groupBy = useAppStore((s) => s.groupBy)
   const setSidebarBody = useAppStore((s) => s.setSidebarBody)
-  const workspacesLabel = translate(
-    'auto.components.sidebar.SidebarHeader.workspaces',
-    'Workspaces'
-  )
+  const agentsViewActive = showAgentsSidebar && sidebarBody === 'agents'
+  const spacesLabel = translate('auto.components.sidebar.SidebarHeader.spaces', 'Spaces')
   const projectsLabel = translate('auto.components.sidebar.SidebarHeader.projects', 'Projects')
-  const workspaceTabLabel =
-    sidebarBody === 'agents' || groupBy === 'none' ? workspacesLabel : projectsLabel
+  // Keep the view name tied to the workspace grouping, not the selected sidebar body.
+  const workspaceTabLabel = groupBy === 'none' ? spacesLabel : projectsLabel
+
+  useEffect(() => {
+    if (!showAgentsSidebar && sidebarBody === 'agents') {
+      setSidebarBody?.('workspaces')
+    }
+  }, [setSidebarBody, showAgentsSidebar, sidebarBody])
 
   return (
     <>
-      <div className="mt-2 flex h-8 min-w-0 items-center justify-between gap-2 px-2">
+      <div className="mt-2 flex h-9 min-w-0 items-center justify-between gap-1.5 px-2">
         <SidebarViewToggle
           ariaLabel={translate('auto.components.sidebar.SidebarHeader.views', 'Sidebar view')}
-          value={sidebarBody === 'agents' ? 'agents' : 'workspaces'}
+          value={agentsViewActive ? 'agents' : 'workspaces'}
           onSelect={(value) => setSidebarBody?.(value as 'workspaces' | 'agents')}
           options={[
             {
               value: 'workspaces',
               label: workspaceTabLabel,
-              widthLabels: [workspacesLabel, projectsLabel],
+              widthLabels: [spacesLabel, projectsLabel],
               sectionTitle: 'projects'
             },
-            {
-              value: 'agents',
-              label: translate('dashboard.sidebar.label', 'Agents'),
-              sectionTitle: 'agents'
-            }
+            ...(showAgentsSidebar
+              ? [
+                  {
+                    value: 'agents' as const,
+                    label: translate('dashboard.sidebar.label', 'Agents'),
+                    sectionTitle: 'agents' as const
+                  }
+                ]
+              : [])
           ]}
         />
-        {sidebarBody === 'agents' ? <div className="shrink-0">{agentToolbar}</div> : null}
-        {sidebarBody === 'workspaces' ? (
+        {agentsViewActive ? <div className="shrink-0">{agentToolbar}</div> : null}
+        {!agentsViewActive ? (
           <SidebarHeaderActions onWorkspaceBoardMenuOpenChange={onWorkspaceBoardMenuOpenChange} />
         ) : null}
       </div>
-      {sidebarBody === 'agents' ? agentSearchRow : null}
+      {agentsViewActive ? agentSearchRow : null}
     </>
   )
 })

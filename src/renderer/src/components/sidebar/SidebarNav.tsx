@@ -3,7 +3,6 @@ import { BookOpen, CalendarClock, EyeOff, Files, Search, Smartphone } from 'luci
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
-import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { useShortcutKeyComboDetails } from '@/hooks/useShortcutLabel'
 import { ShortcutKeyCombo } from '@/components/ShortcutKeyCombo'
 import { useMobileSidebarOnboardingBadge } from './mobile-sidebar-onboarding-badge'
@@ -15,52 +14,31 @@ import { SidebarTaskNavButton } from './SidebarTaskNavButton'
 import { HideSidebarMenu } from './sidebar-nav-controls'
 import { translate } from '@/i18n/i18n'
 import { lazyWithRetry } from '@/lib/lazy-with-retry'
+import { shouldShowAgentDashboardSidebarButton } from './agent-dashboard-sidebar-visibility'
+import type { GlobalSettings } from '../../../../shared/global-settings-types'
 
 export { getSetupGuideSidebarEntryReady, shouldShowSetupGuideEntry } from './SetupGuideSidebarEntry'
 
-function shouldShowAgentDashboardSidebarButton(
-  settings:
-    | Pick<GlobalSettings, 'showAgentsSidebar' | 'experimentalAgentDashboardPopout'>
-    | null
-    | undefined
-): boolean {
-  return settings?.showAgentsSidebar ?? settings?.experimentalAgentDashboardPopout ?? true
-}
-
-export function shouldShowAgentDashboardButton(
-  settings: Pick<GlobalSettings, 'experimentalAgentDashboardPopout'> | null | undefined
-): boolean {
-  return settings?.experimentalAgentDashboardPopout === true
-}
-
-/** @deprecated The legacy activity view is intentionally no longer rendered. */
-export function shouldShowAgentsButton(
-  settings: Pick<GlobalSettings, 'experimentalActivity'> | null | undefined
-): boolean {
-  // Retained for callers/tests of the old predicate; the legacy row is no longer rendered.
-  return settings?.experimentalActivity === true
-}
-
 export function shouldShowMobileButton(
-  settings: Pick<GlobalSettings, 'showMobileButton'> | null | undefined
+  settings: Partial<Pick<GlobalSettings, 'showMobileButton'>> | null | undefined
 ): boolean {
   return settings?.showMobileButton !== false
 }
 
 export function shouldShowAutomationsButton(
-  settings: Pick<GlobalSettings, 'showAutomationsButton'> | null | undefined
+  settings: Partial<Pick<GlobalSettings, 'showAutomationsButton'>> | null | undefined
 ): boolean {
   return settings?.showAutomationsButton !== false
 }
 
 export function shouldShowArtifactsButton(
-  settings: Pick<GlobalSettings, 'showArtifactsButton'> | null | undefined
+  settings: Partial<Pick<GlobalSettings, 'showArtifactsButton'>> | null | undefined
 ): boolean {
   return settings?.showArtifactsButton === true
 }
 
 export function shouldShowSkillsButton(
-  settings: Pick<GlobalSettings, 'showSkillsButton'> | null | undefined
+  settings: Partial<Pick<GlobalSettings, 'showSkillsButton'>> | null | undefined
 ): boolean {
   return settings?.showSkillsButton === true
 }

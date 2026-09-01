@@ -129,7 +129,14 @@ export const getAgentsSidebarEntry = createLocalizedCatalog((): SettingsSearchEn
     'settings.appearance.agentsSidebar.description',
     'Show the Agents tab in the left sidebar.'
   ),
-  keywords: ['agents', 'agent', 'sidebar', 'tab', 'dashboard', 'hide', 'show']
+  keywords: [
+    ...translateSearchKeyword('auto.components.settings.general.search.baa263d6d8', 'agents'),
+    ...translateSearchKeyword('auto.components.settings.agents.search.96ba2373b6', 'agent'),
+    ...translateSearchKeyword('auto.components.settings.appearance.search.5bff6a2ef0', 'sidebar'),
+    ...translateSearchKeyword('auto.components.settings.general.search.2a254b725e', 'tab'),
+    ...translateSearchKeyword('auto.components.settings.appearance.search.648eeada79', 'hide'),
+    ...translateSearchKeyword('auto.components.settings.appearance.search.ac79fe4a04', 'show')
+  ]
 }))
 
 export const getSidebarEntries = createLocalizedCatalog((): SettingsSearchEntry[] => [

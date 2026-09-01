@@ -65,6 +65,7 @@ function renderPane(
           selectedPaneKey={args.selectedPaneKey ?? null}
           onSelectThread={vi.fn()}
           onJumpToWorkspace={vi.fn()}
+          onMarkThreadRead={vi.fn()}
           onMarkThreadUnread={vi.fn()}
           canJumpToWorkspace={() => true}
           showFilterControls={false}

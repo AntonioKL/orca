@@ -19,6 +19,43 @@ export function resolveActivityScopeRepoIds(
   return filterRepoIds.filter((repoId) => repoMap.has(repoId))
 }
 
+/**
+ * Apply the scope to a thread list. Returns the input array by identity when
+ * the scope is inactive or hides nothing, so downstream memos (visible threads,
+ * grouping) see an unchanged dep instead of re-running on every rebuild.
+ */
+export function filterThreadsByActivityScope(args: {
+  threads: AgentPaneThread[]
+  scope: ActivityScopeFilter
+  /** Kept visible even when scoped out, so changing scope can't vanish the open row. */
+  exemptPaneKey: string | null
+}): {
+  threads: AgentPaneThread[]
+  /** Strict matches for bulk actions; excludes a selected row kept visible only by the exemption. */
+  matchingThreads: AgentPaneThread[]
+  hiddenCount: number
+} {
+  const { threads, scope, exemptPaneKey } = args
+  if (!scope.visibleHostIds && scope.filterRepoIds.length === 0) {
+    return { threads, matchingThreads: threads, hiddenCount: 0 }
+  }
+  const matchingThreads: AgentPaneThread[] = []
+  const visibleThreads: AgentPaneThread[] = []
+  for (const thread of threads) {
+    if (threadMatchesActivityScope(thread, scope)) {
+      matchingThreads.push(thread)
+      visibleThreads.push(thread)
+    } else if (thread.paneKey === exemptPaneKey) {
+      visibleThreads.push(thread)
+    }
+  }
+  return {
+    threads: visibleThreads.length === threads.length ? threads : visibleThreads,
+    matchingThreads: matchingThreads.length === threads.length ? threads : matchingThreads,
+    hiddenCount: threads.length - visibleThreads.length
+  }
+}
+
 export function threadMatchesActivityScope(
   thread: AgentPaneThread,
   scope: ActivityScopeFilter

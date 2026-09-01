@@ -13,8 +13,7 @@ import {
 import { useAgentPaneThreads } from './use-agent-pane-threads'
 import { handleActivityFilterFocusShortcut } from './activity-filter-focus-shortcut'
 import { clearCompletedActivity, isClearableActivityThread } from './activity-clear-completed'
-import { createActivityThreadActions } from './activity-thread-actions'
-import type { AgentPaneThread } from './activity-thread-types'
+import { createActivityThreadActions, hasActivityThreadWorkspace } from './activity-thread-actions'
 import { ActivityThreadListPane } from './activity-thread-list-pane'
 import { ActivityThreadDetailPane } from './activity-thread-detail-pane'
 import {
@@ -66,6 +65,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
   const {
     storeData,
     allThreads,
+    scopedThreads,
     selectedPaneKeyIsLive,
     effectiveSelectedPaneKey,
     visibleThreads,
@@ -81,9 +81,12 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     ? (allThreads.find((thread) => thread.paneKey === effectiveSelectedPaneKey) ?? null)
     : null
   const selectedTabId = selectedThread?.tab.id ?? null
+  const selectedWorktreeAvailable = selectedThread
+    ? hasActivityThreadWorkspace(selectedThread)
+    : false
   // Why: repo-less terminal buckets can produce Activity rows, but the workspace Terminal tree only portals real worktrees.
   const selectedHasLiveTab =
-    selectedThread && selectedTabId && storeData.worktreeMap.has(selectedThread.worktree.id)
+    selectedThread && selectedTabId && selectedWorktreeAvailable
       ? (storeData.tabsByWorktree[selectedThread.worktree.id] ?? []).some(
           (tab) => tab.id === selectedTabId
         )
@@ -92,8 +95,11 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     ? (allThreads.find((thread) => thread.paneKey === displayedPaneKey) ?? null)
     : null
   const displayedTabId = displayedThread?.tab.id ?? null
+  const displayedWorktreeAvailable = displayedThread
+    ? hasActivityThreadWorkspace(displayedThread)
+    : false
   const displayedHasLiveTab =
-    displayedThread && displayedTabId && storeData.worktreeMap.has(displayedThread.worktree.id)
+    displayedThread && displayedTabId && displayedWorktreeAvailable
       ? (storeData.tabsByWorktree[displayedThread.worktree.id] ?? []).some(
           (tab) => tab.id === displayedTabId
         )
@@ -240,31 +246,33 @@ export default function ActivityPrototypePage(): React.JSX.Element {
 
   // Why useMemo: rows are React.memo'd on these handlers; a fresh closure per render
   // would defeat the bail-out and re-render every mounted row on unrelated updates.
-  const { hasUnreadThreads, markThreadUnread, selectThread, jumpToWorkspace, markAllThreadsRead } =
-    useMemo(
-      () =>
-        createActivityThreadActions({
-          allThreads,
-          acknowledgeAgents: storeData.acknowledgeAgents,
-          unacknowledgeAgents: storeData.unacknowledgeAgents,
-          setSelectedPaneKey
-        }),
-      [allThreads, storeData.acknowledgeAgents, storeData.unacknowledgeAgents]
-    )
+  const {
+    hasUnreadThreads,
+    markThreadRead,
+    markThreadUnread,
+    selectThread,
+    jumpToWorkspace,
+    markAllThreadsRead
+  } = useMemo(
+    () =>
+      createActivityThreadActions({
+        allThreads: scopedThreads,
+        acknowledgeAgents: storeData.acknowledgeAgents,
+        unacknowledgeAgents: storeData.unacknowledgeAgents,
+        setSelectedPaneKey
+      }),
+    [scopedThreads, storeData.acknowledgeAgents, storeData.unacknowledgeAgents]
+  )
 
   const hasCompletedThreads = useMemo(
-    () => allThreads.some(isClearableActivityThread),
-    [allThreads]
+    () => scopedThreads.some(isClearableActivityThread),
+    [scopedThreads]
   )
   const handleClearCompleted = useCallback(() => {
-    clearCompletedActivity(allThreads)
-  }, [allThreads])
+    clearCompletedActivity(scopedThreads)
+  }, [scopedThreads])
 
-  const worktreeMap = storeData.worktreeMap
-  const canJumpToWorkspace = useCallback(
-    (thread: AgentPaneThread) => worktreeMap.has(thread.worktree.id),
-    [worktreeMap]
-  )
+  const canJumpToWorkspace = hasActivityThreadWorkspace
 
   useEffect(() => {
     if (
@@ -328,6 +336,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
           selectedPaneKey={selectedThread?.paneKey ?? null}
           onSelectThread={selectThread}
           onJumpToWorkspace={jumpToWorkspace}
+          onMarkThreadRead={markThreadRead}
           onMarkThreadUnread={markThreadUnread}
           canJumpToWorkspace={canJumpToWorkspace}
           isThreadListResizing={isThreadListResizing}
@@ -337,9 +346,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
         <ActivityThreadDetailPane
           selectedThread={selectedThread}
           selectedHasLiveTab={Boolean(selectedHasLiveTab)}
-          selectedWorktreeAvailable={Boolean(
-            selectedThread && storeData.worktreeMap.has(selectedThread.worktree.id)
-          )}
+          selectedWorktreeAvailable={selectedWorktreeAvailable}
           visibleThread={visibleThread}
           stagedThread={stagedThread}
           activePortalSlotId={activePortalSlotId}

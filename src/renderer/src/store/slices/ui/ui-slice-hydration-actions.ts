@@ -46,6 +46,7 @@ import {
 import {
   hydrateTrustedOrcaHooks,
   normalizeHydratedVisibleWorkspaceHostIds,
+  preserveStringArrayIdentity,
   sanitizeAcknowledgedAgentsByPaneKey,
   sanitizePaneKeyTimestampRecord,
   sanitizeHydratedActiveView,
@@ -76,6 +77,7 @@ export function createUiHydrationActions(set: UISliceSet, _get: UISliceGet): Par
         const validRepoIds = new Set(s.repos.map((repo) => repo.id))
         const validRepoHostIdentities = new Set(s.repos.map(getRepoHostIdentity))
         const persistedFilterRepoIds = sanitizePersistedRepoIds(ui.filterRepoIds)
+        const persistedAgentsFilterRepoIds = sanitizePersistedRepoIds(ui.agentsFilterRepoIds)
         // Why: pre-rename builds used sidekick* keys; read as fallback only so new pet* writes win after upgrade.
         const customPets = Array.isArray(ui.customPets)
           ? ui.customPets
@@ -184,13 +186,14 @@ export function createUiHydrationActions(set: UISliceSet, _get: UISliceGet): Par
             validRepoIds.size === 0
               ? persistedFilterRepoIds
               : persistedFilterRepoIds.filter((repoId) => validRepoIds.has(repoId)),
-          agentsVisibleHostIds: normalizeVisibleExecutionHostIds(ui.agentsVisibleHostIds),
+          agentsVisibleHostIds: preserveStringArrayIdentity(
+            s.agentsVisibleHostIds,
+            normalizeVisibleExecutionHostIds(ui.agentsVisibleHostIds)
+          ),
           agentsFilterRepoIds:
             validRepoIds.size === 0
-              ? sanitizePersistedRepoIds(ui.agentsFilterRepoIds)
-              : sanitizePersistedRepoIds(ui.agentsFilterRepoIds).filter((repoId) =>
-                  validRepoIds.has(repoId)
-                ),
+              ? persistedAgentsFilterRepoIds
+              : persistedAgentsFilterRepoIds.filter((repoId) => validRepoIds.has(repoId)),
           agentsShowChildAgents: ui.agentsShowChildAgents === true,
           agentsCompactMode: ui.agentsCompactMode !== false,
           collapsedGroups: new Set(ui.collapsedGroups ?? []),

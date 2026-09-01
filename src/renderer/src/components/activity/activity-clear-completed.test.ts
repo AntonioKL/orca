@@ -6,7 +6,9 @@ import { makeTab, makeWorktree } from './ActivityPrototypePage-test-fixtures'
 const mockStore = vi.hoisted(() => {
   const state = {
     activityClearedAtByPaneKey: {} as Record<string, number>,
+    agentStatusByPaneKey: {} as Record<string, RetainedAgentEntry['entry']>,
     retainedAgentsByPaneKey: {} as Record<string, RetainedAgentEntry>,
+    retentionSuppressedPaneKeys: {} as Record<string, true>,
     applyActivityClearedAt: vi.fn((patch: Record<string, number | null>) => {
       const next = { ...state.activityClearedAtByPaneKey }
       for (const [key, value] of Object.entries(patch)) {
@@ -21,9 +23,17 @@ const mockStore = vi.hoisted(() => {
     dismissRetainedAgents: vi.fn((paneKeys: readonly string[]) => {
       const next = { ...state.retainedAgentsByPaneKey }
       for (const key of paneKeys) {
+        if (state.agentStatusByPaneKey[key]) {
+          state.retentionSuppressedPaneKeys[key] = true
+        }
         delete next[key]
       }
       state.retainedAgentsByPaneKey = next
+    }),
+    clearRetentionSuppressedPaneKeys: vi.fn((paneKeys: string[]) => {
+      for (const key of paneKeys) {
+        delete state.retentionSuppressedPaneKeys[key]
+      }
     }),
     retainAgents: vi.fn((entries: RetainedAgentEntry[]) => {
       const next = { ...state.retainedAgentsByPaneKey }
@@ -120,8 +130,10 @@ describe('isClearableActivityThread', () => {
 describe('clearCompletedActivity', () => {
   beforeEach(() => {
     mockStore.activityClearedAtByPaneKey = {}
+    mockStore.agentStatusByPaneKey = {}
     mockStore.retainedAgentsByPaneKey = { 't-done:1': makeRetained('t-done:1') }
-    vi.stubGlobal('window', { api: { agentStatus: { drop: vi.fn() } } })
+    mockStore.retentionSuppressedPaneKeys = {}
+    vi.stubGlobal('window', { api: { agentStatus: { dropPersisted: vi.fn() } } })
   })
 
   afterEach(() => {
@@ -156,13 +168,18 @@ describe('clearCompletedActivity', () => {
       't-interrupted:1': 5_000
     })
     expect(mockStore.dismissRetainedAgents).toHaveBeenCalledWith(['t-done:1'])
-    const drop = (window as unknown as { api: { agentStatus: { drop: ReturnType<typeof vi.fn> } } })
-      .api.agentStatus.drop
+    const drop = (
+      window as unknown as {
+        api: { agentStatus: { dropPersisted: ReturnType<typeof vi.fn> } }
+      }
+    ).api.agentStatus.dropPersisted
     expect(drop).not.toHaveBeenCalled()
 
     lastToastOptions().onAutoClose()
     expect(drop).toHaveBeenCalledTimes(1)
-    expect(drop).toHaveBeenCalledWith('t-done:1')
+    expect(drop).toHaveBeenCalledWith(
+      expect.objectContaining({ paneKey: 't-done:1', state: 'done', receivedAt: 5_000 })
+    )
     // A later dismiss must not double-drop.
     lastToastOptions().onDismiss()
     expect(drop).toHaveBeenCalledTimes(1)
@@ -182,9 +199,40 @@ describe('clearCompletedActivity', () => {
     expect(mockStore.retainedAgentsByPaneKey['t-done:1']).toBeDefined()
 
     lastToastOptions().onAutoClose()
-    const drop = (window as unknown as { api: { agentStatus: { drop: ReturnType<typeof vi.fn> } } })
-      .api.agentStatus.drop
+    const drop = (
+      window as unknown as {
+        api: { agentStatus: { dropPersisted: ReturnType<typeof vi.fn> } }
+      }
+    ).api.agentStatus.dropPersisted
     expect(drop).not.toHaveBeenCalled()
+  })
+
+  it('undo restores a completed live row and removes the suppressor created by clear', () => {
+    const retained = mockStore.retainedAgentsByPaneKey['t-done:1']
+    mockStore.agentStatusByPaneKey['t-done:1'] = retained.entry
+    mockStore.activityClearedAtByPaneKey = { 't-done:1': 1_111 }
+
+    clearCompletedActivity([doneThread])
+    expect(mockStore.activityClearedAtByPaneKey['t-done:1']).toBe(5_000)
+    expect(mockStore.retentionSuppressedPaneKeys['t-done:1']).toBe(true)
+
+    lastToastOptions().action.onClick()
+
+    expect(mockStore.activityClearedAtByPaneKey['t-done:1']).toBe(1_111)
+    expect(mockStore.retentionSuppressedPaneKeys['t-done:1']).toBeUndefined()
+    expect(mockStore.retainedAgentsByPaneKey['t-done:1']).toBeUndefined()
+  })
+
+  it('does not restore a cleared snapshot over a newer retained run', () => {
+    clearCompletedActivity([doneThread])
+    const newer = makeRetained('t-done:1')
+    newer.entry.prompt = 'newer run'
+    mockStore.retainedAgentsByPaneKey['t-done:1'] = newer
+
+    lastToastOptions().action.onClick()
+
+    expect(mockStore.retainedAgentsByPaneKey['t-done:1']).toBe(newer)
+    expect(mockStore.activityClearedAtByPaneKey['t-done:1']).toBeUndefined()
   })
 
   it('does nothing when no thread is clearable', () => {

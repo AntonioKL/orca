@@ -7,11 +7,7 @@ import { getSettingsFocusedExecutionHostId } from '../../../../shared/execution-
 import { buildActivityEvents, createActivityEventBuildCache } from './activity-event-builder'
 import { buildAgentPaneThreads, createAgentPaneThreadReuseCache } from './activity-thread-builder'
 import { isChildAgentThread } from './activity-thread-child-agent'
-import {
-  resolveActivityScopeRepoIds,
-  threadMatchesActivityScope,
-  type ActivityScopeFilter
-} from './activity-scope-filter'
+import { filterThreadsByActivityScope, resolveActivityScopeRepoIds } from './activity-scope-filter'
 import {
   activityThreadMatchesSearchQuery,
   buildActivityThreadGroups,
@@ -31,6 +27,11 @@ export type AgentPaneThreadsStoreData = Pick<
   | 'migrationUnsupportedByPtyId'
   | 'retainedAgentsByPaneKey'
   | 'tabsByWorktree'
+  | 'unifiedTabsByWorktree'
+  | 'repos'
+  | 'folderWorkspaces'
+  | 'detectedWorktreesByRepo'
+  | 'getKnownWorktreeById'
   | 'acknowledgedAgentsByPaneKey'
   | 'activityClearedAtByPaneKey'
   | 'acknowledgeAgents'
@@ -52,6 +53,8 @@ export function useAgentPaneThreads(args: {
 }): {
   storeData: AgentPaneThreadsStoreData
   allThreads: AgentPaneThread[]
+  /** Threads inside the persisted host/project scope; bulk actions must not affect rows outside it. */
+  scopedThreads: AgentPaneThread[]
   selectedPaneKeyIsLive: boolean
   effectiveSelectedPaneKey: string | null
   visibleThreads: AgentPaneThread[]
@@ -70,6 +73,11 @@ export function useAgentPaneThreads(args: {
       migrationUnsupportedByPtyId: s.migrationUnsupportedByPtyId,
       retainedAgentsByPaneKey: s.retainedAgentsByPaneKey,
       tabsByWorktree: s.tabsByWorktree,
+      unifiedTabsByWorktree: s.unifiedTabsByWorktree,
+      repos: s.repos,
+      folderWorkspaces: s.folderWorkspaces,
+      detectedWorktreesByRepo: s.detectedWorktreesByRepo,
+      getKnownWorktreeById: s.getKnownWorktreeById,
       worktreeMap: getWorktreeMapFromState(s),
       repoMap: getRepoMapFromState(s),
       acknowledgedAgentsByPaneKey: s.acknowledgedAgentsByPaneKey,
@@ -98,8 +106,11 @@ export function useAgentPaneThreads(args: {
           migrationUnsupportedByPtyId: storeData.migrationUnsupportedByPtyId,
           retainedAgentsByPaneKey: storeData.retainedAgentsByPaneKey,
           tabsByWorktree: storeData.tabsByWorktree,
+          unifiedTabsByWorktree: storeData.unifiedTabsByWorktree,
           worktreeMap: storeData.worktreeMap,
           repoMap: storeData.repoMap,
+          repos: storeData.repos,
+          resolveWorktree: storeData.getKnownWorktreeById,
           acknowledgedAgentsByPaneKey: storeData.acknowledgedAgentsByPaneKey,
           activityClearedAtByPaneKey: storeData.activityClearedAtByPaneKey,
           // Why: Date.now() is read in the memo body (not a dep) so stale-decay recomputes when agentStatusEpoch ticks, not on wall-clock time.
@@ -130,27 +141,30 @@ export function useAgentPaneThreads(args: {
 
   // Why scope runs before the per-view filters: its hidden count must mean "hidden by
   // the persisted host/project scope alone", not folded into unread/search misses.
-  const { scopedThreads, scopeHiddenThreadCount } = useMemo(() => {
-    const scope: ActivityScopeFilter = {
-      visibleHostIds: agentsVisibleHostIds,
-      filterRepoIds: resolveActivityScopeRepoIds(agentsFilterRepoIds, storeData.repoMap),
-      defaultHostId
-    }
-    const scoped = allThreads.filter(
-      (thread) =>
-        threadMatchesActivityScope(thread, scope) ||
-        // Why: keep the just-selected thread visible so changing scope can't vanish the open row.
-        thread.paneKey === effectiveSelectedPaneKey
-    )
-    return { scopedThreads: scoped, scopeHiddenThreadCount: allThreads.length - scoped.length }
-  }, [
-    allThreads,
-    agentsVisibleHostIds,
-    agentsFilterRepoIds,
-    storeData.repoMap,
-    defaultHostId,
-    effectiveSelectedPaneKey
-  ])
+  const {
+    threads: scopeVisibleThreads,
+    matchingThreads: scopedThreads,
+    hiddenCount: scopeHiddenThreadCount
+  } = useMemo(
+    () =>
+      filterThreadsByActivityScope({
+        threads: allThreads,
+        scope: {
+          visibleHostIds: agentsVisibleHostIds,
+          filterRepoIds: resolveActivityScopeRepoIds(agentsFilterRepoIds, storeData.repoMap),
+          defaultHostId
+        },
+        exemptPaneKey: effectiveSelectedPaneKey
+      }),
+    [
+      allThreads,
+      agentsVisibleHostIds,
+      agentsFilterRepoIds,
+      storeData.repoMap,
+      defaultHostId,
+      effectiveSelectedPaneKey
+    ]
+  )
 
   // Why deferred: filtering hundreds of threads is interruptible background work; the input
   // echoes the keystroke at full priority while the list catches up on the deferred value.
@@ -159,7 +173,7 @@ export function useAgentPaneThreads(args: {
     const normalizedQuery = isActivitySearchQueryTooLarge(deferredQuery)
       ? null
       : deferredQuery.trim().toLowerCase()
-    return scopedThreads.filter((thread) => {
+    return scopeVisibleThreads.filter((thread) => {
       // Why: keep the just-selected thread visible after auto-mark-read flips it to read, else unread-only mode makes the clicked row vanish from the list.
       if (
         readFilter === 'unread' &&
@@ -181,7 +195,7 @@ export function useAgentPaneThreads(args: {
       }
       return activityThreadMatchesSearchQuery({ thread, searchQuery: normalizedQuery })
     })
-  }, [scopedThreads, readFilter, deferredQuery, effectiveSelectedPaneKey, showChildAgents])
+  }, [scopeVisibleThreads, readFilter, deferredQuery, effectiveSelectedPaneKey, showChildAgents])
 
   const visibleThreadGroups = useMemo(
     () => buildActivityThreadGroups(visibleThreads, groupBy),
@@ -191,6 +205,7 @@ export function useAgentPaneThreads(args: {
   return {
     storeData,
     allThreads,
+    scopedThreads,
     selectedPaneKeyIsLive,
     effectiveSelectedPaneKey,
     visibleThreads,

@@ -6,12 +6,14 @@ import {
   clearCompletedActivity,
   isClearableActivityThread
 } from '@/components/activity/activity-clear-completed'
-import { createActivityThreadActions } from '@/components/activity/activity-thread-actions'
+import {
+  createActivityThreadActions,
+  hasActivityThreadWorkspace
+} from '@/components/activity/activity-thread-actions'
 import { ActivityThreadListPane } from '@/components/activity/activity-thread-list-pane'
 import { ActivityThreadOptionsMenu } from '@/components/activity/activity-thread-controls'
 import { useAgentPaneThreads } from '@/components/activity/use-agent-pane-threads'
 import type { ActivityGroupBy, ThreadReadFilter } from '@/components/activity/activity-thread-types'
-import type { AgentPaneThread } from '@/components/activity/activity-thread-types'
 
 /**
  * The Activity thread list, hosted in the sidebar as a navigator: selecting a
@@ -77,7 +79,7 @@ export default function SidebarAgentsList({
 
   const {
     storeData,
-    allThreads,
+    scopedThreads,
     selectedPaneKeyIsLive,
     effectiveSelectedPaneKey,
     visibleThreads,
@@ -93,31 +95,33 @@ export default function SidebarAgentsList({
 
   // Why useMemo: rows are React.memo'd on these handlers; a fresh closure per render
   // would defeat the bail-out and re-render every mounted row on unrelated updates.
-  const { hasUnreadThreads, markThreadUnread, selectThread, jumpToWorkspace, markAllThreadsRead } =
-    useMemo(
-      () =>
-        createActivityThreadActions({
-          allThreads,
-          acknowledgeAgents: storeData.acknowledgeAgents,
-          unacknowledgeAgents: storeData.unacknowledgeAgents,
-          setSelectedPaneKey
-        }),
-      [allThreads, storeData.acknowledgeAgents, storeData.unacknowledgeAgents]
-    )
+  const {
+    hasUnreadThreads,
+    markThreadRead,
+    markThreadUnread,
+    selectThread,
+    jumpToWorkspace,
+    markAllThreadsRead
+  } = useMemo(
+    () =>
+      createActivityThreadActions({
+        allThreads: scopedThreads,
+        acknowledgeAgents: storeData.acknowledgeAgents,
+        unacknowledgeAgents: storeData.unacknowledgeAgents,
+        setSelectedPaneKey
+      }),
+    [scopedThreads, storeData.acknowledgeAgents, storeData.unacknowledgeAgents]
+  )
 
   const hasCompletedThreads = useMemo(
-    () => allThreads.some(isClearableActivityThread),
-    [allThreads]
+    () => scopedThreads.some(isClearableActivityThread),
+    [scopedThreads]
   )
   const handleClearCompleted = useCallback(() => {
-    clearCompletedActivity(allThreads)
-  }, [allThreads])
+    clearCompletedActivity(scopedThreads)
+  }, [scopedThreads])
 
-  const worktreeMap = storeData.worktreeMap
-  const canJumpToWorkspace = useCallback(
-    (thread: AgentPaneThread) => worktreeMap.has(thread.worktree.id),
-    [worktreeMap]
-  )
+  const canJumpToWorkspace = hasActivityThreadWorkspace
 
   return (
     <>
@@ -135,13 +139,16 @@ export default function SidebarAgentsList({
         onCompactModeChange={setCompactMode}
         onShowChildAgentsChange={setShowChildAgents}
         onMarkAllThreadsRead={markAllThreadsRead}
+        onClearCompleted={handleClearCompleted}
         visibleThreadGroups={visibleThreadGroups}
         visibleThreadCount={visibleThreads.length}
         selectedPaneKey={effectiveSelectedPaneKey}
         onSelectThread={selectThread}
         onJumpToWorkspace={jumpToWorkspace}
+        onMarkThreadRead={markThreadRead}
         onMarkThreadUnread={markThreadUnread}
         canJumpToWorkspace={canJumpToWorkspace}
+        allowMarkUnreadWhenSelected
         showJumpAction={false}
         showFilterControls={false}
         showOptionsMenu={false}
