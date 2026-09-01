@@ -92,7 +92,7 @@ export const ptyStreamAndSerializationApi = {
     callback: (data: {
       requestId: string
       ptyId: string
-      opts?: { scrollbackRows?: number; altScreenForcesZeroRows?: boolean }
+      opts?: { scrollbackRows?: number }
     }) => void
   ): (() => void) => {
     const listener = (
@@ -100,7 +100,7 @@ export const ptyStreamAndSerializationApi = {
       data: {
         requestId: string
         ptyId: string
-        opts?: { scrollbackRows?: number; altScreenForcesZeroRows?: boolean }
+        opts?: { scrollbackRows?: number }
       }
     ) => callback(data)
     ipcRenderer.on('pty:serializeBuffer:request', listener)
