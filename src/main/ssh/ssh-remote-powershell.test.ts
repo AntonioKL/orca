@@ -55,9 +55,15 @@ function typeScriptSourcesUnder(dir: string, out: string[] = []): string[] {
   return out
 }
 
-/** Whole-line `//` and block comments only, so string contents are never eaten. */
+// Whole-line `//` and block comments only, so string contents are never eaten.
+//
+// Both strips are anchored to the start of a line. An unanchored block strip would pair an
+// opening `/*` appearing inside a string (a glob such as 'src/*.ts') with any later comment
+// close — a JSDoc terminator, say — and delete everything between them, hiding a real
+// violation that sits in the gap. Verified: the unanchored form misses an injected
+// `Import-Module` sitting after a glob string.
 function withoutComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+  return source.replace(/^[ \t]*\/\*[\s\S]*?\*\//gm, '').replace(/^[ \t]*\/\/.*$/gm, '')
 }
 
 // Why: execution policy gates loading script FILES and nothing else, so dropping
@@ -65,13 +71,58 @@ function withoutComments(source: string): string {
 // invariant is what makes the switch safe to omit, and it was previously guarded by nothing:
 // a future payload that dot-sourced or used `-File` would fail only on a remote host whose
 // LocalMachine policy is Restricted/AllSigned. See the invariant note on `powerShellCommand`.
+// Every pattern is case-insensitive: PowerShell switches and cmdlet names are, and Windows
+// paths are, so `-file`, `import-module` and `DEPLOY.PS1` are all legitimate spellings that a
+// case-sensitive pattern would wave through. Verified to add no false positive across the real
+// importers. Each entry carries the fixtures it must catch AND the near-misses it must not, so
+// a future tightening cannot quietly trade one for the other.
 const POLICY_GATED_CONSTRUCTS = [
-  ['a PowerShell script file (.ps1/.psm1)', /\.psm?1\b/],
-  ['Import-Module', /\bImport-Module\b/],
-  ['the -File switch', /-File\b/],
-  // The quote/backtick prefixes matter: a dot-source in a generated payload usually sits at the
-  // very start of a TS string literal — `powerShellCommand(". '$x'")` — not after a `;`.
-  ['dot-sourcing', /(^|[;{'"`]|\n)[ \t]*\.[ \t]+['"$]/]
+  {
+    label: 'a PowerShell script file (.ps1/.psm1)',
+    pattern: /\.psm?1\b/i,
+    catches: [
+      `powerShellCommand("$script = 'C:\\tools\\deploy.ps1'")`,
+      `powerShellCommand("Import-Module '$dir\\orca.psm1'")`,
+      `powerShellCommand("& '$root\\DEPLOY.PS1'")`
+    ],
+    ignores: [`const build = 'artifact.ps10'`]
+  },
+  {
+    label: 'Import-Module',
+    pattern: /\bImport-Module\b/i,
+    catches: [
+      `powerShellCommand("Import-Module 'NetSecurity'")`,
+      `powerShellCommand("import-module $modulePath")`
+    ],
+    ignores: [`const name = 'Import-ModuleList'`]
+  },
+  {
+    // Anchored to a token boundary: a bare /-File\b/i also matches `--credential-file`,
+    // `--log-file` and `--body-file`, which are real arguments in three of these importers.
+    label: 'the -File switch',
+    pattern: /(^|[\s'"`([{,])-File\b/i,
+    catches: [
+      `runRemote("powershell.exe -NoProfile -File 'C:\\x.ps1'")`,
+      `runRemote("powershell.exe  -file   $scriptVar")`,
+      `runRemote(["-NoProfile", "-File", scriptVar])`
+    ],
+    ignores: [`fetchWith("--credential-file", path)`, `run("--log-file $p --body-file $b")`]
+  },
+  {
+    // The quote/backtick prefixes matter: a dot-source in a generated payload usually sits at
+    // the very start of a TS string literal — `powerShellCommand(". '$x'")` — not after a `;`.
+    label: 'dot-sourcing',
+    pattern: /(^|[;{'"`]|\n)[ \t]*\.[ \t]+['"$]/,
+    catches: [
+      `powerShellCommand(". '$profileScript'")`,
+      `powerShellCommand("$ErrorActionPreference = 'Stop'; . '$profile'")`,
+      `powerShellCommand(". $profileScript")`
+    ],
+    ignores: [
+      `cp -a $sourcePath/. $destinationPath/`,
+      `Host key verification failed for $displayHost. $detail`
+    ]
+  }
 ] as const
 
 describe('remote PowerShell payload invariant', () => {
@@ -81,11 +132,14 @@ describe('remote PowerShell payload invariant', () => {
 
   it('finds the modules that build remote payloads', () => {
     // Guards the scan itself: a resolution change that emptied this list would make every
-    // assertion below vacuously pass.
-    expect(importers.length).toBeGreaterThan(5)
+    // assertion below vacuously pass. 14 importers today.
+    expect(importers.length).toBeGreaterThan(10)
   })
 
-  it.each(POLICY_GATED_CONSTRUCTS)('loads no remote payload through %s', (label, pattern) => {
+  it.each(POLICY_GATED_CONSTRUCTS)('loads no remote payload through $label', ({
+    label,
+    pattern
+  }) => {
     const offenders = importers
       .filter((path) => pattern.test(withoutComments(readFileSync(path, 'utf8'))))
       .map((path) => relative(MAIN_DIR, path))
@@ -99,19 +153,22 @@ describe('remote PowerShell payload invariant', () => {
     ).toEqual([])
   })
 
-  it('detects the constructs it is meant to catch', () => {
-    // Why: these patterns only earn trust if they fire on a real violation, spelled the way a
-    // generated payload actually spells it — as the contents of a TS string literal. An earlier
-    // dot-source pattern passed a `;`-prefixed sample but missed `powerShellCommand(". '$x'")`,
-    // which is the far likelier shape, so each sample below keeps its surrounding quotes.
-    const violations = [
-      `powerShellCommand("$script = 'C:\\tools\\deploy.ps1'")`,
-      `powerShellCommand("Import-Module 'NetSecurity'")`,
-      `runRemote("powershell.exe -NoProfile -File 'C:\\tools\\deploy.ps1'")`,
-      `powerShellCommand(". '$profileScript'")`
-    ]
-    for (const [index, [, pattern]] of POLICY_GATED_CONSTRUCTS.entries()) {
-      expect(pattern.test(violations[index]!), violations[index]).toBe(true)
+  // Why: these patterns only earn trust if they fire on a real violation spelled the way a
+  // generated payload spells it — inside a TS string literal — and stay quiet on the near
+  // misses. Both halves are load-bearing: an earlier dot-source pattern passed a `;`-prefixed
+  // sample but missed `powerShellCommand(". '$x'")`, and the obvious case-insensitive fix for
+  // `-File` matches `--credential-file` in three real importers. A fixture written from the
+  // pattern confirms the pattern; these are written from the requirement.
+  it.each(POLICY_GATED_CONSTRUCTS)('detects $label wherever it is spelled', ({
+    pattern,
+    catches,
+    ignores
+  }) => {
+    for (const sample of catches) {
+      expect(pattern.test(sample), `should catch: ${sample}`).toBe(true)
+    }
+    for (const sample of ignores) {
+      expect(pattern.test(sample), `should ignore: ${sample}`).toBe(false)
     }
   })
 })
