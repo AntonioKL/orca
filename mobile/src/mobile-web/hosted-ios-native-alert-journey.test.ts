@@ -22,6 +22,7 @@ describe('hosted iOS native Alert journey', () => {
     const waitForLabel = vi.fn().mockResolvedValue({ frame: { x: 0, y: 0, width: 1, height: 1 } })
     const tapControl = vi.fn().mockResolvedValue({ x: 0.5, y: 0.5 })
     const waitForLabelToDisappear = vi.fn().mockResolvedValue(undefined)
+    const tapPoint = vi.fn().mockResolvedValue(undefined)
 
     const result = await verifyHostedIosNativeAlertJourney(
       {
@@ -36,12 +37,15 @@ describe('hosted iOS native Alert journey', () => {
         activateWorkspace,
         evaluate,
         tapControl,
+        tapPoint,
         waitForDocument,
         waitForLabel,
         waitForLabelToDisappear
       }
     )
 
+    expect(tapPoint).toHaveBeenCalledWith({ deviceUdid: 'simulator' }, { x: 0.5, y: 0.6 })
+    expect(tapPoint.mock.invocationCallOrder[0]).toBeLessThan(evaluate.mock.invocationCallOrder[1]!)
     expect(tapControl).toHaveBeenCalledWith({ deviceUdid: 'simulator' }, 'Keep editing', 30_000)
     expect(activateControl).toHaveBeenCalledWith(sessionDocument, {
       kind: 'label',
