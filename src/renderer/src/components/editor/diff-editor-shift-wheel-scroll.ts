@@ -4,8 +4,8 @@ const WHEEL_LINE_PIXELS = 16
 
 type HorizontalScrollEditor = Pick<
   editor.ICodeEditor,
-  'getContainerDomNode' | 'getScrollLeft' | 'setScrollLeft'
->
+  'getContainerDomNode' | 'getScrollLeft' | 'setScrollLeft' | 'getScrollWidth'
+> & { getLayoutInfo: () => Pick<editor.EditorLayoutInfo, 'contentWidth'> }
 
 type DiffEditorWithPanes = {
   getModifiedEditor: () => HorizontalScrollEditor
@@ -23,10 +23,19 @@ function getHorizontalWheelPixels(event: WheelEvent, pageWidth: number): number 
   return delta
 }
 
+function canScrollHorizontally(editor: HorizontalScrollEditor): boolean {
+  return editor.getScrollWidth() > editor.getLayoutInfo().contentWidth
+}
+
 function installPaneShiftWheelScroll(editor: HorizontalScrollEditor): () => void {
   const container = editor.getContainerDomNode()
   const handleWheel = (event: WheelEvent): void => {
     if (event.defaultPrevented || !event.shiftKey) {
+      return
+    }
+
+    // Why: a word-wrapped pane never overflows sideways, so leave the gesture to the outer list.
+    if (!canScrollHorizontally(editor)) {
       return
     }
 

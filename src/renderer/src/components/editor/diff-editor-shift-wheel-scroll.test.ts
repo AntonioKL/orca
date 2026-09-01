@@ -9,9 +9,11 @@ type PaneFixture = {
   setScrollLeft: ReturnType<typeof vi.fn<(value: number) => void>>
   getScrollLeft: () => number
   getContainerDomNode: () => HTMLElement
+  getScrollWidth: () => number
+  getLayoutInfo: () => { contentWidth: number }
 }
 
-function createPaneFixture(initialScrollLeft = 10): PaneFixture {
+function createPaneFixture(initialScrollLeft = 10, scrollWidth = 1000): PaneFixture {
   const container = document.createElement('div')
   const input = document.createElement('div')
   let scrollLeft = initialScrollLeft
@@ -26,7 +28,9 @@ function createPaneFixture(initialScrollLeft = 10): PaneFixture {
     input,
     setScrollLeft,
     getScrollLeft: () => scrollLeft,
-    getContainerDomNode: () => container
+    getContainerDomNode: () => container,
+    getScrollWidth: () => scrollWidth,
+    getLayoutInfo: () => ({ contentWidth: 200 })
   }
 }
 
@@ -93,7 +97,26 @@ describe('installDiffEditorShiftWheelScroll', () => {
     dispose()
   })
 
-  it('scrolls the modified pane independently', () => {
+  it('leaves shift input alone when the pane has no horizontal overflow', () => {
+    const original = createPaneFixture(0, 200)
+    const modified = createPaneFixture(0, 200)
+    const onDownstreamWheel = vi.fn()
+    original.input.addEventListener('wheel', onDownstreamWheel)
+    const dispose = installDiffEditorShiftWheelScroll({
+      getOriginalEditor: () => original,
+      getModifiedEditor: () => modified
+    })
+
+    const event = dispatchWheel(original.input, { deltaY: 24, shiftKey: true })
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(original.setScrollLeft).not.toHaveBeenCalled()
+    expect(onDownstreamWheel).toHaveBeenCalledTimes(1)
+    dispose()
+  })
+
+  // Monaco syncs pane scroll itself; this covers listener routing, not product-level pane independence.
+  it('routes the wheel event to the pane under the pointer', () => {
     const original = createPaneFixture()
     const modified = createPaneFixture()
     const dispose = installDiffEditorShiftWheelScroll({
