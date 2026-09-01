@@ -347,10 +347,22 @@ async function expectBrowserTabActive(
   page: Parameters<typeof getActiveWorktreeId>[0],
   title: string
 ): Promise<void> {
-  const tab = page.locator('[data-tab-id]').filter({ hasText: title }).first()
-  await expect(tab).toBeVisible({ timeout: 10_000 })
-  await expect(tab).toHaveAttribute('data-tab-id', /.+/)
-  const tabId = await tab.getAttribute('data-tab-id')
+  // Why: `[data-tab-id]` also covers terminal and editor tabs, and several fixture titles
+  // are substrings of each other ("Modifier destination" inside "Frame modifier
+  // destination"), so the label must match exactly and the id must own a browser overlay.
+  const resolveTabId = (): Promise<string | null> =>
+    page.locator('[data-tab-id]').evaluateAll((tabs, exactTitle) => {
+      const tab = tabs.find(
+        (candidate) =>
+          candidate.textContent?.trim() === exactTitle &&
+          document.querySelector(
+            `[data-browser-overlay-tab-id="${candidate.getAttribute('data-tab-id')}"]`
+          ) !== null
+      )
+      return tab?.getAttribute('data-tab-id') ?? null
+    }, title)
+  await expect.poll(resolveTabId, { timeout: 10_000 }).not.toBeNull()
+  const tabId = await resolveTabId()
   if (!tabId) {
     throw new Error(`Browser tab ${title} was rendered without an id`)
   }
