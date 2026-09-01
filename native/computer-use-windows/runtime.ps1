@@ -1320,6 +1320,12 @@ function Invoke-OrcaOperation($Operation) {
 }
 
 function Invoke-OrcaServeLoop {
+    # Announced before the first read, and after every Add-Type above: a caller
+    # that never sees this line knows the helper cannot have read a request, let
+    # alone synthesized a click, so replaying it is provably safe. Inferring that
+    # from a missing response instead would replay operations that did run.
+    [Console]::Out.WriteLine('{"ready":true}')
+    [Console]::Out.Flush()
     # One NDJSON request per line in, one response per line out, until stdin closes.
     # Responses carry base64 screenshots and routinely exceed a megabyte; ReadLine
     # and the console writer are both length-bounded only by memory.

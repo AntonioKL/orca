@@ -1,6 +1,7 @@
 import { spawnProcess } from '../../shared/child-process/run-process'
 import { windowsPowerShellPath } from '../../shared/child-process/windows-system-binary'
 import { reportComputerDiagnostic } from './computer-sidecar-diagnostics'
+import { isReplayableTool } from './desktop-script-action'
 import type { BridgeRequest, BridgeResponse } from './desktop-script-provider-types'
 import {
   startServeChannel,
@@ -66,7 +67,15 @@ export class DesktopScriptRuntimeHost {
   private pending: PendingRequest | null = null
   private queueTail: Promise<void> | null = null
   private idleTimer: NodeJS.Timeout | null = null
+  private childReady = false
   private childAnswered = false
+  /**
+   * Set once any helper has announced itself, which proves the script on disk
+   * speaks the ready protocol. Until then a mutating request is not replayed
+   * even on a clean start failure, because ORCA_COMPUTER_DESKTOP_SCRIPT_PROVIDER_PATH
+   * can point at an older runtime.ps1 that simply never announces.
+   */
+  private readyProtocolConfirmed = false
   private disposed = false
   private nextRequestId = 1
   private readonly availability: RuntimeHostAvailability
@@ -141,7 +150,7 @@ export class DesktopScriptRuntimeHost {
         // A helper that answered and then died is a crash, not a bad start: the
         // caller sees it and the next operation gets a fresh process — unless it
         // keeps happening, which is thrash the one-shot bridge should absorb.
-        if (!isRuntimeHostUnavailable(error)) {
+        if (!isRuntimeHostUnavailable(error) || !this.mayReplay(request)) {
           if (this.availability.exhausted) {
             this.availability.enterCooldown()
           }
@@ -188,6 +197,7 @@ export class DesktopScriptRuntimeHost {
     if (this.channel) {
       return this.channel
     }
+    this.childReady = false
     this.childAnswered = false
     const channel: DesktopScriptServeChannel = startServeChannel(
       {
@@ -219,14 +229,36 @@ export class DesktopScriptRuntimeHost {
     return channel
   }
 
+  /**
+   * Whether the helper that just died can be proved not to have run the request.
+   *
+   * Why proof and not inference: "no reply came back" is not "nothing happened".
+   * runtime.ps1 synthesizes the input and only then builds the snapshot, which
+   * allocates a full-window bitmap and walks the UIA tree — a native fault there
+   * is uncatchable and would leave a click already delivered. Retrying on that
+   * inference turns one requested click into four.
+   */
+  private mayReplay(request: BridgeRequest): boolean {
+    if (this.childReady || this.childAnswered) {
+      return false
+    }
+    return this.readyProtocolConfirmed || isReplayableTool(request.tool)
+  }
+
   private deliver(line: string): void {
-    let parsed: BridgeResponse
+    let parsed: Record<string, unknown>
     try {
-      parsed = JSON.parse(line) as BridgeResponse
+      parsed = JSON.parse(line) as Record<string, unknown>
     } catch {
       // Not a response at all — a PowerShell banner, a stray write. Dropping it
       // is safe now that the id below is what decides which request is answered,
       // and it keeps a chatty console from making the helper unusable.
+      return
+    }
+    // The readiness announcement carries no request id and answers nothing.
+    if (parsed.ready === true && parsed.requestId === undefined) {
+      this.childReady = true
+      this.readyProtocolConfirmed = true
       return
     }
     const pending = this.pending
@@ -245,19 +277,19 @@ export class DesktopScriptRuntimeHost {
     this.pending = null
     clearTimeout(pending.timer)
     const { requestId: _echoed, ...response } = parsed
-    pending.resolve(response)
+    pending.resolve(response as BridgeResponse)
   }
 
   private handleGone(detail: string): void {
-    const answered = this.childAnswered
+    const started = this.childReady || this.childAnswered
     this.channel = null
     this.availability.recordFailure()
-    if (!answered && this.availability.atPreferredPolicy && isExecutionPolicyBlocked(detail)) {
+    if (!started && this.availability.atPreferredPolicy && isExecutionPolicyBlocked(detail)) {
       this.availability.requestPolicyRetry()
       this.rejectPending(new RuntimeClientError('accessibility_error', detail))
       return
     }
-    if (!answered) {
+    if (!started) {
       this.rejectPending(this.unavailableError(detail))
       return
     }
@@ -269,8 +301,20 @@ export class DesktopScriptRuntimeHost {
     )
   }
 
+  /**
+   * Stop a helper this host has judged unusable — a timeout, a desynchronised
+   * reply, an oversized line.
+   *
+   * Why it counts as a failure: stopping the channel suppresses the exit
+   * handler, so without this these paths bypassed the accounting entirely and a
+   * helper that failed this way on every operation was respawned once per
+   * operation forever — the burst this host exists to remove, restored through
+   * its own recovery path.
+   */
   private abortChannel(error: Error): void {
     this.stopChannel()
+    this.availability.recordFailure()
+    this.availability.warn(`runtime host helper stopped: ${error.message}`)
     this.rejectPending(error)
   }
 

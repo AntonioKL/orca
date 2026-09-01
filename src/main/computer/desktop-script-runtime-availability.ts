@@ -97,9 +97,15 @@ export class RuntimeHostAvailability {
   }
 
   enterCooldown(): void {
+    const failures = this.consecutiveFailures
     this.cooldownUntil = this.now() + this.cooldownMs
+    // The wait is the penalty; leaving the count at the limit would charge twice
+    // and let the first death after recovery re-enter a full cooldown, so an
+    // interleaved workload would spend its life on the one-shot bridge.
+    this.consecutiveFailures = 0
+    this.consecutiveSuccesses = 0
     this.warn(
-      `runtime host unavailable after ${this.consecutiveFailures} consecutive failures; falling back to one powershell.exe per operation for ${this.cooldownMs}ms`
+      `runtime host unavailable after ${failures} consecutive failures; falling back to one powershell.exe per operation for ${this.cooldownMs}ms`
     )
   }
 

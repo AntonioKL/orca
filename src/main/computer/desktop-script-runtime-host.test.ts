@@ -40,6 +40,11 @@ class FakeRuntimeChild extends EventEmitter {
     return this.requests().at(-1)?.requestId as number
   }
 
+  /** The announcement the real serve loop writes before its first read. */
+  ready(): void {
+    this.write('{"ready":true}\n')
+  }
+
   respond(response: Record<string, unknown>, requestId = this.pendingId()): void {
     this.write(`${JSON.stringify({ ...response, requestId })}\n`)
   }
@@ -295,6 +300,150 @@ describe('DesktopScriptRuntimeHost', () => {
 
     // A clean run clears the count, so one bad helper cannot degrade a good one.
     expect(children).toHaveLength(2)
+    host.dispose()
+  })
+
+  it('stops respawning a helper that keeps answering the wrong request', async () => {
+    let clock = 1_000
+    const { host, children } = createHost({ cooldownMs: 60_000, now: () => clock })
+
+    // Desync is host-detected, so it bypassed the exit handler entirely: without
+    // its own accounting this respawned once per operation, forever.
+    for (let round = 0; round < 3; round++) {
+      const promise = host.request({ tool: 'handshake' })
+      await settle()
+      const child = children.at(-1)
+      child?.respond({ ok: true, capabilities: {} }, child.pendingId() + 500)
+      await expect(promise).rejects.toThrow(/did not match the pending request/)
+      await settle()
+    }
+
+    const spawned = children.length
+    await expect(host.request({ tool: 'handshake' })).rejects.toSatisfy(isRuntimeHostUnavailable)
+    expect(children).toHaveLength(spawned)
+    host.dispose()
+  })
+
+  it('stops respawning a helper that times out on every operation', async () => {
+    vi.useFakeTimers()
+    let clock = 1_000
+    const { host, children } = createHost({
+      requestTimeoutMs: 1_000,
+      cooldownMs: 60_000,
+      now: () => clock
+    })
+
+    for (let round = 0; round < 3; round++) {
+      const promise = host.request({ tool: 'get_app_state', app: 'Frozen' })
+      await settle()
+      await vi.advanceTimersByTimeAsync(1_001)
+      await expect(promise).rejects.toMatchObject({ code: 'action_timeout' })
+      await settle()
+    }
+
+    const spawned = children.length
+    await expect(host.request({ tool: 'handshake' })).rejects.toSatisfy(isRuntimeHostUnavailable)
+    expect(children).toHaveLength(spawned)
+    host.dispose()
+  })
+
+  it('never re-sends a mutation to a fresh helper after a pre-answer death', async () => {
+    const { host, children } = createHost()
+
+    const promise = host.request({ tool: 'click', app: 'Notepad', x: 10, y: 10 })
+    await settle()
+    children[0].exit(1, 'Add-Type : Cannot access the temporary directory')
+
+    // The click may already have landed inside the helper that died; replaying
+    // it would click twice. An observation in the same position is retried.
+    await expect(promise).rejects.toSatisfy(isRuntimeHostUnavailable)
+    expect(children).toHaveLength(1)
+    host.dispose()
+  })
+
+  it('never replays a mutation once the helper announced it was reading', async () => {
+    const { host, children } = createHost()
+
+    const promise = host.request({ tool: 'click', app: 'Notepad', x: 10, y: 10 })
+    await settle()
+    children[0].ready()
+    // Past the announcement the click may already have been synthesized: the
+    // snapshot that follows it is the fault-prone part, so a missing reply
+    // proves nothing about whether the input landed.
+    children[0].exit(1, 'faulting module gdiplus.dll')
+
+    await expect(promise).rejects.toThrow(/runtime host exited/)
+    expect(children).toHaveLength(1)
+    host.dispose()
+  })
+
+  it('replays a mutation only for a helper that died before announcing readiness', async () => {
+    const { host, children } = createHost()
+
+    const first = host.request({ tool: 'handshake' })
+    await settle()
+    children[0].ready()
+    children[0].respond({ ok: true, capabilities: {} })
+    await first
+
+    const crashed = host.request({ tool: 'click', app: 'Notepad', x: 1, y: 1 })
+    await settle()
+    children[0].exit(1, 'boom')
+    await expect(crashed).rejects.toThrow(/runtime host exited/)
+
+    const retried = host.request({ tool: 'click', app: 'Notepad', x: 1, y: 1 })
+    await settle()
+    // This helper never announced, so it cannot have read the click: replaying
+    // is a fact rather than a guess, and the caller never sees the stumble.
+    children[1].exit(1, 'Add-Type : Cannot access the temporary directory')
+    await settle()
+
+    expect(children).toHaveLength(3)
+    children[2].ready()
+    children[2].respond({ ok: true, action: { path: 'synthetic' } })
+    await expect(retried).resolves.toMatchObject({ ok: true })
+    host.dispose()
+  })
+
+  it('does not treat the readiness announcement as an unmatched reply', async () => {
+    const { host, children } = createHost()
+
+    const promise = host.request({ tool: 'handshake' })
+    await settle()
+    children[0].ready()
+
+    expect(children[0].killed).toBe(false)
+    children[0].respond({ ok: true, capabilities: {} })
+    await expect(promise).resolves.toEqual({ ok: true, capabilities: {} })
+    host.dispose()
+  })
+
+  it('charges one cooldown per outage, not one per later death', async () => {
+    let clock = 1_000
+    const { host, children } = createHost({ cooldownMs: 60_000, now: () => clock })
+
+    const failed = host.request({ tool: 'handshake' })
+    await settle()
+    await failEveryStart(children, 'The term is not recognized')
+    await expect(failed).rejects.toSatisfy(isRuntimeHostUnavailable)
+
+    clock += 61_000
+    const recovered = host.request({ tool: 'handshake' })
+    await settle()
+    children.at(-1)?.respond({ ok: true, capabilities: {} })
+    await recovered
+
+    // One death after recovery must not re-enter a full cooldown; the previous
+    // outage was already paid for.
+    const crashed = host.request({ tool: 'handshake' })
+    await settle()
+    children.at(-1)?.exit(1, 'boom')
+    await expect(crashed).rejects.toBeInstanceOf(Error)
+
+    const next = host.request({ tool: 'handshake' })
+    await settle()
+    children.at(-1)?.respond({ ok: true, capabilities: {} })
+    await expect(next).resolves.toMatchObject({ ok: true })
     host.dispose()
   })
 
