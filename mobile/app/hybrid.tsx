@@ -9,6 +9,10 @@ import {
   type MobileWebResumeRoute
 } from '../../src/shared/mobile-web/bridge-contract'
 import { MobileWebCapabilityBroker } from '../src/mobile-web/mobile-web-capability-broker'
+import {
+  useMobileWebCapabilityBroker,
+  type MobileWebBrokerPageIdentity
+} from '../src/mobile-web/use-mobile-web-capability-broker'
 import { MOBILE_WEB_PRODUCTION_GRANTS } from '../src/mobile-web/mobile-web-production-grants'
 import { MobileWebHealthDeadline } from '../src/mobile-web/mobile-web-health-deadline'
 import { useMobileWebAlertSafePackageSession } from '../src/mobile-web/use-mobile-web-alert-safe-package-session'
@@ -25,6 +29,7 @@ import { mobileWebDiagnosticsStore } from '../src/mobile-web/mobile-web-diagnost
 import { useMobileWebBridgeRuntimeRef } from '../src/mobile-web/use-mobile-web-bridge-runtime-ref'
 import { useMobileWebHardwareBackHandoff } from '../src/mobile-web/use-mobile-web-hardware-back-handoff'
 import { MobileWebNativeRouteHandoff } from '../src/mobile-web/mobile-web-native-route-handoff'
+import { useMobileWebNavigationAuthority } from '../src/mobile-web/use-mobile-web-navigation-authority'
 import { handleMobileWebBrokerMessage } from '../src/mobile-web/mobile-web-broker-message-handoff'
 import {
   useForceReconnect,
@@ -35,7 +40,6 @@ import {
   useLastConnectedAt,
   useReconnectAttempt
 } from '../src/transport/client-context-connection-metrics'
-import { removeHostAndCloseClient } from '../src/transport/host-removal-lifecycle'
 import { leaveHostRoute } from '../src/host-route-exit'
 
 export default function HybridScreen() {
@@ -136,14 +140,18 @@ export default function HybridScreen() {
   }, [params.hostId])
 
   useEffect(() => {
-    initializedSessionRef.current = undefined
     resumeRouteRef.current = { kind: 'workspaceList' }
+  }, [session?.sessionId])
+
+  // A view-epoch bump replaces the document, so every page-scoped grant retires with it.
+  useEffect(() => {
+    initializedSessionRef.current = undefined
     recentWebGestureAtRef.current = null
     nativeRouteHandoffRef.current.clear()
     setPageReadySessionId(undefined)
     healthDeadlineRef.current.clear()
     return () => healthDeadlineRef.current.clear()
-  }, [session?.sessionId])
+  }, [session?.sessionId, viewEpoch])
 
   const postToWeb = useCallback(async (message: MobileWebBridgeShellMessage) => {
     if (responseDropRef.current.shouldDrop(message)) {
@@ -163,94 +171,72 @@ export default function HybridScreen() {
     onUnhandled: handleBack
   })
 
-  useEffect(() => {
-    brokerRef.current?.dispose()
-    brokerRef.current = null
-    setBrokerSessionId(undefined)
-    const current = session
-    if (!current || !selectedHost || sessionHostId !== selectedHostId) {
-      return
-    }
-    const broker = new MobileWebCapabilityBroker({
-      context: { shellSessionId: current.sessionId, buildId: current.buildId },
-      getClient: () =>
-        bridgeRuntimeRef.current.sessionId === current.sessionId
-          ? bridgeRuntimeRef.current.client
-          : null,
-      isConnected: () =>
-        bridgeRuntimeRef.current.sessionId === current.sessionId &&
-        bridgeRuntimeRef.current.state === 'connected',
-      isActive: () => activeSessionIdRef.current === current.sessionId,
-      postMessage: postToWeb,
-      nativeAuthority: createMobileWebNativeCapabilityAuthority({
-        hostIdentity: selectedHost.publicKeyB64,
-        buildIdentity: current.buildId
-      }),
-      navigationAuthority: {
-        route(destination, requestId) {
-          if (destination === 'terminalSettings') {
-            nativeRouteHandoffRef.current.record(requestId, destination)
-            return
-          }
-          coldResumeRoute.clearRoute()
-          if (destination === 'hostPicker') {
-            leaveHostRoute(router)
-          } else {
-            router.push('/pair-scan')
-          }
-        },
-        reconnect() {
-          return forceReconnectHost(selectedHost.id)
-        },
-        removeHost() {
-          return removeHostAndCloseClient(
-            selectedHost.id,
-            selectedHost.publicKeyB64,
-            closeHostClient
-          )
-        },
-        consumeRecentUserGesture() {
-          return consumeRecentUserGesture()
-        }
-      },
-      terminalClientId: selectedHost.deviceToken,
-      onTerminalFlowMetrics: (metrics) =>
-        mobileWebDiagnosticsStore.terminalFlow(selectedHost.id, metrics),
-      onTerminalResync: (reason) =>
-        mobileWebDiagnosticsStore.terminalResync(selectedHost.id, reason),
-      rememberRoute(route) {
-        resumeRouteRef.current = route
-      },
-      rememberHostRoute: coldResumeRoute.rememberHostRoute,
-      randomBytes: ExpoCrypto.getRandomBytes
-    })
-    brokerRef.current = broker
-    setBrokerSessionId(current.sessionId)
-    void postInitRef.current().catch(() => {})
-    return () => {
-      broker.dispose()
-      if (brokerRef.current === broker) {
-        brokerRef.current = null
-      }
-      setBrokerSessionId((value) => (value === current.sessionId ? undefined : value))
-    }
-  }, [
-    closeHostClient,
-    consumeRecentUserGesture,
-    coldResumeRoute.clearRoute,
-    coldResumeRoute.rememberHostRoute,
-    forceReconnectHost,
-    postToWeb,
-    refreshHosts,
+  const navigationAuthority = useMobileWebNavigationAuthority({
+    hostId: selectedHost?.id,
+    hostPublicKeyB64: selectedHost?.publicKeyB64,
+    routeHandoffRef: nativeRouteHandoffRef,
     router,
-    selectedHost?.deviceToken,
-    selectedHost?.id,
-    selectedHost?.publicKeyB64,
-    session?.buildId,
-    session?.sessionId,
-    sessionHostId,
-    selectedHostId
-  ])
+    clearColdResumeRoute: coldResumeRoute.clearRoute,
+    closeHostClient,
+    forceReconnectHost,
+    consumeRecentUserGesture
+  })
+  const createBroker = useCallback(
+    (page: MobileWebBrokerPageIdentity) => {
+      if (!selectedHost || sessionHostId !== selectedHostId) {
+        return null
+      }
+      return new MobileWebCapabilityBroker({
+        context: { shellSessionId: page.sessionId, buildId: page.buildId },
+        getClient: () =>
+          bridgeRuntimeRef.current.sessionId === page.sessionId
+            ? bridgeRuntimeRef.current.client
+            : null,
+        isConnected: () =>
+          bridgeRuntimeRef.current.sessionId === page.sessionId &&
+          bridgeRuntimeRef.current.state === 'connected',
+        isActive: () => activeSessionIdRef.current === page.sessionId,
+        postMessage: postToWeb,
+        nativeAuthority: createMobileWebNativeCapabilityAuthority({
+          hostIdentity: selectedHost.publicKeyB64,
+          buildIdentity: page.buildId
+        }),
+        navigationAuthority,
+        terminalClientId: selectedHost.deviceToken,
+        onTerminalFlowMetrics: (metrics) =>
+          mobileWebDiagnosticsStore.terminalFlow(selectedHost.id, metrics),
+        onTerminalResync: (reason) =>
+          mobileWebDiagnosticsStore.terminalResync(selectedHost.id, reason),
+        rememberRoute(route) {
+          resumeRouteRef.current = route
+        },
+        rememberHostRoute: coldResumeRoute.rememberHostRoute,
+        randomBytes: ExpoCrypto.getRandomBytes
+      })
+    },
+    [
+      coldResumeRoute.rememberHostRoute,
+      navigationAuthority,
+      postToWeb,
+      selectedHost?.deviceToken,
+      selectedHost?.id,
+      selectedHost?.publicKeyB64,
+      sessionHostId,
+      selectedHostId
+    ]
+  )
+  const onBrokerReady = useCallback(() => {
+    void postInitRef.current().catch(() => {})
+  }, [])
+  const { retireBroker } = useMobileWebCapabilityBroker({
+    brokerRef,
+    sessionId: session?.sessionId,
+    buildId: session?.buildId,
+    viewEpoch,
+    createBroker,
+    onBrokerReady,
+    onBrokerSessionChange: setBrokerSessionId
+  })
 
   useEffect(() => {
     brokerRef.current?.replaceClient(client)
@@ -408,6 +394,7 @@ export default function HybridScreen() {
       onProcessTerminated={(sessionId) => {
         hardwareBackHandoff.resetPage()
         healthDeadlineRef.current.clear()
+        retireBroker()
         void handleProcessTerminated(sessionId)
       }}
     />
