@@ -223,6 +223,41 @@ describe.skipIf(process.platform === 'win32')(
       expect(existsSync(join(fixture.repoPath, 'stolen-config'))).toBe(false)
     })
 
+    // Why: realpath ENOENTs on a DANGLING symlink exactly as it does on a path that is simply
+    // absent, but writeFile FOLLOWS the link and creates its target — so the link's own name is the
+    // wrong thing to classify. This one created .git/hooks/post-commit from nothing.
+    it('refuses a write through a dangling symlink into .git', async () => {
+      await symlink(
+        join(fixture.repoPath, '.git', 'hooks', 'post-commit'),
+        join(fixture.repoPath, 'dangling'),
+        'file'
+      )
+
+      const response = await dispatchFileMethod('files.write', {
+        relativePath: 'dangling',
+        content: '#!/bin/sh\nEVIL\n'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(fixture.repoPath, '.git', 'hooks', 'post-commit'))).toBe(false)
+    })
+
+    it('still writes through a dangling symlink that stays in the working tree', async () => {
+      await symlink(
+        join(fixture.repoPath, 'not-yet.txt'),
+        join(fixture.repoPath, 'pending'),
+        'file'
+      )
+
+      const response = await dispatchFileMethod('files.write', {
+        relativePath: 'pending',
+        content: 'ok\n'
+      })
+
+      expect(response.ok).toBe(true)
+      expect(await readFile(join(fixture.repoPath, 'not-yet.txt'), 'utf-8')).toBe('ok\n')
+    })
+
     // Why also the destination: COPYFILE_EXCL happens to block this today, and it is the only thing
     // that does. Classifying it too keeps the guard from depending on that flag staying put.
     it('refuses a leaf symlink into .git as the destination', async () => {

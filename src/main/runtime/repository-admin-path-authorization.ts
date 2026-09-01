@@ -1,5 +1,5 @@
-import { lstat, realpath } from 'node:fs/promises'
-import { posix, win32 } from 'node:path'
+import { lstat, readlink, realpath } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from 'node:path'
 import type { Store } from '../persistence'
 import { isWindowsAbsolutePathLike } from '../../shared/cross-platform-path'
 import { resolveAuthorizedPath, type ResolveAuthorizedPathOptions } from '../ipc/filesystem-auth'
@@ -134,9 +134,9 @@ export async function resolveAuthorizedMutablePath(
  * catches `GIT~1` on a short-name-enabled NTFS volume.
  */
 async function assertMutableUnlessSymlink(path: string): Promise<void> {
-  let isSymbolicLink: boolean
+  let stats: { isSymbolicLink?: () => boolean }
   try {
-    isSymbolicLink = (await lstat(path)).isSymbolicLink()
+    stats = await lstat(path)
   } catch (error) {
     // Nothing on disk yet cannot alias anything; other failures surface on the syscall itself.
     if (isENOENT(error)) {
@@ -144,7 +144,8 @@ async function assertMutableUnlessSymlink(path: string): Promise<void> {
     }
     throw error
   }
-  if (isSymbolicLink) {
+  // Only a confirmed symlink is exempt. Anything we cannot ask takes the stricter branch below.
+  if (typeof stats.isSymbolicLink === 'function' && stats.isSymbolicLink()) {
     return
   }
   assertMutablePath(await canonicalLeaf(path))
@@ -161,7 +162,7 @@ async function assertMutableUnlessSymlink(path: string): Promise<void> {
  * Partial by nature: `nlink` is not dependable on Windows, so this closes the POSIX case only.
  */
 async function assertNotHardLinked(path: string): Promise<void> {
-  let linkCount: number
+  let linkCount: number | undefined
   try {
     linkCount = (await lstat(path)).nlink
   } catch (error) {
@@ -172,7 +173,9 @@ async function assertNotHardLinked(path: string): Promise<void> {
     }
     throw error
   }
-  if (linkCount > 1) {
+  // Fails closed like its neighbour above: a link count we cannot read leaves us unable to rule out
+  // another name reaching these bytes, and an unclassifiable input takes the refusing branch.
+  if (typeof linkCount !== 'number' || linkCount > 1) {
     throw new Error(REPOSITORY_ADMIN_HARD_LINK_DENIED_MESSAGE)
   }
 }
@@ -187,11 +190,27 @@ async function canonicalLeaf(path: string): Promise<string> {
   try {
     return await realpath(path)
   } catch (error) {
-    // A path that does not exist yet has no link to follow; the caller creates a real file there.
-    if (isENOENT(error)) {
-      return path
+    if (!isENOENT(error)) {
+      // Fail closed: the leaf exists but cannot be canonicalized, so what it points at is unknown.
+      throw new Error(REPOSITORY_ADMIN_PATH_DENIED_MESSAGE)
     }
-    // Fail closed: the leaf exists but cannot be canonicalized, so what it points at is unknown.
-    throw new Error(REPOSITORY_ADMIN_PATH_DENIED_MESSAGE)
   }
+  // ENOENT also covers a DANGLING symlink, and `writeFile` follows one to CREATE its target — so
+  // returning the link's own name here would classify the wrong path. Resolve it by hand.
+  return await danglingLinkTarget(path)
+}
+
+async function danglingLinkTarget(path: string): Promise<string> {
+  let linkTarget: string
+  try {
+    linkTarget = await readlink(path)
+  } catch {
+    // Not a symlink, or unreadable: nothing points anywhere, so the path stands for itself.
+    return path
+  }
+  const resolvedTarget = isAbsolute(linkTarget) ? linkTarget : resolve(dirname(path), linkTarget)
+  // The target's own parent may exist even though the target does not; canonicalize what is there.
+  return await realpath(dirname(resolvedTarget))
+    .then((parent) => join(parent, basename(resolvedTarget)))
+    .catch(() => resolvedTarget)
 }
