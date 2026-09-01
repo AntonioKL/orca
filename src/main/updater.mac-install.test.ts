@@ -443,7 +443,11 @@ describe('updater mac install handoff', () => {
         // abort an update that would otherwise succeed.
         await vi.waitFor(() => expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledOnce())
         expect(armMacUpdateInstallAttemptMock).toHaveBeenCalledOnce()
-        expect(clearMacUpdateInstallAttemptMock).not.toHaveBeenCalled()
+        // Why: arming can throw after the record reached disk; the catch must clear the path
+        // unguarded or a live fence would block every relaunch until the age cap.
+        expect(clearMacUpdateInstallAttemptMock).toHaveBeenCalledWith(
+          '/tmp/orca-update-install-attempt.json'
+        )
       } finally {
         if (resourcesPathDescriptor) {
           Object.defineProperty(process, 'resourcesPath', resourcesPathDescriptor)

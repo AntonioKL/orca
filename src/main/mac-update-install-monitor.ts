@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { runProcess, spawnProcess } from '../shared/child-process/run-process'
 import {
+  areMacUpdateVersionsEqual,
   clearMacUpdateInstallAttempt,
   clearMacUpdateInstallHeartbeat,
   failMacUpdateInstallAttemptIfCurrent,
@@ -40,9 +41,14 @@ export function decideMacUpdateMonitorStep(options: {
   nowMs: number
   shipItSeen: boolean
   shipItMissingSinceMs: number | null
+  /** First verified source-dead observation; the appearance window must not start earlier. */
+  sourceDeadSinceMs?: number | null
 }): MacUpdateMonitorDecision {
   const { attempt, observation, nowMs } = options
-  if (observation.bundleVersion === attempt.targetVersion) {
+  if (
+    observation.bundleVersion !== null &&
+    areMacUpdateVersionsEqual(observation.bundleVersion, attempt.targetVersion)
+  ) {
     return { action: 'complete' }
   }
   if (nowMs - attempt.createdAtMs >= MAC_UPDATE_MONITOR_TIMEOUT_MS) {
@@ -62,7 +68,14 @@ export function decideMacUpdateMonitorStep(options: {
     return { action: 'continue', shipItSeen, shipItMissingSinceMs: options.shipItMissingSinceMs }
   }
   if (!shipItSeen) {
-    if (nowMs - attempt.createdAtMs >= MAC_UPDATE_MONITOR_SHIPIT_APPEARANCE_MS) {
+    // Why the max: a wedged teardown can hold the source alive until the 20s exit watchdog,
+    // eating most of the appearance window. Launchd deserves the full window measured from
+    // when the source verifiably died, or a slow quit turns into a relaunch into ShipIt.
+    const appearanceBaselineMs = Math.max(
+      attempt.createdAtMs,
+      options.sourceDeadSinceMs ?? attempt.createdAtMs
+    )
+    if (nowMs - appearanceBaselineMs >= MAC_UPDATE_MONITOR_SHIPIT_APPEARANCE_MS) {
       return { action: 'fail', reason: 'installer-never-started' }
     }
     return { action: 'continue', shipItSeen: false, shipItMissingSinceMs: null }
@@ -90,6 +103,7 @@ export async function runMacUpdateInstallMonitor(options: {
   }
   let shipItSeen = false
   let shipItMissingSinceMs: number | null = null
+  let sourceDeadSinceMs: number | null = null
 
   for (;;) {
     const current = readMacUpdateInstallAttempt(options.attemptPath)
@@ -100,18 +114,46 @@ export async function runMacUpdateInstallMonitor(options: {
     attempt = current
     const nowMs = now()
     const observation = await (options.observe ?? observeInstall)(attempt)
+    if (observation.source === 'dead') {
+      sourceDeadSinceMs ??= nowMs
+    } else if (observation.source === 'alive') {
+      sourceDeadSinceMs = null
+    }
     const decision = decideMacUpdateMonitorStep({
       attempt,
       observation,
       nowMs,
       shipItSeen,
-      shipItMissingSinceMs
+      shipItMissingSinceMs,
+      sourceDeadSinceMs
     })
     if (decision.action === 'complete') {
       clearMacUpdateInstallAttempt(options.attemptPath, attempt.attemptId)
       return 'completed'
     }
     if (decision.action === 'fail') {
+      // Why a confirm probe: the failing observation is up to a poll old, and launching
+      // recovery against a live ShipIt would relaunch the old app into the install window —
+      // the exact race this monitor exists to prevent. A late completion wins outright.
+      const confirm = await (options.observe ?? observeInstall)(attempt)
+      if (
+        confirm.bundleVersion !== null &&
+        areMacUpdateVersionsEqual(confirm.bundleVersion, attempt.targetVersion)
+      ) {
+        clearMacUpdateInstallAttempt(options.attemptPath, attempt.attemptId)
+        return 'completed'
+      }
+      if (decision.reason !== 'install-timed-out' && confirm.shipIt === 'alive') {
+        shipItSeen = true
+        shipItMissingSinceMs = null
+        writeMacUpdateInstallHeartbeat(options.attemptPath, {
+          schemaVersion: MAC_UPDATE_INSTALL_ATTEMPT_SCHEMA_VERSION,
+          attemptId: attempt.attemptId,
+          heartbeatAtMs: nowMs
+        })
+        await wait(MAC_UPDATE_MONITOR_POLL_MS)
+        continue
+      }
       // Why guarded: cleanup may have cleared or replaced the attempt while this step observed;
       // writing an unconditional failure would resurrect a finished attempt and launch a
       // recovery app nobody asked for.

@@ -1,10 +1,13 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  areMacUpdateVersionsEqual,
   armMacUpdateInstallAttempt,
+  decideMacUpdateInstallLaunch,
   getMacUpdateInstallAttemptPath,
+  getMacUpdateInstallHeartbeatPath,
   getMacUpdateProcessIdentityState,
   MAC_UPDATE_INSTALL_ATTEMPT_SCHEMA_VERSION,
   MAC_UPDATE_INSTALL_ATTEMPT_STALE_MS,
@@ -161,6 +164,52 @@ describe('macOS update install startup probes', () => {
       reason: 'install-abandoned',
       failureReason: 'monitor-exited'
     })
+  })
+})
+
+describe('macOS update version equality', () => {
+  it('treats formatting variants of the same version as installed', () => {
+    expect(areMacUpdateVersionsEqual('v1.4.192', '1.4.192')).toBe(true)
+    expect(areMacUpdateVersionsEqual('1.4.192+build.7', '1.4.192')).toBe(true)
+    expect(areMacUpdateVersionsEqual('1.4.192', '1.4.193')).toBe(false)
+    expect(areMacUpdateVersionsEqual('not-a-version', 'also-not')).toBe(false)
+
+    expect(
+      decideMacUpdateInstallLaunch({
+        attempt: createAttempt({ targetVersion: '1.4.192' }),
+        currentBundlePath: BUNDLE_PATH,
+        currentVersion: 'v1.4.192',
+        nowMs: 3_000,
+        monitorAlive: true,
+        shipItAlive: true
+      })
+    ).toEqual({ action: 'allow-and-clear', reason: 'target-installed' })
+  })
+})
+
+describe('macOS update orphan heartbeat', () => {
+  it('reclaims a heartbeat file that has no attempt record', () => {
+    const appDataPath = createTempDir()
+    const attemptPath = getMacUpdateInstallAttemptPath(appDataPath)
+    writeMacUpdateInstallHeartbeat(attemptPath, {
+      schemaVersion: MAC_UPDATE_INSTALL_ATTEMPT_SCHEMA_VERSION,
+      attemptId: 'orphaned-attempt',
+      heartbeatAtMs: 5_000
+    })
+
+    expect(
+      resolveMacUpdateInstallStartup({
+        appDataPath,
+        appVersion: '1.4.191',
+        executablePath: EXECUTABLE_PATH,
+        isPackaged: true,
+        platform: 'darwin',
+        nowMs: 6_000,
+        readProcessStartedAtMs: () => null,
+        readProcessList: () => ''
+      })
+    ).toEqual({ action: 'allow', reason: 'no-attempt' })
+    expect(existsSync(getMacUpdateInstallHeartbeatPath(attemptPath))).toBe(false)
   })
 })
 

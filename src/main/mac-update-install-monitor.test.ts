@@ -105,6 +105,8 @@ describe('macOS update install monitor', () => {
     const observations = [
       { bundleVersion: attempt.sourceVersion, shipIt: 'alive' as const, source: 'dead' as const },
       { bundleVersion: attempt.sourceVersion, shipIt: 'absent' as const, source: 'dead' as const },
+      { bundleVersion: attempt.sourceVersion, shipIt: 'absent' as const, source: 'dead' as const },
+      // Consumed by the pre-recovery confirm probe: still gone, still the old version.
       { bundleVersion: attempt.sourceVersion, shipIt: 'absent' as const, source: 'dead' as const }
     ]
     const times = [2_000, 3_000, 9_000]
@@ -153,7 +155,9 @@ describe('macOS update install monitor', () => {
       sourcePid: process.pid,
       sourceStartedAtMs: 1
     })
-    const times = [31_001, 15 * 60_000 + 1_001]
+    // First verified source-dead observation starts the appearance window; the second
+    // poll lands past that window without reaching the overall timeout.
+    const times = [31_001, 61_002]
     const launchRecovery = vi.fn().mockResolvedValue(true)
 
     await expect(

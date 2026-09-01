@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { isValidAppVersion } from '../shared/app-version'
+import { compareAppVersions, isValidAppVersion } from '../shared/app-version'
 import { spawnProcess } from '../shared/child-process/run-process'
 import { getProcessStartedAtMs } from './daemon/daemon-process-start-time'
 import {
@@ -17,6 +17,7 @@ export {
 } from './mac-update-install-process-probes'
 import {
   clearMacUpdateInstallAttempt,
+  clearMacUpdateInstallHeartbeat,
   getMacUpdateInstallAttemptPath,
   MAC_UPDATE_INSTALL_ATTEMPT_SCHEMA_VERSION,
   readMacUpdateInstallAttempt,
@@ -58,6 +59,19 @@ export type MacUpdateInstallLaunchDecision =
     }
   | { action: 'block'; reason: 'active-install' | 'shipit-alive' }
 
+/**
+ * Canonical version equality: a feed may carry a leading `v` or build metadata while the
+ * bundle plist is bare. A successful install must never read as a failure over formatting.
+ */
+export function areMacUpdateVersionsEqual(left: string, right: string): boolean {
+  if (left === right) {
+    return true
+  }
+  return (
+    isValidAppVersion(left) && isValidAppVersion(right) && compareAppVersions(left, right) === 0
+  )
+}
+
 export function resolveMacUpdateBundlePath(executablePath: string): string {
   const bundlePath = resolve(executablePath, '..', '..', '..')
   if (!bundlePath.toLowerCase().endsWith('.app')) {
@@ -83,7 +97,7 @@ export function decideMacUpdateInstallLaunch(options: {
   if (!macPathsEqual(attempt.targetBundlePath, options.currentBundlePath)) {
     return { action: 'allow', reason: 'different-bundle' }
   }
-  if (options.currentVersion === attempt.targetVersion) {
+  if (areMacUpdateVersionsEqual(options.currentVersion, attempt.targetVersion)) {
     return { action: 'allow-and-clear', reason: 'target-installed' }
   }
   const ageMs = options.nowMs - attempt.createdAtMs
@@ -233,6 +247,8 @@ function resolveMacUpdateInstallStartupUnsafe(options: {
   const attemptPath = getMacUpdateInstallAttemptPath(options.appDataPath)
   const attempt = readMacUpdateInstallAttempt(attemptPath)
   if (!attempt) {
+    // Why: a heartbeat with no attempt record is an orphan from a lost race; reclaim it.
+    clearMacUpdateInstallHeartbeat(attemptPath)
     return { action: 'allow', reason: 'no-attempt' }
   }
   const monitorAlive =

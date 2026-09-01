@@ -121,6 +121,86 @@ describe('macOS update monitor probe safety', () => {
     ).toEqual({ action: 'fail', reason: 'install-timed-out' })
   })
 
+  it('measures the installer-appearance window from first verified source death', () => {
+    const attempt = createAttempt()
+    const wedgedQuitReleaseMs = attempt.createdAtMs + 25_000
+    // 29s after arm but only 4s after the source verifiably died: not a failure yet.
+    expect(
+      decideMacUpdateMonitorStep({
+        attempt,
+        observation: { bundleVersion: attempt.sourceVersion, shipIt: 'absent', source: 'dead' },
+        nowMs: attempt.createdAtMs + 29_000,
+        shipItSeen: false,
+        shipItMissingSinceMs: null,
+        sourceDeadSinceMs: wedgedQuitReleaseMs
+      }).action
+    ).toBe('continue')
+    // The full window after source death has elapsed: now it is a failure.
+    expect(
+      decideMacUpdateMonitorStep({
+        attempt,
+        observation: { bundleVersion: attempt.sourceVersion, shipIt: 'absent', source: 'dead' },
+        nowMs: wedgedQuitReleaseMs + MAC_UPDATE_MONITOR_SHIPIT_APPEARANCE_MS,
+        shipItSeen: false,
+        shipItMissingSinceMs: null,
+        sourceDeadSinceMs: wedgedQuitReleaseMs
+      })
+    ).toEqual({ action: 'fail', reason: 'installer-never-started' })
+  })
+
+  it('cancels a failure when the confirm probe finds ShipIt alive again', async () => {
+    const { attempt, path } = createAttemptFile()
+    const launchRecovery = vi.fn().mockResolvedValue(true)
+    let calls = 0
+
+    await expect(
+      runMacUpdateInstallMonitor({
+        attemptPath: path,
+        attemptId: attempt.attemptId,
+        now: () => attempt.createdAtMs + MAC_UPDATE_MONITOR_SHIPIT_APPEARANCE_MS + 1,
+        wait: async () => {},
+        observe: async () => {
+          calls += 1
+          // 1: verified absent, source dead -> fail decision. 2: confirm probe sees ShipIt
+          // alive -> failure cancelled. 3: install completes.
+          if (calls === 1) {
+            return { bundleVersion: attempt.sourceVersion, shipIt: 'absent', source: 'dead' }
+          }
+          if (calls === 2) {
+            return { bundleVersion: attempt.sourceVersion, shipIt: 'alive', source: 'dead' }
+          }
+          return { bundleVersion: attempt.targetVersion, shipIt: 'absent', source: 'dead' }
+        },
+        launchRecovery
+      })
+    ).resolves.toBe('completed')
+    expect(launchRecovery).not.toHaveBeenCalled()
+    expect(readMacUpdateInstallAttempt(path)).toBeNull()
+  })
+
+  it('completes instead of failing when the confirm probe sees the target version', async () => {
+    const { attempt, path } = createAttemptFile()
+    const launchRecovery = vi.fn().mockResolvedValue(true)
+    let calls = 0
+
+    await expect(
+      runMacUpdateInstallMonitor({
+        attemptPath: path,
+        attemptId: attempt.attemptId,
+        now: () => attempt.createdAtMs + MAC_UPDATE_MONITOR_TIMEOUT_MS,
+        wait: async () => {},
+        observe: async () => {
+          calls += 1
+          return calls === 1
+            ? { bundleVersion: attempt.sourceVersion, shipIt: 'absent', source: 'dead' }
+            : { bundleVersion: attempt.targetVersion, shipIt: 'absent', source: 'dead' }
+        },
+        launchRecovery
+      })
+    ).resolves.toBe('completed')
+    expect(launchRecovery).not.toHaveBeenCalled()
+  })
+
   it('does not resurrect an attempt cleared mid-observation via the heartbeat write', async () => {
     const { attempt, path } = createAttemptFile()
     let observations = 0

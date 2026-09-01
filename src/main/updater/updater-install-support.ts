@@ -104,6 +104,15 @@ export abstract class UpdaterInstallSupport extends UpdaterCheckState {
         { message: error instanceof Error ? error.message : String(error) },
         { level: 'warn', message: 'Proceeding with the macOS install without the relaunch fence' }
       )
+      // Why unconditional: arming can throw after the record reached disk (e.g. a directory
+      // fsync failure), leaving a live fence nothing in this process would ever clear — which
+      // would silently block every relaunch until the age cap. Clearing also cancels the
+      // just-spawned monitor within one poll.
+      try {
+        clearMacUpdateInstallAttempt(getMacUpdateInstallAttemptPath(app.getPath('appData')))
+      } catch {
+        // The stale attempt self-expires via the age cap; never let cleanup mask the install.
+      }
       return null
     }
   }
