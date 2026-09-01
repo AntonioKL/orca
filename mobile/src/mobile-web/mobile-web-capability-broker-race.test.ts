@@ -1,17 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-  type MobileWebBridgePageMessage,
-  type MobileWebBridgeShellMessage
-} from '../../../src/shared/mobile-web/bridge-contract'
+import type { MobileWebBridgePageMessage } from '../../../src/shared/mobile-web/bridge-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
+import {
+  createMobileWebBrokerFixture,
+  mobileWebBridgeCancelMessage,
+  mobileWebBridgeRequestMessage
+} from './mobile-web-bridge-roundtrip-fixture'
 import type { MobileWebNativeCapabilityAuthority } from './mobile-web-native-capability-authority'
-
-const CONTEXT = {
-  shellSessionId: 'S'.repeat(43),
-  buildId: 'a'.repeat(64)
-}
 const WORKSPACE_ID = `workspace_0_${'01'.repeat(16)}`
 
 describe('mobile web capability broker races', () => {
@@ -126,7 +121,6 @@ describe('mobile web capability broker races', () => {
 })
 
 async function createPrimedHarness(alert?: MobileWebNativeCapabilityAuthority['alert']) {
-  const messages: MobileWebBridgeShellMessage[] = []
   const sendRequest = vi.fn<RpcClient['sendRequest']>()
   const subscribe = vi.fn<RpcClient['subscribe']>()
   const client = {
@@ -134,22 +128,9 @@ async function createPrimedHarness(alert?: MobileWebNativeCapabilityAuthority['a
     subscribe,
     sendTerminalBinaryFrame: vi.fn(() => true)
   } as unknown as RpcClient
-  const broker = new MobileWebCapabilityBroker({
-    context: CONTEXT,
+  const { broker, messages } = createMobileWebBrokerFixture({
     getClient: () => client,
-    isConnected: () => true,
-    isActive: () => true,
-    postMessage: (message) => messages.push(message),
-    nativeAuthority: {
-      alert,
-      hapticFeedback: vi.fn(),
-      clipboardWrite: vi.fn(),
-      openExternal: vi.fn(),
-      terminalPreferences: vi.fn(),
-      terminalTextScaleUpdate: vi.fn()
-    },
-    terminalClientId: 'device-token',
-    randomBytes: (length) => new Uint8Array(length).fill(1)
+    nativeAuthority: { alert }
   })
   sendRequest.mockResolvedValueOnce({
     ok: true,
@@ -160,10 +141,7 @@ async function createPrimedHarness(alert?: MobileWebNativeCapabilityAuthority['a
 }
 
 function nativeAlertRequest(id = 'A'): Extract<MobileWebBridgePageMessage, { type: 'request' }> {
-  return {
-    ...envelope(),
-    type: 'request',
-    mode: 'once',
+  return mobileWebBridgeRequestMessage({
     requestId: id.repeat(22),
     capability: 'native',
     operation: 'alert',
@@ -175,35 +153,24 @@ function nativeAlertRequest(id = 'A'): Extract<MobileWebBridgePageMessage, { typ
         { text: 'Discard', style: 'destructive' }
       ]
     }
-  }
+  })
 }
 
 function requestCancel(id: string): Extract<MobileWebBridgePageMessage, { type: 'cancel' }> {
-  return {
-    ...envelope(),
-    type: 'cancel',
-    target: 'request',
-    id: id.repeat(22)
-  }
+  return mobileWebBridgeCancelMessage({ target: 'request', id: id.repeat(22) })
 }
 
 function workspaceSnapshotRequest(): Extract<MobileWebBridgePageMessage, { type: 'request' }> {
-  return {
-    ...envelope(),
-    type: 'request',
-    mode: 'once',
+  return mobileWebBridgeRequestMessage({
     requestId: 'P'.repeat(22),
     capability: 'workspace',
     operation: 'snapshot',
     payload: { limit: 1 }
-  }
+  })
 }
 
 function terminalSubscriptionRequest(): Extract<MobileWebBridgePageMessage, { type: 'request' }> {
-  return {
-    ...envelope(),
-    type: 'request',
-    mode: 'subscription',
+  return mobileWebBridgeRequestMessage({
     requestId: 'T'.repeat(22),
     subscriptionId: 'Z'.repeat(22),
     capability: 'terminal',
@@ -215,24 +182,11 @@ function terminalSubscriptionRequest(): Extract<MobileWebBridgePageMessage, { ty
       viewport: { cols: 80, rows: 24 },
       visible: true
     }
-  }
+  })
 }
 
 function subscriptionCancel(): Extract<MobileWebBridgePageMessage, { type: 'cancel' }> {
-  return {
-    ...envelope(),
-    type: 'cancel',
-    target: 'subscription',
-    id: 'Z'.repeat(22)
-  }
-}
-
-function envelope() {
-  return {
-    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-    shellSessionId: CONTEXT.shellSessionId,
-    buildId: CONTEXT.buildId
-  } as const
+  return mobileWebBridgeCancelMessage({ target: 'subscription', id: 'Z'.repeat(22) })
 }
 
 function deferredHostResult() {

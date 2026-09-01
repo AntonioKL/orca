@@ -1,5 +1,6 @@
 import { onTestFinished } from 'vitest'
 import {
+  MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
   parseMobileWebBridgePageMessage,
   parseMobileWebBridgeShellMessage,
   type MobileWebBridgeMessageContext,
@@ -9,6 +10,7 @@ import {
 import { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
 import type { RpcClient } from '../transport/rpc-client'
 import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
+import type { MobileWebCapabilityBrokerOptions } from './mobile-web-capability-broker-options'
 import type { MobileWebNativeCapabilityAuthority } from './mobile-web-native-capability-authority'
 import type { MobileWebNavigationAuthority } from './mobile-web-navigation-operations'
 
@@ -80,6 +82,89 @@ function defaultNativeAuthority(): MobileWebNativeCapabilityAuthority {
     alert: async () => ({ kind: 'dismissed' }),
     hapticFeedback: () => {},
     clipboardAvailability: async () => ({ hasText: false, hasImage: false }),
+    clipboardWrite: async () => ({ confirmation: 'in-app' }),
+    openExternal: async () => {},
+    terminalPreferences: async () => ({
+      textScale: 1,
+      autocompleteEnabled: true,
+      linkOpenMode: 'phone-browser'
+    }),
+    terminalTextScaleUpdate: async () => {}
+  }
+}
+
+type PageRequestMessage = Extract<MobileWebBridgePageMessage, { type: 'request' }>
+type PageCancelMessage = Extract<MobileWebBridgePageMessage, { type: 'cancel' }>
+
+// Broker-only harness: page messages go in as-is, shell messages land unparsed in `messages`.
+export function createMobileWebBrokerFixture(
+  overrides: Partial<Omit<MobileWebCapabilityBrokerOptions, 'nativeAuthority'>> & {
+    nativeAuthority?: Partial<MobileWebNativeCapabilityAuthority>
+  } = {}
+): { broker: MobileWebCapabilityBroker; messages: MobileWebBridgeShellMessage[] } {
+  const messages: MobileWebBridgeShellMessage[] = []
+  const { nativeAuthority, ...rest } = overrides
+  const broker = new MobileWebCapabilityBroker({
+    context: MOBILE_WEB_BRIDGE_ROUNDTRIP_CONTEXT,
+    getClient: () => null,
+    isConnected: () => true,
+    isActive: () => true,
+    postMessage: (message) => {
+      messages.push(message)
+    },
+    nativeAuthority: {
+      ...stubbedNativeAuthority(),
+      ...nativeAuthority
+    } as MobileWebNativeCapabilityAuthority,
+    terminalClientId: 'device-token',
+    randomBytes: (length) => new Uint8Array(length).fill(1),
+    ...rest
+  })
+  return { broker, messages }
+}
+
+export function mobileWebBridgeRequestMessage(options: {
+  requestId: string
+  capability: string
+  operation: string
+  payload: unknown
+  subscriptionId?: string
+  context?: MobileWebBridgeMessageContext
+}): PageRequestMessage {
+  const context = options.context ?? MOBILE_WEB_BRIDGE_ROUNDTRIP_CONTEXT
+  return {
+    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+    type: 'request',
+    ...context,
+    requestId: options.requestId,
+    ...(options.subscriptionId === undefined
+      ? { mode: 'once' }
+      : { mode: 'subscription', subscriptionId: options.subscriptionId }),
+    capability: options.capability,
+    operation: options.operation,
+    payload: options.payload
+  } as PageRequestMessage
+}
+
+export function mobileWebBridgeCancelMessage(options: {
+  target: 'request' | 'subscription'
+  id: string
+  context?: MobileWebBridgeMessageContext
+}): PageCancelMessage {
+  const context = options.context ?? MOBILE_WEB_BRIDGE_ROUNDTRIP_CONTEXT
+  return {
+    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+    type: 'cancel',
+    ...context,
+    target: options.target,
+    id: options.id
+  }
+}
+
+// Only the members every broker-only suite stubs; each suite opts into the rest it exercises.
+function stubbedNativeAuthority(): Partial<MobileWebNativeCapabilityAuthority> {
+  return {
+    hapticFeedback: () => {},
     clipboardWrite: async () => ({ confirmation: 'in-app' }),
     openExternal: async () => {},
     terminalPreferences: async () => ({

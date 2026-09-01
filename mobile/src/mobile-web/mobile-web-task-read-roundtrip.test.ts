@@ -11,16 +11,11 @@ import {
   taskRoundtripHostResponse
 } from './mobile-web-task-roundtrip-host-fixtures'
 
-const CONTEXT = {
-  shellSessionId: 'S'.repeat(43),
-  buildId: 'a'.repeat(64)
-}
 it('round trips bounded task bootstrap reads through opaque repository authority', async () => {
   const sendRequest = vi.fn(async (method: string) => taskRoundtripHostResponse(method))
   const rpcClient = { sendRequest } as unknown as RpcClient
   let requestIndex = 0
   const { broker, client } = createMobileWebBridgeRoundtripFixture({
-    context: CONTEXT,
     grants: [
       taskGrant('bootstrap'),
       taskGrant('repositories'),

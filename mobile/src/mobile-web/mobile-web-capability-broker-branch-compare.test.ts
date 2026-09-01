@@ -1,13 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-  type MobileWebBridgePageMessage,
-  type MobileWebBridgeShellMessage
-} from '../../../src/shared/mobile-web/bridge-contract'
+import type { MobileWebBridgePageMessage } from '../../../src/shared/mobile-web/bridge-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
+import {
+  createMobileWebBrokerFixture,
+  mobileWebBridgeRequestMessage
+} from './mobile-web-bridge-roundtrip-fixture'
 
-const CONTEXT = { shellSessionId: 'S'.repeat(43), buildId: 'a'.repeat(64) }
 const WORKSPACE_ID = `workspace_0_${'01'.repeat(16)}`
 
 describe('mobile web branch-compare rate accounting', () => {
@@ -38,7 +36,6 @@ describe('mobile web branch-compare rate accounting', () => {
 })
 
 function createHarness() {
-  const messages: MobileWebBridgeShellMessage[] = []
   const sendRequest = vi.fn<RpcClient['sendRequest']>(async (method) => {
     if (method === 'worktree.ps') {
       return {
@@ -52,21 +49,8 @@ function createHarness() {
     return { ok: false, error: { code: 'method_not_found', message: 'unsupported' } }
   })
   const client = { sendRequest, subscribe: vi.fn() } as unknown as RpcClient
-  const broker = new MobileWebCapabilityBroker({
-    context: CONTEXT,
+  const { broker, messages } = createMobileWebBrokerFixture({
     getClient: () => client,
-    isConnected: () => true,
-    isActive: () => true,
-    postMessage: (message) => messages.push(message),
-    nativeAuthority: {
-      hapticFeedback: vi.fn(),
-      clipboardWrite: vi.fn(),
-      openExternal: vi.fn(),
-      terminalPreferences: vi.fn(),
-      terminalTextScaleUpdate: vi.fn()
-    },
-    terminalClientId: 'device-token',
-    randomBytes: (length) => new Uint8Array(length).fill(1),
     now: () => 1_000
   })
   return { broker, messages, sendRequest }
@@ -89,16 +73,7 @@ function request(
   operation: string,
   payload: unknown
 ): Extract<MobileWebBridgePageMessage, { type: 'request' }> {
-  return {
-    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-    type: 'request',
-    mode: 'once',
-    ...CONTEXT,
-    requestId,
-    capability,
-    operation,
-    payload
-  }
+  return mobileWebBridgeRequestMessage({ requestId, capability, operation, payload })
 }
 
 function firstPayload() {

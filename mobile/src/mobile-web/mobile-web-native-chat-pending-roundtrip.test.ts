@@ -1,17 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  parseMobileWebBridgePageMessage,
-  parseMobileWebBridgeShellMessage
-} from '../../../src/shared/mobile-web/bridge-contract'
-import { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
+import { createMobileWebBridgeRoundtripFixture } from './mobile-web-bridge-roundtrip-fixture'
 import { MOBILE_WEB_PRODUCTION_GRANTS } from './mobile-web-production-grants'
-
-const CONTEXT = {
-  shellSessionId: 'S'.repeat(43),
-  buildId: 'a'.repeat(64)
-}
 
 describe('mobile web native chat pending delivery round trip', () => {
   it('resolves page handles before shell persistence and returns only bounded records', async () => {
@@ -28,44 +18,16 @@ describe('mobile web native chat pending delivery round trip', () => {
       .mockResolvedValue([{ text: 'restored pending', expectedOccurrence: 1 }])
     const sessionChatPendingWrite = vi.fn().mockResolvedValue(undefined)
     const rpcClient = { sendRequest } as unknown as RpcClient
-    let broker: MobileWebCapabilityBroker
     let requestIndex = 0
-    const client = new MobileWebBridgeClient({
-      context: CONTEXT,
+    const { client } = createMobileWebBridgeRoundtripFixture({
       grants: [...MOBILE_WEB_PRODUCTION_GRANTS],
+      rpcClient,
       createRequestId: () => `${String.fromCharCode(65 + requestIndex++)}`.repeat(22),
-      postMessage(message) {
-        const parsed = parseMobileWebBridgePageMessage(JSON.stringify(message), CONTEXT)
-        if (!parsed.ok) {
-          return false
-        }
-        void broker.handle(parsed.value)
-        return true
-      }
-    })
-    broker = new MobileWebCapabilityBroker({
-      context: CONTEXT,
-      getClient: () => rpcClient,
-      isConnected: () => true,
-      isActive: () => true,
-      postMessage(message) {
-        const parsed = parseMobileWebBridgeShellMessage(JSON.stringify(message), CONTEXT)
-        if (!parsed.ok) {
-          throw new Error(parsed.error)
-        }
-        client.receive(parsed.value)
-      },
       nativeAuthority: {
-        hapticFeedback: vi.fn(),
-        clipboardWrite: vi.fn(),
-        openExternal: vi.fn(),
-        terminalPreferences: vi.fn(),
-        terminalTextScaleUpdate: vi.fn(),
         sessionChatPendingRead,
         sessionChatPendingWrite
       },
-      terminalClientId: 'device',
-      randomBytes: (length) => new Uint8Array(length).fill(1)
+      terminalClientId: 'device'
     })
 
     const workspace = (await client.workspaceSnapshot({ limit: 1 })).workspaces[0]!
