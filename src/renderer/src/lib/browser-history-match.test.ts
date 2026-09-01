@@ -56,6 +56,12 @@ describe('browser history match', () => {
     ])
   })
 
+  it('keeps fully-qualified URL prefixes in the top tier', () => {
+    expect(match([entry({ url: 'https://github.com/acme' })], 'https://github.com')).toEqual([
+      { tier: 'host-prefix', url: 'https://github.com/acme' }
+    ])
+  })
+
   it('leaves a subdomain match in host-substring rather than host-prefix', () => {
     expect(match([entry({ url: 'https://docs.github.com/actions' })], 'git')).toEqual([
       { tier: 'host-substring', url: 'https://docs.github.com/actions' }
@@ -129,6 +135,13 @@ describe('browser history match', () => {
     expect(missA).toBe(missB)
     expect(matchBrowserHistory({ prepared, query: '   ', limit: 3, now: NOW })).toBe(missA)
     expect(matchBrowserHistory({ prepared, query: 'git', limit: 0, now: NOW })).toBe(missA)
+  })
+
+  it('reuses preparation for the same immutable history snapshot', () => {
+    const first = prepareBrowserHistoryEntries(GIT_CORPUS)
+
+    expect(prepareBrowserHistoryEntries(GIT_CORPUS)).toBe(first)
+    expect(prepareBrowserHistoryEntries([...GIT_CORPUS])).not.toBe(first)
   })
 
   it('survives an unparseable url by falling back to url and title matching', () => {

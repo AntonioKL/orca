@@ -85,9 +85,14 @@ export function useOmniboxBrowserHistory({
   query: string
   tabResults: readonly OpenTabSearchResult[]
 }): readonly BrowserHistoryOmniboxRow[] {
-  // Why null while disabled: the tab bar is mounted for every workspace, and
-  // this array is replaced on every committed navigation in any browser tab.
-  const history = useAppStore((store) => (enabled ? store.browserUrlHistory : null))
+  // Why read once: the tab bar is mounted for every workspace, and this array
+  // is replaced on every committed navigation in any browser tab. History is
+  // intentionally a per-open snapshot so background navigations cannot churn
+  // the omnibox or reshuffle a selection under the user's fingers.
+  const history = useMemo(
+    () => (enabled ? useAppStore.getState().browserUrlHistory : null),
+    [enabled]
+  )
   const prepared = useMemo(
     () => (history ? prepareBrowserHistoryEntries(history) : null),
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- Snapshot per menu open; a background navigation must not reshuffle rows mid-keystroke.

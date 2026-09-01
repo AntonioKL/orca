@@ -41,7 +41,7 @@ vi.mock('@/store', () => ({
         browserDefaultSearchEngine: 'google',
         getKnownWorktreeById: () => ({ path: '/tmp/wt' })
       }),
-    { getState: () => ({}) }
+    { getState: () => ({ browserUrlHistory: historyStoreMock.entries }) }
   )
 }))
 vi.mock('react', async () => {

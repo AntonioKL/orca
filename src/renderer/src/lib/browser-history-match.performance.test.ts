@@ -26,7 +26,8 @@ const WORST_QUERY = 'observability rollout'
 
 function percentile95(samples: number[]): number {
   const sorted = [...samples].sort((a, b) => a - b)
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))]
+  // Nearest-rank p95: ceil(n*0.95)-1, so 20 samples pick index 18 rather than the max.
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)]
 }
 
 describe('browser history match performance budget', () => {
@@ -41,7 +42,9 @@ describe('browser history match performance budget', () => {
     const samples: number[] = []
     for (let run = 0; run < 20; run += 1) {
       const start = performance.now()
-      prepareBrowserHistoryEntries(entries)
+      // Use a fresh array identity so this measures preparation rather than
+      // the identity cache used by live address bars and omniboxes.
+      prepareBrowserHistoryEntries(entries.slice())
       samples.push(performance.now() - start)
     }
     expect(percentile95(samples)).toBeLessThan(prepareP95Ms)

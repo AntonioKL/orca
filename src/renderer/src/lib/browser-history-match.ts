@@ -34,6 +34,10 @@ export type BrowserHistoryMatch = {
 }
 
 const NO_MATCHES: readonly BrowserHistoryMatch[] = []
+const preparedHistoryCache = new WeakMap<
+  readonly BrowserHistoryEntry[],
+  readonly PreparedBrowserHistoryEntry[]
+>()
 
 function historyHost(url: string): string {
   try {
@@ -53,13 +57,19 @@ export function formatBrowserHistoryUrl(url: string): string {
 export function prepareBrowserHistoryEntries(
   entries: readonly BrowserHistoryEntry[]
 ): readonly PreparedBrowserHistoryEntry[] {
-  return entries.map((entry) => ({
+  const cached = preparedHistoryCache.get(entries)
+  if (cached) {
+    return cached
+  }
+  const prepared = entries.map((entry) => ({
     entry,
     lowerUrl: entry.url.toLowerCase(),
     lowerTitle: entry.title.toLowerCase(),
     lowerHost: historyHost(entry.url),
     frecencyBase: Math.min(entry.visitCount, MAX_VISIT_COUNT_BONUS)
   }))
+  preparedHistoryCache.set(entries, prepared)
+  return prepared
 }
 
 function matchTier(
@@ -69,7 +79,9 @@ function matchTier(
   // A workspace-doc entry's url is a filesystem path, so it has no host: a path
   // prefix is as deliberate as a host prefix and earns the same top tier.
   const prefixTarget = prepared.lowerHost === '' ? prepared.lowerUrl : prepared.lowerHost
-  if (prefixTarget.startsWith(lowerQuery)) {
+  // Preserve the address-bar's long-standing behavior for fully-qualified
+  // input (e.g. `https://github.com`), while still ranking bare hosts by host.
+  if (prefixTarget.startsWith(lowerQuery) || prepared.lowerUrl.startsWith(lowerQuery)) {
     return 'host-prefix'
   }
   if (prepared.lowerHost.includes(lowerQuery)) {
