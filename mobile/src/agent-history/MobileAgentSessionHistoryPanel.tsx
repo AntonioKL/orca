@@ -10,7 +10,6 @@ import type { RpcClient } from '../transport/rpc-client'
 import { readMobileRuntimeHostPlatform } from '../transport/mobile-runtime-host-platform'
 import { getWorktreeLabel } from '../session/worktree-label'
 import {
-  activateStructuredAiVaultSession,
   buildMobileAiVaultResumeLaunch,
   createMobileAiVaultResumeMutationRegistry,
   readMobileRuntimeTerminalWindowsShell,
@@ -38,7 +37,6 @@ import {
 import { buildMobileAgentHistoryResumeActionState } from './agent-history-session-card'
 import { styles } from './agent-history-styles'
 import { useNow } from '../hooks/use-now'
-import { useOpenMobileSession } from '../session/use-open-mobile-session'
 
 export type MobileAgentSessionHistoryPanelProps = {
   hostId: string
@@ -58,7 +56,6 @@ export function MobileAgentSessionHistoryPanel({
   name = ''
 }: MobileAgentSessionHistoryPanelProps) {
   const router = useRouter()
-  const openMobileSession = useOpenMobileSession()
   const { client, state: connState } = useHostClient(hostId)
   const [worktrees, setWorktrees] = useState<Worktree[]>([])
   const [worktreesLoaded, setWorktreesLoaded] = useState(false)
@@ -159,15 +156,16 @@ export function MobileAgentSessionHistoryPanel({
         triggerError()
         return
       }
+      if (!session.sessionId) {
+        setResumeMessage('This session is missing a resume id.')
+        triggerError()
+        return
+      }
+
       resumeLaunchInFlightRef.current = true
       setResumingSessionId(session.id)
       setResumeMessage(null)
       try {
-        const structuredWorkspaceId = await activateStructuredAiVaultSession(client, session)
-        if (structuredWorkspaceId) {
-          openMobileSession({ hostId, worktreeId: structuredWorkspaceId })
-          return
-        }
         const {
           repos,
           folderWorkspaces,
@@ -218,7 +216,11 @@ export function MobileAgentSessionHistoryPanel({
         resumeMutationRegistryRef.current.releaseOnSuccess(session.id)
         triggerSuccess()
         setResumeMessage('Agent session queued.')
-        openMobileSession({ hostId, worktreeId: target.worktreeId })
+        router.push(
+          `/h/${encodeURIComponent(hostId)}/session/${encodeURIComponent(target.worktreeId)}` as Parameters<
+            typeof router.push
+          >[0]
+        )
       } catch (err) {
         triggerError()
         setResumeMessage(err instanceof Error ? err.message : 'Failed to resume session.')
@@ -233,7 +235,7 @@ export function MobileAgentSessionHistoryPanel({
       hostId,
       hostPlatform,
       hostTerminalWindowsShell,
-      openMobileSession,
+      router,
       worktreeId,
       worktrees
     ]

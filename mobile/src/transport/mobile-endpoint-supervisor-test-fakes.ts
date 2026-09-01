@@ -40,11 +40,6 @@ export class FakeSession implements RpcClient {
 }
 
 export class FakeRelaySession extends FakeSession implements MobileRelayRpcSession {
-  private structuredReconnectSignal = {
-    backgroundRestart: false,
-    streamLongevityConfirmed: false
-  }
-
   constructor(
     state: ConnectionState,
     private readonly failure: Error | null = null,
@@ -66,14 +61,6 @@ export class FakeRelaySession extends FakeSession implements MobileRelayRpcSessi
     resumeExpiresAt: this.resumeExpiry
   })
   getFailure = () => this.failure
-  consumeStructuredReconnectSignal = () => {
-    const signal = this.structuredReconnectSignal
-    this.structuredReconnectSignal = {
-      backgroundRestart: false,
-      streamLongevityConfirmed: false
-    }
-    return signal
-  }
 }
 
 export class FakeLogicalClient extends FakeSession implements StableLogicalRpcClient {

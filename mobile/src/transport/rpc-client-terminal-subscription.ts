@@ -34,12 +34,11 @@ export function updateTerminalSubscriptionViewport(
 }
 
 /** Build the unsubscribe RPC for a streaming method that needs the host told to
- *  tear down (tabs, native chat, structured sessions), or null when none is required. Keeps
+ *  tear down (session tabs, native chat), or null when none is required. Keeps
  *  the per-method echo logic out of the rpc-client teardown closure. */
 export function buildStreamUnsubscribe(
   method: string | undefined,
-  params: unknown,
-  requestId?: string
+  params: unknown
 ): { method: string; params: Record<string, unknown> } | null {
   if (!params || typeof params !== 'object') {
     return null
@@ -60,15 +59,6 @@ export function buildStreamUnsubscribe(
     const sessionId = (params as { sessionId?: unknown }).sessionId
     return typeof agent === 'string' && typeof sessionId === 'string'
       ? buildNativeChatUnsubscribe(agent, sessionId)
-      : null
-  }
-  if (method === 'agentSession.subscribe') {
-    const sessionId = (params as { sessionId?: unknown }).sessionId
-    return typeof sessionId === 'string'
-      ? {
-          method: 'agentSession.unsubscribe',
-          params: { sessionId, ...(requestId ? { subscriptionId: requestId } : {}) }
-        }
       : null
   }
   return null

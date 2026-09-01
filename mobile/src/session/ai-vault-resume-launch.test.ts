@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AiVaultSession } from '../../../src/shared/ai-vault-types'
 import { buildAgentResumeStartupPlan } from '../../../src/shared/tui-agent-startup'
 import {
-  activateStructuredAiVaultSession,
   buildMobileAiVaultResumeLaunch,
   buildMobileAiVaultResumeCommand,
   createMobileAiVaultResumeMutationRegistry,
@@ -12,34 +11,6 @@ import {
 } from './ai-vault-resume-launch'
 import { readMobileRuntimeHostPlatform } from '../transport/mobile-runtime-host-platform'
 import { RESUME_RPC_TIMEOUT_MS } from './ai-vault-resume-preparation'
-
-describe('activateStructuredAiVaultSession', () => {
-  it('activates the native structured tab instead of creating a legacy terminal', async () => {
-    const sendRequest = vi.fn().mockResolvedValue({ ok: true, result: {} })
-
-    await expect(
-      activateStructuredAiVaultSession(
-        { sendRequest },
-        {
-          structuredSession: {
-            sessionId: 'native-session-1',
-            workspaceId: 'worktree-1'
-          }
-        }
-      )
-    ).resolves.toBe('worktree-1')
-    expect(sendRequest).toHaveBeenCalledOnce()
-    expect(sendRequest).toHaveBeenCalledWith(
-      'session.tabs.activate',
-      {
-        worktree: 'id:worktree-1',
-        tabId: 'agent-session:native-session-1',
-        navigation: 'caller'
-      },
-      { timeoutMs: RESUME_RPC_TIMEOUT_MS }
-    )
-  })
-})
 
 function session(overrides: Partial<AiVaultSession> = {}): AiVaultSession {
   return {

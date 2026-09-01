@@ -2936,9 +2936,6 @@ export default function SessionScreen() {
         void readFileTab(tab)
         return
       }
-      if (tab.type === 'agent-session') {
-        return
-      }
       const cached = markdownDocs.get(tab.id)
       if (cached?.status === 'ready' && cached.isDirty) {
         return
@@ -3137,8 +3134,6 @@ export default function SessionScreen() {
       setMarkdownActionTarget(tab)
     } else if (tab.type === 'file') {
       setFileActionTarget(tab)
-    } else if (tab.type === 'agent-session') {
-      return
     } else {
       setBrowserActionTarget(tab)
     }
@@ -4615,7 +4610,7 @@ export default function SessionScreen() {
             ) : showEmptyState ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyText}>No tabs in this session</Text>
-                {createError ? <Text style={styles.markdownError}>{createError}</Text> : null}
+                {createError ? <Text style={styles.createError}>{createError}</Text> : null}
                 <View style={styles.emptyActions}>
                   <Pressable
                     style={[

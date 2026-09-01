@@ -21,6 +21,18 @@ import { proveClaudeTuiResume } from './claude-tui-resume-proof'
 const command = resolveClaudeCommand()
 const claudeAvailable =
   spawnSync(command, ['--version'], { stdio: 'ignore', timeout: 5_000 }).status === 0
+const authStatusLaunch = getSpawnArgsForWindows(command, ['auth', 'status', '--json'])
+const claudeAuthenticated = (() => {
+  if (!claudeAvailable) {
+    return false
+  }
+  const result = spawnSync(authStatusLaunch.spawnCmd, authStatusLaunch.spawnArgs, {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 5_000
+  })
+  return result.status === 0 && /"loggedIn"\s*:\s*true/.test(result.stdout)
+})()
 const roots: string[] = []
 const transcripts: string[] = []
 
@@ -156,7 +168,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
-describe.skipIf(!claudeAvailable)('real Claude TUI resume proof', () => {
+describe.skipIf(!claudeAuthenticated)('real Claude TUI resume proof', () => {
   it('resumes a product-created structured session and proves its exact child', async () => {
     const root = await mkdtemp(join(tmpdir(), 'orca-claude-tui-resume-'))
     roots.push(root)

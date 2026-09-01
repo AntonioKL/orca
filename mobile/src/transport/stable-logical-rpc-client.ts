@@ -170,10 +170,6 @@ export function createStableLogicalRpcClient(
         activeSession.notifyForeground(reason)
       }
     },
-    restartAfterStructuredBackground: () =>
-      suspended ? undefined : activeSession.restartAfterStructuredBackground?.(),
-    confirmStructuredStreamLongevity: () =>
-      suspended ? undefined : activeSession.confirmStructuredStreamLongevity?.(),
     close() {
       if (closed) {
         return

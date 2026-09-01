@@ -21,6 +21,18 @@ const realClaudeAvailable =
     windowsHide: true,
     timeout: 5_000
   }).status === 0
+const authStatusLaunch = getSpawnArgsForWindows(command, ['auth', 'status', '--json'])
+const realClaudeAuthenticated = (() => {
+  if (!realClaudeAvailable) {
+    return false
+  }
+  const result = spawnSync(authStatusLaunch.spawnCmd, authStatusLaunch.spawnArgs, {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 5_000
+  })
+  return result.status === 0 && /"loggedIn"\s*:\s*true/.test(result.stdout)
+})()
 
 function realAdapter(
   providerSessionId: string,
@@ -60,32 +72,36 @@ function identity(providerSessionId: string): AgentSessionJournalIdentity {
 }
 
 describe.skipIf(!realClaudeAvailable)('Claude structured real CLI handshake', () => {
-  it('proves a pre-minted session before the first user message', async () => {
-    const providerSessionId = randomUUID()
-    const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
-    const events: ClaudeStructuredSessionEvent[] = []
-    const adapter = realAdapter(providerSessionId, claudeConfigDir, events)
+  it.skipIf(!realClaudeAuthenticated)(
+    'proves a pre-minted session before the first user message',
+    async () => {
+      const providerSessionId = randomUUID()
+      const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
+      const events: ClaudeStructuredSessionEvent[] = []
+      const adapter = realAdapter(providerSessionId, claudeConfigDir, events)
 
-    try {
-      const acquisition = await adapter.acquire({
-        identity: identity(providerSessionId),
-        fence: 1,
-        spawnToken: 'real-cli'
-      })
-      const observedSubtypes = events.flatMap((event) =>
-        event.type === 'message' ? [event.message.subtype] : []
-      )
+      try {
+        const acquisition = await adapter.acquire({
+          identity: identity(providerSessionId),
+          fence: 1,
+          spawnToken: 'real-cli'
+        })
+        const observedSubtypes = events.flatMap((event) =>
+          event.type === 'message' ? [event.message.subtype] : []
+        )
 
-      expect(acquisition.link.handle).toMatchObject({
-        provider: 'claude',
-        sessionId: providerSessionId,
-        leafUuid: expect.any(String)
-      })
-      expect(observedSubtypes).toContain('hook_started')
-    } finally {
-      await adapter.closeAll()
-    }
-  }, 10_000)
+        expect(acquisition.link.handle).toMatchObject({
+          provider: 'claude',
+          sessionId: providerSessionId,
+          leafUuid: expect.any(String)
+        })
+        expect(observedSubtypes).toContain('hook_started')
+      } finally {
+        await adapter.closeAll()
+      }
+    },
+    10_000
+  )
 
   it('turns a real silent unauthenticated startup into sign-in guidance', async () => {
     const claudeConfigDir = await mkdtemp(join(tmpdir(), 'orca-claude-no-auth-'))

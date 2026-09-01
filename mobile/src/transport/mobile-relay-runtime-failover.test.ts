@@ -72,11 +72,6 @@ class FakeSession implements RpcClient {
 }
 
 class FakeRelaySession extends FakeSession implements MobileRelayRpcSession {
-  private structuredReconnectSignal = {
-    backgroundRestart: false,
-    streamLongevityConfirmed: false
-  }
-
   constructor(
     state: ConnectionState,
     private readonly failure: Error | null = null
@@ -89,14 +84,6 @@ class FakeRelaySession extends FakeSession implements MobileRelayRpcSession {
   getResumeExpiresAt = () => Date.now() + 30 * 24 * 3_600_000
   getResumeConfirmation = () => null
   getFailure = () => this.failure
-  consumeStructuredReconnectSignal = () => {
-    const signal = this.structuredReconnectSignal
-    this.structuredReconnectSignal = {
-      backgroundRestart: false,
-      streamLongevityConfirmed: false
-    }
-    return signal
-  }
 }
 
 class FakeLogicalClient extends FakeSession implements StableLogicalRpcClient {

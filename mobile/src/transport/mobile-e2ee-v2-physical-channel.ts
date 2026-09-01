@@ -3,7 +3,6 @@ import {
   type WsOutboundBackpressureQueue
 } from '../../../src/shared/ws-outbound-backpressure-queue'
 import type { MobileE2EEV2ClientSession } from './mobile-e2ee-v2-client-session'
-import { MOBILE_STRUCTURED_RUNTIME_CAPABILITIES } from './mobile-structured-runtime-capabilities'
 
 type ChannelState = 'awaiting-ready' | 'awaiting-authenticated' | 'ready'
 type OutboundItem = { kind: 'text'; plaintext: string } | { kind: 'binary'; plaintext: Uint8Array }
@@ -112,14 +111,6 @@ export class MobileE2EEV2PhysicalChannel {
         throw new Error('Invalid E2EE v2 authenticated response')
       }
       this.state = 'ready'
-      this.enqueueReady({
-        kind: 'text',
-        plaintext: JSON.stringify({
-          type: 'e2ee_client_capabilities',
-          v: 1,
-          clientCapabilities: MOBILE_STRUCTURED_RUNTIME_CAPABILITIES
-        })
-      })
       this.args.onAuthenticated()
     } else if (typeof plaintext === 'string') {
       this.args.onText(plaintext)

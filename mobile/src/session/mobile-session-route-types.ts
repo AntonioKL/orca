@@ -6,11 +6,10 @@ import type { MobileTerminalTheme } from '../terminal/terminal-webview-contract'
 import type { MobileDiffLine } from './mobile-diff-lines'
 import type { MobileHighlightedDiffLine, MobileSyntaxSegment } from './mobile-file-syntax'
 import type { TerminalRecord } from './mobile-terminal-records'
-import type { MobileStructuredAgent } from './mobile-structured-session-create'
 
 export type Terminal = TerminalRecord
 
-export type MobileSessionTabType = 'terminal' | 'markdown' | 'file' | 'browser' | 'agent-session'
+export type MobileSessionTabType = 'terminal' | 'markdown' | 'file' | 'browser'
 
 export type MobileSessionTab =
   | {
@@ -40,14 +39,6 @@ export type MobileSessionTab =
       isDirty: boolean
       isActive: boolean
       documentVersion: string
-    }
-  | {
-      type: 'agent-session'
-      id: string
-      title: string
-      sessionId: string
-      agent: MobileStructuredAgent
-      isActive: boolean
     }
   | {
       type: 'file'

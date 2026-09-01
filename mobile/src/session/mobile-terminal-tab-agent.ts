@@ -31,9 +31,6 @@ export function resolveMobileTerminalTabAgentId(tab: {
 }
 
 export function getMobileSessionTabTitle(tab: MobileSessionTab): string {
-  if (tab.type === 'agent-session') {
-    return tab.title || `${tab.agent === 'claude' ? 'Claude' : 'Codex'} Chat`
-  }
   if (tab.type === 'browser') {
     const title = tab.title.trim()
     if (title && !isBlankBrowserUrl(title)) {

@@ -1,6 +1,5 @@
 import type { MobileTerminalTheme } from '../terminal/terminal-webview-contract'
 import type { AgentStatusEntry } from '../../../src/shared/agent-status-types'
-import type { MobileStructuredAgent } from './mobile-structured-session-create'
 
 export type TerminalRecord = {
   handle: string
@@ -49,14 +48,6 @@ type MobileSessionTabLike =
       relativePath?: string
       language?: string
       isDirty?: boolean
-      isActive?: boolean
-    }
-  | {
-      type: 'agent-session'
-      id: string
-      title?: string
-      sessionId: string
-      agent: MobileStructuredAgent
       isActive?: boolean
     }
   | {
@@ -133,8 +124,6 @@ function mobileSessionTabEqual(
         a.canGoBack === b.canGoBack &&
         a.canGoForward === b.canGoForward
       )
-    case 'agent-session':
-      return b.type === 'agent-session' && a.sessionId === b.sessionId && a.agent === b.agent
   }
 }
 

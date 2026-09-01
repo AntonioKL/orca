@@ -1,44 +1,17 @@
-import { AgentSessionAcquisitionExitUnprovenError } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type {
   AgentSessionAcquisition,
   StructuredAgentSessionAcquireInput,
   StructuredAgentSessionAdapter
 } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
-import {
-  openClaudeStreamJsonConnection,
-  type ClaudeControlRequest,
-  type ClaudeControlResponder
-} from './claude-stream-json-connection'
 import { answerClaudePrompt, cancelClaudeTurn } from './claude-structured-control-actions'
-import { dispatchClaudeTurn, resolveClaudeReplayWaiter } from './claude-structured-dispatch'
-import {
-  handleClaudeInboundControl,
-  handleClaudeInboundControlCancel
-} from './claude-structured-inbound-control'
-import {
-  claudeAuthDiagnostic,
-  readClaudeFrameString,
-  readClaudeInit,
-  readClaudeModels
-} from './claude-structured-init-proof'
-import {
-  createClaudeInitDeadline,
-  requestClaudeInitialization
-} from './claude-structured-init-deadline'
+import { dispatchClaudeTurn } from './claude-structured-dispatch'
+import { acquireClaudeSession } from './claude-structured-session-acquisition'
+export { CLAUDE_STRUCTURED_INIT_TIMEOUT_MS } from './claude-structured-session-acquisition'
 import { supportsClaudeStructuredLocation } from './claude-structured-location-support'
-import { CLAUDE_SPAWN_TOKEN_ENV, claudeProcessIdentity } from './claude-structured-owner-identity'
-import {
-  restoreClaudeStructuredSessionOptions,
-  restoredClaudeStructuredSessionOptions,
-  setClaudeStructuredOption
-} from './claude-structured-options'
-import { ClaudePromptRegistry } from './claude-structured-prompt-replies'
+import { setClaudeStructuredOption } from './claude-structured-options'
 import { readClaudeStructuredSessionOptions } from './claude-structured-session-options'
-import { createClaudeSessionPublication } from './claude-structured-session-publication'
-import { createClaudeSessionJournalTranslator } from './claude-structured-journal-translation'
 import {
-  cancelClaudeAcquisitionAttempt,
   ClaudeAcquisitionRegistry,
   type ClaudeAcquisitionAttempt,
   type ClaudeSession,
@@ -47,7 +20,6 @@ import {
 } from './claude-structured-session-state'
 import {
   closeAllClaudeSessions,
-  closeClaudePublishedSessionForDeps,
   closeClaudeSession,
   settleClaudeExitedSession
 } from './claude-structured-session-close'
@@ -59,7 +31,6 @@ export type {
   ClaudeStructuredSessionEvent
 } from './claude-structured-session-state'
 
-export const CLAUDE_STRUCTURED_INIT_TIMEOUT_MS = 10_000
 const DISPATCH_ACK_TIMEOUT_MS = 10_000
 
 export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAdapter {
@@ -70,175 +41,18 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
 
   supportsLocation = supportsClaudeStructuredLocation
 
-  async acquire(input: StructuredAgentSessionAcquireInput): Promise<AgentSessionAcquisition> {
-    const sessionId = input.identity.sessionId
-    const prompts = new ClaudePromptRegistry()
-    const translator = createClaudeSessionJournalTranslator(
-      input.events,
-      prompts,
-      String(input.fence)
-    )
-    const { previous, attempt } = this.acquisitions.start(sessionId, prompts)
-    let liveSession: ClaudeSession | null = null
-    let observedLeafUuid: string | null = null
-    const initTimeoutMs = this.deps.initTimeoutMs ?? CLAUDE_STRUCTURED_INIT_TIMEOUT_MS
-    const initDeadline = createClaudeInitDeadline(sessionId, initTimeoutMs)
-
-    const onMessage = (message: Record<string, unknown>): void => {
-      const init = readClaudeInit(message)
-      if (init) {
-        initDeadline.resolve(init)
+  acquire = (input: StructuredAgentSessionAcquireInput): Promise<AgentSessionAcquisition> =>
+    acquireClaudeSession({
+      input,
+      deps: this.deps,
+      sessions: this.sessions,
+      acquisitions: this.acquisitions,
+      callbacks: {
+        deliver: (attempt, sessionId, event) => this.deliver(attempt, sessionId, event),
+        emit: (session, events, event) => this.emit(session, events, event),
+        handleExit: (sessionId, attempt, error) => this.handleExit(sessionId, attempt, error)
       }
-      observedLeafUuid = readClaudeFrameString(message, 'uuid') ?? observedLeafUuid
-      if (liveSession) {
-        liveSession.leafUuid = observedLeafUuid
-        resolveClaudeReplayWaiter(liveSession, message)
-      }
-      this.deliver(attempt, sessionId, () =>
-        this.emit(liveSession, input.events, { type: 'message', sessionId, message })
-      )
-    }
-    const onControlRequest = (
-      request: ClaudeControlRequest,
-      responder?: ClaudeControlResponder
-    ): void => {
-      handleClaudeInboundControl({
-        sessionId,
-        attempt,
-        request,
-        responder,
-        emit: (event) =>
-          this.deliver(attempt, sessionId, () => this.emit(liveSession, input.events, event))
-      })
-    }
-
-    try {
-      if (previous && !(await cancelClaudeAcquisitionAttempt(previous))) {
-        this.acquisitions.restoreIfCurrent(sessionId, attempt, previous)
-        throw new AgentSessionAcquisitionExitUnprovenError(
-          new Error(`claude acquisition for session ${sessionId} could not be stopped`)
-        )
-      }
-      this.acquisitions.assertCurrent(sessionId, attempt)
-      if (!(await closeClaudePublishedSessionForDeps(this.sessions, sessionId, this.deps))) {
-        throw new AgentSessionAcquisitionExitUnprovenError(
-          new Error(`claude session ${sessionId} could not be stopped`)
-        )
-      }
-      this.acquisitions.assertCurrent(sessionId, attempt)
-      const launch = await this.deps.resolveLaunch({ identity: input.identity })
-      observedLeafUuid = launch.resumeLeafUuid
-      this.acquisitions.assertCurrent(sessionId, attempt)
-      const open = this.deps.openConnection ?? openClaudeStreamJsonConnection
-      const connection = await open(
-        {
-          command: launch.command,
-          args: launch.args,
-          cwd: launch.cwd,
-          env: {
-            ...launch.env,
-            [CLAUDE_SPAWN_TOKEN_ENV]: input.spawnToken,
-            CLAUDE_CONFIG_DIR: launch.claudeConfigDir
-          }
-        },
-        {
-          onMessage,
-          onControlRequest,
-          onControlCancelRequest: ({ request_id: requestId }) => {
-            handleClaudeInboundControlCancel({
-              sessionId,
-              attempt,
-              requestId,
-              emit: (event) =>
-                this.deliver(attempt, sessionId, () => this.emit(liveSession, input.events, event))
-            })
-          },
-          onExit: (error) => {
-            if (!attempt.published) {
-              initDeadline.reject(error)
-            }
-            this.handleExit(sessionId, attempt, error)
-          }
-        }
-      )
-      attempt.connection = connection
-      this.acquisitions.assertCurrent(sessionId, attempt)
-      initDeadline.start()
-      const [initialization, init] = await Promise.all([
-        requestClaudeInitialization(connection, sessionId, initTimeoutMs),
-        initDeadline.promise
-      ])
-      const models = readClaudeModels(initialization)
-      this.deliver(attempt, sessionId, () =>
-        this.emit(liveSession, input.events, { type: 'options', sessionId, models })
-      )
-      initDeadline.clear()
-      this.acquisitions.assertCurrent(sessionId, attempt)
-      if (init.providerSessionId !== launch.providerSessionId) {
-        throw new Error(
-          `claude proved session ${init.providerSessionId}, expected ${launch.providerSessionId}`
-        )
-      }
-      const settings = await connection
-        .request('get_settings', {}, { timeoutMs: this.deps.requestTimeoutMs })
-        .catch(() => null)
-      this.deliver(attempt, sessionId, () =>
-        this.emit(liveSession, input.events, {
-          type: 'auth-diagnostic',
-          sessionId,
-          diagnostic: claudeAuthDiagnostic(init, settings)
-        })
-      )
-      observedLeafUuid = init.uuid ?? observedLeafUuid
-      const process = await claudeProcessIdentity(
-        { ...input, pid: connection.pid },
-        this.deps.readProcessStartTime
-      )
-      this.acquisitions.assertCurrent(sessionId, attempt)
-      if (connection.closed) {
-        throw new Error(`claude stream-json for session ${sessionId} exited while being acquired`)
-      }
-      const publication = createClaudeSessionPublication({
-        connection,
-        init,
-        leafUuid: observedLeafUuid,
-        fence: input.fence,
-        resumed: launch.resumed,
-        prompts,
-        translator,
-        events: input.events,
-        process,
-        options: restoredClaudeStructuredSessionOptions(input.options),
-        ...(this.deps.mintLinkId ? { linkId: this.deps.mintLinkId() } : {}),
-        observedAt: this.deps.now?.() ?? Date.now()
-      })
-      const acquired: AgentSessionAcquisition = publication.acquisition
-      liveSession = publication.session
-      await restoreClaudeStructuredSessionOptions(liveSession, this.deps.requestTimeoutMs)
-      this.acquisitions.assertCurrent(sessionId, attempt)
-      this.acquisitions.deleteIfCurrent(sessionId, attempt)
-      this.sessions.set(sessionId, liveSession)
-      attempt.published = true
-      for (const event of attempt.buffered.splice(0)) {
-        event()
-      }
-      return acquired
-    } catch (error) {
-      initDeadline.clear()
-      if (this.sessions.get(sessionId)?.connection !== attempt.connection) {
-        translator?.dispose()
-        prompts.clear()
-        const closed = (await attempt.connection?.close()) ?? true
-        if (!closed) {
-          throw new AgentSessionAcquisitionExitUnprovenError(error)
-        }
-      }
-      this.acquisitions.deleteIfCurrent(sessionId, attempt)
-      throw error
-    } finally {
-      attempt.finish()
-    }
-  }
+    })
 
   private deliver(attempt: ClaudeAcquisitionAttempt, sessionId: string, event: () => void): void {
     if (!attempt.published) {
