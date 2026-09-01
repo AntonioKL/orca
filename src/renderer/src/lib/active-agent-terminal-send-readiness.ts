@@ -1,6 +1,8 @@
 import type { RuntimeTerminalAgentStatus } from '../../../shared/runtime-types'
+import type { ActiveAgentNotesSendFailureCode } from './active-agent-note-send-result'
 import { callRuntimeRpc, RuntimeRpcCallError } from '@/runtime/runtime-rpc-client'
 import type { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
+import { runtimeFailureCode } from './active-agent-note-send-diagnostics'
 
 export const ACTIVE_AGENT_SEND_RPC_TIMEOUT_MS = 15000
 
@@ -14,6 +16,7 @@ export type TerminalAgentSendReadiness =
 export type TerminalAgentSendReadinessResult = {
   status: TerminalAgentSendReadiness
   supportsGuardedSend: boolean
+  code?: ActiveAgentNotesSendFailureCode
 }
 
 export async function getTerminalAgentSendReadiness(
@@ -44,13 +47,14 @@ export async function getTerminalAgentSendReadiness(
       }
       // Why: active-focused sends still wait for tui-idle, preserving old
       // runtime compatibility without immediate selected-target risk.
-      return {
-        status: await getLegacyTerminalAgentSendStatus(runtimeTarget, terminalHandle),
-        supportsGuardedSend: false
-      }
+      return await getLegacyTerminalAgentSendStatus(runtimeTarget, terminalHandle)
     }
     if (isRuntimeTerminalUnavailable(error)) {
-      return { status: 'no-active-terminal', supportsGuardedSend: false }
+      return {
+        status: 'no-active-terminal',
+        supportsGuardedSend: false,
+        code: runtimeTerminalUnavailableCode(error)
+      }
     }
     throw error
   }
@@ -59,7 +63,7 @@ export async function getTerminalAgentSendReadiness(
 async function getLegacyTerminalAgentSendStatus(
   runtimeTarget: ReturnType<typeof getActiveRuntimeTarget>,
   terminalHandle: string
-): Promise<TerminalAgentSendReadiness> {
+): Promise<TerminalAgentSendReadinessResult> {
   try {
     const { isRunningAgent } = await callRuntimeRpc<{ isRunningAgent: boolean }>(
       runtimeTarget,
@@ -67,13 +71,24 @@ async function getLegacyTerminalAgentSendStatus(
       { terminal: terminalHandle },
       { timeoutMs: ACTIVE_AGENT_SEND_RPC_TIMEOUT_MS }
     )
-    return isRunningAgent ? 'sendable' : 'no-agent'
+    return {
+      status: isRunningAgent ? 'sendable' : 'no-agent',
+      supportsGuardedSend: false
+    }
   } catch (error) {
     if (isRuntimeTerminalUnavailable(error)) {
-      return 'no-active-terminal'
+      return {
+        status: 'no-active-terminal',
+        supportsGuardedSend: false,
+        code: runtimeTerminalUnavailableCode(error)
+      }
     }
     throw error
   }
+}
+
+function runtimeTerminalUnavailableCode(error: unknown): ActiveAgentNotesSendFailureCode {
+  return runtimeFailureCode(error) ?? 'runtime-unverifiable'
 }
 
 export function isRuntimeTimeout(error: unknown): boolean {

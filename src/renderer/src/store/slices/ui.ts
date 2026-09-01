@@ -1183,9 +1183,11 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       worktreeId: mode.worktreeId,
       prompt: mode.prompt,
       noteTarget: { tabId: target.tabId, leafId: target.leafId }
-    }).catch((error) => {
-      console.error('Failed to send notes to sidebar agent target:', error)
-      return { status: 'no-active-terminal' as const }
+    }).catch(() => {
+      console.error('Failed to send notes to sidebar agent target:', {
+        code: 'runtime-unverifiable'
+      })
+      return { status: 'status-unavailable' as const, code: 'runtime-unverifiable' as const }
     })
 
     const stillCurrent = (): boolean => {
@@ -1198,7 +1200,10 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     }
 
     if (result.status !== 'sent') {
-      const message = activeAgentNotesSendFailureMessage(result.status, { explicitTarget: true })
+      const message = activeAgentNotesSendFailureMessage(result.status, {
+        explicitTarget: true,
+        code: result.code
+      })
       set((s) =>
         s.agentSendPopoverTargetMode?.id === mode.id &&
         s.agentSendPopoverTargetMode.instanceId === mode.instanceId
