@@ -52,7 +52,11 @@ import {
 import { wslAwareSpawn } from '../git/runner'
 import { parseWslPath, toWindowsWslPath } from '../wsl'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
-import { resolveAuthorizedMutablePath } from './repository-admin-path-authorization'
+import {
+  assertMutableHostPath,
+  assertMutableRuntimeRelativePath,
+  resolveAuthorizedMutablePath
+} from './repository-admin-path-authorization'
 import { isENOENT } from '../ipc/filesystem-path-containment'
 import { listQuickOpenFiles } from '../ipc/filesystem-list-files'
 import { searchQuickOpenFilePaths as searchHostQuickOpenFilePaths } from '../ipc/filesystem-search-file-paths'
@@ -1325,6 +1329,9 @@ export class RuntimeFileCommands {
     if (grant.readOnly) {
       throw new Error('terminal_file_grant_read_only')
     }
+    // Why: grants name absolute artifact paths under the temp roots, and a repository checked out
+    // there carries its own `.git` inside one — this write follows the grant, not a worktree path.
+    assertMutableHostPath(grant.absolutePath)
     if (isMobileBinaryPath(grant.absolutePath)) {
       throw new Error('binary_file')
     }
@@ -1789,7 +1796,7 @@ export class RuntimeFileCommands {
     expectedSshTargetId?: string,
     expectedExecutionHostId?: string
   ): Promise<{ ok: true }> {
-    const target = await this.resolveFileExplorerPath(worktreeSelector, relativePath)
+    const target = await this.resolveFileExplorerMutationPath(worktreeSelector, relativePath)
     assertRuntimeFileMutationExpectation(
       target.connectionId,
       expectedExecutionHostId,
@@ -1805,7 +1812,10 @@ export class RuntimeFileCommands {
       return { ok: true }
     }
 
-    const filePath = await resolveAuthorizedMutablePath(target.path, this.host.requireStore())
+    // Why followsLink: writeFile truncates the inode the name points at, hard links included.
+    const filePath = await resolveAuthorizedMutablePath(target.path, this.host.requireStore(), {
+      followsLink: true
+    })
     try {
       const fileStats = await lstat(filePath)
       if (fileStats.isDirectory()) {
@@ -1828,7 +1838,7 @@ export class RuntimeFileCommands {
     expectedSshTargetId?: string,
     expectedExecutionHostId?: string
   ): Promise<{ ok: true }> {
-    const target = await this.resolveFileExplorerPath(worktreeSelector, relativePath)
+    const target = await this.resolveFileExplorerMutationPath(worktreeSelector, relativePath)
     assertRuntimeFileMutationExpectation(
       target.connectionId,
       expectedExecutionHostId,
@@ -1860,7 +1870,7 @@ export class RuntimeFileCommands {
     expectedSshTargetId?: string,
     expectedExecutionHostId?: string
   ): Promise<{ ok: true }> {
-    const target = await this.resolveFileExplorerPath(worktreeSelector, relativePath)
+    const target = await this.resolveFileExplorerMutationPath(worktreeSelector, relativePath)
     assertRuntimeFileMutationExpectation(
       target.connectionId,
       expectedExecutionHostId,
@@ -1877,7 +1887,9 @@ export class RuntimeFileCommands {
       return { ok: true }
     }
 
-    const filePath = await resolveAuthorizedMutablePath(target.path, this.host.requireStore())
+    const filePath = await resolveAuthorizedMutablePath(target.path, this.host.requireStore(), {
+      followsLink: append
+    })
     await mkdir(dirname(filePath), { recursive: true })
     await writeFile(filePath, content, { flag: append ? 'a' : 'wx' })
     return { ok: true }
@@ -1890,7 +1902,7 @@ export class RuntimeFileCommands {
     expectedSshTargetId?: string,
     expectedExecutionHostId?: string
   ): Promise<{ ok: true }> {
-    const target = await this.resolveFileExplorerPath(worktreeSelector, relativePath)
+    const target = await this.resolveFileExplorerMutationPath(worktreeSelector, relativePath)
     assertRuntimeFileMutationExpectation(
       target.connectionId,
       expectedExecutionHostId,
@@ -1923,7 +1935,7 @@ export class RuntimeFileCommands {
     expectedSshTargetId?: string,
     expectedExecutionHostId?: string
   ): Promise<{ ok: true }> {
-    const target = await this.resolveFileExplorerPath(worktreeSelector, relativePath)
+    const target = await this.resolveFileExplorerMutationPath(worktreeSelector, relativePath)
     assertRuntimeFileMutationExpectation(
       target.connectionId,
       expectedExecutionHostId,
@@ -1952,7 +1964,7 @@ export class RuntimeFileCommands {
     expectedSshTargetId?: string,
     expectedExecutionHostId?: string
   ): Promise<{ ok: true }> {
-    const target = await this.resolveFileExplorerPath(worktreeSelector, relativePath)
+    const target = await this.resolveFileExplorerMutationPath(worktreeSelector, relativePath)
     assertRuntimeFileMutationExpectation(
       target.connectionId,
       expectedExecutionHostId,
@@ -1981,10 +1993,10 @@ export class RuntimeFileCommands {
     expectedSshTargetId?: string,
     expectedExecutionHostId?: string
   ): Promise<{ ok: true }> {
-    const [tempTarget, finalTarget] = await this.resolveFileExplorerPaths(worktreeSelector, [
-      tempRelativePath,
-      finalRelativePath
-    ])
+    const [tempTarget, finalTarget] = await this.resolveFileExplorerMutationPaths(
+      worktreeSelector,
+      [tempRelativePath, finalRelativePath]
+    )
     assertRuntimeFileMutationExpectation(
       tempTarget.connectionId,
       expectedExecutionHostId,
@@ -2004,7 +2016,11 @@ export class RuntimeFileCommands {
     }
 
     const store = this.host.requireStore()
-    const tempPath = await resolveAuthorizedMutablePath(tempTarget.path, store)
+    // Why followsLink on temp only: copyFile reads through it, while COPYFILE_EXCL means the
+    // destination must not exist, so there is no inode there to alias.
+    const tempPath = await resolveAuthorizedMutablePath(tempTarget.path, store, {
+      followsLink: true
+    })
     const finalPath = await resolveAuthorizedMutablePath(finalTarget.path, store)
     await mkdir(dirname(finalPath), { recursive: true })
     await copyFile(tempPath, finalPath, constants.COPYFILE_EXCL)
@@ -2020,7 +2036,7 @@ export class RuntimeFileCommands {
     expectedSshTargetId?: string,
     expectedExecutionHostId?: string
   ): Promise<{ ok: true }> {
-    const [oldTarget, newTarget] = await this.resolveFileExplorerPaths(worktreeSelector, [
+    const [oldTarget, newTarget] = await this.resolveFileExplorerMutationPaths(worktreeSelector, [
       oldRelativePath,
       newRelativePath
     ])
@@ -2060,7 +2076,7 @@ export class RuntimeFileCommands {
     expectedSshTargetId?: string,
     expectedExecutionHostId?: string
   ): Promise<{ ok: true }> {
-    const [sourceTarget, destinationTarget] = await this.resolveFileExplorerPaths(
+    const [sourceTarget, destinationTarget] = await this.resolveFileExplorerMutationPaths(
       worktreeSelector,
       [sourceRelativePath, destinationRelativePath]
     )
@@ -2086,11 +2102,11 @@ export class RuntimeFileCommands {
     // target is the object it touches — unlike rename/delete, which act on the entry itself.
     const sourcePath = await resolveAuthorizedMutablePath(sourceTarget.path, store, {
       preserveSymlink: true,
-      followsLeafSymlink: true
+      followsLink: true
     })
     const destinationPath = await resolveAuthorizedMutablePath(destinationTarget.path, store, {
       preserveSymlink: true,
-      followsLeafSymlink: true
+      followsLink: true
     })
     await mkdir(dirname(destinationPath), { recursive: true })
     // Why: COPYFILE_EXCL preserves the no-clobber invariant of the local shell copy IPC (caller already deconflicts names).
@@ -2106,7 +2122,7 @@ export class RuntimeFileCommands {
     expectedSshTargetId?: string,
     expectedExecutionHostId?: string
   ): Promise<{ ok: true }> {
-    const target = await this.resolveFileExplorerPath(worktreeSelector, relativePath)
+    const target = await this.resolveFileExplorerMutationPath(worktreeSelector, relativePath)
     assertRuntimeFileMutationExpectation(
       target.connectionId,
       expectedExecutionHostId,
@@ -2372,6 +2388,26 @@ export class RuntimeFileCommands {
   ): Promise<{ worktree: ResolvedRuntimeFileWorktree; path: string; connectionId?: string }> {
     const [target] = await this.resolveFileExplorerPaths(worktreeSelector, [relativePath])
     return target
+  }
+
+  private async resolveFileExplorerMutationPath(
+    worktreeSelector: string,
+    relativePath: string
+  ): Promise<{ worktree: ResolvedRuntimeFileWorktree; path: string; connectionId?: string }> {
+    const [target] = await this.resolveFileExplorerMutationPaths(worktreeSelector, [relativePath])
+    return target
+  }
+
+  // Separate from the read funnel so refusing `.git` never blocks listing or previewing it.
+  private async resolveFileExplorerMutationPaths(
+    worktreeSelector: string,
+    relativePaths: readonly string[]
+  ): Promise<{ worktree: ResolvedRuntimeFileWorktree; path: string; connectionId?: string }[]> {
+    const targets = await this.resolveFileExplorerPaths(worktreeSelector, relativePaths)
+    targets.forEach((target, index) => {
+      assertMutableRuntimeRelativePath(relativePaths[index], target.worktree.path)
+    })
+    return targets
   }
 
   private async resolveFileExplorerPaths(

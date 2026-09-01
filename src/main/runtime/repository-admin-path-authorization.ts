@@ -1,18 +1,48 @@
-import { realpath } from 'node:fs/promises'
+import { lstat, realpath } from 'node:fs/promises'
 import type { Store } from '../persistence'
+import { isWindowsAbsolutePathLike } from '../../shared/cross-platform-path'
 import { resolveAuthorizedPath, type ResolveAuthorizedPathOptions } from '../ipc/filesystem-auth'
 import { isENOENT } from '../ipc/filesystem-path-containment'
 import {
   isRepositoryAdminPath,
-  REPOSITORY_ADMIN_PATH_DENIED_MESSAGE
+  REPOSITORY_ADMIN_PATH_DENIED_MESSAGE,
+  type RepositoryAdminPathFlavour
 } from '../../shared/repository-admin-path'
+
+/** The executing host's flavour, read off a path it owns rather than assumed from this process. */
+export function repositoryPathFlavourForHost(hostPath: string): RepositoryAdminPathFlavour {
+  return isWindowsAbsolutePathLike(hostPath) ? 'win32' : 'posix'
+}
+
+/** Refuses a host-absolute mutation target, taking the flavour from the path itself. */
+export function assertMutableHostPath(hostPath: string): void {
+  if (isRepositoryAdminPath(hostPath, repositoryPathFlavourForHost(hostPath))) {
+    throw new Error(REPOSITORY_ADMIN_PATH_DENIED_MESSAGE)
+  }
+}
+
+/**
+ * Refuses a worktree-relative mutation target before the local/SSH split.
+ *
+ * This is the SSH lane's only cover: that branch returns before any path is resolved, so the
+ * relative spelling is all there is to classify there.
+ */
+export function assertMutableRuntimeRelativePath(relativePath: string, worktreePath: string): void {
+  if (isRepositoryAdminPath(relativePath, repositoryPathFlavourForHost(worktreePath))) {
+    throw new Error(REPOSITORY_ADMIN_PATH_DENIED_MESSAGE)
+  }
+}
+
+export const REPOSITORY_ADMIN_HARD_LINK_DENIED_MESSAGE =
+  'Access denied: this file has more than one name on disk, so writing through it could modify Git repository metadata.'
 
 export type ResolveAuthorizedMutablePathOptions = ResolveAuthorizedPathOptions & {
   /**
-   * The syscall reads or writes *through* a leaf symlink (copy does; rename and delete act on the
-   * directory entry instead). Set it so the link's target is classified as well.
+   * The syscall acts on the OBJECT a name points at rather than on the directory entry — copy reads
+   * and writes through it, `writeFile` truncates through it. Rename and delete act on the entry, so
+   * they leave this off. Set it to classify the link target and refuse multi-named inodes.
    */
-  followsLeafSymlink?: boolean
+  followsLink?: boolean
 }
 
 /**
@@ -31,13 +61,41 @@ export async function resolveAuthorizedMutablePath(
   store: Store,
   options: ResolveAuthorizedMutablePathOptions = {}
 ): Promise<string> {
-  const { followsLeafSymlink, ...authorizationOptions } = options
+  const { followsLink, ...authorizationOptions } = options
   const resolvedPath = await resolveAuthorizedPath(targetPath, store, authorizationOptions)
   assertMutablePath(resolvedPath)
-  if (followsLeafSymlink) {
+  if (followsLink) {
     assertMutablePath(await canonicalLeaf(resolvedPath))
+    await assertNotHardLinked(resolvedPath)
   }
   return resolvedPath
+}
+
+/**
+ * Refuses a file that has more than one name on disk.
+ *
+ * A hard link into `.git` cannot be detected by path: every name for the inode is equally real and
+ * `realpath` returns the one it was given. Link count is the only portable signal that another name
+ * — possibly inside `.git` — reaches the same bytes. Mirrors the existing `nlink > 1` refusal on
+ * terminal artifacts.
+ *
+ * Partial by nature: `nlink` is not dependable on Windows, so this closes the POSIX case only.
+ */
+async function assertNotHardLinked(path: string): Promise<void> {
+  let linkCount: number
+  try {
+    linkCount = (await lstat(path)).nlink
+  } catch (error) {
+    // Nothing on disk yet has no aliases. Any other stat failure aborts the mutation on its own
+    // error, which the following syscall would raise anyway, so it is not restated as a refusal.
+    if (isENOENT(error)) {
+      return
+    }
+    throw error
+  }
+  if (linkCount > 1) {
+    throw new Error(REPOSITORY_ADMIN_HARD_LINK_DENIED_MESSAGE)
+  }
 }
 
 function assertMutablePath(path: string): void {
