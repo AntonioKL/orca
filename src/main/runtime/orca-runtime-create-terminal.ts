@@ -229,10 +229,7 @@ export class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTerminalCreate
               pty.title = null
               pty.titleUpdatedAt = null
             }
-            pty.launchConfig =
-              !agentResumeDeclined && effectiveLaunchConfig
-                ? dependencies.copySleepingAgentLaunchConfig(effectiveLaunchConfig)
-                : null
+            pty.launchConfig = !agentResumeDeclined && effectiveLaunchConfig ? dependencies.copySleepingAgentLaunchConfig(effectiveLaunchConfig) : null
             pty.launchToken = agentResumeDeclined ? null : (launchToken ?? null)
             pty.launchIncarnationId = !agentResumeDeclined && launchToken ? pty.incarnationId : null
             pty.launchAgent = agentResumeDeclined ? null : (launchOpts.launchAgent ?? null)
@@ -260,13 +257,9 @@ export class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTerminalCreate
               ptyId: result.id,
               title: launchOpts.title ?? null,
               ...(cwd !== workspace.path ? { cwd } : {}),
-              ...(!agentResumeDeclined && effectiveLaunchConfig
-                ? { launchConfig: effectiveLaunchConfig }
-                : {}),
+              ...(!agentResumeDeclined && effectiveLaunchConfig ? { launchConfig: effectiveLaunchConfig } : {}),
               ...(!agentResumeDeclined && launchToken ? { launchToken } : {}),
-              ...(!agentResumeDeclined && launchOpts.launchAgent
-                ? { launchAgent: launchOpts.launchAgent }
-                : {}),
+              ...(!agentResumeDeclined && launchOpts.launchAgent ? { launchAgent: launchOpts.launchAgent } : {}),
               ...(launchOpts.viewMode ? { viewMode: launchOpts.viewMode } : {}),
               activate: presentation === 'focused',
               ...(presentation ? { presentation } : {}),

@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../../../providers/types'
 import { toAppSshPtyId } from '../../../providers/ssh-pty-id'
-import { rememberRetiredRelayEpochOwner } from './relay-pty-mint-epoch'
+import {
+  rememberRetiredRelayEpochOwner,
+  takeRetiredRelayEpochOwner
+} from './relay-pty-mint-epoch'
 import { spawnForStablePane, type StablePaneOwner } from './stable-owner'
 
 type EpochAwareSpawnOptions = PtySpawnOptions & { resumeProviderSession?: unknown }
@@ -29,7 +32,7 @@ const agentSpawnOptions = (): EpochAwareSpawnOptions => ({
   agentSessionCreateOperationId: 'create-operation'
 })
 
-function createProvider(status: unknown | Error) {
+function createProvider(status: unknown) {
   const spawns: EpochAwareSpawnOptions[] = []
   const requestHostRpc = vi.fn(async () => {
     if (status instanceof Error) {
@@ -52,7 +55,7 @@ function createProvider(status: unknown | Error) {
 
 async function runSpawn(
   relayPtyId: string,
-  status: unknown | Error,
+  status: unknown,
   spawnOptions: EpochAwareSpawnOptions = agentSpawnOptions()
 ) {
   const harness = createProvider(status)
@@ -76,6 +79,47 @@ async function runSpawn(
 }
 
 describe('spawnForStablePane relay epoch gate', () => {
+  it('bounds retired owners when a pane never gets a fresh spawn', () => {
+    for (let index = 0; index < 300; index += 1) {
+      rememberRetiredRelayEpochOwner({
+        connectionId: `connection-${index}`,
+        paneKey: `pane-${index}`,
+        ownerPtyId: `ssh:connection-${index}@@pty2:epoch-${index}:1`
+      })
+    }
+
+    expect(takeRetiredRelayEpochOwner('connection-0', 'pane-0')).toBeUndefined()
+    expect(takeRetiredRelayEpochOwner('connection-299', 'pane-299')).toBe(
+      'ssh:connection-299@@pty2:epoch-299:1'
+    )
+  })
+
+  it('refreshes eviction recency when the same pane retires again', () => {
+    for (let index = 0; index < 512; index += 1) {
+      rememberRetiredRelayEpochOwner({
+        connectionId: `refresh-${index}`,
+        paneKey: `pane-${index}`,
+        ownerPtyId: `ssh:refresh-${index}@@pty2:epoch-${index}:1`
+      })
+    }
+    // refresh-256 is now the oldest surviving entry; re-retiring it must move it to newest.
+    rememberRetiredRelayEpochOwner({
+      connectionId: 'refresh-256',
+      paneKey: 'pane-256',
+      ownerPtyId: 'ssh:refresh-256@@pty2:epoch-updated:1'
+    })
+    rememberRetiredRelayEpochOwner({
+      connectionId: 'refresh-overflow',
+      paneKey: 'pane-overflow',
+      ownerPtyId: 'ssh:refresh-overflow@@pty2:epoch-overflow:1'
+    })
+
+    expect(takeRetiredRelayEpochOwner('refresh-257', 'pane-257')).toBeUndefined()
+    expect(takeRetiredRelayEpochOwner('refresh-256', 'pane-256')).toBe(
+      'ssh:refresh-256@@pty2:epoch-updated:1'
+    )
+  })
+
   it('declines an agent resume owned by a different relay epoch', async () => {
     const { freshOptions, result, freshResult, requestHostRpc } = await runSpawn(
       'pty2:previous:1',

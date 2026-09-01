@@ -2,6 +2,8 @@ import type { IPtyProvider, PtySpawnOptions } from '../../../providers/types'
 import { parseAppSshPtyId } from '../../../providers/ssh-pty-id'
 
 const RELAY_STATUS_TIMEOUT_MS = 2_000
+// A missed pane/connection teardown must not retain one tombstone per session.
+const MAX_RETIRED_RELAY_OWNERS = 256
 const relayMintEpochByProvider = new WeakMap<IPtyProvider, Promise<string | undefined>>()
 const retiredRelayOwnerByPane = new Map<string, string>()
 
@@ -54,10 +56,16 @@ export function rememberRetiredRelayEpochOwner(args: {
   if (parsed?.connectionId !== args.connectionId || !parseRelayPtyMintEpoch(parsed.relayPtyId)) {
     return
   }
-  retiredRelayOwnerByPane.set(
-    retiredRelayOwnerKey(args.connectionId, args.paneKey),
-    args.ownerPtyId
-  )
+  const key = retiredRelayOwnerKey(args.connectionId, args.paneKey)
+  // Delete-then-set so a re-retired pane refreshes recency instead of being evicted first.
+  retiredRelayOwnerByPane.delete(key)
+  if (retiredRelayOwnerByPane.size >= MAX_RETIRED_RELAY_OWNERS) {
+    const oldestKey = retiredRelayOwnerByPane.keys().next().value
+    if (oldestKey !== undefined) {
+      retiredRelayOwnerByPane.delete(oldestKey)
+    }
+  }
+  retiredRelayOwnerByPane.set(key, args.ownerPtyId)
 }
 
 export function takeRetiredRelayEpochOwner(
