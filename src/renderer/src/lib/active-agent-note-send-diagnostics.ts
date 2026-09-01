@@ -3,7 +3,7 @@ import type {
   ActiveAgentNotesSendFailureCode,
   ActiveAgentNotesSendResult
 } from './active-agent-note-send-result'
-import { RuntimeRpcCallError } from '@/runtime/runtime-rpc-client'
+import { hasRuntimeRpcErrorCode } from '../../../shared/runtime-rpc-error-code'
 
 const TERMINAL_RUNTIME_FAILURE_CODES = [
   'terminal_handle_stale',
@@ -45,14 +45,7 @@ export function codeForReadinessStatus(
 }
 
 export function runtimeFailureCode(error: unknown): ActiveAgentNotesSendFailureCode | null {
-  if (
-    error instanceof RuntimeRpcCallError &&
-    TERMINAL_RUNTIME_FAILURE_CODES.some((code) => code === error.code)
-  ) {
-    return error.code as ActiveAgentNotesSendFailureCode
-  }
-  const message = error instanceof Error ? error.message : String(error)
-  return TERMINAL_RUNTIME_FAILURE_CODES.find((code) => message === code) ?? null
+  return TERMINAL_RUNTIME_FAILURE_CODES.find((code) => hasRuntimeRpcErrorCode(error, code)) ?? null
 }
 
 export function runtimeFailureFallbackCode(error: unknown): ActiveAgentNotesSendFailureCode {

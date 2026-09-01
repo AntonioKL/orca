@@ -1,4 +1,5 @@
 import type { RuntimeTerminalAgentStatus } from '../../../shared/runtime-types'
+import { hasRuntimeRpcErrorCode } from '../../../shared/runtime-rpc-error-code'
 import type { ActiveAgentNotesSendFailureCode } from './active-agent-note-send-result'
 import { callRuntimeRpc, RuntimeRpcCallError } from '@/runtime/runtime-rpc-client'
 import type { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
@@ -97,16 +98,11 @@ export function isRuntimeTimeout(error: unknown): boolean {
 }
 
 export function isRuntimeTerminalUnavailable(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return (
-    message.includes('terminal_handle_stale') ||
-    message.includes('terminal_exited') ||
-    message.includes('terminal_gone') ||
-    message.includes('no_active_terminal')
+  return ['terminal_handle_stale', 'terminal_exited', 'terminal_gone', 'no_active_terminal'].some(
+    (code) => hasRuntimeRpcErrorCode(error, code)
   )
 }
 
 export function isRuntimeTerminalNotWritable(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return message.includes('terminal_not_writable')
+  return hasRuntimeRpcErrorCode(error, 'terminal_not_writable')
 }
