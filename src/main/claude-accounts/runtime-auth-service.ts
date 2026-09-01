@@ -70,7 +70,13 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
     ) {
       try {
         const scoped = await readActiveClaudeKeychainCredentialsStrict(preparation.configDir)
-        if (scoped && this.isValidCredentialsJsonObject(scoped)) {
+        const skipScopedReadBack = this.skipNextReadBackForAccountId === selected.id
+        if (skipScopedReadBack) {
+          // Re-auth writes managed storage first; let the managed→scoped write
+          // below repair any stale Keychain item left by the previous login.
+          this.skipNextReadBackForAccountId = null
+        }
+        if (!skipScopedReadBack && scoped && this.isValidCredentialsJsonObject(scoped)) {
           const managed = await this.readManagedCredentials(selected)
           if (scoped !== managed) {
             await this.writeManagedCredentials(selected, scoped)
@@ -80,8 +86,8 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
         if (managed && this.isValidCredentialsJsonObject(managed)) {
           await writeActiveClaudeKeychainCredentials(managed, preparation.configDir)
         }
-      } catch (error) {
-        console.warn('[claude-runtime-auth] Failed to bridge macOS managed Claude Keychain', error)
+      } catch {
+        console.warn('[claude-runtime-auth] Failed to bridge macOS managed Claude Keychain')
         // Never route a pane at a home whose credential surface could not be
         // synchronized; fall back to the system lane instead.
         return {
@@ -143,8 +149,8 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
   private async safeSyncForCurrentSelection(): Promise<void> {
     try {
       await this.syncForCurrentSelection()
-    } catch (error) {
-      console.warn('[claude-runtime-auth] Failed to sync runtime auth state:', error)
+    } catch {
+      console.warn('[claude-runtime-auth] Failed to sync runtime auth state')
     }
   }
 
@@ -177,8 +183,8 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
         writeManagedCredentials: (account, contents) =>
           this.writeManagedCredentials(account, contents)
       })
-    } catch (error) {
-      console.warn('[claude-runtime-auth] Legacy auth migration deferred:', error)
+    } catch {
+      console.warn('[claude-runtime-auth] Legacy auth migration deferred')
     }
   }
 

@@ -64,6 +64,39 @@ describe('ClaudeRuntimeAuthService', () => {
     expect(testState.legacyKeychainCredentials).toBeNull()
   })
 
+  it('repairs a stale scoped Keychain item after re-authentication', async () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+    const staleCredentials = createClaudeCredentialsJson('user@example.com', 'stale')
+    const freshCredentials = createClaudeCredentialsJson('user@example.com', 'fresh')
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      staleCredentials
+    )
+    const store = createStore(
+      createSettings({
+        claudeManagedAccounts: [
+          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
+        ],
+        activeClaudeManagedAccountId: 'account-1'
+      })
+    )
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+
+    await service.prepareForClaudeLaunch()
+    testState.managedKeychainCredentials.set('account-1', freshCredentials)
+    testState.scopedKeychainCredentials = staleCredentials
+    service.clearLastWrittenCredentialsJson('account-1')
+
+    await service.prepareForClaudeLaunch()
+
+    expect(testState.managedKeychainCredentials.get('account-1')).toBe(freshCredentials)
+    expect(testState.scopedKeychainCredentials).toBe(freshCredentials)
+  })
+
   it('reads back refreshed active keychain credentials on macOS', async () => {
     if (process.platform !== 'darwin') {
       return
