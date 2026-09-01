@@ -1531,8 +1531,8 @@ jobs:
             $exportedUninstaller = Join-Path $env:RUNNER_TEMP 'uninstaller-signing\unsigned\orca-uninstaller.exe'
             if (Test-Path -LiteralPath $exportedUninstaller) {
               $uninstallerStagePath = Join-Path $stage.FullName 'uninstaller\orca-uninstaller.exe'
-              New-Item -ItemType Directory -Force -Path (Split-Path $uninstallerStagePath) | Out-Null
-              Copy-Item -LiteralPath $exportedUninstaller -Destination $uninstallerStagePath -Force
+              New-Item -ItemType Directory -Force -Path (Split-Path $uninstallerStagePath) -ErrorAction Stop | Out-Null
+              Copy-Item -LiteralPath $exportedUninstaller -Destination $uninstallerStagePath -Force -ErrorAction Stop
               Write-Host 'Staged the NSIS uninstaller for signing: uninstaller\orca-uninstaller.exe'
             } else {
               Write-Host "::warning::No exported NSIS uninstaller at $exportedUninstaller; this release ships an unsigned uninstaller (fail-open)."

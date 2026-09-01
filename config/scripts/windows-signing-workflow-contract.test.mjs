@@ -269,7 +269,14 @@ describe('Windows NSIS uninstaller signing', () => {
 
     expect(relayScripts.length).toBeGreaterThan(0)
     for (const run of relayScripts) {
-      expect(run).toContain('$env:RUNNER_TEMP')
+      // Why count occurrences rather than assert `toContain` once: a step
+      // carrying two relay paths could root the first in RUNNER_TEMP and leave
+      // the second bare-relative — which resolves against the checkout, and is
+      // exactly the shape of the defect this test exists to catch.
+      const mentions = run.match(/uninstaller-signing/g) ?? []
+      const rooted = run.match(/Join-Path \$env:RUNNER_TEMP 'uninstaller-signing/g) ?? []
+
+      expect(rooted.length, run).toBe(mentions.length)
       expect(run).not.toContain('$env:GITHUB_WORKSPACE')
     }
   })
@@ -311,6 +318,11 @@ describe('Windows NSIS uninstaller signing', () => {
     expect(stage.run).toMatch(/try \{[\s\S]*\$exportedUninstaller[\s\S]*\} catch \{/)
     expect(uninstallerBlock).toContain('::warning::Could not stage the NSIS uninstaller')
     expect(uninstallerBlock).not.toContain('throw')
+    // Explicit, so the catch does not silently depend on GitHub's
+    // $ErrorActionPreference='Stop' default for `shell: pwsh`.
+    expect(uninstallerBlock).toContain('New-Item -ItemType Directory -Force -Path (Split-Path')
+    expect(uninstallerBlock).toMatch(/New-Item[^\r\n]*-ErrorAction Stop/)
+    expect(uninstallerBlock).toMatch(/Copy-Item[^\r\n]*-ErrorAction Stop/)
     // The upload it gates still keys off this step, so the catch is load-bearing.
     expect(stepNamed(releaseSteps(), 'Upload unsigned inner binaries for SignPath').if).toContain(
       "steps.stage-inner.outcome == 'success'"
@@ -371,6 +383,35 @@ describe('Windows NSIS uninstaller signing', () => {
     expect(verify.run).toContain('shipped: Uninstall Orca.exe')
     expect(verify.run).toContain('-tnsis')
     expect(verify.run).toContain("-ArgumentList '/S'")
+  })
+
+  // This workflow is the merge gate, so it must not be able to fail on its own
+  // artefact: 7-Zip's NSIS handler is unreliable enough that its output has to
+  // be corroborated before a signature verdict is drawn from it.
+  it('never lets an unreliable extract fail the rehearsal', () => {
+    const steps = readWorkflow('.github/workflows/windows-signing-rehearsal.yml').jobs.rehearse
+      .steps
+    const verify = stepNamed(steps, 'Verify signatures end to end')
+
+    // The 7-Zip route is only trusted when it reproduces the relayed bytes;
+    // otherwise it falls through to the install route rather than failing.
+    expect(verify.run).toContain(
+      'Write-Host "7-Zip\'s NSIS output did not match the relayed digest; falling back to a silent install."'
+    )
+    expect(verify.run).toMatch(/\$installedUninstaller = \$null\r?\n\s*\}/)
+
+    // The comparison that is not tautological: a file NSIS wrote out, against
+    // the digest the sign hook recorded.
+    expect(verify.run).toContain('$shippedDigest -ne $expectedDigest')
+    expect(verify.run).toContain('the uninstaller the installer ships is not the relayed one')
+
+    // An installer that prompts must not hang to the 360-minute job cap, and
+    // the app it launches must not outlive the step holding install-dir handles.
+    expect(verify.run).toContain('-PassThru')
+    expect(verify.run).toContain('$installerProcess.WaitForExit(300000)')
+    expect(verify.run).toContain('the silent install did not exit within 5 minutes')
+    expect(verify.run).toMatch(/for \(\$attempt = 0; \$attempt -lt 20; \$attempt\+\+\)/)
+    expect(verify.run).toContain("Get-Process -Name 'orca-terminal-daemon'")
   })
 
   it('wires the electron-builder sign hook that the relay depends on', () => {

@@ -387,33 +387,81 @@ jobs:
           # NSIS handler. If it cannot read the section either, fall back to a
           # real silent install.
           $installedUninstaller = $null
+          $installedVia = $null
+          $expectedDigest = if (Test-Path -LiteralPath $receipt) { (Get-Content -LiteralPath $receipt -Raw).Trim() } else { $null }
           $full7z = 'C:\Program Files\7-Zip\7z.exe'
           if (Test-Path -LiteralPath $full7z) {
             New-Item -ItemType Directory -Path nsis-extract -Force | Out-Null
             & $full7z x -tnsis 'dist/orca-windows-setup.exe' '-onsis-extract' -y 2>&1 | Out-Null
             $installedUninstaller = Get-ChildItem -Path nsis-extract -Recurse -File -Filter 'Uninstall*.exe' -ErrorAction SilentlyContinue |
               Select-Object -First 1
+            # Why the digest guard before trusting this route: 7-Zip's NSIS
+            # handler emits partial or garbled output on some NSIS builds, and a
+            # truncated extract would score NotSigned and fail the rehearsal as
+            # "the shipped uninstaller is unsigned" when nothing is wrong. Only
+            # trust it when it reproduces the bytes the relay embedded; otherwise
+            # fall through to the install route, which is ground truth. A name
+            # miss (the handler labelling the entry by its source name) falls
+            # through the same way.
+            if ($null -ne $installedUninstaller -and $null -ne $expectedDigest -and
+                (Get-FileHash -LiteralPath $installedUninstaller.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedDigest) {
+              Write-Host "7-Zip's NSIS output did not match the relayed digest; falling back to a silent install."
+              $installedUninstaller = $null
+            }
             if ($null -ne $installedUninstaller) {
+              $installedVia = "7-Zip's NSIS handler"
               Write-Host "Read the embedded uninstaller with 7-Zip's NSIS handler: $($installedUninstaller.FullName)"
             } else {
-              Write-Host "7-Zip's NSIS handler did not yield an uninstaller; falling back to a silent install."
+              Write-Host "7-Zip's NSIS handler did not yield a usable uninstaller; falling back to a silent install."
             }
           }
 
           if ($null -eq $installedUninstaller) {
             # Nothing here is published, so mutating this runner is free.
-            Start-Process -FilePath (Resolve-Path 'dist/orca-windows-setup.exe') -ArgumentList '/S' -Wait
-            # The installer launches the app on finish; it is not wanted here.
-            Stop-Process -Name 'Orca' -Force -ErrorAction SilentlyContinue
+            # Why -PassThru and a bounded wait rather than -Wait: a bare -Wait on
+            # an installer that ever prompts hangs to the job's 360-minute cap.
+            $installerProcess = Start-Process -FilePath (Resolve-Path 'dist/orca-windows-setup.exe') -ArgumentList '/S' -PassThru
+            if (-not $installerProcess.WaitForExit(300000)) {
+              $installerProcess | Stop-Process -Force -ErrorAction SilentlyContinue
+              $failures.Add('the silent install did not exit within 5 minutes; it is likely prompting')
+            }
+            # Why a poll rather than one Stop-Process: the oneClick installer
+            # launches the app as it finishes, so Orca.exe can appear *after* the
+            # installer process exits. A single silenced Stop-Process would miss
+            # it and leave Orca plus orca-terminal-daemon.exe holding handles
+            # under %LOCALAPPDATA%\Programs for the rest of the job.
+            for ($attempt = 0; $attempt -lt 20; $attempt++) {
+              $running = @(Get-Process -Name 'Orca' -ErrorAction SilentlyContinue)
+              if ($running.Count -gt 0) {
+                $running | Stop-Process -Force -ErrorAction SilentlyContinue
+                break
+              }
+              Start-Sleep -Milliseconds 500
+            }
+            Get-Process -Name 'orca-terminal-daemon' -ErrorAction SilentlyContinue |
+              Stop-Process -Force -ErrorAction SilentlyContinue
             $installedUninstaller = Get-ChildItem -Path "$env:LOCALAPPDATA\Programs" -Recurse -File -Filter 'Uninstall*.exe' -ErrorAction SilentlyContinue |
               Where-Object { $_.FullName -like '*Orca*' } |
               Select-Object -First 1
+            if ($null -ne $installedUninstaller) { $installedVia = 'a silent install' }
           }
 
           if ($null -eq $installedUninstaller) {
             $failures.Add('could not obtain the uninstaller the installer ships; neither 7-Zip nor a silent install produced it')
           } else {
-            Test-Signature 'shipped: Uninstall Orca.exe' $installedUninstaller.FullName
+            # Why this digest comparison is the point of the whole rehearsal:
+            # unlike the release job's, it hashes a file NSIS itself wrote out
+            # rather than the file the hook copied, so it is the only check that
+            # proves the shipped installer embedded the SignPath-signed bytes. On
+            # the 7-Zip route the guard above already forced equality; on the
+            # install route this is the first time it is tested.
+            if ($null -ne $expectedDigest) {
+              $shippedDigest = (Get-FileHash -LiteralPath $installedUninstaller.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($shippedDigest -ne $expectedDigest) {
+                $failures.Add("the uninstaller the installer ships is not the relayed one (via $installedVia): $shippedDigest vs $expectedDigest")
+              }
+            }
+            Test-Signature "shipped: Uninstall Orca.exe (via $installedVia)" $installedUninstaller.FullName
           }
 
           foreach ($relative in Get-Content 'inner-signing-list.txt') {
