@@ -314,7 +314,7 @@ The checklist. On Windows, do not reach for:
 | Forking `powershell.exe` to read system state               | The native reader — [`windows-process-enumeration.md`](./windows-process-enumeration.md) is the standing rule for the process table |
 | A process per operation in a loop                           | One long-lived helper with a request channel. A burst of short-lived interpreters under one parent is itself the signal     |
 | `Add-Type -TypeDefinition` at runtime                       | A precompiled, signed assembly, or a native helper                                                                          |
-| Copying our own image under a different name                | An installer or updater that does not need the rename. Where the rename is load-bearing, document it as such                |
+| Copying our own image under a different name                | Copy it verbatim — [`windows-daemon-host-relocation.md`](./windows-daemon-host-relocation.md) (done for the daemon host)    |
 | Deriving a script runner from a UI preference               | [`windows-setup-shell.md`](./windows-setup-shell.md) — the script declares its own interpreter                              |
 
 Two framing rules that outlast the table:
