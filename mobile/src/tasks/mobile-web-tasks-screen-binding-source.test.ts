@@ -5,8 +5,8 @@ const hostedTasksRoute = readFileSync(
   new URL('../../host-web-app/h/[hostId]/tasks.tsx', import.meta.url),
   'utf8'
 )
-const nativeTasksRoute = readFileSync(
-  new URL('../../app/h/[hostId]/tasks.tsx', import.meta.url),
+const hostOperations = readFileSync(
+  new URL('./use-mobile-tasks-host-operations.tsx', import.meta.url),
   'utf8'
 )
 
@@ -29,7 +29,8 @@ describe('mobile web Tasks screen binding', () => {
     expect(hostedTasksRoute).toContain('webHostTaskProjectFileOperations(shell.client)')
     expect(hostedTasksRoute).toContain('webHostWorkspaceCreationOperations(shell.client)')
     expect(hostedTasksRoute).toContain('nativeHostBinding={false}')
-    expect(nativeTasksRoute).toContain('nativeHostBinding = true')
+    expect(hostOperations).toContain('nativeHostBinding = true')
+    expect(hostOperations).toContain('useHostClient(nativeHostBinding ? hostId : undefined)')
     expect(hostedTasksRoute).not.toMatch(/StyleSheet|className|<View|<Text|<Pressable|<div/)
   })
 })

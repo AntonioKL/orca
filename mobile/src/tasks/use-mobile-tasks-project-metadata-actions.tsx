@@ -5,15 +5,13 @@ import {
   type GitHubProjectField,
   type GitHubProjectFieldMutationValue,
   type GitHubProjectRow,
-  isSuccess,
   optimisticProjectFieldValue,
-  splitRepositorySlug
+  projectRowMutationTarget
 } from './mobile-tasks-legacy-foundation'
 
 export function useMobileTasksProjectMetadataActions(model: ProjectThreadReplyActionsModel) {
   const {
     activeGitHubProjectHost,
-    client,
     githubProjectTable,
     projectMutating,
     setGithubProjectTable,
@@ -21,7 +19,8 @@ export function useMobileTasksProjectMetadataActions(model: ProjectThreadReplyAc
     setProjectMutating,
     setProjectRowDetail,
     setProjectRowDetailError,
-    setProjectRowItem
+    setProjectRowItem,
+    taskProjectMutationOperations
   } = model
   const mutateProjectRowMetadata = useCallback(
     async (
@@ -33,34 +32,17 @@ export function useMobileTasksProjectMetadataActions(model: ProjectThreadReplyAc
         removeAssignees?: string[]
       }
     ): Promise<void> => {
-      if (!client || projectMutating) {
+      if (!taskProjectMutationOperations || projectMutating) {
         return
       }
-      const slug = splitRepositorySlug(row.content.repository)
-      if (!slug || !row.content.number) {
+      const target = projectRowMutationTarget(row, activeGitHubProjectHost)
+      if (!target) {
         setProjectRowDetailError('This project item cannot be edited from mobile.')
         return
       }
       setProjectMutating(true)
       try {
-        const response = await client.sendRequest(
-          'github.project.updateIssueBySlug',
-          {
-            owner: slug.owner,
-            repo: slug.repo,
-            host: activeGitHubProjectHost,
-            number: row.content.number,
-            updates
-          },
-          { timeoutMs: 30_000 }
-        )
-        if (!isSuccess(response)) {
-          throw new Error(response.error.message)
-        }
-        const result = response.result as { ok?: boolean; error?: { message?: string } }
-        if (result.ok === false) {
-          throw new Error(result.error?.message ?? 'Failed to update GitHub item')
-        }
+        await taskProjectMutationOperations.updateMetadata(target, updates)
         const applyContentUpdate = (candidate: GitHubProjectRow): GitHubProjectRow => {
           const labels = new Map(candidate.content.labels.map((label) => [label.name, label]))
           for (const label of updates.addLabels ?? []) {
@@ -133,45 +115,33 @@ export function useMobileTasksProjectMetadataActions(model: ProjectThreadReplyAc
         setProjectMutating(false)
       }
     },
-    [activeGitHubProjectHost, client, projectMutating]
+    [activeGitHubProjectHost, projectMutating, taskProjectMutationOperations]
   )
-
   const mutateProjectRowField = useCallback(
     async (
       row: GitHubProjectRow,
       field: GitHubProjectField,
       value: GitHubProjectFieldMutationValue | null
     ): Promise<void> => {
-      if (!client || !githubProjectTable || projectMutating) {
+      if (!taskProjectMutationOperations || !githubProjectTable || projectMutating) {
+        return
+      }
+      const target = projectRowMutationTarget(row, activeGitHubProjectHost)
+      if (!target) {
+        setProjectRowDetailError('This project field cannot be edited from mobile.')
         return
       }
       setProjectMutating(true)
       try {
-        const response = await client.sendRequest(
-          value === null ? 'github.project.clearItemField' : 'github.project.updateItemField',
-          value === null
-            ? {
-                projectId: githubProjectTable.project.id,
-                host: activeGitHubProjectHost,
-                itemId: row.id,
-                fieldId: field.id
-              }
-            : {
-                projectId: githubProjectTable.project.id,
-                host: activeGitHubProjectHost,
-                itemId: row.id,
-                fieldId: field.id,
-                value
-              },
-          { timeoutMs: 30_000 }
+        await taskProjectMutationOperations.updateField(
+          {
+            ...target,
+            projectId: githubProjectTable.project.id,
+            itemId: row.id
+          },
+          field.id,
+          value
         )
-        if (!isSuccess(response)) {
-          throw new Error(response.error.message)
-        }
-        const result = response.result as { ok?: boolean; error?: { message?: string } }
-        if (result.ok === false) {
-          throw new Error(result.error?.message ?? 'Failed to update project field')
-        }
         const patchRow = (candidate: GitHubProjectRow): GitHubProjectRow => {
           const fieldValuesByFieldId = { ...candidate.fieldValuesByFieldId }
           if (value === null) {
@@ -205,39 +175,21 @@ export function useMobileTasksProjectMetadataActions(model: ProjectThreadReplyAc
         setProjectMutating(false)
       }
     },
-    [activeGitHubProjectHost, client, githubProjectTable, projectMutating]
+    [activeGitHubProjectHost, githubProjectTable, projectMutating, taskProjectMutationOperations]
   )
-
   const mutateProjectRowIssueType = useCallback(
     async (row: GitHubProjectRow, issueType: GitHubIssueType | null): Promise<void> => {
-      if (!client || projectMutating) {
+      if (!taskProjectMutationOperations || projectMutating) {
         return
       }
-      const slug = splitRepositorySlug(row.content.repository)
-      if (row.itemType !== 'ISSUE' || !slug || !row.content.number) {
+      const target = projectRowMutationTarget(row, activeGitHubProjectHost)
+      if (row.itemType !== 'ISSUE' || !target || target.type !== 'issue') {
         setProjectRowDetailError('This project issue type cannot be edited from mobile.')
         return
       }
       setProjectMutating(true)
       try {
-        const response = await client.sendRequest(
-          'github.project.updateIssueTypeBySlug',
-          {
-            owner: slug.owner,
-            repo: slug.repo,
-            host: activeGitHubProjectHost,
-            number: row.content.number,
-            issueTypeId: issueType?.id ?? null
-          },
-          { timeoutMs: 30_000 }
-        )
-        if (!isSuccess(response)) {
-          throw new Error(response.error.message)
-        }
-        const result = response.result as { ok?: boolean; error?: { message?: string } }
-        if (result.ok === false) {
-          throw new Error(result.error?.message ?? 'Failed to update issue type')
-        }
+        await taskProjectMutationOperations.updateIssueType(target, issueType?.id ?? null)
         const patchRow = (candidate: GitHubProjectRow): GitHubProjectRow => ({
           ...candidate,
           content: { ...candidate.content, issueType }
@@ -261,12 +213,12 @@ export function useMobileTasksProjectMetadataActions(model: ProjectThreadReplyAc
         setProjectMutating(false)
       }
     },
-    [activeGitHubProjectHost, client, projectMutating]
+    [activeGitHubProjectHost, projectMutating, taskProjectMutationOperations]
   )
   return Object.assign(model, {
-    mutateProjectRowMetadata,
     mutateProjectRowField,
-    mutateProjectRowIssueType
+    mutateProjectRowIssueType,
+    mutateProjectRowMetadata
   })
 }
 

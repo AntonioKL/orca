@@ -7,6 +7,7 @@ import {
 import { normalizeMobileMarkdownPreviewHtml } from './mobile-markdown-preview-html'
 import { parseMobileMarkdown } from './mobile-markdown-parser'
 import { isMobileMermaidLanguage } from './mobile-mermaid-language'
+import { readMobileTasksSourceFamily } from '../tasks/mobile-tasks-source-family.test-support'
 
 describe('isMobileMermaidLanguage', () => {
   it('matches mermaid case-insensitively after trim', () => {
@@ -333,10 +334,7 @@ describe('mobile Markdown external links', () => {
       new URL('../session/MobileNativeChatMessage.tsx', import.meta.url),
       'utf8'
     )
-    const tasksSource = readFileSync(
-      new URL('../../app/h/[hostId]/tasks.tsx', import.meta.url),
-      'utf8'
-    )
+    const tasksSource = readMobileTasksSourceFamily()
     const filePreviewSource = readFileSync(
       new URL('../files/MobileFilePreviewScreen.tsx', import.meta.url),
       'utf8'

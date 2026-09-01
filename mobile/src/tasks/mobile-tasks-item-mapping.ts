@@ -1,9 +1,4 @@
-import {
-  type RpcSuccess,
-  type TaskProvider,
-  type GitHubOwnerRepo,
-  colors
-} from './mobile-tasks-dependencies'
+import { type GitHubOwnerRepo, type TaskProvider, colors } from './mobile-tasks-dependencies'
 import type {
   GitHubPreset,
   GitHubProjectRow,
@@ -18,10 +13,6 @@ import type {
   LinearIssue,
   RepoSummary
 } from './mobile-tasks-provider-detail-types'
-
-export function isSuccess(response: unknown): response is RpcSuccess {
-  return Boolean(response && typeof response === 'object' && (response as RpcSuccess).ok)
-}
 
 export function taskTime(value: string): number {
   const time = Date.parse(value)

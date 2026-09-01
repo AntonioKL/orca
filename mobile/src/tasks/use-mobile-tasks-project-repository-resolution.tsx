@@ -1,16 +1,18 @@
 import type { ProjectProjectionModel } from './use-mobile-tasks-project-projection'
 import {
-  type GitHubOwnerRepo,
+  createMobileItemPrFileContentScope,
+  createMobileProjectPrFileContentScope,
   githubProjectKey,
   useEffect,
-  useMemo
+  useMemo,
+  useMobilePrFileContentCache
 } from './mobile-tasks-dependencies'
 import {
   GITHUB_REPO_CONCURRENCY,
   getGitHubReviewerSeedUsers,
-  isSuccess,
   mapWithConcurrency,
   mergeGitHubAssignableUsers,
+  projectRowGitHubRepository,
   projectRowType
 } from './mobile-tasks-legacy-foundation'
 
@@ -18,7 +20,7 @@ export function useMobileTasksProjectRepositoryResolution(model: ProjectProjecti
   const {
     actionItem,
     activeGitHubProject,
-    client,
+    activeGitHubProjectHost,
     connState,
     detailPayload,
     findProjectRowRepo,
@@ -34,12 +36,13 @@ export function useMobileTasksProjectRepositoryResolution(model: ProjectProjecti
     projectRowItem,
     provider,
     setGithubRepoSlugCache,
+    taskReadOperations,
     taskStateHydrated,
     tasksSupported
   } = model
   useEffect(() => {
     if (
-      !client ||
+      !taskReadOperations ||
       connState !== 'connected' ||
       !tasksSupported ||
       !taskStateHydrated ||
@@ -59,16 +62,13 @@ export function useMobileTasksProjectRepositoryResolution(model: ProjectProjecti
     let cancelled = false
     void mapWithConcurrency(missing, GITHUB_REPO_CONCURRENCY, async (repo) => {
       try {
-        const response = await client.sendRequest(
-          'github.repoSlug',
-          { repo: `id:${repo.id}` },
-          { timeoutMs: 30_000 }
-        )
-        if (!isSuccess(response)) {
-          throw new Error(response.error.message)
+        return {
+          repoId: repo.id,
+          entry: {
+            path: repo.path,
+            repository: await taskReadOperations.resolveGitHubRepoSlug(repo.id)
+          }
         }
-        const result = response.result as GitHubOwnerRepo | null
-        return { repoId: repo.id, entry: { path: repo.path, repository: result } }
       } catch {
         // Cached so readiness settles; `failed` marks it for retry on refresh.
         return { repoId: repo.id, entry: { path: repo.path, repository: null, failed: true } }
@@ -90,12 +90,12 @@ export function useMobileTasksProjectRepositoryResolution(model: ProjectProjecti
       cancelled = true
     }
   }, [
-    client,
     connState,
     githubMode,
     githubRepoSlugCache,
     hostedRepos,
     provider,
+    taskReadOperations,
     taskStateHydrated,
     tasksSupported
   ])
@@ -121,6 +121,22 @@ export function useMobileTasksProjectRepositoryResolution(model: ProjectProjecti
     () => (projectRowItem ? findProjectRowRepo(projectRowItem) : null),
     [findProjectRowRepo, projectRowItem]
   )
+  const itemPrFileContentScope = createMobileItemPrFileContentScope(actionItem, detailPayload)
+  const projectPrFileContentScope = createMobileProjectPrFileContentScope(
+    projectRowItem,
+    projectRowHostedRepo,
+    projectRowDetail,
+    projectRowItem ? projectRowGitHubRepository(projectRowItem, activeGitHubProjectHost) : null
+  )
+  const activePrFileContentScope = projectRowItem
+    ? projectPrFileContentScope
+    : itemPrFileContentScope
+  const {
+    clear: clearPrFileContents,
+    contents: prFileContents,
+    load: loadPrFileContent,
+    loadingPath: prFileLoadingPath
+  } = useMobilePrFileContentCache(activePrFileContentScope)
   const itemReviewerCandidates = useMemo(() => {
     if (!actionItem || actionItem.provider !== 'github' || actionItem.source.type !== 'pr') {
       return []
@@ -197,16 +213,23 @@ export function useMobileTasksProjectRepositoryResolution(model: ProjectProjecti
   }, [projectRowDetail, projectRowItem?.content.assignees])
   return Object.assign(model, {
     activeGitHubProjectKey,
-    activeGitHubProjectViewId,
     activeGitHubProjectView,
-    projectIssueTypeRepository,
-    projectMetadataRepository,
-    projectRowHostedRepo,
+    activeGitHubProjectViewId,
+    activePrFileContentScope,
+    clearPrFileContents,
+    itemPrFileContentScope,
     itemReviewerCandidates,
     itemSelectedReviewerLogins,
+    loadPrFileContent,
+    prFileContents,
+    prFileLoadingPath,
+    projectIssueTypeRepository,
+    projectMetadataRepository,
+    projectMetadataSeedLogins,
+    projectPrFileContentScope,
     projectReviewerCandidates,
-    projectSelectedReviewerLogins,
-    projectMetadataSeedLogins
+    projectRowHostedRepo,
+    projectSelectedReviewerLogins
   })
 }
 
