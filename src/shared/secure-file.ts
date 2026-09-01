@@ -17,6 +17,11 @@ import {
   type SecurePathHardeningCacheBounds
 } from './secure-path-hardening-cache'
 import {
+  configureHardeningRetryBudget,
+  mayAttemptHardening,
+  recordHardeningOutcome
+} from './secure-path-hardening-retry-budget'
+import {
   bestEffortRestrictWindowsPath,
   resetSecureFileWindowsUserSidForTests,
   restrictWindowsPathSync
@@ -56,50 +61,15 @@ let hardenedDirectoryPathsThisProcess = new SecurePathHardeningCache<true>(
   DEFAULT_HARDENING_CACHE_BOUNDS
 )
 
-type HardeningFailureRecord = { at: number; attempts: number }
-
-/**
- * Why a retry floor and not a plain eviction: hardening fails permanently on hosts where it simply
- * cannot work — FAT32/exFAT have no ACLs, network paths and redirected profiles refuse, restricted
- * tokens lack WRITE_DAC. The env store re-hardens on the *read* path at ~2/s (#4901), so evicting
- * on every failure turns those hosts into a permanent icacls-and-log storm.
- */
-const HARDENING_RETRY_FLOOR_MS = 60_000
-const MAX_HARDENING_ATTEMPTS = 3
-
-let hardeningFailuresThisProcess = new SecurePathHardeningCache<HardeningFailureRecord>(
-  DEFAULT_HARDENING_CACHE_BOUNDS
-)
-
-function mayAttemptHardening(targetPath: string): boolean {
-  const failure = hardeningFailuresThisProcess.get(targetPath)
-  if (!failure) {
-    return true
-  }
-  if (failure.attempts >= MAX_HARDENING_ATTEMPTS) {
-    return false
-  }
-  return Date.now() - failure.at >= HARDENING_RETRY_FLOOR_MS
-}
-
-function recordHardeningOutcome(targetPath: string, restricted: boolean): void {
-  if (restricted) {
-    hardeningFailuresThisProcess.delete(targetPath)
-    return
-  }
-  const previous = hardeningFailuresThisProcess.get(targetPath)
-  hardeningFailuresThisProcess.set(targetPath, {
-    at: Date.now(),
-    attempts: (previous?.attempts ?? 0) + 1
-  })
-}
+// Bounds the retry rate for paths whose hardening keeps failing; see the module for why.
+configureHardeningRetryBudget(DEFAULT_HARDENING_CACHE_BOUNDS)
 
 function hardenSecureDirectoryOnce(dirPath: string): void {
   // Why: dir hardening stays async — re-applying it stormed the main thread (#4901); files inside are hardened synchronously anyway.
   if (hardenedDirectoryPathsThisProcess.get(dirPath)) {
     return
   }
-  // Cache before the ACL lands so concurrent writes don't restorm; a failure drops it, under the retry floor.
+  // Cache before the ACL lands so concurrent writes don't restorm; a failure drops it, under the retry budget.
   hardenedDirectoryPathsThisProcess.set(dirPath, true)
   applySecurePathRestriction(dirPath, true, process.platform, false, (restricted) => {
     if (!restricted) {
@@ -358,7 +328,7 @@ export function __resetSecureFileHardenedPathsForTests(
 ): void {
   hardenedPathsThisProcess = new SecurePathHardeningCache(bounds)
   hardenedDirectoryPathsThisProcess = new SecurePathHardeningCache(bounds)
-  hardeningFailuresThisProcess = new SecurePathHardeningCache(bounds)
+  configureHardeningRetryBudget(bounds)
 }
 
 export function __getSecureFileHardeningCacheStateForTests(): {

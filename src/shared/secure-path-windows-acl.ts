@@ -14,9 +14,10 @@ const BUILTIN_ADMINISTRATORS_SID = 'S-1-5-32-544'
 
 const WINDOWS_SID_PATTERN = /^S-1-\d+(?:-\d+)+$/
 
-export type SecurePathHardeningFailure = {
+export type SecurePathHardeningReport = {
   targetPath: string
-  stage: 'sid-lookup' | 'reset' | 'grant' | 'verify'
+  /** `throttled` and `recovered` mark entering and leaving the rate-limited degraded state. */
+  stage: 'sid-lookup' | 'reset' | 'grant' | 'verify' | 'throttled' | 'recovered'
   detail: string
 }
 
@@ -149,20 +150,37 @@ function toIcaclsPath(targetPath: string): string {
  * installs a reporter that routes into the diagnostic trace; the console default keeps dev runs
  * and the CLI readable.
  */
-let reportFailure: (failure: SecurePathHardeningFailure) => void = (failure) => {
-  console.warn('[secure-path.windows-acl] failed to restrict path', failure)
+const consoleReporter = (entry: SecurePathHardeningReport): void => {
+  if (entry.stage === 'recovered') {
+    console.info('[secure-path.windows-acl] path hardening recovered', entry)
+    return
+  }
+  console.warn('[secure-path.windows-acl] failed to restrict path', entry)
 }
 
-export function setSecurePathHardeningFailureReporter(
-  reporter: ((failure: SecurePathHardeningFailure) => void) | null
+let reportEntry: (entry: SecurePathHardeningReport) => void = consoleReporter
+
+export function setSecurePathHardeningReporter(
+  reporter: ((entry: SecurePathHardeningReport) => void) | null
 ): void {
-  reportFailure = reporter ?? ((failure) => {
-    console.warn('[secure-path.windows-acl] failed to restrict path', failure)
-  })
+  reportEntry = reporter ?? consoleReporter
 }
 
-function report(targetPath: string, stage: SecurePathHardeningFailure['stage'], detail: string): void {
-  reportFailure({ targetPath, stage, detail: detail.trim().slice(0, 500) })
+/** Exported so the caller owning the retry budget reports degradation and recovery on this lane. */
+export function reportSecurePathHardening(
+  targetPath: string,
+  stage: SecurePathHardeningReport['stage'],
+  detail: string
+): void {
+  reportEntry({ targetPath, stage, detail: detail.trim().slice(0, 500) })
+}
+
+function report(
+  targetPath: string,
+  stage: SecurePathHardeningReport['stage'],
+  detail: string
+): void {
+  reportSecurePathHardening(targetPath, stage, detail)
 }
 
 /**

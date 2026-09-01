@@ -200,34 +200,80 @@ describe('hardenSecurePath', () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     const targetPath = writeFailingHardenTarget()
 
-    // The read-path polling loop the storm came from.
+    // The read-path polling loop the storm came from: 25 reads, not 25 spawns.
     for (let read = 0; read < 25; read++) {
       hardenExistingSecureFile(targetPath)
       await flushAsyncAcl()
     }
 
-    expect(attemptsFor(targetPath)).toHaveLength(1)
+    expect(attemptsFor(targetPath)).toHaveLength(3)
+    // Entering the degraded state is announced once, not once per read.
+    expect(throttleReports(warn, targetPath)).toHaveLength(1)
     warn.mockRestore()
   })
 
-  it('retries a failing path once the retry floor has passed, then gives up', async () => {
+  /**
+   * A cap that never expires latches a transient failure: one AV scan or momentary lock and every
+   * later credential write in the session is unprotected, on a host where hardening would now
+   * work. The rate is bounded; the lifetime is not.
+   */
+  it('keeps re-probing a failing path in every later window', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     const targetPath = writeFailingHardenTarget()
     let clock = Date.now()
     const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
 
-    for (let read = 0; read < 10; read++) {
-      hardenExistingSecureFile(targetPath)
-      await flushAsyncAcl()
+    for (let window = 0; window < 6; window++) {
+      for (let read = 0; read < 6; read++) {
+        hardenExistingSecureFile(targetPath)
+        await flushAsyncAcl()
+      }
       clock += 61_000
     }
 
-    // Three attempts spread over ten minutes, not ten — and then silence.
-    expect(attemptsFor(targetPath)).toHaveLength(3)
+    // Bounded per window, but never abandoned: 36 reads, 3 attempts in each of 6 windows.
+    expect(attemptsFor(targetPath)).toHaveLength(18)
     now.mockRestore()
     warn.mockRestore()
   })
+
+  it('reports recovery when a previously throttled path hardens again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    const targetPath = writeFailingHardenTarget()
+    let clock = Date.now()
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+
+    for (let read = 0; read < 5; read++) {
+      hardenExistingSecureFile(targetPath)
+      await flushAsyncAcl()
+    }
+    expect(throttleReports(warn, targetPath)).toHaveLength(1)
+
+    // The transient condition clears; the next window's re-probe must notice.
+    clock += 61_000
+    vi.mocked(runProcess).mockImplementation((spec) => Promise.resolve(fakeIcacls(spec)))
+    hardenExistingSecureFile(targetPath)
+    await flushAsyncAcl()
+
+    expect(info).toHaveBeenCalledWith(
+      '[secure-path.windows-acl] path hardening recovered',
+      expect.objectContaining({ targetPath, stage: 'recovered' })
+    )
+    now.mockRestore()
+    info.mockRestore()
+    warn.mockRestore()
+  })
+
+  // Scoped to one path: the parent directory is hardened too, and reports its own transition.
+  function throttleReports(warn: ReturnType<typeof vi.spyOn>, targetPath: string): unknown[] {
+    return warn.mock.calls.filter((call) => {
+      const entry = call[1] as { stage?: string; targetPath?: string } | undefined
+      return entry?.stage === 'throttled' && entry.targetPath === targetPath
+    })
+  }
 
   function writeFailingHardenTarget(): string {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-secure-file-'))

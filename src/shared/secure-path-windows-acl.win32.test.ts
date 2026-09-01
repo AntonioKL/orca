@@ -191,6 +191,45 @@ describeOnWindows('restrictWindowsPathSync against a real filesystem', () => {
     expect(readAclEntries(file)).toEqual(first)
   })
 
+  /**
+   * Verification writes a temp SDDL file. If it cannot, the ACL may well have been applied — but
+   * it cannot be *proved*, so hardening must report failure rather than assume success. Fail
+   * closed, and say so: a silently-unverifiable control is the shape of the original bug.
+   */
+  it('reports failure, loudly, when verification cannot write its descriptor', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const file = join(root, 'unverifiable.json')
+    writeFileSync(file, '{}')
+    const realTemp = process.env.TEMP
+    const realTmp = process.env.TMP
+    // Point the descriptor save at a directory that cannot exist.
+    process.env.TEMP = join(root, 'no-such-dir', 'nested')
+    process.env.TMP = process.env.TEMP
+
+    try {
+      expect(restrictWindowsPathSync(file, false)).toBe(false)
+      expect(warn).toHaveBeenCalledWith(
+        '[secure-path.windows-acl] failed to restrict path',
+        expect.objectContaining({ stage: 'verify' })
+      )
+    } finally {
+      if (realTemp === undefined) {
+        delete process.env.TEMP
+      } else {
+        process.env.TEMP = realTemp
+      }
+      if (realTmp === undefined) {
+        delete process.env.TMP
+      } else {
+        process.env.TMP = realTmp
+      }
+      warn.mockRestore()
+    }
+
+    // And the ACL itself was still applied, so the failure is a loss of proof, not of protection.
+    expect(readAclEntries(file)).toHaveLength(3)
+  })
+
   it('reports failure for a path that does not exist', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     expect(restrictWindowsPathSync(join(root, 'absent.json'), false)).toBe(false)
