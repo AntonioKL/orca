@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { readMobileTasksSourceFamily } from './mobile-tasks-source-family.test-support'
 
-const tasksRouteSource = readFileSync(
-  new URL('../../app/h/[hostId]/tasks.tsx', import.meta.url),
+const tasksSource = readMobileTasksSourceFamily()
+const hostOperationsSource = readFileSync(
+  new URL('./use-mobile-tasks-host-operations.tsx', import.meta.url),
   'utf8'
 )
 const copyFeedbackSource = readFileSync(
@@ -12,14 +14,17 @@ const copyFeedbackSource = readFileSync(
 
 describe('mobile tasks device operations', () => {
   it('keeps the existing presentation behind an injectable native boundary', () => {
-    expect(tasksRouteSource).toContain('export default function MobileTasksScreen({')
-    expect(tasksRouteSource).toContain('deviceOperations = defaultHostTaskDeviceOperations()')
-    expect(tasksRouteSource).toContain('useMobileTaskCopyFeedback({')
+    // The screen takes its native capabilities as props; the default is resolved once.
+    expect(tasksSource).toContain('MobileTasksScreen(props: MobileTasksScreenProps = {})')
+    expect(hostOperationsSource).toContain('deviceOperations = defaultHostTaskDeviceOperations()')
+    expect(tasksSource).toContain('useMobileTaskCopyFeedback({')
     expect(copyFeedbackSource).toContain('operations.copyText(')
-    expect(tasksRouteSource).toContain('deviceOperations.hapticMediumImpact()')
-    expect(tasksRouteSource).toContain('deviceOperations.openExternalUrl(')
-    expect(tasksRouteSource).not.toContain("from 'expo-clipboard'")
-    expect(tasksRouteSource).not.toContain('Linking.openURL')
-    expect(tasksRouteSource).not.toContain("from '../../../src/platform/haptics'")
+    expect(tasksSource).toContain('deviceOperations.hapticMediumImpact()')
+    expect(tasksSource).toContain('deviceOperations.openExternalUrl(')
+    // No native module reaches the composition; only the adapters may import them.
+    expect(tasksSource).not.toContain("from 'expo-clipboard'")
+    expect(tasksSource).not.toContain('Linking.openURL')
+    expect(tasksSource).not.toContain("from '../platform/haptics'")
+    expect(tasksSource).not.toContain("from '../../../src/platform/haptics'")
   })
 })

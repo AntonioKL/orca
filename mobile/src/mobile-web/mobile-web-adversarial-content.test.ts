@@ -8,6 +8,7 @@ import {
 } from '../../../src/shared/mobile-web/provider-review-contract'
 import { MobileWebDiffRowSchema } from '../../../src/shared/mobile-web/source-control-operation-contract'
 import { MobileWebTaskGitLabListResultSchema } from '../../../src/shared/mobile-web/task-list-contract'
+import { readMobileTasksSourceFamily } from '../tasks/mobile-tasks-source-family.test-support'
 
 const ADVERSARIAL_TEXT = '<img src=x onerror=alert(1)>${globalThis.process?.env}'
 
@@ -72,11 +73,13 @@ describe('mobile web adversarial host content', () => {
 
   it('renders these host fields through React Native text surfaces', () => {
     const sources = [
-      '../files/mobile-file-explorer-row.tsx',
-      '../source-control/MobileBranchDiffPreviewDrawer.tsx',
-      '../source-control/MobileSourceControlFileRows.tsx',
-      '../../app/h/[hostId]/tasks.tsx'
-    ].map((path) => readFileSync(new URL(path, import.meta.url), 'utf8'))
+      ...[
+        '../files/mobile-file-explorer-row.tsx',
+        '../source-control/MobileBranchDiffPreviewDrawer.tsx',
+        '../source-control/MobileSourceControlFileRows.tsx'
+      ].map((path) => readFileSync(new URL(path, import.meta.url), 'utf8')),
+      readMobileTasksSourceFamily()
+    ]
 
     for (const source of sources) {
       expect(source).toContain('<Text')

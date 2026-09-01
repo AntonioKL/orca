@@ -148,7 +148,7 @@ export function renderMobileTasksLinearFilterPicker(model: ConnectionPresentatio
 
 export function renderMobileTasksLinearWorkspacePicker(model: ConnectionPresentationModel) {
   const {
-    client,
+    taskLinearOperations,
     linearWorkspaceOptions,
     loadLinearContext,
     selectedLinearWorkspaceId,
@@ -168,9 +168,9 @@ export function renderMobileTasksLinearWorkspacePicker(model: ConnectionPresenta
       onSelect={(workspaceId) => {
         setSelectedLinearWorkspaceId(workspaceId)
         setSelectedLinearTeamIds(new Set())
-        if (client) {
-          void client
-            .sendRequest('linear.selectWorkspace', { workspaceId })
+        if (taskLinearOperations) {
+          void taskLinearOperations
+            .selectWorkspace(workspaceId)
             .then(() => loadLinearContext())
             .catch((err) => {
               setError(err instanceof Error ? err.message : 'Failed to switch workspace')

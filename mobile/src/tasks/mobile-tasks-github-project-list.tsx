@@ -8,7 +8,6 @@ import {
   FlatList,
   spacing,
   ChevronDown,
-  triggerMediumImpact,
   TaskProviderLogo
 } from './mobile-tasks-dependencies'
 import { styles } from './mobile-tasks-legacy-styles'
@@ -22,6 +21,7 @@ import {
 
 export function renderMobileTasksGitHubProjectList(model: ConnectionPresentationModel) {
   const {
+    deviceOperations,
     activeGitHubProject,
     findProjectRowRepo,
     githubProjectError,
@@ -113,7 +113,7 @@ export function renderMobileTasksGitHubProjectList(model: ConnectionPresentation
           <Pressable
             style={({ pressed }) => [styles.taskRow, pressed && styles.taskRowPressed]}
             onPress={() => {
-              triggerMediumImpact()
+              deviceOperations.hapticMediumImpact()
               setProjectRowItem(row)
             }}
           >

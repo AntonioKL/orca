@@ -7,11 +7,10 @@ import {
   useEffect
 } from './mobile-tasks-dependencies'
 import {
-  type LinearState,
-  type LinearTeam,
   getTaskPresetQuery,
-  isSuccess,
-  scopeGitHubTaskSearch
+  resetActionItemDrafts,
+  scopeGitHubTaskSearch,
+  taskLinearTarget
 } from './mobile-tasks-legacy-foundation'
 
 export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsModel) {
@@ -21,7 +20,7 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
     activeGitHubProjectViewId,
     appliedGithubProjectSearch,
     appliedQuery,
-    client,
+    clearPrFileContents,
     connState,
     copiedLinkResetTimerRef,
     githubKind,
@@ -64,10 +63,9 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
     setLinearSubIssueTitle,
     setLinearTeams,
     setPrFileCommentDrafts,
-    setPrFileContents,
-    setPrFileLoadingPath,
     showCreateTask,
     showGitHubProjectPicker,
+    taskLinearOperations,
     taskStateHydrated,
     taskUiReady,
     tasksSupported
@@ -77,7 +75,6 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
     refreshTasks()
     void loadGitHubProjectTable({ queryOverride: appliedGithubProjectSearch })
   }, [appliedGithubProjectSearch, loadGitHubProjectTable, refreshTasks])
-
   useEffect(() => {
     if (!taskStateHydrated) {
       return
@@ -89,7 +86,6 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
     }, 300)
     return () => clearTimeout(timer)
   }, [githubKind, provider, query, taskStateHydrated])
-
   const setTaskCopyFeedbackRootRef = useCallback((node: View | null): void => {
     if (node !== null) {
       return
@@ -98,7 +94,6 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
     // the Tasks screen detaches without a passive cleanup-only Effect.
     clearMobileTaskCopyFeedbackTimer(copiedLinkResetTimerRef)
   }, [])
-
   useEffect(() => {
     if (!taskUiReady || provider !== 'github' || githubMode !== 'items') {
       return
@@ -110,7 +105,6 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
       githubItemsQuery: trimmed
     })
   }, [appliedQuery, githubMode, githubPreset, persistTaskResumeState, provider, taskUiReady])
-
   useEffect(() => {
     if (!taskUiReady || provider !== 'linear') {
       return
@@ -120,14 +114,12 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
       linearQuery: appliedQuery.trim()
     })
   }, [appliedQuery, linearFilter, persistTaskResumeState, provider, taskUiReady])
-
   useEffect(() => {
     if (connState !== 'connected' || !taskStateHydrated) {
       return
     }
     void loadTasks()
   }, [connState, loadTasks, taskStateHydrated])
-
   useEffect(() => {
     if (!taskStateHydrated || provider !== 'linear' || !linearConnected) {
       return
@@ -136,7 +128,6 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
       setError(err instanceof Error ? err.message : 'Failed to load Linear context')
     })
   }, [linearConnected, loadLinearContext, provider, taskStateHydrated])
-
   useEffect(() => {
     if (!taskUiReady || provider !== 'github' || githubMode !== 'project') {
       return
@@ -163,7 +154,6 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
     selectGitHubProject,
     taskUiReady
   ])
-
   useEffect(() => {
     if (!taskUiReady || !showGitHubProjectPicker) {
       return
@@ -172,7 +162,6 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
       setGithubProjectError(err instanceof Error ? err.message : 'Failed to load projects')
     })
   }, [loadGitHubProjects, showGitHubProjectPicker, taskUiReady])
-
   useEffect(() => {
     if (!tasksSupported || !taskStateHydrated || !showCreateTask) {
       return
@@ -186,25 +175,19 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
       )
       return
     }
-    if (!client) {
+    if (!taskLinearOperations) {
       return
     }
     let stale = false
     setCreateTeamId(null)
-    void client
-      .sendRequest('linear.listTeams')
-      .then((response) => {
+    void taskLinearOperations
+      .listTeams()
+      .then((teams) => {
         if (stale) {
           return
         }
-        if (isSuccess(response)) {
-          const teams = response.result as LinearTeam[]
-          setLinearTeams(teams)
-          setCreateTeamId((current) => current ?? teams[0]?.id ?? null)
-        } else {
-          setLinearTeams([])
-          setCreateTeamId(null)
-        }
+        setLinearTeams(teams)
+        setCreateTeamId((current) => current ?? teams[0]?.id ?? null)
       })
       .catch(() => {
         if (!stale) {
@@ -215,10 +198,16 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
     return () => {
       stale = true
     }
-  }, [client, hostedRepos, provider, showCreateTask, taskStateHydrated, tasksSupported])
-
+  }, [
+    hostedRepos,
+    provider,
+    showCreateTask,
+    taskLinearOperations,
+    taskStateHydrated,
+    tasksSupported
+  ])
   useEffect(() => {
-    if (!tasksSupported || !linearMetadataItem || !client) {
+    if (!tasksSupported || !linearMetadataItem || !taskLinearOperations) {
       setLinearStates([])
       setLinearCommentDraft('')
       setLinearSubIssueTitle('')
@@ -228,21 +217,13 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
     setLinearStatesLoading(true)
     setLinearCommentDraft('')
     setLinearSubIssueTitle('')
-    const baseParams = {
-      teamId: linearMetadataItem.source.team.id,
-      workspaceId: linearMetadataItem.source.workspaceId
-    }
-    void client
-      .sendRequest('linear.teamStates', baseParams)
-      .then((statesResponse) => {
+    void taskLinearOperations
+      .teamStates(taskLinearTarget(linearMetadataItem))
+      .then((states) => {
         if (stale) {
           return
         }
-        if (isSuccess(statesResponse)) {
-          setLinearStates(statesResponse.result as LinearState[])
-        } else {
-          setLinearStates([])
-        }
+        setLinearStates(states)
       })
       .catch(() => {
         if (!stale) {
@@ -257,42 +238,28 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
     return () => {
       stale = true
     }
-  }, [client, linearMetadataItem, tasksSupported])
-
+  }, [linearMetadataItem, taskLinearOperations, tasksSupported])
   useEffect(() => {
-    if (!actionItem) {
-      setItemTitleDraft('')
-      setItemBodyDraft('')
-      setItemCommentDraft('')
-      setItemAddLabelsDraft('')
-      setItemRemoveLabelsDraft('')
-      setItemAddAssigneesDraft('')
-      setItemRemoveAssigneesDraft('')
-      setItemReviewersDraft('')
-      setItemReplyDrafts({})
-      setExpandedPrFilePath(null)
-      setPrFileContents({})
-      setPrFileLoadingPath(null)
-      setPrFileCommentDrafts({})
-      setExpandedResolvedCommentGroups(new Set())
-      return
-    }
-    setItemTitleDraft(actionItem.title)
-    setItemBodyDraft('')
-    setItemCommentDraft('')
-    setItemAddLabelsDraft('')
-    setItemRemoveLabelsDraft('')
-    setItemAddAssigneesDraft('')
-    setItemRemoveAssigneesDraft('')
-    setItemReviewersDraft('')
-    setItemReplyDrafts({})
-    setExpandedPrFilePath(null)
-    setPrFileContents({})
-    setPrFileLoadingPath(null)
-    setPrFileCommentDrafts({})
-    setExpandedResolvedCommentGroups(new Set())
-  }, [actionItem])
-  return Object.assign(model, { refreshGitHubProject, setTaskCopyFeedbackRootRef })
+    resetActionItemDrafts(actionItem, {
+      updateTitle: setItemTitleDraft,
+      updateBody: setItemBodyDraft,
+      updateComment: setItemCommentDraft,
+      updateAddLabels: setItemAddLabelsDraft,
+      updateRemoveLabels: setItemRemoveLabelsDraft,
+      updateAddAssignees: setItemAddAssigneesDraft,
+      updateRemoveAssignees: setItemRemoveAssigneesDraft,
+      updateReviewers: setItemReviewersDraft,
+      updateReplies: setItemReplyDrafts,
+      updateExpandedFile: setExpandedPrFilePath,
+      updateFileComments: setPrFileCommentDrafts,
+      updateResolvedGroups: setExpandedResolvedCommentGroups,
+      clearFileContents: clearPrFileContents
+    })
+  }, [actionItem, clearPrFileContents])
+  return Object.assign(model, {
+    refreshGitHubProject,
+    setTaskCopyFeedbackRootRef
+  })
 }
 
 export type ListAndDetailEffectsModel = ReturnType<typeof useMobileTasksListAndDetailEffects>

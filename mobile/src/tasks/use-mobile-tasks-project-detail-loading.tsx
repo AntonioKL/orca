@@ -1,13 +1,7 @@
 import type { ItemDetailLoadingModel } from './use-mobile-tasks-item-detail-loading'
 import { useEffect } from './mobile-tasks-dependencies'
 import {
-  type DetailComment,
-  type GitHubAssignableUser,
-  type GitHubDetailCheck,
-  type GitHubDetailFile,
-  type GitHubPRReviewSummary,
   editableProjectFields,
-  isSuccess,
   projectFieldDraftValue,
   projectRowType,
   splitRepositorySlug
@@ -16,14 +10,12 @@ import {
 export function useMobileTasksProjectDetailLoading(model: ItemDetailLoadingModel) {
   const {
     activeGitHubProjectHost,
-    client,
+    clearPrFileContents,
     githubProjectTable,
     projectRowDetailRefreshSeq,
     projectRowItem,
     setExpandedPrFilePath,
     setPrFileCommentDrafts,
-    setPrFileContents,
-    setPrFileLoadingPath,
     setProjectBodyDraft,
     setProjectCommentDraft,
     setProjectEditingCommentDraft,
@@ -34,6 +26,7 @@ export function useMobileTasksProjectDetailLoading(model: ItemDetailLoadingModel
     setProjectRowDetailError,
     setProjectRowDetailLoading,
     setProjectTitleDraft,
+    taskProjectReadOperations,
     tasksSupported
   } = model
   useEffect(() => {
@@ -48,8 +41,7 @@ export function useMobileTasksProjectDetailLoading(model: ItemDetailLoadingModel
       setProjectEditingCommentDraft('')
       setProjectReviewersDraft('')
       setExpandedPrFilePath(null)
-      setPrFileContents({})
-      setPrFileLoadingPath(null)
+      clearPrFileContents()
       setPrFileCommentDrafts({})
       setProjectFieldDrafts({})
       return
@@ -64,8 +56,7 @@ export function useMobileTasksProjectDetailLoading(model: ItemDetailLoadingModel
     setProjectEditingCommentDraft('')
     setProjectReviewersDraft('')
     setExpandedPrFilePath(null)
-    setPrFileContents({})
-    setPrFileLoadingPath(null)
+    clearPrFileContents()
     setPrFileCommentDrafts({})
     setProjectFieldDrafts(
       Object.fromEntries(
@@ -78,7 +69,13 @@ export function useMobileTasksProjectDetailLoading(model: ItemDetailLoadingModel
     setProjectRowDetail(null)
     setProjectRowDetailError('')
 
-    if (!tasksSupported || !client || !type || !slug || !projectRowItem.content.number) {
+    if (
+      !tasksSupported ||
+      !taskProjectReadOperations ||
+      !type ||
+      !slug ||
+      !projectRowItem.content.number
+    ) {
       setProjectRowDetailLoading(false)
       return
     }
@@ -86,71 +83,24 @@ export function useMobileTasksProjectDetailLoading(model: ItemDetailLoadingModel
     let stale = false
     setProjectRowDetailLoading(true)
 
-    void client
-      .sendRequest(
-        'github.project.workItemDetailsBySlug',
-        {
-          owner: slug.owner,
-          repo: slug.repo,
-          host: activeGitHubProjectHost,
-          number: projectRowItem.content.number,
-          type
-        },
-        { timeoutMs: 30_000 }
-      )
-      .then((response) => {
+    void taskProjectReadOperations
+      .loadItemDetail({
+        owner: slug.owner,
+        repo: slug.repo,
+        host: activeGitHubProjectHost,
+        number: projectRowItem.content.number,
+        type
+      })
+      .then((details) => {
         if (stale) {
           return
         }
-        if (!isSuccess(response)) {
-          throw new Error(response.error.message)
-        }
-        const result = response.result as
-          | {
-              ok: true
-              details: {
-                body?: string
-                comments?: DetailComment[]
-                item?: {
-                  labels?: string[]
-                  reviewDecision?: string | null
-                  reviewRequests?: GitHubAssignableUser[]
-                  latestReviews?: GitHubPRReviewSummary[]
-                }
-                assignees?: string[]
-                headSha?: string
-                baseSha?: string
-                pullRequestId?: string
-                checks?: GitHubDetailCheck[]
-                files?: Array<{
-                  path: string
-                  oldPath?: string
-                  status?: GitHubDetailFile['status']
-                  additions?: number
-                  deletions?: number
-                  isBinary?: boolean
-                  viewerViewedState?: 'DISMISSED' | 'VIEWED' | 'UNVIEWED'
-                }>
-              }
-            }
-          | { ok: false; error: { message: string } }
-        if (!result.ok) {
-          throw new Error(result.error.message)
-        }
         setProjectRowDetail({
           provider: 'github',
-          body: result.details.body ?? '',
-          comments: result.details.comments ?? [],
-          labels: result.details.item?.labels ?? projectRowItem.content.labels.map((l) => l.name),
-          assignees: result.details.assignees ?? [],
-          reviewDecision: result.details.item?.reviewDecision,
-          reviewRequests: result.details.item?.reviewRequests ?? [],
-          latestReviews: result.details.item?.latestReviews ?? [],
-          headSha: result.details.headSha,
-          baseSha: result.details.baseSha,
-          pullRequestId: result.details.pullRequestId,
-          checks: result.details.checks ?? [],
-          files: result.details.files ?? []
+          ...details,
+          labels: details.labels ?? projectRowItem.content.labels.map((label) => label.name),
+          reviewRequests: details.reviewRequests ?? [],
+          latestReviews: details.latestReviews ?? []
         })
       })
       .catch((err) => {
@@ -169,13 +119,14 @@ export function useMobileTasksProjectDetailLoading(model: ItemDetailLoadingModel
     }
   }, [
     activeGitHubProjectHost,
-    client,
+    clearPrFileContents,
     githubProjectTable,
     projectRowDetailRefreshSeq,
     projectRowItem,
+    taskProjectReadOperations,
     tasksSupported
   ])
-  return model
+  return Object.assign(model, {})
 }
 
 export type ProjectDetailLoadingModel = ReturnType<typeof useMobileTasksProjectDetailLoading>

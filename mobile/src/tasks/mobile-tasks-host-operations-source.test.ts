@@ -1,112 +1,116 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { readMobileTasksSourceFamily } from './mobile-tasks-source-family.test-support'
 
-const tasksRouteSource = readFileSync(
-  new URL('../../app/h/[hostId]/tasks.tsx', import.meta.url),
-  'utf8'
-)
+const tasksSource = readMobileTasksSourceFamily()
+
+/** Every host call the Tasks composition makes goes through a typed operations
+ *  object; the RPC method names live only in the adapter modules. */
+const HOST_RPC_METHODS = [
+  'github.addIssueComment',
+  'github.addPRReviewComment',
+  'github.addPRReviewCommentReply',
+  'github.countWorkItems',
+  'github.createIssue',
+  'github.listAssignableUsers',
+  'github.listLabels',
+  'github.listWorkItems',
+  'github.mergePR',
+  'github.prChecks',
+  'github.prFileContents',
+  'github.project.listAccessible',
+  'github.project.listAssignableUsersBySlug',
+  'github.project.listIssueTypesBySlug',
+  'github.project.listLabelsBySlug',
+  'github.project.listViews',
+  'github.project.resolveRef',
+  'github.project.viewTable',
+  'github.project.workItemDetailsBySlug',
+  'github.repoSlug',
+  'github.requestPRReviewers',
+  'github.rerunPRChecks',
+  'github.resolveReviewThread',
+  'github.setPRFileViewed',
+  'github.updateIssue',
+  'github.updatePR',
+  'github.updatePRState',
+  'github.workItemDetails',
+  'gitlab.addIssueComment',
+  'gitlab.addMRComment',
+  'gitlab.createIssue',
+  'gitlab.listWorkItems',
+  'gitlab.mergeMR',
+  'gitlab.todos',
+  'gitlab.updateIssue',
+  'gitlab.updateMR',
+  'gitlab.updateMRState',
+  'gitlab.workItemDetails',
+  'linear.addIssueComment',
+  'linear.connect',
+  'linear.createIssue',
+  'linear.getIssue',
+  'linear.issueComments',
+  'linear.listIssues',
+  'linear.listTeams',
+  'linear.searchIssues',
+  'linear.selectWorkspace',
+  'linear.status',
+  'linear.teamStates',
+  'linear.updateIssue',
+  'preflight.detectAgents',
+  'preflight.detectRemoteAgents',
+  'repo.hooks',
+  'repo.list',
+  'repo.searchRefs',
+  'repo.update',
+  'settings.update',
+  'ssh.connect',
+  'ssh.getState',
+  'status.get',
+  'ui.set'
+] as const
+
+const OPERATION_CALLS = [
+  'taskReadOperations.bootstrap()',
+  'taskPreferenceOperations.updateSettings(',
+  'taskItemMutationOperations.setClosed(',
+  'taskItemMutationOperations.updateMetadata(',
+  'taskItemReviewOperations.addComment(',
+  'taskItemReviewOperations.requestReviewers(',
+  'taskItemReviewOperations.resolveThread(',
+  'taskItemReviewOperations.replyReviewComment(',
+  'taskItemReviewOperations.merge(',
+  'taskItemFileOperations.refreshChecks(',
+  'taskItemFileOperations.rerunChecks(',
+  'taskItemFileOperations.setFileViewed(',
+  'taskItemFileOperations.loadFileContents(',
+  'taskItemFileOperations.addInlineComment(',
+  'taskLinearOperations.updateState(',
+  'taskLinearOperations.addComment(',
+  'taskLinearOperations.createSubIssue(',
+  'taskLinearOperations.createIssue(',
+  'taskProviderWriteOperations.createIssue(',
+  'taskProviderWriteOperations.updateIssueSource(',
+  '.listSparsePresets(',
+  '.saveSparsePreset(',
+  'taskWorkspaceCreationOperations.readRuntimeSettings()',
+  'taskWorkspaceCreationOperations.resolvePrBase(',
+  'taskWorkspaceCreationOperations.resolveMrBase(',
+  '.createWorkspaceFromSource('
+] as const
 
 describe('mobile tasks host operations', () => {
   it('keeps bootstrap and preferences behind injectable typed boundaries', () => {
-    expect(tasksRouteSource).toContain('readOperations')
-    expect(tasksRouteSource).toContain('preferenceOperations')
-    expect(tasksRouteSource).toContain('listOperations')
-    expect(tasksRouteSource).toContain('detailOperations')
-    expect(tasksRouteSource).toContain('itemMutationOperations')
-    expect(tasksRouteSource).toContain('itemReviewOperations')
-    expect(tasksRouteSource).toContain('itemFileOperations')
-    expect(tasksRouteSource).toContain('linearOperations')
-    expect(tasksRouteSource).toContain('providerWriteOperations')
-    expect(tasksRouteSource).toContain('projectReadOperations')
-    expect(tasksRouteSource).toContain('workspaceCreationOperations')
-    expect(tasksRouteSource).toContain('taskReadOperations.bootstrap()')
-    expect(tasksRouteSource).toContain('taskPreferenceOperations.updateSettings(')
-    expect(tasksRouteSource).not.toContain("sendRequest('status.get')")
-    expect(tasksRouteSource).not.toContain("sendRequest('repo.list')")
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.status')")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.repoSlug'")
-    expect(tasksRouteSource).not.toContain("sendRequest('settings.update'")
-    expect(tasksRouteSource).not.toContain("sendRequest('ui.set'")
-    expect(tasksRouteSource).not.toContain("sendRequest('repo.searchRefs'")
-    expect(tasksRouteSource).not.toContain("sendRequest('ssh.getState'")
-    expect(tasksRouteSource).not.toContain("sendRequest('ssh.connect'")
-    expect(tasksRouteSource).not.toContain("sendRequest('preflight.detectAgents'")
-    expect(tasksRouteSource).not.toContain("sendRequest('preflight.detectRemoteAgents'")
-    expect(tasksRouteSource).not.toContain("sendRequest('repo.hooks'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.listWorkItems'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.countWorkItems'")
-    expect(tasksRouteSource).not.toContain("sendRequest('gitlab.listWorkItems'")
-    expect(tasksRouteSource).not.toContain("sendRequest('gitlab.todos'")
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.listIssues'")
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.searchIssues'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.listLabels'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.listAssignableUsers'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.workItemDetails'")
-    expect(tasksRouteSource).not.toContain("sendRequest('gitlab.workItemDetails'")
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.getIssue'")
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.issueComments'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.project.listAccessible'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.project.listViews'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.project.resolveRef'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.project.viewTable'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.project.workItemDetailsBySlug'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.project.listLabelsBySlug'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.project.listAssignableUsersBySlug'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.project.listIssueTypesBySlug'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.updateIssue'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.updatePRState'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.updatePR'")
-    expect(tasksRouteSource).not.toContain("sendRequest('gitlab.updateIssue'")
-    expect(tasksRouteSource).not.toContain("sendRequest('gitlab.updateMRState'")
-    expect(tasksRouteSource).not.toContain("sendRequest('gitlab.updateMR'")
-    expect(tasksRouteSource).toContain('taskItemMutationOperations.setClosed(')
-    expect(tasksRouteSource).toContain('taskItemMutationOperations.updateMetadata(')
-    expect(tasksRouteSource).not.toContain("sendRequest('github.addIssueComment'")
-    expect(tasksRouteSource).not.toContain("sendRequest('gitlab.addIssueComment'")
-    expect(tasksRouteSource).not.toContain("sendRequest('gitlab.addMRComment'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.requestPRReviewers'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.resolveReviewThread'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.addPRReviewCommentReply'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.mergePR'")
-    expect(tasksRouteSource).not.toContain("sendRequest('gitlab.mergeMR'")
-    expect(tasksRouteSource).toContain('taskItemReviewOperations.addComment(')
-    expect(tasksRouteSource).toContain('taskItemReviewOperations.requestReviewers(')
-    expect(tasksRouteSource).toContain('taskItemReviewOperations.resolveThread(')
-    expect(tasksRouteSource).toContain('taskItemReviewOperations.replyReviewComment(')
-    expect(tasksRouteSource).toContain('taskItemReviewOperations.merge(')
-    expect(tasksRouteSource).not.toContain("sendRequest('github.prChecks'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.rerunPRChecks'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.setPRFileViewed'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.prFileContents'")
-    expect(tasksRouteSource).not.toContain("sendRequest('github.addPRReviewComment'")
-    expect(tasksRouteSource).toContain('taskItemFileOperations.refreshChecks(')
-    expect(tasksRouteSource).toContain('taskItemFileOperations.rerunChecks(')
-    expect(tasksRouteSource).toContain('taskItemFileOperations.setFileViewed(')
-    expect(tasksRouteSource).toContain('taskItemFileOperations.loadFileContents(')
-    expect(tasksRouteSource).toContain('taskItemFileOperations.addInlineComment(')
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.connect'")
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.listTeams'")
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.teamStates'")
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.selectWorkspace'")
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.updateIssue'")
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.addIssueComment'")
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.getIssue'")
-    expect(tasksRouteSource).not.toContain("sendRequest('linear.createIssue'")
-    expect(tasksRouteSource).toContain('taskLinearOperations.updateState(')
-    expect(tasksRouteSource).toContain('taskLinearOperations.addComment(')
-    expect(tasksRouteSource).toContain('taskLinearOperations.createSubIssue(')
-    expect(tasksRouteSource).toContain('taskLinearOperations.createIssue(')
-    expect(tasksRouteSource).not.toContain("sendRequest('github.createIssue'")
-    expect(tasksRouteSource).not.toContain("sendRequest('gitlab.createIssue'")
-    expect(tasksRouteSource).not.toContain("sendRequest('repo.update'")
-    expect(tasksRouteSource).toContain('taskProviderWriteOperations.createIssue(')
-    expect(tasksRouteSource).toContain('taskProviderWriteOperations.updateIssueSource(')
-    expect(tasksRouteSource).not.toContain('.sendRequest(')
-    expect(tasksRouteSource).toContain('.listSparsePresets(')
-    expect(tasksRouteSource).toContain('.saveSparsePreset(')
-    expect(tasksRouteSource).toContain('taskWorkspaceCreationOperations.readRuntimeSettings()')
-    expect(tasksRouteSource).toContain('taskWorkspaceCreationOperations.resolvePrBase(')
-    expect(tasksRouteSource).toContain('taskWorkspaceCreationOperations.resolveMrBase(')
-    expect(tasksRouteSource).toContain('.createWorkspaceFromSource(')
+    for (const call of OPERATION_CALLS) {
+      expect(tasksSource, `${call} must stay wired`).toContain(call)
+    }
+  })
+
+  it('leaves every raw RPC call to the adapter layer', () => {
+    expect(tasksSource).not.toContain('.sendRequest(')
+    for (const method of HOST_RPC_METHODS) {
+      expect(tasksSource, `${method} must not be named outside the adapters`).not.toContain(
+        `'${method}'`
+      )
+    }
   })
 })
