@@ -24,7 +24,7 @@ export function applyClaudeEnvPatch(
     }
   }
 
-  if (patch.CLAUDE_CONFIG_DIR) {
+  if (patch.CLAUDE_CONFIG_DIR && !baseEnv.CLAUDE_CONFIG_DIR) {
     baseEnv.CLAUDE_CONFIG_DIR = patch.CLAUDE_CONFIG_DIR
   }
   if (patch.ANTHROPIC_CUSTOM_HEADERS !== undefined) {

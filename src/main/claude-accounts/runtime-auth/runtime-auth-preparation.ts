@@ -10,6 +10,7 @@ import {
 } from '../runtime-selection'
 import { ClaudeRuntimeAuthSnapshotRestore } from './runtime-auth-snapshot-restore'
 import type { ClaudeRuntimeAuthPreparation } from './runtime-auth-types'
+import { resolveOwnedClaudeManagedAuthPath } from '../managed-auth-path'
 
 export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapshotRestore {
   protected getPreparation(target?: ClaudeAccountSelectionTarget): ClaudeRuntimeAuthPreparation {
@@ -61,6 +62,24 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
         envPatch: {},
         stripAuthEnv: true,
         provenance: `wsl:${normalizeClaudeAccountSelectionTarget(normalizedTarget).wslDistro ?? '__default__'}:system`
+      }
+    }
+    if (activeAccount?.managedAuthRuntime !== 'wsl' && activeAccount) {
+      const managedPath = resolveOwnedClaudeManagedAuthPath(
+        activeAccount.id,
+        activeAccount.managedAuthPath,
+        { adoptLegacyMarker: true }
+      )
+      if (managedPath) {
+        return {
+          configDir: managedPath,
+          runtime: 'host',
+          wslDistro: null,
+          wslLinuxConfigDir: null,
+          envPatch: { CLAUDE_CONFIG_DIR: managedPath },
+          stripAuthEnv: true,
+          provenance: `managed:${activeAccount.id}`
+        }
       }
     }
     return {

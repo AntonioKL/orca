@@ -19,7 +19,15 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
     target?: ClaudeAccountSelectionTarget
   ): Promise<ClaudeRuntimeAuthPreparation> {
     const effectiveTarget = target ?? this.getDefaultAccountSelectionTarget()
-    await this.syncForCurrentSelection(effectiveTarget)
+    const settings = this.store.getSettings()
+    const selectedId = getSelectedClaudeAccountIdForTarget(settings, effectiveTarget)
+    const selected = selectedId
+      ? settings.claudeManagedAccounts.find((account) => account.id === selectedId)
+      : null
+    // Isolated accounts are already Claude's runtime store; never copy them into ~/.claude.
+    if (!selected || selected.managedAuthRuntime === 'wsl') {
+      await this.syncForCurrentSelection(effectiveTarget)
+    }
     return this.getPreparation(effectiveTarget)
   }
 

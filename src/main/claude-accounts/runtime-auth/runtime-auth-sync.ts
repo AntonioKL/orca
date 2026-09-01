@@ -23,6 +23,13 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
       this.lastSyncedAccountId
     )
     this.managedRefreshDeferredByLivePtyAccountId = null
+    // Per-account Claude config dirs are self-contained; syncing them into the
+    // shared ~/.claude would recreate the stale-sibling race this isolation removes.
+    if (activeAccount?.managedAuthRuntime === 'host') {
+      this.clearLastWrittenRuntimeState()
+      this.lastSyncedAccountId = activeAccount.id
+      return
+    }
     const previousManagedCredentialsJson = previousAccount
       ? await this.readManagedCredentials(previousAccount)
       : null
