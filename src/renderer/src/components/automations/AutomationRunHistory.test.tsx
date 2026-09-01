@@ -196,4 +196,44 @@ describe('AutomationRunHistory keyboard navigation', () => {
 
     expect(onOpenRun).toHaveBeenCalledWith(run1)
   })
+
+  it('moves focus with the selection so Enter reaches the selected row, not the old one', async () => {
+    const onOpenRun = vi.fn()
+    const run1 = makeRun({ id: 'run-1', scheduledFor: FIRST })
+    const run2 = makeRun({ id: 'run-2', scheduledFor: LATEST })
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    roots.push(root)
+
+    await act(async () => {
+      root.render(
+        <AutomationRunHistory
+          runs={[run1, run2]}
+          automationId="a-1"
+          worktreeMap={new Map()}
+          onOpenRun={onOpenRun}
+        />
+      )
+    })
+
+    const buttons = container.querySelectorAll<HTMLButtonElement>('button[data-automation-run-id]')
+    buttons[0].focus()
+    expect(document.activeElement).toBe(buttons[0])
+
+    await act(async () => {
+      buttons[0].dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+      )
+    })
+
+    expect(buttons[1].getAttribute('data-current')).toBe('true')
+    expect(document.activeElement).toBe(buttons[1])
+
+    // Enter is passed through to the focused row, which must now be the selected one.
+    ;(document.activeElement as HTMLButtonElement).click()
+    expect(onOpenRun).toHaveBeenCalledTimes(1)
+    expect(onOpenRun).toHaveBeenCalledWith(run2)
+  })
 })

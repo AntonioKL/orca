@@ -60,6 +60,13 @@ export function AutomationRunHistory({
     selectedRunState.automationId === automationId ? selectedRunState.runId : null
   const selectedRun = runs.find((run) => run.id === selectedRunId) ?? runs[0] ?? null
 
+  const findRunRow = React.useCallback(
+    (runId: string): HTMLElement | null =>
+      containerRef.current?.querySelector<HTMLElement>(`[data-automation-run-id="${runId}"]`) ??
+      null,
+    []
+  )
+
   React.useEffect(() => {
     if (runs.length === 0 || notice) {
       return
@@ -87,25 +94,25 @@ export function AutomationRunHistory({
         if (targetRun) {
           event.preventDefault()
           setSelectedRunState({ automationId, runId: targetRun.id })
+          // Enter is left to the focused control, so focus has to follow the selection.
+          findRunRow(targetRun.id)?.focus?.({ preventScroll: true })
         }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [automationId, notice, onOpenRun, runs, selectedRun])
+  }, [automationId, findRunRow, notice, onOpenRun, runs, selectedRun])
 
   React.useEffect(() => {
     if (!selectedRunId) {
       return
     }
-    const element = containerRef.current?.querySelector<HTMLElement>(
-      `[data-automation-run-id="${selectedRunId}"]`
-    )
+    const element = findRunRow(selectedRunId)
     if (element && typeof element.scrollIntoView === 'function') {
       element.scrollIntoView({ block: 'nearest' })
     }
-  }, [selectedRunId])
+  }, [findRunRow, selectedRunId])
 
   return (
     <div ref={containerRef} className="rounded-md border border-border/50 bg-muted/20 shadow-sm">
