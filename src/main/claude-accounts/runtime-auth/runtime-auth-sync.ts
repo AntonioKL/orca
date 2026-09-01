@@ -8,6 +8,7 @@ import {
 } from '../runtime-selection'
 import { hasLiveClaudePtys } from '../live-pty-gate'
 import { isOauthTokenExpiring } from '../oauth-refresh'
+import { writeActiveClaudeKeychainCredentialsForRuntime } from '../keychain'
 import { ClaudeRuntimeAuthPreparationService } from './runtime-auth-preparation'
 
 export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
@@ -142,7 +143,17 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
       console.warn(
         '[claude-runtime-auth] Active managed account is not owned by Orca, restoring system default'
       )
-      if (this.lastSyncedAccountId !== null) {
+      if (activeAccount.managedAuthRuntime === undefined) {
+        // Legacy accounts cannot safely restore a missing managed credential;
+        // retain the shared runtime while ensuring a valid snapshot marker.
+        if (!this.readSystemDefaultSnapshot(this.getSystemDefaultSnapshotPath())) {
+          await this.captureSystemDefaultSnapshot({ force: false })
+        }
+      }
+      if (
+        this.lastSyncedAccountId !== null &&
+        (activeAccount.managedAuthRuntime !== undefined || previousAccount?.id !== activeAccount.id)
+      ) {
         if (
           previousAccount &&
           (previousAccount.id !== activeAccount.id ||
@@ -167,7 +178,15 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
       console.warn(
         '[claude-runtime-auth] Active managed account is missing or has invalid credentials, restoring system default'
       )
-      if (this.lastSyncedAccountId !== null) {
+      if (activeAccount.managedAuthRuntime === undefined) {
+        if (!this.readSystemDefaultSnapshot(this.getSystemDefaultSnapshotPath())) {
+          await this.captureSystemDefaultSnapshot({ force: false })
+        }
+      }
+      if (
+        this.lastSyncedAccountId !== null &&
+        (activeAccount.managedAuthRuntime !== undefined || previousAccount?.id !== activeAccount.id)
+      ) {
         if (
           previousAccount &&
           (previousAccount.id !== activeAccount.id ||
@@ -263,9 +282,21 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
     }
 
     this.writeRuntimeCredentials(credentialsJson)
-    // Isolated accounts are self-contained config roots. Never mirror their
-    // credentials into either active Keychain service (the legacy service is
-    // shared by all accounts and creates stale siblings).
+    // Legacy accounts predate per-account runtime isolation and still need both
+    // Keychain services for old and new Claude Code builds. Isolated accounts
+    // must never touch the shared active services.
+    if (process.platform === 'darwin' && activeAccount.managedAuthRuntime === undefined) {
+      const paths = this.pathResolver.getRuntimePaths()
+      try {
+        await writeActiveClaudeKeychainCredentialsForRuntime(credentialsJson, paths.configDir)
+      } catch (error) {
+        await this.restoreSystemDefaultSnapshot(
+          credentialsJson,
+          await this.readManagedOauthAccount(activeAccount)
+        )
+        throw error
+      }
+    }
     const managedOauthAccount = await this.readManagedOauthAccount(activeAccount)
     if (this.writeRuntimeOauthAccount(managedOauthAccount)) {
       this.lastWrittenOauthAccount = managedOauthAccount

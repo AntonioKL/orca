@@ -77,7 +77,7 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
         provenance: `wsl:${normalizeClaudeAccountSelectionTarget(normalizedTarget).wslDistro ?? '__default__'}:system`
       }
     }
-    if (activeAccount?.managedAuthRuntime !== 'wsl' && activeAccount) {
+    if (activeAccount?.managedAuthRuntime === 'host') {
       const managedPath = resolveOwnedClaudeManagedAuthPath(
         activeAccount.id,
         activeAccount.managedAuthPath,
@@ -101,14 +101,14 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
       wslDistro: null,
       wslLinuxConfigDir: null,
       envPatch: paths.envPatch,
-      stripAuthEnv: Boolean(activeAccountId && activeAccount?.managedAuthRuntime !== 'wsl'),
+      stripAuthEnv: Boolean(activeAccountId && activeAccount?.managedAuthRuntime === 'host'),
       managedRefreshDeferredByLivePty: Boolean(
         activeAccountId &&
-        activeAccount?.managedAuthRuntime !== 'wsl' &&
+        activeAccount?.managedAuthRuntime === 'host' &&
         this.managedRefreshDeferredByLivePtyAccountId === activeAccountId
       ),
       provenance:
-        activeAccountId && activeAccount?.managedAuthRuntime !== 'wsl'
+        activeAccountId && activeAccount?.managedAuthRuntime === 'host'
           ? `managed:${activeAccountId}`
           : 'system'
     }

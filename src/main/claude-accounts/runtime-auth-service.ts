@@ -14,8 +14,9 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
   constructor(store: Store) {
     super(store)
     this.initializeLastSyncedState()
-    void this.safeSyncForCurrentSelection()
-    void this.migrateLegacySharedAuth()
+    // Sync the selected runtime first; migration must not race a cleanup and
+    // repopulate a managed account from a stale shared Keychain entry.
+    void this.safeSyncForCurrentSelection().finally(() => this.migrateLegacySharedAuth())
   }
 
   async prepareForClaudeLaunch(
@@ -28,7 +29,32 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
       ? settings.claudeManagedAccounts.find((account) => account.id === selectedId)
       : null
     // Isolated accounts are already Claude's runtime store; never copy them into ~/.claude.
-    if (!selected || selected.managedAuthRuntime === 'wsl') {
+    // Legacy accounts with valid credentials still use the shared runtime and
+    // must be synchronized before launch; missing legacy credentials are left
+    // for the background cleanup path to handle without a second restore.
+    const legacyCredentials =
+      selected && selected.managedAuthRuntime === undefined
+        ? await this.readManagedCredentials(selected)
+        : null
+    let cleanupMissingLegacy = false
+    if (selected && selected.managedAuthRuntime === undefined && legacyCredentials === null) {
+      const runtimeCredentials = this.readRuntimeCredentialsFile()
+      const managedOauth = await this.readManagedOauthAccount(selected)
+      const runtimeMatches = this.runtimeCredentialsBelongToAccount(
+        runtimeCredentials,
+        selected,
+        managedOauth
+      )
+      cleanupMissingLegacy = runtimeMatches
+    }
+    if (
+      !selected ||
+      selected.managedAuthRuntime === 'wsl' ||
+      (selected.managedAuthRuntime === undefined &&
+        legacyCredentials !== null &&
+        this.isValidCredentialsJsonObject(legacyCredentials)) ||
+      cleanupMissingLegacy
+    ) {
       await this.syncForCurrentSelection(effectiveTarget)
     }
     return this.getPreparation(effectiveTarget)
