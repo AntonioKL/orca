@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { CLIPBOARD_IMAGE_TOO_LARGE_ERROR } from '../../../src/shared/clipboard-image'
 import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState } from '../transport/types'
@@ -46,7 +46,9 @@ export function useMobileNativeChatImageUpload(args: {
   const [isAttaching, setIsAttaching] = useState(false)
   const attachingCount = useRef(0)
   const connStateRef = useRef(connState)
-  connStateRef.current = connState
+  useLayoutEffect(() => {
+    connStateRef.current = connState
+  }, [connState])
 
   const attachImage = useCallback(
     async (source: MobileImageSource): Promise<void> => {

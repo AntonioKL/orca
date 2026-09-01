@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type {
   AgentSessionHistoryResult,
   AgentSessionSubscribeEvent
@@ -37,7 +37,9 @@ export function useMobileStructuredAgentState(args: {
   const [state, setState] = useState<StructuredAgentSessionState>(EMPTY_STRUCTURED_AGENT_SESSION)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const stateRef = useRef(state)
-  stateRef.current = state
+  useLayoutEffect(() => {
+    stateRef.current = state
+  }, [state])
 
   const apply = useCallback((action: StructuredAgentSessionAction) => {
     setState((current) => reduceStructuredAgentSession(current, action))
