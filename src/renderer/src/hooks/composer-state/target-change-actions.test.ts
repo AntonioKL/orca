@@ -15,26 +15,32 @@ const readyOption: ProjectHostSetupOption = {
   path: '/checkouts/side'
 }
 
-function renderTargetChangeActions() {
+function renderTargetChangeActions(currentRepoId = '') {
   const spies = {
     setRepoId: vi.fn(),
     setProjectError: vi.fn(),
     setSelectedProjectHostSetupOverrideId: vi.fn(),
-    setSelectedProjectIdOverride: vi.fn()
+    setSelectedProjectIdOverride: vi.fn(),
+    setSparseEnabled: vi.fn(),
+    setSparseSelectedPresetId: vi.fn(),
+    setBaseBranch: vi.fn()
   }
+  const retargetGitHubPrStartPointSelection = vi.fn(
+    (_selection: unknown, repoId: string) => `retargeted:${repoId}`
+  )
+  const smartGitHubPrStartPointSelectionRef = { current: 'pr-selection' as unknown }
   const noop = vi.fn()
   const { result } = renderHook(() =>
     useTargetChangeActions({
       baseBranch: undefined,
       branchAutoNameRef: { current: null },
-      decisions: { retargetGitHubPrStartPointSelection: (selection: unknown) => selection },
+      decisions: { retargetGitHubPrStartPointSelection },
       folderSourceRepos: [],
       hostOptions: [],
       linkedWorkItem: null,
       projectHostSetupOptions: [readyOption],
-      repoId: '',
+      repoId: currentRepoId,
       selectedRepoProjectId: 'github:stablyai/orca',
-      setBaseBranch: noop,
       setBranchNameOverride: noop,
       setBranchNameOverridePreservesNameEdits: noop,
       setCompareBaseRef: noop,
@@ -49,14 +55,12 @@ function renderTargetChangeActions() {
       setReuseEligibleBranch: noop,
       setReuseSelectedBranch: noop,
       setSparseDirectories: noop,
-      setSparseEnabled: noop,
-      setSparseSelectedPresetId: noop,
       setStartFromResetHint: noop,
-      smartGitHubPrStartPointSelectionRef: { current: null },
+      smartGitHubPrStartPointSelectionRef,
       ...spies
     } as unknown as Parameters<typeof useTargetChangeActions>[0])
   )
-  return { actions: result.current, spies }
+  return { actions: result.current, spies, smartGitHubPrStartPointSelectionRef }
 }
 
 describe('choosing a run target closes the pending checkout question (STA-6080)', () => {
@@ -76,5 +80,35 @@ describe('choosing a run target closes the pending checkout question (STA-6080)'
     actions.handleRepoChange('orca-main')
 
     expect(spies.setSelectedProjectIdOverride).toHaveBeenCalledWith(null)
+  })
+})
+
+/**
+ * Two setups of one project can carry the same repo id (the same repo registered on two hosts), so
+ * switching run target resolves to the repo the composer is already on and trips `handleRepoChange`'s
+ * same-id early return. `forceResetStartFrom: true` at that call is the only thing that still clears
+ * the repo-scoped sparse selection and retargets an in-flight PR start point onto the new host.
+ */
+describe('switching run target to a setup with the same repo id', () => {
+  it('still resets repo-scoped state past the same-id early return', () => {
+    const { actions, spies, smartGitHubPrStartPointSelectionRef } =
+      renderTargetChangeActions('orca-side')
+
+    actions.handleProjectHostSetupChange('setup-side')
+
+    expect(spies.setSparseEnabled).toHaveBeenCalledWith(false)
+    expect(spies.setSparseSelectedPresetId).toHaveBeenCalledWith(null)
+    expect(spies.setBaseBranch).toHaveBeenCalledWith(undefined)
+    expect(smartGitHubPrStartPointSelectionRef.current).toBe('retargeted:orca-side')
+  })
+
+  it('keeps the task source, which is what preserveStartFrom protects', () => {
+    const { actions, spies } = renderTargetChangeActions('orca-side')
+
+    actions.handleProjectHostSetupChange('setup-side')
+
+    // preserveStartFrom keeps the setup override and the linked source; only repo-scoped state goes.
+    expect(spies.setSelectedProjectHostSetupOverrideId).toHaveBeenCalledTimes(1)
+    expect(spies.setSelectedProjectHostSetupOverrideId).toHaveBeenCalledWith('setup-side')
   })
 })
