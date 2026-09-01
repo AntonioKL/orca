@@ -117,6 +117,10 @@ export abstract class DaemonPtySessionShutdown extends DaemonPtySessionSpawn {
         !coldRestore &&
         (detection?.status === 'unreadable' ||
           (detection?.status === 'restored' && detection.hasUnreadableRecovery))
+      // Why: suspend before kill so onExit cannot mark sleep history clean; fenced refusals reopen it.
+      if (coldRestore || suspendHistory) {
+        this.historyManager?.suspendSession(id)
+      }
     }
     const result = await this.client.request(
       'kill',
@@ -129,14 +133,14 @@ export abstract class DaemonPtySessionShutdown extends DaemonPtySessionSpawn {
       remainingDaemonRequestTimeoutMs(opts.deadlineMs)
     )
     if (isPtyShutdownFenceUnavailable(result)) {
+      if (opts.keepHistory && (coldRestore || suspendHistory)) {
+        this.historyManager?.reopenSession(id)
+      }
       return result as PtyShutdownResult
     }
     if (coldRestore) {
       this.coldRestoreCache.set(id, coldRestore)
       this.sleepRestoreSessionIds.add(id)
-      this.historyManager?.suspendSession(id)
-    } else if (suspendHistory) {
-      this.historyManager?.suspendSession(id)
     }
     this.activeSessionIds.delete(id)
     this.clearSessionAwaitingDaemonRecovery(id)
