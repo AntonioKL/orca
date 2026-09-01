@@ -23,7 +23,10 @@ import type {
   RuntimeMobileSessionTabGroup,
   RuntimeMobileSessionTerminalClientTab
 } from '../../../shared/runtime-types'
-import { hostSnapshotAffirmsClientHostedPages } from './host-session-snapshot-authority'
+import {
+  hostSnapshotAffirmsClientHostedPages,
+  hostSnapshotAffirmsWorktreeContents
+} from './host-session-snapshot-authority'
 import type {
   BrowserCertificateFailure,
   BrowserPage,
@@ -43,12 +46,16 @@ import {
   buildRetiredTerminalTabStateSweepPatch,
   type RetiredTerminalTabSweepState
 } from '../store/slices/retired-terminal-tab-state-sweep'
+import { terminalTabHasReconnectablePty } from '../store/slices/terminal-orphan-helpers'
 import { getRemoteRuntimePtyEnvironmentId, toRemoteRuntimePtyId } from './runtime-terminal-stream'
 import { sanitizeTerminalLayoutPaneTitlesForLabels } from '@/lib/terminal-pane-title-sanitization'
 import { terminalLayoutEqual } from '@/lib/terminal-layout-equality'
 import { normalizeTerminalLayoutPtyOwnership } from '@/components/terminal-pane/terminal-layout-pty-ownership'
 import { isClientAuthoritativeAgentStatusPane } from '@/components/terminal-pane/renderer-owned-agent-status-registry'
-import { getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import {
+  getExplicitRuntimeEnvironmentIdForWorktree,
+  type WorktreeRuntimeOwnerState
+} from '@/lib/worktree-runtime-owner'
 import {
   clearHostSessionMirrorHydration,
   markHostSessionMirrorHydrated,
@@ -133,6 +140,7 @@ import {
 } from '../../../shared/runtime-browser-placement'
 
 const WEB_SESSION_GROUP_PREFIX = 'web-session-tabs:'
+const REMOTE_NULL_PTY_TAB_GRACE_MS = 30_000
 export const WEB_SESSION_TABS_VISIBILITY_RESUME_STAGGER_MS = 100
 
 type SessionTabsStreamEvent =
@@ -339,13 +347,19 @@ export type WebSessionTabsSyncState = Pick<
       | 'automaticAgentResumeClaimsByTabId'
       | 'migrationUnsupportedByPtyId'
       | 'paneForegroundAgentByPaneKey'
+      | 'lastKnownRelayPtyIdByTabId'
+      | 'deferredSshSessionIdsByTabId'
+      | 'pendingReconnectPtyIdByTabId'
       | 'pendingStartupByTabId'
       | 'recentlyClosedAgentStatusTabIds'
       | 'recentlyRetiredAgentStatusPaneKeys'
       | 'retainedAgentsByPaneKey'
       | 'retentionSuppressedPaneKeys'
+      | 'unverifiedPtyLossTabIds'
     >
   >
+
+export type WebSessionTabsSyncInputState = WebSessionTabsSyncState & WorktreeRuntimeOwnerState
 
 type WebSessionTabsBatchRecordKey =
   | 'activeBrowserTabIdByWorktree'
@@ -1378,7 +1392,11 @@ function shouldReplaceTerminalTab(
   environmentId: string,
   nextRemotePtyIds: ReadonlySet<string>,
   nextMirroredTerminalIds: ReadonlySet<string>,
-  exactProvisionalHandoffs: ReadonlySet<string>
+  exactProvisionalHandoffs: ReadonlySet<string>,
+  now: number,
+  hasReconnectEvidence: boolean,
+  hostAffirmsWorktreeContents: boolean,
+  tabBelongsToEnvironment: boolean
 ): boolean {
   if (exactProvisionalHandoffs.has(tab.id)) {
     // Why: agent kind is not session identity; retire only the provisional tab
@@ -1389,8 +1407,22 @@ function shouldReplaceTerminalTab(
     // Why: host snapshots are authoritative for mirrored tabs; replace old mirrors even when the next surface still awaits a stream handle, else parity drifts.
     return true
   }
-  if (tab.pendingActivationSpawn && tab.ptyId === null && nextRemotePtyIds.size > 0) {
-    return true
+  if (tab.ptyId === null) {
+    if (hasReconnectEvidence) {
+      return false
+    }
+    if (tab.pendingActivationSpawn && tabBelongsToEnvironment && nextRemotePtyIds.size > 0) {
+      return true
+    }
+    // Why: a worktree has one execution host, so null-PTY placeholders inherit this
+    // snapshot's owner; after the bounded create window, omission proves they are ghosts.
+    if (
+      hostAffirmsWorktreeContents &&
+      tabBelongsToEnvironment &&
+      now - tab.createdAt >= REMOTE_NULL_PTY_TAB_GRACE_MS
+    ) {
+      return true
+    }
   }
   if (!isRuntimeTerminalTabForEnvironment(tab, environmentId)) {
     return false
@@ -1400,6 +1432,23 @@ function shouldReplaceTerminalTab(
     tab.ptyId !== null &&
     (nextRemotePtyIds.has(tab.ptyId) ||
       nextMirroredTerminalIds.has(toWebTerminalSurfaceTabId(tab.id)))
+  )
+}
+
+function nullPtyTabHasRetentionEvidence(state: WebSessionTabsSyncState, tab: TerminalTab): boolean {
+  if (state.unverifiedPtyLossTabIds?.[tab.id]) {
+    return true
+  }
+  return terminalTabHasReconnectablePty(
+    {
+      ptyIdsByTabId: state.ptyIdsByTabId,
+      lastKnownRelayPtyIdByTabId: state.lastKnownRelayPtyIdByTabId ?? {},
+      deferredSshSessionIdsByTabId: state.deferredSshSessionIdsByTabId ?? {},
+      pendingReconnectPtyIdByTabId: state.pendingReconnectPtyIdByTabId ?? {},
+      unverifiedPtyLossTabIds: state.unverifiedPtyLossTabIds ?? {}
+    },
+    tab.id,
+    tab.ptyId
   )
 }
 
@@ -3023,7 +3072,7 @@ function toVisibleTabType(tab: Tab): WebSessionTabsSyncState['activeTabType'] {
 }
 
 function applyWebSessionTabsSnapshotWithContext(
-  state: WebSessionTabsSyncState,
+  state: WebSessionTabsSyncInputState,
   rawSnapshot: RuntimeMobileSessionTabsResult,
   environmentId: string,
   now = Date.now(),
@@ -3136,6 +3185,9 @@ function applyWebSessionTabsSnapshotWithContext(
     }
   }
   const exactProvisionalHandoffs = new Set(provisionalHandoffHostTabIds.keys())
+  const snapshotAffirmsWorktreeContents = hostSnapshotAffirmsWorktreeContents(snapshot)
+  const nullPtyTabsBelongToEnvironment =
+    getExplicitRuntimeEnvironmentIdForWorktree(state, worktreeId) === environmentId
   const retainedTerminalTabs = reconcilesNonAgentTabs
     ? currentTerminalTabs.filter(
         (tab) =>
@@ -3144,7 +3196,11 @@ function applyWebSessionTabsSnapshotWithContext(
             environmentId,
             nextRemotePtyIds,
             nextMirroredTerminalIds,
-            exactProvisionalHandoffs
+            exactProvisionalHandoffs,
+            now,
+            nullPtyTabHasRetentionEvidence(state, tab),
+            snapshotAffirmsWorktreeContents,
+            nullPtyTabsBelongToEnvironment
           )
       )
     : currentTerminalTabs
@@ -4308,7 +4364,7 @@ function applyWebSessionTabsSnapshotWithContext(
 }
 
 export function applyWebSessionTabsSnapshot(
-  state: WebSessionTabsSyncState,
+  state: WebSessionTabsSyncInputState,
   rawSnapshot: RuntimeMobileSessionTabsResult,
   environmentId: string,
   now = Date.now(),
@@ -4325,7 +4381,7 @@ export function applyWebSessionTabsSnapshot(
 }
 
 export function applyWebSessionTabsSnapshots(
-  state: WebSessionTabsSyncState,
+  state: WebSessionTabsSyncInputState,
   snapshots: readonly RuntimeMobileSessionTabsResult[],
   environmentId: string,
   now = Date.now()
@@ -4360,7 +4416,7 @@ export function applyWebSessionTabsSnapshots(
 }
 
 export function applyFreshWebSessionTabsSnapshot(
-  state: WebSessionTabsSyncState,
+  state: WebSessionTabsSyncInputState,
   snapshot: RuntimeMobileSessionTabsResult,
   environmentId: string,
   now = Date.now()
@@ -4372,7 +4428,7 @@ export function applyFreshWebSessionTabsSnapshot(
 }
 
 export function applyFreshWebSessionTabsSnapshots(
-  state: WebSessionTabsSyncState,
+  state: WebSessionTabsSyncInputState,
   snapshots: readonly RuntimeMobileSessionTabsResult[],
   environmentId: string,
   now = Date.now()
@@ -4411,7 +4467,7 @@ function decideWebSessionTabsSnapshotOperations(
 }
 
 function applyWebSessionTabsSnapshotOperations(
-  state: WebSessionTabsSyncState,
+  state: WebSessionTabsSyncInputState,
   operations: readonly DecidedWebSessionTabsSnapshotOperation[]
 ): WebSessionTabsSyncState | Partial<WebSessionTabsSyncState> {
   let nextState = state
