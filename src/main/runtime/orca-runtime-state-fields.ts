@@ -64,19 +64,6 @@ export class OrcaRuntimeWithStateFields extends OrcaRuntimeWithLinearCommands {
     }
   }
 
-  notifySshRelayUnavailable(targetId: string): void {
-    this.bumpSshRelayRecoveryGeneration(targetId)
-    this.invalidateSshWorktreeScanCache(targetId)
-    const worktreeIds = new Set(
-      [...this.ptysById.values()]
-        .filter((pty) => pty.connectionId === targetId)
-        .map((pty) => pty.worktreeId)
-    )
-    for (const worktreeId of worktreeIds) {
-      this.notifyMobileSessionTabsChangedNow(worktreeId, ++this.mobileSessionTabsChangeSequence)
-    }
-  }
-
   constructor(
     store: RuntimeStore | null = null,
     stats?: StatsCollector,
