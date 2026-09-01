@@ -73,6 +73,19 @@ describe('mobile native chat image preview reconciliation', () => {
     expect(findLandedImagePreviewEchoes(messages, [preview])).toEqual([])
   })
 
+  it('does not bind a glued image echo to an ordinary row with the same prefix', () => {
+    const messages = [
+      userText('ordinary', 'look at this later'),
+      userText('source', '[Image: source: /tmp/a.png]'),
+      userText('prompt', 'look at this[Image #1] is it still working?')
+    ]
+    const preview = { ...pending('pending', ['file:///a.jpg']), text: 'look at this' }
+
+    expect(findLandedImagePreviewEchoes(messages, [preview])).toEqual([
+      { pendingId: 'pending', messageId: 'prompt', images: ['file:///a.jpg'] }
+    ])
+  })
+
   it('reconciles a middle-marker echo without changing its rendered whitespace', () => {
     const messages = [
       userText('source', '[Image: source: /tmp/a.png]'),
