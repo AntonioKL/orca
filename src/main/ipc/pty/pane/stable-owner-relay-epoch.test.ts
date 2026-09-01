@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../../../providers/types'
 import { toAppSshPtyId } from '../../../providers/ssh-pty-id'
-import {
-  rememberRetiredRelayEpochOwner,
-  takeRetiredRelayEpochOwner
-} from './relay-pty-mint-epoch'
+import { rememberRetiredRelayEpochOwner, takeRetiredRelayEpochOwner } from './relay-pty-mint-epoch'
 import { spawnForStablePane, type StablePaneOwner } from './stable-owner'
 
 type EpochAwareSpawnOptions = PtySpawnOptions & { resumeProviderSession?: unknown }
@@ -239,6 +236,90 @@ describe('spawnForStablePane relay epoch gate', () => {
     })
 
     expect(harness.spawns[0]).toEqual(spawnOptions)
+  })
+
+  it('does not let a retired owner gate an unrelated later restore of the same pane', async () => {
+    const paneKey = 'tab-lifetime:55555555-5555-4555-8555-555555555555'
+    const retiredPtyId = toAppSshPtyId('remote', 'pty2:previous:1')
+    const provider = {
+      requestHostRpc: vi.fn(async () => ({ ptyIdMintEpoch: 'current' })),
+      spawn: vi.fn(async (options: EpochAwareSpawnOptions) =>
+        options.attachOnly
+          ? { id: retiredPtyId, isReattach: true }
+          : { id: toAppSshPtyId('remote', 'pty2:current:2') }
+      )
+    } as unknown as IPtyProvider
+    rememberRetiredRelayEpochOwner({
+      connectionId: 'remote',
+      paneKey,
+      ownerPtyId: retiredPtyId
+    })
+
+    await spawnForStablePane({
+      runtime: undefined,
+      provider,
+      spawnOptions: { cols: 80, rows: 24 },
+      owner: owner('pty2:previous:1'),
+      connectionId: 'remote',
+      paneKey
+    })
+
+    const secondOptions = agentSpawnOptions()
+    await spawnForStablePane({
+      runtime: undefined,
+      provider,
+      spawnOptions: secondOptions,
+      owner: null,
+      connectionId: 'remote',
+      paneKey
+    })
+    expect(provider.spawn).toHaveBeenLastCalledWith(secondOptions)
+  })
+
+  it('retains the retired owner when the first replacement spawn fails', async () => {
+    const paneKey = 'tab-retry:66666666-6666-4666-8666-666666666666'
+    const requestHostRpc = vi.fn(async () => ({ ptyIdMintEpoch: 'current' }))
+    let attempts = 0
+    const provider = {
+      requestHostRpc,
+      spawn: vi.fn(async (options: EpochAwareSpawnOptions) => {
+        if (options.attachOnly) {
+          throw new Error('not found')
+        }
+        attempts += 1
+        if (attempts === 1) {
+          throw new Error('relay replacement in progress')
+        }
+        return { id: toAppSshPtyId('remote', 'pty2:current:2') }
+      })
+    } as unknown as IPtyProvider
+    rememberRetiredRelayEpochOwner({
+      connectionId: 'remote',
+      paneKey,
+      ownerPtyId: toAppSshPtyId('remote', 'pty2:previous:1')
+    })
+
+    await expect(
+      spawnForStablePane({
+        runtime: undefined,
+        provider,
+        spawnOptions: agentSpawnOptions(),
+        owner: null,
+        connectionId: 'remote',
+        paneKey
+      })
+    ).rejects.toThrow('relay replacement in progress')
+
+    const retried = await spawnForStablePane({
+      runtime: undefined,
+      provider,
+      spawnOptions: agentSpawnOptions(),
+      owner: null,
+      connectionId: 'remote',
+      paneKey
+    })
+    expect(retried.result.agentResumeUnavailable).toBe(true)
+    expect(provider.spawn).toHaveBeenCalledTimes(2)
   })
 
   it('does not treat a new agent launch as a retired-owner resume', async () => {

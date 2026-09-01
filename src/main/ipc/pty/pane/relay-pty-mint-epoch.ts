@@ -68,7 +68,7 @@ export function rememberRetiredRelayEpochOwner(args: {
   retiredRelayOwnerByPane.set(key, args.ownerPtyId)
 }
 
-export function takeRetiredRelayEpochOwner(
+export function peekRetiredRelayEpochOwner(
   connectionId: string | null | undefined,
   paneKey: string | null | undefined
 ): string | undefined {
@@ -76,8 +76,31 @@ export function takeRetiredRelayEpochOwner(
     return undefined
   }
   const key = retiredRelayOwnerKey(connectionId, paneKey)
-  const ownerPtyId = retiredRelayOwnerByPane.get(key)
-  retiredRelayOwnerByPane.delete(key)
+  return retiredRelayOwnerByPane.get(key)
+}
+
+/** Remove a retired owner only after the replacement PTY has been committed. */
+export function consumeRetiredRelayEpochOwner(
+  connectionId: string | null | undefined,
+  paneKey: string | null | undefined,
+  ownerPtyId: string | undefined
+): void {
+  if (!connectionId || !paneKey || !ownerPtyId) {
+    return
+  }
+  const key = retiredRelayOwnerKey(connectionId, paneKey)
+  if (retiredRelayOwnerByPane.get(key) === ownerPtyId) {
+    retiredRelayOwnerByPane.delete(key)
+  }
+}
+
+/** @deprecated Use peek + consume after a successful spawn. */
+export function takeRetiredRelayEpochOwner(
+  connectionId: string | null | undefined,
+  paneKey: string | null | undefined
+): string | undefined {
+  const ownerPtyId = peekRetiredRelayEpochOwner(connectionId, paneKey)
+  consumeRetiredRelayEpochOwner(connectionId, paneKey, ownerPtyId)
   return ownerPtyId
 }
 
