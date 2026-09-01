@@ -21,6 +21,7 @@ import { StructuredAgentSessionHandoffFlowRunner } from './structured-agent-sess
 import { StructuredAgentSessionHandoffOperationGuard } from './structured-agent-session-handoff-operation-guard'
 import { StructuredAgentSessionHandoffQueue } from './structured-agent-session-handoff-queue'
 import { closeRetainedTuiOwner } from './structured-agent-session-handoff-owner-close'
+import { requestStructuredManualRecovery } from './structured-agent-session-handoff-recover'
 import { restoreStructuredAgentSessionHandoff } from './structured-agent-session-handoff-restart'
 import {
   structuredHandoffRefusal as refusal,
@@ -37,13 +38,11 @@ import type {
   StructuredAgentSessionHandoffFlowContext
 } from './structured-agent-session-handoff-types'
 import { StructuredAgentSessionHandoffState } from './structured-agent-session-handoff-state'
-
 export class StructuredAgentSessionHandoffCoordinator {
   private readonly state: StructuredAgentSessionHandoffState
   private readonly queue = new StructuredAgentSessionHandoffQueue()
   private readonly operationGuard: StructuredAgentSessionHandoffOperationGuard
   private readonly flowRunner: StructuredAgentSessionHandoffFlowRunner
-
   constructor(private readonly deps: StructuredAgentSessionHandoffDeps) {
     this.state = new StructuredAgentSessionHandoffState({
       requireRecord: (sessionId) => this.requireRecord(sessionId),
@@ -58,17 +57,12 @@ export class StructuredAgentSessionHandoffCoordinator {
       fail: (params, error) => this.fail(params, error)
     })
   }
-
   status = (sessionId: string): AgentSessionHandoffStatus => this.state.status(sessionId)
-
   drain = (): Promise<void> => this.flowRunner.drain()
-
   closeRetainedTuiOwner = (sessionId: string): Promise<boolean> =>
     this.closeRetainedOwner(sessionId)
-
   setStatus = (sessionId: string, status: AgentSessionHandoffStatus): void =>
     this.state.setStatus(sessionId, status)
-
   async request(
     callerKey: string,
     params: AgentSessionHandoffRequest
@@ -120,6 +114,30 @@ export class StructuredAgentSessionHandoffCoordinator {
         'structured_agent_session_unsupported',
         'Agent TUI handoff is unavailable on this host.'
       )
+    }
+    if (action === 'recover') {
+      const status = this.status(record.sessionId)
+      const started = await requestStructuredManualRecovery({
+        deps: this.deps,
+        operationGuard: this.operationGuard,
+        callerKey,
+        params,
+        fingerprint,
+        record,
+        status,
+        requireRecord: this.requireRecord,
+        restore: this.restore,
+        setStatus: this.setStatus
+      })
+      if (!started) {
+        return this.refuseAdmitted(
+          callerKey,
+          params,
+          'agent_session_operation_conflict',
+          'This handoff is no longer eligible for proof recovery.'
+        )
+      }
+      return this.success(record.sessionId, false)
     }
     if (action === 'retry') {
       if (!structuredHandoffRetryIsAdmissible(this.status(record.sessionId), params)) {
@@ -181,7 +199,6 @@ export class StructuredAgentSessionHandoffCoordinator {
     this.begin(callerKey, params, turnId, fingerprint)
     return this.success(record.sessionId, false)
   }
-
   async restore(sessionId: string): Promise<void> {
     await restoreStructuredAgentSessionHandoff(
       {
@@ -194,7 +211,6 @@ export class StructuredAgentSessionHandoffCoordinator {
       sessionId
     )
   }
-
   private refuseAdmitted(
     callerKey: string,
     params: AgentSessionHandoffRequest,
@@ -208,14 +224,12 @@ export class StructuredAgentSessionHandoffCoordinator {
       refusal: refusal(code, message)
     })
   }
-
   private success(
     sessionId: string,
     replayed: boolean
   ): AgentSessionMutationResult<AgentSessionHandoffResult> {
     return structuredHandoffSuccess(this.deps, sessionId, replayed, this.status(sessionId))
   }
-
   private queueAfterTurn(
     callerKey: string,
     params: AgentSessionHandoffRequest,
@@ -251,7 +265,6 @@ export class StructuredAgentSessionHandoffCoordinator {
       }
     )
   }
-
   private begin(
     callerKey: string,
     params: AgentSessionHandoffRequest,
@@ -267,7 +280,6 @@ export class StructuredAgentSessionHandoffCoordinator {
       tuiAlreadyExited
     })
   }
-
   private flowContext(): StructuredAgentSessionHandoffFlowContext {
     return createStructuredHandoffFlowContext({
       deps: this.deps,
@@ -278,7 +290,6 @@ export class StructuredAgentSessionHandoffCoordinator {
       requireRecord: (sessionId) => this.requireRecord(sessionId)
     })
   }
-
   private fail(params: AgentSessionHandoffRequest, error: unknown): void {
     const record = this.requireRecord(params.envelope.sessionId)
     this.setStatus(
@@ -286,7 +297,6 @@ export class StructuredAgentSessionHandoffCoordinator {
       failedStructuredHandoffStatus(record, params, error, this.deps.transport?.hostLabel)
     )
   }
-
   private closeRetainedOwner(sessionId: string): Promise<boolean> {
     return closeRetainedTuiOwner({
       sessionId,
@@ -296,7 +306,6 @@ export class StructuredAgentSessionHandoffCoordinator {
       releaseOwner: this.state.releaseOwner
     })
   }
-
   private requireRecord = (sessionId: string): AgentSessionRecord =>
     requireStructuredHandoffRecord(this.deps, sessionId)
 }
