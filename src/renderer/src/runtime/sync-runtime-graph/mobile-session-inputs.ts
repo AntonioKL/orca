@@ -147,7 +147,7 @@ export function buildMobileSessionWorktreeInputs(
   const activeTabId = state.activeTabId
   return {
     worktreeId,
-    worktreeInstanceId: getIndexedWorktreesById(state.worktreesByRepo, worktreeId).find(
+    worktreeInstanceId: getIndexedWorktreesById(state.worktreesByRepo ?? {}, worktreeId).find(
       (worktree) => worktree.instanceId !== undefined
     )?.instanceId,
     terminalTabs,
