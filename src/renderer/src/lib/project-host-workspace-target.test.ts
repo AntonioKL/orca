@@ -572,6 +572,26 @@ describe('STA-6080: the renderer never silently picks a checkout', () => {
     })
   })
 
+  it('ignores a pending duplicate when a ready setup exists on the explicit host', () => {
+    const resolution = resolveWorkspaceCreationTarget({
+      eligibleRepos: repos,
+      projects: [project],
+      projectHostSetups: [
+        makeSetup('setup-pending', 'github:stablyai/orca', 'local', 'orca-main', {
+          setupState: 'pending'
+        }),
+        sameHostSetups[0]
+      ],
+      projectId: 'github:stablyai/orca',
+      hostId: 'local'
+    })
+
+    expect(resolution).toMatchObject({
+      status: 'ready',
+      target: { projectHostSetupId: 'setup-main' }
+    })
+  })
+
   it('resolves to the setup the caller named even with a same-host sibling present', () => {
     const resolution = resolveWorkspaceCreationTarget({
       eligibleRepos: repos,

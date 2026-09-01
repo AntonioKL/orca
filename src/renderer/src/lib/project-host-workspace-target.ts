@@ -183,12 +183,6 @@ export function resolveWorkspaceCreationTarget(
   }
 
   if (projectId && hostId) {
-    const hostSetup = setups.find(
-      (setup) => setup.projectId === projectId && setup.hostId === hostId
-    )
-    if (hostSetup && !isReadyProjectHostSetup(hostSetup)) {
-      return { status: 'unavailable', reason: 'setup-not-ready' }
-    }
     const choice = chooseReadyTarget(
       setups,
       reposById,
@@ -199,6 +193,18 @@ export function resolveWorkspaceCreationTarget(
     }
     if (choice.status === 'single') {
       return { status: 'ready', target: choice.setup }
+    }
+    // A legacy profile can retain a pending row alongside a ready duplicate. The ready row is
+    // actionable; report pending only when no ready setup exists for the requested host.
+    if (
+      setups.some(
+        (setup) =>
+          setup.projectId === projectId &&
+          setup.hostId === hostId &&
+          !isReadyProjectHostSetup(setup)
+      )
+    ) {
+      return { status: 'unavailable', reason: 'setup-not-ready' }
     }
     return { status: 'unavailable', reason: 'project-not-set-up-on-host' }
   }
