@@ -6,6 +6,8 @@ import type {
   AgentSessionAttachResult,
   AgentSessionHistoryRequest,
   AgentSessionHistoryResult,
+  AgentSessionHandoffRequest,
+  AgentSessionHandoffResult,
   AgentSessionHandoffStatus,
   AgentSessionMutationResult,
   AgentSessionOptionsResult,
@@ -257,6 +259,19 @@ export class StructuredAgentSessionHost {
     params: Parameters<typeof setStructuredAgentSessionOption>[2]
   ): ReturnType<typeof setStructuredAgentSessionOption> =>
     setStructuredAgentSessionOption(this.mutationContext(), caller, params)
+
+  requestHandoff = (
+    caller: StructuredAgentSessionCaller,
+    params: AgentSessionHandoffRequest
+  ): Promise<AgentSessionMutationResult<AgentSessionHandoffResult>> =>
+    (
+      this.handoffs as {
+        request: (
+          callerKey: string,
+          params: AgentSessionHandoffRequest
+        ) => Promise<AgentSessionMutationResult<AgentSessionHandoffResult>>
+      }
+    ).request(caller.callerKey, params)
 
   readOptions = (sessionId: string): Promise<AgentSessionOptionsResult> =>
     readStructuredAgentSessionOptions(this.mutationContext(), sessionId)

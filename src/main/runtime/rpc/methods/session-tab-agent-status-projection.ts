@@ -22,9 +22,6 @@ export function projectSessionTabAgentStatus<TPayload extends SessionTabsPayload
     (clientKind === undefined ||
       (clientCapabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY) ?? false))
   let projected = structuredVisible ? payload : projectAgentSessionTabsOut(payload, () => true)
-  if (structuredVisible && clientKind !== undefined) {
-    projected = projectAgentSessionTabsOut(projected, (tab) => tab.agent !== 'codex')
-  }
   // Why: only paired runtimes have legacy `done` completion side effects; mobile must keep its row without changing the exact v2 auth shape.
   if (
     clientKind !== 'runtime' ||

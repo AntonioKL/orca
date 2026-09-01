@@ -71,12 +71,58 @@ describe('Claude structured dispatch image limits', () => {
       type: 'user',
       parent_tool_use_id: null,
       session_id: 'provider-session',
-      uuid: 'user-replay-uuid'
+      uuid: 'user-replay-uuid',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'hello' }]
+      }
     })
 
     await expect(dispatched).resolves.toMatchObject({
       state: 'accepted',
       providerIdentity: { uuid: 'user-replay-uuid' }
+    })
+  })
+
+  it('ignores a top-level tool-result user frame while waiting for a slash command replay', async () => {
+    const session = sessionFor()
+    const dispatched = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: '/permissions' }]) },
+      100
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+
+    resolveClaudeReplayWaiter(session, {
+      type: 'user',
+      parent_tool_use_id: null,
+      session_id: 'provider-session',
+      uuid: 'tool-result-uuid',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'done' }]
+      }
+    })
+    expect(session.dispatchWaiters).toHaveLength(1)
+
+    resolveClaudeReplayWaiter(session, {
+      type: 'user',
+      parent_tool_use_id: null,
+      session_id: 'provider-session',
+      uuid: 'user-replay-uuid',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: '/permissions' }]
+      }
+    })
+
+    await expect(dispatched).resolves.toEqual({
+      state: 'accepted',
+      providerIdentity: {
+        provider: 'claude',
+        sessionId: 'provider-session',
+        uuid: 'user-replay-uuid'
+      }
     })
   })
 

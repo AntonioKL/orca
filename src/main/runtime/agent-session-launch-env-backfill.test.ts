@@ -62,9 +62,9 @@ describe('legacy agent session launch environment', () => {
     )
 
     const reopened = await AgentSessionRecordStore.open({ directory, hostId: 'local' })
-    expect(reopened.getRecord(SESSION)?.launchEnv).toEqual({
-      ANTHROPIC_AUTH_TOKEN: 'pinned-token'
-    })
+    expect(
+      (reopened.getRecord(SESSION) as { launchEnv?: Record<string, string> } | null)?.launchEnv
+    ).toBeUndefined()
   })
 
   it('rejects an environment that could not be reloaded before writing it', async () => {

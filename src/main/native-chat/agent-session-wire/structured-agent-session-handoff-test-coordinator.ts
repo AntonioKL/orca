@@ -57,7 +57,7 @@ export function createStructuredAgentSessionHandoffTestCoordinator(
       journal: input.journal,
       fence: input.store.getRecord(input.sessionId)?.lease.runtimeFence ?? 1
     }),
-    suspendNative: async () => undefined,
+    suspendNative: async () => ({ state: 'stopped' as const }),
     acquireNative: input.acquireNative,
     acquireNativeStop: (_sessionId, turnId) => input.acquireNativeStop(turnId),
     importTuiHistory: async ({ fence }) => {

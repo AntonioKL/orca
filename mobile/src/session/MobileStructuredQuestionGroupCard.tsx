@@ -8,6 +8,16 @@ import {
 } from '../../../src/shared/agent-session-question-answer'
 import { colors, radii, spacing, typography } from '../theme/mobile-theme'
 
+function toggleSortedOption(selected: readonly number[], optionIndex: number): number[] {
+  return selected.includes(optionIndex)
+    ? selected.filter((value) => value !== optionIndex)
+    : [
+        ...selected.filter((value) => value < optionIndex),
+        optionIndex,
+        ...selected.filter((value) => value > optionIndex)
+      ]
+}
+
 export function MobileStructuredQuestionGroupCard(props: {
   questions: readonly AgentJournalQuestion[]
   onAnswer: (encoded: string) => Promise<boolean>
@@ -41,14 +51,11 @@ export function MobileStructuredQuestionGroupCard(props: {
 
   const toggleOption = (optionIndex: number): void => {
     setSelections((current) => {
-      const next = current.map((selected) => [...selected])
-      const selected = next[index] ?? []
-      next[index] = question.multiSelect
-        ? selected.includes(optionIndex)
-          ? selected.filter((value) => value !== optionIndex)
-          : [...selected, optionIndex].sort((left, right) => left - right)
+      const selected = current[index] ?? []
+      const nextSelected = question.multiSelect
+        ? toggleSortedOption(selected, optionIndex)
         : [optionIndex]
-      return next
+      return current.map((value, i) => (i === index ? nextSelected : value))
     })
     if (!question.multiSelect) {
       setOtherText((current) => current.map((text, i) => (i === index ? '' : text)))

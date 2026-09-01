@@ -40,6 +40,16 @@ const CLIENT = {
   clientCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY]
 }
 
+const { readClaudeTranscriptLeafUuid, resolveSessionFilePath } = vi.hoisted(() => ({
+  readClaudeTranscriptLeafUuid: vi.fn(),
+  resolveSessionFilePath: vi.fn()
+}))
+
+vi.mock('../native-chat/session-file-resolver', () => ({
+  readClaudeTranscriptLeafUuid,
+  resolveSessionFilePath
+}))
+
 type FakeClaudeConnection = Omit<ClaudeStreamJsonConnection, 'closed'> & {
   closed: boolean
   launch: ClaudeStreamJsonLaunch
@@ -234,7 +244,7 @@ function itemsOf(frames: AgentSessionSubscribeEvent[]): AgentJournalRenderItem[]
   for (const frame of frames) {
     const rows =
       frame.type === 'snapshot' || frame.type === 'reset'
-        ? frame.snapshot.items
+        ? frame.page.items
         : frame.type === 'batch'
           ? frame.batch.items
           : []
@@ -256,6 +266,8 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'orca-claude-structured-integration-'))
   transcriptPath = join(root, 'claude-home', 'projects', 'workspace', `${PROVIDER_SESSION}.jsonl`)
   await mkdir(join(root, 'claude-home', 'projects', 'workspace'), { recursive: true })
+  resolveSessionFilePath.mockResolvedValue(transcriptPath)
+  readClaudeTranscriptLeafUuid.mockResolvedValue('init-leaf')
   claude = fakeClaude()
   tuiOwner = null
   cleanups = new Map()
@@ -287,7 +299,21 @@ beforeEach(async () => {
       }
       return tuiOwner
     },
-    reproveTuiOwner: async ({ owner }) => owner,
+    reproveTuiOwner: async ({ owner }) => {
+      if (owner.link.handle.provider !== 'claude' || !owner.transcriptPath) {
+        return owner
+      }
+      return {
+        ...owner,
+        link: claudeProviderHandleLink({
+          sessionId: owner.link.handle.sessionId,
+          leafUuid: await readClaudeTranscriptLeafUuid(owner.transcriptPath),
+          resumed: true,
+          fence: owner.link.mintedAtFence,
+          observedAt: Date.now()
+        })
+      }
+    },
     recoverTuiOwner: async () => {
       if (!tuiOwner) {
         throw new Error('scripted TUI owner missing')
@@ -295,18 +321,7 @@ beforeEach(async () => {
       return tuiOwner
     },
     stopRecoveredOwner: async () => {},
-    waitForTuiExit: async (owner, persistHandle) => {
-      await persistHandle(
-        claudeProviderHandleLink({
-          sessionId: PROVIDER_SESSION,
-          leafUuid: 'tui-assistant',
-          resumed: true,
-          fence: owner.link.mintedAtFence,
-          observedAt: Date.now()
-        })
-      )
-      return { transcriptPath }
-    },
+    waitForTuiExit: async (owner) => ({ transcriptPath: owner.transcriptPath }),
     waitForTuiIdleOrExit: async () => 'idle',
     tuiStatus: () => 'idle',
     stopFailedTuiLaunch: async () => {}
@@ -328,6 +343,7 @@ beforeEach(async () => {
         resolveWorkspacePath: async (workspaceId) => `/repos/${workspaceId}`,
         resolveCodexCommand: () => '/usr/local/bin/codex',
         resolveClaudeCommand: () => '/usr/local/bin/claude',
+        readProcessStartTime: async (pid: number) => pid * 10,
         resolveClaudeLaunchEnv: () => ({
           ANTHROPIC_AUTH_TOKEN: 'configured-token',
           ANTHROPIC_BASE_URL: 'https://gateway.example.test'
@@ -524,6 +540,7 @@ describe('a structured Claude session over agentSession.*', () => {
         deps: { store: { getRecord: (id: string) => { lease: { runtimeFence: number } } } }
       }
     ).deps.store.getRecord(SESSION).lease.runtimeFence
+    readClaudeTranscriptLeafUuid.mockResolvedValueOnce('tui-assistant')
     await ok('agentSession.requestHandoff', handoffParams('to-native', tuiFence))
     await vi.waitFor(async () =>
       expect(await host.handoffStatus(SESSION)).toMatchObject({ owner: 'native', phase: 'idle' })

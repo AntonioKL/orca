@@ -77,14 +77,11 @@ describe('Claude TUI resume launch', () => {
     const build = createClaudeTuiResumeLaunchBuilder({
       resolveWorkspacePath: async () => '/workspace',
       resolveCommand: () => 'claude',
-      resolveEnv: () => ({ ANTHROPIC_AUTH_TOKEN: 'rotated-token' }),
+      resolveEnv: () => ({ ANTHROPIC_AUTH_TOKEN: 'pinned-token' }),
       inheritedEnv: {}
     })
 
-    const launch = await build({
-      record: record({ launchEnv: { ANTHROPIC_AUTH_TOKEN: 'pinned-token' } }),
-      spawnToken: 'spawn'
-    })
+    const launch = await build({ record: record(), spawnToken: 'spawn' })
 
     expect(launch.env.ANTHROPIC_AUTH_TOKEN).toBe('pinned-token')
   })

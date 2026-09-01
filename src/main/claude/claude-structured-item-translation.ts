@@ -78,6 +78,13 @@ export function claudeMessageBody(envelope: ClaudeMessageEnvelope): AgentJournal
   return blocks.length > 0 ? { kind: 'message', role: envelope.role, blocks } : null
 }
 
+export function claudeHasReplayContent(envelope: ClaudeMessageEnvelope): boolean {
+  return envelope.content.some((value) => {
+    const part = claudeRecord(value)
+    return part !== null && part.type !== 'tool_result'
+  })
+}
+
 export function claudeToolUses(envelope: ClaudeMessageEnvelope): ClaudeToolUse[] {
   return envelope.content.flatMap((value) => {
     const part = claudeRecord(value)

@@ -38,6 +38,7 @@ import {
 import { buildMobileAgentHistoryResumeActionState } from './agent-history-session-card'
 import { styles } from './agent-history-styles'
 import { useNow } from '../hooks/use-now'
+import { useOpenMobileSession } from '../session/use-open-mobile-session'
 
 export type MobileAgentSessionHistoryPanelProps = {
   hostId: string
@@ -57,6 +58,7 @@ export function MobileAgentSessionHistoryPanel({
   name = ''
 }: MobileAgentSessionHistoryPanelProps) {
   const router = useRouter()
+  const openMobileSession = useOpenMobileSession()
   const { client, state: connState } = useHostClient(hostId)
   const [worktrees, setWorktrees] = useState<Worktree[]>([])
   const [worktreesLoaded, setWorktreesLoaded] = useState(false)
@@ -163,11 +165,7 @@ export function MobileAgentSessionHistoryPanel({
       try {
         const structuredWorkspaceId = await activateStructuredAiVaultSession(client, session)
         if (structuredWorkspaceId) {
-          router.push(
-            `/h/${encodeURIComponent(hostId)}/session/${encodeURIComponent(structuredWorkspaceId)}` as Parameters<
-              typeof router.push
-            >[0]
-          )
+          openMobileSession({ hostId, worktreeId: structuredWorkspaceId })
           return
         }
         const {
@@ -220,11 +218,7 @@ export function MobileAgentSessionHistoryPanel({
         resumeMutationRegistryRef.current.releaseOnSuccess(session.id)
         triggerSuccess()
         setResumeMessage('Agent session queued.')
-        router.push(
-          `/h/${encodeURIComponent(hostId)}/session/${encodeURIComponent(target.worktreeId)}` as Parameters<
-            typeof router.push
-          >[0]
-        )
+        openMobileSession({ hostId, worktreeId: target.worktreeId })
       } catch (err) {
         triggerError()
         setResumeMessage(err instanceof Error ? err.message : 'Failed to resume session.')
@@ -239,7 +233,7 @@ export function MobileAgentSessionHistoryPanel({
       hostId,
       hostPlatform,
       hostTerminalWindowsShell,
-      router,
+      openMobileSession,
       worktreeId,
       worktrees
     ]

@@ -18,6 +18,7 @@ import {
   structuredCallerFor as callerFor,
   supportsStructuredSessions
 } from './structured-agent-session-gate'
+import type { AgentSessionAttachParams } from '../../../native-chat/agent-session-wire/structured-agent-session-attach'
 import { STRUCTURED_AGENT_SESSION_HOLD_METHODS } from './structured-agent-session-hold'
 import {
   AttachParams,
@@ -25,6 +26,7 @@ import {
   CreateParams,
   CreateSupportParams,
   HistoryParams,
+  HandoffParams,
   HandoffStatusParams,
   OptionsParams,
   RespondParams,
@@ -86,22 +88,31 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
           }
         })
         await ensureHostInstalled(ctx)
-        const result = await requireHost(ctx).attach(callerFor(ctx), {
-          ...resolved,
+        const { agent: _resolvedAgent, provider: _resolvedProvider, ...resolvedAttach } = resolved
+        const attachParams: AgentSessionAttachParams = {
+          ...resolvedAttach,
+          provider: resolved.provider as 'claude' | 'codex',
+          agent: resolved.agent as 'claude' | 'codex',
           envelope: { ...params.envelope, payloadFingerprint: hostFingerprint }
-        })
-        if (result.ok && resolved.agent === 'codex') {
+        }
+        const result = await requireHost(ctx).attach(callerFor(ctx), attachParams)
+        if (result.ok) {
           ctx.runtime.publishStructuredAgentSessionTab({
             workspaceId: resolved.location.workspaceId,
             sessionId: result.value.sessionId,
-            agent: 'codex',
+            agent: resolved.agent as 'claude' | 'codex',
             activate: true
           })
         }
         return result
       }
       await ensureHostInstalled(ctx)
-      return requireHost(ctx).attach(callerFor(ctx), params)
+      const { agent: _attachAgent, provider: _attachProvider, ...attachWithoutAgent } = params
+      return requireHost(ctx).attach(callerFor(ctx), {
+        ...attachWithoutAgent,
+        provider: params.provider as 'claude' | 'codex',
+        agent: params.agent as 'claude' | 'codex'
+      } as AgentSessionAttachParams)
     }
   }),
   defineMethod({
@@ -109,7 +120,12 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
     params: AttachParams,
     handler: async (params, ctx) => {
       await ensureHostInstalled(ctx)
-      return requireHost(ctx).attach(callerFor(ctx), params)
+      const { agent: _attachAgent, provider: _attachProvider, ...attachWithoutAgent } = params
+      return requireHost(ctx).attach(callerFor(ctx), {
+        ...attachWithoutAgent,
+        provider: params.provider as 'claude' | 'codex',
+        agent: params.agent as 'claude' | 'codex'
+      } as AgentSessionAttachParams)
     }
   }),
   defineMethod({
@@ -148,6 +164,11 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
     name: 'agentSession.setOption',
     params: SetOptionParams,
     handler: async (params, ctx) => requireHost(ctx).setOption(callerFor(ctx), params)
+  }),
+  defineMethod({
+    name: 'agentSession.requestHandoff',
+    params: HandoffParams,
+    handler: async (params, ctx) => requireHost(ctx).requestHandoff(callerFor(ctx), params)
   }),
   defineMethod({
     name: 'agentSession.handoffStatus',

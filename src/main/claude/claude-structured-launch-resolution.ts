@@ -38,7 +38,10 @@ export type ClaudeStructuredLaunchResolverDeps = {
   store: AgentSessionRecordStore
   resolveWorkspacePath: (workspaceId: string) => Promise<string>
   resolveCommand?: () => string
-  resolveEnv?: () => Record<string, string>
+  resolveEnv?: () =>
+    | Promise<Record<string, string> | undefined>
+    | Record<string, string>
+    | undefined
 }
 
 export function claudeSessionIdForOrcaSession(sessionId: string): string {
@@ -85,15 +88,12 @@ export function createClaudeStructuredLaunchResolver(
       ...CLAUDE_STRUCTURED_BASE_ARGS,
       ...providerArgs
     ])
+    const env = await deps.resolveEnv?.()
     return {
       command: spawnCmd,
       args: spawnArgs,
       cwd: await deps.resolveWorkspacePath(record.location.workspaceId),
-      ...(record.launchEnv
-        ? { env: { ...record.launchEnv } }
-        : deps.resolveEnv
-          ? { env: deps.resolveEnv() }
-          : {}),
+      ...(env ? { env } : {}),
       claudeConfigDir: record.accountHome.path,
       providerSessionId,
       resumeLeafUuid: head?.handle.provider === 'claude' ? head.handle.leafUuid : null,

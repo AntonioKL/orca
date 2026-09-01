@@ -7,6 +7,7 @@ import {
   pasteMobileNativeChatImagePaths
 } from './mobile-native-chat-image-send'
 import {
+  clearMobileNativeChatInput,
   openMobileNativeChatSendBudget,
   sendMobileNativeChatMessageWithOutcome,
   typeMobileNativeChatCommandWithOutcome,
@@ -22,6 +23,7 @@ import {
   acquireMobileNativeChatTerminalWrite,
   releaseMobileNativeChatTerminalWrite
 } from './mobile-native-chat-terminal-write-lock'
+import { AGENT_TUI_CLEAR_INPUT_LINE } from '../../../src/shared/agent-tui-input-clear'
 
 type MobileStructuredTuiSendArgs = {
   client: RpcClient
@@ -86,23 +88,35 @@ export async function sendMobileStructuredTuiMessage(
     const textDeadline =
       args.attachments.length > 0 ? deadline + MOBILE_NATIVE_CHAT_IMAGE_SETTLE_MS : deadline
     const classification = classifyMobileNativeChatSend(args.agent, args.text)
-    const outcome =
+    const shouldTypeCommand =
       classification !== 'chat' && isSlashCommandDraft(args.text) && args.attachments.length === 0
-        ? await typeMobileNativeChatCommandWithOutcome({
-            client: args.client,
-            terminal: args.terminal,
-            command: args.text,
-            ...(mobileClient ? { mobileClient } : {}),
-            deadline: textDeadline
-          })
-        : await sendMobileNativeChatMessageWithOutcome({
-            client: args.client,
-            terminal: args.terminal,
-            text: args.text,
-            clearInputFirst: args.attachments.length === 0,
-            ...(mobileClient ? { mobileClient } : {}),
-            deadline: textDeadline
-          })
+    if (!shouldTypeCommand && args.attachments.length === 0) {
+      const cleared = await clearMobileNativeChatInput({
+        client: args.client,
+        terminal: args.terminal,
+        clearInput: AGENT_TUI_CLEAR_INPUT_LINE,
+        ...(mobileClient ? { mobileClient } : {}),
+        deadline: textDeadline
+      })
+      if (!cleared) {
+        return 'rejected'
+      }
+    }
+    const outcome = shouldTypeCommand
+      ? await typeMobileNativeChatCommandWithOutcome({
+          client: args.client,
+          terminal: args.terminal,
+          command: args.text,
+          ...(mobileClient ? { mobileClient } : {}),
+          deadline: textDeadline
+        })
+      : await sendMobileNativeChatMessageWithOutcome({
+          client: args.client,
+          terminal: args.terminal,
+          text: args.text,
+          ...(mobileClient ? { mobileClient } : {}),
+          deadline: textDeadline
+        })
     if (args.attachments.length > 0 && outcome !== 'accepted') {
       markMobileNativeChatInputStale(args.terminal)
     }

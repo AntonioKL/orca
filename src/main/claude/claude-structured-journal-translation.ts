@@ -13,6 +13,7 @@ import type { ClaudeStructuredSessionEvent } from './claude-structured-session-s
 import {
   claudeMessageBody,
   claudeMessageIdentity,
+  claudeHasReplayContent,
   claudeRecord,
   claudeStreamingMessageBody,
   claudeText,
@@ -219,7 +220,7 @@ export function createClaudeJournalTranslator(
     }
     if (
       envelope.role === 'user' &&
-      envelope.content.length > 0 &&
+      claudeHasReplayContent(envelope) &&
       message.parent_tool_use_id === null
     ) {
       if (currentTurn) {

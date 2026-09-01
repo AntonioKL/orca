@@ -3,6 +3,10 @@ import { open } from 'node:fs/promises'
 import type { AgentJournalMessageItem } from '../../shared/agent-session-journal-types'
 import type { NativeChatBlock } from '../../shared/native-chat-types'
 import type { AgentSessionDispatchOutcome } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
+import {
+  claudeHasReplayContent,
+  readClaudeMessageEnvelope
+} from './claude-structured-item-translation'
 import type { ClaudeSession } from './claude-structured-session-state'
 import { readClaudeFrameString } from './claude-structured-init-proof'
 
@@ -54,7 +58,11 @@ export function resolveClaudeReplayWaiter(
   session: ClaudeSession,
   message: Record<string, unknown>
 ): void {
-  const isUserReplay = message.type === 'user' && message.parent_tool_use_id === null
+  const envelope = readClaudeMessageEnvelope(message)
+  const isUserReplay =
+    envelope?.role === 'user' &&
+    message.parent_tool_use_id === null &&
+    claudeHasReplayContent(envelope)
   const isCompletedCommand = message.type === 'result'
   if (
     (!isUserReplay && !isCompletedCommand) ||

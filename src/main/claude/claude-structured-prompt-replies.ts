@@ -46,7 +46,7 @@ function questionAnswer(prompt: ClaudePendingPrompt, questionId: string, optionI
     return optionId
   }
   const questionIndex = prompt.questionIds.indexOf(questionId)
-  if (questionIndex < 0) {
+  if (questionIndex === -1) {
     return optionId
   }
   const choice = /^choice-([1-9]\d*)$/.exec(decoded.answer)

@@ -102,7 +102,13 @@ export async function readClaudeStructuredSessionOptions(
   }
   const effort = session.options.get('effort') ?? session.reportedOptions.effort
   return {
-    models: models.map(({ resolvedModel: _, ...entry }) => entry),
+    models: models.map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      ...(entry.description ? { description: entry.description } : {}),
+      isDefault: entry.isDefault,
+      efforts: entry.efforts
+    })),
     current: { model, ...(effort ? { effort } : {}) }
   }
 }

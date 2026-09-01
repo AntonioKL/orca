@@ -84,10 +84,7 @@ function transport(): StructuredAgentSessionHandoffTransport {
         record.lease.ownerProcess?.spawnToken ?? record.lease.reservedSpawnToken ?? 'recovered'
       ),
     stopRecoveredOwner: async () => undefined,
-    waitForTuiExit: async (current, persistHandle) => {
-      await persistHandle(current.link)
-      return { transcriptPath: current.transcriptPath }
-    },
+    waitForTuiExit: async (current) => ({ transcriptPath: current.transcriptPath }),
     waitForTuiIdleOrExit: async () => 'idle',
     tuiStatus: () => 'idle'
   }
@@ -119,6 +116,7 @@ function adapter(): StructuredAgentSessionAdapter {
     readOptions: vi.fn(async () => ({ current: { model: activeModel }, models: [] })),
     closeSession: vi.fn(async () => {
       activeModel = DEFAULT_MODEL
+      return true
     })
   }
 }

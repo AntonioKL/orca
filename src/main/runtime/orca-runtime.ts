@@ -650,6 +650,7 @@ import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
 } from '../../shared/tui-agent-launch-defaults'
+import { resolveStartupShell, tokenizeStartupCommand } from '../../shared/tui-agent-startup-shell'
 import { resolveCodexStructuredAppServerArgs } from '../codex/codex-structured-app-server-args'
 import { resolveLocalWindowsAgentStartupShell } from '../../shared/windows-terminal-shell'
 import {
@@ -11324,15 +11325,34 @@ export class OrcaRuntimeService {
       // in a plain folder lands in the folder rather than failing to resolve.
       resolveWorkspacePath: async (workspaceId) =>
         (await this.resolveRuntimeFileTarget(`id:${workspaceId}`)).worktree.path,
-      resolveLaunchArgs: () => this.resolveConfiguredCodexStructuredArgs(),
+      resolveLaunchArgs: (provider) => this.resolveConfiguredStructuredLaunchArgs(provider),
       resolveLaunchEnvOverlay: () =>
         resolveTuiAgentLaunchEnv('codex', this.requireStore().getSettings().agentDefaultEnv),
+      resolveClaudeLaunchEnv: () =>
+        resolveTuiAgentLaunchEnv('claude', this.requireStore().getSettings().agentDefaultEnv),
       handoffTransport: this.createStructuredAgentSessionHandoffTransport()
     })
   }
 
-  private resolveConfiguredCodexStructuredArgs(): string[] {
+  private resolveConfiguredStructuredLaunchArgs(
+    provider: AgentSessionRecord['provider']
+  ): string[] {
     const settings = this.requireStore().getSettings()
+    if (provider === 'claude') {
+      const shell = resolveStartupShell(
+        process.platform,
+        resolveLocalWindowsAgentStartupShell({
+          platform: process.platform,
+          isRemote: false,
+          terminalWindowsShell: settings.terminalWindowsShell
+        })
+      )
+      const tokenized = tokenizeStartupCommand(
+        resolveTuiAgentLaunchArgs('claude', settings.agentDefaultArgs),
+        shell
+      )
+      return tokenized.ok ? tokenized.tokens : []
+    }
     const shell = resolveLocalWindowsAgentStartupShell({
       platform: process.platform,
       isRemote: false,
@@ -11763,7 +11783,7 @@ export class OrcaRuntimeService {
       tuiStatus: (owner) => this.structuredTuiStatus(owner),
       closeTuiOwner: (owner) => this.closeStructuredTuiOwner(owner),
       revealNativeSession: ({ workspaceId, sessionId, agent = 'codex', adoptedTerminal }) => {
-        if (adoptedTerminal || agent !== 'codex') {
+        if (adoptedTerminal) {
           return
         }
         this.publishStructuredAgentSessionTab({
@@ -12174,7 +12194,7 @@ export class OrcaRuntimeService {
 
   async getStructuredAgentSessionCreateSupport(
     worktreeSelector: string,
-    agent: 'codex'
+    agent: 'claude' | 'codex'
   ): Promise<{ supported: boolean; reason?: 'agent' | 'remote' | 'wsl' }> {
     const location = await this.resolveStructuredAgentSessionLocation(worktreeSelector)
     await this.ensureStructuredAgentSessionHost()
@@ -12239,8 +12259,14 @@ export class OrcaRuntimeService {
   async resolveStructuredAgentSessionCreateIntent(input: {
     envelope: { sessionId: string; clientOperationId: string }
     worktree: string
-    agent: 'codex'
+    agent: 'claude' | 'codex'
   }): Promise<AgentSessionAttachParams> {
+    if (input.agent === 'claude') {
+      return this.resolveStructuredAgentSessionIntent(
+        input,
+        async ({ launchEnv }) => launchEnv.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
+      )
+    }
     return this.resolveStructuredAgentSessionIntent(input, async ({ workspacePath, launchEnv }) => {
       // A create has no process yet, so the current selection is what it must follow.
       const preparedHome = await this.prepareCodexStructuredLaunchFn?.({ workspacePath, launchEnv })
@@ -12257,7 +12283,7 @@ export class OrcaRuntimeService {
     input: {
       envelope: { sessionId: string; clientOperationId: string }
       worktree: string
-      agent: 'codex'
+      agent: 'claude' | 'codex'
     },
     resolveAccountHomePath: (context: {
       workspacePath: string
@@ -12283,7 +12309,7 @@ export class OrcaRuntimeService {
       provider: input.agent,
       agent: input.agent,
       accountHome: {
-        variable: 'CODEX_HOME',
+        variable: input.agent === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME',
         path: await resolveAccountHomePath({ workspacePath, launchEnv })
       },
       runtimeKind: 'native'
@@ -12338,16 +12364,12 @@ export class OrcaRuntimeService {
     }
     this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession()
     for (const session of host?.listSessionTabs() ?? []) {
-      if (session.agent !== 'codex') {
-        continue
-      }
       let sessionId = session.sessionId
       while (sessionId.startsWith('agent-session:')) {
         sessionId = sessionId.slice('agent-session:'.length)
       }
       this.publishStructuredAgentSessionTab({
         ...session,
-        agent: 'codex',
         sessionId,
         activate: false,
         notify: false
@@ -12358,7 +12380,7 @@ export class OrcaRuntimeService {
   publishStructuredAgentSessionTab(input: {
     workspaceId: string
     sessionId: string
-    agent: 'codex'
+    agent: 'claude' | 'codex'
     activate: boolean
     notify?: boolean
   }): void {
@@ -12370,7 +12392,7 @@ export class OrcaRuntimeService {
     const tab: RuntimeMobileSessionAgentTab = {
       type: 'agent-session',
       id,
-      title: 'Codex Chat',
+      title: input.agent === 'claude' ? 'Claude Chat' : 'Codex Chat',
       sessionId: input.sessionId,
       agent: input.agent,
       isActive: input.activate

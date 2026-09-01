@@ -158,6 +158,7 @@ function adapter(): StructuredAgentSessionAdapter {
     })),
     closeSession: vi.fn(async () => {
       activeModel = DEFAULT_MODEL
+      return true
     })
   }
 }

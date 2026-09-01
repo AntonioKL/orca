@@ -173,6 +173,31 @@ describe('Claude structured journal translation', () => {
     })
   })
 
+  it('does not start a lifecycle for a top-level user tool result', () => {
+    const state = sinkState()
+    const translator = createClaudeJournalTranslator({ sink: state.sink })
+
+    translator.handle(
+      message('user', 'tool-result-only', [
+        { type: 'tool_result', tool_use_id: 'tool-1', content: 'done' }
+      ])
+    )
+
+    expect(state.items.map((item) => agentJournalItemKey(item.identity))).toEqual([
+      'orca:claude-tool%3Aclaude-session%3Atool-1'
+    ])
+    expect(state.items[0]?.body).toMatchObject({
+      kind: 'tool-call',
+      state: 'completed',
+      output: { head: 'done' }
+    })
+    expect(
+      state.items.some(
+        (item) => item.body.kind === 'status' && item.body.turnLifecycle !== undefined
+      )
+    ).toBe(false)
+  })
+
   it('renders empty user frames through the provider fallback', () => {
     const state = sinkState()
     const translator = createClaudeJournalTranslator({ sink: state.sink })
@@ -191,14 +216,14 @@ describe('Claude structured journal translation', () => {
     )
   })
 
-  it('renders every unmodeled Claude frame family as a bounded provider row', () => {
+  it('renders unmodeled substantive Claude frames as bounded provider rows', () => {
     const state = sinkState()
     const translator = createClaudeJournalTranslator({ sink: state.sink })
 
     translator.handle({
       type: 'message',
       sessionId: 'orca-session',
-      message: { type: 'system', subtype: 'compact_boundary', summary: 'x'.repeat(100_000) }
+      message: { type: 'system', subtype: 'local_command_output', summary: 'x'.repeat(100_000) }
     })
     translator.handle({
       type: 'message',
@@ -242,18 +267,22 @@ describe('Claude structured journal translation', () => {
     )
     expect(frames.map((frame) => frame.kind)).toEqual(
       expect.arrayContaining([
-        'message:system:compact_boundary',
-        'message:system:hook_response',
+        'message:system:local_command_output',
         'message:system:command_started',
         'message:result',
-        'message:tool_progress',
-        'message:prompt_suggestion',
         'message:user:content:document',
         'control_request:future_control'
       ])
     )
+    expect(frames.map((frame) => frame.kind)).not.toEqual(
+      expect.arrayContaining([
+        'message:system:hook_response',
+        'message:tool_progress',
+        'message:prompt_suggestion'
+      ])
+    )
     expect(
-      frames.find((frame) => frame.kind === 'message:system:compact_boundary')?.payload
+      frames.find((frame) => frame.kind === 'message:system:local_command_output')?.payload
     ).toEqual(expect.objectContaining({ truncated: true, byteLength: expect.any(Number) }))
   })
 

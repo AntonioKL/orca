@@ -103,7 +103,7 @@ describe('projectSessionTabAgentStatus', () => {
     expect(capable).toBe(snapshot)
   })
 
-  it('withholds legacy Claude rows from paired structured clients', () => {
+  it('keeps structured Claude and Codex rows visible to paired structured clients', () => {
     const snapshot = {
       ...makeSnapshot(false),
       tabs: [
@@ -132,7 +132,7 @@ describe('projectSessionTabAgentStatus', () => {
       projectSessionTabAgentStatus(snapshot, 'runtime', [
         STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
       ]).tabs.map((tab) => tab.id)
-    ).toEqual(['agent-session:codex'])
+    ).toEqual(['agent-session:codex', 'agent-session:claude'])
   })
 
   it('withholds session boundaries from legacy paired clients', () => {

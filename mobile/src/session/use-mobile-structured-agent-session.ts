@@ -37,10 +37,13 @@ function openStructuredAgentSessionSubscription(args: {
     { sessionId: args.sessionId, ...(args.cursor ? { cursor: args.cursor } : {}) },
     args.onEvent,
     {
-      paramsForReconnect: () => ({
-        sessionId: args.sessionId,
-        ...(args.resumeCursor() ? { cursor: args.resumeCursor() } : {})
-      })
+      paramsForReconnect: () => {
+        const resumeCursor = args.resumeCursor()
+        return {
+          sessionId: args.sessionId,
+          ...(resumeCursor ? { cursor: resumeCursor } : {})
+        }
+      }
     }
   )
 }
@@ -63,12 +66,18 @@ export function useMobileStructuredAgentSession(args: {
   const { client, sessionId } = args
   const [state, dispatch] = useReducer(reduceStructuredAgentSession, EMPTY_STRUCTURED_AGENT_SESSION)
   const stateRef = useRef(state)
-  stateRef.current = state
   const resumeCursorRef = useRef<AgentJournalCursor | null>(state.cursor)
-  resumeCursorRef.current = state.cursor
   const [loadingOlder, setLoadingOlder] = useState(false)
   const reconnectRef = useRef(createMobileStructuredReconnectState())
   const cancelLongevityRef = useRef<() => void>(() => {})
+
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
+
+  useEffect(() => {
+    resumeCursorRef.current = state.cursor
+  }, [state.cursor])
 
   useEffect(() => {
     dispatch({ type: 'loading' })
@@ -125,7 +134,7 @@ export function useMobileStructuredAgentSession(args: {
           }
           if (event.type === 'snapshot' || event.type === 'reset') {
             setLoadingOlder(false)
-            resumeCursorRef.current = event.snapshot.cursor
+            resumeCursorRef.current = event.page.liveCursor ?? event.page.window.nextCursor
           } else if (event.type === 'batch') {
             const current = resumeCursorRef.current
             if (shouldAdvanceStructuredResumeCursor(current, event.batch.cursor)) {
@@ -156,8 +165,8 @@ export function useMobileStructuredAgentSession(args: {
         const result = response.result as AgentSessionHistoryResult
         if (result.ok) {
           dispatch({ type: 'tail-page', page: result.page })
-          resumeCursorRef.current = result.page.liveCursor ?? null
-          openSubscription(result.page.liveCursor ?? null)
+          resumeCursorRef.current = result.page.liveCursor ?? result.page.window.nextCursor
+          openSubscription(resumeCursorRef.current)
           return
         }
         dispatch({
@@ -166,12 +175,12 @@ export function useMobileStructuredAgentSession(args: {
             type: 'reset',
             sessionId,
             reset: result.reset,
-            snapshot: result.snapshot,
+            page: result.page,
             fence: result.fence ?? 0
           }
         })
-        resumeCursorRef.current = result.snapshot.cursor
-        openSubscription(result.snapshot.cursor)
+        resumeCursorRef.current = result.page.liveCursor ?? result.page.window.nextCursor
+        openSubscription(resumeCursorRef.current)
       })
       .catch((error: unknown) => {
         if (!closed) {
@@ -227,7 +236,7 @@ export function useMobileStructuredAgentSession(args: {
             type: 'reset',
             sessionId,
             reset: result.reset,
-            snapshot: result.snapshot,
+            page: result.page,
             fence: result.fence ?? 0
           }
         })

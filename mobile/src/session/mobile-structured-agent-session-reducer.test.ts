@@ -17,11 +17,28 @@ function item(id: string, sequence: number, revision = 1): AgentJournalRenderIte
 }
 
 function snapshot(epoch: string, items: AgentJournalRenderItem[]) {
+  const oldest = items[0]?.sequence ?? 0
+  const newest = items.at(-1)?.sequence ?? 0
   return {
     type: 'snapshot' as const,
     sessionId: 'session-a',
     fence: 1,
-    snapshot: { sessionId: 'session-a', cursor: { epoch, sequence: 50 }, items, submissions: [] }
+    page: {
+      sessionId: 'session-a',
+      epoch,
+      direction: 'tail' as const,
+      items,
+      removedItemIds: [],
+      submissions: [],
+      window: {
+        oldest: items[0] ? { epoch, sequence: oldest } : null,
+        newest: items.at(-1) ? { epoch, sequence: newest } : null,
+        nextCursor: { epoch, sequence: items.length > 0 ? newest : 0 }
+      },
+      liveCursor: items.at(-1) ? { epoch, sequence: newest } : undefined,
+      hasOlder: false,
+      hasNewer: false
+    }
   }
 }
 
@@ -92,8 +109,8 @@ describe('mobile structured session reducer', () => {
         event: {
           ...snapshot('epoch-a', []),
           fence: index + 1,
-          snapshot: {
-            ...snapshot('epoch-a', []).snapshot,
+          page: {
+            ...snapshot('epoch-a', []).page,
             cursor: { epoch: 'epoch-a', sequence: index }
           },
           handoff

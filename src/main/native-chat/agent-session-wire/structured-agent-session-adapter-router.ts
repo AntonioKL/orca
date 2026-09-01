@@ -27,16 +27,18 @@ export class StructuredAgentSessionAdapterRouter implements StructuredAgentSessi
     return acquired
   }
 
-  async releaseAcquisition(input: { sessionId: string }): Promise<void> {
+  async releaseAcquisition(input: { sessionId: string }): Promise<boolean> {
     const adapter = this.owners.get(input.sessionId)
     if (adapter) {
-      await adapter.releaseAcquisition?.(input)
+      const released = await adapter.releaseAcquisition?.(input)
       this.owners.delete(input.sessionId)
-      return
+      return released === true
     }
+    let released = false
     for (const candidate of Object.values(this.adapters)) {
-      await candidate.releaseAcquisition?.(input)
+      released = (await candidate.releaseAcquisition?.(input)) === true || released
     }
+    return released
   }
 
   dispatch: StructuredAgentSessionAdapter['dispatch'] = (input) =>
@@ -62,13 +64,14 @@ export class StructuredAgentSessionAdapterRouter implements StructuredAgentSessi
   historyFilePath = (input: { identity: AgentSessionJournalIdentity }) =>
     this.requireAgent(input.identity).historyFilePath?.(input) ?? Promise.resolve(null)
 
-  async closeSession(sessionId: string): Promise<void> {
+  async closeSession(sessionId: string): Promise<boolean> {
     const adapter = this.owners.get(sessionId)
     if (!adapter) {
-      return
+      return false
     }
-    await adapter.closeSession?.(sessionId)
+    const closed = await adapter.closeSession?.(sessionId)
     this.owners.delete(sessionId)
+    return closed === true
   }
 
   async closeAll(): Promise<void> {

@@ -48,7 +48,7 @@ export function createClaudeTuiResumeLaunchBuilder(
       '--resume',
       head.handle.sessionId
     ])
-    const configuredEnv = record.launchEnv ?? deps.resolveEnv?.() ?? {}
+    const configuredEnv = deps.resolveEnv?.() ?? {}
     const env = buildClaudeChildProcessEnv(
       {
         ...configuredEnv,

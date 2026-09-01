@@ -8,12 +8,16 @@ import { OrcaRuntimeService } from './orca-runtime'
 const {
   probeAgentSessionProcessIdentity,
   proveCodexTuiRollout,
+  readClaudeTranscriptLeafUuid,
   readStructuredTuiProcessIdentity,
+  resolveSessionFilePath,
   resolvePinnedCodexRolloutProof
 } = vi.hoisted(() => ({
   probeAgentSessionProcessIdentity: vi.fn(),
   proveCodexTuiRollout: vi.fn(),
+  readClaudeTranscriptLeafUuid: vi.fn(),
   readStructuredTuiProcessIdentity: vi.fn(),
+  resolveSessionFilePath: vi.fn(),
   resolvePinnedCodexRolloutProof: vi.fn()
 }))
 
@@ -21,6 +25,10 @@ vi.mock('./structured-tui-process-identity', () => ({ readStructuredTuiProcessId
 vi.mock('../codex/codex-tui-rollout-proof', () => ({
   proveCodexTuiRollout,
   resolvePinnedCodexRolloutProof
+}))
+vi.mock('../native-chat/session-file-resolver', () => ({
+  readClaudeTranscriptLeafUuid,
+  resolveSessionFilePath
 }))
 vi.mock('./agent-session-process-identity-probe', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -111,7 +119,13 @@ describe('structured TUI launch tab binding', () => {
       getAgentSessionExecutionNamespace(): typeof namespace
       ptysById: Map<
         string,
-        { launchToken: string | null; launchAgent: string | null; agentSessionOwners: unknown[] }
+        {
+          launchToken: string | null
+          launchAgent: string | null
+          agentSessionOwners: unknown[]
+          tabId?: string | null
+          paneKey?: string | null
+        }
       >
     }
     internal.listResolvedWorktrees = vi.fn(async () => [
@@ -125,6 +139,9 @@ describe('structured TUI launch tab binding', () => {
       folderWorkspace: null
     }))
     internal.getAgentSessionExecutionNamespace = () => namespace
+    proveCodexTuiRollout.mockResolvedValueOnce({
+      transcriptPath: '/tmp/codex-home/sessions/thread-1.jsonl'
+    })
     probeAgentSessionProcessIdentity.mockResolvedValue({
       outcome: 'identity-matched',
       matchedOn: ['process-start-time']
@@ -134,6 +151,37 @@ describe('structured TUI launch tab binding', () => {
     const coldPty = internal.ptysById.get('pty-cold-owner')!
     expect(coldPty).toMatchObject({ launchToken: null, launchAgent: null })
     expect(coldPty.agentSessionOwners).toHaveLength(1)
+    const runtimeId = (runtime as unknown as { runtimeId: string }).runtimeId
+    ;(
+      runtime as unknown as {
+        handles: Map<
+          string,
+          {
+            handle: string
+            runtimeId: string
+            rendererGraphEpoch: number
+            worktreeId: string
+            tabId: string
+            leafId: string
+            ptyId: string
+            ptyGeneration: number
+          }
+        >
+      }
+    ).handles.set(terminalHandle, {
+      handle: terminalHandle,
+      runtimeId,
+      rendererGraphEpoch: 0,
+      worktreeId: WORKTREE_ID,
+      tabId: 'pty:pty-cold-owner',
+      leafId: 'pty:pty-cold-owner',
+      ptyId: 'pty-cold-owner',
+      ptyGeneration: 0
+    })
+    coldPty.tabId = 'tab-cold-owner'
+    coldPty.paneKey = `tab-cold-owner:${leafId}`
+    coldPty.launchToken = 'spawn-token'
+    coldPty.launchAgent = 'codex'
 
     const owner = await internal.createStructuredAgentSessionHandoffTransport().recoverTuiOwner({
       sessionId: 'session-1',
@@ -157,7 +205,15 @@ describe('structured TUI launch tab binding', () => {
       paneKey: `tab-cold-owner:${leafId}`,
       ptyId: 'pty-cold-owner'
     })
-    expect(resolvePinnedCodexRolloutProof).toHaveBeenCalledWith(namespace.providerRoot, 'thread-1')
+    expect(proveCodexTuiRollout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codexHome: namespace.providerRoot,
+        threadId: 'thread-1',
+        readOutput: expect.any(Function),
+        write: expect.any(Function)
+      })
+    )
+    expect(resolvePinnedCodexRolloutProof).not.toHaveBeenCalled()
     expect(writeAgentSessionProof).not.toHaveBeenCalled()
     expect(agentSessionPtyWriteGate.boundSessionId('pty-cold-owner')).toBe('session-1')
     agentSessionPtyWriteGate.unbindPty('pty-cold-owner')
@@ -181,7 +237,7 @@ describe('structured TUI launch tab binding', () => {
           state: 'done',
           prompt: '',
           agentType: 'claude',
-          receivedAt: 10,
+          receivedAt: Date.now() + 1000,
           stateStartedAt: 10,
           providerSession: { key: 'session_id', id: sessionId, transcriptPath }
         }
@@ -190,6 +246,7 @@ describe('structured TUI launch tab binding', () => {
     const internal = runtime as unknown as {
       createStructuredAgentSessionHandoffTransport(): StructuredAgentSessionHandoffTransport
       ptysById: Map<string, unknown>
+      restoredOrchestrationAuthorityByPtyId: Map<string, unknown>
     }
     internal.ptysById.set('pty-claude', {
       ptyId: 'pty-claude',
@@ -201,6 +258,8 @@ describe('structured TUI launch tab binding', () => {
       launchAgent: 'claude',
       connected: true
     })
+    resolveSessionFilePath.mockResolvedValue('/tmp/claude-home/projects/worktree/session.jsonl')
+    readClaudeTranscriptLeafUuid.mockResolvedValue('leaf-before-resume')
     const record = {
       sessionId: 'session-1',
       accountHome: { variable: 'CLAUDE_CONFIG_DIR', path: '/tmp/claude-home' },
@@ -231,9 +290,7 @@ describe('structured TUI launch tab binding', () => {
 
     const transport = internal.createStructuredAgentSessionHandoffTransport()
     const recovered = await transport.recoverTuiOwner(record)
-    const reproved = await transport.reproveTuiOwner({ record, owner: recovered })
-
-    expect(reproved).toMatchObject({
+    expect(recovered).toMatchObject({
       transcriptPath,
       link: {
         handle: { provider: 'claude', sessionId, leafUuid: 'leaf-before-resume' },
@@ -241,8 +298,47 @@ describe('structured TUI launch tab binding', () => {
         mintedAtFence: 3
       }
     })
-    expect(reproved.link.linkId).not.toBe('claude-old')
-    expect(attestAgentHookCompatibilityAuthority).not.toHaveBeenCalled()
+    expect(recovered.link.linkId).not.toBe('claude-old')
+
+    const pty = internal.ptysById.get('pty-claude') as {
+      launchToken: string | null
+    }
+    pty.launchToken = null
+    const dispatchAuthority = runtime.getOrchestrationDispatchAuthority(recovered.terminal.handle)!
+    internal.restoredOrchestrationAuthorityByPtyId.set('pty-claude', {
+      ptyId: 'pty-claude',
+      worktreeId: WORKTREE_ID,
+      terminalHandle: recovered.terminal.handle,
+      paneKey: recovered.terminal.paneKey,
+      processIncarnation: dispatchAuthority.processIncarnation,
+      hostScope: dispatchAuthority.hostScope
+    })
+
+    expect(
+      runtime.verifyOrchestrationCompatibilityCaller({
+        terminalHandle: recovered.terminal.handle,
+        paneKey,
+        launchToken: spawnToken
+      })
+    ).toMatchObject({
+      paneKey,
+      terminalHandle: recovered.terminal.handle,
+      processIncarnation: dispatchAuthority.processIncarnation
+    })
+    expect(attestAgentHookCompatibilityAuthority).toHaveBeenCalledWith({
+      paneKey,
+      launchTokenHash: createHash('sha256').update(spawnToken).digest('hex'),
+      connectionId: null,
+      terminalProvenance: 'restored'
+    })
+    attestAgentHookCompatibilityAuthority.mockReturnValueOnce(null as never)
+    expect(
+      runtime.verifyOrchestrationCompatibilityCaller({
+        terminalHandle: recovered.terminal.handle,
+        paneKey,
+        launchToken: spawnToken
+      })
+    ).toBeNull()
     expect(agentSessionPtyWriteGate.boundSessionId('pty-claude')).toBe('session-1')
     agentSessionPtyWriteGate.unbindPty('pty-claude')
   })
@@ -265,7 +361,7 @@ describe('structured TUI launch tab binding', () => {
           state: 'done',
           prompt: '',
           agentType: 'claude',
-          receivedAt: 10,
+          receivedAt: Date.now() + 1000,
           stateStartedAt: 10,
           providerSession: { key: 'session_id', id: sessionId, transcriptPath }
         }
@@ -286,7 +382,8 @@ describe('structured TUI launch tab binding', () => {
       launchAgent: 'claude',
       connected: true
     })
-    internal.restoredOrchestrationAuthorityByPtyId.set('pty-restored', {})
+    resolveSessionFilePath.mockResolvedValue('/tmp/claude-home/projects/worktree/restored.jsonl')
+    readClaudeTranscriptLeafUuid.mockResolvedValue('leaf-restored')
     const record = {
       sessionId: 'session-restored',
       accountHome: { variable: 'CLAUDE_CONFIG_DIR', path: '/tmp/claude-home' },
@@ -311,8 +408,34 @@ describe('structured TUI launch tab binding', () => {
       }
     } as never
 
-    await internal.createStructuredAgentSessionHandoffTransport().recoverTuiOwner(record)
+    const recovered = await internal
+      .createStructuredAgentSessionHandoffTransport()
+      .recoverTuiOwner(record)
+    const restoredPty = internal.ptysById.get('pty-restored') as {
+      launchToken: string | null
+    }
+    restoredPty.launchToken = null
+    const dispatchAuthority = runtime.getOrchestrationDispatchAuthority(recovered.terminal.handle)!
+    internal.restoredOrchestrationAuthorityByPtyId.set('pty-restored', {
+      ptyId: 'pty-restored',
+      worktreeId: WORKTREE_ID,
+      terminalHandle: recovered.terminal.handle,
+      paneKey: recovered.terminal.paneKey,
+      processIncarnation: dispatchAuthority.processIncarnation,
+      hostScope: dispatchAuthority.hostScope
+    })
 
+    expect(
+      runtime.verifyOrchestrationCompatibilityCaller({
+        terminalHandle: recovered.terminal.handle,
+        paneKey,
+        launchToken: spawnToken
+      })
+    ).toMatchObject({
+      paneKey,
+      terminalHandle: recovered.terminal.handle,
+      processIncarnation: dispatchAuthority.processIncarnation
+    })
     expect(attestAgentHookCompatibilityAuthority).toHaveBeenCalledWith({
       paneKey,
       launchTokenHash: createHash('sha256').update(spawnToken).digest('hex'),
@@ -321,8 +444,12 @@ describe('structured TUI launch tab binding', () => {
     })
     attestAgentHookCompatibilityAuthority.mockReturnValueOnce(null as never)
     await expect(
-      internal.createStructuredAgentSessionHandoffTransport().recoverTuiOwner(record)
-    ).rejects.toThrow('launch-token authority')
+      runtime.verifyOrchestrationCompatibilityCaller({
+        terminalHandle: recovered.terminal.handle,
+        paneKey,
+        launchToken: spawnToken
+      })
+    ).toBeNull()
     agentSessionPtyWriteGate.unbindPty('pty-restored')
   })
 
@@ -375,7 +502,7 @@ describe('structured TUI launch tab binding', () => {
       }>
       markLocalWorkspaceTrustedForAgent(): void
       waitForTerminal(): Promise<unknown>
-      waitForStructuredTuiProof(): Promise<{ transcriptPath?: string }>
+      waitForAdoptedStructuredTuiProof(): Promise<{ transcriptPath?: string }>
       waitForStructuredTuiPtyExit(): Promise<void>
       closeTerminal(handle: string): Promise<unknown>
       handles: Map<
@@ -398,7 +525,7 @@ describe('structured TUI launch tab binding', () => {
     internal.markLocalWorkspaceTrustedForAgent = vi.fn()
     const waitForTerminal = vi.fn(async () => ({}))
     internal.waitForTerminal = waitForTerminal
-    const waitForStructuredTuiProof = vi.fn(async () => {
+    const waitForAdoptedStructuredTuiProof = vi.fn(async () => {
       const snapshot = await runtime.listMobileSessionTabs(`id:${WORKTREE_ID}`)
       expect(snapshot.tabs).toContainEqual(
         expect.objectContaining({
@@ -412,7 +539,7 @@ describe('structured TUI launch tab binding', () => {
       expect(revealTerminalSession).not.toHaveBeenCalled()
       return { transcriptPath: '/tmp/rollout.jsonl' }
     })
-    internal.waitForStructuredTuiProof = waitForStructuredTuiProof
+    internal.waitForAdoptedStructuredTuiProof = waitForAdoptedStructuredTuiProof
     const waitForStructuredTuiPtyExit = vi.fn(async () => {})
     internal.waitForStructuredTuiPtyExit = waitForStructuredTuiPtyExit
     const closeTerminal = vi.fn(async () => undefined)
@@ -458,7 +585,7 @@ describe('structured TUI launch tab binding', () => {
       expect.any(String),
       expect.objectContaining({ condition: 'tui-idle' })
     )
-    expect(waitForStructuredTuiProof).toHaveBeenCalledOnce()
+    expect(waitForAdoptedStructuredTuiProof).toHaveBeenCalledOnce()
     expect(onSpawned).toHaveBeenCalledWith(
       expect.objectContaining({
         terminal: expect.objectContaining({ ptyId: 'pty-structured' }),
@@ -468,7 +595,7 @@ describe('structured TUI launch tab binding', () => {
     expect(onSpawned.mock.invocationCallOrder[0]).toBeLessThan(
       waitForTerminal.mock.invocationCallOrder[0]!
     )
-    expect(waitForStructuredTuiProof.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(waitForAdoptedStructuredTuiProof.mock.invocationCallOrder[0]).toBeLessThan(
       revealTerminalSession.mock.invocationCallOrder[0]!
     )
     const launchCommand = spawn.mock.calls[0]?.[0]?.command
@@ -553,9 +680,9 @@ describe('structured TUI launch tab binding', () => {
       paneKey: owner.terminal.paneKey
     })
     expect(rebound.terminal.handle).not.toBe(owner.terminal.handle)
-    await transport.waitForTuiExit(rebound, async () => {})
+    await transport.waitForTuiExit(rebound)
     expect(waitForStructuredTuiPtyExit).toHaveBeenCalledWith('pty-structured')
-    expect(waitForStructuredTuiProof).toHaveBeenCalledOnce()
+    expect(waitForAdoptedStructuredTuiProof).toHaveBeenCalledOnce()
 
     await expect(transport.closeTuiOwner?.(rebound)).resolves.toEqual({
       transcriptPath: '/tmp/rollout.jsonl'
@@ -568,5 +695,34 @@ describe('structured TUI launch tab binding', () => {
       transport.waitForTuiIdleOrExit(rebound, new AbortController().signal)
     ).resolves.toBe('exited')
     await expect(transport.stopFailedTuiLaunch?.(rebound)).resolves.toBeUndefined()
+  })
+
+  it('reveals Claude structured native sessions into the mobile graph', () => {
+    const runtime = new OrcaRuntimeService()
+    const publish = vi.spyOn(runtime, 'publishStructuredAgentSessionTab')
+    const focusEditorTab = vi.fn()
+    runtime.setNotifier({ focusEditorTab } as never)
+    const internal = runtime as unknown as {
+      createStructuredAgentSessionHandoffTransport(): StructuredAgentSessionHandoffTransport
+    }
+
+    internal.createStructuredAgentSessionHandoffTransport().revealNativeSession?.({
+      workspaceId: WORKTREE_ID,
+      sessionId: 'session-claude',
+      agent: 'claude'
+    })
+
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: WORKTREE_ID,
+        sessionId: 'session-claude',
+        agent: 'claude',
+        activate: false
+      })
+    )
+    expect(focusEditorTab).toHaveBeenCalledWith(
+      'structured-agent-session-session-claude',
+      WORKTREE_ID
+    )
   })
 })

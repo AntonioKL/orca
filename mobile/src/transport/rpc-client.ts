@@ -17,6 +17,7 @@ export type SendRequestOptions = {
 
 type SubscribeOptions = {
   onBinaryFrame?: (frame: BrowserScreencastFrame) => void
+  paramsForReconnect?: () => unknown
 }
 
 type StreamingListener = (result: unknown) => void
@@ -43,6 +44,8 @@ export type RpcClient = {
   getLastInboundAt?: () => number | null
   onStateChange: (listener: (state: ConnectionState) => void) => () => void
   notifyForeground: (reason?: ForegroundNudgeReason) => void
+  confirmStructuredStreamLongevity?: () => void
+  restartAfterStructuredBackground?: () => void
   close: () => void
 }
 
