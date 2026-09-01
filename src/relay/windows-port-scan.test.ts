@@ -14,7 +14,10 @@ import {
   __setWindowsProcessTreeLoaderForTests,
   resetWindowsProcessTableForTests
 } from '../main/windows/windows-process-table'
-import { scanWindowsListeningPorts } from './windows-port-scan'
+import {
+  resetWindowsPortScanDiagnosticsForTests,
+  scanWindowsListeningPorts
+} from './windows-port-scan'
 
 type Spec = {
   program: string
@@ -85,6 +88,7 @@ function specs(): Spec[] {
 describe('scanWindowsListeningPorts', () => {
   beforeEach(() => {
     runProcessMock.mockReset()
+    resetWindowsPortScanDiagnosticsForTests()
     resetWindowsProcessTableForTests()
     __setWindowsProcessTreeLoaderForTests(
       nativeTable([
@@ -308,6 +312,33 @@ describe('scanWindowsListeningPorts', () => {
       { host: '0.0.0.0', port: 3000, pid: NETSTAT_PID }
     ])
     expect(getAllProcesses).not.toHaveBeenCalled()
+  })
+
+  // The relay daemon's stderr is what installRelayLogRotation routes into
+  // relay.log, so a fall-through logged anywhere else is a fall-through nobody
+  // can diagnose. Pin the stream, not just the fact that something was called.
+  it('reports leaving the native path on the relay diagnostic stream, once', async () => {
+    const lines: string[] = []
+    const stderr = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation((chunk: string | Uint8Array) => {
+        lines.push(String(chunk))
+        return true
+      })
+    try {
+      runProcessMock.mockResolvedValue(ok(''))
+      await scanWindowsListeningPorts()
+      await scanWindowsListeningPorts()
+    } finally {
+      stderr.mockRestore()
+    }
+
+    const reported = lines.filter((line) => line.includes('[ports] netstat unusable'))
+    expect(reported).toHaveLength(1)
+    expect(reported[0]).toContain('no listening row parsed')
+    // relayLogLine's ISO stamp: an unplaceable line cannot be read against the
+    // reconnect flaps around it.
+    expect(reported[0]).toMatch(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z /)
   })
 
   it('treats a netstat timeout as unanswered and falls through', async () => {

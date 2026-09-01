@@ -7,6 +7,7 @@ import {
 import { getProcessOutputFields } from '../shared/process-output-field-scanner'
 import type { DetectedPort } from './port-scan-handler'
 import { buildRelayCommandEnv } from './relay-command-env'
+import { relayLogLine } from './relay-diagnostic-log'
 
 const SYSTEM_PORTS_TO_EXCLUDE = new Set([22])
 const MAX_DETECTED_PORTS = 50
@@ -91,13 +92,24 @@ let reportedNetstatUnusable = false
  * Both fall-throughs are permanent when they are wrong — the host stays on the
  * PowerShell payload, or on nothing, for the life of the relay — and the scan
  * repeats every 12-30s, so this logs one line rather than a stream.
+ *
+ * Through relayLogLine, not console.warn: this only ever runs in the detached
+ * daemon, whose stderr installRelayLogRotation routes into the relay.log that
+ * the remote-diagnostics tail reads. An untimestamped line in that file cannot
+ * be placed against the reconnect flaps around it (#7773), and "since when" is
+ * most of what this line is for.
  */
 function reportWindowsNetstatUnusable(reason: string): void {
   if (reportedNetstatUnusable) {
     return
   }
   reportedNetstatUnusable = true
-  console.warn(`[ports] netstat unusable on this host (${reason}); falling back to PowerShell`)
+  relayLogLine(`[ports] netstat unusable on this host (${reason}); falling back to PowerShell`)
+}
+
+/** Test-only: re-arm the one-shot so each case can observe its own line. */
+export function resetWindowsPortScanDiagnosticsForTests(): void {
+  reportedNetstatUnusable = false
 }
 
 /**
