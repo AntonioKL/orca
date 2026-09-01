@@ -187,9 +187,15 @@ export class DesktopScriptRuntimeHost {
       }, this.requestTimeoutMs)
       timer.unref?.()
       this.pending = { id, resolve, reject, timer }
-      channel.write(`${JSON.stringify({ ...request, requestId: id })}\n`, (error) =>
+      channel.write(`${JSON.stringify({ ...request, requestId: id })}\n`, (error) => {
+        // Bind the report to what it was written for: a late callback must not
+        // charge a second failure for this operation, nor stop a replacement
+        // helper and reject a later request with this one's error.
+        if (this.channel !== channel || this.pending?.id !== id) {
+          return
+        }
         this.abortChannel(new RuntimeClientError('accessibility_error', error.message))
-      )
+      })
     })
   }
 

@@ -13,9 +13,19 @@ class FakeRuntimeChild extends EventEmitter {
   readonly writes: string[] = []
   killed = false
   stdinEnded = false
+  /** Holds write callbacks so a late stdin failure can be fired deliberately. */
+  deferWrites = false
+  private readonly pendingWrites: ((error?: Error | null) => void)[] = []
+
   readonly stdin = {
     write: (chunk: string, callback?: (error?: Error | null) => void): boolean => {
       this.writes.push(chunk)
+      if (this.deferWrites) {
+        if (callback) {
+          this.pendingWrites.push(callback)
+        }
+        return true
+      }
       callback?.(null)
       return true
     },
@@ -28,6 +38,13 @@ class FakeRuntimeChild extends EventEmitter {
   kill(): boolean {
     this.killed = true
     return true
+  }
+
+  /** What a destroyed stdin does to writes still queued at teardown. */
+  failQueuedWrites(): void {
+    for (const callback of this.pendingWrites.splice(0)) {
+      callback(new Error('ERR_STREAM_DESTROYED'))
+    }
   }
 
   /** Requests written to this child, decoded. */
@@ -67,6 +84,7 @@ function createHost(
     requestTimeoutMs?: number
     cooldownMs?: number
     now?: () => number
+    deferWrites?: boolean
   } = {}
 ) {
   const children: FakeRuntimeChild[] = []
@@ -79,6 +97,7 @@ function createHost(
     spawn: (spec) => {
       specs.push(spec)
       const child = new FakeRuntimeChild()
+      child.deferWrites = options.deferWrites === true
       children.push(child)
       return child as unknown as RuntimeChildProcess
     }
@@ -444,6 +463,44 @@ describe('DesktopScriptRuntimeHost', () => {
     await settle()
     children.at(-1)?.respond({ ok: true, capabilities: {} })
     await expect(next).resolves.toMatchObject({ ok: true })
+    host.dispose()
+  })
+
+  it('charges one failure when a write fails after the helper was torn down', async () => {
+    const { host, children, warnings } = createHost({ deferWrites: true })
+
+    const promise = host.request({ tool: 'handshake' })
+    await settle()
+    children[0].respond({ ok: true, capabilities: {} }, 999)
+    await expect(promise).rejects.toThrow(/did not match the pending request/)
+
+    // stop() destroys stdin, so the queued write calls back with an error. That
+    // is the same operation failing, not a second one, and counting it twice
+    // would drive a 3-strike cooldown at half the intended rate.
+    children[0].failQueuedWrites()
+
+    expect(warnings.filter((line) => /helper stopped/.test(line))).toHaveLength(1)
+    host.dispose()
+  })
+
+  it('never lets a stale write error stop a replacement helper', async () => {
+    const { host, children } = createHost({ deferWrites: true })
+
+    const first = host.request({ tool: 'handshake' })
+    await settle()
+    children[0].respond({ ok: true, capabilities: {} }, 999)
+    await expect(first).rejects.toBeInstanceOf(Error)
+
+    const second = host.request({ tool: 'handshake' })
+    await settle()
+    expect(children).toHaveLength(2)
+
+    // The late callback belongs to a channel and a request that are both gone.
+    children[0].failQueuedWrites()
+
+    expect(children[1].killed).toBe(false)
+    children[1].respond({ ok: true, capabilities: {} })
+    await expect(second).resolves.toMatchObject({ ok: true })
     host.dispose()
   })
 

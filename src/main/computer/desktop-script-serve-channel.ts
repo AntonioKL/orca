@@ -65,8 +65,13 @@ export class DesktopScriptServeChannel {
   }
 
   write(payload: string, onError: (error: Error) => void): void {
+    if (this.closed) {
+      return
+    }
     this.child.stdin.write(payload, (error) => {
-      if (error) {
+      // A destroyed stdin calls back after stop(); reporting then charges the
+      // caller a second failure for one operation.
+      if (error && !this.closed) {
         onError(error)
       }
     })
