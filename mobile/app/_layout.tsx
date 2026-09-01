@@ -21,7 +21,10 @@ import {
   isRetiredNativeWorkspaceRoute,
   retiredNativeWorkspaceHostId
 } from '../src/mobile-web/mobile-web-production-route'
-import { MOBILE_NATIVE_BASELINE_MODE } from '../src/mobile-web/mobile-native-baseline-mode'
+import {
+  MOBILE_HYBRID_ROUTE_RETIRED,
+  MOBILE_NATIVE_BASELINE_MODE
+} from '../src/mobile-web/mobile-native-baseline-mode'
 import {
   mobileHomeDestination,
   mobileHostWorkspaceEntry
@@ -65,7 +68,7 @@ export default function RootLayout() {
   }, [pathname])
 
   useEffect(() => {
-    if (MOBILE_NATIVE_BASELINE_MODE && pathname === '/hybrid') {
+    if (MOBILE_HYBRID_ROUTE_RETIRED && pathname === '/hybrid') {
       router.replace(hostId ? mobileHostWorkspaceEntry(hostId, true) : '/')
       return
     }

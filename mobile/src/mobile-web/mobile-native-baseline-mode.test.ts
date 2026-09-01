@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mobileNativeBaselineMode } from './mobile-native-baseline-mode'
+import { mobileHybridRouteRetired, mobileNativeBaselineMode } from './mobile-native-baseline-mode'
 
 describe('mobile native baseline mode', () => {
   it('allows the exact runner flag in a development build', () => {
@@ -32,5 +32,21 @@ describe('mobile native baseline mode', () => {
 
   it('does not allow the development baseline flag in production', () => {
     expect(mobileNativeBaselineMode({ developmentBuild: false, requested: '1' })).toBe(true)
+  })
+
+  // The hosted E2E runner enables native baselines and then opens /hybrid in the same bundle, so
+  // the baseline flag must never retire the hybrid route.
+  it('keeps /hybrid reachable in a development build regardless of the baseline flag', () => {
+    expect(mobileHybridRouteRetired({ developmentBuild: true })).toBe(false)
+    expect(mobileHybridRouteRetired({ developmentBuild: true, architecture: 'hybrid' })).toBe(false)
+    expect(mobileHybridRouteRetired({ developmentBuild: true, architecture: 'native' })).toBe(true)
+  })
+
+  it('retires /hybrid in release builds unless the hybrid architecture is explicit', () => {
+    expect(mobileHybridRouteRetired({ developmentBuild: false })).toBe(true)
+    expect(mobileHybridRouteRetired({ developmentBuild: false, architecture: 'hybrid' })).toBe(
+      false
+    )
+    expect(mobileHybridRouteRetired({ developmentBuild: false, architecture: 'native' })).toBe(true)
   })
 })
