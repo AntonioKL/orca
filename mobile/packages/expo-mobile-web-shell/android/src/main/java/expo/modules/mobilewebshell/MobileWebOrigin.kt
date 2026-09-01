@@ -14,6 +14,10 @@ internal fun mobileWebOriginForSession(sessionId: String): String {
 
 internal fun mobileWebOriginUriForSession(sessionId: String): Uri = Uri.parse(mobileWebOriginForSession(sessionId))
 
+/** Android-free host projection so JVM unit tests can check origins without android.net.Uri. */
+internal fun mobileWebOriginHostForSession(sessionId: String): String =
+  mobileWebOriginForSession(sessionId).substringAfter("://")
+
 internal fun isMobileWebOriginForSession(url: Uri, sessionId: String): Boolean =
   url.scheme == MOBILE_WEB_ORIGIN_SCHEME &&
     url.host == mobileWebOriginUriForSession(sessionId).host &&

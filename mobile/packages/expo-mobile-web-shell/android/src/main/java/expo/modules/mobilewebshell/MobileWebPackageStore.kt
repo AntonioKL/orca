@@ -103,8 +103,14 @@ internal class MobileWebPackageStore internal constructor(
       manifestJson.toByteArray(Charsets.UTF_8).size +
       canonicalManifestJson.toByteArray(Charsets.UTF_8).size
     reserveCacheCapacity(hostKey, reservedByteLength)
-    val stageRoot = File(cacheRoot, "$hostKey/staging/$stageId")
+    val hostRoot = File(cacheRoot, hostKey)
+    val stagingRoot = File(hostRoot, "staging")
+    val stageRoot = File(stagingRoot, stageId)
     try {
+      // mkdirs() would create the stage *through* a symlinked ancestor before any later check
+      // could reject it, so the ancestors are validated first.
+      require(isMobileWebUnlinkedPath(hostRoot, cacheRoot)) { "mobile_web_stage_create_failed" }
+      require(isMobileWebUnlinkedPath(stagingRoot, cacheRoot)) { "mobile_web_stage_create_failed" }
       require(stageRoot.mkdirs()) { "mobile_web_stage_create_failed" }
       require(isMobileWebUnlinkedPath(stageRoot, cacheRoot)) {
         "mobile_web_stage_create_failed"
