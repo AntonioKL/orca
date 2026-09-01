@@ -56,6 +56,7 @@ import {
   getExplicitRuntimeEnvironmentIdForWorktree,
   type WorktreeRuntimeOwnerState
 } from '@/lib/worktree-runtime-owner'
+import { resolveWorktreeOperationRouteResult } from '@/lib/worktree-operation-route'
 import {
   clearHostSessionMirrorHydration,
   markHostSessionMirrorHydrated,
@@ -1396,7 +1397,8 @@ function shouldReplaceTerminalTab(
   now: number,
   hasReconnectEvidence: boolean,
   hostAffirmsWorktreeContents: boolean,
-  tabBelongsToEnvironment: boolean
+  tabBelongsToEnvironment: boolean,
+  worktreeOwnerIsMissing: boolean
 ): boolean {
   if (exactProvisionalHandoffs.has(tab.id)) {
     // Why: agent kind is not session identity; retire only the provisional tab
@@ -1411,7 +1413,11 @@ function shouldReplaceTerminalTab(
     if (hasReconnectEvidence) {
       return false
     }
-    if (tab.pendingActivationSpawn && tabBelongsToEnvironment && nextRemotePtyIds.size > 0) {
+    if (
+      tab.pendingActivationSpawn &&
+      nextRemotePtyIds.size > 0 &&
+      (tabBelongsToEnvironment || worktreeOwnerIsMissing)
+    ) {
       return true
     }
     // Why: a worktree has one execution host, so null-PTY placeholders inherit this
@@ -3188,6 +3194,8 @@ function applyWebSessionTabsSnapshotWithContext(
   const snapshotAffirmsWorktreeContents = hostSnapshotAffirmsWorktreeContents(snapshot)
   const nullPtyTabsBelongToEnvironment =
     getExplicitRuntimeEnvironmentIdForWorktree(state, worktreeId) === environmentId
+  const worktreeOwnerIsMissing =
+    resolveWorktreeOperationRouteResult(state, worktreeId).kind === 'missing'
   const retainedTerminalTabs = reconcilesNonAgentTabs
     ? currentTerminalTabs.filter(
         (tab) =>
@@ -3200,7 +3208,8 @@ function applyWebSessionTabsSnapshotWithContext(
             now,
             nullPtyTabHasRetentionEvidence(state, tab),
             snapshotAffirmsWorktreeContents,
-            nullPtyTabsBelongToEnvironment
+            nullPtyTabsBelongToEnvironment,
+            worktreeOwnerIsMissing
           )
       )
     : currentTerminalTabs

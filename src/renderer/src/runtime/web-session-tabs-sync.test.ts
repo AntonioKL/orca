@@ -367,6 +367,52 @@ describe('applyWebSessionTabsSnapshot', () => {
     expect({ ...state, ...patch }.tabsByWorktree[WT]).toContainEqual(tab)
   })
 
+  it('keeps a pending activation tab when worktree ownership is ambiguous', () => {
+    const tab: TerminalTab = {
+      id: 'ambiguous-owner-pending-tab',
+      ptyId: null,
+      worktreeId: WT,
+      title: 'Terminal',
+      defaultTitle: 'Terminal',
+      customTitle: null,
+      color: null,
+      sortOrder: 0,
+      createdAt: NOW - 1,
+      pendingActivationSpawn: true
+    }
+    const state = makeState({
+      tabsByWorktree: { [WT]: [tab] },
+      detectedWorktreesByRepo: {
+        'repo-a': {
+          worktrees: [{ id: WT, repoId: 'repo-a', hostId: 'runtime:runtime-a' }]
+        },
+        'repo-b': {
+          worktrees: [{ id: WT, repoId: 'repo-b', hostId: 'runtime:runtime-b' }]
+        }
+      }
+    })
+
+    const patch = applyWebSessionTabsSnapshot(
+      state,
+      makeSnapshot([
+        {
+          type: 'terminal',
+          id: HOST_SURFACE_ID,
+          title: 'Terminal',
+          parentTabId: 'host-tab-1',
+          leafId: LEAF_ID,
+          isActive: true,
+          status: 'ready',
+          terminal: 'terminal-1'
+        }
+      ]),
+      'runtime-a',
+      NOW
+    ) as Partial<WebSessionTabsSyncState>
+
+    expect({ ...state, ...patch }.tabsByWorktree[WT]).toContainEqual(tab)
+  })
+
   it('ignores stale or duplicate same-epoch snapshots after a newer version was applied', () => {
     const state = makeState()
     const newer = makeSnapshot([], { snapshotVersion: 3, activeTabType: null })

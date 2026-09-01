@@ -477,8 +477,6 @@ describe('applyWebSessionTabsSnapshot', () => {
 
     const patch = applyWebSessionTabsSnapshot(
       makeState({
-        repos: [{ id: 'repo', connectionId: null, executionHostId: `runtime:${ENV}` }],
-        worktreesByRepo: { repo: [{ id: WT, repoId: 'repo' }] },
         tabsByWorktree: { [WT]: [pendingTab] },
         activeTabId: pendingTab.id,
         activeTabIdByWorktree: { [WT]: pendingTab.id }
