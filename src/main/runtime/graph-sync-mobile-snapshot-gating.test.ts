@@ -886,4 +886,37 @@ describe('graph-sync mobile snapshot gating', () => {
       expect.objectContaining({ type: 'terminal', parentTabId: 'late-serve-tab' })
     ])
   })
+
+  it('rejects a delayed renderer snapshot from the deleted occupant after recreation', () => {
+    const runtime = new OrcaRuntimeService({
+      ...storeBase,
+      getWorktreeMeta: () => ({ instanceId: 'new-instance' })
+    } as never)
+    const events: RuntimeMobileSessionTabsResult[] = []
+    runtime.onMobileSessionTabsChanged((snapshot) => events.push(snapshot))
+    const internals = runtime as unknown as RuntimeInternals & {
+      removedMobileSessionWorktreeIds: Map<
+        string,
+        { removedInstanceId: string; blockedPublicationEpochs: Set<string> }
+      >
+    }
+    internals.removedMobileSessionWorktreeIds.set(WT, {
+      removedInstanceId: 'old-instance',
+      blockedPublicationEpochs: new Set(['renderer:old'])
+    })
+
+    runtime.syncWindowGraph(1, {
+      tabs: [],
+      leaves: [],
+      mobileSessionTabs: [
+        {
+          ...makeRendererSnapshot({ version: 1, epoch: 'renderer:late' }),
+          worktreeInstanceId: 'old-instance'
+        }
+      ]
+    })
+
+    expect(internals.mobileSessionTabsByWorktree.has(WT)).toBe(false)
+    expect(events).toHaveLength(0)
+  })
 })
