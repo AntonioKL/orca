@@ -78,7 +78,17 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
         }
         if (!skipScopedReadBack && scoped && this.isValidCredentialsJsonObject(scoped)) {
           const managed = await this.readManagedCredentials(selected)
-          if (scoped !== managed) {
+          const match = await this.findManagedAccountForRuntimeCredentials(
+            scoped,
+            this.readRuntimeOauthAccount()
+          )
+          if (
+            managed &&
+            scoped !== managed &&
+            match.kind === 'matched' &&
+            match.account.id === selected.id &&
+            this.runtimeCredentialsCanReplaceManagedCredentials(scoped, managed)
+          ) {
             await this.writeManagedCredentials(selected, scoped)
           }
         }

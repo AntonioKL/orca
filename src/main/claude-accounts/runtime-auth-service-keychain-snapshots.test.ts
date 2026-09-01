@@ -97,6 +97,81 @@ describe('ClaudeRuntimeAuthService', () => {
     expect(testState.scopedKeychainCredentials).toBe(freshCredentials)
   })
 
+  it('does not import a different identity from the scoped Keychain item', async () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+    const managedCredentials = createClaudeCredentialsJson(
+      'user@example.com',
+      'managed',
+      null,
+      2_000
+    )
+    const foreignCredentials = createClaudeCredentialsJson(
+      'other@example.com',
+      'foreign',
+      null,
+      3_000
+    )
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      managedCredentials
+    )
+    const store = createStore(
+      createSettings({
+        claudeManagedAccounts: [
+          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
+        ],
+        activeClaudeManagedAccountId: 'account-1'
+      })
+    )
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+
+    await service.prepareForClaudeLaunch()
+    testState.scopedKeychainCredentials = foreignCredentials
+    await service.prepareForClaudeLaunch()
+
+    expect(testState.managedKeychainCredentials.get('account-1')).toBe(managedCredentials)
+    expect(testState.scopedKeychainCredentials).toBe(managedCredentials)
+  })
+
+  it('does not import an older same-identity scoped Keychain credential', async () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+    const managedCredentials = createClaudeCredentialsJson(
+      'user@example.com',
+      'managed',
+      null,
+      2_000
+    )
+    const staleCredentials = createClaudeCredentialsJson('user@example.com', 'stale', null, 1_000)
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      managedCredentials
+    )
+    const store = createStore(
+      createSettings({
+        claudeManagedAccounts: [
+          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
+        ],
+        activeClaudeManagedAccountId: 'account-1'
+      })
+    )
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+
+    await service.prepareForClaudeLaunch()
+    testState.scopedKeychainCredentials = staleCredentials
+    await service.prepareForClaudeLaunch()
+
+    expect(testState.managedKeychainCredentials.get('account-1')).toBe(managedCredentials)
+    expect(testState.scopedKeychainCredentials).toBe(managedCredentials)
+  })
+
   it('reads back refreshed active keychain credentials on macOS', async () => {
     if (process.platform !== 'darwin') {
       return

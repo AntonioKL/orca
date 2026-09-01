@@ -62,20 +62,12 @@ export class ClaudeRuntimeAuthReadback extends ClaudeRuntimeAuthCredentialMatchi
         }
         // Why: on cold start we can't tell a fresh CLI refresh from stale runtime creds; adopt only when expiry or a rotated refresh token proves runtime is newer than managed.
         if (this.lastWrittenCredentialsJson === null) {
-          const fresher = this.runtimeCredentialsAreFresher(
-            runtimeContents.credentialsJson,
-            match.managedCredentialsJson
-          )
-          const refreshTokenRotated =
-            this.compareRefreshTokens(
+          if (
+            !this.runtimeCredentialsCanReplaceManagedCredentials(
               runtimeContents.credentialsJson,
               match.managedCredentialsJson
-            ) === 'different'
-          const older = this.runtimeCredentialsAreOlder(
-            runtimeContents.credentialsJson,
-            match.managedCredentialsJson
-          )
-          if (!fresher && !(refreshTokenRotated && !older)) {
+            )
+          ) {
             continue
           }
         } else if (
