@@ -141,4 +141,34 @@ describe('activity event host ownership', () => {
     expect(result.events[0]?.worktree).toBe(folderWorktree)
     expect(result.events[0]?.worktree.displayName).toBe('Docs folder')
   })
+
+  it('uses the retained terminal handle to preserve runtime host ownership after teardown', () => {
+    const localWorktree = makeWorktree()
+    const runtimeWorktree = {
+      ...makeWorktree(),
+      hostId: 'runtime:env-1' as const,
+      runtimeOwnerEnvironmentId: 'env-1',
+      displayName: 'Runtime worktree'
+    }
+    const tab = { ...makeTab(), ptyId: null }
+    const retained = makeRetainedDoneEntry(tab)
+    retained.entry = { ...doneEntry(null), terminalHandle: 'remote:env-1@@pty-1' }
+    const resolveWorktree = vi.fn((_worktreeId, executionHostId) =>
+      executionHostId === 'runtime:env-1' ? runtimeWorktree : localWorktree
+    )
+
+    const result = buildActivityEvents({
+      agentStatusByPaneKey: {},
+      retainedAgentsByPaneKey: { [PANE_KEY]: retained },
+      tabsByWorktree: {},
+      worktreeMap: new Map([[localWorktree.id, localWorktree]]),
+      repoMap: new Map(),
+      resolveWorktree,
+      acknowledgedAgentsByPaneKey: {},
+      now: 3_000
+    })
+
+    expect(resolveWorktree).toHaveBeenCalledWith(localWorktree.id, 'runtime:env-1')
+    expect(result.events[0]?.worktree).toBe(runtimeWorktree)
+  })
 })

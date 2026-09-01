@@ -26,10 +26,12 @@ export function buildAgentStatusBatchPatch(
 export type AgentStatusTabPrefixDropState = Pick<
   AppState,
   | 'acknowledgedAgentsByPaneKey'
+  | 'activityClearedAtByPaneKey'
   | 'agentLaunchConfigByPaneKey'
   | 'agentStatusByPaneKey'
   | 'agentStatusEpoch'
   | 'migrationUnsupportedByPtyId'
+  | 'manuallyUnreadTurnsByPaneKey'
   | 'recentlyClosedAgentStatusTabIds'
   | 'recentlyRetiredAgentStatusPaneKeys'
   | 'retainedAgentsByPaneKey'
@@ -37,6 +39,24 @@ export type AgentStatusTabPrefixDropState = Pick<
   | 'sortEpoch'
   | 'tabsByWorktree'
 >
+
+function removePaneKeyRecords<T>(
+  record: Record<string, T>,
+  prefix: string,
+  extraKeys: ReadonlySet<string>
+): Record<string, T> {
+  const matchingKeys = Object.keys(record).filter(
+    (key) => key.startsWith(prefix) || extraKeys.has(key)
+  )
+  if (matchingKeys.length === 0) {
+    return record
+  }
+  const next = { ...record }
+  for (const key of matchingKeys) {
+    delete next[key]
+  }
+  return next
+}
 
 /** Pure form of the dropAgentStatusByTabPrefix reducer: the paired snapshot
  *  apply folds the same sweep into a patch it assembles itself, so the two
@@ -86,6 +106,16 @@ export function buildAgentStatusTabPrefixDropPatch(
       s.recentlyRetiredAgentStatusPaneKeys,
       retiredAliasPaneKeys
     )
+    const nextClearedAt = removePaneKeyRecords(
+      s.activityClearedAtByPaneKey,
+      prefix,
+      completedOrphanKeySet
+    )
+    const nextManualUnread = removePaneKeyRecords(
+      s.manuallyUnreadTurnsByPaneKey,
+      prefix,
+      completedOrphanKeySet
+    )
 
     if (
       liveKeys.length === 0 &&
@@ -96,13 +126,25 @@ export function buildAgentStatusTabPrefixDropPatch(
       if (nextAck !== s.acknowledgedAgentsByPaneKey) {
         return {
           acknowledgedAgentsByPaneKey: nextAck,
+          ...(nextClearedAt !== s.activityClearedAtByPaneKey
+            ? { activityClearedAtByPaneKey: nextClearedAt }
+            : {}),
+          ...(nextManualUnread !== s.manuallyUnreadTurnsByPaneKey
+            ? { manuallyUnreadTurnsByPaneKey: nextManualUnread }
+            : {}),
           recentlyClosedAgentStatusTabIds: nextClosedTabs,
           recentlyRetiredAgentStatusPaneKeys: nextRetiredPaneKeys
         }
       }
       return {
         recentlyClosedAgentStatusTabIds: nextClosedTabs,
-        recentlyRetiredAgentStatusPaneKeys: nextRetiredPaneKeys
+        recentlyRetiredAgentStatusPaneKeys: nextRetiredPaneKeys,
+        ...(nextClearedAt !== s.activityClearedAtByPaneKey
+          ? { activityClearedAtByPaneKey: nextClearedAt }
+          : {}),
+        ...(nextManualUnread !== s.manuallyUnreadTurnsByPaneKey
+          ? { manuallyUnreadTurnsByPaneKey: nextManualUnread }
+          : {})
       }
     }
     hadLive = liveKeys.length > 0
@@ -147,6 +189,12 @@ export function buildAgentStatusTabPrefixDropPatch(
       recentlyRetiredAgentStatusPaneKeys: nextRetiredPaneKeys,
       ...(nextAck !== s.acknowledgedAgentsByPaneKey
         ? { acknowledgedAgentsByPaneKey: nextAck }
+        : {}),
+      ...(nextClearedAt !== s.activityClearedAtByPaneKey
+        ? { activityClearedAtByPaneKey: nextClearedAt }
+        : {}),
+      ...(nextManualUnread !== s.manuallyUnreadTurnsByPaneKey
+        ? { manuallyUnreadTurnsByPaneKey: nextManualUnread }
         : {}),
       // Why: mirrors removeAgentStatusByTabPrefix — only bump epochs when the live map changed; retained-only sweeps don't affect sort/freshness.
       agentStatusEpoch:

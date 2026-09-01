@@ -75,7 +75,8 @@ export function appendUnsupportedAndRetainedEvents(context: {
     }
     const owner = resolveOwner(
       { worktreeId: retained.worktreeId, tab: retained.tab },
-      retained.entry
+      retained.entry,
+      retained.tab.ptyId ?? retained.entry.terminalHandle
     )
     if (!owner.knownWorktree) {
       continue

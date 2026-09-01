@@ -9,7 +9,12 @@ describe('pairing-local UI fields', () => {
       'automationHostFilter',
       'hideWorkspacesFromOtherDevices',
       'manualRepoOrder',
-      'workspaceHostOrder'
+      'workspaceHostOrder',
+      'agentsVisibleHostIds',
+      'agentsFilterRepoIds',
+      'agentsShowChildAgents',
+      'agentsCompactMode',
+      'activityClearedAtByPaneKey'
     ])
   })
 

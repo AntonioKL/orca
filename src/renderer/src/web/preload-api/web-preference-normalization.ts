@@ -68,7 +68,12 @@ export function mergeHostWebUIState(
     automationHostFilter: local.automationHostFilter,
     hideWorkspacesFromOtherDevices: local.hideWorkspacesFromOtherDevices === true,
     manualRepoOrder: local.manualRepoOrder,
-    workspaceHostOrder: local.workspaceHostOrder
+    workspaceHostOrder: local.workspaceHostOrder,
+    agentsVisibleHostIds: local.agentsVisibleHostIds,
+    agentsFilterRepoIds: local.agentsFilterRepoIds,
+    agentsShowChildAgents: local.agentsShowChildAgents,
+    agentsCompactMode: local.agentsCompactMode,
+    activityClearedAtByPaneKey: local.activityClearedAtByPaneKey
   } satisfies Record<PairingLocalUiField, unknown> & Partial<PersistedUIState>
   return { ...mergeWebUIState(local, incoming), ...pinned }
 }

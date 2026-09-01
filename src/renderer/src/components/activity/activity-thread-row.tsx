@@ -13,23 +13,6 @@ import { ActivityThreadHoverCard } from './activity-thread-hover-card'
 import { activityThreadRowCopy } from './activity-thread-presentation'
 import type { AgentPaneThread } from './activity-thread-types'
 
-function isEventFromNestedInteractiveElement(
-  target: EventTarget | null,
-  currentTarget: HTMLElement
-): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false
-  }
-  const interactiveTarget = target.closest(
-    'a, button, input, select, textarea, [role="button"], [role="link"], [tabindex]:not([tabindex="-1"])'
-  )
-  return (
-    interactiveTarget instanceof HTMLElement &&
-    interactiveTarget !== currentTarget &&
-    currentTarget.contains(interactiveTarget)
-  )
-}
-
 // Why React.memo: rows are pure functions of these props; thread identity is stable across
 // query/selection/group re-renders, so memo keeps a keystroke or selection change from
 // re-rendering every mounted row. Callbacks take the thread so parents can pass stable handlers.
@@ -72,18 +55,9 @@ export const ActivityThreadRow = React.memo(function ActivityThreadRow({
         data-worktree-card-surface="true"
         data-worktree-card-active={selected ? 'primary' : undefined}
         onClick={() => onSelect(thread)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(event) => {
-          // Why: markdown responses can contain links; keyboard activation on a nested link follows the link instead of selecting the row.
-          if (isEventFromNestedInteractiveElement(event.target, event.currentTarget)) {
-            return
-          }
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            onSelect(thread)
-          }
-        }}
+        role="listitem"
+        aria-label={taskTitle}
+        aria-current={selected ? 'true' : undefined}
         className={cn(
           'group relative flex w-full cursor-pointer flex-col gap-1.5 rounded-lg border border-transparent px-1.5 py-2.5 text-left transition-[background-color,border-color,opacity,box-shadow] duration-200 outline-none select-none worktree-sidebar-card-hover focus-visible:ring-1 focus-visible:ring-ring',
           selected && 'border-transparent'
@@ -94,16 +68,24 @@ export const ActivityThreadRow = React.memo(function ActivityThreadRow({
             <ThreadAgentStateIndicator thread={thread} />
           </span>
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <div
+            {/* Keep the activation target separate from markdown links and row actions. */}
+            <button
+              type="button"
+              aria-label={taskTitle}
+              aria-keyshortcuts="Enter Space"
+              onClick={(event) => {
+                event.stopPropagation()
+                onSelect(thread)
+              }}
               className={cn(
-                'min-w-0 text-[13px] leading-5',
+                'block min-w-0 w-full cursor-pointer text-left text-[13px] leading-5 outline-none focus-visible:ring-1 focus-visible:ring-ring',
                 compactMode ? 'truncate' : 'line-clamp-2 break-words',
                 thread.unread ? 'font-semibold text-foreground' : 'font-medium text-foreground'
               )}
               title={taskTitle}
             >
               {taskTitle}
-            </div>
+            </button>
 
             {statusLine ? (
               showMarkdownStatus ? (

@@ -81,6 +81,34 @@ describe('acknowledgedAgentsByPaneKey cleanup on teardown', () => {
     expect(ack['tab-3:1']).toBeUndefined()
   })
 
+  it('dropAgentStatusByTabPrefix clears pane-keyed activity maps without live rows', () => {
+    vi.useFakeTimers()
+    const store = createTestStore()
+    store.setState({
+      activityClearedAtByPaneKey: { 'tab-4:0': 100 },
+      manuallyUnreadTurnsByPaneKey: { 'tab-4:0': 200 }
+    })
+
+    store.getState().dropAgentStatusByTabPrefix('tab-4')
+
+    expect(store.getState().activityClearedAtByPaneKey['tab-4:0']).toBeUndefined()
+    expect(store.getState().manuallyUnreadTurnsByPaneKey['tab-4:0']).toBeUndefined()
+  })
+
+  it('dropHibernatedAgentStatusPane clears pane-keyed activity maps without completion evidence', () => {
+    vi.useFakeTimers()
+    const store = createTestStore()
+    store.setState({
+      activityClearedAtByPaneKey: { 'tab-5:0': 100 },
+      manuallyUnreadTurnsByPaneKey: { 'tab-5:0': 200 }
+    })
+
+    store.getState().dropHibernatedAgentStatusPane('wt-1', 'tab-5:0')
+
+    expect(store.getState().activityClearedAtByPaneKey['tab-5:0']).toBeUndefined()
+    expect(store.getState().manuallyUnreadTurnsByPaneKey['tab-5:0']).toBeUndefined()
+  })
+
   it('a paneKey reused after teardown reads as unvisited (no leaked ack suppresses the signal)', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-29T12:00:00.000Z'))

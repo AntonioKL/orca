@@ -1,15 +1,20 @@
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 import type { Worktree } from '../../../../shared/worktree/types'
+import type { ExecutionHostId } from '../../../../shared/execution-host'
 
 const STANDALONE_ACTIVITY_WORKTREE_REPO_ID = '__activity_standalone__'
 const STANDALONE_ACTIVITY_WORKTREES_CAP = 200
 const standaloneActivityWorktrees = new Map<string, Worktree>()
 
-function buildStandaloneActivityWorktree(worktreeId: string): Worktree {
+function buildStandaloneActivityWorktree(
+  worktreeId: string,
+  executionHostId?: ExecutionHostId
+): Worktree {
   const displayName =
     worktreeId === FLOATING_TERMINAL_WORKTREE_ID ? 'Floating terminal' : 'Standalone terminal'
   return {
     id: worktreeId,
+    ...(executionHostId ? { hostId: executionHostId } : {}),
     repoId: STANDALONE_ACTIVITY_WORKTREE_REPO_ID,
     path: '',
     head: '',
@@ -30,14 +35,18 @@ function buildStandaloneActivityWorktree(worktreeId: string): Worktree {
 }
 
 /** Return a stable synthetic worktree for terminal-only activity. */
-export function standaloneActivityWorktree(worktreeId: string): Worktree {
-  let worktree = standaloneActivityWorktrees.get(worktreeId)
+export function standaloneActivityWorktree(
+  worktreeId: string,
+  executionHostId?: ExecutionHostId
+): Worktree {
+  const cacheKey = `${worktreeId}\0${executionHostId ?? ''}`
+  let worktree = standaloneActivityWorktrees.get(cacheKey)
   if (!worktree) {
     if (standaloneActivityWorktrees.size >= STANDALONE_ACTIVITY_WORKTREES_CAP) {
       standaloneActivityWorktrees.clear()
     }
-    worktree = buildStandaloneActivityWorktree(worktreeId)
-    standaloneActivityWorktrees.set(worktreeId, worktree)
+    worktree = buildStandaloneActivityWorktree(worktreeId, executionHostId)
+    standaloneActivityWorktrees.set(cacheKey, worktree)
   }
   return worktree
 }

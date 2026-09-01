@@ -15,6 +15,7 @@ import { registerPersistedPaneKeyAlias } from '../restoring-sessions/pane-alias-
 import {
   normalizeWorkspaceSessionPaneIdentities,
   remapAcknowledgedAgentPaneKeys,
+  remapActivityClearedAtPaneKeys,
   remapSshRemotePtyLeaseLeafIds,
   type WorkspaceSessionPaneIdentityRemap
 } from '../restoring-sessions/workspace-pane-normalization'
@@ -50,10 +51,19 @@ export function setLocalWorkspaceSession(
     context.runtime.state.ui?.acknowledgedAgentsByPaneKey,
     normalized.leafIdByInputLeafIdByTabId
   )
-  if (remappedAcknowledgements.changed) {
+  const remappedActivityCutoffs = remapActivityClearedAtPaneKeys(
+    context.runtime.state.ui?.activityClearedAtByPaneKey,
+    normalized.leafIdByInputLeafIdByTabId
+  )
+  if (remappedAcknowledgements.changed || remappedActivityCutoffs.changed) {
     context.runtime.state.ui = {
       ...context.runtime.state.ui,
-      acknowledgedAgentsByPaneKey: remappedAcknowledgements.acknowledgements
+      ...(remappedAcknowledgements.changed
+        ? { acknowledgedAgentsByPaneKey: remappedAcknowledgements.acknowledgements }
+        : {}),
+      ...(remappedActivityCutoffs.changed
+        ? { activityClearedAtByPaneKey: remappedActivityCutoffs.cutoffs }
+        : {})
     }
   }
   for (const entry of normalized.legacyPaneKeyAliasEntries) {

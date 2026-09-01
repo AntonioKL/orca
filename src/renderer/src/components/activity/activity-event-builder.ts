@@ -150,7 +150,9 @@ function resolveActivityEventOwner(
   const resolvedWorktree = args.resolveWorktree?.(context.worktreeId, executionHostId)
   const mappedWorktree = args.worktreeMap.get(context.worktreeId)
   const worktree =
-    resolvedWorktree ?? mappedWorktree ?? standaloneActivityWorktree(context.worktreeId)
+    resolvedWorktree ??
+    mappedWorktree ??
+    standaloneActivityWorktree(context.worktreeId, executionHostId)
   let repo =
     executionHostId && args.repos
       ? findIndexedRepoOwnerForHost(args.repos, worktree.repoId, executionHostId)

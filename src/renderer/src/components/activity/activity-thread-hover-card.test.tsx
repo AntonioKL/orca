@@ -118,6 +118,10 @@ describe('ActivityThreadHoverCard and ActivityThreadRow', () => {
 
     const card = container.querySelector('[data-worktree-card-surface="true"]')
     expect(card).not.toBeNull()
+    expect(card?.getAttribute('role')).toBe('listitem')
+    expect(
+      card?.querySelector('button[aria-label="Audit current HEAD on m4air environment"]')
+    ).not.toBeNull()
     expect(card?.textContent).toContain('Audit current HEAD on m4air environment')
     expect(card?.textContent).toContain('m4air-audit')
   })
