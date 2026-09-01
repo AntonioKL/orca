@@ -31,7 +31,6 @@ export type CreateWorkspaceFromComposerArgs = {
   note: string | undefined
   sparseCheckout?: { directories: string[]; presetId?: string }
   nameIsAutoManaged?: boolean
-  note: string | undefined
   worktreeCreateIdempotency: WorktreeCreateIdempotencyProbe
 }
 
@@ -96,7 +95,6 @@ async function createWorkItemWorkspace(args: {
   note: string | undefined
   sparseCheckout?: { directories: string[]; presetId?: string }
   nameIsAutoManaged?: boolean
-  note: string | undefined
   worktreeCreateIdempotency: WorktreeCreateIdempotencyProbe
 }): Promise<WorktreeCreateResult> {
   const { client, selection, targetRepoId, setupDecision, agent, workspaceName, note } = args
