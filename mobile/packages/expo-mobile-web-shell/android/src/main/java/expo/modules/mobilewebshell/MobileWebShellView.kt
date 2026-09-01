@@ -64,7 +64,7 @@ private val MOBILE_WEB_MERMAID_FRAME_CSP = listOf(
 @SuppressLint("ViewConstructor", "SetJavaScriptEnabled")
 internal class MobileWebShellView(
   context: Context,
-  private val appContext: AppContext
+  appContext: AppContext
 ) : ExpoView(context, appContext) {
   private val onBridgeMessage by EventDispatcher<Map<String, Any>>()
   private val onNavigationBlocked by EventDispatcher<Map<String, Any>>()
@@ -345,32 +345,35 @@ internal class MobileWebShellView(
     )
   }
 
-   private fun isAllowedDocumentUrl(url: Uri): Boolean =
-       activeSessionId != null &&
-     isMobileWebOriginForSession(url, activeSessionId ?: return false) &&
+  private fun isAllowedDocumentUrl(url: Uri): Boolean {
+    val sessionId = activeSessionId ?: return false
+    return isMobileWebOriginForSession(url, sessionId) &&
       url.path == "/" &&
       url.encodedPath == "/" &&
       url.query == null &&
-       url.fragment == activeSessionId &&
-       url.toString().length <= 8 * 1024
+      url.fragment == sessionId &&
+      url.toString().length <= 8 * 1024
+  }
 
-   private fun isAllowedDocumentRequestUrl(url: Uri): Boolean =
-     activeSessionId != null &&
-       isMobileWebOriginForSession(url, activeSessionId ?: return false) &&
-       url.path == "/" &&
-       url.encodedPath == "/" &&
-       url.query == null &&
-       (url.fragment == null || url.fragment == activeSessionId) &&
-       url.toString().length <= 8 * 1024
+  private fun isAllowedDocumentRequestUrl(url: Uri): Boolean {
+    val sessionId = activeSessionId ?: return false
+    return isMobileWebOriginForSession(url, sessionId) &&
+      url.path == "/" &&
+      url.encodedPath == "/" &&
+      url.query == null &&
+      (url.fragment == null || url.fragment == sessionId) &&
+      url.toString().length <= 8 * 1024
+  }
 
-  private fun isAllowedEmbeddedDocumentUrl(url: Uri): Boolean =
-    activeSessionId != null &&
-    isMobileWebOriginForSession(url, activeSessionId ?: return false) &&
+  private fun isAllowedEmbeddedDocumentUrl(url: Uri): Boolean {
+    val sessionId = activeSessionId ?: return false
+    return isMobileWebOriginForSession(url, sessionId) &&
       url.path == "/$MOBILE_WEB_MERMAID_FRAME_PATH" &&
       url.encodedPath == "/$MOBILE_WEB_MERMAID_FRAME_PATH" &&
       url.query == null &&
       url.fragment == null &&
       url.toString().length <= 8 * 1024
+  }
 
   private fun blockedResponse(): WebResourceResponse = WebResourceResponse(
     "text/plain",

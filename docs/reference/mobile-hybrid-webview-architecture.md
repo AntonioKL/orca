@@ -248,9 +248,13 @@ pnpm test:e2e:hosted-mobile-webview:ssh:packaged
 ```
 
 The iOS hosted-WebView and packaged SSH journeys require macOS, Xcode, an
-available simulator, and Docker for the SSH topology. Android-specific commands
-are listed in `mobile/package.json`. Physical-device and store-signed evidence
-must be recorded separately from emulator results.
+available simulator, and Docker for the SSH topology. The nine
+`test:e2e:hosted-webview*` entrypoints under `mobile/`, and what each one needs,
+are tabulated in `mobile/README.md`. The native store suites live beside them:
+`pnpm --dir mobile test:native:ios-web-store` for Swift and
+`:orca-expo-mobile-web-shell:testDebugUnitTest` for Kotlin, both run by
+`.github/workflows/mobile-native-shell-tests.yml`. Physical-device and
+store-signed evidence must be recorded separately from emulator results.
 
 ## Support and Privacy
 

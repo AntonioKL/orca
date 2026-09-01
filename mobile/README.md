@@ -209,17 +209,42 @@ pnpm lint:mobile-web
 pnpm build:mobile-web-rnw
 ```
 
-Hosted integration journeys:
+### Hosted WebView journeys
 
-```bash
-pnpm test:e2e:hosted-mobile-webview
-pnpm test:e2e:hosted-mobile-webview:ssh
-pnpm test:e2e:hosted-mobile-webview:ssh:packaged
-```
+Repository-root entrypoints build Desktop and the hosted bundle first, then hand
+off to the mobile runner:
 
-The iOS journeys require macOS, Xcode, and an available simulator. SSH journeys
-also require Docker. Android route, security, release, cache, and crash-loop
-commands are listed in `mobile/package.json`.
+| Command | Needs |
+| --- | --- |
+| `pnpm test:e2e:hosted-mobile-webview` | macOS, Xcode, a booted iOS simulator |
+| `pnpm test:e2e:hosted-mobile-webview:ssh` | the above, plus Docker for the SSH relay target |
+| `pnpm test:e2e:hosted-mobile-webview:ssh:packaged` | the above, against packaged mobile-web resources |
+
+Mobile-side entrypoints (`pnpm --dir mobile <script>`) drive an already-built
+Desktop through the `orca` CLI, so a paired Desktop must be reachable:
+
+| Command | Needs |
+| --- | --- |
+| `test:e2e:hosted-webview` | macOS, Xcode, a booted iOS simulator |
+| `test:e2e:hosted-webview:security` | same; runs only the origin/capability assertions |
+| `test:e2e:hosted-webview:android-routes` | an Android emulator or device on `adb`, with accessibility reads |
+| `test:e2e:hosted-webview:android-back` | an Android emulator or device on `adb` |
+| `test:e2e:hosted-webview:android-security` | an Android device on `adb` plus a local network probe port |
+| `test:e2e:hosted-webview:android-release` | a **user**-build (release-signed, non-debuggable) install; `--serial` or `ANDROID_SERIAL` |
+| `test:e2e:hosted-webview:android-crash-loop` | an Android device on `adb`; forwards the WebView DevTools socket |
+| `test:e2e:hosted-webview:android-corrupt-cache` | an Android device on `adb`, POSIX signals, and `--desktop-pid` |
+| `test:e2e:hosted-webview:ios-crash-loop` | macOS, Xcode, an iOS simulator reachable through `xcrun simctl` |
+
+### Native store suites
+
+| Command | Needs |
+| --- | --- |
+| `pnpm --dir mobile test:native:ios-web-store` | macOS with Xcode command line tools; compiles the shipped Swift store sources with `xcrun swiftc` and needs no simulator |
+| `cd mobile/android && ./gradlew :orca-expo-mobile-web-shell:testDebugUnitTest` | JDK 17 and the Android SDK, after `npx expo prebuild --platform android --no-install` |
+
+Both native suites run in CI from `.github/workflows/mobile-native-shell-tests.yml`.
+The hosted journeys do not: none of them can run on a GitHub-hosted runner that
+has an emulator and Docker at once.
 
 ## Protocol Compatibility
 
