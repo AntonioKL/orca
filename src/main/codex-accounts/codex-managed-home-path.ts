@@ -2,6 +2,7 @@ import { lstatSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'nod
 import { join, resolve } from 'node:path'
 import { app } from 'electron'
 import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
+import { readUntrustedString } from '../../shared/untrusted-value-fields'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import type { CodexManagedAccount } from '../../shared/managed-account-types'
 import { getSystemCodexHomePath } from '../codex/codex-home-paths'
@@ -24,7 +25,7 @@ import {
 } from './wsl-codex-managed-home-probe'
 import {
   buildWslManagedHomePreparationScript,
-  WSL_PREPARE_UNTRUSTED_EXITS
+  interpretWslPreparationResult
 } from './wsl-codex-managed-home-preparation'
 
 const WSL_MANAGED_HOME_TIMEOUT_MS = 5_000
@@ -32,16 +33,27 @@ const WSL_MANAGED_HOME_TIMEOUT_MS = 5_000
 export class CodexManagedHomePath {
   constructor(private readonly validateWslPath: (distro: string, script: string) => string) {}
 
+  /** Creates the root; for the write paths (add, recreate) that need it to exist. */
   getRoot(): string {
-    const root = join(app.getPath('userData'), 'codex-accounts')
+    const root = this.rootPath()
     mkdirSync(root, { recursive: true })
     return root
+  }
+
+  /**
+   * Why a non-creating spelling: `assert` is a *gate*. Reset-credit validation
+   * and other read-only callers must be able to refuse without touching the
+   * filesystem, and creating the root as a side effect of asking a question is
+   * how a check becomes a mutation.
+   */
+  private rootPath(): string {
+    return join(app.getPath('userData'), 'codex-accounts')
   }
 
   assertHostOwnership(candidatePath: string, expectedAccountId: string): string {
     return assertOwnedHostCodexManagedHomePath({
       candidatePath,
-      managedAccountsRoot: join(app.getPath('userData'), 'codex-accounts'),
+      managedAccountsRoot: this.rootPath(),
       systemCodexHomePath: getSystemCodexHomePath(),
       expectedAccountId
     })
@@ -69,7 +81,7 @@ export class CodexManagedHomePath {
     if (!wslInfo) {
       return assertOwnedHostCodexManagedHomePath({
         candidatePath,
-        managedAccountsRoot: this.getRoot(),
+        managedAccountsRoot: this.rootPath(),
         systemCodexHomePath: getSystemCodexHomePath(),
         expectedAccountId
       })
@@ -126,27 +138,13 @@ export class CodexManagedHomePath {
       shell: 'bash',
       timeoutMs: WSL_MANAGED_HOME_TIMEOUT_MS
     })
-    if (result.timedOut) {
-      throw new ManagedCodexHomeTemporarilyUnavailableError(undefined, {
-        cause: new Error(
-          `Preparing the managed Codex home in WSL ${wslInfo.distro} timed out after ${WSL_MANAGED_HOME_TIMEOUT_MS}ms.`
-        )
-      })
+    const outcome = interpretWslPreparationResult(result, wslInfo.distro)
+    if (outcome.kind === 'untrusted') {
+      throw new UntrustedManagedCodexHomeError(outcome.reason)
     }
-    // Why: 41/42 mean the path is not this account's home; re-auth must refuse
-    // rather than write credentials into someone else's directory. Every other
-    // non-zero exit — a cold distro, a missing shell, a 9p hiccup — proves
-    // nothing about ownership and must not read as a trust failure (STA-5616).
-    const untrustedReason =
-      typeof result.code === 'number' ? WSL_PREPARE_UNTRUSTED_EXITS.get(result.code) : undefined
-    if (untrustedReason !== undefined) {
-      throw new UntrustedManagedCodexHomeError(untrustedReason)
-    }
-    if (result.code !== 0) {
+    if (outcome.kind === 'indeterminate') {
       throw new ManagedCodexHomeTemporarilyUnavailableError(undefined, {
-        cause: new Error(
-          `Preparing the managed Codex home in WSL ${wslInfo.distro} exited with code ${String(result.code)}.`
-        )
+        cause: new Error(outcome.reason)
       })
     }
   }
@@ -225,8 +223,14 @@ export class CodexManagedHomePath {
     return { kind: 'owned', homePath: candidatePath }
   }
 
+  /**
+   * Why not `instanceof` plus a bare `.message`: this decides whether re-auth may
+   * RECREATE the home, and it runs on whatever `assert` threw. A revoked Proxy
+   * throws on the prototype walk and a hostile getter throws on the read, either
+   * of which would escape the catch that exists to make this path total.
+   */
   private isMissingHomeError(error: unknown): boolean {
-    return error instanceof Error && error.message === MISSING_MANAGED_HOME_MESSAGE
+    return readUntrustedString(error, 'message') === MISSING_MANAGED_HOME_MESSAGE
   }
 
   private pathsEqual(left: string, right: string): boolean {

@@ -41,34 +41,57 @@ describe('buildWslCodexManagedHomeProbeScript', () => {
     const script = buildWslCodexManagedHomeProbeScript(LINUX_HOME, 'account-1')
 
     expect(script).toContain(`expected_marker='account-1'`)
-    expect(script).toContain('test "$candidate_real" = "$managed_root_real/$expected_marker/home"')
-    expect(script).toContain('test "$contents" = "$expected_marker"')
+    expect(script).toContain(
+      'if [ "$candidate_real" != "$managed_root_real/$expected_marker/home" ]; then tag account-mismatch; fi'
+    )
+    expect(script).toContain(
+      'if [ "$contents" != "$expected_marker" ]; then tag marker-mismatch; fi'
+    )
   })
 
   it('accepts any managed account home when no account is given', () => {
     const script = buildWslCodexManagedHomeProbeScript(LINUX_HOME)
 
     expect(script).not.toContain('expected_marker')
-    expect(script).toContain('test -n "$contents" || tag marker-mismatch')
+    expect(script).toContain('case "$contents" in "") tag marker-mismatch ;; esac')
   })
 
-  it('never tags absence straight off a failed `test`', () => {
+  it('never derives a verdict from a raw filesystem test or a pipeline', () => {
     const script = buildWslCodexManagedHomeProbeScript(LINUX_HOME, 'account-1')
 
-    // `test -e ... || tag missing-*` is the collapse: a status of 1 means
-    // "absent OR could not look". Absence must route through prove_absent.
-    expect(script).not.toMatch(/test -e [^\n]*\|\| tag missing/)
-    expect(script).toMatch(/test -e "\$candidate" \|\| prove_absent /)
-    expect(script).toMatch(/test -e "\$marker" \|\| prove_absent /)
+    // The invariant: a tag may only follow a command that SUCCEEDED. A `test`
+    // that failed, or a pipeline whose exit status conflates "no match" with
+    // "the producer died", must never reach one.
+    expect(script).not.toMatch(/test -[a-z] [^\n]*\|\| *tag /)
+    expect(script).not.toMatch(/test -[a-z] [^\n]*&& *tag /)
+    expect(script).not.toMatch(/\| *grep[^\n]*(&&|\|\|) *(tag|exit)/)
   })
 
-  it('rejects a symlinked marker before reading it', () => {
+  it('observes every path through the single guarded primitive', () => {
     const script = buildWslCodexManagedHomeProbeScript(LINUX_HOME, 'account-1')
-    const lines = script.split('\n')
 
-    expect(script).toContain('test -h "$marker" && tag marker-not-regular')
-    expect(lines.findIndex((l) => l.includes('test -h "$marker"'))).toBeLessThan(
-      lines.findIndex((l) => l.includes('cat -- "$marker"'))
+    expect(script).toContain('kind_of "$candidate" "$candidate_parent" "$candidate_name"')
+    expect(script).toContain('kind_of "$marker" "$candidate_real" .orca-managed-home')
+    expect(script).toContain('case "$KIND" in absent) tag missing-home ;; esac')
+    expect(script).toContain('*) tag marker-not-regular ;;')
+  })
+
+  it('sends every failed capture to the unknown exit rather than a tag', () => {
+    const script = buildWslCodexManagedHomeProbeScript(LINUX_HOME, 'account-1')
+    const captures = script.split('\n').filter((line) => line.includes('=$('))
+
+    expect(captures.length).toBeGreaterThan(3)
+    for (const line of captures) {
+      expect(line).toMatch(/\|\| *(unknown|_meta=)/)
+    }
+  })
+
+  it('classifies the marker before reading it', () => {
+    const script = buildWslCodexManagedHomeProbeScript(LINUX_HOME, 'account-1')
+    const scriptLines = script.split('\n')
+
+    expect(scriptLines.findIndex((l) => l.includes('kind_of "$marker"'))).toBeLessThan(
+      scriptLines.findIndex((l) => l.includes('cat -- "$marker"'))
     )
   })
 
@@ -78,7 +101,7 @@ describe('buildWslCodexManagedHomeProbeScript', () => {
     // Every structural fact is reported through `tag`, which exits 0; the bare
     // `exit 1`s are reserved for reads that failed and prove nothing.
     expect(script).not.toContain('exit 35')
-    expect(script.match(/\|\| exit 1$/gm)?.length).toBeGreaterThan(0)
+    expect(script.match(/\|\| unknown$/gm)?.length).toBeGreaterThan(0)
   })
 })
 

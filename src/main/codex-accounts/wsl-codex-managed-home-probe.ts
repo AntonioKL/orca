@@ -1,4 +1,6 @@
 import { quotePosixShell } from '../../shared/wsl-login-shell-command'
+import { readUntrustedBoolean, readUntrustedString } from '../../shared/untrusted-value-fields'
+import { buildWslGuestObservationPrelude } from './wsl-guest-filesystem-observation'
 import { toWindowsWslPath } from '../wsl'
 import {
   MARKER_NOT_REGULAR_FILE_MESSAGE,
@@ -18,6 +20,9 @@ import {
  * not Orca-owned" (STA-5616).
  */
 const VERDICT_TAG = 'ORCA_CODEX_HOME_VERDICT:'
+
+/** Any non-zero status is indeterminate; this one just names the intent. */
+const PROBE_UNKNOWN_EXIT = 1
 
 export const OUTSIDE_MANAGED_ROOT_MESSAGE =
   'Managed WSL Codex home is outside Orca account storage.'
@@ -42,39 +47,51 @@ export function buildWslCodexManagedHomeProbeScript(
 ): string {
   return [
     'set -uo pipefail',
+    ...buildWslGuestObservationPrelude(PROBE_UNKNOWN_EXIT),
     `tag() { printf '${VERDICT_TAG}%s\\n' "$1"; exit 0; }`,
-    // `test -e` returns the same status for "absent" and "cannot look" (EACCES on
-    // a parent, EIO, ELOOP), so a bare `|| tag missing` would rebuild the very
-    // collapse this probe exists to remove. Absence is only dispositive when the
-    // parent can be listed AND the entry is not in it; every other shape exits
-    // non-zero, which the host reads as indeterminate.
-    'prove_absent() { ls -A -- "$1" >/dev/null 2>&1 || exit 1; ' +
-      'ls -A -- "$1" 2>/dev/null | grep -Fxq -- "$2" && exit 1; tag "$3"; }',
     `candidate=${quotePosixShell(linuxPath)}`,
     'managed_root="${HOME%/}/.local/share/orca/codex-accounts"',
-    'candidate_parent=$(dirname -- "$candidate") || exit 1',
-    'candidate_name=$(basename -- "$candidate") || exit 1',
-    'test -e "$candidate" || prove_absent "$candidate_parent" "$candidate_name" missing-home',
-    'candidate_real=$(readlink -f -- "$candidate") || exit 1',
-    'managed_root_real=$(readlink -f -- "$managed_root") || exit 1',
+    'candidate_parent=$(dirname -- "$candidate") || unknown',
+    'candidate_name=$(basename -- "$candidate") || unknown',
+    // Absence is the only structural fact worth a tag here, and `kind_of` will
+    // not report it without a listing that proves it.
+    'kind_of "$candidate" "$candidate_parent" "$candidate_name"',
+    'case "$KIND" in absent) tag missing-home ;; esac',
+    'candidate_real=$(readlink -f -- "$candidate") || unknown',
+    'managed_root_real=$(readlink -f -- "$managed_root") || unknown',
     'marker="$candidate_real/.orca-managed-home"',
-    // lstat before stat, mirroring the host lane: a symlink marker is not
-    // ownership proof however trustworthy the file it points at looks.
-    'test -h "$marker" && tag marker-not-regular',
-    'test -e "$marker" || prove_absent "$candidate_real" .orca-managed-home missing-marker',
-    'test -f "$marker" || tag marker-not-regular',
-    'contents=$(cat -- "$marker") || exit 1',
+    // One typed observation replaces the old -h/-e/-f chain, each link of which
+    // was trusted in the negative and so could turn a stat failure into a
+    // verdict. A symlink marker is not ownership proof (host-lane parity).
+    'kind_of "$marker" "$candidate_real" .orca-managed-home',
+    'case "$KIND" in',
+    '  absent) tag missing-marker ;;',
+    '  regular) ;;',
+    '  *) tag marker-not-regular ;;',
+    'esac',
+    'contents=$(cat -- "$marker") || unknown',
     'case "$candidate_real" in "$managed_root_real"/*/home) ;; *) tag outside-managed-root ;; esac',
     ...(expectedAccountId === undefined
-      ? ['test -n "$contents" || tag marker-mismatch']
+      ? ['case "$contents" in "") tag marker-mismatch ;; esac']
       : [
           `expected_marker=${quotePosixShell(expectedAccountId)}`,
-          'test "$candidate_real" = "$managed_root_real/$expected_marker/home" || tag account-mismatch',
-          'test "$contents" = "$expected_marker" || tag marker-mismatch'
+          'if [ "$candidate_real" != "$managed_root_real/$expected_marker/home" ]; then tag account-mismatch; fi',
+          'if [ "$contents" != "$expected_marker" ]; then tag marker-mismatch; fi'
         ]),
-    "encoded=$(printf '%s' \"$candidate_real\" | base64 | tr -d '\\n') || exit 1",
+    "encoded=$(printf '%s' \"$candidate_real\" | base64 | tr -d '\\n') || unknown",
     'tag "owned:$encoded"'
   ].join('\n')
+}
+
+/** The one place that reads a raw field; kept local so nothing else dereferences the outcome. */
+function readField(value: unknown, key: string): unknown {
+  try {
+    return value === null || typeof value !== 'object'
+      ? undefined
+      : (value as Record<string, unknown>)[key]
+  } catch {
+    return undefined
+  }
 }
 
 function indeterminate(message: string, cause?: unknown): HostCodexManagedHomeVerdict {
@@ -103,13 +120,24 @@ export function classifyWslCodexManagedHomeProbe(
   outcome: WslCodexManagedHomeProbeOutcome,
   distro: string
 ): HostCodexManagedHomeVerdict {
-  if (!outcome.ran) {
+  // Why every field is read defensively: this value crosses a subprocess/IPC
+  // boundary, so its runtime shape is not guaranteed by its type. A malformed
+  // or hostile outcome must become indeterminate, not an untyped throw that no
+  // caller can recognise as an unproven observation.
+  const ran = readUntrustedBoolean(outcome, 'ran')
+  if (ran !== true) {
     return {
       kind: 'indeterminate',
-      error: new Error('WSL Codex ownership probe could not run.', { cause: outcome.error })
+      error: new Error('WSL Codex ownership probe could not run.', {
+        cause: ran === false ? readField(outcome, 'error') : outcome
+      })
     }
   }
-  const lines = outcome.stdout
+  const stdout = readUntrustedString(outcome, 'stdout')
+  if (stdout === undefined) {
+    return indeterminate('WSL Codex ownership probe returned no readable output.')
+  }
+  const lines = stdout
     .replaceAll(String.fromCharCode(0), '')
     .split(/\r?\n/)
     .map((line) => line.trim())

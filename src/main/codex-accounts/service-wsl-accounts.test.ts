@@ -765,9 +765,11 @@ describe('CodexAccountService config sync', () => {
         if (script.includes('readlink -f')) {
           expect(script).toContain("expected_marker='account-1'")
           expect(script).toContain(
-            'test "$candidate_real" = "$managed_root_real/$expected_marker/home"'
+            'if [ "$candidate_real" != "$managed_root_real/$expected_marker/home" ]; then tag account-mismatch; fi'
           )
-          expect(script).toContain('test "$contents" = "$expected_marker"')
+          expect(script).toContain(
+            'if [ "$contents" != "$expected_marker" ]; then tag marker-mismatch; fi'
+          )
           return ownedProbeVerdict(wslLinuxHomePath)
         }
         return ''
