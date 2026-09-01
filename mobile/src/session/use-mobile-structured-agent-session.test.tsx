@@ -254,6 +254,34 @@ describe('useMobileStructuredAgentSession', () => {
     )
   })
 
+  it('waits for the structured hold before subscribing', async () => {
+    let resolveHold: (() => void) | null = null
+    sendRequest.mockImplementation((method, params) => {
+      if (method === 'agentSession.hold') {
+        return new Promise((resolve) => {
+          resolveHold = () => resolve(ok({ held: true }))
+        })
+      }
+      return defaultSendRequest(method, params)
+    })
+
+    act(() => {
+      renderer = create(createElement(Harness))
+    })
+
+    await vi.waitFor(() => expect(resolveHold).not.toBeNull())
+    expect(subscribe).not.toHaveBeenCalled()
+
+    await act(async () => resolveHold?.())
+    await vi.waitFor(() =>
+      expect(subscribe).toHaveBeenCalledWith(
+        'agentSession.subscribe',
+        { sessionId: 'session-1' },
+        expect.any(Function)
+      )
+    )
+  })
+
   it('sends with the shared structured mutation envelope after the stream fence lands', async () => {
     act(() => {
       renderer = create(createElement(Harness))

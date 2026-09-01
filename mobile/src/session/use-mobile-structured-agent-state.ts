@@ -47,46 +47,60 @@ export function useMobileStructuredAgentState(args: {
 
   useEffect(() => {
     if (!client || !sessionId || !enabled) {
-      return
-    }
-    const holderId = structuredAgentSessionHolderId('mobile-chat')
-    const held = callAgentSession(client, 'agentSession.hold', {
-      sessionId,
-      holderId
-    }).catch(() => undefined)
-    return () => {
-      void held.then(() =>
-        callAgentSession(
-          client,
-          'agentSession.release',
-          {
-            sessionId,
-            holderId
-          },
-          undefined,
-          { failWhenDisconnected: true }
-        ).catch(() => undefined)
-      )
-    }
-  }, [client, enabled, sessionId])
-
-  useEffect(() => {
-    if (!client || !sessionId || !enabled) {
       setState(EMPTY_STRUCTURED_AGENT_SESSION)
       setLoadingOlder(false)
       return
     }
     apply({ type: 'loading' })
-    const unsubscribe = client.subscribe('agentSession.subscribe', { sessionId }, (raw) => {
-      if (typeof raw === 'object' && raw !== null && (raw as { type?: unknown }).type === 'error') {
-        apply({ type: 'error', message: String((raw as { message?: unknown }).message ?? '') })
-        return
-      }
-      if (isSubscribeEvent(raw)) {
-        apply({ type: 'event', event: raw })
-      }
+    const holderId = structuredAgentSessionHolderId('mobile-chat')
+    let cancelled = false
+    let unsubscribe = (): void => {}
+    const held = callAgentSession(client, 'agentSession.hold', {
+      sessionId,
+      holderId
     })
-    return unsubscribe
+    void held
+      .then(() => {
+        if (cancelled) {
+          return
+        }
+        unsubscribe = client.subscribe('agentSession.subscribe', { sessionId }, (raw) => {
+          if (
+            typeof raw === 'object' &&
+            raw !== null &&
+            (raw as { type?: unknown }).type === 'error'
+          ) {
+            apply({ type: 'error', message: String((raw as { message?: unknown }).message ?? '') })
+            return
+          }
+          if (isSubscribeEvent(raw)) {
+            apply({ type: 'event', event: raw })
+          }
+        })
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          apply({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+        }
+      })
+    return () => {
+      cancelled = true
+      unsubscribe()
+      void held
+        .then(() =>
+          callAgentSession(
+            client,
+            'agentSession.release',
+            {
+              sessionId,
+              holderId
+            },
+            undefined,
+            { failWhenDisconnected: true }
+          ).catch(() => undefined)
+        )
+        .catch(() => undefined)
+    }
   }, [apply, client, enabled, sessionId])
 
   const loadEarlier = useCallback(() => {
