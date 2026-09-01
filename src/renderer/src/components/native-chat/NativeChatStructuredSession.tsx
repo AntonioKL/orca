@@ -22,7 +22,6 @@ import { useStructuredAgentSession } from './use-structured-agent-session'
 import { translate } from '@/i18n/i18n'
 import { NativeChatOrchestrationPausedNotice } from './NativeChatOrchestrationPausedNotice'
 import { useNativeChatPasteBridge } from './use-native-chat-paste-bridge'
-import { useNativeChatLaunchDraftSignal } from './use-native-chat-launch-draft-adoption'
 
 function encodeQuestionAnswer(questionId: string, answer: string): string {
   return `${encodeURIComponent(questionId)}:${encodeURIComponent(answer)}`

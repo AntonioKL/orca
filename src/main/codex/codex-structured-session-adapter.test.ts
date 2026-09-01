@@ -191,6 +191,7 @@ describe('CodexStructuredSessionAdapter.acquire', () => {
       params: {
         threadId: 'thread-proven',
         cwd: '/work/repo',
+        excludeTurns: true,
         path: '/rollouts/thread-proven.jsonl'
       }
     })
