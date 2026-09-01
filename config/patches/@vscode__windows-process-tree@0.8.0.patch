@@ -27,7 +27,7 @@ index 855bd4b86f0a3c18c7594212c0e42b6e35bc4001..33774e7ae296f0de39dd94156673c9e7
                  "/guard:cf",
                  "/sdl",
 diff --git a/src/process.cc b/src/process.cc
-index 3eea92077c4d1d433119361d5c432881859131e9..1998f4addd4d7e9aba946ea6f7f7a4a5d13291bc 100644
+index 3eea92077c4d1d433119361d5c432881859131e9..18c406c4aaa7b73eb89ebedbfab6254fcc7b511a 100644
 --- a/src/process.cc
 +++ b/src/process.cc
 @@ -37,7 +37,7 @@ uint32_t GetRawProcessList(std::vector<ProcessInfo>& process_info,
@@ -39,3 +39,271 @@ index 3eea92077c4d1d433119361d5c432881859131e9..1998f4addd4d7e9aba946ea6f7f7a4a5
    }
  
    CloseHandle(snapshot_handle);
+@@ -49,7 +49,9 @@ void GetProcessMemoryUsage(ProcessInfo& process_info) {
+   HANDLE hProcess;
+   PROCESS_MEMORY_COUNTERS pmc;
+ 
+-  hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
++  // PROCESS_VM_READ is never used here -- GetProcessMemoryInfo reads counters the
++  // kernel keeps, not the address space -- and acquiring it is what EDR scores.
++  hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+ 
+   if (hProcess == NULL) {
+     return;
+@@ -81,7 +83,8 @@ void GetCpuUsage(Cpu& cpu_info, bool first_pass) {
+   DWORD pid = cpu_info.pid;
+   HANDLE hProcess;
+ 
+-  hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
++  // GetProcessTimes needs no more than PROCESS_QUERY_LIMITED_INFORMATION.
++  hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+ 
+   if (hProcess == NULL) {
+     return;
+diff --git a/src/process_commandline.cc b/src/process_commandline.cc
+index ea822b120e8038a4803e34647042f08f4aaf5ca1..5a616a6b9a88208e11df71fd779767b4b365b48c 100644
+--- a/src/process_commandline.cc
++++ b/src/process_commandline.cc
+@@ -1,67 +1,175 @@
+-/*---------------------------------------------------------------------------------------------
+- *  Copyright (c) Microsoft Corporation. All rights reserved.
+- *  Licensed under the MIT License. See License.txt in the project root for license information.
+- *--------------------------------------------------------------------------------------------*/
+-
+-#include "process.h"
+-#include "process_commandline.h"
+-#include <windows.h>
+-#include <winternl.h>
+-#include <iostream>
+-
+-bool GetProcessCommandLine(ProcessInfo& process_info) {
+-  HINSTANCE ntdll = GetModuleHandleW(L"ntdll.dll");
+-  if (!ntdll) {
+-    return false;
+-  }
+-
+-  decltype(NtQueryInformationProcess)* nt_query_information_process =
+-      reinterpret_cast<decltype(NtQueryInformationProcess)*>(
+-          GetProcAddress(ntdll, "NtQueryInformationProcess"));
+-
+-  if (!nt_query_information_process) {
+-    return false;
+-  }
+-
+-  PROCESS_BASIC_INFORMATION pbi{};
+-  PEB peb = {NULL};
+-  RTL_USER_PROCESS_PARAMETERS process_parameters = {NULL};
+-
+-  // Get process handle
+-  DWORD pid = process_info.pid;
+-  HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+-  if (hProcess == INVALID_HANDLE_VALUE) {
+-    return false;
+-  }
+-
+-  // Get Process Environment Block (PEB)
+-  NTSTATUS status = nt_query_information_process(hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), nullptr);
+-  if (NT_SUCCESS(status) && pbi.PebBaseAddress) {
+-    // Read PEB
+-    if (ReadProcessMemory(hProcess, pbi.PebBaseAddress, &peb, sizeof(peb), nullptr)) {
+-      // Read the processs parameters
+-      if (ReadProcessMemory(hProcess, peb.ProcessParameters, &process_parameters, sizeof(RTL_USER_PROCESS_PARAMETERS), nullptr)) {
+-        if (process_parameters.CommandLine.Length > 0) {
+-          std::wstring buffer;
+-          buffer.resize(process_parameters.CommandLine.Length / sizeof(wchar_t));
+-          if (ReadProcessMemory(hProcess, process_parameters.CommandLine.Buffer, &buffer[0], process_parameters.CommandLine.Length, nullptr)) {
+-            int wide_length = static_cast<int>(buffer.length());
+-            int charcount = WideCharToMultiByte(CP_UTF8, 0, buffer.data(), wide_length,
+-                                      NULL, 0, NULL, NULL);
+-            if (charcount) {
+-              process_info.commandLine.resize(static_cast<size_t>(charcount));
+-              WideCharToMultiByte(CP_UTF8, 0, buffer.data(), wide_length,
+-                                  &process_info.commandLine[0], charcount,
+-                                  NULL, NULL);
+-            }
+-            CloseHandle(hProcess);
+-            return true;
+-          }
+-        }
+-      }
+-    }
+-  }
+-
+-  CloseHandle(hProcess);
+-  return false;
+-}
++/*---------------------------------------------------------------------------------------------
++ *  Copyright (c) Microsoft Corporation. All rights reserved.
++ *  Licensed under the MIT License. See License.txt in the project root for license information.
++ *--------------------------------------------------------------------------------------------*/
++
++#include "process.h"
++#include "process_commandline.h"
++#include <windows.h>
++#include <winternl.h>
++#include <vector>
++
++namespace {
++
++// Windows 8.1 and later hand back a process's command line as a UNICODE_STRING
++// the kernel builds, needing only PROCESS_QUERY_LIMITED_INFORMATION. That is the
++// whole point of preferring it: OpenProcess(PROCESS_VM_READ) plus a chain of
++// ReadProcessMemory calls across every pid on a timer is the primitive
++// credential dumpers use, and EDR scores it that way regardless of intent.
++const ULONG kProcessCommandLineInformation = 60;
++
++const NTSTATUS kStatusNotImplemented = static_cast<NTSTATUS>(0xC0000002L);
++const NTSTATUS kStatusInvalidInfoClass = static_cast<NTSTATUS>(0xC0000003L);
++const NTSTATUS kStatusInfoLengthMismatch = static_cast<NTSTATUS>(0xC0000004L);
++const NTSTATUS kStatusBufferTooSmall = static_cast<NTSTATUS>(0xC0000023L);
++const NTSTATUS kStatusNotSupported = static_cast<NTSTATUS>(0xC00000BBL);
++
++// winternl.h's PROCESSINFOCLASS does not name class 60 and its enumerator range
++// stops far short of it, so the class travels as a ULONG rather than a cast enum.
++typedef NTSTATUS(NTAPI* NtQueryInformationProcessFn)(HANDLE, ULONG, PVOID, ULONG, PULONG);
++
++// ntdll ships no import library for this entry point; it has to be resolved.
++NtQueryInformationProcessFn ResolveNtQueryInformationProcess() {
++  HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
++  if (!ntdll) {
++    return nullptr;
++  }
++  return reinterpret_cast<NtQueryInformationProcessFn>(
++      GetProcAddress(ntdll, "NtQueryInformationProcess"));
++}
++
++NtQueryInformationProcessFn NtQueryInformationProcessEntry() {
++  static NtQueryInformationProcessFn entry = ResolveNtQueryInformationProcess();
++  return entry;
++}
++
++// Latched once class 60 proves absent, so an older kernel pays that probe once
++// rather than once per process per scan.
++volatile LONG g_command_line_class_missing = 0;
++
++enum CommandLineOutcome {
++  kCommandLineRecovered,
++  kProcessUnreachable,
++  kCommandLineClassMissing
++};
++
++bool StoreCommandLineUtf8(ProcessInfo& process_info, const wchar_t* data, size_t wide_length) {
++  if (wide_length == 0) {
++    return false;
++  }
++  int length = static_cast<int>(wide_length);
++  int charcount = WideCharToMultiByte(CP_UTF8, 0, data, length, NULL, 0, NULL, NULL);
++  if (!charcount) {
++    return false;
++  }
++  process_info.commandLine.resize(static_cast<size_t>(charcount));
++  WideCharToMultiByte(CP_UTF8, 0, data, length, &process_info.commandLine[0], charcount, NULL,
++                      NULL);
++  return true;
++}
++
++CommandLineOutcome ClassifyQueryFailure(NTSTATUS status) {
++  if (status == kStatusInvalidInfoClass || status == kStatusNotSupported ||
++      status == kStatusNotImplemented) {
++    return kCommandLineClassMissing;
++  }
++  return kProcessUnreachable;
++}
++
++CommandLineOutcome ReadCommandLineWithoutPeb(ProcessInfo& process_info) {
++  if (InterlockedCompareExchange(&g_command_line_class_missing, 0, 0) != 0) {
++    return kCommandLineClassMissing;
++  }
++  NtQueryInformationProcessFn query = NtQueryInformationProcessEntry();
++  if (!query) {
++    return kCommandLineClassMissing;
++  }
++
++  // PROCESS_QUERY_INFORMATION implicitly grants PROCESS_QUERY_LIMITED_INFORMATION,
++  // so a pid that refuses this open cannot grant the stronger one the PEB read
++  // needs. Reporting it unreachable rather than retrying is what keeps the
++  // VM_READ open off the ~25% of the table that denies access on every scan.
++  HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_info.pid);
++  if (process == NULL) {
++    return kProcessUnreachable;
++  }
++
++  ULONG size = 0;
++  NTSTATUS status = query(process, kProcessCommandLineInformation, nullptr, 0, &size);
++  if (status != kStatusInfoLengthMismatch && status != kStatusBufferTooSmall) {
++    CloseHandle(process);
++    return ClassifyQueryFailure(status);
++  }
++  if (size < sizeof(UNICODE_STRING)) {
++    CloseHandle(process);
++    return kProcessUnreachable;
++  }
++
++  std::vector<unsigned char> buffer(size);
++  status = query(process, kProcessCommandLineInformation, &buffer[0], size, &size);
++  CloseHandle(process);
++  if (!NT_SUCCESS(status)) {
++    return ClassifyQueryFailure(status);
++  }
++
++  // Header and characters arrive in one allocation; Length is in bytes and
++  // excludes any terminator, exactly what the PEB read used to copy.
++  const UNICODE_STRING* command_line = reinterpret_cast<const UNICODE_STRING*>(&buffer[0]);
++  if (command_line->Buffer != nullptr) {
++    StoreCommandLineUtf8(process_info, command_line->Buffer,
++                         command_line->Length / sizeof(wchar_t));
++  }
++  return kCommandLineRecovered;
++}
++
++// The original reader. Only a kernel without class 60 reaches it.
++bool ReadCommandLineFromPeb(ProcessInfo& process_info) {
++  NtQueryInformationProcessFn query = NtQueryInformationProcessEntry();
++  if (!query) {
++    return false;
++  }
++
++  HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE,
++                               process_info.pid);
++  if (process == NULL) {
++    return false;
++  }
++
++  PROCESS_BASIC_INFORMATION pbi = {};
++  PEB peb = {};
++  RTL_USER_PROCESS_PARAMETERS process_parameters = {};
++  bool recovered = false;
++
++  NTSTATUS status = query(process, ProcessBasicInformation, &pbi, sizeof(pbi), nullptr);
++  if (NT_SUCCESS(status) && pbi.PebBaseAddress &&
++      ReadProcessMemory(process, pbi.PebBaseAddress, &peb, sizeof(peb), nullptr) &&
++      ReadProcessMemory(process, peb.ProcessParameters, &process_parameters,
++                        sizeof(RTL_USER_PROCESS_PARAMETERS), nullptr) &&
++      process_parameters.CommandLine.Length > 0) {
++    std::wstring buffer;
++    buffer.resize(process_parameters.CommandLine.Length / sizeof(wchar_t));
++    if (ReadProcessMemory(process, process_parameters.CommandLine.Buffer, &buffer[0],
++                          process_parameters.CommandLine.Length, nullptr)) {
++      StoreCommandLineUtf8(process_info, buffer.data(), buffer.length());
++      recovered = true;
++    }
++  }
++
++  CloseHandle(process);
++  return recovered;
++}
++
++}  // namespace
++
++bool GetProcessCommandLine(ProcessInfo& process_info) {
++  switch (ReadCommandLineWithoutPeb(process_info)) {
++    case kCommandLineRecovered:
++      return true;
++    case kProcessUnreachable:
++      return false;
++    case kCommandLineClassMissing:
++      break;
++  }
++  InterlockedExchange(&g_command_line_class_missing, 1);
++  return ReadCommandLineFromPeb(process_info);
++}

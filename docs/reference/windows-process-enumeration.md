@@ -180,7 +180,7 @@ on any other OS keeps using the scan.
 
 ## Why the package is patched
 
-`config/patches/@vscode__windows-process-tree@0.8.0.patch` carries three hunks.
+`config/patches/@vscode__windows-process-tree@0.8.0.patch` carries four hunks.
 
 1. **Spectre mitigation.** The upstream `binding.gyp` requires Spectre-mitigated
    libraries, which Orca's Windows build agents do not install. `node-pty` is
@@ -195,9 +195,67 @@ on any other OS keeps using the scan.
    realpath, then loads the relative path from the `node_modules` symlink, so
    `node_addon_api.gyp` resolves outside the repo and hourly Windows builds
    die at configure. `node-pty` is patched the same way for the same reason.
+4. **No PEB reads, no `PROCESS_VM_READ`.** See below.
 
 The typings claim `commandLine` is truncated at 512 characters. Measured, it is
 not: the longest observed on a real host was 26,059.
+
+### The command line comes from the kernel, not the target's memory
+
+Upstream, `GetProcessCommandLine` opens every process with
+`PROCESS_QUERY_INFORMATION | PROCESS_VM_READ` and issues three chained
+`ReadProcessMemory` calls — PEB, `RTL_USER_PROCESS_PARAMETERS`, then the string
+— to recover the command line. Walking another process's address space for
+credentials-adjacent data on a repeating timer is what a credential dumper does,
+so Defender for Endpoint scores it as such regardless of intent. Nothing about
+the flag sets above changes that; only removing the read does.
+
+Windows 8.1 added `NtQueryInformationProcess`'s `ProcessCommandLineInformation`
+class (60), which returns the same string as a `UNICODE_STRING` the kernel
+builds, needing only `PROCESS_QUERY_LIMITED_INFORMATION`. Electron's floor is
+Windows 10, so every OS Orca supports has it. The entry point is resolved with
+`GetProcAddress` on `ntdll.dll` — it has no import library — and the size is
+probed with a null-buffer call that answers `STATUS_INFO_LENGTH_MISMATCH`.
+
+The same hunk drops `PROCESS_VM_READ` from `GetProcessMemoryUsage` and
+`GetCpuUsage`, which acquired it and never read an address space:
+`GetProcessMemoryInfo` and `GetProcessTimes` are satisfied by
+`PROCESS_QUERY_LIMITED_INFORMATION`. Measured, both return identical values
+under the weaker right on every process that opens at all.
+
+Measured on Windows 11, 514 processes, counted in-process by replacing the
+addon's import table entries with counting stubs:
+
+| per `CommandLine` scan | before                                    | after                                  |
+| ---------------------- | ----------------------------------------- | -------------------------------------- |
+| `OpenProcess` calls    | 514                                       | 514                                    |
+| desired access         | `0x0410` (`VM_READ \| QUERY_INFORMATION`) | `0x1000` (`QUERY_LIMITED_INFORMATION`) |
+| `ReadProcessMemory`    | 1128                                      | **0**                                  |
+| p50 / p95              | 12.7 / 14.1 ms                            | 9.3 / 10.0 ms                          |
+
+Command lines were byte-identical on every process both readers recovered
+(376/376 and 379/379 across runs), including a 24,068-character argv with
+embedded quotes, non-ASCII characters and trailing whitespace, and a WOW64
+target. The weaker right is also a strict superset in reach: three processes
+that refused `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ` granted
+`PROCESS_QUERY_LIMITED_INFORMATION`, and none went the other way.
+
+The PEB reader is kept for a kernel without class 60, behind a process-wide
+latch set only by `STATUS_INVALID_INFO_CLASS`, `STATUS_NOT_SUPPORTED` or
+`STATUS_NOT_IMPLEMENTED`. A process that merely denied a handle does **not**
+reach it: `PROCESS_QUERY_INFORMATION` implicitly grants
+`PROCESS_QUERY_LIMITED_INFORMATION`, so a pid that refused the weaker open
+cannot grant the stronger one, and retrying would re-arm the `VM_READ` open
+against exactly the protected processes — a quarter of the table — that make the
+signal look like credential dumping.
+
+What this does not do is narrow _which_ processes are asked. A detailed scan
+still queries every pid, including `lsass.exe`; it now asks with the same right
+Task Manager uses instead of `PROCESS_VM_READ`. Restricting the command-line
+pass to Orca's own subtree is the complementary change, and it belongs with the
+identity/detailed reader split rather than here — a ppid-derived allowlist would
+miss exactly the detached, reparented descendants the trackers exist to find
+(#9045, #10475), so it needs the job-object membership as its source of truth.
 
 ## Packaging
 

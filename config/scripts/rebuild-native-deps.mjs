@@ -20,7 +20,10 @@
 
 import { rebuild } from '@electron/rebuild'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { stageWindowsProcessTreeNodeAddonApiHeaders } from './windows-process-tree-gyp-rebuild.mjs'
+import {
+  ensureWindowsProcessTreeCommandLinePatch,
+  stageWindowsProcessTreeNodeAddonApiHeaders
+} from './windows-process-tree-gyp-rebuild.mjs'
 import {
   copyFileSync,
   existsSync,
@@ -147,6 +150,9 @@ if (
   existsSync(join(projectDir, 'node_modules', '@vscode', 'windows-process-tree', 'package.json'))
 ) {
   stageWindowsProcessTreeNodeAddonApiHeaders()
+  if (ensureWindowsProcessTreeCommandLinePatch()) {
+    console.warn('[rebuild] Repaired the un-applied windows-process-tree command-line patch.')
+  }
 }
 
 try {

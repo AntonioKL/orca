@@ -271,12 +271,22 @@ export function writeFakeWindowsProcessTree(projectDir) {
   writeFileSync(join(processTreeDir, 'index.js'), 'module.exports = {}\n')
 }
 
-export function writeFakeWindowsProcessTreeWithNodeAddonApi(projectDir) {
+export function writeFakeWindowsProcessTreeWithNodeAddonApi(
+  projectDir,
+  { commandLinePatchApplied = true } = {}
+) {
   const processTreeDir = join(projectDir, 'node_modules', '@vscode', 'windows-process-tree')
   const nodeAddonApiDir = join(processTreeDir, 'node_modules', 'node-addon-api')
   mkdirSync(nodeAddonApiDir, { recursive: true })
   writeFileSync(join(processTreeDir, 'package.json'), '{"dependencies":{"node-addon-api":"*"}}\n')
   writeFileSync(join(processTreeDir, 'index.js'), 'module.exports = {}\n')
+  mkdirSync(join(processTreeDir, 'src'), { recursive: true })
+  writeFileSync(
+    join(processTreeDir, 'src', 'process_commandline.cc'),
+    commandLinePatchApplied
+      ? '// kProcessCommandLineInformation = 60\n'
+      : '// OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid)\n'
+  )
   writeFileSync(join(nodeAddonApiDir, 'package.json'), '{"name":"node-addon-api"}\n')
   writeFileSync(join(nodeAddonApiDir, 'napi.h'), '// napi.h\n')
   writeFileSync(join(nodeAddonApiDir, 'napi-inl.h'), '// napi-inl.h\n')

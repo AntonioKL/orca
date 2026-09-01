@@ -85,6 +85,31 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
     }
   })
 
+  // Why fail rather than build: an unpatched command-line reader compiles fine
+  // and then opens every process with PROCESS_VM_READ to walk its PEB, which is
+  // the primitive the patch exists to remove.
+  it('refuses a Windows rebuild when the command-line patch is missing', () => {
+    const projectDir = mkTempProject()
+
+    try {
+      writeFakeUsableElectronPackage(projectDir, { platform: 'win32' })
+      writeFakeElectronRebuild(projectDir)
+      writeFakeNodePtyConptyPayload(projectDir, 'x64')
+      writeFakeWindowsProcessTreeWithNodeAddonApi(projectDir, { commandLinePatchApplied: false })
+
+      const result = runRebuildScript(
+        projectDir,
+        { npm_config_platform: 'win32', npm_config_arch: 'x64' },
+        ['--platform=win32', '--arch=x64', '--force']
+      )
+
+      expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain('process_commandline.cc')
+    } finally {
+      removeTreeSync(projectDir)
+    }
+  })
+
   it('restores the ConPTY runtime payload after a Windows Electron rebuild', () => {
     const projectDir = mkTempProject()
 
