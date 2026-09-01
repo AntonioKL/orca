@@ -68,7 +68,14 @@ export function buildWslManagedAuthProbeScript(
     'fi',
     'contents=$(cat -- "$marker") || exit 1',
     `${markerTest} || tag marker-mismatch`,
-    'case "$candidate_real" in "$managed_root_real"/*/auth) ;; *) tag outside-managed-root ;; esac',
+    // A shell `*` matches `/` too, so `<root>/*/auth` also matched
+    // `<root>/other/acct/auth`. Strip the root and require exactly one segment
+    // before `auth`.
+    'rest=${candidate_real#"$managed_root_real"/}',
+    'test "$rest" != "$candidate_real" || tag outside-managed-root',
+    'account_segment=${rest%/auth}',
+    'test "$account_segment" != "$rest" || tag outside-managed-root',
+    'case "$account_segment" in \'\'|*/*) tag outside-managed-root ;; esac',
     "encoded=$(printf '%s' \"$candidate_real\" | base64 | tr -d '\\n') || exit 1",
     'tag "owned:$encoded"'
   ].join('\n')
@@ -173,16 +180,22 @@ export async function resolveWslManagedAuthVerdict(
   return classifyWslManagedAuthProbe(probe, wslInfo.distro)
 }
 
+/**
+ * Orca only ever creates `<root>/<accountId>/auth`, so anything with extra
+ * components between the root and `auth` is not that directory however much of
+ * the suffix it shares. A suffix test accepted `<root>/other/acct/auth` as
+ * account `acct`.
+ */
 function hasManagedGuestPathShape(linuxPath: string, expectedAccountId?: string): boolean {
-  if (!linuxPath.includes(MANAGED_GUEST_ROOT_SEGMENT) || !linuxPath.endsWith('/auth')) {
+  const rootIndex = linuxPath.indexOf(MANAGED_GUEST_ROOT_SEGMENT)
+  if (rootIndex === -1) {
     return false
   }
-  // The account segment is the caller's claim about whose storage this is;
-  // another account's directory is not evidence about this one.
-  return (
-    expectedAccountId === undefined ||
-    linuxPath.endsWith(`/claude-accounts/${expectedAccountId}/auth`)
-  )
+  const segments = linuxPath.slice(rootIndex + MANAGED_GUEST_ROOT_SEGMENT.length).split('/')
+  if (segments.length !== 2 || segments[0].length === 0 || segments[1] !== 'auth') {
+    return false
+  }
+  return expectedAccountId === undefined || segments[0] === expectedAccountId
 }
 
 /**

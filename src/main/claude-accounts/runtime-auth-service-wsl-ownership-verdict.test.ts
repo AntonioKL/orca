@@ -18,7 +18,10 @@ import {
   testState
 } from './runtime-auth-service-test-harness'
 
-const fsFaults = vi.hoisted(() => ({ lockedRealpathSuffix: null as string | null }))
+const fsFaults = vi.hoisted(() => ({
+  lockedRealpathSuffix: null as string | null,
+  lockedReadSuffix: null as string | null
+}))
 
 vi.mock('node:fs', async (importOriginal) => {
   const original = await importOriginal<typeof NodeFsModule>()
@@ -34,7 +37,15 @@ vi.mock('node:fs', async (importOriginal) => {
     return original.realpathSync(path, options)
   }) as typeof original.realpathSync
   realpathSync.native = original.realpathSync.native
-  const mocked = { ...original, realpathSync }
+  const readFileSync = ((path: never, options: never) => {
+    if (fsFaults.lockedReadSuffix !== null && String(path).endsWith(fsFaults.lockedReadSuffix)) {
+      const error = new Error('EBUSY: resource busy or locked, read') as NodeJS.ErrnoException
+      error.code = 'EBUSY'
+      throw error
+    }
+    return original.readFileSync(path, options)
+  }) as typeof original.readFileSync
+  const mocked = { ...original, realpathSync, readFileSync }
   return { ...mocked, default: mocked }
 })
 
@@ -143,11 +154,13 @@ describe('runtime-auth WSL ownership probe', () => {
     resetRuntimeAuthTestState()
     wslMocks.runWslProcess.mockReset()
     fsFaults.lockedRealpathSuffix = null
+    fsFaults.lockedReadSuffix = null
     setPlatform('win32')
   })
 
   afterEach(() => {
     fsFaults.lockedRealpathSuffix = null
+    fsFaults.lockedReadSuffix = null
     cleanupRuntimeAuthTestState()
   })
 
@@ -172,6 +185,16 @@ describe('runtime-auth WSL ownership probe', () => {
 
   it('keeps the active WSL account when the guest proves ownership', async () => {
     const authPath = seedGuestAuth()
+    const owned = `${TAG}owned:${Buffer.from(authPath, 'utf-8').toString('base64')}\n`
+    const store = await syncWithProbe(wslResult({ stdout: owned }))
+    expect(selectedUbuntuAccount(store)).toBe('ubuntu-account')
+  })
+
+  it('keeps the active WSL account when the credentials file cannot be read', async () => {
+    // The ownership probe proved the directory; the second observation is the
+    // one that failed. A locked file is not a missing one.
+    const authPath = seedGuestAuth()
+    fsFaults.lockedReadSuffix = '.credentials.json'
     const owned = `${TAG}owned:${Buffer.from(authPath, 'utf-8').toString('base64')}\n`
     const store = await syncWithProbe(wslResult({ stdout: owned }))
     expect(selectedUbuntuAccount(store)).toBe('ubuntu-account')
@@ -213,6 +236,7 @@ describe('runtime-auth host ownership probe', () => {
   beforeEach(() => {
     resetRuntimeAuthTestState()
     fsFaults.lockedRealpathSuffix = null
+    fsFaults.lockedReadSuffix = null
     setPlatform('linux')
   })
 
@@ -242,6 +266,32 @@ describe('runtime-auth host ownership probe', () => {
     fsFaults.lockedRealpathSuffix = join('host-account', 'auth')
     const store = await syncHost()
     expect(store.getSettings().activeClaudeManagedAccountId).toBe('host-account')
+  })
+
+  it('keeps the active host account when the credentials file cannot be read', async () => {
+    fsFaults.lockedReadSuffix = '.credentials.json'
+    const store = await syncHost()
+    expect(store.getSettings().activeClaudeManagedAccountId).toBe('host-account')
+  })
+
+  it('keeps the active host account when the keychain read fails on darwin', async () => {
+    setPlatform('darwin')
+    const keychain = await import('./keychain')
+    const read = vi.mocked(keychain.readManagedClaudeKeychainCredentials)
+    const original = read.getMockImplementation()
+    // Every call, not `Once`: sync reads the keychain more than once, and a
+    // single-shot rejection gets consumed before the read under test.
+    read.mockRejectedValue(new Error('User interaction is not allowed.'))
+    try {
+      const store = await syncHost()
+      expect(read).toHaveBeenCalled()
+      expect(store.getSettings().activeClaudeManagedAccountId).toBe('host-account')
+    } finally {
+      read.mockReset()
+      if (original) {
+        read.mockImplementation(original)
+      }
+    }
   })
 
   it('still clears the active host account when its directory is proven gone', async () => {

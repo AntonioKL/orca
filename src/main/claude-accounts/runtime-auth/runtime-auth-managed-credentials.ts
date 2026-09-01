@@ -6,8 +6,10 @@ import {
 } from '../claude-managed-auth-ownership'
 import {
   readClaudeManagedAuthFile,
+  readClaudeManagedAuthFileResult,
   resolveClaudeManagedAuthVerdict,
-  writeClaudeManagedAuthFile
+  writeClaudeManagedAuthFile,
+  type ClaudeManagedAuthFileRead
 } from '../managed-auth-path'
 import { resolveWslManagedAuthVerdict } from '../wsl-managed-auth-probe'
 import { isOauthTokenExpiring, refreshClaudeOauthCredentials } from '../oauth-refresh'
@@ -33,10 +35,29 @@ export class ClaudeRuntimeAuthManagedCredentials extends ClaudeRuntimeAuthCreden
     account: ClaudeManagedAccount,
     managedAuthPath: string
   ): Promise<string | null> {
+    const read = await this.readManagedCredentialsResultAt(account, managedAuthPath)
+    return read.kind === 'present' ? read.contents : null
+  }
+
+  /**
+   * The unflattened read, for the caller that clears the user's selection when
+   * credentials look missing. A locked file is not a missing one.
+   */
+  protected async readManagedCredentialsResultAt(
+    account: ClaudeManagedAccount,
+    managedAuthPath: string
+  ): Promise<ClaudeManagedAuthFileRead> {
     if (process.platform === 'darwin') {
-      return readManagedClaudeKeychainCredentials(account.id)
+      try {
+        const contents = await readManagedClaudeKeychainCredentials(account.id)
+        return contents === null ? { kind: 'absent' } : { kind: 'present', contents }
+      } catch (error) {
+        // The keychain helper resolves null only for a genuine not-found; every
+        // other failure throws, and none of them are an absent credential.
+        return { kind: 'indeterminate', error }
+      }
     }
-    return readClaudeManagedAuthFile(managedAuthPath, '.credentials.json')
+    return readClaudeManagedAuthFileResult(managedAuthPath, '.credentials.json')
   }
 
   protected async writeManagedCredentials(

@@ -66,7 +66,7 @@ vi.mock('../wsl/wsl-runner', () => ({
 // function's return value: a transient lock is an errno, and it is the
 // classifier under test that has to decide what an EBUSY means. A mock that
 // hands back a pre-decided `null` would be asserting the answer.
-const fsFaults = vi.hoisted(() => ({ realpathLocked: false }))
+const fsFaults = vi.hoisted(() => ({ realpathLocked: false, rmLocked: false }))
 
 vi.mock('node:fs', async (importOriginal) => {
   const original = await importOriginal<typeof NodeFsModule>()
@@ -83,7 +83,17 @@ vi.mock('node:fs', async (importOriginal) => {
     return original.realpathSync(path, options)
   }) as typeof original.realpathSync
   realpathSync.native = original.realpathSync.native
-  const mocked = { ...original, realpathSync }
+  const rmSync = ((path: never, options: never) => {
+    if (fsFaults.rmLocked) {
+      const error = new Error(
+        `EBUSY: resource busy or locked, rm '${String(path)}'`
+      ) as NodeJS.ErrnoException
+      error.code = 'EBUSY'
+      throw error
+    }
+    return original.rmSync(path, options)
+  }) as typeof original.rmSync
+  const mocked = { ...original, realpathSync, rmSync }
   return { ...mocked, default: mocked }
 })
 
@@ -213,6 +223,10 @@ async function buildService(
   const login = service as unknown as { runClaudeLoginAndCapture: () => Promise<unknown> }
   const ownership = await import('./claude-managed-auth-ownership')
   const keychain = await import('./keychain')
+  // The factory is cached across `vi.resetModules()`, so call counts would
+  // otherwise accumulate across tests and make a `not.toHaveBeenCalled` pass or
+  // fail on test order rather than on behaviour.
+  vi.mocked(keychain.deleteManagedClaudeKeychainCredentials).mockClear()
   return {
     service: service as unknown as ServiceHarness['service'],
     settings: () => settings,
@@ -236,6 +250,7 @@ describe('STA-5674: fail-once ownership probe during Claude managed-account add'
     authPathMocks.ownershipCalls = 0
     authPathMocks.credentialsAtFault = null
     fsFaults.realpathLocked = false
+    fsFaults.rmLocked = false
     guestHome = mkdtempSync(join(tmpdir(), 'sta5674-guest-'))
     paths.userDataRoot = mkdtempSync(join(tmpdir(), 'sta5674-userdata-'))
   })
@@ -243,6 +258,7 @@ describe('STA-5674: fail-once ownership probe during Claude managed-account add'
   afterEach(() => {
     restorePlatform()
     fsFaults.realpathLocked = false
+    fsFaults.rmLocked = false
     if (guestHome) {
       rmSync(guestHome, { recursive: true, force: true })
     }
@@ -422,16 +438,20 @@ describe('STA-5674: fail-once ownership probe during Claude managed-account add'
     await expect(service.addAccount({ runtime: 'host' })).rejects.toBe(loginFailure)
   })
 
-  it('a user-requested removal whose probe cannot complete still deletes the account directory', async () => {
+  it('a user-requested removal deletes the account directory without consulting a probe that would fail', async () => {
     setPlatform('linux')
     const { service, settings, keychainDelete } = await buildService()
     await service.addAccount({ runtime: 'host' })
     const accountId = (settings().claudeManagedAccounts[0] as { id: string }).id
     const accountsRoot = join(paths.userDataRoot, 'claude-accounts')
-    // The add used probes 1-3; the removal's own gate is the next one.
+    // The add used probes 1-3. Arm the next one to fail: if removal consults an
+    // ownership gate at all it gets an unprovable answer, and the assertion on
+    // the call count below is what proves the fault was live rather than unused.
     authPathMocks.failOwnershipOnCall = 4
 
     await service.removeAccount(accountId)
+
+    expect(authPathMocks.ownershipCalls).toBe(3)
 
     // The user asked for the account to be gone. Refusing to delete on an
     // unprovable probe leaves credentials on disk with no UI reference to them
@@ -440,6 +460,41 @@ describe('STA-5674: fail-once ownership probe during Claude managed-account add'
     expect(existsSync(join(accountsRoot, accountId, 'auth', '.credentials.json'))).toBe(false)
     expect(existsSync(join(accountsRoot, accountId))).toBe(false)
     expect(keychainDelete).toHaveBeenCalledWith(accountId)
+  })
+
+  it('a user-requested removal that cannot delete the files reports the failure and keeps the account', async () => {
+    setPlatform('linux')
+    const { service, settings, keychainDelete } = await buildService()
+    await service.addAccount({ runtime: 'host' })
+    const accountId = (settings().claudeManagedAccounts[0] as { id: string }).id
+    const accountsRoot = join(paths.userDataRoot, 'claude-accounts')
+    fsFaults.rmLocked = true
+
+    await expect(service.removeAccount(accountId)).rejects.toThrow(/EBUSY/)
+
+    // Telling the user it is gone while the credentials are still on disk is the
+    // same silent retention as refusing to delete; the account must come back so
+    // they can retry.
+    expect(existsSync(join(accountsRoot, accountId, 'auth', '.credentials.json'))).toBe(true)
+    expect(settings().claudeManagedAccounts).toHaveLength(1)
+    expect(keychainDelete).not.toHaveBeenCalled()
+  })
+
+  it('a user-requested removal that cannot resolve the accounts root refuses rather than reporting success', async () => {
+    setPlatform('linux')
+    const { service, settings, keychainDelete } = await buildService()
+    await service.addAccount({ runtime: 'host' })
+    const accountId = (settings().claudeManagedAccounts[0] as { id: string }).id
+    const accountsRoot = join(paths.userDataRoot, 'claude-accounts')
+    // Without the canonical spelling a non-match proves nothing: the persisted
+    // path is canonical while the root is not.
+    fsFaults.realpathLocked = true
+
+    await expect(service.removeAccount(accountId)).rejects.toThrow(/could not locate/i)
+
+    expect(existsSync(join(accountsRoot, accountId, 'auth', '.credentials.json'))).toBe(true)
+    expect(settings().claudeManagedAccounts).toHaveLength(1)
+    expect(keychainDelete).not.toHaveBeenCalled()
   })
 
   it('CONTROL — a user-requested removal still deletes the account directory and its keychain credentials', async () => {

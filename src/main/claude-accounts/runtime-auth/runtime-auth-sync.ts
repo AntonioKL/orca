@@ -67,16 +67,7 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
     }
     if (!activeAccount) {
       if (activeAccountId) {
-        const nextSelection = setSelectedClaudeAccountIdForTarget(
-          normalizeClaudeRuntimeSelection(settings),
-          null,
-          normalizedTarget
-        )
-        this.store.updateSettings({
-          activeClaudeManagedAccountId:
-            normalizedTarget.runtime === 'host' ? null : settings.activeClaudeManagedAccountId,
-          activeClaudeManagedAccountIdsByRuntime: nextSelection
-        })
+        this.clearSelectionForTarget(settings, normalizedTarget)
       }
       if (normalizedTarget.runtime === 'wsl') {
         return
@@ -109,36 +100,26 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
         console.warn(
           '[claude-runtime-auth] Active WSL managed account is not owned by Orca, restoring system default'
         )
-        const nextSelection = setSelectedClaudeAccountIdForTarget(
-          normalizeClaudeRuntimeSelection(settings),
-          null,
-          normalizedTarget
-        )
-        this.store.updateSettings({
-          activeClaudeManagedAccountId:
-            normalizedTarget.runtime === 'host' ? null : settings.activeClaudeManagedAccountId,
-          activeClaudeManagedAccountIdsByRuntime: nextSelection
-        })
+        this.clearSelectionForTarget(settings, normalizedTarget)
         return
       }
-      const credentialsJson = await this.readManagedCredentialsAt(
+      const wslCredentials = await this.readManagedCredentialsResultAt(
         activeAccount,
         wslOwnership.authPath
       )
+      if (wslCredentials.kind === 'indeterminate') {
+        console.warn(
+          '[claude-runtime-auth] Could not read the active WSL managed credentials; leaving the selection in place',
+          wslCredentials.error
+        )
+        return
+      }
+      const credentialsJson = wslCredentials.kind === 'present' ? wslCredentials.contents : null
       if (!credentialsJson || !this.isValidCredentialsJsonObject(credentialsJson)) {
         console.warn(
           '[claude-runtime-auth] Active WSL managed account is missing or has invalid credentials, restoring system default'
         )
-        const nextSelection = setSelectedClaudeAccountIdForTarget(
-          normalizeClaudeRuntimeSelection(settings),
-          null,
-          normalizedTarget
-        )
-        this.store.updateSettings({
-          activeClaudeManagedAccountId:
-            normalizedTarget.runtime === 'host' ? null : settings.activeClaudeManagedAccountId,
-          activeClaudeManagedAccountIdsByRuntime: nextSelection
-        })
+        this.clearSelectionForTarget(settings, normalizedTarget)
         return
       }
       // Why: WSL managed accounts are isolated by their Linux CLAUDE_CONFIG_DIR; materializing into Windows ~/.claude would mix two auth stores.
@@ -178,7 +159,18 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
       return
     }
 
-    let credentialsJson = await this.readManagedCredentialsAt(activeAccount, hostOwnership.authPath)
+    const hostCredentials = await this.readManagedCredentialsResultAt(
+      activeAccount,
+      hostOwnership.authPath
+    )
+    if (hostCredentials.kind === 'indeterminate') {
+      console.warn(
+        '[claude-runtime-auth] Could not read the active managed credentials; leaving the selection in place',
+        hostCredentials.error
+      )
+      return
+    }
+    let credentialsJson = hostCredentials.kind === 'present' ? hostCredentials.contents : null
     if (!credentialsJson || !this.isValidCredentialsJsonObject(credentialsJson)) {
       console.warn(
         '[claude-runtime-auth] Active managed account is missing or has invalid credentials, restoring system default'
@@ -302,5 +294,24 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
     }
     this.lastSyncedAccountId = activeAccount.id
     this.hasMaterializedRuntimeAuth = true
+  }
+
+  /**
+   * Drop the account selected for `target`, keeping the legacy host field in
+   * step. Three call sites did this identically.
+   */
+  private clearSelectionForTarget(
+    settings: ReturnType<typeof this.store.getSettings>,
+    target: ReturnType<typeof normalizeClaudeAccountSelectionTarget>
+  ): void {
+    this.store.updateSettings({
+      activeClaudeManagedAccountId:
+        target.runtime === 'host' ? null : settings.activeClaudeManagedAccountId,
+      activeClaudeManagedAccountIdsByRuntime: setSelectedClaudeAccountIdForTarget(
+        normalizeClaudeRuntimeSelection(settings),
+        null,
+        target
+      )
+    })
   }
 }

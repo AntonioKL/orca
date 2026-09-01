@@ -5,6 +5,7 @@ import { toWindowsWslPath } from '../wsl'
 import { runWslProcess } from '../wsl/wsl-runner'
 import {
   assertOwnedClaudeManagedAuthPath,
+  ManagedClaudeAuthTemporarilyUnavailableError,
   MISSING_MANAGED_AUTH_MESSAGE,
   type ClaudeManagedAuthVerdict
 } from './claude-managed-auth-ownership'
@@ -153,22 +154,28 @@ export class ClaudeManagedAuthStorage {
    * directory Orca itself would have created for this account ID.
    */
   async remove(accountId: string, candidatePath: string): Promise<void> {
-    const accountDir = this.resolveOwnSpellingAccountDir(accountId, candidatePath)
-    if (accountDir === null) {
+    const target = this.resolveOwnSpellingAccountDir(accountId, candidatePath)
+    if (target.kind === 'unresolvable') {
+      // We could not work out which directory this is, so we cannot report it
+      // gone. Throwing rolls the caller's settings change back, which is what
+      // keeps "removed" from being said about files that are still there.
+      throw new ManagedClaudeAuthTemporarilyUnavailableError(
+        "Orca could not locate this account's files to remove them. Retry in a moment.",
+        { cause: target.error }
+      )
+    }
+    if (target.kind === 'foreign') {
+      // Nothing of ours to delete at a path we never chose; the record can go.
       console.warn(
         '[claude-accounts] Not removing a managed auth path Orca did not choose:',
         candidatePath
       )
     } else {
-      try {
-        // Recursive removal never traverses a symlink -- it unlinks the link --
-        // so a planted link cannot redirect this outside the root.
-        rmSync(accountDir, { recursive: true, force: true })
-      } catch (error) {
-        // Non-throwing by contract: the caller has already committed the
-        // settings change and must not roll it back over a failed unlink.
-        console.warn('[claude-accounts] Could not remove managed auth directory:', error)
-      }
+      // Recursive removal never traverses a symlink -- it unlinks the link --
+      // so a planted link cannot redirect this outside the root. A failure here
+      // must reach the user: silently keeping the files while the account
+      // disappears from settings is the orphaning this method exists to stop.
+      rmSync(target.accountDir, { recursive: true, force: true })
     }
     await deleteManagedClaudeKeychainCredentials(accountId)
   }
@@ -190,43 +197,68 @@ export class ClaudeManagedAuthStorage {
     await this.remove(accountId, candidatePath)
   }
 
-  private resolveOwnSpellingAccountDir(accountId: string, candidatePath: string): string | null {
+  /**
+   * Which directory an explicit removal may delete, decided from the persisted
+   * spelling alone. `foreign` is a completed answer -- this path is not ours --
+   * while `unresolvable` means we could not work the question out, and the two
+   * must not both read as "nothing to do".
+   */
+  private resolveOwnSpellingAccountDir(
+    accountId: string,
+    candidatePath: string
+  ):
+    | { kind: 'own'; accountDir: string }
+    | { kind: 'foreign' }
+    | { kind: 'unresolvable'; error: unknown } {
     const wslInfo = parseWslUncPath(candidatePath)
     if (wslInfo) {
       const suffix = `/.local/share/orca/claude-accounts/${accountId}/auth`
       return wslInfo.linuxPath.endsWith(suffix)
-        ? toWindowsWslPath(wslInfo.linuxPath.slice(0, -'/auth'.length), wslInfo.distro)
-        : null
+        ? {
+            kind: 'own',
+            accountDir: toWindowsWslPath(
+              wslInfo.linuxPath.slice(0, -'/auth'.length),
+              wslInfo.distro
+            )
+          }
+        : { kind: 'foreign' }
+    }
+    let spellings: { roots: string[]; canonicalizationError: unknown }
+    try {
+      spellings = this.getAccountsRootSpellings()
+    } catch (error) {
+      return { kind: 'unresolvable', error }
     }
     const resolvedCandidate = resolve(candidatePath)
-    for (const root of this.getAccountsRootSpellings()) {
+    for (const root of spellings.roots) {
       if (pathsEqual(resolvedCandidate, resolve(root, accountId, 'auth'))) {
-        return resolve(root, accountId)
+        return { kind: 'own', accountDir: resolve(root, accountId) }
       }
     }
-    return null
+    // No spelling matched, but one spelling was never computed -- so "not ours"
+    // is not something we actually established.
+    return spellings.canonicalizationError === undefined
+      ? { kind: 'foreign' }
+      : { kind: 'unresolvable', error: spellings.canonicalizationError }
   }
 
   /**
    * Both spellings of the accounts root. The persisted path is canonical (the
    * gate that produced it resolved symlinks) while `getRoot()` is not, so a
-   * userData directory behind a symlink makes the two disagree — and this is
-   * spelling normalisation, not an ownership check, so a failed realpath just
-   * leaves the lexical spelling to match against.
+   * userData directory behind a symlink makes the two disagree. A failed
+   * realpath is reported rather than swallowed: with only the lexical spelling
+   * to compare against, a non-match proves nothing.
    */
-  private getAccountsRootSpellings(): string[] {
-    let root: string
-    try {
-      root = resolve(this.getRoot())
-    } catch (error) {
-      console.warn('[claude-accounts] Could not resolve the managed accounts root:', error)
-      return []
-    }
+  private getAccountsRootSpellings(): { roots: string[]; canonicalizationError: unknown } {
+    const root = resolve(this.getRoot())
     try {
       const canonicalRoot = realpathSync(root)
-      return pathsEqual(canonicalRoot, root) ? [root] : [root, canonicalRoot]
-    } catch {
-      return [root]
+      return {
+        roots: pathsEqual(canonicalRoot, root) ? [root] : [root, canonicalRoot],
+        canonicalizationError: undefined
+      }
+    } catch (error) {
+      return { roots: [root], canonicalizationError: error }
     }
   }
 

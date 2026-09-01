@@ -267,6 +267,34 @@ describe('WSL Claude managed-auth verdict', () => {
     expect(await storage.resolveVerdict(named)).toMatchObject({ kind: 'owned' })
   })
 
+  it('refuses a nested account path that merely shares the suffix, without a probe', async () => {
+    setPlatform('win32')
+    const storage = new ClaudeManagedAuthStorage()
+    // Would throw if it reached `runWslProcess`, which is not mocked here.
+    expect(
+      await storage.resolveVerdict(
+        '\\\\wsl$\\Ubuntu\\home\\dev\\.local\\share\\orca\\claude-accounts\\other\\acct\\auth',
+        'acct'
+      )
+    ).toEqual({ kind: 'untrusted', reason: OUTSIDE_MANAGED_AUTH_ROOT_MESSAGE })
+    // The discriminating case: this one really does end in
+    // `/claude-accounts/acct/auth`, so only a segment-aware check rejects it.
+    expect(
+      await storage.resolveVerdict(
+        '\\\\wsl$\\Ubuntu\\home\\dev\\.local\\share\\orca\\claude-accounts\\nested\\claude-accounts\\acct\\auth',
+        'acct'
+      )
+    ).toEqual({ kind: 'untrusted', reason: OUTSIDE_MANAGED_AUTH_ROOT_MESSAGE })
+    // The one-segment form for the same account is accepted as far as the shape
+    // check goes, so the rejection above is the nesting and not the account ID.
+    expect(
+      await storage.resolveVerdict(
+        '\\\\wsl$\\Ubuntu\\home\\dev\\.local\\share\\orca\\claude-accounts\\acct\\auth\\deeper',
+        'acct'
+      )
+    ).toEqual({ kind: 'untrusted', reason: OUTSIDE_MANAGED_AUTH_ROOT_MESSAGE })
+  })
+
   it('refuses a guest path outside the managed accounts root without running a probe', async () => {
     setPlatform('win32')
     const storage = new ClaudeManagedAuthStorage()

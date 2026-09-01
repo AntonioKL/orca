@@ -72,17 +72,23 @@ export function isUnprovenManagedClaudeAuthError(error: unknown): boolean {
       return false
     }
     if (seen.has(current)) {
+      // A cycle means every reachable link has already been inspected, so this
+      // is a completed answer rather than an abandoned one.
       return false
     }
     seen.add(current)
-    if (current instanceof ManagedClaudeAuthTemporarilyUnavailableError) {
-      return true
-    }
     try {
+      if (current instanceof ManagedClaudeAuthTemporarilyUnavailableError) {
+        return true
+      }
       current = (current as { cause?: unknown }).cause
     } catch {
+      // `instanceof` runs a prototype lookup, which a Proxy can trap and throw
+      // from, and so can a `cause` accessor. Either way the shape defeated
+      // inspection.
       return true
     }
   }
-  return false
+  // Depth exhausted: unlike a cycle, links remain that were never looked at.
+  return true
 }

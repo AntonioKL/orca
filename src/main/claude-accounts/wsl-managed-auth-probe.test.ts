@@ -157,7 +157,30 @@ describe('Claude managed-auth error vocabulary', () => {
     expect(isUnprovenManagedClaudeAuthError(hostile)).toBe(true)
   })
 
-  it('terminates on a self-referential cause chain', () => {
+  it('treats a Proxy that rejects prototype inspection as unproven', () => {
+    const hostile = new Proxy(new Error('wrapped'), {
+      getPrototypeOf() {
+        throw new Error('nope')
+      },
+      get() {
+        throw new Error('nope')
+      }
+    })
+    expect(isUnprovenManagedClaudeAuthError(hostile)).toBe(true)
+  })
+
+  it('treats a chain longer than the inspection depth as unproven', () => {
+    // The links past the cap were never looked at, so nothing about them is
+    // proven -- unlike a cycle, where every reachable link has been seen.
+    let chain: unknown = new ManagedClaudeAuthTemporarilyUnavailableError()
+    for (let i = 0; i < 12; i += 1) {
+      chain = new Error(`layer ${i}`, { cause: chain })
+    }
+    expect(isUnprovenManagedClaudeAuthError(chain)).toBe(true)
+  })
+
+  it('terminates on a self-referential cause chain, and answers it', () => {
+    // A cycle is a completed inspection: every reachable link was visited.
     const looping = new Error('loop') as Error & { cause?: unknown }
     looping.cause = looping
     expect(isUnprovenManagedClaudeAuthError(looping)).toBe(false)
@@ -307,6 +330,17 @@ describe.skipIf(!bashCanRunTheProbe())('WSL guest probe script, executed by bash
     expect(runProbe(linkedCandidate)).toEqual({
       kind: 'untrusted',
       reason: UNTRUSTED_MANAGED_AUTH_MESSAGE
+    })
+  })
+
+  it('refuses a nested account path that merely shares the suffix', () => {
+    // `<root>/other/acct/auth` is not `<root>/acct/auth`; a shell `*` matched it.
+    const nested = join(guestHome, '.local/share/orca/claude-accounts/other', ACCOUNT, 'auth')
+    mkdirSync(nested, { recursive: true })
+    writeFileSync(join(nested, '.orca-managed-claude-auth'), `${ACCOUNT}\n`)
+    expect(runProbe(nested)).toEqual({
+      kind: 'untrusted',
+      reason: OUTSIDE_MANAGED_AUTH_ROOT_MESSAGE
     })
   })
 

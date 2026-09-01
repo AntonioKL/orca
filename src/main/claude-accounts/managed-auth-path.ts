@@ -150,19 +150,64 @@ export function readManagedAuthMarkerState(
   return matches ? { kind: 'valid' } : { kind: 'invalid' }
 }
 
+/**
+ * Why a result rather than `string | null`: a null told callers "there are no
+ * credentials", and `doSyncForCurrentSelection` acts on that by clearing the
+ * user's selected account. A locked file, an unsearchable directory, or a failed
+ * `realpath` produced the same null, so a transient fault logged the user out
+ * (STA-5674). A shape that cannot say "failed" is what keeps that from
+ * recurring.
+ */
+export type ClaudeManagedAuthFileRead =
+  | { kind: 'present'; contents: string }
+  | { kind: 'absent' }
+  | { kind: 'indeterminate'; error: unknown }
+
+export function readClaudeManagedAuthFileResult(
+  managedAuthPath: string,
+  filename: '.credentials.json' | 'oauth-account.json'
+): ClaudeManagedAuthFileRead {
+  const filePath = resolve(managedAuthPath, filename)
+  let fileStats: ReturnType<typeof lstatSync>
+  try {
+    fileStats = lstatSync(filePath)
+  } catch (error) {
+    return isDefinitiveAbsence(error) ? { kind: 'absent' } : { kind: 'indeterminate', error }
+  }
+  // A symlink or a non-file in the credentials position is a completed
+  // observation that Orca's file is not there, not a failure to look.
+  if (fileStats.isSymbolicLink() || !fileStats.isFile()) {
+    return { kind: 'absent' }
+  }
+  let canonicalAuthPath: string
+  let canonicalFilePath: string
+  try {
+    canonicalAuthPath = realpathSync(managedAuthPath)
+    canonicalFilePath = realpathSync(filePath)
+  } catch (error) {
+    return isDefinitiveAbsence(error) ? { kind: 'absent' } : { kind: 'indeterminate', error }
+  }
+  if (!canonicalFilePath.startsWith(canonicalAuthPath + sep)) {
+    return { kind: 'absent' }
+  }
+  try {
+    return { kind: 'present', contents: readFileSync(filePath, 'utf-8') }
+  } catch (error) {
+    return isDefinitiveAbsence(error) ? { kind: 'absent' } : { kind: 'indeterminate', error }
+  }
+}
+
+/**
+ * The lossy view, for read-only callers that treat null as "skip this account"
+ * and touch nothing durable. Anything that clears state must branch on
+ * `readClaudeManagedAuthFileResult`.
+ */
 export function readClaudeManagedAuthFile(
   managedAuthPath: string,
   filename: '.credentials.json' | 'oauth-account.json'
 ): string | null {
-  const filePath = resolve(managedAuthPath, filename)
-  try {
-    if (!isOwnedChildFile(managedAuthPath, filePath)) {
-      return null
-    }
-    return readFileSync(filePath, 'utf-8')
-  } catch {
-    return null
-  }
+  const read = readClaudeManagedAuthFileResult(managedAuthPath, filename)
+  return read.kind === 'present' ? read.contents : null
 }
 
 export function writeClaudeManagedAuthFile(
@@ -177,6 +222,7 @@ export function writeClaudeManagedAuthFile(
   writeFileAtomically(filePath, contents, { mode: 0o600 })
 }
 
+/** Write-path guard only; the read path classifies its own failures above. */
 function isOwnedChildFile(managedAuthPath: string, filePath: string): boolean {
   if (
     !existsSync(filePath) ||
