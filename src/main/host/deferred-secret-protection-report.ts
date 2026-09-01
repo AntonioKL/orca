@@ -44,7 +44,7 @@ export function scheduleSecretProtectionGapReport({
   /** Development profiles are disposable/isolated and must not trigger OS keychain UI. */
   skipInDevelopment?: boolean
 }): void {
-  if (skipInDevelopment) {
+  if (skipInDevelopment && !options.force) {
     return
   }
 
