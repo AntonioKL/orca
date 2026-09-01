@@ -8,6 +8,8 @@ import { runtimeFailureCode } from './active-agent-note-send-diagnostics'
 
 function runtimeError(code: string): RuntimeRpcCallError {
   return new RuntimeRpcCallError({
+    id: 'test-runtime-error',
+    ok: false,
     error: { code, message: 'The terminal is no longer available' }
   })
 }
