@@ -71,6 +71,7 @@ export async function requestStructuredAgentSessionMutation<TValue>(args: {
   expectedRuntimeFence: number
   fields: Record<string, unknown>
   clientOperationId?: string
+  retryUnknown?: boolean
   timeoutMs?: number
 }): Promise<StructuredAgentSessionMutationCallResult<TValue>> {
   const {
@@ -81,6 +82,7 @@ export async function requestStructuredAgentSessionMutation<TValue>(args: {
     expectedRuntimeFence,
     fields,
     clientOperationId,
+    retryUnknown,
     timeoutMs
   } = args
   try {
@@ -98,6 +100,7 @@ export async function requestStructuredAgentSessionMutation<TValue>(args: {
             fields
           })
         },
+        ...(retryUnknown ? { retryUnknown: true } : {}),
         ...fields
       },
       timeoutMs

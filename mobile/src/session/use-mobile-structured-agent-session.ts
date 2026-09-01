@@ -108,6 +108,10 @@ export function useMobileStructuredAgentSession(args: {
         }
       }
       if (result.status === 'unknown') {
+        // Prompt/option/cancel plans cannot redispatch an unknown ledger row;
+        // issue a fresh id so a retry can be admitted after the user checks the
+        // stream. Sends opt into explicit retryUnknown below.
+        operationIdsRef.current.delete(key)
         return result
       }
       operationIdsRef.current.delete(key)
@@ -160,7 +164,8 @@ export function useMobileStructuredAgentSession(args: {
       }
       const fields = { body }
       const key = `${sessionId}:agentSession.send:${JSON.stringify(fields)}`
-      const clientOperationId = operationIdsRef.current.get(key) ?? structuredSessionOperationId()
+      const priorOperationId = operationIdsRef.current.get(key)
+      const clientOperationId = priorOperationId ?? structuredSessionOperationId()
       operationIdsRef.current.set(key, clientOperationId)
       const result = await requestStructuredAgentSessionMutation<AgentSessionSendResult>({
         client,
@@ -170,6 +175,7 @@ export function useMobileStructuredAgentSession(args: {
         expectedRuntimeFence: currentFence,
         fields,
         clientOperationId,
+        ...(priorOperationId ? { retryUnknown: true } : {}),
         timeoutMs
       })
       if (result.status === 'accepted') {

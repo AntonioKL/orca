@@ -554,7 +554,7 @@ describe('useMobileStructuredAgentSession', () => {
     expect(onSendError).toHaveBeenCalledWith('Answer unconfirmed — check chat before retrying')
   })
 
-  it('reuses an operation id when a prompt response delivery is unknown', async () => {
+  it('uses a fresh operation id when a prompt response delivery is unknown', async () => {
     act(() => {
       renderer = create(createElement(Harness))
     })
@@ -588,6 +588,37 @@ describe('useMobileStructuredAgentSession', () => {
     const retryId = (calls[1]![1] as { envelope: { clientOperationId: string } }).envelope
       .clientOperationId
     expect(firstId).toMatch(/^\d{13}-[0-9a-f]{32}$/)
+    expect(retryId).toMatch(/^\d{13}-[0-9a-f]{32}$/)
+    expect(retryId).not.toBe(firstId)
+  })
+
+  it('marks a retried send as retryUnknown after ambiguous delivery', async () => {
+    act(() => {
+      renderer = create(createElement(Harness))
+    })
+    await vi.waitFor(() => expect(listener).toEqual(expect.any(Function)))
+    act(() => listener?.(snapshotEvent(3)))
+    let attempts = 0
+    sendRequest.mockImplementation(async (method, params) => {
+      if (method === 'agentSession.send' && attempts++ === 0) {
+        throw markRpcDeliveryUnknown(new Error('Connection closed'))
+      }
+      return defaultSendRequest(method, params)
+    })
+
+    await act(async () => {
+      expect(await hook!.sendWithOutcome('retry me')).toBe('unknown')
+      expect(await hook!.sendWithOutcome('retry me')).toBe('accepted')
+    })
+
+    const calls = sendRequest.mock.calls.filter(([method]) => method === 'agentSession.send')
+    expect(calls).toHaveLength(2)
+    expect(calls[0]![1]).not.toHaveProperty('retryUnknown')
+    expect(calls[1]![1]).toMatchObject({ retryUnknown: true })
+    const firstId = (calls[0]![1] as { envelope: { clientOperationId: string } }).envelope
+      .clientOperationId
+    const retryId = (calls[1]![1] as { envelope: { clientOperationId: string } }).envelope
+      .clientOperationId
     expect(retryId).toBe(firstId)
   })
 
