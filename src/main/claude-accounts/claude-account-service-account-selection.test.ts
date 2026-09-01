@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -115,6 +115,7 @@ describe('ClaudeAccountService credential capture', () => {
     const managedAuthPath = join(tempDir, 'claude-accounts', 'account-1', 'auth')
     mkdirSync(managedAuthPath, { recursive: true })
     writeFileSync(join(managedAuthPath, '.orca-managed-claude-auth'), 'account-1\n', 'utf-8')
+    const trustedManagedAuthPath = realpathSync(managedAuthPath)
     vi.mocked(deleteActiveClaudeKeychainCredentialsStrict).mockRejectedValueOnce(
       new Error('keychain unavailable')
     )
@@ -160,7 +161,7 @@ describe('ClaudeAccountService credential capture', () => {
 
     await expect(service.removeAccount('account-1')).resolves.toBeDefined()
 
-    expect(deleteActiveClaudeKeychainCredentialsStrict).toHaveBeenCalledWith(managedAuthPath)
+    expect(deleteActiveClaudeKeychainCredentialsStrict).toHaveBeenCalledWith(trustedManagedAuthPath)
     expect(settings.claudeManagedAccounts).toHaveLength(0)
   })
 

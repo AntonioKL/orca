@@ -140,16 +140,18 @@ export class ClaudeManagedAuthStorage {
   }
 
   async remove(accountId: string, candidatePath: string): Promise<void> {
+    let trustedPath: string | null = null
     try {
       const managedAuthPath = await this.assertOwned(candidatePath, accountId)
+      trustedPath = managedAuthPath
       rmSync(resolve(managedAuthPath, '..'), { recursive: true, force: true })
     } catch (error) {
       console.warn('[claude-accounts] Refusing to remove untrusted managed auth:', error)
     }
     await deleteManagedClaudeKeychainCredentials(accountId)
-    if (process.platform === 'darwin') {
+    if (process.platform === 'darwin' && trustedPath) {
       try {
-        await deleteActiveClaudeKeychainCredentialsStrict(candidatePath)
+        await deleteActiveClaudeKeychainCredentialsStrict(trustedPath)
       } catch (error) {
         // Why: account removal must not be blocked by a stale or inaccessible scoped Keychain item.
         console.warn('[claude-accounts] Failed to remove scoped Claude Keychain credentials', error)
