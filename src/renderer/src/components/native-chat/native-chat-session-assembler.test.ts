@@ -141,6 +141,92 @@ describe('assembleNativeChatSession', () => {
     ])
   })
 
+  it('keeps distinct equal-timestamp image companions with their adjacent prompts', () => {
+    const firstPrompt = msg({
+      id: 'a-first-prompt',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image #1] inspect the first' }]
+    })
+    const firstCompanion = msg({
+      id: 'z-first-companion',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image: source: /tmp/first.png]' }]
+    })
+    const secondPrompt = msg({
+      id: 'b-second-prompt',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image #1] inspect the second' }]
+    })
+    const secondCompanion = msg({
+      id: 'y-second-companion',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image: source: /tmp/second.png]' }]
+    })
+
+    const session = assembleNativeChatSession({
+      sources: {
+        transcript: [firstPrompt, firstCompanion, secondPrompt, secondCompanion]
+      },
+      sessionId: 's1',
+      agent: 'claude'
+    })
+
+    expect(session.messages).toEqual([
+      {
+        ...firstPrompt,
+        blocks: [
+          { type: 'image-ref', path: '/tmp/first.png' },
+          { type: 'text', text: 'inspect the first' }
+        ]
+      },
+      {
+        ...secondPrompt,
+        blocks: [
+          { type: 'image-ref', path: '/tmp/second.png' },
+          { type: 'text', text: 'inspect the second' }
+        ]
+      }
+    ])
+  })
+
+  it('does not move an equal-timestamp companion across an unrelated row', () => {
+    const prompt = msg({
+      id: 'a-prompt',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image #1] inspect this' }]
+    })
+    const unrelated = msg({
+      id: 'm-answer',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: 'unrelated' }]
+    })
+    const companion = msg({
+      id: 'z-companion',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image: source: /tmp/image.png]' }]
+    })
+
+    const session = assembleNativeChatSession({
+      sources: { transcript: [prompt, unrelated, companion] },
+      sessionId: 's1',
+      agent: 'claude'
+    })
+
+    expect(session.messages.map((message) => message.id)).toEqual([
+      'a-prompt',
+      'm-answer',
+      'z-companion'
+    ])
+    expect(session.messages[0]?.blocks).toEqual([{ type: 'text', text: 'inspect this' }])
+    expect(session.messages[2]?.blocks).toEqual([{ type: 'image-ref', path: '/tmp/image.png' }])
+  })
+
   it('merges Claude image source markers into a trailing-marker prompt', () => {
     const imageSource = msg({
       id: 'u-image-source',

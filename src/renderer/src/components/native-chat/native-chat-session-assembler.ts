@@ -9,7 +9,7 @@ import {
 import { NATIVE_CHAT_STREAMING_ID } from '../../../../shared/native-chat-streaming'
 import {
   hasImagePromptMarker,
-  imageSourcePathFromText,
+  isImageSourceUserTurn,
   normalizeImageTranscriptMessages
 } from '../../../../shared/native-chat-image-transcript-markers'
 import { isLaunchPromptMessageId, isPendingMessageId } from './native-chat-pending'
@@ -118,13 +118,6 @@ export function compareMessages(a: NativeChatMessage, b: NativeChatMessage): num
   if (at !== bt) {
     return at - bt
   }
-  // Claude emits an image-source companion and its prompt at the same instant.
-  // Keep the companion adjacent and first so the normalization pass can fold it
-  // into the prompt, regardless of opaque UUID ordering.
-  const imageOrder = imageTranscriptOrder(a, b)
-  if (imageOrder !== 0) {
-    return imageOrder
-  }
   if (a.id < b.id) {
     return -1
   }
@@ -132,30 +125,6 @@ export function compareMessages(a: NativeChatMessage, b: NativeChatMessage): num
     return 1
   }
   return 0
-}
-
-function imageTranscriptOrder(a: NativeChatMessage, b: NativeChatMessage): number {
-  return imageTranscriptRank(a) - imageTranscriptRank(b)
-}
-
-function imageTranscriptRank(message: NativeChatMessage): number {
-  if (isImageSourceCompanion(message)) {
-    return 0
-  }
-  if (message.role === 'user' && hasImagePromptMarker(message)) {
-    return 2
-  }
-  return 1
-}
-
-function isImageSourceCompanion(message: NativeChatMessage): boolean {
-  return (
-    message.role === 'user' &&
-    message.blocks.length > 0 &&
-    message.blocks.every(
-      (block) => isTextBlock(block) && imageSourcePathFromText(block.text) !== null
-    )
-  )
 }
 
 /**
@@ -200,15 +169,74 @@ export function assembleNativeChatSession(
   }
 }
 
-function sortForImageNormalization(
+type ImageNormalizationUnit = {
+  messages: NativeChatMessage[]
+  sortKey: NativeChatMessage
+}
+
+// Keep only adjacent companion/prompt rows atomic; ranking every companion first
+// can cross-fold distinct turns that share a timestamp.
+export function sortForImageNormalization(
   messages: readonly NativeChatMessage[]
 ): readonly NativeChatMessage[] {
-  for (let index = 1; index < messages.length; index += 1) {
-    if (compareMessages(messages[index - 1]!, messages[index]!) > 0) {
-      return [...messages].sort(compareMessages)
+  const units: ImageNormalizationUnit[] = []
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]!
+    const companions: NativeChatMessage[] = []
+    let prompt: NativeChatMessage | undefined
+
+    if (isImageSourceUserTurn(message)) {
+      let nextIndex = index
+      while (
+        nextIndex < messages.length &&
+        messages[nextIndex]?.source === message.source &&
+        isImageSourceUserTurn(messages[nextIndex]!)
+      ) {
+        companions.push(messages[nextIndex]!)
+        nextIndex += 1
+      }
+      const candidate = messages[nextIndex]
+      if (
+        candidate?.role === 'user' &&
+        candidate.source === message.source &&
+        hasImagePromptMarker(candidate)
+      ) {
+        prompt = candidate
+        index = nextIndex
+      } else {
+        companions.length = 0
+      }
+    } else {
+      const candidate = messages[index + 1]
+      if (
+        message.role === 'user' &&
+        hasImagePromptMarker(message) &&
+        candidate?.source === message.source &&
+        candidate.timestamp === message.timestamp &&
+        isImageSourceUserTurn(candidate)
+      ) {
+        let nextIndex = index + 1
+        while (
+          nextIndex < messages.length &&
+          messages[nextIndex]?.source === message.source &&
+          messages[nextIndex]?.timestamp === message.timestamp &&
+          isImageSourceUserTurn(messages[nextIndex]!)
+        ) {
+          companions.push(messages[nextIndex]!)
+          nextIndex += 1
+        }
+        prompt = message
+        index = nextIndex - 1
+      }
     }
+
+    const unitMessages = prompt ? [...companions, prompt] : [message]
+    units.push({ messages: unitMessages, sortKey: prompt ?? message })
   }
-  return messages
+
+  units.sort((a, b) => compareMessages(a.sortKey, b.sortKey))
+  const sorted = units.flatMap((unit) => unit.messages)
+  return sorted.every((message, index) => message === messages[index]) ? messages : sorted
 }
 
 /**

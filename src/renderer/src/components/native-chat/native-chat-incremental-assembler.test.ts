@@ -150,4 +150,51 @@ describe('incremental assembler — oracle differential', () => {
       }
     ])
   })
+
+  it('does not cross-fold distinct equal-timestamp image turns', () => {
+    const assembler = createIncrementalAssembler()
+    const firstPrompt = msg({
+      id: 'a-first-prompt',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image #1] inspect the first' }]
+    })
+    const firstCompanion = msg({
+      id: 'z-first-companion',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image: source: /tmp/first.png]' }]
+    })
+    const secondPrompt = msg({
+      id: 'b-second-prompt',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image #1] inspect the second' }]
+    })
+    const secondCompanion = msg({
+      id: 'y-second-companion',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image: source: /tmp/second.png]' }]
+    })
+
+    const assembled = reset(assembler, [firstPrompt, firstCompanion, secondPrompt, secondCompanion])
+
+    expect(normalizeImageTranscriptMessages(assembled)).toEqual([
+      {
+        ...firstPrompt,
+        blocks: [
+          { type: 'image-ref', path: '/tmp/first.png' },
+          { type: 'text', text: 'inspect the first' }
+        ]
+      },
+      {
+        ...secondPrompt,
+        blocks: [
+          { type: 'image-ref', path: '/tmp/second.png' },
+          { type: 'text', text: 'inspect the second' }
+        ]
+      }
+    ])
+  })
 })
