@@ -12,6 +12,7 @@ import type {
   AiVaultPrepareSessionResumeResult
 } from '../../shared/ai-vault-resume-preparation'
 import type { RuntimeDesktopWindowStatus } from '../../shared/runtime-types'
+import type { AgentProviderSessionMetadata } from '../../shared/agent-session-resume'
 import type { AgentSessionClaimSigner } from './agent-session-claim-identity'
 import type { OrchestrationEnvironmentTransport } from './orchestration/environment-transport'
 import type { RuntimeCommandSurfaceHost } from './orca-runtime-core'
@@ -34,7 +35,48 @@ import { createEphemeralAgentSessionClaimSigner } from './agent-session-claim-id
 import { registerConptyDa1OverrideInstaller } from './terminal-model-query-authority'
 import { registerTerminalViewAttributesApplier } from './terminal-view-attribute-store'
 
+export type RuntimeNativeChatTranscriptBinding = {
+  worktreeId: string
+  connectionId: string | null
+  agent: string | null
+  providerSession: AgentProviderSessionMetadata | null
+}
+
 export class OrcaRuntimeWithStateFields extends OrcaRuntimeWithLinearCommands {
+  resolveNativeChatTranscriptBinding(handle: string): RuntimeNativeChatTranscriptBinding | null {
+    const terminalContext = this.resolveTerminalContext(handle)
+    const snapshot = terminalContext
+      ? this.mobileSessionTabsByWorktree.get(terminalContext.worktreeId)
+      : null
+    if (!terminalContext || !snapshot) {
+      return null
+    }
+    const terminal = this.toMobileSessionTabsResult(snapshot).tabs.find(
+      (tab) => tab.type === 'terminal' && tab.status === 'ready' && tab.terminal === handle
+    )
+    if (!terminal || terminal.type !== 'terminal') {
+      return null
+    }
+    return {
+      ...terminalContext,
+      agent: terminal.agentStatus?.agentType ?? terminal.launchAgent ?? null,
+      providerSession: terminal.agentStatus?.providerSession ?? null
+    }
+  }
+
+  notifySshRelayUnavailable(targetId: string): void {
+    this.bumpSshRelayRecoveryGeneration(targetId)
+    this.invalidateSshWorktreeScanCache(targetId)
+    const worktreeIds = new Set(
+      [...this.ptysById.values()]
+        .filter((pty) => pty.connectionId === targetId)
+        .map((pty) => pty.worktreeId)
+    )
+    for (const worktreeId of worktreeIds) {
+      this.notifyMobileSessionTabsChangedNow(worktreeId, ++this.mobileSessionTabsChangeSequence)
+    }
+  }
+
   constructor(
     store: RuntimeStore | null = null,
     stats?: StatsCollector,
