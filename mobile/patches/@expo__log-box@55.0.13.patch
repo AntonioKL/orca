@@ -1,9 +1,10 @@
 diff --git a/android/src/main/expo/modules/logbox/ExpoLogBoxWebViewWrapper.kt b/android/src/main/expo/modules/logbox/ExpoLogBoxWebViewWrapper.kt
+index 556724a6f48706fe64d7872a58a63a7a53e01f9d..5286ea546d42e2f9afa63916b2fce02b6ff2ebdf 100644
 --- a/android/src/main/expo/modules/logbox/ExpoLogBoxWebViewWrapper.kt
 +++ b/android/src/main/expo/modules/logbox/ExpoLogBoxWebViewWrapper.kt
-@@ -4,6 +4,7 @@
+@@ -3,6 +3,7 @@
  package expo.modules.logbox
-
+ 
  import android.app.Activity
 +import android.content.pm.ApplicationInfo
  import android.graphics.Bitmap

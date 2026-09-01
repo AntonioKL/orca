@@ -40,18 +40,23 @@ const androidProbeSource = readFileSync(
   ),
   'utf8'
 )
-const expoLogBoxPatch = readFileSync(
-  new URL('../../patches/@expo__log-box@55.0.12.patch', import.meta.url),
+// Read patches through pnpm-workspace.yaml so a dependency bump can't leave a patch undeclared.
+const workspaceManifest = readFileSync(
+  new URL('../../pnpm-workspace.yaml', import.meta.url),
   'utf8'
 )
-const expoDomWebViewPatch = readFileSync(
-  new URL('../../patches/@expo__dom-webview@55.0.5.patch', import.meta.url),
-  'utf8'
-)
-const reactNativeWebViewPatch = readFileSync(
-  new URL('../../patches/react-native-webview@13.16.1.patch', import.meta.url),
-  'utf8'
-)
+function readPatchedDependencySource(packageName: string): string {
+  const entry = workspaceManifest.match(
+    new RegExp(`^\\s+'?${packageName.replace(/[/@.]/g, '\\$&')}@[^':]+'?:\\s*(\\S+)$`, 'm')
+  )
+  if (!entry) {
+    throw new Error(`no patchedDependencies entry for ${packageName}`)
+  }
+  return readFileSync(new URL(`../../${entry[1]}`, import.meta.url), 'utf8')
+}
+const expoLogBoxPatch = readPatchedDependencySource('@expo/log-box')
+const expoDomWebViewPatch = readPatchedDependencySource('@expo/dom-webview')
+const reactNativeWebViewPatch = readPatchedDependencySource('react-native-webview')
 const simulatorHarnessSource = readFileSync(
   new URL('../../scripts/run-hosted-webview-simulator-e2e.mjs', import.meta.url),
   'utf8'
