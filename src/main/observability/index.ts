@@ -48,7 +48,8 @@ import {
   type UploadBundleOptions,
   type UploadBundleResult
 } from './diagnostic-bundle-upload'
-import { setActiveSink } from './tracer'
+import { setActiveSink, startSpan } from './tracer'
+import { setSecurePathHardeningFailureReporter } from '../../shared/secure-path-windows-acl'
 
 const CI_ENV_VARS = [
   'CI',
@@ -153,10 +154,27 @@ export function initObservability(): ObservabilityConsent {
     return c
   }
   installLocalSink()
+  installSecurePathHardeningReporter()
   return c
 }
 
+/**
+ * Why route it here: Windows path hardening lives in `src/shared` and defaults to `console.warn`,
+ * which reaches nothing in a packaged build — the main process is GUI-subsystem and owns no
+ * console. A credential file left on inherited ACLs is exactly what a diagnostic bundle should
+ * show, so the failure becomes a failed span in the trace sink.
+ */
+function installSecurePathHardeningReporter(): void {
+  setSecurePathHardeningFailureReporter((failure) => {
+    startSpan('secure-path.windows-acl.failure', {
+      attributes: { targetPath: failure.targetPath, stage: failure.stage }
+    }).fail(failure.detail)
+    console.warn('[secure-path.windows-acl] failed to restrict path', failure)
+  })
+}
+
 export async function shutdownObservability(): Promise<void> {
+  setSecurePathHardeningFailureReporter(null)
   // Order matters: tracer first so no new pushes arrive while the local sink
   // is closing and flushing buffered lines.
   setActiveSink(null)

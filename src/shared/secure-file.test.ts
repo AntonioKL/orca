@@ -20,15 +20,20 @@ vi.mock('./child-process/run-process', () => ({
 }))
 
 const OK = { code: 0, signal: null, stdout: '', stderr: '', timedOut: false }
+const USER_SID = 'S-1-5-21-1000'
 
 type FakeSpec = { program: string; args?: readonly string[] }
 
-// Rights handed to the last /grant:r pass per path, so the verify pass can echo a matching readback.
-const grantedRights = new Map<string, string>()
+/** Paths the fake considers already hardened, with the ACE flags the grant pass used. */
+const hardenedByFake = new Map<string, string>()
+
+/** Paths whose verify pass should answer with a DACL that is not the intended one. */
+const forcedBadSddl = new Map<string, string>()
 
 /**
- * Stands in for icacls across all three passes. The verify pass has to answer with a real-shaped
- * `icacls <path>` readback or every harden would report failure, so this models the format.
+ * Stands in for icacls. `/save` really writes a UTF-16LE SDDL file, because the code under test
+ * reads that file back off disk — which also means these tests exercise the real SDDL parser
+ * rather than a restatement of it.
  */
 function fakeIcacls(spec: FakeSpec): typeof OK {
   const args = spec.args ?? []
@@ -36,21 +41,29 @@ function fakeIcacls(spec: FakeSpec): typeof OK {
   const grantIndex = args.indexOf('/grant:r')
   if (grantIndex !== -1) {
     const grant = args[grantIndex + 1]!
-    grantedRights.set(path, grant.slice(grant.lastIndexOf(':(') + 1))
+    hardenedByFake.set(path, grant.includes('(OI)(CI)') ? 'OICI' : '')
     return OK
   }
-  if (args.length > 1) {
+  const saveIndex = args.indexOf('/save')
+  if (saveIndex === -1) {
     return OK // /reset
   }
-  const rights = grantedRights.get(path) ?? '(F)'
-  const principals = ['host\\me', 'NT AUTHORITY\\SYSTEM', 'BUILTIN\\Administrators']
-  const aceLines = principals.map((name, index) =>
-    index === 0 ? `${path} ${name}:${rights}` : `      ${name}:${rights}`
-  )
-  return {
-    ...OK,
-    stdout: `${aceLines.join('\r\n')}\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n`
+  writeFileSync(args[saveIndex + 1]!, fakeSddl(path), 'utf16le')
+  return OK
+}
+
+function fakeSddl(path: string): string {
+  const forced = forcedBadSddl.get(path)
+  if (forced) {
+    return `name\r\n${forced}\r\n`
   }
+  const aceFlags = hardenedByFake.get(path)
+  if (aceFlags === undefined) {
+    // Never hardened: the inherited DACL a fresh file carries, so the first verify must fail.
+    return `name\r\nD:(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;FA;;;${USER_SID})\r\n`
+  }
+  const ace = (sid: string): string => `(A;${aceFlags};FA;;;${sid})`
+  return `name\r\nD:PAI${ace('BA')}${ace('SY')}${ace(USER_SID)}\r\n`
 }
 
 describe('hardenSecurePath', () => {
@@ -66,12 +79,13 @@ describe('hardenSecurePath', () => {
     __resetSecureFileHardenedPathsForTests()
     vi.mocked(runProcessSync).mockReset()
     vi.mocked(runProcess).mockReset()
-    grantedRights.clear()
+    hardenedByFake.clear()
+    forcedBadSddl.clear()
     // runProcessSync serves whoami.exe (SID lookup) and the SYNCHRONOUS icacls file-ACL path
     // used by writeSecureFile. Directory + read-path re-hardens use async runProcess.
     vi.mocked(runProcessSync).mockImplementation((spec) => {
       if (spec.program === 'C:\\Windows\\System32\\whoami.exe') {
-        return { ...OK, stdout: '"USER","S-1-5-21-1000"' }
+        return { ...OK, stdout: `"USER","${USER_SID}"` }
       }
       return fakeIcacls(spec)
     })
@@ -113,17 +127,15 @@ describe('hardenSecurePath', () => {
     })
 
     const specs = vi.mocked(runProcess).mock.calls.map(([spec]) => spec)
-    expect(specs.map((spec) => spec.program)).toEqual([
-      'C:\\Windows\\System32\\icacls.exe',
-      'C:\\Windows\\System32\\icacls.exe',
-      'C:\\Windows\\System32\\icacls.exe'
-    ])
-    expect(specs[0]!.args).toEqual(['C:\\Users\\me\\.orca\\secret.json', '/reset', '/q'])
-    expect(specs[1]!.args).toEqual([
+    expect(specs.every((spec) => spec.program === 'C:\\Windows\\System32\\icacls.exe')).toBe(true)
+    // Verify runs first, so an already-correct DACL is never rewritten.
+    expect(specs[0]!.args?.slice(0, 2)).toEqual(['C:\\Users\\me\\.orca\\secret.json', '/save'])
+    expect(specs[1]!.args).toEqual(['C:\\Users\\me\\.orca\\secret.json', '/reset', '/q'])
+    expect(specs[2]!.args).toEqual([
       'C:\\Users\\me\\.orca\\secret.json',
       '/inheritance:r',
       '/grant:r',
-      '*S-1-5-21-1000:(F)',
+      `*${USER_SID}:(F)`,
       '/grant:r',
       '*S-1-5-18:(F)',
       '/grant:r',
@@ -131,70 +143,124 @@ describe('hardenSecurePath', () => {
       '/q'
     ])
     // The apply is read back: a loosened ACL has to be detectable, not just overwritten.
-    expect(specs[2]!.args).toEqual(['C:\\Users\\me\\.orca\\secret.json'])
-    expect(specs[1]!.timeoutMs).toBe(5000)
+    expect(specs[3]!.args?.slice(0, 2)).toEqual(['C:\\Users\\me\\.orca\\secret.json', '/save'])
+    expect(specs[2]!.timeoutMs).toBe(5000)
   })
 
-  it('reports failure when the applied ACL does not read back as expected', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.mocked(runProcess).mockImplementation((spec) => {
-      if ((spec.args ?? []).length === 1) {
-        // An inherited ACE survived: the DACL was never protected — the shipped failure mode.
-        return Promise.resolve({
-          ...OK,
-          stdout: `${spec.args![0]} host\\me:(I)(F)\r\n\r\nSuccessfully processed 1 files\r\n`
-        })
-      }
-      return Promise.resolve(OK)
-    })
+  // BLOCKING 1: re-running /reset on an already-correct DACL restores the inherited (broader) one
+  // for the few ms until the grant pass lands, for no gain. A correct DACL must be left alone.
+  it('leaves an already-correct ACL untouched instead of rewriting it', async () => {
+    const target = 'C:\\Users\\me\\.orca\\secret.json'
+    hardenedByFake.set(target, '')
 
-    hardenSecurePath('C:\\Users\\me\\.orca\\secret.json', {
-      isDirectory: false,
-      platform: 'win32'
-    })
+    hardenSecurePath(target, { isDirectory: false, platform: 'win32' })
+    await flushAsyncAcl()
+
+    const specs = vi.mocked(runProcess).mock.calls.map(([spec]) => spec)
+    expect(specs).toHaveLength(1)
+    expect(specs[0]!.args).toContain('/save')
+    expect(specs.some((spec) => spec.args?.includes('/reset'))).toBe(false)
+    expect(specs.some((spec) => spec.args?.includes('/grant:r'))).toBe(false)
+  })
+
+  // BLOCKING 3: the verify pass must check *identity*, not just rule count, inheritance and rights.
+  // Granting Everyone full control satisfies all three of those and is the failure it exists for.
+  it.each([
+    ['full control to Everyone', 'D:PAI(A;;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;WD)', 'S-1-1-0'],
+    ['a deny rule', `D:PAI(D;;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;${USER_SID})`, 'unexpected D rule'],
+    ['an unprotected DACL', `D:AI(A;;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;${USER_SID})`, 'not protected'],
+    ['a surviving inherited rule', `D:PAI(A;ID;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;${USER_SID})`, 'inherited'],
+    ['read-only rights', `D:PAI(A;;FR;;;BA)(A;;FA;;;SY)(A;;FA;;;${USER_SID})`, 'not full control']
+  ])('rejects a verified DACL granting %s', async (_label, sddl, expected) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const target = 'C:\\Users\\me\\.orca\\secret.json'
+    forcedBadSddl.set(target, sddl)
+
+    hardenSecurePath(target, { isDirectory: false, platform: 'win32' })
     await flushAsyncAcl()
 
     expect(warn).toHaveBeenCalledWith(
       '[secure-path.windows-acl] failed to restrict path',
-      expect.objectContaining({ stage: 'verify' })
+      expect.objectContaining({
+        stage: 'verify',
+        detail: expect.stringContaining(expected)
+      })
     )
     warn.mockRestore()
   })
 
-  // The async branch cannot return its outcome, so a failed apply must not stay cached as success.
-  it('re-hardens on the next read when an async apply failed', async () => {
+  /**
+   * BLOCKING 2: evicting the cache on every failed apply is the #4901 storm wearing a different
+   * hat. The env store re-hardens on the *read* path at ~2/s, and on a host where hardening
+   * legitimately cannot work (FAT32, network path, restricted token) an unconditional retry is
+   * two icacls spawns and two warnings a second, forever. So: a retry floor, then a hard cap.
+   */
+  it('throttles retries of a failing path instead of re-spawning on every read', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    const targetPath = writeFailingHardenTarget()
+
+    // The read-path polling loop the storm came from.
+    for (let read = 0; read < 25; read++) {
+      hardenExistingSecureFile(targetPath)
+      await flushAsyncAcl()
+    }
+
+    expect(attemptsFor(targetPath)).toHaveLength(1)
+    warn.mockRestore()
+  })
+
+  it('retries a failing path once the retry floor has passed, then gives up', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    const targetPath = writeFailingHardenTarget()
+    let clock = Date.now()
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+
+    for (let read = 0; read < 10; read++) {
+      hardenExistingSecureFile(targetPath)
+      await flushAsyncAcl()
+      clock += 61_000
+    }
+
+    // Three attempts spread over ten minutes, not ten — and then silence.
+    expect(attemptsFor(targetPath)).toHaveLength(3)
+    now.mockRestore()
+    warn.mockRestore()
+  })
+
+  function writeFailingHardenTarget(): string {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-secure-file-'))
     tempDirs.push(userDataPath)
     const targetPath = join(userDataPath, 'secret.json')
     writeFileSync(targetPath, '{}')
     vi.mocked(runProcess).mockResolvedValue({ ...OK, code: 5, stderr: 'Access is denied.' })
+    return targetPath
+  }
 
-    hardenExistingSecureFile(targetPath)
-    await flushAsyncAcl()
-    hardenExistingSecureFile(targetPath)
-    await flushAsyncAcl()
-
-    // Both the directory and the file are retried rather than trusted from the failed first pass.
-    expect(getHardenAclCalls().map(getAclTarget)).toEqual([
-      userDataPath,
-      targetPath,
-      userDataPath,
-      targetPath
-    ])
-    warn.mockRestore()
-  })
+  function attemptsFor(targetPath: string): { args?: readonly string[] }[] {
+    return getHardenAclCalls().filter((spec) => getAclTarget(spec) === targetPath)
+  }
 
   // /c makes icacls exit 0 while printing "Failed processing 1 files" — a silent no-op by another route.
   it('never passes the icacls /c continue-on-error flag', async () => {
-    hardenSecurePath('C:\\Users\\me\\.orca\\secret.json', {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-secure-file-'))
+    tempDirs.push(userDataPath)
+    // Cover both runners: the write path is synchronous, the directory re-harden is not.
+    writeSecureFile(join(userDataPath, 'secret.json'), 'contents')
+    hardenSecurePath('C:\\Users\\me\\.orca\\other.json', {
       isDirectory: false,
       platform: 'win32'
     })
     await flushAsyncAcl()
 
-    for (const [spec] of vi.mocked(runProcess).mock.calls) {
+    const specs = [
+      ...vi.mocked(runProcess).mock.calls.map(([spec]) => spec),
+      ...vi.mocked(runProcessSync).mock.calls.map(([spec]) => spec)
+    ]
+    expect(specs.length).toBeGreaterThan(4)
+    for (const spec of specs) {
       expect(spec.args).not.toContain('/c')
     }
   })
@@ -203,8 +269,11 @@ describe('hardenSecurePath', () => {
     hardenSecurePath('C:\\Users\\me\\.orca', { isDirectory: true, platform: 'win32' })
     await flushAsyncAcl()
 
-    const grantArgs = vi.mocked(runProcess).mock.calls[1]![0].args as string[]
-    expect(grantArgs).toContain('*S-1-5-21-1000:(OI)(CI)(F)')
+    const grantArgs = vi
+      .mocked(runProcess)
+      .mock.calls.map(([spec]) => spec.args as string[])
+      .find((args) => args.includes('/grant:r'))!
+    expect(grantArgs).toContain(`*${USER_SID}:(OI)(CI)(F)`)
     expect(grantArgs).toContain('*S-1-5-18:(OI)(CI)(F)')
   })
 
@@ -584,26 +653,40 @@ describe('hardenSecurePath', () => {
   })
 })
 
-// Each harden is two icacls passes (/reset then /inheritance:r + grants); counting the /reset
-// pass keeps "one harden = one entry" and stays observable synchronously on the async path.
-function isAclResetSpec(spec: { program: string; args?: readonly string[] }): boolean {
-  return spec.program.endsWith('icacls.exe') && (spec.args?.includes('/reset') ?? false)
+/**
+ * Every harden opens with a `/save` verify; one that has work to do then runs `/reset`, `/grant:r`
+ * and a closing `/save`. Counting only the *opening* verify keeps "one harden = one entry"
+ * regardless of which of the two shapes it took.
+ */
+function hardenInitiations(specs: FakeSpec[]): { args?: readonly string[] }[] {
+  const initiations: { args?: readonly string[] }[] = []
+  const awaitingClosingVerify = new Set<string>()
+  for (const spec of specs) {
+    if (!spec.program.endsWith('icacls.exe')) {
+      continue
+    }
+    const path = spec.args?.[0] ?? ''
+    if (spec.args?.includes('/grant:r')) {
+      awaitingClosingVerify.add(path)
+    } else if (spec.args?.includes('/save')) {
+      if (awaitingClosingVerify.has(path)) {
+        awaitingClosingVerify.delete(path)
+      } else {
+        initiations.push(spec)
+      }
+    }
+  }
+  return initiations
 }
 
 // Async icacls calls (directory hardening + read-path file re-harden).
 function getHardenAclCalls(): { args?: readonly string[] }[] {
-  return vi
-    .mocked(runProcess)
-    .mock.calls.map(([spec]) => spec)
-    .filter(isAclResetSpec)
+  return hardenInitiations(vi.mocked(runProcess).mock.calls.map(([spec]) => spec))
 }
 
 // Synchronous icacls calls (credential-file ACL on the write path).
 function getSyncHardenAclCalls(): { args?: readonly string[] }[] {
-  return vi
-    .mocked(runProcessSync)
-    .mock.calls.map(([spec]) => spec)
-    .filter(isAclResetSpec)
+  return hardenInitiations(vi.mocked(runProcessSync).mock.calls.map(([spec]) => spec))
 }
 
 function getAclTarget(spec: { args?: readonly string[] }): string {

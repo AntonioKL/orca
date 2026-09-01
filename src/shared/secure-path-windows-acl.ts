@@ -1,8 +1,10 @@
-import { win32 as pathWin32 } from 'node:path'
+import { randomBytes } from 'node:crypto'
+import { readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, win32 as pathWin32 } from 'node:path'
 import { runProcess, runProcessSync } from './child-process/run-process'
 import { windowsSystem32Binary } from './child-process/windows-system-binary'
-
-let cachedWindowsUserSid: string | null | undefined
+import { parseSddlDacl } from './windows-security-descriptor'
 
 const ACL_TIMEOUT_MS = 5000
 
@@ -10,103 +12,117 @@ const ACL_TIMEOUT_MS = 5000
 const LOCAL_SYSTEM_SID = 'S-1-5-18'
 const BUILTIN_ADMINISTRATORS_SID = 'S-1-5-32-544'
 
-type WindowsAclStep = {
-  stage: 'reset' | 'grant' | 'verify'
-  args: string[]
-  /** Returns a failure reason, or null when the observed state is correct. */
-  validate?: (stdout: string) => string | null
+const WINDOWS_SID_PATTERN = /^S-1-\d+(?:-\d+)+$/
+
+export type SecurePathHardeningFailure = {
+  targetPath: string
+  stage: 'sid-lookup' | 'reset' | 'grant' | 'verify'
+  detail: string
 }
 
-/**
- * Hardening a path is three `icacls` passes.
- *
- * `reset` drops every *explicit* ACE, which `/inheritance:r` alone leaves in place — a planted
- * `Everyone:(R)` survives the grant pass otherwise. It momentarily restores the inherited ACL,
- * which is the ACL the path already has when nothing has hardened it yet.
- *
- * `verify` re-reads the result. The predecessor had an equivalent check and it never ran, so a
- * loosened ACL went unreported for as long as the apply did; an apply that is not read back is
- * only half a control.
- */
-function buildWindowsRestrictAclSteps(
-  targetPath: string,
-  currentUserSid: string,
+type AclPlan = {
+  program: string
+  /** The path as icacls must receive it, already extended-length prefixed when needed. */
+  icaclsPath: string
   isDirectory: boolean
-): WindowsAclStep[] {
+  allowedSids: string[]
+  resetArgs: string[]
+  grantArgs: string[]
+}
+
+function buildAclPlan(targetPath: string, currentUserSid: string, isDirectory: boolean): AclPlan {
   const icaclsPath = toIcaclsPath(targetPath)
   // Directories propagate to children (artifact-intent files rely on inheritance); files take no flags.
   const rights = isDirectory ? '(OI)(CI)(F)' : '(F)'
-  const sids = [...new Set([currentUserSid, LOCAL_SYSTEM_SID, BUILTIN_ADMINISTRATORS_SID])]
-  return [
-    // Never add /c: it makes icacls exit 0 on "Failed processing 1 files", which is a silent no-op by another route.
-    { stage: 'reset', args: [icaclsPath, '/reset', '/q'] },
-    {
-      stage: 'grant',
-      args: [
-        icaclsPath,
-        '/inheritance:r',
-        ...sids.flatMap((sid) => ['/grant:r', `*${sid}:${rights}`]),
-        '/q'
-      ]
-    },
-    {
-      stage: 'verify',
-      args: [icaclsPath],
-      validate: (stdout) => validateAcl(stdout, icaclsPath, rights, sids.length)
-    }
+  const allowedSids = [
+    ...new Set([currentUserSid, LOCAL_SYSTEM_SID, BUILTIN_ADMINISTRATORS_SID])
   ]
+  return {
+    program: windowsSystem32Binary('icacls.exe'),
+    icaclsPath,
+    isDirectory,
+    allowedSids,
+    // `/reset` purges explicit ACEs, which `/inheritance:r` leaves in place — a planted
+    // `Everyone:(R)` survives the grant pass otherwise. The two cannot be combined in one call.
+    resetArgs: [icaclsPath, '/reset', '/q'],
+    // Never add /c: it makes icacls exit 0 on "Failed processing 1 files", a silent no-op by another route.
+    grantArgs: [
+      icaclsPath,
+      '/inheritance:r',
+      ...allowedSids.flatMap((sid) => ['/grant:r', `*${sid}:${rights}`]),
+      '/q'
+    ]
+  }
+}
+
+function verifyArgs(plan: AclPlan, savePath: string): string[] {
+  return [plan.icaclsPath, '/save', savePath, '/q']
+}
+
+function sddlSavePath(): string {
+  return join(tmpdir(), `orca-acl-${process.pid}-${randomBytes(6).toString('hex')}.sddl`)
 }
 
 /**
- * Checks the applied DACL without depending on account-name resolution, which is localized.
- * The `(I)` inherited marker and the rights tokens are not.
+ * Judges a `/save` result. Returns a failure reason, or null when the DACL on disk is exactly the
+ * intended one — protected, granting full control to the allowed SIDs and to nobody else.
  */
-function validateAcl(
-  stdout: string,
-  icaclsPath: string,
-  expectedRights: string,
-  expectedCount: number
+function evaluateSavedAcl(
+  plan: AclPlan,
+  result: { code: number | null; stderr: string },
+  savePath: string
 ): string | null {
-  const observed = parseIcaclsAceRights(stdout, icaclsPath)
-  if (observed.length !== expectedCount) {
-    return `expected ${expectedCount} access rules, found ${observed.length}`
+  if (result.code !== 0) {
+    return result.stderr.trim() || `icacls exited ${result.code}`
   }
-  if (observed.some((rights) => rights.includes('(I)'))) {
-    return 'inherited access rules survived; the DACL is not protected'
+  let sddl: string
+  try {
+    // icacls writes the descriptor as UTF-16LE, which sidesteps the OEM codepage its stdout uses.
+    sddl = readFileSync(savePath, 'utf16le')
+  } catch {
+    return 'icacls saved no security descriptor'
   }
-  const unexpected = observed.filter((rights) => rights !== expectedRights)
-  if (unexpected.length > 0) {
-    return `access rules do not grant ${expectedRights}: ${unexpected.join(' ')}`
+  return validateHardenedDacl(sddl, plan)
+}
+
+function validateHardenedDacl(sddl: string, plan: AclPlan): string | null {
+  const dacl = parseSddlDacl(sddl)
+  if (!dacl) {
+    return 'no DACL in the saved security descriptor'
+  }
+  if (!dacl.isProtected) {
+    return 'DACL is not protected; the parent still propagates into it'
+  }
+  const observed = new Set<string>()
+  for (const ace of dacl.aces) {
+    if (ace.type !== 'A') {
+      return `unexpected ${ace.type} rule for ${ace.sid}`
+    }
+    if (ace.flags.includes('ID')) {
+      return `inherited rule survived for ${ace.sid}`
+    }
+    if (ace.rights !== 'FA') {
+      return `rule for ${ace.sid} grants ${ace.rights || 'nothing'}, not full control`
+    }
+    if (ace.flags.includes('OI') !== plan.isDirectory) {
+      return `wrong inheritance flags for ${ace.sid}`
+    }
+    observed.add(ace.sid)
+  }
+  // Identity, not just shape: a count check alone accepts a granted SID swapped for another.
+  // Unexpected principals are reported before missing ones — "Everyone has full control" is the
+  // headline, and a substitution always produces both.
+  for (const sid of observed) {
+    if (!plan.allowedSids.includes(sid)) {
+      return `unexpected rule for ${sid}`
+    }
+  }
+  for (const sid of plan.allowedSids) {
+    if (!observed.has(sid)) {
+      return `missing rule for ${sid}`
+    }
   }
   return null
-}
-
-/**
- * Pulls the `(I)(F)`-style rights off each ACE line of `icacls <path>`.
- *
- * The first line carries the path, whose own characters must not be mistaken for an ACE, so it is
- * stripped by the exact string that was passed in. A blank line ends the list, before the
- * localized "Successfully processed" summary.
- */
-function parseIcaclsAceRights(stdout: string, icaclsPath: string): string[] {
-  const rights: string[] = []
-  const lines = stdout.split(/\r?\n/)
-  for (const [index, rawLine] of lines.entries()) {
-    const line =
-      index === 0 && rawLine.startsWith(icaclsPath) ? rawLine.slice(icaclsPath.length) : rawLine
-    const trimmed = line.trim()
-    if (!trimmed) {
-      if (index === 0) {
-        continue
-      }
-      break
-    }
-    const separator = trimmed.lastIndexOf(':(')
-    if (separator !== -1) {
-      rights.push(trimmed.slice(separator + 1))
-    }
-  }
-  return rights
 }
 
 /**
@@ -127,114 +143,171 @@ function toIcaclsPath(targetPath: string): string {
   return targetPath
 }
 
-function icaclsProgram(): string {
-  return windowsSystem32Binary('icacls.exe')
+/**
+ * Why a hook: hardening runs in the Electron main process, which is GUI-subsystem on Windows and
+ * owns no console, so `console.warn` reaches nothing in a packaged build. The main process
+ * installs a reporter that routes into the diagnostic trace; the console default keeps dev runs
+ * and the CLI readable.
+ */
+let reportFailure: (failure: SecurePathHardeningFailure) => void = (failure) => {
+  console.warn('[secure-path.windows-acl] failed to restrict path', failure)
 }
 
-/**
- * Why loud: hardening stays best-effort — non-NTFS volumes, network paths and restricted tokens
- * fail legitimately and must not crash a write — but a swallowed failure leaves credentials under
- * inherited ACLs while every caller believes otherwise. Undetectable best-effort is not a control.
- */
-function reportAclFailure(targetPath: string, stage: string, detail: string): void {
-  console.warn('[secure-path.windows-acl] failed to restrict path', {
-    targetPath,
-    stage,
-    detail: detail.trim().slice(0, 500)
+export function setSecurePathHardeningFailureReporter(
+  reporter: ((failure: SecurePathHardeningFailure) => void) | null
+): void {
+  reportFailure = reporter ?? ((failure) => {
+    console.warn('[secure-path.windows-acl] failed to restrict path', failure)
   })
 }
 
-function checkAclStep(
-  targetPath: string,
-  step: WindowsAclStep,
-  result: { code: number | null; stdout: string; stderr: string }
-): boolean {
-  if (result.code !== 0) {
-    reportAclFailure(targetPath, step.stage, result.stderr || `icacls exited ${result.code}`)
-    return false
-  }
-  const invalid = step.validate?.(result.stdout)
-  if (invalid) {
-    reportAclFailure(targetPath, step.stage, invalid)
-    return false
-  }
-  return true
+function report(targetPath: string, stage: SecurePathHardeningFailure['stage'], detail: string): void {
+  reportFailure({ targetPath, stage, detail: detail.trim().slice(0, 500) })
 }
 
 /**
- * Applies the ACL without blocking. `onSettled` reports the real outcome, which the caller needs
- * because the return value cannot: the cache must not keep claiming a path is hardened when the
- * apply that was supposed to harden it failed.
+ * Applies the ACL without blocking. `onSettled` reports the real outcome, which the return value
+ * cannot: the caller's cache must not keep claiming a path is hardened when the apply failed.
  */
 export function bestEffortRestrictWindowsPath(
   targetPath: string,
   isDirectory: boolean,
   onSettled?: (restricted: boolean) => void
 ): void {
-  const currentUserSid = getCurrentWindowsUserSid()
-  if (!currentUserSid) {
-    reportAclFailure(targetPath, 'sid-lookup', 'could not resolve the current user SID')
+  const plan = planFor(targetPath, isDirectory)
+  if (!plan) {
     onSettled?.(false)
     return
   }
   // Why async: hardening runs on the read path, and blocking it on a spawn stormed the main thread (#4901).
-  void runRestrictAclStepsAsync(
-    targetPath,
-    buildWindowsRestrictAclSteps(targetPath, currentUserSid, isDirectory)
-  ).then(onSettled)
+  void restrictAsync(targetPath, plan).then(onSettled)
 }
 
-async function runRestrictAclStepsAsync(
-  targetPath: string,
-  steps: readonly WindowsAclStep[]
-): Promise<boolean> {
-  for (const step of steps) {
+async function restrictAsync(targetPath: string, plan: AclPlan): Promise<boolean> {
+  // Verify first: a path that already reads back correct needs no write at all. Re-running
+  // `/reset` on a correct DACL would briefly restore the inherited (broader) one for no gain.
+  if ((await verifyAsync(plan)) === null) {
+    return true
+  }
+  for (const [stage, args] of [
+    ['reset', plan.resetArgs],
+    ['grant', plan.grantArgs]
+  ] as const) {
     try {
-      const result = await runProcess({
-        program: icaclsProgram(),
-        args: step.args,
-        timeoutMs: ACL_TIMEOUT_MS
-      })
-      if (!checkAclStep(targetPath, step, result)) {
+      const result = await runProcess({ program: plan.program, args, timeoutMs: ACL_TIMEOUT_MS })
+      if (result.code !== 0) {
+        report(targetPath, stage, result.stderr || `icacls exited ${result.code}`)
         return false
       }
     } catch (error) {
-      reportAclFailure(targetPath, step.stage, String(error))
+      report(targetPath, stage, String(error))
       return false
     }
+  }
+  const invalid = await verifyAsync(plan)
+  if (invalid) {
+    report(targetPath, 'verify', invalid)
+    return false
   }
   return true
 }
 
+async function verifyAsync(plan: AclPlan): Promise<string | null> {
+  const savePath = sddlSavePath()
+  try {
+    const result = await runProcess({
+      program: plan.program,
+      args: verifyArgs(plan, savePath),
+      timeoutMs: ACL_TIMEOUT_MS
+    })
+    return evaluateSavedAcl(plan, result, savePath)
+  } catch (error) {
+    return String(error)
+  } finally {
+    discard(savePath)
+  }
+}
+
 export function restrictWindowsPathSync(targetPath: string, isDirectory: boolean): boolean {
-  const currentUserSid = getCurrentWindowsUserSid()
-  if (!currentUserSid) {
-    reportAclFailure(targetPath, 'sid-lookup', 'could not resolve the current user SID')
+  const plan = planFor(targetPath, isDirectory)
+  if (!plan) {
     return false
   }
   // Why sync: the file must not be published until its ACL is actually restricted (read path stays async, #4901).
-  for (const step of buildWindowsRestrictAclSteps(targetPath, currentUserSid, isDirectory)) {
+  if (verifySync(plan) === null) {
+    return true
+  }
+  for (const [stage, args] of [
+    ['reset', plan.resetArgs],
+    ['grant', plan.grantArgs]
+  ] as const) {
     try {
-      const result = runProcessSync({
-        program: icaclsProgram(),
-        args: step.args,
-        timeoutMs: ACL_TIMEOUT_MS
-      })
-      if (!checkAclStep(targetPath, step, result)) {
+      const result = runProcessSync({ program: plan.program, args, timeoutMs: ACL_TIMEOUT_MS })
+      if (result.code !== 0) {
+        report(targetPath, stage, result.stderr || `icacls exited ${result.code}`)
         return false
       }
     } catch (error) {
       // Why not fatal: a failed ACL apply must not crash the write; false leaves the path uncached to retry later.
-      reportAclFailure(targetPath, step.stage, String(error))
+      report(targetPath, stage, String(error))
       return false
     }
+  }
+  const invalid = verifySync(plan)
+  if (invalid) {
+    report(targetPath, 'verify', invalid)
+    return false
   }
   return true
 }
 
+function verifySync(plan: AclPlan): string | null {
+  const savePath = sddlSavePath()
+  try {
+    const result = runProcessSync({
+      program: plan.program,
+      args: verifyArgs(plan, savePath),
+      timeoutMs: ACL_TIMEOUT_MS
+    })
+    return evaluateSavedAcl(plan, result, savePath)
+  } catch (error) {
+    return String(error)
+  } finally {
+    discard(savePath)
+  }
+}
+
+function discard(savePath: string): void {
+  try {
+    rmSync(savePath, { force: true })
+  } catch {
+    // The descriptor holds no secrets; a leftover temp file is not worth reporting.
+  }
+}
+
+function planFor(targetPath: string, isDirectory: boolean): AclPlan | null {
+  const currentUserSid = getCurrentWindowsUserSid()
+  if (!currentUserSid) {
+    report(targetPath, 'sid-lookup', 'could not resolve the current user SID')
+    return null
+  }
+  return buildAclPlan(targetPath, currentUserSid, isDirectory)
+}
+
+let cachedWindowsUserSid: string | null = null
+let sidLookupFailedAt = 0
+const SID_LOOKUP_RETRY_MS = 60_000
+
+/**
+ * Only a well-formed SID is cached for the process lifetime. A failure is cached for a minute:
+ * caching it forever let one transient `whoami` hiccup disable hardening until restart.
+ */
 function getCurrentWindowsUserSid(): string | null {
-  if (cachedWindowsUserSid !== undefined) {
+  if (cachedWindowsUserSid) {
     return cachedWindowsUserSid
+  }
+  if (sidLookupFailedAt && Date.now() - sidLookupFailedAt < SID_LOOKUP_RETRY_MS) {
+    return null
   }
   try {
     const result = runProcessSync({
@@ -242,12 +315,17 @@ function getCurrentWindowsUserSid(): string | null {
       args: ['/user', '/fo', 'csv', '/nh'],
       timeoutMs: ACL_TIMEOUT_MS
     })
-    const columns = parseCsvLine(result.stdout.trim())
-    cachedWindowsUserSid = result.code === 0 ? (columns[1] ?? null) : null
+    const candidate = result.code === 0 ? parseCsvLine(result.stdout.trim())[1] : undefined
+    if (candidate && WINDOWS_SID_PATTERN.test(candidate)) {
+      cachedWindowsUserSid = candidate
+      sidLookupFailedAt = 0
+      return candidate
+    }
   } catch {
-    cachedWindowsUserSid = null
+    // Fall through to the failure record below.
   }
-  return cachedWindowsUserSid
+  sidLookupFailedAt = Date.now()
+  return null
 }
 
 function parseCsvLine(line: string): string[] {
@@ -255,5 +333,6 @@ function parseCsvLine(line: string): string[] {
 }
 
 export function resetSecureFileWindowsUserSidForTests(): void {
-  cachedWindowsUserSid = undefined
+  cachedWindowsUserSid = null
+  sidLookupFailedAt = 0
 }

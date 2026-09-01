@@ -56,15 +56,55 @@ let hardenedDirectoryPathsThisProcess = new SecurePathHardeningCache<true>(
   DEFAULT_HARDENING_CACHE_BOUNDS
 )
 
+type HardeningFailureRecord = { at: number; attempts: number }
+
+/**
+ * Why a retry floor and not a plain eviction: hardening fails permanently on hosts where it simply
+ * cannot work — FAT32/exFAT have no ACLs, network paths and redirected profiles refuse, restricted
+ * tokens lack WRITE_DAC. The env store re-hardens on the *read* path at ~2/s (#4901), so evicting
+ * on every failure turns those hosts into a permanent icacls-and-log storm.
+ */
+const HARDENING_RETRY_FLOOR_MS = 60_000
+const MAX_HARDENING_ATTEMPTS = 3
+
+let hardeningFailuresThisProcess = new SecurePathHardeningCache<HardeningFailureRecord>(
+  DEFAULT_HARDENING_CACHE_BOUNDS
+)
+
+function mayAttemptHardening(targetPath: string): boolean {
+  const failure = hardeningFailuresThisProcess.get(targetPath)
+  if (!failure) {
+    return true
+  }
+  if (failure.attempts >= MAX_HARDENING_ATTEMPTS) {
+    return false
+  }
+  return Date.now() - failure.at >= HARDENING_RETRY_FLOOR_MS
+}
+
+function recordHardeningOutcome(targetPath: string, restricted: boolean): void {
+  if (restricted) {
+    hardeningFailuresThisProcess.delete(targetPath)
+    return
+  }
+  const previous = hardeningFailuresThisProcess.get(targetPath)
+  hardeningFailuresThisProcess.set(targetPath, {
+    at: Date.now(),
+    attempts: (previous?.attempts ?? 0) + 1
+  })
+}
+
 function hardenSecureDirectoryOnce(dirPath: string): void {
   // Why: dir hardening stays async — re-applying it stormed the main thread (#4901); files inside are hardened synchronously anyway.
   if (hardenedDirectoryPathsThisProcess.get(dirPath)) {
     return
   }
-  // Cache before the ACL lands so concurrent writes don't restorm; the callback evicts it if the apply failed.
+  // Cache before the ACL lands so concurrent writes don't restorm; a failure drops it, under the retry floor.
   hardenedDirectoryPathsThisProcess.set(dirPath, true)
-  applySecurePathRestriction(dirPath, true, process.platform, false, () => {
-    hardenedDirectoryPathsThisProcess.delete(dirPath)
+  applySecurePathRestriction(dirPath, true, process.platform, false, (restricted) => {
+    if (!restricted) {
+      hardenedDirectoryPathsThisProcess.delete(dirPath)
+    }
   })
 }
 
@@ -83,30 +123,46 @@ function hardenSecurePathOnce(targetPath: string, isDirectory: boolean): boolean
     return true
   }
   // Why: async re-harden is safe here — read path hardens each file at most once/process; new files harden synchronously on the write path.
-  if (
-    applySecurePathRestriction(targetPath, isDirectory, process.platform, false, () => {
-      hardenedPathsThisProcess.delete(targetPath)
-    })
-  ) {
+  const outcome = applySecurePathRestriction(
+    targetPath,
+    isDirectory,
+    process.platform,
+    false,
+    (restricted) => {
+      if (!restricted) {
+        hardenedPathsThisProcess.delete(targetPath)
+      }
+    }
+  )
+  if (outcome !== 'failed') {
     rememberHardenedPath(targetPath, isDirectory)
     return true
   }
   return false
 }
 
-export function writeSecureJsonFile(targetPath: string, value: unknown): void {
-  writeSecureFile(targetPath, JSON.stringify(value, null, 2))
+/** Returns false when the file was written but its permissions could not be restricted. */
+export function writeSecureJsonFile(targetPath: string, value: unknown): boolean {
+  return writeSecureFile(targetPath, JSON.stringify(value, null, 2))
 }
 
-export function writeDurableSecureJsonFile(targetPath: string, value: unknown): void {
-  writeSecureFile(targetPath, JSON.stringify(value, null, 2), { durable: true })
+/** Returns false when the file was written but its permissions could not be restricted. */
+export function writeDurableSecureJsonFile(targetPath: string, value: unknown): boolean {
+  return writeSecureFile(targetPath, JSON.stringify(value, null, 2), { durable: true })
 }
 
+/**
+ * Writes `contents` and restricts the result to the current user.
+ *
+ * Returns whether the restriction actually took. Hardening stays best-effort — it fails
+ * legitimately on FAT32, network paths and restricted tokens, and must not break a write — but
+ * the outcome is now reported rather than assumed, so a caller storing a credential can react.
+ */
 export function writeSecureFile(
   targetPath: string,
   contents: string,
   options: { durable?: boolean } = {}
-): void {
+): boolean {
   const dir = dirname(targetPath)
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
@@ -124,15 +180,18 @@ export function writeSecureFile(
       fsyncFileSync(tmpFile)
     }
     // Why: writeFileSync mode is a no-op on Windows, so restrict the credential's ACL synchronously before the rename publishes it under inherited ACLs.
-    applySecurePathRestriction(tmpFile, false, process.platform, true)
+    const stagedOutcome = applySecurePathRestriction(tmpFile, false, process.platform, true)
     renameSync(tmpFile, targetPath)
     // Why: these hold auth credentials, so the published path must stay current-user only; cache only on confirmed success so failures retry.
-    if (applySecurePathRestriction(targetPath, false, process.platform, true)) {
+    // The staged file's protected DACL survives the rename, so this pass usually just verifies it.
+    const publishedOutcome = applySecurePathRestriction(targetPath, false, process.platform, true)
+    if (publishedOutcome === 'applied') {
       rememberHardenedPath(targetPath, false)
     }
     if (options.durable) {
       bestEffortFsyncDirectorySync(dir)
     }
+    return stagedOutcome === 'applied' && publishedOutcome === 'applied'
   } catch (error) {
     rmSync(tmpFile, { force: true })
     throw error
@@ -198,32 +257,41 @@ export function hardenSecurePath(
 }
 
 /**
- * Applies hardening. The async Windows branch cannot know the outcome in time to return it, so it
- * reports through `onAsyncFailure` instead — the caller uses that to drop the cache entry rather
- * than leave a failed apply recorded as a success.
+ * `pending` is the honest answer for the async Windows branch: it has not happened yet, and
+ * reporting it as `applied` is what let a dead ACL look like a working one. The real outcome
+ * arrives through `onAsyncSettled`.
  */
+type HardeningOutcome = 'applied' | 'pending' | 'failed'
+
 function applySecurePathRestriction(
   targetPath: string,
   isDirectory: boolean,
   platform: NodeJS.Platform,
   sync: boolean,
-  onAsyncFailure?: () => void
-): boolean {
+  onAsyncSettled?: (restricted: boolean) => void
+): HardeningOutcome {
   if (platform === 'win32') {
     if (sync) {
+      // Why no retry floor here: the write path is user-driven, not polled, and a failed apply
+      // must still be retried on the next write of the same credential.
       // Why: apply the ACL synchronously so the credential file isn't briefly readable under inherited ACLs (writeFileSync mode is a no-op on Windows).
-      return restrictWindowsPathSync(targetPath, isDirectory)
+      return restrictWindowsPathSync(targetPath, isDirectory) ? 'applied' : 'failed'
+    }
+    // Why the floor: this is the read path, polled at ~2/s (#4901). Retrying every failure there
+    // is the same storm the cache exists to prevent.
+    if (!mayAttemptHardening(targetPath)) {
+      onAsyncSettled?.(false)
+      return 'failed'
     }
     // Why: dir/read-path re-harden runs async to avoid blocking the main thread (#4901).
     bestEffortRestrictWindowsPath(targetPath, isDirectory, (restricted) => {
-      if (!restricted) {
-        onAsyncFailure?.()
-      }
+      recordHardeningOutcome(targetPath, restricted)
+      onAsyncSettled?.(restricted)
     })
-    return true
+    return 'pending'
   }
   chmodSync(targetPath, isDirectory ? 0o700 : 0o600)
-  return true
+  return 'applied'
 }
 
 /** Caches the current metadata snapshot for a just-hardened path, or clears it if the path is gone. */
@@ -290,6 +358,7 @@ export function __resetSecureFileHardenedPathsForTests(
 ): void {
   hardenedPathsThisProcess = new SecurePathHardeningCache(bounds)
   hardenedDirectoryPathsThisProcess = new SecurePathHardeningCache(bounds)
+  hardeningFailuresThisProcess = new SecurePathHardeningCache(bounds)
 }
 
 export function __getSecureFileHardeningCacheStateForTests(): {

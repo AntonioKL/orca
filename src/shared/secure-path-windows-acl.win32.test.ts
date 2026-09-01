@@ -146,6 +146,51 @@ describeOnWindows('restrictWindowsPathSync against a real filesystem', () => {
     expect(readAclEntries(file)).toHaveLength(3)
   })
 
+  /**
+   * The shape of a DACL is not the same question as who is on it. This one is protected, carries
+   * exactly three non-inherited full-control rules, and grants Everyone — so it satisfies every
+   * check that does not compare SIDs, and hardening would report success and leave it alone.
+   */
+  it('repairs a protected three-rule DACL that grants the wrong principal', () => {
+    const file = join(root, 'substituted.json')
+    writeFileSync(file, '{"token":"secret"}')
+    expect(
+      icacls(
+        file,
+        '/inheritance:r',
+        '/grant:r',
+        `*${EVERYONE_SID}:(F)`,
+        '/grant:r',
+        '*S-1-5-18:(F)',
+        '/grant:r',
+        '*S-1-5-32-544:(F)',
+        '/q'
+      ).code
+    ).toBe(0)
+
+    const before = readAclEntries(file)
+    expect(before).toHaveLength(3)
+    expect(before.every((entry) => !entry.includes('(I)'))).toBe(true)
+    expect(before.some((entry) => entry.startsWith('Everyone:'))).toBe(true)
+
+    expect(restrictWindowsPathSync(file, false)).toBe(true)
+
+    const after = readAclEntries(file)
+    expect(after).toHaveLength(3)
+    expect(after.some((entry) => entry.startsWith('Everyone:'))).toBe(false)
+  })
+
+  it('is idempotent: a second harden leaves the same DACL', () => {
+    const file = join(root, 'idempotent.json')
+    writeFileSync(file, '{}')
+
+    expect(restrictWindowsPathSync(file, false)).toBe(true)
+    const first = readAclEntries(file)
+    expect(restrictWindowsPathSync(file, false)).toBe(true)
+
+    expect(readAclEntries(file)).toEqual(first)
+  })
+
   it('reports failure for a path that does not exist', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     expect(restrictWindowsPathSync(join(root, 'absent.json'), false)).toBe(false)
