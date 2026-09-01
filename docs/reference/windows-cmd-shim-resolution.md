@@ -45,6 +45,11 @@ shim directory), or contains `% ^ & | < > " :` or a line break; a script or
 target that is not on disk; an interpreter-less target that is not `.exe`/`.com`;
 and a program path that is not absolute.
 
+Refusing every `:` cannot cause a false refusal. Windows reserves the character
+within a path segment, so a relative path cannot contain one — the only
+spellings that can are drive-qualified, an alternate data stream (`a.js:zone`),
+or a `\\?\` device path, and the last is already refused as absolute.
+
 ## Kill switch
 
 Set **`ORCA_DISABLE_CMD_SHIM_RESOLUTION`** to any non-empty value in the

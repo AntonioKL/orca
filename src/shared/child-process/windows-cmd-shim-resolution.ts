@@ -72,8 +72,14 @@ const PNPM_DIRECT_SHIM = new RegExp(String.raw`^(?:@SETLOCAL\n)?@?${dp0Path('tar
 
 // `:` matters as much as the operators: `win32.isAbsolute('D:evil.js')` is
 // false, but `win32.resolve` reads the drive letter and lands on `D:\evil.js`,
-// outside the shim directory entirely. It also rules out the alternate-data-
-// stream spelling `a.js:zone`. No shim-relative path legitimately contains one.
+// outside the shim directory entirely.
+//
+// Rejecting every `:` is provably free rather than merely untested: Windows
+// reserves the character in a path segment, so a relative path cannot contain
+// one at all. The only spellings that can are drive-qualified (`D:x`), an
+// alternate data stream (`a.js:zone`), or a `\\?\` device path — and the last
+// is already refused as absolute. No generator can emit a shim-relative path
+// this rule would wrongly refuse.
 const UNSAFE_SHIM_PATH = /[%^&|<>":\r\n]/
 
 /** A target with no interpreter must be something CreateProcess can start on
