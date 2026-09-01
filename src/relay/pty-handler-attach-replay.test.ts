@@ -209,6 +209,79 @@ describe('PtyHandler', () => {
     expect(handler.getIdentityEvidenceDebugSnapshot().processTableReads).toBe(1)
   })
 
+  it('publishes mixed held evidence as epoch-consistent batches', async () => {
+    const dataCallbacks: ((data: string) => void)[] = []
+    mockPtySpawn.mockReturnValue({
+      ...mockPtyInstance,
+      onData: vi.fn((cb: (data: string) => void) => {
+        dataCallbacks.push(cb)
+      }),
+      onExit: vi.fn()
+    })
+    vi.spyOn(processTableSnapshot, 'getStrictProcessTableSnapshot').mockResolvedValue([])
+    const publications: Record<string, unknown>[] = []
+    Object.assign(dispatcher, {
+      activeClientIds: () => [1],
+      admitsPtyIdentityEvidencePublication: () => true,
+      publishProducerNotification: vi.fn((_clientId: number, method: string, params: unknown) => {
+        if (method === 'pty.identityEvidence' && params && typeof params === 'object') {
+          publications.push(params as Record<string, unknown>)
+        }
+        return true
+      })
+    })
+
+    await spawnPty()
+    await spawnPty()
+    const boundary = '\x1b]133;C\x07'
+    dataCallbacks[0]?.(boundary)
+    await vi.advanceTimersByTimeAsync(0)
+    dataCallbacks[1]?.(boundary)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(handler.getIdentityEvidenceDebugSnapshot().processTableReads).toBe(2)
+    expect(handler.getIdentityEvidenceDebugSnapshot().heldRows).toBe(2)
+    publications.length = 0
+    await dispatcher.callRequest(
+      'pty.identityEvidence.setVisibility',
+      { ids: [PTY_1, testPtyId(2)] },
+      { clientId: 1, isStale: () => false } as never
+    )
+
+    expect(publications).toHaveLength(2)
+    for (const publication of publications) {
+      const epoch = publication.observationEpoch
+      expect(typeof epoch).toBe('number')
+      expect(
+        (publication.rows as { foregroundProcessEvidence: { observationEpoch: number } }[]).every(
+          (row) => row.foregroundProcessEvidence.observationEpoch === epoch
+        )
+      ).toBe(true)
+    }
+  })
+
+  it('does not read the process table for clients without the identity capability', async () => {
+    let dataCallback: ((data: string) => void) | undefined
+    mockPtySpawn.mockReturnValue({
+      ...mockPtyInstance,
+      onData: vi.fn((cb: (data: string) => void) => {
+        dataCallback = cb
+      }),
+      onExit: vi.fn()
+    })
+    vi.spyOn(processTableSnapshot, 'getStrictProcessTableSnapshot').mockResolvedValue([])
+    Object.assign(dispatcher, {
+      activeClientIds: () => [1],
+      admitsPtyIdentityEvidencePublication: () => false
+    })
+
+    await spawnPty()
+    dataCallback?.('\x1b]133;C\x07')
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(handler.getIdentityEvidenceDebugSnapshot().processTableReads).toBe(0)
+  })
+
   it('suppresses legacy replay after the V1 owner is already active', async () => {
     let dataCallback: ((data: string) => void) | undefined
     mockPtySpawn.mockReturnValue({

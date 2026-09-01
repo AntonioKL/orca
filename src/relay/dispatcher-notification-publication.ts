@@ -3,9 +3,9 @@ import type { JsonRpcNotification } from './protocol'
 import {
   DROPPED_NOTIFICATION_LOG_KEY_LIMIT,
   type PreparedRelayFrame,
-  type RelayClient
+  type RelayClient,
+  type PtyIdentityEvidencePublicationAdmission
 } from './dispatcher-contract'
-import type { PtyIdentityEvidencePublicationAdmission } from './dispatcher-contract'
 import { RelayDispatcherPtyPublication } from './dispatcher-pty-publication'
 
 export abstract class RelayDispatcherNotificationPublication extends RelayDispatcherPtyPublication {

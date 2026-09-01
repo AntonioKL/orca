@@ -4,9 +4,9 @@ import type { PtySourceReceivingActivation } from '../../shared/pty-source-recei
 import type {
   SshPtyDataCallback,
   SshPtyExitCallback,
-  SshPtyReplayCallback
+  SshPtyReplayCallback,
+  SshPtyIdentityEvidenceCallback
 } from './ssh-pty-provider-contract'
-import type { SshPtyIdentityEvidenceCallback } from './ssh-pty-provider-contract'
 import { parseSshPtySourceFrame } from './ssh-pty-source-frame'
 import { parseSshIdentityEvidenceNotification } from './ssh-pty-identity-notification'
 import { SshPtySourceDeliveryLedger } from './ssh-pty-source-delivery-ledger'
@@ -14,6 +14,7 @@ import type {
   PendingSshPtySourceData,
   SshPtyRejectedSourceRecovery
 } from './ssh-pty-source-delivery-state'
+import { rejectedRecoveryPriority, rejectedSourceIdentity } from './ssh-pty-notification-rejection'
 
 export type {
   SshPtyDataCallback,
@@ -263,46 +264,4 @@ export function subscribeSshPtyNotifications(args: {
       })
     }
   })
-}
-
-function rejectedRecoveryPriority(recovery: SshPtyRejectedSourceRecovery): number {
-  if (recovery === 'reconnect-channel') {
-    return 3
-  }
-  return recovery === 'fresh-activation' ? 2 : 1
-}
-
-function rejectedSourceIdentity(params: {
-  deliveryToken?: unknown
-  clientGeneration?: unknown
-  ownerGeneration?: unknown
-  ptyIncarnation?: unknown
-}):
-  | Readonly<{
-      deliveryToken: string
-      clientGeneration: number
-      ownerGeneration: number
-      ptyIncarnation: string
-    }>
-  | undefined {
-  if (
-    typeof params.deliveryToken !== 'string' ||
-    params.deliveryToken.length === 0 ||
-    !positiveSafeInteger(params.clientGeneration) ||
-    !positiveSafeInteger(params.ownerGeneration) ||
-    typeof params.ptyIncarnation !== 'string' ||
-    params.ptyIncarnation.length === 0
-  ) {
-    return undefined
-  }
-  return Object.freeze({
-    deliveryToken: params.deliveryToken,
-    clientGeneration: params.clientGeneration,
-    ownerGeneration: params.ownerGeneration,
-    ptyIncarnation: params.ptyIncarnation
-  })
-}
-
-function positiveSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) > 0
 }

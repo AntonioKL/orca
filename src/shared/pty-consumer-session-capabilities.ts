@@ -45,7 +45,9 @@ export function intersectPtyConsumerCapabilities(
   const outputSupported = Boolean(
     offer && support && offer.versions.includes(1) && support.versions.includes(1)
   )
-  const identitySupported = Boolean(identityOffer && identitySupport?.versions.includes(1))
+  const identitySupported = Boolean(
+    identityOffer && identityOffer.versions.includes(1) && identitySupport?.versions.includes(1)
+  )
   if (!outputSupported && !identitySupported) {
     return {}
   }

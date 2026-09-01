@@ -531,6 +531,20 @@ describe('PtyConsumerSession', () => {
     })
   })
 
+  it('does not grant identity evidence when the client omits V1', () => {
+    const session = new PtyConsumerSession({
+      serverBuildId: 'relay-build',
+      identityEvidence: { versions: [1] },
+      createLease: () => 'lease'
+    })
+    const admission = session.admit(
+      ownerHello({ capabilities: { identityEvidence: { versions: [2] } } }),
+      auth('connection-1')
+    )
+
+    expect(admission.grant.capabilities).toBeUndefined()
+  })
+
   it('makes token-free bounded legacy an explicit capability omission', () => {
     const session = createSession()
     const admission = session.admit(ownerHello(), auth('connection-1'))

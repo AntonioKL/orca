@@ -2512,12 +2512,28 @@ export class PtyHandler {
     if (!this.dispatcher.publishProducerNotification) {
       return
     }
-    const epoch = Math.max(...rows.map((row) => row.foregroundProcessEvidence.observationEpoch))
-    this.dispatcher.publishProducerNotification(clientId, 'pty.identityEvidence', {
-      authorityGeneration: this.ptyIdMintEpoch,
-      observationEpoch: epoch,
-      rows
-    })
+    // Rows can come from different host reads (a boundary-triggered read refreshes only one PTY),
+    // so one envelope epoch would make the provider reject the entire reseed as inconsistent.
+    // Preserve each row's observation epoch and send one internally consistent batch per epoch.
+    const rowsByEpoch = new Map<number, PtyIdentityEvidenceRow[]>()
+    for (const row of rows) {
+      const epoch = row.foregroundProcessEvidence.observationEpoch
+      const batch = rowsByEpoch.get(epoch)
+      if (batch) {
+        batch.push(row)
+      } else {
+        rowsByEpoch.set(epoch, [row])
+      }
+    }
+    for (const [observationEpoch, epochRows] of [...rowsByEpoch.entries()].sort(
+      ([left], [right]) => left - right
+    )) {
+      this.dispatcher.publishProducerNotification(clientId, 'pty.identityEvidence', {
+        authorityGeneration: this.ptyIdMintEpoch,
+        observationEpoch,
+        rows: epochRows
+      })
+    }
   }
 
   private reconcileVisibleIdentityEvidence(): void {
@@ -2590,11 +2606,13 @@ export class PtyHandler {
       this.identityEvidenceReadQueued = true
       return
     }
-    if (this.dispatcher.hasConnectedClients && !this.dispatcher.hasConnectedClients()) {
+    if (!this.hasIdentityEvidenceConsumer()) {
       this.identityEvidencePendingIds.clear()
       return
     }
-    const requestedIds = this.identityEvidencePendingIds
+    // Snapshot before clearing; retaining the mutable set here would make `clear()` erase the
+    // filter too, turning every boundary-triggered read into a full-pool scan.
+    const requestedIds = new Set(this.identityEvidencePendingIds)
     this.identityEvidencePendingIds.clear()
     const entries = Array.from(this.ptys.values()).filter(
       (managed) =>
@@ -2685,6 +2703,20 @@ export class PtyHandler {
         this.scheduleIdentityEvidenceRead()
       }
     }
+  }
+
+  /** Skip process-table work when no connected client negotiated identity evidence. */
+  private hasIdentityEvidenceConsumer(): boolean {
+    const activeClientIds = this.dispatcher.activeClientIds
+    const admits = this.dispatcher.admitsPtyIdentityEvidencePublication
+    // Test doubles and pre-capability dispatchers omit these methods; retain their historical
+    // behaviour so a relay can still serve local PTY reads while the optional capability rolls out.
+    if (typeof activeClientIds !== 'function' || typeof admits !== 'function') {
+      return true
+    }
+    return activeClientIds
+      .call(this.dispatcher)
+      .some((clientId) => admits.call(this.dispatcher, clientId))
   }
 
   private async listProcesses(): Promise<PtyProcessSummary[]> {
