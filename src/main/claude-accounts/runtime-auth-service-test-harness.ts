@@ -20,6 +20,7 @@ export const testState = {
   throwLegacyRuntimeKeychainWrite: false,
   throwScopedKeychainWrite: false,
   runtimeWriteConfigDir: null as string | null,
+  scopedKeychainCredentialsByConfigDir: new Map<string, string>(),
   managedKeychainCredentials: new Map<string, string>()
 }
 
@@ -63,6 +64,7 @@ export function createKeychainMock() {
           throw new Error('scoped keychain write failed')
         }
         testState.scopedKeychainCredentials = contents
+        testState.scopedKeychainCredentialsByConfigDir.set(configDir, contents)
       } else {
         testState.legacyKeychainCredentials = contents
       }
@@ -70,12 +72,14 @@ export function createKeychainMock() {
     }),
     deleteActiveClaudeKeychainCredentials: vi.fn(async () => {
       testState.scopedKeychainCredentials = null
+      testState.scopedKeychainCredentialsByConfigDir.clear()
       testState.legacyKeychainCredentials = null
       testState.activeKeychainCredentials = null
     }),
     deleteActiveClaudeKeychainCredentialsStrict: vi.fn(async (configDir?: string) => {
       if (configDir) {
         testState.scopedKeychainCredentials = null
+        testState.scopedKeychainCredentialsByConfigDir.delete(configDir)
       } else {
         testState.legacyKeychainCredentials = null
       }
@@ -86,6 +90,9 @@ export function createKeychainMock() {
         ? (() => {
             if (testState.throwScopedKeychainRead) {
               throw new Error('scoped keychain read failed')
+            }
+            if (configDir !== expectedRuntimeConfigDir()) {
+              return testState.scopedKeychainCredentialsByConfigDir.get(configDir) ?? null
             }
             return testState.scopedKeychainCredentials
           })()
@@ -103,6 +110,7 @@ export function createKeychainMock() {
         }
         testState.runtimeWriteConfigDir = configDir
         testState.scopedKeychainCredentials = contents
+        testState.scopedKeychainCredentialsByConfigDir.set(configDir, contents)
         if (testState.throwLegacyRuntimeKeychainWrite) {
           console.warn(
             '[claude-runtime-auth] Failed to refresh legacy shared Keychain:',
@@ -144,6 +152,7 @@ export function resetRuntimeAuthTestState(): void {
   testState.throwLegacyRuntimeKeychainWrite = false
   testState.throwScopedKeychainWrite = false
   testState.runtimeWriteConfigDir = null
+  testState.scopedKeychainCredentialsByConfigDir.clear()
   testState.managedKeychainCredentials.clear()
   testState.userDataDir = mkdtempSync(join(tmpdir(), 'orca-claude-runtime-'))
   testState.fakeHomeDir = mkdtempSync(join(tmpdir(), 'orca-claude-home-'))
