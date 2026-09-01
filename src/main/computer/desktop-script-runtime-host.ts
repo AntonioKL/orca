@@ -190,7 +190,13 @@ export class DesktopScriptRuntimeHost {
       channel.write(`${JSON.stringify({ ...request, requestId: id })}\n`, (error) => {
         // Bind the report to what it was written for: a late callback must not
         // charge a second failure for this operation, nor stop a replacement
-        // helper and reject a later request with this one's error.
+        // helper and reject a later request with this one's error. Deliberately
+        // redundant with the channel's own closed guard — keep both. This one
+        // also covers a live channel whose request has already been answered,
+        // which the channel cannot see; that case is what pins it.
+        //
+        // Redundant does not mean untested: removing either guard alone fails a
+        // test, so neither can be deleted as "the one the other covers".
         if (this.channel !== channel || this.pending?.id !== id) {
           return
         }

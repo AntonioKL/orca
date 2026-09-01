@@ -70,7 +70,9 @@ export class DesktopScriptServeChannel {
     }
     this.child.stdin.write(payload, (error) => {
       // A destroyed stdin calls back after stop(); reporting then charges the
-      // caller a second failure for one operation.
+      // caller a second failure for one operation. Deliberately redundant with
+      // the host's own staleness check — keep both, and note that each is
+      // pinned separately, this one by the "once stopped" tests here.
       if (error && !this.closed) {
         onError(error)
       }

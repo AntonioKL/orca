@@ -47,6 +47,11 @@ class FakeRuntimeChild extends EventEmitter {
     }
   }
 
+  /** Fail one queued write, leaving later ones outstanding. */
+  failQueuedWrite(index: number): void {
+    this.pendingWrites.splice(index, 1)[0](new Error('EPIPE'))
+  }
+
   /** Requests written to this child, decoded. */
   requests(): Record<string, unknown>[] {
     return this.writes.map((line) => JSON.parse(line) as Record<string, unknown>)
@@ -500,6 +505,28 @@ describe('DesktopScriptRuntimeHost', () => {
 
     expect(children[1].killed).toBe(false)
     children[1].respond({ ok: true, capabilities: {} })
+    await expect(second).resolves.toMatchObject({ ok: true })
+    host.dispose()
+  })
+
+  it('ignores a write error for a request that already finished', async () => {
+    const { host, children } = createHost({ deferWrites: true })
+
+    const first = host.request({ tool: 'handshake' })
+    await settle()
+    children[0].respond({ ok: true, capabilities: {} })
+    await first
+
+    const second = host.request({ tool: 'handshake' })
+    await settle()
+
+    // Backpressure can hold a write callback past its own response. The channel
+    // is alive and was never stopped, so only the request id can tell that this
+    // report is stale — this is what pins the host-side guard on its own.
+    children[0].failQueuedWrite(0)
+
+    expect(children[0].killed).toBe(false)
+    children[0].respond({ ok: true, capabilities: {} })
     await expect(second).resolves.toMatchObject({ ok: true })
     host.dispose()
   })
