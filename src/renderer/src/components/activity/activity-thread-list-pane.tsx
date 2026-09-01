@@ -9,12 +9,18 @@ import {
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import { ActivityThreadListToolbar } from './activity-thread-list-toolbar'
+import {
+  getActiveStickyHeaderIndex,
+  getActiveStickyHeaderIndexForScroll,
+  getPreviousStickyHeaderIndex
+} from '../sidebar/worktree-list/viewport/virtual-rows'
 import { ActivityThreadVirtualRow } from './activity-thread-virtual-row'
 import { ActivityThreadListResizeHandle } from './activity-thread-list-resize-handle'
 import {
   buildActivityVirtualItems,
   estimateActivityVirtualItemSize,
   findActivityThreadItemIndex,
+  getActivityHeaderItemIndexes,
   getActivityVirtualItemKey
 } from './activity-thread-virtual-items'
 import type {
@@ -147,6 +153,10 @@ export function ActivityThreadListPane({
       }),
     [visibleThreadGroups, groupBy, effectiveCollapsedGroupKeys]
   )
+  const headerItemIndexes = useMemo(
+    () => getActivityHeaderItemIndexes(virtualItems),
+    [virtualItems]
+  )
   const selectedItemIndex = useMemo(
     () => findActivityThreadItemIndex(virtualItems, selectedPaneKey),
     [virtualItems, selectedPaneKey]
@@ -173,23 +183,43 @@ export function ActivityThreadListPane({
     },
     rangeExtractor: useCallback(
       (range: Range) => {
-        const indexes = defaultRangeExtractor(range)
-        if (
-          selectedItemIndex !== null &&
-          selectedItemIndex >= 0 &&
-          !indexes.includes(selectedItemIndex)
-        ) {
-          indexes.push(selectedItemIndex)
-          indexes.sort((a, b) => a - b)
+        const activeStickyIndex =
+          groupBy !== 'none'
+            ? getActiveStickyHeaderIndex(headerItemIndexes, range.startIndex)
+            : null
+        const previousStickyIndex =
+          activeStickyIndex !== null
+            ? getPreviousStickyHeaderIndex(headerItemIndexes, activeStickyIndex)
+            : null
+        const indexSet = new Set(defaultRangeExtractor(range))
+        if (activeStickyIndex !== null) {
+          indexSet.add(activeStickyIndex)
         }
-        return indexes
+        if (previousStickyIndex !== null) {
+          indexSet.add(previousStickyIndex)
+        }
+        if (selectedItemIndex !== null && selectedItemIndex >= 0) {
+          indexSet.add(selectedItemIndex)
+        }
+        return Array.from(indexSet).sort((a, b) => a - b)
       },
-      [selectedItemIndex]
+      [groupBy, headerItemIndexes, selectedItemIndex]
     ),
     overscan: 8,
     observeElementRect: observeActivityListRect,
     useFlushSync: false
   })
+
+  const scrollOffset = virtualizer.scrollOffset ?? 0
+  const activeStickyHeaderIndex =
+    groupBy !== 'none'
+      ? getActiveStickyHeaderIndexForScroll({
+          rangeStartIndex: virtualizer.range?.startIndex ?? 0,
+          scrollOffset,
+          stickyHeaderIndexes: headerItemIndexes,
+          virtualItems: virtualizer.getVirtualItems()
+        })
+      : null
 
   const resizable = onResizeStart !== undefined
   return (
@@ -226,7 +256,7 @@ export function ActivityThreadListPane({
         <div
           ref={scrollContainerRef}
           onScroll={scrollTopRef ? handleScroll : undefined}
-          className="h-full overflow-y-auto overflow-x-hidden p-1.5 scrollbar-sleek"
+          className="h-full overflow-y-auto overflow-x-hidden px-1.5 pb-1.5 pt-px scrollbar-sleek"
         >
           <div
             className="relative w-full"
@@ -238,13 +268,27 @@ export function ActivityThreadListPane({
               if (!item) {
                 return null
               }
+              const isActiveSticky =
+                item.type === 'header' && virtualRow.index === activeStickyHeaderIndex
               return (
                 <div
                   key={virtualRow.key}
                   ref={virtualizer.measureElement}
                   data-index={virtualRow.index}
-                  className="absolute left-0 top-0 w-full"
-                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  data-activity-sticky-header={item.type === 'header' ? '' : undefined}
+                  data-activity-sticky-header-active={isActiveSticky ? '' : undefined}
+                  className={cn(
+                    'left-0 right-0 w-full',
+                    isActiveSticky
+                      ? cn(
+                          'sticky -top-px z-20',
+                          resizable ? 'bg-background' : 'bg-worktree-sidebar'
+                        )
+                      : 'absolute top-0'
+                  )}
+                  style={
+                    isActiveSticky ? undefined : { transform: `translateY(${virtualRow.start}px)` }
+                  }
                 >
                   <ActivityThreadVirtualRow
                     item={item}
