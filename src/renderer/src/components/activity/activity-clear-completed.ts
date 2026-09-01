@@ -42,8 +42,9 @@ export function planClearCompletedActivity(
       continue
     }
     clearedThreadCount += 1
-    cutoffPatch[thread.paneKey] = thread.latestTimestamp
-    restorePatch[thread.paneKey] = state.activityClearedAtByPaneKey[thread.paneKey] ?? null
+    const previousCutoff = state.activityClearedAtByPaneKey[thread.paneKey] ?? null
+    cutoffPatch[thread.paneKey] = Math.max(previousCutoff ?? 0, thread.latestTimestamp)
+    restorePatch[thread.paneKey] = previousCutoff
     const retained = state.retainedAgentsByPaneKey[thread.paneKey]
     if (retained) {
       retainedSnapshots.push(retained)

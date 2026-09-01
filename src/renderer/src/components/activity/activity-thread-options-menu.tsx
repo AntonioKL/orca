@@ -69,7 +69,7 @@ export function ActivityThreadOptionsMenu({
   hasCompletedThreads?: boolean
   onCompactModeChange: (compactMode: boolean) => void
   onShowChildAgentsChange?: (showChildAgents: boolean) => void
-  onMarkAllThreadsRead: () => void
+  onMarkAllThreadsRead?: () => void
   onClearCompleted?: () => void
   onSearch?: () => void
   unreadOnly?: boolean
@@ -258,26 +258,32 @@ export function ActivityThreadOptionsMenu({
             {showChildAgents ? <Check className="size-3.5" /> : null}
           </DropdownMenuCheckboxItem>
         ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onMarkAllThreadsRead} disabled={!hasUnreadThreads}>
-          <CheckCheck className="size-3.5 text-muted-foreground" />
-          <span>
-            {translate(
-              'auto.components.activity.ActivityPrototypePage.023ff75afe',
-              'Mark all read'
-            )}
-          </span>
-        </DropdownMenuItem>
-        {onClearCompleted ? (
-          <DropdownMenuItem onSelect={onClearCompleted} disabled={!hasCompletedThreads}>
-            <Trash2 className="size-3.5 text-muted-foreground" />
-            <span>
-              {translate(
-                'auto.components.activity.ActivityPrototypePage.clearCompleted',
-                'Clear completed'
-              )}
-            </span>
-          </DropdownMenuItem>
+        {onMarkAllThreadsRead || onClearCompleted ? (
+          <>
+            <DropdownMenuSeparator />
+            {onMarkAllThreadsRead ? (
+              <DropdownMenuItem onSelect={onMarkAllThreadsRead} disabled={!hasUnreadThreads}>
+                <CheckCheck className="size-3.5 text-muted-foreground" />
+                <span>
+                  {translate(
+                    'auto.components.activity.ActivityPrototypePage.023ff75afe',
+                    'Mark all read'
+                  )}
+                </span>
+              </DropdownMenuItem>
+            ) : null}
+            {onClearCompleted ? (
+              <DropdownMenuItem onSelect={onClearCompleted} disabled={!hasCompletedThreads}>
+                <Trash2 className="size-3.5 text-muted-foreground" />
+                <span>
+                  {translate(
+                    'auto.components.activity.ActivityPrototypePage.clearCompleted',
+                    'Clear completed'
+                  )}
+                </span>
+              </DropdownMenuItem>
+            ) : null}
+          </>
         ) : null}
       </DropdownMenuContent>
     </DropdownMenu>

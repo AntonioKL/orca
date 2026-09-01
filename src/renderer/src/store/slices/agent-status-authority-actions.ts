@@ -76,6 +76,10 @@ export function createAgentStatusAuthorityActions(
             s.activityClearedAtByPaneKey,
             retiredPaneKeySet
           ),
+          manuallyUnreadTurnsByPaneKey: removePaneKeys(
+            s.manuallyUnreadTurnsByPaneKey,
+            retiredPaneKeySet
+          ),
           paneForegroundAgentByPaneKey: removePaneKeys(
             s.paneForegroundAgentByPaneKey,
             retiredPaneKeySet
@@ -204,6 +208,7 @@ export function createAgentStatusAuthorityActions(
         ),
         acknowledgedAgentsByPaneKey: movePaneKeyedRecord(s.acknowledgedAgentsByPaneKey, from, to),
         activityClearedAtByPaneKey: movePaneKeyedRecord(s.activityClearedAtByPaneKey, from, to),
+        manuallyUnreadTurnsByPaneKey: movePaneKeyedRecord(s.manuallyUnreadTurnsByPaneKey, from, to),
         paneForegroundAgentByPaneKey: movePaneKeyedRecord(s.paneForegroundAgentByPaneKey, from, to),
         unreadTerminalPanes: movePaneKeyedRecord(s.unreadTerminalPanes, from, to),
         unreadAgentCompletionPanes: movePaneKeyedRecord(s.unreadAgentCompletionPanes, from, to),

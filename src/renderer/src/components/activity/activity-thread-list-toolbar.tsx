@@ -48,7 +48,7 @@ export function ActivityThreadListToolbar({
   hasUnreadThreads: boolean
   onCompactModeChange: (compactMode: boolean) => void
   onShowChildAgentsChange?: (showChildAgents: boolean) => void
-  onMarkAllThreadsRead: () => void
+  onMarkAllThreadsRead?: () => void
   hasCompletedThreads?: boolean
   onClearCompleted?: () => void
   resizable: boolean
@@ -184,22 +184,24 @@ export function ActivityThreadListToolbar({
       </div>
       {onMarkAllThreadsRead || onClearCompleted ? (
         <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-            onClick={onMarkAllThreadsRead}
-            disabled={!hasUnreadThreads}
-          >
-            <CheckCheck className="size-3.5" />
-            <span>
-              {translate(
-                'auto.components.activity.ActivityPrototypePage.023ff75afe',
-                'Mark all read'
-              )}
-            </span>
-          </Button>
+          {onMarkAllThreadsRead ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+              onClick={onMarkAllThreadsRead}
+              disabled={!hasUnreadThreads}
+            >
+              <CheckCheck className="size-3.5" />
+              <span>
+                {translate(
+                  'auto.components.activity.ActivityPrototypePage.023ff75afe',
+                  'Mark all read'
+                )}
+              </span>
+            </Button>
+          ) : null}
           {onClearCompleted ? (
             <Button
               type="button"

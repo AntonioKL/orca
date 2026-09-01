@@ -30,7 +30,7 @@ export function SidebarViewToggle({
       role="radiogroup"
       aria-label={ariaLabel}
       className={cn(
-        'inline-flex shrink-0 items-center rounded-lg border border-black/10 bg-black/[0.06] p-0.5 shadow-2xs dark:border-white/10 dark:bg-black/40',
+        'inline-flex shrink-0 items-center rounded-lg border border-sidebar-border bg-sidebar-accent p-0.5 shadow-xs',
         className
       )}
     >
@@ -47,7 +47,7 @@ export function SidebarViewToggle({
             className={cn(
               'relative grid grid-cols-1 rounded-md border px-1.5 py-0.5 text-center text-xs outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring/50 motion-reduce:transition-none',
               active
-                ? 'border-black/[0.06] bg-background font-semibold text-foreground shadow-xs dark:border-white/10 dark:bg-worktree-sidebar-accent dark:text-worktree-sidebar-foreground'
+                ? 'border-sidebar-border bg-sidebar font-semibold text-sidebar-foreground shadow-xs'
                 : 'border-transparent font-medium text-worktree-sidebar-foreground/65 hover:text-worktree-sidebar-foreground'
             )}
           >

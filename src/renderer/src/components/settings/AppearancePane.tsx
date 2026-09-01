@@ -150,6 +150,7 @@ export function AppearancePane({
     { title: terminalTitle },
     ...getTerminalAppearanceSearchEntries({ showWarpImport: !isWebClient })
   ]
+  const agentsSidebarEntry = getAgentsSidebarEntry()
   const windowSearchEntries = [
     {
       title: windowSidebarTitle,
@@ -157,7 +158,7 @@ export function AppearancePane({
     },
     ...getStatusBarEntries(),
     ...getSidebarEntries(),
-    ...(getAgentsSidebarEntry?.() ? [getAgentsSidebarEntry()] : []),
+    ...(agentsSidebarEntry ? [agentsSidebarEntry] : []),
     ...getLayoutEntries(),
     getLeftSidebarAppearanceEntry(),
     getWorkspaceCardLayoutEntry()

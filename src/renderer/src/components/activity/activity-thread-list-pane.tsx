@@ -87,7 +87,7 @@ export function ActivityThreadListPane({
   hasUnreadThreads: boolean
   onCompactModeChange: (compactMode: boolean) => void
   onShowChildAgentsChange?: (showChildAgents: boolean) => void
-  onMarkAllThreadsRead: () => void
+  onMarkAllThreadsRead?: () => void
   hasCompletedThreads?: boolean
   onClearCompleted?: () => void
   visibleThreadGroups: ActivityThreadGroup[]

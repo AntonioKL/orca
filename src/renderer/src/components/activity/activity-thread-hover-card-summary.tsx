@@ -24,6 +24,7 @@ import {
 } from '../sidebar/WorktreeCardDetailSection'
 import { EventTime, ThreadAgentStateIndicator } from './activity-thread-controls'
 import { activityThreadRowCopy, threadAgentStateLabel } from './activity-thread-presentation'
+import { getActivityThreadWorkspaceTitle } from '@/lib/activity-thread-display'
 import type { AgentPaneThread } from './activity-thread-types'
 
 export function ActivityThreadHoverCardSummary({
@@ -64,6 +65,7 @@ export function ActivityThreadHoverCardSummary({
   }, [executionHostId, hostLabelOverrides, parsedHost, runtimeEnvironments, sshTargetLabels])
   const branchIdentityDisplay = useMemo(() => getWorktreeGitIdentityDisplay(worktree), [worktree])
   const { taskTitle, needsAttention } = activityThreadRowCopy(thread)
+  const workspaceTitle = getActivityThreadWorkspaceTitle(worktree)
   const copyPathLabel = translate(
     'auto.components.activity.ActivityThreadHoverCard.copyPath',
     'Copy path'
@@ -185,7 +187,7 @@ export function ActivityThreadHoverCardSummary({
               </div>
             ) : null}
             <span className="truncate text-[12.5px] font-semibold text-foreground">
-              {worktree.displayName}
+              {workspaceTitle}
             </span>
           </div>
 

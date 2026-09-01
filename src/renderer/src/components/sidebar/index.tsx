@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from 'react'
 import { useAppStore } from '@/store'
-import { TooltipProvider } from '@/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
 import SidebarHeader from './SidebarHeader'
 import SidebarNav from './SidebarNav'
@@ -14,7 +14,6 @@ import { cn } from '@/lib/utils'
 import { BellDot, FolderPlus, Loader2, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { ActivityGroupBy, ThreadReadFilter } from '@/components/activity/activity-thread-types'
 import { useSidebarProjectDrop } from './useSidebarProjectDrop'
 import { useWorkspaceBoardPanel } from './useWorkspaceBoardPanel'
@@ -68,7 +67,6 @@ function Sidebar({
   const [agentSearchOpen, setAgentSearchOpen] = React.useState(false)
   const [agentOptionsTarget, setAgentOptionsTarget] = React.useState<HTMLDivElement | null>(null)
   const agentsScrollTopRef = React.useRef(0)
-  const agentSearchInputRef = React.useRef<HTMLInputElement>(null)
   const fetchAllWorktrees = useAppStore((s) => s.fetchAllWorktrees)
   const activeModal = useAppStore((s) => s.activeModal)
   const statusBarVisible = useAppStore((s) => s.statusBarVisible)
@@ -209,7 +207,6 @@ function Sidebar({
                 agentSearchOpen ? (
                   <div className="shrink-0 border-b border-border px-2 py-1.5">
                     <Input
-                      ref={agentSearchInputRef}
                       autoFocus
                       value={agentQuery}
                       onChange={(event) => setAgentQuery(event.target.value)}

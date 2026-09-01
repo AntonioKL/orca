@@ -29,11 +29,6 @@ export type SidebarAgentsListProps = {
   query: string
   setQuery: (query: string) => void
   optionsTarget?: HTMLElement | null
-  collapsedGroupKeys?: ReadonlySet<string>
-  onToggleGroupCollapse?: (groupKey: string) => void
-  onSearch?: () => void
-  unreadOnly?: boolean
-  onToggleUnread?: () => void
   scrollTopRef?: React.MutableRefObject<number>
 }
 
@@ -45,11 +40,6 @@ export default function SidebarAgentsList({
   query,
   setQuery,
   optionsTarget,
-  collapsedGroupKeys,
-  onToggleGroupCollapse,
-  onSearch,
-  unreadOnly = false,
-  onToggleUnread,
   scrollTopRef
 }: SidebarAgentsListProps): React.JSX.Element {
   // Why store-backed: these are persisted preferences (agents* UI fields), unlike the momentary read filter/search.
@@ -58,26 +48,7 @@ export default function SidebarAgentsList({
   const showChildAgents = useAppStore((s) => s.agentsShowChildAgents)
   const setShowChildAgents = useAppStore((s) => s.setAgentsShowChildAgents)
   const [selectedPaneKey, setSelectedPaneKey] = useState<string | null>(null)
-  const [internalCollapsedGroupKeys, setInternalCollapsedGroupKeys] = useState<Set<string>>(
-    () => new Set()
-  )
   const activityFilterInputRef = useRef<HTMLInputElement | null>(null)
-
-  const isControlled = collapsedGroupKeys !== undefined && onToggleGroupCollapse !== undefined
-  const effectiveCollapsedGroupKeys = isControlled ? collapsedGroupKeys : internalCollapsedGroupKeys
-  const handleToggleGroup = isControlled
-    ? onToggleGroupCollapse
-    : (groupKey: string) => {
-        setInternalCollapsedGroupKeys((prev) => {
-          const next = new Set(prev)
-          if (next.has(groupKey)) {
-            next.delete(groupKey)
-          } else {
-            next.add(groupKey)
-          }
-          return next
-        })
-      }
 
   const {
     storeData,
@@ -140,8 +111,6 @@ export default function SidebarAgentsList({
         hasUnreadThreads={hasUnreadThreads}
         onCompactModeChange={setCompactMode}
         onShowChildAgentsChange={setShowChildAgents}
-        onMarkAllThreadsRead={markAllThreadsRead}
-        onClearCompleted={handleClearCompleted}
         visibleThreadGroups={visibleThreadGroups}
         visibleThreadCount={visibleThreads.length}
         selectedPaneKey={effectiveSelectedPaneKey}
@@ -155,8 +124,6 @@ export default function SidebarAgentsList({
         showFilterControls={false}
         showOptionsMenu={false}
         scopeFilterRow={<ActivityScopeFilterChips hiddenThreadCount={scopeHiddenThreadCount} />}
-        collapsedGroupKeys={effectiveCollapsedGroupKeys}
-        onToggleGroupCollapse={handleToggleGroup}
         scrollTopRef={scrollTopRef}
       />
       {optionsTarget
@@ -172,9 +139,6 @@ export default function SidebarAgentsList({
               onShowChildAgentsChange={setShowChildAgents}
               onMarkAllThreadsRead={markAllThreadsRead}
               onClearCompleted={handleClearCompleted}
-              onSearch={onSearch}
-              unreadOnly={unreadOnly}
-              onToggleUnread={onToggleUnread}
             />,
             optionsTarget
           )

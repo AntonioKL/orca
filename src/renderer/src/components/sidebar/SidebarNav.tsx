@@ -57,10 +57,9 @@ const SidebarNav = React.memo(function SidebarNav() {
   const openModal = useAppStore((s) => s.openModal)
   const updateSettings = useAppStore((s) => s.updateSettings)
   const activeView = useAppStore((s) => s.activeView)
-  const experimentalSidebarButtons = useAppStore((s) =>
-    shouldShowAgentDashboardSidebarButton(s.settings) ? 2 : 0
+  const showAgentDashboardButton = useAppStore((s) =>
+    shouldShowAgentDashboardSidebarButton(s.settings)
   )
-  const showAgentDashboardButton = (experimentalSidebarButtons & 2) !== 0
   const showAutomationsButton = useAppStore((s) => shouldShowAutomationsButton(s.settings))
   const showMobileButton = useAppStore((s) => shouldShowMobileButton(s.settings))
   const showArtifactsButton = useAppStore((s) => shouldShowArtifactsButton(s.settings))

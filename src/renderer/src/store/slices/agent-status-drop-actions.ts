@@ -57,7 +57,11 @@ export function createAgentStatusDropActions(
               agentLaunchConfigByPaneKey: nextLaunchConfigs,
               ...(nextAck !== s.acknowledgedAgentsByPaneKey
                 ? { acknowledgedAgentsByPaneKey: nextAck }
-                : {})
+                : {}),
+              manuallyUnreadTurnsByPaneKey: removeAcknowledgement(
+                s.manuallyUnreadTurnsByPaneKey,
+                paneKey
+              )
             }
           }
           return nextAck !== s.acknowledgedAgentsByPaneKey
@@ -83,6 +87,10 @@ export function createAgentStatusDropActions(
           ...(nextAck !== s.acknowledgedAgentsByPaneKey
             ? { acknowledgedAgentsByPaneKey: nextAck }
             : {}),
+          manuallyUnreadTurnsByPaneKey: removeAcknowledgement(
+            s.manuallyUnreadTurnsByPaneKey,
+            paneKey
+          ),
           ...(needsSuppressor
             ? {
                 retentionSuppressedPaneKeys: {

@@ -132,17 +132,18 @@ describe('ExperimentalPane', () => {
     )
   })
 
-  it('does not expose graduated Agents surfaces as experimental settings', () => {
+  it('exposes the Agents sidebar visibility switch for discoverability', () => {
     const settings = getDefaultSettings('/tmp')
     const markup = renderToStaticMarkup(
       <ExperimentalPane settings={settings} updateSettings={vi.fn()} />
     )
 
     expect(settings.experimentalAgentDashboardPopout).toBeUndefined()
-    expect(markup).not.toContain('Agent Dashboard')
-    expect(markup).not.toContain('Agents View')
-    expect(getExperimentalPaneSearchEntries().map((entry) => entry.title)).not.toEqual(
-      expect.arrayContaining(['Agent Dashboard', 'Agents View'])
+    expect(markup).toContain('Show Agents Button')
+    expect(markup).toContain('Appearance')
+    expect(markup).toContain('Window &amp; Sidebar')
+    expect(getExperimentalPaneSearchEntries().map((entry) => entry.title)).toContain(
+      'Show Agents Button'
     )
   })
 
