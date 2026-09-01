@@ -1,22 +1,27 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { execFileAsyncMock, execFileMock, promisifyCustom } = vi.hoisted(() => ({
-  execFileAsyncMock: vi.fn(),
-  execFileMock: vi.fn(),
-  promisifyCustom: Symbol.for('nodejs.util.promisify.custom')
-}))
-
-vi.mock('child_process', () => ({
-  execFile: Object.assign(execFileMock, {
-    [promisifyCustom]: execFileAsyncMock
-  })
+const runProcessMock = vi.fn()
+vi.mock('../shared/child-process/run-process', () => ({
+  runProcess: (spec: unknown) => runProcessMock(spec)
 }))
 
 vi.mock('./relay-command-env', () => ({
   buildRelayCommandEnv: () => ({ PATH: 'C:\\Windows\\System32' })
 }))
 
-const { scanWindowsListeningPorts } = await import('./windows-port-scan')
+import {
+  __setWindowsProcessTableCimScanForTests,
+  __setWindowsProcessTreeLoaderForTests,
+  resetWindowsProcessTableForTests
+} from '../main/windows/windows-process-table'
+import { scanWindowsListeningPorts } from './windows-port-scan'
+
+type Spec = {
+  program: string
+  args?: readonly string[]
+  timeoutMs?: number | null
+  signal?: AbortSignal
+}
 
 // The scanner drops any row whose pid is the relay process or its parent, so a fixture pid
 // that happens to match the vitest worker's own pid silently empties the result and the
@@ -32,78 +37,206 @@ function pidUnlikeSelf(seed: number): number {
   return pid
 }
 
-const POWERSHELL_PID = pidUnlikeSelf(1234)
 const NETSTAT_PID = pidUnlikeSelf(2468)
+const SSHD_PID = pidUnlikeSelf(4321)
+const POWERSHELL_PID = pidUnlikeSelf(1234)
+
+const NETSTAT_STDOUT = [
+  '  Proto  Local Address          Foreign Address        State           PID',
+  `  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       ${NETSTAT_PID}`,
+  `  TCP    [::]:3000              [::]:0                 LISTENING       ${NETSTAT_PID}`,
+  `  TCP    0.0.0.0:4000           93.184.216.34:443      ESTABLISHED     ${NETSTAT_PID}`,
+  `  UDP    0.0.0.0:5353           *:*                                    ${NETSTAT_PID}`,
+  `  TCP    0.0.0.0:2222           0.0.0.0:0              LISTENING       ${SSHD_PID}`
+].join('\r\n')
+
+function ok(stdout: string): {
+  code: number
+  signal: null
+  stdout: string
+  stderr: string
+  timedOut: boolean
+} {
+  return { code: 0, signal: null, stdout, stderr: '', timedOut: false }
+}
+
+type NativeRow = {
+  pid: number
+  ppid: number
+  name: string
+  memory?: number
+  commandLine?: string
+  creationTimeMs?: number
+}
+
+/** A native snapshot must contain the reader's own pid or the table rejects. */
+function nativeTable(rows: NativeRow[]) {
+  return () => ({
+    ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+    getAllProcesses: (callback: (processes: NativeRow[] | undefined) => void) =>
+      callback([{ pid: process.pid, ppid: 0, name: 'vitest.exe' }, ...rows])
+  })
+}
+
+function specs(): Spec[] {
+  return runProcessMock.mock.calls.map((call) => call[0] as Spec)
+}
 
 describe('scanWindowsListeningPorts', () => {
   beforeEach(() => {
-    execFileAsyncMock.mockReset()
+    runProcessMock.mockReset()
+    resetWindowsProcessTableForTests()
+    __setWindowsProcessTreeLoaderForTests(
+      nativeTable([
+        { pid: NETSTAT_PID, ppid: 4, name: 'node.exe' },
+        { pid: SSHD_PID, ppid: 4, name: 'sshd.exe' }
+      ])
+    )
   })
 
-  it('bounds the PowerShell scan with the caller abort signal and timeout', async () => {
+  afterEach(() => {
+    __setWindowsProcessTreeLoaderForTests()
+    __setWindowsProcessTableCimScanForTests()
+    resetWindowsProcessTableForTests()
+  })
+
+  it('reads netstat first and never starts PowerShell', async () => {
     const controller = new AbortController()
-    execFileAsyncMock.mockResolvedValueOnce({
-      stdout: JSON.stringify({
+    runProcessMock.mockResolvedValueOnce(ok(NETSTAT_STDOUT))
+
+    await expect(scanWindowsListeningPorts(controller.signal)).resolves.toEqual([
+      { host: '::', port: 3000, pid: NETSTAT_PID, processName: 'node' },
+      { host: '0.0.0.0', port: 3000, pid: NETSTAT_PID, processName: 'node' }
+    ])
+
+    expect(specs()).toHaveLength(1)
+    expect(specs()[0].program).toMatch(/netstat\.exe$/)
+    // `-p tcp` is absent on purpose: on Windows it means IPv4-only and would
+    // hide every `[::]` listener.
+    expect(specs()[0].args).toEqual(['-ano'])
+    expect(specs()[0].signal).toBe(controller.signal)
+    expect(specs()[0].timeoutMs).toBe(5000)
+  })
+
+  it('keeps the sshd and self-pid filters working off native process names', async () => {
+    runProcessMock.mockResolvedValueOnce(
+      ok(
+        [
+          NETSTAT_STDOUT,
+          `  TCP    0.0.0.0:9999           0.0.0.0:0              LISTENING       ${process.pid}`
+        ].join('\r\n')
+      )
+    )
+
+    const ports = await scanWindowsListeningPorts()
+
+    // sshd.exe is matched despite the table's `.exe` spelling, and the relay's
+    // own listener never reaches a client.
+    expect(ports.map((port) => `${port.host}:${port.port}`)).toEqual([':::3000', '0.0.0.0:3000'])
+  })
+
+  it('still reports host/port/pid when no process table is readable', async () => {
+    runProcessMock.mockResolvedValueOnce(ok(NETSTAT_STDOUT))
+    __setWindowsProcessTreeLoaderForTests(() => null)
+    __setWindowsProcessTableCimScanForTests(() =>
+      Promise.reject(new Error('windows process table unavailable'))
+    )
+    resetWindowsProcessTableForTests()
+
+    await expect(scanWindowsListeningPorts()).resolves.toEqual([
+      { host: '0.0.0.0', port: 2222, pid: SSHD_PID },
+      { host: '::', port: 3000, pid: NETSTAT_PID },
+      { host: '0.0.0.0', port: 3000, pid: NETSTAT_PID }
+    ])
+    // Names were unavailable, so nothing else was spawned to go get them.
+    expect(specs()).toHaveLength(1)
+  })
+
+  it('falls back to PowerShell without an execution-policy override', async () => {
+    const controller = new AbortController()
+    runProcessMock
+      .mockResolvedValueOnce({
+        code: 1,
+        signal: null,
+        stdout: '',
+        stderr: 'blocked',
+        timedOut: false
+      })
+      .mockResolvedValueOnce(
+        ok(
+          JSON.stringify({
+            host: '127.0.0.1',
+            port: 5173,
+            pid: POWERSHELL_PID,
+            processName: 'node'
+          })
+        )
+      )
+
+    await expect(scanWindowsListeningPorts(controller.signal)).resolves.toEqual([
+      {
         host: '127.0.0.1',
         port: 5173,
         pid: POWERSHELL_PID,
         processName: 'node'
-      }),
-      stderr: ''
-    })
-
-    await expect(scanWindowsListeningPorts(controller.signal)).resolves.toEqual([
-      { host: '127.0.0.1', port: 5173, pid: POWERSHELL_PID, processName: 'node' }
+      }
     ])
 
-    expect(execFileAsyncMock).toHaveBeenCalledWith(
-      'powershell.exe',
-      expect.arrayContaining(['-EncodedCommand', expect.any(String)]),
-      expect.objectContaining({
-        signal: controller.signal,
-        timeout: 5000,
-        windowsHide: true
-      })
-    )
+    const powershell = specs()[1]
+    expect(powershell.program).toMatch(/powershell\.exe$/i)
+    expect(powershell.args?.slice(0, 3)).toEqual(['-NoProfile', '-NonInteractive', '-Command'])
+    expect(powershell.args).not.toContain('-ExecutionPolicy')
+    expect(powershell.args).not.toContain('-EncodedCommand')
+    expect(powershell.args).toHaveLength(4)
+    expect(powershell.args?.[3]).toContain('Get-NetTCPConnection')
+    expect(powershell.signal).toBe(controller.signal)
+    expect(powershell.timeoutMs).toBe(5000)
   })
 
-  it('bounds the netstat fallback with the same abort signal and timeout', async () => {
-    const controller = new AbortController()
-    execFileAsyncMock
+  it('tries pwsh when Windows PowerShell cannot answer, then gives up empty', async () => {
+    runProcessMock
+      .mockResolvedValueOnce(ok(''))
       .mockRejectedValueOnce(new Error('powershell unavailable'))
       .mockRejectedValueOnce(new Error('pwsh unavailable'))
-      .mockResolvedValueOnce({
-        stdout: [
-          '  Proto  Local Address          Foreign Address        State           PID',
-          `  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       ${NETSTAT_PID}`
-        ].join('\r\n'),
-        stderr: ''
-      })
 
-    await expect(scanWindowsListeningPorts(controller.signal)).resolves.toEqual([
-      { host: '0.0.0.0', port: 3000, pid: NETSTAT_PID }
+    await expect(scanWindowsListeningPorts()).resolves.toEqual([])
+
+    expect(specs().map((spec) => spec.program)).toEqual([
+      expect.stringMatching(/netstat\.exe$/),
+      expect.stringMatching(/powershell\.exe$/i),
+      'pwsh.exe'
     ])
-
-    expect(execFileAsyncMock).toHaveBeenLastCalledWith(
-      'netstat.exe',
-      ['-ano', '-p', 'tcp'],
-      expect.objectContaining({
-        signal: controller.signal,
-        timeout: 5000,
-        windowsHide: true
-      })
-    )
   })
 
-  it('does not start the netstat fallback after the scan is cancelled', async () => {
+  it('gives up rather than falling back once the scan is cancelled', async () => {
     const controller = new AbortController()
     controller.abort()
-    execFileAsyncMock.mockRejectedValueOnce(
-      Object.assign(new Error('cancelled'), { name: 'AbortError' })
-    )
+    runProcessMock.mockResolvedValueOnce({
+      code: null,
+      signal: null,
+      stdout: '',
+      stderr: '',
+      timedOut: false
+    })
 
     await expect(scanWindowsListeningPorts(controller.signal)).resolves.toEqual([])
 
-    expect(execFileAsyncMock).toHaveBeenCalledTimes(1)
+    expect(runProcessMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a netstat timeout as unanswered and falls through', async () => {
+    runProcessMock
+      .mockResolvedValueOnce({
+        code: null,
+        signal: 'SIGKILL',
+        stdout: '',
+        stderr: '',
+        timedOut: true
+      })
+      .mockResolvedValueOnce(ok('[]'))
+
+    await expect(scanWindowsListeningPorts()).resolves.toEqual([])
+
+    expect(specs()).toHaveLength(2)
   })
 })
