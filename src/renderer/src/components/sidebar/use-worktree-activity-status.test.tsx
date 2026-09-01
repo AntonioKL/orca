@@ -142,6 +142,36 @@ describe('useWorktreeActivityStatus', () => {
     )
   })
 
+  it('ignores an unmapped stale title for a restored working pane', () => {
+    const worktreeId = 'repo1::/path/wt1'
+    const paneKey = makePaneKey('tab-1', LEAF_ID)
+    mockState = {
+      ...mockState,
+      tabsByWorktree: {
+        [worktreeId]: [makeTab('tab-1', worktreeId)]
+      },
+      ptyIdsByTabId: {
+        'tab-1': ['pty-1']
+      },
+      // Runtime pane ids are numeric until layout hydration resolves them to
+      // stable leaves, so the restored pane cannot be matched directly here.
+      runtimePaneTitlesByTabId: {
+        'tab-1': {
+          0: '⠋ Codex',
+          1: 'bash'
+        }
+      },
+      agentStatusByPaneKey: {
+        [paneKey]: makeAgentStatusEntry({ paneKey, state: 'working' })
+      }
+    }
+    mockState.agentStatusByPaneKey[paneKey]!.restoredUnconfirmed = true
+
+    expect(renderToStaticMarkup(<StatusProbe worktreeId={worktreeId} />)).toBe(
+      '<span>active</span>'
+    )
+  })
+
   it('lets a fresh hook done state override the same pane stale working title', () => {
     const worktreeId = 'repo1::/path/wt1'
     const paneKey = makePaneKey('tab-1', LEAF_ID)

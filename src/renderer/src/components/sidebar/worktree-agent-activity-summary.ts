@@ -21,6 +21,7 @@ export type WorktreeAgentActivitySummary = {
   hasLiveDone: boolean
   hasRetainedDone: boolean
   agentStatusPaneIdsByTabId: Record<string, ReadonlySet<string>>
+  restoredAgentStatusPaneIdsByTabId: Record<string, ReadonlySet<string>>
 }
 
 const EMPTY_AGENT_STATUS_PANE_IDS_BY_TAB_ID: Record<string, ReadonlySet<string>> = {}
@@ -32,7 +33,8 @@ const EMPTY_SUMMARY: WorktreeAgentActivitySummary = {
   hasInterrupted: false,
   hasLiveDone: false,
   hasRetainedDone: false,
-  agentStatusPaneIdsByTabId: EMPTY_AGENT_STATUS_PANE_IDS_BY_TAB_ID
+  agentStatusPaneIdsByTabId: EMPTY_AGENT_STATUS_PANE_IDS_BY_TAB_ID,
+  restoredAgentStatusPaneIdsByTabId: EMPTY_AGENT_STATUS_PANE_IDS_BY_TAB_ID
 }
 
 type AgentActivityTabsByWorktree = Record<string, readonly { id: string }[]>
@@ -118,6 +120,7 @@ function getWorktreeAgentActivitySummaries(
     const summary = summaryForWorktree(worktreeId)
     if (entry.restoredUnconfirmed) {
       addAgentStatusPaneId(summary, paneIdentity.tabId, paneIdentity.paneId)
+      addRestoredAgentStatusPaneId(summary, paneIdentity.tabId, paneIdentity.paneId)
       continue
     }
     if (!isExplicitAgentStatusFresh(entry, now, AGENT_STATUS_STALE_AFTER_MS)) {
@@ -189,6 +192,10 @@ function summariesEqual(
     agentStatusPaneIdsByTabIdEqual(
       previous.agentStatusPaneIdsByTabId,
       next.agentStatusPaneIdsByTabId
+    ) &&
+    agentStatusPaneIdsByTabIdEqual(
+      previous.restoredAgentStatusPaneIdsByTabId,
+      next.restoredAgentStatusPaneIdsByTabId
     )
   )
 }
@@ -251,6 +258,22 @@ function addAgentStatusPaneId(
   if (!paneIds) {
     paneIds = new Set<string>()
     summary.agentStatusPaneIdsByTabId[tabId] = paneIds
+  }
+  paneIds.add(paneId)
+}
+
+function addRestoredAgentStatusPaneId(
+  summary: WorktreeAgentActivitySummary,
+  tabId: string,
+  paneId: string
+): void {
+  if (summary.restoredAgentStatusPaneIdsByTabId === EMPTY_AGENT_STATUS_PANE_IDS_BY_TAB_ID) {
+    summary.restoredAgentStatusPaneIdsByTabId = {}
+  }
+  let paneIds = summary.restoredAgentStatusPaneIdsByTabId[tabId] as Set<string> | undefined
+  if (!paneIds) {
+    paneIds = new Set<string>()
+    summary.restoredAgentStatusPaneIdsByTabId[tabId] = paneIds
   }
   paneIds.add(paneId)
 }

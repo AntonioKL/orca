@@ -23,6 +23,7 @@ export type WorktreeStatus =
 type WorktreeStatusHeuristicOptions = {
   liveAgentStatus?: LiveAgentWorktreeStatus
   agentStatusPaneIdsByTabId?: Record<string, ReadonlySet<string>>
+  restoredAgentStatusPaneIdsByTabId?: Record<string, ReadonlySet<string>>
   terminalLayoutsByTabId?: Record<string, TerminalLayoutSnapshot | undefined>
   terminalLayoutRootsByTabId?: Record<string, TerminalPaneLayoutNode | null | undefined>
 }
@@ -91,6 +92,12 @@ function tabHasStatus(
       ) {
         continue
       }
+      // Restored rows are recovery evidence until a live hook confirms them.
+      // Before layout hydration, runtime pane ids cannot identify their stable
+      // leaf, so ignore unresolved titles rather than reviving a stale spinner.
+      if (leafId === null && options.restoredAgentStatusPaneIdsByTabId?.[tab.id]?.size) {
+        continue
+      }
       if (
         classifyTitleActivity(title) === status &&
         titleStatusIsAgentAttributable(title, tab.launchAgent)
@@ -139,6 +146,7 @@ export function resolveWorktreeStatus(args: {
   ptyIdsByTabId: Record<string, string[]>
   runtimePaneTitlesByTabId?: Record<string, Record<number, string>>
   agentStatusPaneIdsByTabId?: Record<string, ReadonlySet<string>>
+  restoredAgentStatusPaneIdsByTabId?: Record<string, ReadonlySet<string>>
   terminalLayoutsByTabId?: Record<string, TerminalLayoutSnapshot | undefined>
   terminalLayoutRootsByTabId?: Record<string, TerminalPaneLayoutNode | null | undefined>
   hasPermission: boolean
@@ -155,6 +163,7 @@ export function resolveWorktreeStatus(args: {
     args.runtimePaneTitlesByTabId ?? {},
     {
       agentStatusPaneIdsByTabId: args.agentStatusPaneIdsByTabId,
+      restoredAgentStatusPaneIdsByTabId: args.restoredAgentStatusPaneIdsByTabId,
       terminalLayoutsByTabId: args.terminalLayoutsByTabId,
       terminalLayoutRootsByTabId: args.terminalLayoutRootsByTabId
     }
