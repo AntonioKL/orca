@@ -1,3 +1,5 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type {
   AgentJournalMessageItem,
@@ -264,6 +266,32 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
       ANTHROPIC_AUTH_TOKEN: 'configured-token',
       ANTHROPIC_BASE_URL: 'https://gateway.example.test',
       CLAUDE_CONFIG_DIR: '/accounts/claude',
+      [CLAUDE_SPAWN_TOKEN_ENV]: 'spawn-9'
+    })
+  })
+
+  it('leaves CLAUDE_CONFIG_DIR unset when the account home is the CLI default', async () => {
+    const claude = fakeClaude()
+    const adapter = adapterFor(claude, { claudeConfigDir: join(homedir(), '.claude'), env: {} })
+
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+
+    // Pinning the CLI's own default suppresses the macOS Keychain and breaks claude.ai login.
+    expect(claude.connections[0].launch.env).toEqual({ [CLAUDE_SPAWN_TOKEN_ENV]: 'spawn-9' })
+  })
+
+  it('re-pins the account home when the launch env would send the child elsewhere', async () => {
+    const claude = fakeClaude()
+    const accountHome = join(homedir(), '.claude')
+    const adapter = adapterFor(claude, {
+      claudeConfigDir: accountHome,
+      env: { CLAUDE_CONFIG_DIR: '/other/account' }
+    })
+
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+
+    expect(claude.connections[0].launch.env).toEqual({
+      CLAUDE_CONFIG_DIR: accountHome,
       [CLAUDE_SPAWN_TOKEN_ENV]: 'spawn-9'
     })
   })

@@ -699,7 +699,7 @@ describe('structured TUI launch tab binding', () => {
     await expect(transport.stopFailedTuiLaunch?.(rebound)).resolves.toBeUndefined()
   })
 
-  it('reveals Claude structured native sessions into the mobile graph', () => {
+  it('reveals Claude structured native sessions into the mobile graph', async () => {
     const runtime = new OrcaRuntimeService()
     const publish = vi.spyOn(runtime, 'publishStructuredAgentSessionTab')
     const focusEditorTab = vi.fn()
@@ -708,7 +708,7 @@ describe('structured TUI launch tab binding', () => {
       createStructuredAgentSessionHandoffTransport(): StructuredAgentSessionHandoffTransport
     }
 
-    internal.createStructuredAgentSessionHandoffTransport().revealNativeSession?.({
+    await internal.createStructuredAgentSessionHandoffTransport().revealNativeSession?.({
       workspaceId: WORKTREE_ID,
       sessionId: 'session-claude',
       agent: 'claude'

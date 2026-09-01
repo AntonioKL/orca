@@ -3,6 +3,7 @@ import type { AgentSessionJournalIdentity } from '../../shared/agent-session-jou
 import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-provider-handle'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
+import { applyClaudeEnvPatch } from '../claude-accounts/environment'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import { getSpawnArgsForWindows } from '../win32-utils'
@@ -100,15 +101,24 @@ export function createClaudeStructuredLaunchResolver(
       ...CLAUDE_STRUCTURED_BASE_ARGS,
       ...providerArgs
     ])
-    const resolvedEnv = await deps.resolveEnv?.()
-    const env = withCliRuntimeOnPath(command, cloneDefinedEnv(resolvedEnv ?? process.env), {
-      platform: process.platform
-    })
+    const overlay = await deps.resolveEnv?.()
+    // Why the overlay merges onto the inherited env rather than replacing it: the child
+    // still needs PATH and the rest of the shell environment, and withCliRuntimeOnPath
+    // derives PATH from what it is handed. Ambient Anthropic auth is stripped from the
+    // inherited half only, so an explicit agentDefaultEnv override still wins.
+    const env = withCliRuntimeOnPath(
+      command,
+      {
+        ...applyClaudeEnvPatch(cloneDefinedEnv(process.env), {}, { stripAuthEnv: true }),
+        ...(overlay ? cloneDefinedEnv(overlay) : {})
+      },
+      { platform: process.platform }
+    )
     return {
       command: spawnCmd,
       args: spawnArgs,
       cwd: await deps.resolveWorkspacePath(record.location.workspaceId),
-      ...(resolvedEnv !== undefined || env !== process.env ? { env } : {}),
+      env,
       claudeConfigDir: record.accountHome.path,
       providerSessionId,
       resumeLeafUuid: head?.handle.provider === 'claude' ? head.handle.leafUuid : null,

@@ -116,11 +116,60 @@ describe('claude structured launch resolution', () => {
       ANTHROPIC_BASE_URL: 'https://gateway.example.test'
     }))
 
-    expect((await resolver({ identity: IDENTITY })).env).toEqual({
+    expect((await resolver({ identity: IDENTITY })).env).toMatchObject({
       ANTHROPIC_AUTH_TOKEN: 'rotated-token',
       ANTHROPIC_BASE_URL: 'https://gateway.example.test'
     })
     expect((await resolver({ identity: IDENTITY })).env?.ANTHROPIC_AUTH_TOKEN).toBe('rotated-token')
+  })
+
+  it('strips ambient Anthropic auth from the inherited env but keeps the rest of it', async () => {
+    const restore = {
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
+      CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+      ORCA_LAUNCH_RESOLUTION_MARKER: process.env.ORCA_LAUNCH_RESOLUTION_MARKER
+    }
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-SHELL-LEAK'
+    process.env.ANTHROPIC_AUTH_TOKEN = 'tok-SHELL-LEAK'
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'oauth-SHELL-LEAK'
+    process.env.ORCA_LAUNCH_RESOLUTION_MARKER = 'inherited'
+    try {
+      const launch = await resolverFor(record())({ identity: IDENTITY })
+
+      expect(launch.env?.ANTHROPIC_API_KEY).toBeUndefined()
+      expect(launch.env?.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
+      expect(launch.env?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+      // The inherited env is still the base — only auth is removed from it.
+      expect(launch.env?.ORCA_LAUNCH_RESOLUTION_MARKER).toBe('inherited')
+      expect(launch.env?.PATH ?? launch.env?.Path).toBeTruthy()
+    } finally {
+      for (const [key, value] of Object.entries(restore)) {
+        if (value === undefined) {
+          delete process.env[key]
+        } else {
+          process.env[key] = value
+        }
+      }
+    }
+  })
+
+  it('lets an explicit Claude env overlay override the stripped ambient auth', async () => {
+    const restore = process.env.ANTHROPIC_API_KEY
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-SHELL-LEAK'
+    try {
+      const launch = await resolverFor(record(), () => ({
+        ANTHROPIC_API_KEY: 'sk-ant-CONFIGURED'
+      }))({ identity: IDENTITY })
+
+      expect(launch.env?.ANTHROPIC_API_KEY).toBe('sk-ant-CONFIGURED')
+    } finally {
+      if (restore === undefined) {
+        delete process.env.ANTHROPIC_API_KEY
+      } else {
+        process.env.ANTHROPIC_API_KEY = restore
+      }
+    }
   })
 
   it('pairs a resolved Claude CLI with its sibling Node runtime', async () => {

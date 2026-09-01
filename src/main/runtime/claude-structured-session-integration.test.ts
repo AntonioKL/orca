@@ -365,6 +365,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.unstubAllEnvs()
   await stopStructuredAgentSessionRuntime()
   await rm(root, { recursive: true, force: true })
 })
@@ -392,15 +393,19 @@ describe('a structured Claude session over agentSession.*', () => {
   })
 
   it('creates, sends, streams, approves, interrupts, and resumes from the chain head', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-SHELL-LEAK')
     const created = await ok<{ fence: number }>('agentSession.create', createIntentParams())
     expect(claude.live().launch.args).toContain('--session-id')
     expect(claude.live().launch.args).toContain(PROVIDER_SESSION)
-    expect(claude.live().launch.env).toEqual({
+    expect(claude.live().launch.env).toMatchObject({
       ANTHROPIC_AUTH_TOKEN: 'configured-token',
       ANTHROPIC_BASE_URL: 'https://gateway.example.test',
       CLAUDE_CONFIG_DIR: join(root, 'claude-home'),
       [CLAUDE_SPAWN_TOKEN_ENV]: expect.any(String)
     })
+    // The child inherits the shell env for PATH, but never the ambient Anthropic auth.
+    expect(claude.live().launch.env).not.toHaveProperty('ANTHROPIC_API_KEY')
+    expect(claude.live().launch.env?.PATH ?? claude.live().launch.env?.Path).toBeTruthy()
     const history = await call('agentSession.history', {
       sessionId: SESSION,
       direction: 'tail',
