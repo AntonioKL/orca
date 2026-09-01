@@ -52,6 +52,7 @@ import {
 import { wslAwareSpawn } from '../git/runner'
 import { parseWslPath, toWindowsWslPath } from '../wsl'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
+import { resolveAuthorizedMutablePath } from './repository-admin-path-authorization'
 import { isENOENT } from '../ipc/filesystem-path-containment'
 import { listQuickOpenFiles } from '../ipc/filesystem-list-files'
 import { searchQuickOpenFilePaths as searchHostQuickOpenFilePaths } from '../ipc/filesystem-search-file-paths'
@@ -1804,7 +1805,7 @@ export class RuntimeFileCommands {
       return { ok: true }
     }
 
-    const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
+    const filePath = await resolveAuthorizedMutablePath(target.path, this.host.requireStore())
     try {
       const fileStats = await lstat(filePath)
       if (fileStats.isDirectory()) {
@@ -1844,7 +1845,7 @@ export class RuntimeFileCommands {
       return { ok: true }
     }
 
-    const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
+    const filePath = await resolveAuthorizedMutablePath(target.path, this.host.requireStore())
     await mkdir(dirname(filePath), { recursive: true })
     await writeFile(filePath, content, { flag: 'wx' })
     return { ok: true }
@@ -1876,7 +1877,7 @@ export class RuntimeFileCommands {
       return { ok: true }
     }
 
-    const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
+    const filePath = await resolveAuthorizedMutablePath(target.path, this.host.requireStore())
     await mkdir(dirname(filePath), { recursive: true })
     await writeFile(filePath, content, { flag: append ? 'a' : 'wx' })
     return { ok: true }
@@ -1905,7 +1906,7 @@ export class RuntimeFileCommands {
       return { ok: true }
     }
 
-    const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
+    const filePath = await resolveAuthorizedMutablePath(target.path, this.host.requireStore())
     await mkdir(dirname(filePath), { recursive: true })
     try {
       await writeFile(filePath, '', { encoding: 'utf-8', flag: 'wx' })
@@ -1938,7 +1939,7 @@ export class RuntimeFileCommands {
       return { ok: true }
     }
 
-    const dirPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
+    const dirPath = await resolveAuthorizedMutablePath(target.path, this.host.requireStore())
     await assertRuntimePathDoesNotExist(dirPath)
     await mkdir(dirPath, { recursive: false })
     return { ok: true }
@@ -1967,7 +1968,7 @@ export class RuntimeFileCommands {
       return { ok: true }
     }
 
-    const dirPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
+    const dirPath = await resolveAuthorizedMutablePath(target.path, this.host.requireStore())
     await mkdir(dirPath, { recursive: false })
     return { ok: true }
   }
@@ -2003,8 +2004,8 @@ export class RuntimeFileCommands {
     }
 
     const store = this.host.requireStore()
-    const tempPath = await resolveAuthorizedPath(tempTarget.path, store)
-    const finalPath = await resolveAuthorizedPath(finalTarget.path, store)
+    const tempPath = await resolveAuthorizedMutablePath(tempTarget.path, store)
+    const finalPath = await resolveAuthorizedMutablePath(finalTarget.path, store)
     await mkdir(dirname(finalPath), { recursive: true })
     await copyFile(tempPath, finalPath, constants.COPYFILE_EXCL)
     await rm(tempPath, { force: true })
@@ -2041,8 +2042,12 @@ export class RuntimeFileCommands {
     }
 
     const store = this.host.requireStore()
-    const oldPath = await resolveAuthorizedPath(oldTarget.path, store, { preserveSymlink: true })
-    const newPath = await resolveAuthorizedPath(newTarget.path, store, { preserveSymlink: true })
+    const oldPath = await resolveAuthorizedMutablePath(oldTarget.path, store, {
+      preserveSymlink: true
+    })
+    const newPath = await resolveAuthorizedMutablePath(newTarget.path, store, {
+      preserveSymlink: true
+    })
     await renameLocalPathSerializedByDestination(oldPath, newPath)
     return { ok: true }
   }
@@ -2077,10 +2082,10 @@ export class RuntimeFileCommands {
     }
 
     const store = this.host.requireStore()
-    const sourcePath = await resolveAuthorizedPath(sourceTarget.path, store, {
+    const sourcePath = await resolveAuthorizedMutablePath(sourceTarget.path, store, {
       preserveSymlink: true
     })
-    const destinationPath = await resolveAuthorizedPath(destinationTarget.path, store, {
+    const destinationPath = await resolveAuthorizedMutablePath(destinationTarget.path, store, {
       preserveSymlink: true
     })
     await mkdir(dirname(destinationPath), { recursive: true })
@@ -2113,7 +2118,7 @@ export class RuntimeFileCommands {
       return { ok: true }
     }
 
-    const targetPath = await resolveAuthorizedPath(target.path, this.host.requireStore(), {
+    const targetPath = await resolveAuthorizedMutablePath(target.path, this.host.requireStore(), {
       preserveSymlink: true
     })
     // Why: a non-local runtime has no client Trash; this delete is permanent, so the renderer confirms before calling.

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -31,13 +31,16 @@ vi.mock('../git/worktree', () => {
 
 let repoPath = ''
 
+let repoConnectionId: string | undefined
+
 function makeStore() {
   const repo = {
     id: 'repo-1',
     path: repoPath,
     displayName: 'repo',
     badgeColor: 'blue',
-    addedAt: 1
+    addedAt: 1,
+    ...(repoConnectionId ? { connectionId: repoConnectionId } : {})
   }
   return {
     getRepo: (id: string) => (id === 'repo-1' ? repo : undefined),
@@ -95,7 +98,11 @@ function dispatchFileMethod(method: string, params: Record<string, unknown>): Pr
     id: 'req-1',
     authToken: 'tok',
     method,
-    params: { worktree: `path:${repoPath}`, expectedExecutionHostId: 'local', ...params }
+    params: {
+      worktree: `path:${repoPath}`,
+      expectedExecutionHostId: repoConnectionId ? `ssh:${repoConnectionId}` : 'local',
+      ...params
+    }
   })
 }
 
@@ -414,5 +421,220 @@ describe('files.* RPCs refuse a linked worktree .git pointer file', () => {
     expect(await readFile(join(repoPath, '.git'), 'utf-8')).toBe(
       'gitdir: /elsewhere/.git/worktrees/feature\n'
     )
+  })
+})
+
+// Why: the relative spelling is not what the filesystem touches. A symlinked ancestor makes a path
+// with no `.git` segment resolve straight into `.git`, so segment matching alone is not a guard.
+describe.skipIf(process.platform === 'win32')(
+  'files.* RPCs refuse a .git aliased through a symlinked ancestor',
+  () => {
+    beforeEach(async () => {
+      await buildRepo()
+      await symlink(join(repoPath, '.git'), join(repoPath, 'foo'), 'dir')
+    })
+
+    afterEach(async () => {
+      await rm(repoPath, { recursive: true, force: true })
+    })
+
+    it('files.write refuses foo/config when foo is a symlink to .git', async () => {
+      const response = await dispatchFileMethod('files.write', {
+        relativePath: 'foo/config',
+        content: '[core]\n\thooksPath = /tmp/evil\n'
+      })
+
+      expectRefused(response)
+      expect(await readFile(join(repoPath, '.git', 'config'), 'utf-8')).toBe('[core]\n')
+    })
+
+    it('files.delete refuses foo/config when foo is a symlink to .git', async () => {
+      const response = await dispatchFileMethod('files.delete', {
+        relativePath: 'foo/config',
+        recursive: false
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, '.git', 'config'))).toBe(true)
+    })
+
+    it('files.rename refuses foo/config as the source', async () => {
+      const response = await dispatchFileMethod('files.rename', {
+        oldRelativePath: 'foo/config',
+        newRelativePath: 'stolen-config'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, '.git', 'config'))).toBe(true)
+      expect(existsSync(join(repoPath, 'stolen-config'))).toBe(false)
+    })
+
+    it('files.rename refuses foo/hooks/pre-commit as the destination', async () => {
+      const response = await dispatchFileMethod('files.rename', {
+        oldRelativePath: 'tracked.txt',
+        newRelativePath: 'foo/hooks/pre-commit'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, '.git', 'hooks'))).toBe(false)
+    })
+
+    it('files.copy refuses foo/hooks/pre-commit as the destination', async () => {
+      const response = await dispatchFileMethod('files.copy', {
+        sourceRelativePath: 'tracked.txt',
+        destinationRelativePath: 'foo/hooks/pre-commit'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, '.git', 'hooks'))).toBe(false)
+    })
+
+    it('files.createDir refuses foo/hooks', async () => {
+      const response = await dispatchFileMethod('files.createDir', {
+        relativePath: 'foo/hooks'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, '.git', 'hooks'))).toBe(false)
+    })
+
+    it.each([
+      ['files.writeBase64', { relativePath: 'foo/config', contentBase64: 'ZXZpbA==' }],
+      [
+        'files.writeBase64Chunk',
+        { relativePath: 'foo/config', contentBase64: 'ZXZpbA==', append: true }
+      ]
+    ])('%s refuses a symlinked .git target', async (method, params) => {
+      const response = await dispatchFileMethod(method, params)
+
+      expectRefused(response)
+      expect(await readFile(join(repoPath, '.git', 'config'), 'utf-8')).toBe('[core]\n')
+    })
+
+    it('files.createFile refuses foo/hooks/pre-commit', async () => {
+      const response = await dispatchFileMethod('files.createFile', {
+        relativePath: 'foo/hooks/pre-commit'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, '.git', 'hooks'))).toBe(false)
+    })
+
+    it('files.createDirNoClobber refuses foo/hooks', async () => {
+      const response = await dispatchFileMethod('files.createDirNoClobber', {
+        relativePath: 'foo/hooks'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, '.git', 'hooks'))).toBe(false)
+    })
+
+    it('files.copy refuses foo/config as the source', async () => {
+      const response = await dispatchFileMethod('files.copy', {
+        sourceRelativePath: 'foo/config',
+        destinationRelativePath: 'stolen-config'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, 'stolen-config'))).toBe(false)
+    })
+
+    it('files.commitUpload refuses foo/config as the temp path', async () => {
+      const response = await dispatchFileMethod('files.commitUpload', {
+        tempRelativePath: 'foo/config',
+        finalRelativePath: 'stolen-config'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, '.git', 'config'))).toBe(true)
+      expect(existsSync(join(repoPath, 'stolen-config'))).toBe(false)
+    })
+
+    it('files.commitUpload refuses foo/hooks/pre-commit as the final path', async () => {
+      const response = await dispatchFileMethod('files.commitUpload', {
+        tempRelativePath: 'tracked.txt',
+        finalRelativePath: 'foo/hooks/pre-commit'
+      })
+
+      expectRefused(response)
+      expect(existsSync(join(repoPath, '.git', 'hooks'))).toBe(false)
+    })
+
+    // Why: deleting the link itself is legitimate and must keep working — only following it in is not.
+    it('files.delete still removes the symlink itself, leaving .git intact', async () => {
+      const response = await dispatchFileMethod('files.delete', {
+        relativePath: 'foo',
+        recursive: false
+      })
+
+      expect(response.ok).toBe(true)
+      expect(existsSync(join(repoPath, 'foo'))).toBe(false)
+      expect(existsSync(join(repoPath, '.git', 'HEAD'))).toBe(true)
+    })
+  }
+)
+
+describe('resolved-path classification', () => {
+  afterEach(async () => {
+    await rm(repoPath, { recursive: true, force: true })
+  })
+
+  // Known limitation, documented deliberately: classification runs on the whole resolved path, so a
+  // workspace that itself lives under a directory named `.git` is refused. It fails safe, and no
+  // real workspace layout puts a checkout inside a `.git` directory.
+  it('refuses a workspace that itself lives under a .git segment', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'orca-admin-path-base-'))
+    const workspacePath = join(base, '.git', 'workspace')
+    await mkdir(workspacePath, { recursive: true })
+    await writeFile(join(workspacePath, 'tracked.txt'), 'working tree content\n', 'utf-8')
+    repoPath = workspacePath
+    listedWorktrees.splice(0, listedWorktrees.length, { path: workspacePath })
+
+    const response = await dispatchFileMethod('files.delete', {
+      relativePath: 'tracked.txt',
+      recursive: false
+    })
+
+    expectRefused(response)
+    expect(existsSync(join(workspacePath, 'tracked.txt'))).toBe(true)
+    repoPath = base
+  })
+})
+
+// Why: the SSH branch returns before the local gate, so the canonical-path check never runs there.
+// The relative-path guard at the RPC boundary is the only thing covering it.
+describe('files.* RPCs refuse repository admin paths on the SSH branch', () => {
+  beforeEach(async () => {
+    await buildRepo()
+    repoConnectionId = 'conn-1'
+  })
+
+  afterEach(async () => {
+    repoConnectionId = undefined
+    await rm(repoPath, { recursive: true, force: true })
+  })
+
+  it.each(['files.delete', 'files.write', 'files.createDir'])(
+    '%s refuses .git before reaching the SSH provider',
+    async (method) => {
+      const response = await dispatchFileMethod(
+        method,
+        method === 'files.write'
+          ? { relativePath: '.git/config', content: 'evil' }
+          : { relativePath: '.git/config', recursive: false }
+      )
+
+      // Without the guard this reaches getSshFilesystemProvider and reports a dropped connection.
+      expectRefused(response)
+    }
+  )
+
+  it('files.rename refuses a .git destination before reaching the SSH provider', async () => {
+    const response = await dispatchFileMethod('files.rename', {
+      oldRelativePath: 'tracked.txt',
+      newRelativePath: '.git/hooks/pre-commit'
+    })
+
+    expectRefused(response)
   })
 })
