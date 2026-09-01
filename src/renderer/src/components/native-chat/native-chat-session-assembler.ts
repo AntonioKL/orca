@@ -7,7 +7,11 @@ import {
   type NativeChatSessionStatus
 } from '../../../../shared/native-chat-types'
 import { NATIVE_CHAT_STREAMING_ID } from '../../../../shared/native-chat-streaming'
-import { normalizeImageTranscriptMessages } from '../../../../shared/native-chat-image-transcript-markers'
+import {
+  hasImagePromptMarker,
+  imageSourcePathFromText,
+  normalizeImageTranscriptMessages
+} from '../../../../shared/native-chat-image-transcript-markers'
 import { isLaunchPromptMessageId, isPendingMessageId } from './native-chat-pending'
 
 /** Messages grouped by source. Higher-priority sources (transcript > hook >
@@ -114,6 +118,13 @@ export function compareMessages(a: NativeChatMessage, b: NativeChatMessage): num
   if (at !== bt) {
     return at - bt
   }
+  // Claude emits an image-source companion and its prompt at the same instant.
+  // Keep the companion adjacent and first so the normalization pass can fold it
+  // into the prompt, regardless of opaque UUID ordering.
+  const imageOrder = imageTranscriptOrder(a, b)
+  if (imageOrder !== 0) {
+    return imageOrder
+  }
   if (a.id < b.id) {
     return -1
   }
@@ -121,6 +132,30 @@ export function compareMessages(a: NativeChatMessage, b: NativeChatMessage): num
     return 1
   }
   return 0
+}
+
+function imageTranscriptOrder(a: NativeChatMessage, b: NativeChatMessage): number {
+  return imageTranscriptRank(a) - imageTranscriptRank(b)
+}
+
+function imageTranscriptRank(message: NativeChatMessage): number {
+  if (isImageSourceCompanion(message)) {
+    return 0
+  }
+  if (message.role === 'user' && hasImagePromptMarker(message)) {
+    return 2
+  }
+  return 1
+}
+
+function isImageSourceCompanion(message: NativeChatMessage): boolean {
+  return (
+    message.role === 'user' &&
+    message.blocks.length > 0 &&
+    message.blocks.every(
+      (block) => isTextBlock(block) && imageSourcePathFromText(block.text) !== null
+    )
+  )
 }
 
 /**
@@ -135,13 +170,14 @@ export function assembleNativeChatSession(
   const { sources, sessionId, agent, status, error } = input
 
   // Process highest priority first so a later, lower-priority duplicate is
-  // dropped rather than overwriting. Within a source, order is preserved.
+  // dropped rather than overwriting. Sort each source before image folding so
+  // equal-timestamp companion/prompt rows retain semantic order.
   const ordered: NativeChatMessage[] = [
-    ...normalizeImageTranscriptMessages(sources.transcript ?? []),
+    ...normalizeImageTranscriptMessages(sortForImageNormalization(sources.transcript ?? [])),
     ...(sources.hook ?? []),
     // Scrape segments carry the same raw `[Image: source: …]` markers (e.g. from
     // scrollback before the transcript loads), so normalize them too.
-    ...normalizeImageTranscriptMessages(sources.scrape ?? [])
+    ...normalizeImageTranscriptMessages(sortForImageNormalization(sources.scrape ?? []))
   ]
 
   const byId = new Map<string, NativeChatMessage>()
@@ -162,6 +198,17 @@ export function assembleNativeChatSession(
     agent,
     ...(error ? { error } : {})
   }
+}
+
+function sortForImageNormalization(
+  messages: readonly NativeChatMessage[]
+): readonly NativeChatMessage[] {
+  for (let index = 1; index < messages.length; index += 1) {
+    if (compareMessages(messages[index - 1]!, messages[index]!) > 0) {
+      return [...messages].sort(compareMessages)
+    }
+  }
+  return messages
 }
 
 /**

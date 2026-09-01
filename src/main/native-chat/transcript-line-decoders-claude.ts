@@ -56,11 +56,9 @@ export function decodeClaudeTranscriptLine(
   // base64 blocks on the prompt itself carry no url/path and are dropped too — so a
   // turn with images rendered with no images at all.
   const blocks = isInjectedUserTurn
-    ? decodedBlocks.filter(
-        (block) =>
-          block.type === 'tool-result' ||
-          (block.type === 'text' && imageSourcePathFromText(block.text) !== null)
-      )
+    ? isImageSourceRecord(decodedBlocks)
+      ? decodedBlocks
+      : decodedBlocks.filter((block) => block.type === 'tool-result')
     : decodedBlocks
   if (blocks.length === 0) {
     return null
@@ -73,6 +71,15 @@ export function decodeClaudeTranscriptLine(
     timestamp,
     source: 'transcript'
   }
+}
+
+// Keep only genuine image companion records; a marker mixed with prose must
+// remain an injected turn (or be dropped), never become an image-source turn.
+function isImageSourceRecord(blocks: NativeChatBlock[]): boolean {
+  return (
+    blocks.length > 0 &&
+    blocks.every((block) => block.type === 'text' && imageSourcePathFromText(block.text) !== null)
+  )
 }
 
 // Claude marks reasoning via `thinking` content blocks; when a message is made

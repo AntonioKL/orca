@@ -112,6 +112,35 @@ describe('assembleNativeChatSession', () => {
     ])
   })
 
+  it('folds equal-timestamp image companions before UUID ordering can split them', () => {
+    const prompt = msg({
+      id: 'a-prompt',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image #1] what do you see' }]
+    })
+    const companion = msg({
+      id: 'z-companion',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image: source: /tmp/3d.png]' }]
+    })
+
+    const session = assembleNativeChatSession({
+      // Arrival order is intentionally reversed; UUID order would be wrong too.
+      sources: { transcript: [prompt, companion] },
+      sessionId: 's1',
+      agent: 'claude'
+    })
+
+    expect(session.messages).toHaveLength(1)
+    expect(session.messages[0]).toMatchObject({ id: 'a-prompt', role: 'user' })
+    expect(session.messages[0]?.blocks).toEqual([
+      { type: 'image-ref', path: '/tmp/3d.png' },
+      { type: 'text', text: 'what do you see' }
+    ])
+  })
+
   it('merges Claude image source markers into a trailing-marker prompt', () => {
     const imageSource = msg({
       id: 'u-image-source',

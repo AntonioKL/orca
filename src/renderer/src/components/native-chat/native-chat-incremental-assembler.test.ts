@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NativeChatMessage } from '../../../../shared/native-chat-types'
+import { normalizeImageTranscriptMessages } from '../../../../shared/native-chat-image-transcript-markers'
 import { assembleNativeChatSession } from './native-chat-session-assembler'
 import {
   applyAppends,
@@ -120,5 +121,33 @@ describe('incremental assembler — oracle differential', () => {
     reset(assembler, base)
     const out = assembler.messages
     expect(applyAppends(assembler, [])).toBe(out)
+  })
+
+  it('keeps equal-timestamp image companions ahead of prompts for normalization', () => {
+    const assembler = createIncrementalAssembler()
+    const prompt = msg({
+      id: 'a-prompt',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image #1] inspect this' }]
+    })
+    const companion = msg({
+      id: 'z-companion',
+      role: 'user',
+      timestamp: 100,
+      blocks: [{ type: 'text', text: '[Image: source: /tmp/image.png]' }]
+    })
+
+    const assembled = reset(assembler, [prompt, companion])
+    expect(assembled.map((message) => message.id)).toEqual(['z-companion', 'a-prompt'])
+    expect(normalizeImageTranscriptMessages(assembled)).toEqual([
+      {
+        ...prompt,
+        blocks: [
+          { type: 'image-ref', path: '/tmp/image.png' },
+          { type: 'text', text: 'inspect this' }
+        ]
+      }
+    ])
   })
 })
