@@ -1,8 +1,9 @@
-import { Keyboard, Pressable, StyleSheet } from 'react-native'
+import { Keyboard, Platform, Pressable, StyleSheet } from 'react-native'
 import { useEffect, useState } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Search, X } from 'lucide-react-native'
 import { colors, spacing } from '../theme/mobile-theme'
+import { resolveBottomDrawerKeyboardInset } from './bottom-drawer-keyboard-inset'
 import { FAB_SIZE } from './NewWorkspaceFab'
 
 type SearchWorkspacesFabProps = {
@@ -19,21 +20,32 @@ export function SearchWorkspacesFab({
   const [keyboardHeight, setKeyboardHeight] = useState(0)
 
   useEffect(() => {
-    const showSubscription = Keyboard.addListener('keyboardDidShow', ({ endCoordinates }) => {
+    // Why: iOS fires willShow before the animation, so the FAB rides the keyboard up instead of popping in late.
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
+    const showSubscription = Keyboard.addListener(showEvent, ({ endCoordinates }) => {
       setKeyboardHeight(endCoordinates.height)
     })
-    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => setKeyboardHeight(0))
+    const hideSubscription = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0))
     return () => {
       showSubscription.remove()
       hideSubscription.remove()
     }
   }, [])
 
+  // Why: the FAB already offsets by insets.bottom, which the iOS keyboard frame also covers.
+  const keyboardLift = resolveBottomDrawerKeyboardInset({
+    keyboardHeight,
+    bottomInset: insets.bottom,
+    fillAvailable: false,
+    platform: Platform.OS
+  })
+
   return (
     <Pressable
       style={({ pressed }) => [
         styles.fab,
-        { bottom: spacing.xl + insets.bottom + keyboardHeight },
+        { bottom: spacing.xl + insets.bottom + keyboardLift },
         pressed && styles.fabPressed
       ]}
       onPress={onPress}
