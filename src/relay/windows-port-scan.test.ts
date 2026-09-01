@@ -224,6 +224,92 @@ describe('scanWindowsListeningPorts', () => {
     expect(runProcessMock).toHaveBeenCalledTimes(1)
   })
 
+  // `LISTENING` ships in netstat.exe.mui, picked by UI language, so no env can
+  // pin it. Without the shape-based re-read a German host parses zero rows,
+  // reads that as a blocked reader, and runs the flagged payload every 12-30s.
+  it('reads a localized host by socket shape rather than the state word', async () => {
+    runProcessMock.mockResolvedValueOnce(
+      ok(
+        [
+          'Aktive Verbindungen',
+          '',
+          '  Proto  Lokale Adresse         Remoteadresse          Status           PID',
+          '  TCP    0.0.0.0:135            0.0.0.0:0              ABHÖREN          1116',
+          `  TCP    0.0.0.0:3000           0.0.0.0:0              ABHÖREN          ${NETSTAT_PID}`,
+          `  TCP    [::]:3000              [::]:0                 ABHÖREN          ${NETSTAT_PID}`,
+          `  TCP    192.168.0.5:52000      93.184.216.34:443      HERGESTELLT      ${NETSTAT_PID}`
+        ].join('\r\n')
+      )
+    )
+
+    await expect(scanWindowsListeningPorts()).resolves.toEqual([
+      { host: '0.0.0.0', port: 135, pid: 1116 },
+      { host: '::', port: 3000, pid: NETSTAT_PID, processName: 'node' },
+      { host: '0.0.0.0', port: 3000, pid: NETSTAT_PID, processName: 'node' }
+    ])
+    expect(specs()).toHaveLength(1)
+  })
+
+  // Windows prints BOUND with a zero peer too, so the shape test must stay the
+  // fallback: an English host is read by its word and never sees a bound socket.
+  it('does not promote a BOUND socket on a host whose state word parsed', async () => {
+    runProcessMock.mockResolvedValueOnce(
+      ok(
+        [
+          `  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       ${NETSTAT_PID}`,
+          `  TCP    0.0.0.0:8080           0.0.0.0:0              BOUND           ${NETSTAT_PID}`
+        ].join('\r\n')
+      )
+    )
+
+    await expect(scanWindowsListeningPorts()).resolves.toEqual([
+      { host: '0.0.0.0', port: 3000, pid: NETSTAT_PID, processName: 'node' }
+    ])
+  })
+
+  // A capped read exits 0 and its head parses, and netstat orders IPv4 TCP
+  // before IPv6 TCP, so publishing the head would drop every `[::]` listener.
+  it('refuses a netstat table that hit the capture cap', async () => {
+    const filler = Array.from(
+      { length: 60_000 },
+      (_, index) =>
+        `  TCP    10.0.0.1:${1000 + (index % 5000)}      10.0.0.2:443           TIME_WAIT       4`
+    ).join('\r\n')
+    runProcessMock
+      .mockResolvedValueOnce(ok(`${NETSTAT_STDOUT}\r\n${filler}`.slice(0, 4 * 1024 * 1024)))
+      .mockResolvedValueOnce(ok('[]'))
+
+    await expect(scanWindowsListeningPorts()).resolves.toEqual([])
+
+    // Fell through instead of publishing the IPv4 head it could still parse.
+    expect(specs()).toHaveLength(2)
+    expect(specs()[1].args).toContain('-Command')
+  })
+
+  it('does not wait on the shared process table once the scan is cancelled', async () => {
+    const controller = new AbortController()
+    const getAllProcesses = vi.fn()
+    __setWindowsProcessTreeLoaderForTests(() => ({
+      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      getAllProcesses
+    }))
+    resetWindowsProcessTableForTests()
+    // netstat answered, then the request was abandoned before names were needed.
+    runProcessMock.mockImplementationOnce(() => {
+      controller.abort()
+      return Promise.resolve(ok(NETSTAT_STDOUT))
+    })
+
+    await expect(scanWindowsListeningPorts(controller.signal)).resolves.toEqual([
+      // Unnamed, so the sshd row survives its own filter — the cost of not
+      // waiting, and strictly better than blocking an abandoned request.
+      { host: '0.0.0.0', port: 2222, pid: SSHD_PID },
+      { host: '::', port: 3000, pid: NETSTAT_PID },
+      { host: '0.0.0.0', port: 3000, pid: NETSTAT_PID }
+    ])
+    expect(getAllProcesses).not.toHaveBeenCalled()
+  })
+
   it('treats a netstat timeout as unanswered and falls through', async () => {
     runProcessMock
       .mockResolvedValueOnce({

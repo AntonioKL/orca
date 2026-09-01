@@ -30,7 +30,7 @@ const WINDOWS_PORT_SCAN_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 export async function scanWindowsListeningPorts(signal?: AbortSignal): Promise<DetectedPort[]> {
   const netstatPorts = await readWindowsNetstatPorts(signal)
   if (netstatPorts) {
-    return normalizeWindowsDetectedPorts(await attachWindowsProcessNames(netstatPorts))
+    return normalizeWindowsDetectedPorts(await attachWindowsProcessNames(netstatPorts, signal))
   }
   if (signal?.aborted) {
     return []
@@ -60,6 +60,15 @@ async function readWindowsNetstatPorts(signal?: AbortSignal): Promise<DetectedPo
     if (result.timedOut || result.code !== 0) {
       return null
     }
+    // A capped read still exits 0 and its head still parses, so nothing
+    // downstream can tell a partial table from a whole one. netstat prints IPv4
+    // TCP, then IPv6 TCP, then UDP, so the rows lost first are exactly the
+    // `[::]` listeners that dropping `-p tcp` above exists to keep. Refuse the
+    // whole read rather than publish its head.
+    if (Buffer.byteLength(result.stdout) >= WINDOWS_PORT_SCAN_MAX_OUTPUT_BYTES) {
+      reportWindowsNetstatUnusable('output hit the capture cap and was truncated')
+      return null
+    }
     stdout = result.stdout
   } catch {
     return null
@@ -67,7 +76,28 @@ async function readWindowsNetstatPorts(signal?: AbortSignal): Promise<DetectedPo
   const ports = parseWindowsNetstatOutput(stdout)
   // Windows always has a listener (RPC endpoint mapper, SMB), so an exit-0 scan
   // that parses to nothing is a reader that was blocked, not an idle host.
-  return ports.length > 0 ? ports : null
+  if (ports.length === 0) {
+    reportWindowsNetstatUnusable('exited 0 but no listening row parsed')
+    return null
+  }
+  return ports
+}
+
+let reportedNetstatUnusable = false
+
+/**
+ * Say once why the scan left the native path.
+ *
+ * Both fall-throughs are permanent when they are wrong — the host stays on the
+ * PowerShell payload, or on nothing, for the life of the relay — and the scan
+ * repeats every 12-30s, so this logs one line rather than a stream.
+ */
+function reportWindowsNetstatUnusable(reason: string): void {
+  if (reportedNetstatUnusable) {
+    return
+  }
+  reportedNetstatUnusable = true
+  console.warn(`[ports] netstat unusable on this host (${reason}); falling back to PowerShell`)
 }
 
 /**
@@ -76,10 +106,19 @@ async function readWindowsNetstatPorts(signal?: AbortSignal): Promise<DetectedPo
  * Names are optional data — the panel renders host/port/pid without them — so a
  * host that cannot read the table keeps its rows rather than forking a shell of
  * its own. See docs/reference/windows-process-enumeration.md.
+ *
+ * Best-effort by design: the snapshot is shared and TTL-cached, so it can
+ * predate netstat and hand a recycled PID its previous owner's name. Only
+ * labels read this field, and a fresh read would cost every caller a scan.
  */
-async function attachWindowsProcessNames(ports: DetectedPort[]): Promise<DetectedPort[]> {
+async function attachWindowsProcessNames(
+  ports: DetectedPort[],
+  signal?: AbortSignal
+): Promise<DetectedPort[]> {
   const pids = new Set(ports.flatMap((port) => (port.pid == null ? [] : [port.pid])))
-  if (pids.size === 0) {
+  // The shared snapshot takes no signal and must not be cancelled on one
+  // caller's behalf, so an abandoned scan declines to wait for it instead.
+  if (pids.size === 0 || signal?.aborted) {
     return ports
   }
   let names: Map<number, string>
@@ -176,15 +215,47 @@ export function parseWindowsPowerShellPortRows(json: string): DetectedPort[] {
   return rows.flatMap((row) => parseWindowsPortRow(row))
 }
 
+/**
+ * Listening rows, on a host in any UI language.
+ *
+ * `LISTENING` is not in `netstat.exe` — it lives in
+ * `System32\<locale>\netstat.exe.mui` beside `ESTABLISHED` and `Proto`, and MUI
+ * selection follows the UI language, so the pinned-locale env in
+ * relay-command-env.ts cannot reach it. A German host prints `ABHÖREN` and the
+ * word test finds nothing at all.
+ *
+ * The shape is language-independent: a listening socket has no peer, so its
+ * foreign address is `0.0.0.0:0` / `[::]:0`, and on every state Windows prints
+ * with a real peer that port is non-zero. It is the fallback rather than the
+ * primary test only because `BOUND` also prints a zero peer, and reading a
+ * bound socket as a listener is worse than reading an English host by its word.
+ */
 export function parseWindowsNetstatOutput(output: string): DetectedPort[] {
-  const rows: DetectedPort[] = []
+  const byStateWord = scanWindowsNetstatRows(
+    output,
+    (fields) => fields[3].toUpperCase() === 'LISTENING'
+  )
+  if (byStateWord.ports.length > 0 || byStateWord.tcpRows === 0) {
+    return byStateWord.ports
+  }
+  return scanWindowsNetstatRows(output, (fields) => readWindowsNetstatPort(fields[2]) === 0).ports
+}
+
+/** `tcpRows` separates a localized host from one with genuinely no TCP output. */
+function scanWindowsNetstatRows(
+  output: string,
+  isListening: (fields: string[]) => boolean
+): { ports: DetectedPort[]; tcpRows: number } {
+  const ports: DetectedPort[] = []
+  let tcpRows = 0
 
   for (const line of output.split(/\r?\n/)) {
     const fields = getProcessOutputFields(line, 5)
     if (fields.length < 5 || fields[0].toUpperCase() !== 'TCP') {
       continue
     }
-    if (fields[3].toUpperCase() !== 'LISTENING') {
+    tcpRows += 1
+    if (!isListening(fields)) {
       continue
     }
     const hostPort = parseWindowsNetstatAddress(fields[1])
@@ -192,10 +263,10 @@ export function parseWindowsNetstatOutput(output: string): DetectedPort[] {
     if (!hostPort || !Number.isSafeInteger(pid) || pid <= 0) {
       continue
     }
-    rows.push({ ...hostPort, pid })
+    ports.push({ ...hostPort, pid })
   }
 
-  return rows
+  return { ports, tcpRows }
 }
 
 function parseWindowsPortRow(row: unknown): DetectedPort[] {
@@ -243,13 +314,20 @@ function readInteger(value: unknown): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined
 }
 
-function parseWindowsNetstatAddress(value: string): { host: string; port: number } | null {
-  const ipv6Match = /^\[(.*)\]:(\d+)$/.exec(value)
-  const portText = ipv6Match?.[2] ?? value.slice(value.lastIndexOf(':') + 1)
+/** Port alone, keeping 0 — the foreign-address test above turns on that value. */
+function readWindowsNetstatPort(value: string): number | null {
+  const ipv6Match = /^\[.*\]:(\d+)$/.exec(value)
+  const portText = ipv6Match?.[1] ?? value.slice(value.lastIndexOf(':') + 1)
   const port = Number.parseInt(portText, 10)
-  if (!Number.isSafeInteger(port) || port <= 0) {
+  return Number.isSafeInteger(port) ? port : null
+}
+
+function parseWindowsNetstatAddress(value: string): { host: string; port: number } | null {
+  const port = readWindowsNetstatPort(value)
+  if (port == null || port <= 0) {
     return null
   }
+  const ipv6Match = /^\[(.*)\]:\d+$/.exec(value)
   if (ipv6Match) {
     return { host: ipv6Match[1], port }
   }

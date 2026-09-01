@@ -44,7 +44,8 @@ describeOnWindows('windows port scan against the real host', () => {
       timeoutMs: 20_000
     })
 
-    expect(result.stderr).toBe('')
+    // No stderr assertion: an autoload or first-run banner writes there without
+    // the scan having failed.
     expect(result.code).toBe(0)
     expect(parseWindowsPowerShellPortRows(result.stdout).length).toBeGreaterThan(0)
   }, 30_000)
