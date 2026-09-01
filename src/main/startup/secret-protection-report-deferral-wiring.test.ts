@@ -52,6 +52,7 @@ describe('secret protection report deferral wiring', () => {
     expect(source).toContain(`\n  ${SCHEDULE}`)
 
     expect(call).toContain('deferUntilFirstWindow: !isServeMode')
+    expect(call).toContain('skipInDevelopment: is.dev')
     // Why assert the constants are absent too: `!isServeMode` being present does not stop a
     // later property in the same literal from overriding it.
     expect(call).not.toContain('deferUntilFirstWindow: true')

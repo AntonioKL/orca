@@ -2504,7 +2504,10 @@ void app.whenReady().then(async () => {
   scheduleSecretProtectionGapReport({
     dataFile: activeOrcaProfile.dataFile,
     force: process.env.ORCA_ALWAYS_REPORT_SECRET_PROTECTION === '1',
-    deferUntilFirstWindow: !isServeMode
+    deferUntilFirstWindow: !isServeMode,
+    // The synchronous safeStorage probe can open a macOS Keychain sheet and
+    // stall the main loop, which also stalls CDP startup for dev automation.
+    skipInDevelopment: is.dev
   })
   // Why here: the host key store is a sidecar of the same profile, and every SSH connect consults
   // it. Left unbound it reports nothing trusted, which is safe but silently discards our own
