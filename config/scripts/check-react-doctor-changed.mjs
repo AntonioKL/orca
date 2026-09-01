@@ -8,9 +8,17 @@ const requestedBase =
   process.env.ORCA_CODE_QUALITY_BASE ??
   'origin/main'
 const base = resolvePullRequestDiffBase(process.cwd(), requestedBase)
+// Why validate rather than trust: `base` arrives from argv or the environment and
+// below it can reach cmd.exe unquoted, because resolvePnpmCliInvocation still
+// falls back to a shell when it cannot find a directly spawnable pnpm. Everything
+// git accepts as a revision fits this set; nothing cmd.exe treats as syntax does.
+const GIT_REVISION = /^[A-Za-z0-9._/@^~-]+$/
+if (!GIT_REVISION.test(base)) {
+  throw new Error(`Refusing to pass an unsafe diff base to pnpm: ${base}`)
+}
 // Why the shim and not a direct binary: `dlx` fetches react-doctor on demand, so
-// only the pnpm CLI can run it. resolvePnpmCliInvocation picks the shell-free
-// `node <pnpm cli>` form whenever npm_execpath exposes one.
+// only the pnpm CLI can run it. resolvePnpmCliInvocation prefers whatever
+// npm_execpath exposes -- pnpm 12's own pnpm.exe, spawned with no shell.
 const { command, prefixArgs, shell } = resolvePnpmCliInvocation()
 const result = spawnSync(
   command,
