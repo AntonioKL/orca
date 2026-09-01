@@ -21,7 +21,10 @@ import { getRepoIdFromMobileWorktreeId } from '../session/mobile-session-route-h
 import { loadMobileNewTabAgentOptions } from '../session/mobile-new-tab-agent-loader'
 import type { RpcClient } from '../transport/rpc-client'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
-import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
+import type {
+  MobileWebHostWorkspaceId,
+  MobileWebWorkspaceAuthority
+} from './mobile-web-workspace-authority'
 
 export async function executeMobileWebSessionQuickCommandOperation(args: {
   operation: string
@@ -99,7 +102,7 @@ async function readQuickCommands(client: RpcClient): Promise<TerminalQuickComman
 
 function projectQuickCommands(
   result: unknown,
-  hostWorkspaceId: string,
+  hostWorkspaceId: MobileWebHostWorkspaceId,
   pageWorkspaceId: string
 ): MobileWebQuickCommandSnapshotResult {
   const commands = parseNormalizedTerminalQuickCommands(
@@ -127,7 +130,7 @@ function projectQuickCommands(
 function hostMutation(
   mutation: MobileWebQuickCommandMutationPayload['mutation'],
   commands: TerminalQuickCommand[],
-  hostWorkspaceId: string,
+  hostWorkspaceId: MobileWebHostWorkspaceId,
   pageWorkspaceId: string
 ): TerminalQuickCommandMutation {
   const repoId = workspaceRepoId(hostWorkspaceId)
@@ -161,7 +164,7 @@ function hostMutation(
 async function launchQuickCommand(args: {
   client: RpcClient
   command: TerminalQuickCommand
-  hostWorkspaceId: string
+  hostWorkspaceId: MobileWebHostWorkspaceId
   pageWorkspaceId: string
   requestId: string
   workspaceAuthority: MobileWebWorkspaceAuthority
