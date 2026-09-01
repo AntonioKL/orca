@@ -139,7 +139,7 @@
         "description": "Keep an Orca shortcut and activity indicator in the macOS menu bar."
       },
       "agentsSidebar": {
-        "title": "Agents tab",
+        "title": "Show Agents Button",
         "description": "Show the Agents tab in the left sidebar."
       }
     },

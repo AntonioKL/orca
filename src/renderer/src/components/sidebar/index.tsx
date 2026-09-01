@@ -11,7 +11,6 @@ import SidebarToolbar from './SidebarToolbar'
 import WorkspaceKanbanDrawer from './WorkspaceKanbanDrawer'
 import type { VirtualizedScrollAnchor } from '@/hooks/useVirtualizedScrollAnchor'
 import { cn } from '@/lib/utils'
-import { SIDEBAR_HEADER_WIDE_MIN_WIDTH } from './sidebar-header-actions'
 import { BellDot, FolderPlus, Loader2, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -70,7 +69,6 @@ function Sidebar({
   const [agentOptionsTarget, setAgentOptionsTarget] = React.useState<HTMLDivElement | null>(null)
   const agentsScrollTopRef = React.useRef(0)
   const agentSearchInputRef = React.useRef<HTMLInputElement>(null)
-  const compactHeader = sidebarWidth < SIDEBAR_HEADER_WIDE_MIN_WIDTH
   const fetchAllWorktrees = useAppStore((s) => s.fetchAllWorktrees)
   const activeModal = useAppStore((s) => s.activeModal)
   const statusBarVisible = useAppStore((s) => s.statusBarVisible)
@@ -149,70 +147,61 @@ function Sidebar({
               showAgentsSidebar={showAgentsSidebar}
               agentToolbar={
                 <div className="flex items-center gap-1 shrink-0">
-                  {compactHeader ? null : (
-                    <>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            className={cn(
-                              'text-muted-foreground',
-                              agentSearchOpen &&
-                                'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
-                            )}
-                            aria-label={translate(
-                              'auto.components.activity.ActivityPrototypePage.search',
-                              'Search'
-                            )}
-                            aria-pressed={agentSearchOpen}
-                            onClick={() => setAgentSearchOpen((open) => !open)}
-                          >
-                            <Search className="size-3.5" strokeWidth={2.25} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" sideOffset={6}>
-                          {translate(
-                            'auto.components.activity.ActivityPrototypePage.search',
-                            'Search'
-                          )}
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-pressed={agentReadFilter === 'unread'}
-                            onClick={() =>
-                              setAgentReadFilter((filter) =>
-                                filter === 'unread' ? 'all' : 'unread'
-                              )
-                            }
-                            className={cn(
-                              'text-muted-foreground',
-                              agentReadFilter === 'unread' &&
-                                'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
-                            )}
-                            aria-label={translate(
-                              'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
-                              'Show unread threads only'
-                            )}
-                          >
-                            <BellDot className="size-3.5" strokeWidth={2.25} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" sideOffset={6}>
-                          {translate(
-                            'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
-                            'Show unread threads only'
-                          )}
-                        </TooltipContent>
-                      </Tooltip>
-                    </>
-                  )}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className={cn(
+                          'text-muted-foreground',
+                          agentSearchOpen &&
+                            'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
+                        )}
+                        aria-label={translate(
+                          'auto.components.activity.ActivityPrototypePage.search',
+                          'Search'
+                        )}
+                        aria-pressed={agentSearchOpen}
+                        onClick={() => setAgentSearchOpen((open) => !open)}
+                      >
+                        <Search className="size-3.5" strokeWidth={2.25} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={6}>
+                      {translate('auto.components.activity.ActivityPrototypePage.search', 'Search')}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-pressed={agentReadFilter === 'unread'}
+                        onClick={() =>
+                          setAgentReadFilter((filter) => (filter === 'unread' ? 'all' : 'unread'))
+                        }
+                        className={cn(
+                          'text-muted-foreground',
+                          agentReadFilter === 'unread' &&
+                            'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
+                        )}
+                        aria-label={translate(
+                          'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
+                          'Show unread threads only'
+                        )}
+                      >
+                        <BellDot className="size-3.5" strokeWidth={2.25} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={6}>
+                      {translate(
+                        'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
+                        'Show unread threads only'
+                      )}
+                    </TooltipContent>
+                  </Tooltip>
                   <div ref={setAgentOptionsTarget} className="flex items-center" />
                 </div>
               }
@@ -253,23 +242,6 @@ function Sidebar({
                   query={agentQuery}
                   setQuery={setAgentQuery}
                   optionsTarget={agentOptionsTarget}
-                  onSearch={
-                    compactHeader
-                      ? () => {
-                          setAgentSearchOpen(true)
-                          window.setTimeout(() => {
-                            agentSearchInputRef.current?.focus()
-                          }, 0)
-                        }
-                      : undefined
-                  }
-                  unreadOnly={agentReadFilter === 'unread'}
-                  onToggleUnread={
-                    compactHeader
-                      ? () =>
-                          setAgentReadFilter((filter) => (filter === 'unread' ? 'all' : 'unread'))
-                      : undefined
-                  }
                   scrollTopRef={agentsScrollTopRef}
                 />
               </React.Suspense>

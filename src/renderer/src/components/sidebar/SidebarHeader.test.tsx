@@ -251,4 +251,19 @@ describe('SidebarHeader', () => {
     })
     expect(mocks.openWorkspaceCreationComposerWithTourHandoff).toHaveBeenCalledTimes(1)
   })
+
+  it('switches to compact actions only below the wide-layout breakpoint', () => {
+    mockState.sidebarWidth = 234
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+    expect(container.querySelector('[aria-label="More workspace actions"]')).toBeTruthy()
+
+    mockState.sidebarWidth = 235
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+    expect(container.querySelector('[aria-label="More workspace actions"]')).toBeNull()
+    expect(container.querySelector('[aria-label="Add Project"]')).toBeTruthy()
+  })
 })

@@ -7,7 +7,8 @@ import {
 import { normalizeWorkspaceCleanupBrowseState } from '../../../../../shared/workspace-cleanup-browse-state'
 import {
   normalizeExecutionHostScope,
-  normalizeExecutionHostOrder
+  normalizeExecutionHostOrder,
+  normalizeVisibleExecutionHostIds
 } from '../../../../../shared/execution-host'
 import { normalizeFeatureInteractions } from '../../../../../shared/feature-interactions'
 import { normalizeContextualTourIds } from '../../../../../shared/contextual-tours'

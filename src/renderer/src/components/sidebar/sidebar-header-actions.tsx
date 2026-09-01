@@ -19,7 +19,7 @@ import {
   WorkspaceOptionsMenuItems
 } from './workspace-options-menu-items'
 
-export const SIDEBAR_HEADER_WIDE_MIN_WIDTH = 280
+export const SIDEBAR_HEADER_WIDE_MIN_WIDTH = 235
 
 function AddProjectButton(): React.JSX.Element {
   const openModal = useAppStore((s) => s.openModal)
