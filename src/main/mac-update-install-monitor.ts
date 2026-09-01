@@ -143,9 +143,13 @@ export async function runMacUpdateInstallMonitor(options: {
         clearMacUpdateInstallAttempt(options.attemptPath, attempt.attemptId)
         return 'completed'
       }
-      if (decision.reason !== 'install-timed-out' && confirm.shipIt === 'alive') {
-        shipItSeen = true
-        shipItMissingSinceMs = null
+      if (decision.reason !== 'install-timed-out' && confirm.shipIt !== 'absent') {
+        if (confirm.shipIt === 'alive') {
+          shipItSeen = true
+          shipItMissingSinceMs = null
+        }
+        // Why unknown re-polls untouched: an unverified list neither confirms the failure nor
+        // proves ShipIt was ever seen; freeze the clocks and let the next verified probe decide.
         writeMacUpdateInstallHeartbeat(options.attemptPath, {
           schemaVersion: MAC_UPDATE_INSTALL_ATTEMPT_SCHEMA_VERSION,
           attemptId: attempt.attemptId,

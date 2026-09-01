@@ -178,6 +178,46 @@ describe('macOS update monitor probe safety', () => {
     expect(readMacUpdateInstallAttempt(path)).toBeNull()
   })
 
+  it('keeps polling when the confirm probe cannot verify ShipIt, without marking it seen', async () => {
+    const { attempt, path } = createAttemptFile()
+    const launchRecovery = vi.fn().mockResolvedValue(true)
+    const t0 = attempt.createdAtMs
+    // Poll 1 starts the appearance window at first verified source death; polls 2 and 3 are
+    // past it. Each failing poll consumes one extra observation for its confirm probe.
+    const times = [t0 + 2_000, t0 + 33_000, t0 + 35_000]
+    const observations: {
+      bundleVersion: string
+      shipIt: 'alive' | 'absent' | 'unknown'
+      source: 'dead'
+    }[] = [
+      { bundleVersion: attempt.sourceVersion, shipIt: 'absent', source: 'dead' },
+      { bundleVersion: attempt.sourceVersion, shipIt: 'absent', source: 'dead' },
+      // Confirm probe: ps hiccup. Must neither fail nor count as ShipIt having been seen.
+      { bundleVersion: attempt.sourceVersion, shipIt: 'unknown', source: 'dead' },
+      { bundleVersion: attempt.sourceVersion, shipIt: 'absent', source: 'dead' },
+      { bundleVersion: attempt.sourceVersion, shipIt: 'absent', source: 'dead' }
+    ]
+    const observe = vi.fn(async () => observations.shift()!)
+
+    await expect(
+      runMacUpdateInstallMonitor({
+        attemptPath: path,
+        attemptId: attempt.attemptId,
+        now: () => times.shift() ?? t0 + 35_000,
+        wait: async () => {},
+        observe,
+        launchRecovery
+      })
+    ).resolves.toBe('failed')
+    expect(observe).toHaveBeenCalledTimes(5)
+    expect(launchRecovery).toHaveBeenCalledOnce()
+    // Why never-started: an unknown confirm must not flip shipItSeen and reword the failure.
+    expect(readMacUpdateInstallAttempt(path)).toMatchObject({
+      phase: 'failed',
+      failureReason: 'installer-never-started'
+    })
+  })
+
   it('completes instead of failing when the confirm probe sees the target version', async () => {
     const { attempt, path } = createAttemptFile()
     const launchRecovery = vi.fn().mockResolvedValue(true)

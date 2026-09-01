@@ -7,13 +7,15 @@ import { getProcessStartedAtMs } from './daemon/daemon-process-start-time'
 import {
   getMacUpdateProcessIdentityState,
   isMatchingBundleShipItRunning,
-  readAllProcessCommands
+  readAllProcessCommands,
+  type MacUpdateShipItState
 } from './mac-update-install-process-probes'
 export {
   getMacUpdateProcessIdentityState,
   isMacUpdateProcessIdentityAlive,
   isMatchingBundleShipItRunning,
-  type MacUpdateProcessIdentityState
+  type MacUpdateProcessIdentityState,
+  type MacUpdateShipItState
 } from './mac-update-install-process-probes'
 import {
   clearMacUpdateInstallAttempt,
@@ -51,13 +53,13 @@ const MONITOR_IDENTITY_SANITY_WINDOW_MS = 30_000
 
 export type MacUpdateInstallLaunchDecision =
   | { action: 'allow'; reason: 'different-bundle' | 'no-attempt' }
-  | { action: 'allow-and-clear'; reason: 'target-installed' | 'stale-attempt' }
+  | { action: 'allow-and-clear'; reason: 'target-installed' }
   | {
       action: 'allow-with-failure'
       reason: 'install-abandoned' | 'recorded-failure'
       failureReason: MacUpdateInstallRecoveryReason
     }
-  | { action: 'block'; reason: 'active-install' | 'shipit-alive' }
+  | { action: 'block'; reason: 'active-install' | 'shipit-alive' | 'shipit-unverifiable' }
 
 /**
  * Canonical version equality: a feed may carry a leading `v` or build metadata while the
@@ -86,7 +88,8 @@ export function decideMacUpdateInstallLaunch(options: {
   currentVersion: string
   nowMs: number
   monitorAlive: boolean
-  shipItAlive: boolean
+  /** Verified-only: an unknown process list must never read as ShipIt absence. */
+  shipIt: MacUpdateShipItState
   /** Freshest known monitor heartbeat; defaults to the attempt record's own field. */
   effectiveHeartbeatAtMs?: number
 }): MacUpdateInstallLaunchDecision {
@@ -100,10 +103,9 @@ export function decideMacUpdateInstallLaunch(options: {
   if (areMacUpdateVersionsEqual(options.currentVersion, attempt.targetVersion)) {
     return { action: 'allow-and-clear', reason: 'target-installed' }
   }
-  const ageMs = options.nowMs - attempt.createdAtMs
-  if (ageMs < 0) {
-    return { action: 'allow-and-clear', reason: 'stale-attempt' }
-  }
+  // Why clamped: a backward wall-clock step during the handoff must not disable the liveness
+  // checks below and relaunch the old bundle into a live ShipIt.
+  const ageMs = Math.max(0, options.nowMs - attempt.createdAtMs)
   if (attempt.phase === 'failed') {
     return {
       action: 'allow-with-failure',
@@ -121,11 +123,17 @@ export function decideMacUpdateInstallLaunch(options: {
   if (options.monitorAlive) {
     return { action: 'block', reason: 'active-install' }
   }
-  if (options.shipItAlive) {
+  if (options.shipIt === 'alive') {
     return { action: 'block', reason: 'shipit-alive' }
   }
+  if (options.shipIt === 'unknown') {
+    // Why: only a verified process list may clear the way; the age cap above bounds this block.
+    return { action: 'block', reason: 'shipit-unverifiable' }
+  }
   const heartbeatAtMs = Math.max(options.effectiveHeartbeatAtMs ?? 0, attempt.heartbeatAtMs)
-  if (options.nowMs - heartbeatAtMs <= MAC_UPDATE_INSTALL_ATTEMPT_STALE_MS) {
+  // Why abs: after a backward clock step a heartbeat from the "future" is not proof of life;
+  // only a heartbeat within the stale window on either side keeps the fence up.
+  if (Math.abs(options.nowMs - heartbeatAtMs) <= MAC_UPDATE_INSTALL_ATTEMPT_STALE_MS) {
     return { action: 'block', reason: 'active-install' }
   }
   return {
@@ -217,7 +225,7 @@ export function resolveMacUpdateInstallStartup(options: {
   platform?: NodeJS.Platform
   nowMs?: number
   readProcessStartedAtMs?: (pid: number) => number | null
-  readProcessList?: () => string
+  readProcessList?: () => string | null
 }): MacUpdateInstallLaunchDecision {
   // Why fail-open: this runs on every packaged launch; an unexpected error must never block or
   // crash startup — worst case the launch proceeds exactly as it did before the fence existed.
@@ -239,7 +247,7 @@ function resolveMacUpdateInstallStartupUnsafe(options: {
   platform?: NodeJS.Platform
   nowMs?: number
   readProcessStartedAtMs?: (pid: number) => number | null
-  readProcessList?: () => string
+  readProcessList?: () => string | null
 }): MacUpdateInstallLaunchDecision {
   if ((options.platform ?? process.platform) !== 'darwin' || !options.isPackaged) {
     return { action: 'allow', reason: 'no-attempt' }
@@ -257,15 +265,18 @@ function resolveMacUpdateInstallStartupUnsafe(options: {
       attempt.monitorStartedAtMs,
       options.readProcessStartedAtMs
     ) !== 'dead'
-  let shipItAlive = false
+  let shipIt: MacUpdateShipItState = 'absent'
   if (!monitorAlive) {
     try {
-      shipItAlive = isMatchingBundleShipItRunning(
-        attempt.targetBundlePath,
-        (options.readProcessList ?? readAllProcessCommands)()
-      )
+      const processList = (options.readProcessList ?? readAllProcessCommands)()
+      shipIt =
+        processList === null
+          ? 'unknown'
+          : isMatchingBundleShipItRunning(attempt.targetBundlePath, processList)
+            ? 'alive'
+            : 'absent'
     } catch {
-      shipItAlive = false
+      shipIt = 'unknown'
     }
   }
   const heartbeat = readMacUpdateInstallHeartbeat(attemptPath)
@@ -275,7 +286,7 @@ function resolveMacUpdateInstallStartupUnsafe(options: {
     currentVersion: options.appVersion,
     nowMs: options.nowMs ?? Date.now(),
     monitorAlive,
-    shipItAlive,
+    shipIt,
     effectiveHeartbeatAtMs:
       heartbeat && heartbeat.attemptId === attempt.attemptId ? heartbeat.heartbeatAtMs : undefined
   })

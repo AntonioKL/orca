@@ -9,6 +9,7 @@ import {
   getMacUpdateInstallAttemptPath,
   getMacUpdateInstallHeartbeatPath,
   getMacUpdateProcessIdentityState,
+  MAC_UPDATE_INSTALL_ATTEMPT_MAX_AGE_MS,
   MAC_UPDATE_INSTALL_ATTEMPT_SCHEMA_VERSION,
   MAC_UPDATE_INSTALL_ATTEMPT_STALE_MS,
   resolveMacUpdateInstallStartup,
@@ -167,6 +168,76 @@ describe('macOS update install startup probes', () => {
   })
 })
 
+describe('macOS update startup ShipIt probe', () => {
+  it('keeps blocking on an unverified process list, bounded by the age cap', () => {
+    const appDataPath = createTempDir()
+    const attemptPath = getMacUpdateInstallAttemptPath(appDataPath)
+    const attempt = createAttempt({ heartbeatAtMs: 1_000 })
+    writeMacUpdateInstallAttempt(attemptPath, attempt)
+    const options = {
+      appDataPath,
+      appVersion: attempt.sourceVersion,
+      executablePath: EXECUTABLE_PATH,
+      isPackaged: true,
+      platform: 'darwin' as const,
+      // Monitor verifiably dead and heartbeat stale: the process list is the last defense.
+      readProcessStartedAtMs: () => attempt.monitorStartedAtMs + 1_000
+    }
+    const failingProbes: (() => string | null)[] = [
+      () => null,
+      () => {
+        throw new Error('ps timed out')
+      }
+    ]
+    for (const readProcessList of failingProbes) {
+      expect(
+        resolveMacUpdateInstallStartup({
+          ...options,
+          nowMs: 1_000 + MAC_UPDATE_INSTALL_ATTEMPT_STALE_MS + 10_000,
+          readProcessList
+        })
+      ).toEqual({ action: 'block', reason: 'shipit-unverifiable' })
+    }
+    expect(
+      resolveMacUpdateInstallStartup({
+        ...options,
+        nowMs: attempt.createdAtMs + MAC_UPDATE_INSTALL_ATTEMPT_MAX_AGE_MS + 1,
+        readProcessList: () => null
+      })
+    ).toEqual({
+      action: 'allow-with-failure',
+      reason: 'install-abandoned',
+      failureReason: 'install-timed-out'
+    })
+  })
+})
+
+describe('macOS update gate under a backward clock step', () => {
+  it('keeps verified liveness checks active and does not strand once they clear', () => {
+    const attempt = createAttempt({ createdAtMs: 3_600_000, heartbeatAtMs: 3_600_000 })
+    const base = {
+      attempt,
+      currentBundlePath: BUNDLE_PATH,
+      currentVersion: attempt.sourceVersion,
+      nowMs: 5_000
+    }
+    expect(decideMacUpdateInstallLaunch({ ...base, monitorAlive: true, shipIt: 'absent' })).toEqual(
+      { action: 'block', reason: 'active-install' }
+    )
+    expect(decideMacUpdateInstallLaunch({ ...base, monitorAlive: false, shipIt: 'alive' })).toEqual(
+      { action: 'block', reason: 'shipit-alive' }
+    )
+    // A heartbeat an hour in the "future" is not proof of life once nothing verifiable is running.
+    expect(
+      decideMacUpdateInstallLaunch({ ...base, monitorAlive: false, shipIt: 'absent' })
+    ).toEqual({
+      action: 'allow-with-failure',
+      reason: 'install-abandoned',
+      failureReason: 'monitor-exited'
+    })
+  })
+})
+
 describe('macOS update version equality', () => {
   it('treats formatting variants of the same version as installed', () => {
     expect(areMacUpdateVersionsEqual('v1.4.192', '1.4.192')).toBe(true)
@@ -181,7 +252,7 @@ describe('macOS update version equality', () => {
         currentVersion: 'v1.4.192',
         nowMs: 3_000,
         monitorAlive: true,
-        shipItAlive: true
+        shipIt: 'alive'
       })
     ).toEqual({ action: 'allow-and-clear', reason: 'target-installed' })
   })

@@ -51,7 +51,7 @@ describe('macOS update install ownership', () => {
         currentVersion: attempt.sourceVersion,
         nowMs: 2_500,
         monitorAlive: true,
-        shipItAlive: true
+        shipIt: 'alive'
       })
     ).toEqual({ action: 'block', reason: 'active-install' })
 
@@ -62,7 +62,7 @@ describe('macOS update install ownership', () => {
         currentVersion: attempt.targetVersion,
         nowMs: 2_500,
         monitorAlive: true,
-        shipItAlive: true
+        shipIt: 'alive'
       })
     ).toEqual({ action: 'allow-and-clear', reason: 'target-installed' })
 
@@ -73,7 +73,7 @@ describe('macOS update install ownership', () => {
         currentVersion: attempt.sourceVersion,
         nowMs: 2_500,
         monitorAlive: true,
-        shipItAlive: true
+        shipIt: 'alive'
       })
     ).toEqual({ action: 'allow', reason: 'different-bundle' })
   })
@@ -88,7 +88,7 @@ describe('macOS update install ownership', () => {
         currentVersion: attempt.sourceVersion,
         nowMs: 20_001,
         monitorAlive: false,
-        shipItAlive: false
+        shipIt: 'absent'
       })
     ).toEqual({
       action: 'allow-with-failure',
@@ -103,7 +103,7 @@ describe('macOS update install ownership', () => {
         currentVersion: attempt.sourceVersion,
         nowMs: 20_001,
         monitorAlive: false,
-        shipItAlive: true
+        shipIt: 'alive'
       })
     ).toEqual({ action: 'block', reason: 'shipit-alive' })
   })
@@ -118,7 +118,7 @@ describe('macOS update install ownership', () => {
         currentVersion: attempt.sourceVersion,
         nowMs: attempt.createdAtMs + 15 * 60_000 + 1,
         monitorAlive: false,
-        shipItAlive: false
+        shipIt: 'absent'
       })
     ).toEqual({
       action: 'allow-with-failure',
@@ -140,7 +140,7 @@ describe('macOS update install ownership', () => {
         currentVersion: attempt.sourceVersion,
         nowMs: 3_000,
         monitorAlive: false,
-        shipItAlive: false
+        shipIt: 'absent'
       })
     ).toEqual({
       action: 'allow-with-failure',

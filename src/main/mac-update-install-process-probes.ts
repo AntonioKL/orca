@@ -59,7 +59,10 @@ export function isMatchingBundleShipItRunning(
   })
 }
 
-export function readAllProcessCommands(): string {
+export type MacUpdateShipItState = 'alive' | 'absent' | 'unknown'
+
+/** null means the probe itself failed — callers must treat that as unknown, not as absence. */
+export function readAllProcessCommands(): string | null {
   try {
     const result = runProcessSync({
       program: '/bin/ps',
@@ -67,8 +70,8 @@ export function readAllProcessCommands(): string {
       timeoutMs: PROCESS_LIST_TIMEOUT_MS,
       maxOutputBytes: PROCESS_LIST_MAX_BYTES
     })
-    return result.code === 0 ? result.stdout : ''
+    return result.code === 0 ? result.stdout : null
   } catch {
-    return ''
+    return null
   }
 }
