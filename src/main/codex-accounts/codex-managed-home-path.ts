@@ -1,15 +1,36 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { app } from 'electron'
+import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 import { quotePosixShell } from '../../shared/wsl-login-shell-command'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import type { CodexManagedAccount } from '../../shared/managed-account-types'
 import { getSystemCodexHomePath } from '../codex/codex-home-paths'
-import { toWindowsWslPath } from '../wsl'
 import { runWslProcess } from '../wsl/wsl-runner'
-import { assertOwnedHostCodexManagedHomePath } from './host-codex-managed-home-ownership'
+import {
+  assertOwnedCodexManagedHomeVerdict,
+  assertOwnedHostCodexManagedHomePath,
+  ManagedCodexHomeTemporarilyUnavailableError,
+  MISSING_MANAGED_HOME_MESSAGE,
+  MISSING_OWNERSHIP_MARKER_MESSAGE,
+  UntrustedManagedCodexHomeError,
+  type HostCodexManagedHomeVerdict
+} from './host-codex-managed-home-ownership'
+import {
+  ACCOUNT_ID_MISMATCH_MESSAGE,
+  buildWslCodexManagedHomeProbeScript,
+  classifyWslCodexManagedHomeProbe,
+  MARKER_ACCOUNT_MISMATCH_MESSAGE,
+  OUTSIDE_MANAGED_ROOT_MESSAGE
+} from './wsl-codex-managed-home-probe'
 
 const WSL_MANAGED_HOME_TIMEOUT_MS = 5_000
+
+/** Exit codes the preparation script uses to report a *proven* foreign directory. */
+const WSL_PREPARE_UNTRUSTED_EXITS = new Map<number, string>([
+  [41, MISSING_OWNERSHIP_MARKER_MESSAGE],
+  [42, MARKER_ACCOUNT_MISMATCH_MESSAGE]
+])
 
 export class CodexManagedHomePath {
   constructor(private readonly validateWslPath: (distro: string, script: string) => string) {}
@@ -56,22 +77,26 @@ export class CodexManagedHomePath {
         expectedAccountId
       })
     }
+    // Why: the spelling of the persisted path is a fact the host already holds,
+    // so a mismatch is dispositive without asking the guest anything.
     if (
       !wslInfo.linuxPath.includes('/.local/share/orca/codex-accounts/') ||
       !wslInfo.linuxPath.endsWith('/home')
     ) {
-      throw new Error('Managed WSL Codex home is outside Orca account storage.')
+      throw new UntrustedManagedCodexHomeError(OUTSIDE_MANAGED_ROOT_MESSAGE)
     }
     if (
       expectedAccountId !== undefined &&
       !wslInfo.linuxPath.endsWith(`/.local/share/orca/codex-accounts/${expectedAccountId}/home`)
     ) {
-      throw new Error('Managed WSL Codex home does not match its persisted account ID.')
+      throw new UntrustedManagedCodexHomeError(ACCOUNT_ID_MISMATCH_MESSAGE)
     }
     if (process.platform === 'win32') {
       return this.assertWindowsWslPath(wslInfo, expectedAccountId)
     }
-    return this.assertMountedWslPath(candidatePath, wslInfo.linuxPath, expectedAccountId)
+    return assertOwnedCodexManagedHomeVerdict(
+      this.resolveMountedWslVerdict(candidatePath, wslInfo.linuxPath, expectedAccountId)
+    )
   }
 
   private recreateExpectedHostHome(account: CodexManagedAccount, originalError: unknown): string {
@@ -113,12 +138,28 @@ export class CodexManagedHomePath {
       shell: 'bash',
       timeoutMs: WSL_MANAGED_HOME_TIMEOUT_MS
     })
+    if (result.timedOut) {
+      throw new ManagedCodexHomeTemporarilyUnavailableError(undefined, {
+        cause: new Error(
+          `Preparing the managed Codex home in WSL ${wslInfo.distro} timed out after ${WSL_MANAGED_HOME_TIMEOUT_MS}ms.`
+        )
+      })
+    }
     // Why: 41/42 mean the path is not this account's home; re-auth must refuse
-    // rather than write credentials into someone else's directory.
-    if (result.code !== 0 || result.timedOut) {
-      throw new Error(
-        `Could not prepare the managed Codex home in WSL ${wslInfo.distro} for re-authentication.`
-      )
+    // rather than write credentials into someone else's directory. Every other
+    // non-zero exit — a cold distro, a missing shell, a 9p hiccup — proves
+    // nothing about ownership and must not read as a trust failure (STA-5616).
+    const untrustedReason =
+      typeof result.code === 'number' ? WSL_PREPARE_UNTRUSTED_EXITS.get(result.code) : undefined
+    if (untrustedReason !== undefined) {
+      throw new UntrustedManagedCodexHomeError(untrustedReason)
+    }
+    if (result.code !== 0) {
+      throw new ManagedCodexHomeTemporarilyUnavailableError(undefined, {
+        cause: new Error(
+          `Preparing the managed Codex home in WSL ${wslInfo.distro} exited with code ${String(result.code)}.`
+        )
+      })
     }
   }
 
@@ -126,68 +167,64 @@ export class CodexManagedHomePath {
     wslInfo: { distro: string; linuxPath: string },
     expectedAccountId?: string
   ): string {
+    const script = buildWslCodexManagedHomeProbeScript(wslInfo.linuxPath, expectedAccountId)
+    let stdout: string
     try {
-      const canonicalLinuxPath = this.validateWslPath(
-        wslInfo.distro,
-        [
-          'set -euo pipefail',
-          `candidate=${quotePosixShell(wslInfo.linuxPath)}`,
-          'managed_root="${HOME%/}/.local/share/orca/codex-accounts"',
-          'candidate_real=$(readlink -f -- "$candidate")',
-          'managed_root_real=$(readlink -f -- "$managed_root")',
-          'test -f "$candidate_real/.orca-managed-home"',
-          ...(expectedAccountId === undefined
-            ? [
-                'case "$candidate_real" in "$managed_root_real"/*/home) printf "%s\\n" "$candidate_real" ;; *) exit 35 ;; esac'
-              ]
-            : [
-                `expected_marker=${quotePosixShell(expectedAccountId)}`,
-                'test "$candidate_real" = "$managed_root_real/$expected_marker/home"',
-                'test "$(cat "$candidate_real/.orca-managed-home")" = "$expected_marker"',
-                'printf "%s\\n" "$candidate_real"'
-              ])
-        ].join('\n')
-      ).trim()
-      if (!canonicalLinuxPath) {
-        throw new Error('Managed Codex home directory does not exist on disk.')
-      }
-      return toWindowsWslPath(canonicalLinuxPath, wslInfo.distro)
+      stdout = this.validateWslPath(wslInfo.distro, script)
     } catch (error) {
-      throw new Error('Managed WSL Codex home is outside Orca account storage.', {
-        cause: error
-      })
+      // Why: the guest reports its observation on a tagged line and always exits
+      // 0, so a throw here is the runner failing — never evidence about the home.
+      return assertOwnedCodexManagedHomeVerdict(
+        classifyWslCodexManagedHomeProbe({ ran: false, error }, wslInfo.distro)
+      )
     }
+    return assertOwnedCodexManagedHomeVerdict(
+      classifyWslCodexManagedHomeProbe({ ran: true, stdout }, wslInfo.distro)
+    )
   }
 
-  private assertMountedWslPath(
+  /**
+   * The same gate for a WSL home reached through a mount rather than `wsl.exe`.
+   * Reads go through `statSync`/`lstatSync` rather than `existsSync` so an EPERM
+   * or EIO cannot be folded into "does not exist" (STA-4422's collapse).
+   */
+  private resolveMountedWslVerdict(
     candidatePath: string,
     linuxPath: string,
     expectedAccountId?: string
-  ): string {
+  ): HostCodexManagedHomeVerdict {
     if (linuxPath.split('/').includes('..')) {
-      throw new Error('Managed WSL Codex home is outside Orca account storage.')
+      return { kind: 'untrusted', reason: OUTSIDE_MANAGED_ROOT_MESSAGE }
     }
-    if (!existsSync(candidatePath)) {
-      throw new Error('Managed Codex home directory does not exist on disk.')
+    try {
+      statSync(candidatePath)
+    } catch (error) {
+      if (isDefinitiveAbsence(error)) {
+        return { kind: 'untrusted', reason: MISSING_MANAGED_HOME_MESSAGE }
+      }
+      return { kind: 'indeterminate', error }
     }
     const markerPath = join(candidatePath, '.orca-managed-home')
-    if (!existsSync(markerPath)) {
-      throw new Error('Managed Codex home is missing Orca ownership marker.')
+    let markerContents: string
+    try {
+      if (!lstatSync(markerPath).isFile()) {
+        return { kind: 'untrusted', reason: MISSING_OWNERSHIP_MARKER_MESSAGE }
+      }
+      markerContents = readFileSync(markerPath, 'utf-8')
+    } catch (error) {
+      if (isDefinitiveAbsence(error)) {
+        return { kind: 'untrusted', reason: MISSING_OWNERSHIP_MARKER_MESSAGE }
+      }
+      return { kind: 'indeterminate', error }
     }
-    if (
-      expectedAccountId !== undefined &&
-      readFileSync(markerPath, 'utf-8').trim() !== expectedAccountId
-    ) {
-      throw new Error('Managed WSL Codex home ownership marker does not match its account ID.')
+    if (expectedAccountId !== undefined && markerContents.trim() !== expectedAccountId) {
+      return { kind: 'untrusted', reason: MARKER_ACCOUNT_MISMATCH_MESSAGE }
     }
-    return candidatePath
+    return { kind: 'owned', homePath: candidatePath }
   }
 
   private isMissingHomeError(error: unknown): boolean {
-    return (
-      error instanceof Error &&
-      error.message === 'Managed Codex home directory does not exist on disk.'
-    )
+    return error instanceof Error && error.message === MISSING_MANAGED_HOME_MESSAGE
   }
 
   private pathsEqual(left: string, right: string): boolean {
