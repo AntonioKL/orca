@@ -40,6 +40,8 @@ export type MacUpdateInstallLaunchDecision =
     }
   | { action: 'block'; reason: 'active-install' | 'shipit-alive' }
 
+export type MacUpdateProcessIdentityState = 'alive' | 'dead' | 'unverifiable'
+
 export function resolveMacUpdateBundlePath(executablePath: string): string {
   const bundlePath = resolve(executablePath, '..', '..', '..')
   if (!bundlePath.toLowerCase().endsWith('.app')) {
@@ -53,7 +55,33 @@ export function isMacUpdateProcessIdentityAlive(
   expectedStartedAtMs: number,
   readStartedAtMs: (pid: number) => number | null = getProcessStartedAtMs
 ): boolean {
-  return readStartedAtMs(pid) === expectedStartedAtMs
+  return getMacUpdateProcessIdentityState(pid, expectedStartedAtMs, readStartedAtMs) === 'alive'
+}
+
+/**
+ * A failed process probe is not proof that the process exited. Keep that distinction so a
+ * transient ps/TCC failure cannot make ShipIt race an otherwise live desktop owner.
+ */
+export function getMacUpdateProcessIdentityState(
+  pid: number,
+  expectedStartedAtMs: number,
+  readStartedAtMs: (pid: number) => number | null = getProcessStartedAtMs
+): MacUpdateProcessIdentityState {
+  let actualStartedAtMs: number | null
+  try {
+    actualStartedAtMs = readStartedAtMs(pid)
+  } catch {
+    actualStartedAtMs = null
+  }
+  if (actualStartedAtMs !== null) {
+    return actualStartedAtMs === expectedStartedAtMs ? 'alive' : 'dead'
+  }
+  try {
+    process.kill(pid, 0)
+    return 'unverifiable'
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'dead' : 'unverifiable'
+  }
 }
 
 export function decideMacUpdateInstallLaunch(options: {
@@ -195,11 +223,11 @@ export function resolveMacUpdateInstallStartup(options: {
   if (!attempt) {
     return { action: 'allow', reason: 'no-attempt' }
   }
-  const monitorAlive = isMacUpdateProcessIdentityAlive(
+  const monitorAlive = getMacUpdateProcessIdentityState(
     attempt.monitorPid,
     attempt.monitorStartedAtMs,
     options.readProcessStartedAtMs
-  )
+  ) !== 'dead'
   let shipItAlive = false
   if (!monitorAlive) {
     try {
