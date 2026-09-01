@@ -50,9 +50,14 @@ export type ResolvedSpawn = {
 /**
  * Translate a spec into the exact `child_process.spawn` call to make.
  *
- * Kept pure and exported so the Windows branch is testable from macOS/Linux:
- * the decisions below are the whole point of this module, and they must not be
- * observable only on the platform that breaks.
+ * Exported so the Windows branch is testable from macOS/Linux: the decisions
+ * below are the whole point of this module, and they must not be observable
+ * only on the platform that breaks.
+ *
+ * Pure except on the win32 `.cmd` branch, where shim resolution does a `stat`
+ * and (on a cache miss) one bounded read of the shim itself. Both are inside
+ * try/catch and any failure falls back to the cmd.exe path, so the function
+ * still cannot throw or reach anything but the program path it was handed.
  */
 export function resolveSpawn(spec: ProcessSpec, platform: NodeJS.Platform): ResolvedSpawn {
   const args = spec.args ?? []
@@ -88,7 +93,15 @@ export function resolveSpawn(spec: ProcessSpec, platform: NodeJS.Platform): Reso
     return {
       file: shim.program,
       args: [...shim.prefixArgs, ...args],
-      options: shim.env ? { ...base, env: shim.env } : base
+      options: {
+        ...base,
+        ...(shim.env ? { env: shim.env } : {}),
+        // Why cleared rather than inherited: the flag exists for callers that
+        // hand us a whole pre-built command line, and there is no such line
+        // here — Node would join `[script, ...args]` unquoted and shred any
+        // argument containing a space.
+        windowsVerbatimArguments: undefined
+      }
     }
   }
 

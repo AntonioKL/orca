@@ -68,6 +68,50 @@ describe('parseWindowsCmdShim', () => {
     expect(parseWindowsCmdShim(contents)).toBeNull()
   })
 
+  it.each([
+    ['a direct target', npmDirectShim('D:evil.exe')],
+    ['a node script', npmProgNodeShim('D:evil.js')],
+    ['a same-drive spelling', npmDirectShim('C:evil.exe')]
+  ])('refuses a drive-relative path in %s', (_case, contents) => {
+    // `win32.isAbsolute('D:evil.js')` is false, yet `win32.resolve` reads the
+    // drive letter and lands on `D:\evil.js` — outside the shim directory
+    // entirely. cmd would build `C:\shim\D:evil.js` and fail, so accepting it
+    // is the silent-wrong-execution case this parser exists to exclude.
+    expect(parseWindowsCmdShim(contents)).toBeNull()
+  })
+
+  it.each([
+    ['%* replaced by %1, which forwards only the first argument', '%1'],
+    ['%* duplicated, which forwards every argument twice', '%* %*']
+  ])('refuses %s', (_case, forwarding) => {
+    expect(parseWindowsCmdShim(npmProgNodeShim('cli.js').replace('%*', forwarding))).toBeNull()
+  })
+
+  it.each([
+    ['a UTF-8 BOM', (body: string) => `﻿${body}`],
+    ['a doubled UTF-8 BOM', (body: string) => `﻿﻿${body}`],
+    ['LF-only line endings', (body: string) => body.replace(/\r\n/g, '\n')],
+    ['no final newline', (body: string) => body.replace(/\r\n$/, '')],
+    ['trailing whitespace on every line', (body: string) => body.replace(/\r\n/g, '  \t\r\n')],
+    ['doubled blank lines', (body: string) => body.replace(/\r\n/g, '\r\n\r\n')],
+    ['an all-lowercase body', (body: string) => body.toLowerCase()],
+    ['an all-uppercase body', (body: string) => body.toUpperCase()]
+  ])('reads the codex shim through %s', (_case, rewrite) => {
+    // Line endings, casing and surrounding whitespace vary with the generator,
+    // the editor and the transport; none of them changes what the shim runs.
+    // Only the captured path is case-sensitive, so the case cases compare
+    // against the rewritten spelling.
+    const parsed = parseWindowsCmdShim(rewrite(REAL_CODEX_CMD))
+    expect(parsed?.kind).toBe('node')
+    expect((parsed as { script: string }).script.toLowerCase()).toBe(
+      'node_modules\\@openai\\codex\\bin\\codex.js'
+    )
+  })
+
+  it('refuses lone-CR line endings, which leave the body as one unsplit line', () => {
+    expect(parseWindowsCmdShim(REAL_CODEX_CMD.replace(/\r\n/g, '\r'))).toBeNull()
+  })
+
   it('refuses a NODE_PATH block whose branches are not a plain prepend', () => {
     const tampered = pnpmBranchedNodeShim('..\\a.js', 'C:\\p').replace(
       '"NODE_PATH=C:\\p;%NODE_PATH%"',
@@ -153,6 +197,11 @@ describeOnWindows('resolveWindowsCmdShim', () => {
       'abs',
       npmDirectShim('C:\\o.exe')
     ],
+    [
+      'a drive-relative target that would escape the shim directory',
+      'drive',
+      npmDirectShim('D:o.exe')
+    ],
     ['a file that is not a generated shim', 'alias', REAL_PN_CMD]
   ])('falls back for %s', (_case, name, contents) => {
     // A file per case: the resolution cache is keyed on path, mtime and size,
@@ -202,6 +251,22 @@ describeOnWindows('resolveWindowsCmdShim', () => {
     expect(resolved.args).toEqual([join(dir, 'cli.js'), 'a b', 'c"d'])
     // Node's own quoting is CommandLineToArgvW-correct; the verbatim line is
     // only needed for the cmd hop we just removed.
+    expect(resolved.options.windowsVerbatimArguments).toBeUndefined()
+  })
+
+  it('clears a caller-set windowsVerbatimArguments on the resolved path', () => {
+    // The flag means "I built the whole command line, hand it through". There
+    // is no such line here, so honouring it would make Node join
+    // `[script, ...args]` unquoted and shred every argument with a space.
+    const resolved = resolveSpawn(
+      {
+        program: write('verbatim.cmd', npmProgNodeShim('cli.js')),
+        args: ['a b'],
+        env,
+        windowsVerbatimArguments: true
+      },
+      'win32'
+    )
     expect(resolved.options.windowsVerbatimArguments).toBeUndefined()
   })
 

@@ -70,7 +70,11 @@ const NPM_DIRECT_SHIM = new RegExp(
 /** pnpm's equivalent, which omits `@echo off` and keeps only `@SETLOCAL`. */
 const PNPM_DIRECT_SHIM = new RegExp(String.raw`^(?:@SETLOCAL\n)?@?${dp0Path('target')} +%\*$`, 'i')
 
-const UNSAFE_SHIM_PATH = /[%^&|<>"\r\n]/
+// `:` matters as much as the operators: `win32.isAbsolute('D:evil.js')` is
+// false, but `win32.resolve` reads the drive letter and lands on `D:\evil.js`,
+// outside the shim directory entirely. It also rules out the alternate-data-
+// stream spelling `a.js:zone`. No shim-relative path legitimately contains one.
+const UNSAFE_SHIM_PATH = /[%^&|<>":\r\n]/
 
 /** A target with no interpreter must be something CreateProcess can start on
  * its own. Extensionless or `.cmd` targets need cmd's own PATHEXT search, which
@@ -163,6 +167,11 @@ function statFile(path: string): Stats | null {
 }
 
 function readParsedShim(program: string): ParsedWindowsCmdShim | null {
+  // This `stat` puts synchronous I/O on the spawn path, where `resolveSpawn`
+  // previously had none: a shim on an unresponsive network share now blocks the
+  // caller's thread until the filesystem gives up. Judged acceptable because a
+  // `.cmd` on such a share was already about to be spawned from it, but it is
+  // the one cost of resolution that is paid even when nothing resolves.
   const stats = statFile(program)
   if (!stats || stats.size > MAX_SHIM_BYTES) {
     return null
@@ -178,6 +187,10 @@ function readParsedShim(program: string): ParsedWindowsCmdShim | null {
     return null
   }
   const parsed = parseWindowsCmdShim(contents)
+  // Clearing wholesale drops hot entries with cold ones, where an LRU would
+  // not. Left as is because the cap is per-process and one entry per distinct
+  // `.cmd` path Orca ever spawns; reaching it means a re-read, not a wrong
+  // answer.
   if (parseCache.size >= PARSE_CACHE_LIMIT) {
     parseCache.clear()
   }
@@ -198,6 +211,10 @@ function firstEnvKey(env: NodeJS.ProcessEnv, name: string): string | undefined {
  * Not searched: the working directory, which cmd would consult first for a bare
  * name. Preferring a `node.exe` that happens to sit in the cwd over the
  * installed one is a Windows footgun, not a behaviour worth reproducing.
+ *
+ * Only `node.exe`, though cmd would also accept the `node.com`/`.bat`/`.cmd`
+ * PATHEXT spellings. Those return null here, which is a clean fallback to the
+ * cmd path — a `.cmd` node in particular is a hop we could not remove anyway.
  */
 function resolveShimNode(directory: string, env: NodeJS.ProcessEnv): string | null {
   const sibling = win32.join(directory, 'node.exe')
