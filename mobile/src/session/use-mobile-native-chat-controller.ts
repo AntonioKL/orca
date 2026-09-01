@@ -92,7 +92,9 @@ export function useMobileNativeChatController(args: {
   const structuredNativeChat = useMobileStructuredAgentSession({
     client,
     sessionId: activeChatStructured ? activeChatSessionId : null,
-    enabled: showNativeChat,
+    // Holds are connection-scoped; disabling on transport loss lets the hook
+    // reacquire the provider when the client authenticates again.
+    enabled: showNativeChat && connState === 'connected',
     agent: activeChatStructured ? activeChatAgent : null,
     onSendError
   })

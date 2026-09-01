@@ -16,6 +16,7 @@ const holdUnconfirmedSend = vi.fn()
 const viewMode = { isTabChatView: (_tabId: string) => true }
 const sessionState = { messages: [] as unknown[], status: 'ready', transcriptLoading: false }
 const structuredSendWithOutcome = vi.fn()
+const structuredSessionArgs: { enabled?: boolean }[] = []
 const structuredCancel = vi.fn()
 const structuredRespondPermission = vi.fn(async () => true)
 const structuredRespondQuestion = vi.fn(async () => true)
@@ -84,22 +85,25 @@ vi.mock('./use-mobile-native-chat-session', () => ({
   useMobileNativeChatSession: () => sessionState
 }))
 vi.mock('./use-mobile-structured-agent-session', () => ({
-  useMobileStructuredAgentSession: () => ({
-    session: structuredSessionState,
-    isWorking: false,
-    turnId: null,
-    sendWithOutcome: structuredSendWithOutcome,
-    cancel: structuredCancel,
-    permission: structuredPermission,
-    question: structuredQuestion,
-    optionSnapshot: structuredOptionSnapshot,
-    optionSurface: structuredOptionSurface,
-    pendingOptionId: 'model',
-    respondPermission: structuredRespondPermission,
-    respondQuestion: structuredRespondQuestion,
-    setStructuredOption: structuredSetOption,
-    invokeStructuredOption: structuredInvokeOption
-  })
+  useMobileStructuredAgentSession: (args: { enabled?: boolean }) => {
+    structuredSessionArgs.push(args)
+    return {
+      session: structuredSessionState,
+      isWorking: false,
+      turnId: null,
+      sendWithOutcome: structuredSendWithOutcome,
+      cancel: structuredCancel,
+      permission: structuredPermission,
+      question: structuredQuestion,
+      optionSnapshot: structuredOptionSnapshot,
+      optionSurface: structuredOptionSurface,
+      pendingOptionId: 'model',
+      respondPermission: structuredRespondPermission,
+      respondQuestion: structuredRespondQuestion,
+      setStructuredOption: structuredSetOption,
+      invokeStructuredOption: structuredInvokeOption
+    }
+  }
 }))
 vi.mock('./use-mobile-native-chat-drafts', () => ({
   useMobileNativeChatDrafts: (args: Record<string, unknown>) => {
@@ -208,6 +212,7 @@ describe('useMobileNativeChatController handleNativeChatSend', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    structuredSessionArgs.length = 0
     clientStub.sendRequest.mockResolvedValue({
       id: 'send',
       ok: true,
@@ -339,6 +344,26 @@ describe('useMobileNativeChatController handleNativeChatSend', () => {
     expect(structuredSendWithOutcome).toHaveBeenCalledWith('look')
     expect(sendWithOutcome).not.toHaveBeenCalled()
     expect(clientStub.sendRequest).not.toHaveBeenCalled()
+  })
+
+  it('drops and reacquires the structured hold across reconnect', async () => {
+    const tab = {
+      type: 'agent-session' as const,
+      id: 'agent-tab-1',
+      title: 'Codex Chat',
+      sessionId: 'session-structured',
+      agent: 'codex' as const,
+      isActive: true
+    }
+    await act(async () => {
+      renderer?.update(createElement(Harness, { tab, connState: 'reconnecting' }))
+    })
+    expect(structuredSessionArgs.at(-1)?.enabled).toBe(false)
+
+    await act(async () => {
+      renderer?.update(createElement(Harness, { tab, connState: 'connected' }))
+    })
+    expect(structuredSessionArgs.at(-1)?.enabled).toBe(true)
   })
 
   it('exposes structured prompt cards and session options on structured tabs', async () => {

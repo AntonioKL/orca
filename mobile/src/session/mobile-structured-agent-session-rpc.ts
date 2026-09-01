@@ -31,11 +31,13 @@ export async function callAgentSession<TResult>(
   client: RpcClient,
   method: string,
   params: unknown,
-  timeoutMs = STRUCTURED_SEND_TIMEOUT_MS
+  timeoutMs = STRUCTURED_SEND_TIMEOUT_MS,
+  options?: { failWhenDisconnected?: boolean }
 ): Promise<TResult> {
   const response = await client.sendRequest(method, params, {
     timeoutMs,
-    budgetSpansConnect: true
+    budgetSpansConnect: true,
+    ...(options?.failWhenDisconnected ? { failWhenDisconnected: true } : {})
   })
   if (!response.ok) {
     throw new Error(response.error.message)

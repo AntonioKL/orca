@@ -56,10 +56,16 @@ export function useMobileStructuredAgentState(args: {
     }).catch(() => undefined)
     return () => {
       void held.then(() =>
-        callAgentSession(client, 'agentSession.release', {
-          sessionId,
-          holderId
-        }).catch(() => undefined)
+        callAgentSession(
+          client,
+          'agentSession.release',
+          {
+            sessionId,
+            holderId
+          },
+          undefined,
+          { failWhenDisconnected: true }
+        ).catch(() => undefined)
       )
     }
   }, [client, enabled, sessionId])
