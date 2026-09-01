@@ -1,13 +1,9 @@
-import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { readMobileSessionRouteSource } from '../session/mobile-session-route-source-family.test-support'
+import { describe, expect, it } from 'vitest'
 
-const commandDockSource = readMobileSessionRouteSource('../session/MobileSessionCommandDock.tsx')
-const terminalRuntimeSource = readMobileSessionRouteSource(
-  '../session/use-mobile-session-terminal-runtime.ts'
-)
-const nativeChatSource = readMobileSessionRouteSource(
-  '../session/use-mobile-session-native-chat-dictation.ts'
+const sessionRouteSource = readFileSync(
+  new URL('../../app/h/[hostId]/session/[worktreeId].tsx', import.meta.url),
+  'utf8'
 )
 const liveInputStatusSource = readFileSync(
   new URL('../session/MobileTerminalLiveInputStatus.tsx', import.meta.url),
@@ -27,11 +23,11 @@ const sendCompletionGenerationSource = readFileSync(
 )
 
 function liveInputBarBlock(): string {
-  const start = commandDockSource.indexOf('{liveInputEnabled ? (')
+  const start = sessionRouteSource.indexOf('{liveInputEnabled ? (')
   expect(start).toBeGreaterThanOrEqual(0)
-  const end = commandDockSource.indexOf(') : (', start)
+  const end = sessionRouteSource.indexOf(') : (', start)
   expect(end).toBeGreaterThan(start)
-  return commandDockSource.slice(start, end)
+  return sessionRouteSource.slice(start, end)
 }
 
 describe('terminal live input affordance', () => {
@@ -48,9 +44,9 @@ describe('terminal live input affordance', () => {
     expect(block).toContain('!canSend && styles.liveInputFocusTargetDisabled')
     expect(block).toContain('showSoftInputOnFocus')
     expect(block).toContain('liveInputText={liveInputCapture}')
-    expect(terminalRuntimeSource).toContain('useTerminalLiveInputFocus({')
-    expect(nativeChatSource).toContain('useMobileSendCompletionGeneration({')
-    expect(nativeChatSource).toContain('onBlur: resetLiveInputFocus')
+    expect(sessionRouteSource).toContain('useTerminalLiveInputFocus({')
+    expect(sessionRouteSource).toContain('useMobileSendCompletionGeneration({')
+    expect(sessionRouteSource).toContain('onBlur: resetLiveInputFocus')
     expect(sendCompletionGenerationSource).toContain('return () => {')
     expect(sendCompletionGenerationSource).toContain('onBlur()')
     expect(liveInputFocusSource).toContain('focusTerminalLiveInputTarget(inputRef.current')

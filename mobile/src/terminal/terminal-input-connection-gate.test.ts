@@ -1,27 +1,29 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { resolveMobileTerminalInputGate } from './terminal-input-connection-gate'
 import { buildTerminalSendParams, TERMINAL_INPUT_SEND_OPTIONS } from './terminal-send-request'
-import { readMobileSessionRouteSource } from '../session/mobile-session-route-source-family.test-support'
 
-const runtimeSource = readMobileSessionRouteSource(
-  '../session/use-mobile-session-terminal-runtime.ts'
+const sessionRouteSource = readFileSync(
+  new URL('../../app/h/[hostId]/session/[worktreeId].tsx', import.meta.url),
+  'utf8'
 )
-const sendActionsSource = readMobileSessionRouteSource(
-  '../session/use-mobile-session-terminal-send-actions.ts'
+const nativeTerminalOperationsSource = readFileSync(
+  new URL('../session/native-host-session-terminal-operations.ts', import.meta.url),
+  'utf8'
 )
-const terminalInputSource = readMobileSessionRouteSource(
-  '../session/use-mobile-session-terminal-input.ts'
+const accessoryRawSendSource = readFileSync(
+  new URL('./terminal-live-accessory-raw-send.ts', import.meta.url),
+  'utf8'
 )
-const commandDockSource = readMobileSessionRouteSource('../session/MobileSessionCommandDock.tsx')
 
-function sourceSlice(source: string, anchorStart: string, anchorEnd: string): string {
-  const start = source.indexOf(anchorStart)
+function routeSlice(anchorStart: string, anchorEnd: string): string {
+  const start = sessionRouteSource.indexOf(anchorStart)
   expect(start).toBeGreaterThanOrEqual(0)
   // Why: a duplicated start anchor would silently slice the wrong region.
-  expect(source.indexOf(anchorStart, start + 1)).toBe(-1)
-  const end = source.indexOf(anchorEnd, start)
+  expect(sessionRouteSource.indexOf(anchorStart, start + 1)).toBe(-1)
+  const end = sessionRouteSource.indexOf(anchorEnd, start)
   expect(end).toBeGreaterThan(start)
-  return source.slice(start, end + anchorEnd.length)
+  return sessionRouteSource.slice(start, end + anchorEnd.length)
 }
 
 describe('terminal input connection gate', () => {
@@ -85,46 +87,32 @@ describe('terminal input connection gate', () => {
 
 describe('session route offline-compose wiring', () => {
   it('derives both gates from the shared resolver', () => {
-    expect(runtimeSource).toContain('resolveMobileTerminalInputGate({')
+    expect(sessionRouteSource).toContain('resolveMobileTerminalInputGate({')
   })
 
   it('keeps the buffered command box editable offline while the live capture stays send-gated', () => {
-    const bufferedInput = sourceSlice(
-      commandDockSource,
+    const bufferedInput = routeSlice(
       'ref={commandInputRef}',
       'onSubmitEditing={() => void handleSend()}'
     )
     expect(bufferedInput).toContain('editable={canCompose}')
 
-    const liveCapture = sourceSlice(
-      commandDockSource,
-      'ref={liveInputRef}',
-      'importantForAutofill="no"'
-    )
+    const liveCapture = routeSlice('ref={liveInputRef}', 'importantForAutofill="no"')
     expect(liveCapture).toContain('editable={canSend}')
   })
 
   it('keeps the send button connection-gated so held text cannot fire into a dead link', () => {
-    const sendButton = sourceSlice(
-      commandDockSource,
-      'styles.sendButton,',
-      'accessibilityLabel="Send command"'
-    )
+    const sendButton = routeSlice('styles.sendButton,', 'accessibilityLabel="Send command"')
     expect(sendButton).toContain('disabled={!canSend}')
   })
 
   it('holds composed text when the return key submits offline', () => {
-    const handleSend = sourceSlice(
-      sendActionsSource,
-      'async function handleSend()',
-      'sendingRef.current = true'
-    )
+    const handleSend = routeSlice('async function handleSend()', 'sendingRef.current = true')
     expect(handleSend).toContain('!canSend')
   })
 
   it('keeps the live/buffered mode toggle reachable offline', () => {
-    const modeToggle = sourceSlice(
-      commandDockSource,
+    const modeToggle = routeSlice(
       'liveInputEnabled && styles.accessoryKeyActive',
       'onPress={toggleLiveInput}'
     )
@@ -132,25 +120,13 @@ describe('session route offline-compose wiring', () => {
   })
 
   it('tells the live-input commit hook about connection loss so stale mirror state resets', () => {
-    const hookCall = sourceSlice(
-      runtimeSource,
-      'useTerminalLiveInputCommit({',
-      'setLiveInputCapture'
-    )
+    const hookCall = routeSlice('useTerminalLiveInputCommit({', 'setLiveInputCapture')
     expect(hookCall).toContain("connected: connState === 'connected'")
   })
 
   it('keeps every keystroke-grade terminal send now-or-never so nothing replays after reconnect', () => {
-    // Live mirror, buffered send, and gesture arrows must all opt out of the
-    // connect wait — a parked send replays stale bytes into the PTY. Accessory
-    // keys get the same option inside terminal-live-accessory-raw-send.ts.
-    expect(sendActionsSource).toContain('TERMINAL_INPUT_SEND_OPTIONS')
-    expect(terminalInputSource).toContain('TERMINAL_INPUT_SEND_OPTIONS')
-    const optionUses = [sendActionsSource, terminalInputSource].flatMap(
-      (source) => source.match(/TERMINAL_INPUT_SEND_OPTIONS/g) ?? []
-    ).length
-    // Two owner imports plus one buffered, one live, and one gesture send.
-    expect(optionUses).toBe(5)
+    expect(nativeTerminalOperationsSource).toContain('TERMINAL_INPUT_SEND_OPTIONS')
+    expect(accessoryRawSendSource).toContain('TERMINAL_INPUT_SEND_OPTIONS')
     expect(TERMINAL_INPUT_SEND_OPTIONS).toEqual({ failWhenDisconnected: true })
   })
 

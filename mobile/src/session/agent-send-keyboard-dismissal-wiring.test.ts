@@ -1,38 +1,32 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { readMobileSessionRouteSource } from './mobile-session-route-source-family.test-support'
 
-const runtimeSource = readMobileSessionRouteSource('./use-mobile-session-terminal-runtime.ts')
-const nativeChatSource = readMobileSessionRouteSource(
-  './use-mobile-session-native-chat-dictation.ts'
+const sessionRouteSource = readFileSync(
+  new URL('../../app/h/[hostId]/session/[worktreeId].tsx', import.meta.url),
+  'utf8'
 )
-const sendActionsSource = readMobileSessionRouteSource(
-  './use-mobile-session-terminal-send-actions.ts'
+const bufferedDraftHookSource = readFileSync(
+  new URL('../terminal/use-buffered-terminal-drafts.ts', import.meta.url),
+  'utf8'
 )
-const commandDockSource = readMobileSessionRouteSource('./MobileSessionCommandDock.tsx')
-const tabApplicationSource = readMobileSessionRouteSource('./use-mobile-session-tab-application.ts')
-const terminalListSource = readMobileSessionRouteSource('./use-mobile-session-terminal-list.ts')
-const startupSource = readMobileSessionRouteSource('./use-mobile-session-startup.ts')
-const bufferedDraftHookSource = readMobileSessionRouteSource(
-  '../terminal/use-buffered-terminal-drafts.ts'
-)
-const keyboardDismissalHookSource = readMobileSessionRouteSource(
-  './use-agent-send-keyboard-dismissal.ts'
+const keyboardDismissalHookSource = readFileSync(
+  new URL('./use-agent-send-keyboard-dismissal.ts', import.meta.url),
+  'utf8'
 )
 
-function sourceSlice(source: string, anchorStart: string, anchorEnd: string): string {
-  const start = source.indexOf(anchorStart)
+function routeSlice(anchorStart: string, anchorEnd: string): string {
+  const start = sessionRouteSource.indexOf(anchorStart)
   expect(start).toBeGreaterThanOrEqual(0)
   // Why: a duplicated start anchor would silently slice the wrong region.
-  expect(source.indexOf(anchorStart, start + 1)).toBe(-1)
-  const end = source.indexOf(anchorEnd, start)
+  expect(sessionRouteSource.indexOf(anchorStart, start + 1)).toBe(-1)
+  const end = sessionRouteSource.indexOf(anchorEnd, start)
   expect(end).toBeGreaterThan(start)
-  return source.slice(start, end + anchorEnd.length)
+  return sessionRouteSource.slice(start, end + anchorEnd.length)
 }
 
 describe('terminal send keyboard dismissal wiring', () => {
   it('gates the dismissal on the agent-session predicate', () => {
-    const slice = sourceSlice(
-      sendActionsSource,
+    const slice = routeSlice(
       'const dismissKeyboardAfterAgentSend = useAgentSendKeyboardDismissal(',
       'getSendCompletionGeneration\n  )'
     )
@@ -45,18 +39,17 @@ describe('terminal send keyboard dismissal wiring', () => {
     )
     expect(keyboardDismissalHookSource).toContain('dismissSoftwareKeyboard()')
     expect(keyboardDismissalHookSource).toContain('return useCallback(')
-    expect(sendActionsSource).toContain(
-      "import { useAgentSendKeyboardDismissal } from './use-agent-send-keyboard-dismissal'"
+    expect(sessionRouteSource).toContain(
+      "import { useAgentSendKeyboardDismissal } from '../../../../src/session/use-agent-send-keyboard-dismissal'"
     )
   })
 
   it('invalidates pending terminal sends when the focused input surface changes', () => {
-    const slice = sourceSlice(
-      nativeChatSource,
+    const slice = routeSlice(
       'const getSendCompletionGeneration = useMobileSendCompletionGeneration({',
       '})'
     )
-    expect(nativeChatSource).toContain(
+    expect(sessionRouteSource).toContain(
       'const routeKey = nativeChatScopeKey ?? `${hostId}\\0${worktreeId}`'
     )
     expect(slice).toContain(
@@ -67,7 +60,7 @@ describe('terminal send keyboard dismissal wiring', () => {
   it('dismisses after the live input submits, which is the only Enter path', () => {
     // terminal-live-input.ts deliberately keeps Enter off the key map, so
     // onSubmitEditing is the single send seam for the live field.
-    const slice = sourceSlice(commandDockSource, 'ref={liveInputRef}', 'importantForAutofill="no"')
+    const slice = routeSlice('ref={liveInputRef}', 'importantForAutofill="no"')
     expect(slice).toContain('generation: getSendCompletionGeneration()')
     expect(slice).toContain('const submit = handleLiveInputSubmit()')
     expect(slice).toContain('interaction: getLiveInteractionGeneration()')
@@ -79,11 +72,7 @@ describe('terminal send keyboard dismissal wiring', () => {
   })
 
   it('dismisses the buffered command send only once the write is accepted', () => {
-    const slice = sourceSlice(
-      sendActionsSource,
-      'async function handleSend() {',
-      'async function handleAccessoryKey('
-    )
+    const slice = routeSlice('async function handleSend() {', 'async function handleAccessoryKey(')
     const acceptedAt = slice.indexOf('const accepted = isTerminalSendRpcAccepted(response)')
     const restoreAt = slice.indexOf('restoreRejectedDraft()', acceptedAt)
     const dismissAt = slice.indexOf('dismissKeyboardAfterAgentSend(')
@@ -106,24 +95,18 @@ describe('terminal send keyboard dismissal wiring', () => {
   })
 
   it('keeps buffered Return focused until accepted-agent dismissal runs', () => {
-    const slice = sourceSlice(
-      commandDockSource,
-      'ref={commandInputRef}',
-      'onSubmitEditing={() => void handleSend()}'
-    )
+    const slice = routeSlice('ref={commandInputRef}', 'onSubmitEditing={() => void handleSend()}')
     expect(slice).toContain('blurOnSubmit={false}')
   })
 
   it('restores a rejected buffered draft by origin without generation fencing', () => {
-    const sendSlice = sourceSlice(
-      sendActionsSource,
+    const sendSlice = routeSlice(
       'async function handleSend() {',
       'async function handleAccessoryKey('
     )
     const originAt = sendSlice.indexOf('handle: activeHandle')
     const requestAt = sendSlice.indexOf('await client.sendRequest(')
-    const restoreSlice = sourceSlice(
-      sendActionsSource,
+    const restoreSlice = routeSlice(
       'const bufferedDraftSend = bufferedTerminalDraftState.beginBufferedTerminalDraftSend(',
       'bufferedTerminalDraftState.restoreRejectedDraft(bufferedDraftSend)'
     )
@@ -147,12 +130,11 @@ describe('terminal send keyboard dismissal wiring', () => {
       'setDrafts((current) => updateBufferedTerminalDraft(current, handle, value))'
     )
     expect(bufferedDraftHookSource).toContain('pruneBufferedTerminalDraftRestorations(')
-    expect(runtimeSource).toContain('useRef(bufferedTerminalDraftState.reconcileTerminalTabs)')
-    expect(tabApplicationSource).toContain(
+    expect(sessionRouteSource).toContain('useRef(bufferedTerminalDraftState.reconcileTerminalTabs)')
+    expect(sessionRouteSource).toContain(
       'reconcileBufferedDraftsRef.current(currentSessionTabs, nextTabs, {'
     )
-    const routeResetSlice = sourceSlice(
-      startupSource,
+    const routeResetSlice = routeSlice(
       '// Why: Expo reuses this screen across worktrees;',
       'clearDelayedActionTimers()\n    }'
     )
@@ -163,8 +145,7 @@ describe('terminal send keyboard dismissal wiring', () => {
   it('bounds buffered drafts on the terminal.list sweep, against the retained set', () => {
     // The drafts record and the pending-restoration map both live as long as the
     // session screen does; this one call is the only thing that bounds either.
-    const slice = sourceSlice(
-      terminalListSource,
+    const slice = routeSlice(
       'const liveHandles = new Set(result.terminals.map((terminal) => terminal.handle))',
       'setTerminalKeyboardMetrics((prev) => pruneTerminalKeyboardMetrics(prev, shouldPrune))'
     )
@@ -185,8 +166,7 @@ describe('terminal send keyboard dismissal wiring', () => {
   it('leaves the accessory shortcut keys alone, Enter included', () => {
     // Why: the accessory bar sits on top of the keyboard — dismissing would
     // pull away the very row the user is tapping.
-    const slice = sourceSlice(
-      sendActionsSource,
+    const slice = routeSlice(
       'async function handleAccessoryKey(',
       'const sendLiveTerminalInput = useCallback('
     )

@@ -8,18 +8,9 @@ const source =
   readFileSync(new URL('./terminal-webview-pending-messages.ts', import.meta.url), 'utf8') +
   readFileSync(new URL('./terminal-webview-url-tap.ts', import.meta.url), 'utf8') +
   readFileSync(new URL('./terminal-webview-tap-dispatch-injected.ts', import.meta.url), 'utf8') +
-  readFileSync(new URL('./terminal-webview-html.ts', import.meta.url), 'utf8') +
-  Array.from({ length: 10 }, (_, index) =>
-    readFileSync(
-      new URL(
-        `./terminal-webview-html/fragment-${String(index + 1).padStart(2, '0')}.ts`,
-        import.meta.url
-      ),
-      'utf8'
-    )
-  ).join('')
+  readFileSync(new URL('./terminal-webview-html.ts', import.meta.url), 'utf8')
 const sessionSource = readFileSync(
-  new URL('../session/use-mobile-session-terminal-input.ts', import.meta.url),
+  new URL('../../app/h/[hostId]/session/[worktreeId].tsx', import.meta.url),
   'utf8'
 )
 const sessionHelperSource = readFileSync(

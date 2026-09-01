@@ -9,7 +9,6 @@ import { useMobileNativeChatDrafts } from './use-mobile-native-chat-drafts'
 import { useMobileNativeChatFileSearch } from './use-mobile-native-chat-file-search'
 import { useMobileNativeChatMessageSend } from './use-mobile-native-chat-message-send'
 import { mobileNativeChatScopeKey } from './mobile-native-chat-scope-key'
-import { mobileNativeChatStreamPreview } from './mobile-native-chat-streaming-gate'
 import { useMobileNativeChatSession } from './use-mobile-native-chat-session'
 import { useMobileNativeChatSessionOptions } from './use-mobile-native-chat-session-options'
 import { useMobileNativeChatPrompts } from './use-mobile-native-chat-prompts'
@@ -159,7 +158,7 @@ export function useMobileNativeChatController(args: {
   // Throttle the streaming bubble: OpenCode emits a status frame per streamed
   // part, and each one re-renders and re-parses the whole accumulated markdown.
   const nativeChatStreamingText = useThrottledLatestValue(
-    mobileNativeChatStreamPreview(nativeChatStatus, nativeChatAgentWorking),
+    nativeChatAgentWorking ? nativeChatStatus?.lastAssistantMessage : undefined,
     NATIVE_CHAT_STREAM_THROTTLE_MS
   )
   const {
