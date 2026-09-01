@@ -12,11 +12,15 @@ import {
 } from '../project-groups/folder-workspace-path-status'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import type { RuntimeStore } from './runtime-store-contract'
+import { folderWorkspaceKey } from '../../shared/workspace-scope'
 
 type RuntimeProjectGroupDependencies = {
   getStore: () => RuntimeStore | null
   resolveRepo: (selector: string) => Promise<Repo>
   notifyReposChanged: () => void
+  resolveFolderConnectionId: (workspace: FolderWorkspace) => string | null
+  teardownFolderWorkspacePtys: (worktreeId: string, connectionId: string | null) => Promise<void>
+  cleanupRemovedFolderWorkspaceState: (worktreeId: string) => void
 }
 
 type FolderWorkspaceUpdates = Partial<
@@ -210,6 +214,15 @@ export class RuntimeProjectGroupController {
     const store = this.deps.getStore()
     if (!store?.removeFolderWorkspace) {
       throw new Error('runtime_unavailable')
+    }
+    const workspace = store.getFolderWorkspaces?.().find((entry) => entry.id === folderWorkspaceId)
+    if (workspace) {
+      const connectionId = this.deps.resolveFolderConnectionId(workspace)
+      await this.deps.teardownFolderWorkspacePtys(
+        folderWorkspaceKey(folderWorkspaceId),
+        connectionId
+      )
+      this.deps.cleanupRemovedFolderWorkspaceState(folderWorkspaceKey(folderWorkspaceId))
     }
     const deleted = store.removeFolderWorkspace(folderWorkspaceId)
     if (deleted) {

@@ -11,7 +11,8 @@ export class OrcaRuntimeWithSyncMobileSessionTabs extends OrcaRuntimeWithWriteOr
   protected syncMobileSessionTabs(
     snapshots: RuntimeMobileSessionTabsSnapshot[] | undefined,
     unchangedWorktreeIds?: string[],
-    resyncWorktreeIds = new Set<string>()
+    resyncWorktreeIds = new Set<string>(),
+    rendererGeneration?: string | null
   ): Set<string> {
     const changedWorktreeIds = new Set<string>()
     if (snapshots === undefined) {
@@ -21,6 +22,54 @@ export class OrcaRuntimeWithSyncMobileSessionTabs extends OrcaRuntimeWithWriteOr
     // new object, and the accept gate below drops semantically-unchanged
     // renderer resends before they replace an entry — so reference identity
     // before/after detects exactly the entries that actually changed.
+    const blockedRecreatedWorktreeIds = new Set<string>()
+    const acceptedSnapshots = snapshots.filter((snapshot) => {
+      const fence = this.removedMobileSessionWorktreeIds.get(snapshot.worktree)
+      if (!fence) {
+        return true
+      }
+      const currentMeta = this.store?.getWorktreeMeta(snapshot.worktree)
+      if (!currentMeta) {
+        return false
+      }
+      if (snapshot.worktreeInstanceId !== undefined) {
+        if (
+          fence.removedInstanceId !== undefined &&
+          snapshot.worktreeInstanceId === fence.removedInstanceId
+        ) {
+          blockedRecreatedWorktreeIds.add(snapshot.worktree)
+          return false
+        }
+        if (
+          currentMeta.instanceId !== undefined &&
+          snapshot.worktreeInstanceId !== currentMeta.instanceId
+        ) {
+          blockedRecreatedWorktreeIds.add(snapshot.worktree)
+          return false
+        }
+        return true
+      }
+      if (
+        rendererGeneration !== undefined &&
+        rendererGeneration !== null &&
+        snapshot.publicationEpoch !== rendererGeneration
+      ) {
+        blockedRecreatedWorktreeIds.add(snapshot.worktree)
+        return false
+      }
+      if (fence.blockedPublicationEpochs.has(snapshot.publicationEpoch)) {
+        blockedRecreatedWorktreeIds.add(snapshot.worktree)
+        return false
+      }
+      if (fence.acceptedPublicationEpoch === snapshot.publicationEpoch) {
+        return true
+      }
+      if (fence.acceptedPublicationEpoch !== undefined) {
+        fence.blockedPublicationEpochs.add(fence.acceptedPublicationEpoch)
+      }
+      fence.acceptedPublicationEpoch = snapshot.publicationEpoch
+      return true
+    })
     const before = new Map(this.mobileSessionTabsByWorktree)
     this.restoreLivePairedRendererSessionOwnedMobileTerminals(null, {
       missingSnapshotOnly: true,
@@ -31,7 +80,7 @@ export class OrcaRuntimeWithSyncMobileSessionTabs extends OrcaRuntimeWithWriteOr
       this.getWorkspaceSessionHydrationTargets(Boolean(this.offscreenBrowserBackend))
     )
     if (this.offscreenBrowserBackend) {
-      for (const snapshot of snapshots) {
+      for (const snapshot of acceptedSnapshots) {
         if (!worktreeSessionsToHydrate.has(snapshot.worktree)) {
           worktreeSessionsToHydrate.set(snapshot.worktree, null)
         }
@@ -46,7 +95,10 @@ export class OrcaRuntimeWithSyncMobileSessionTabs extends OrcaRuntimeWithWriteOr
       })
     }
     const nextWorktrees = new Set<string>()
-    const incomingWorktreeIds = new Set(snapshots.map((snapshot) => snapshot.worktree))
+    const incomingWorktreeIds = new Set(acceptedSnapshots.map((snapshot) => snapshot.worktree))
+    for (const worktreeId of blockedRecreatedWorktreeIds) {
+      nextWorktrees.add(worktreeId)
+    }
     // Why: the renderer withholds unchanged snapshots to keep the graph payload
     // small, so these worktrees are still live and must not fall into the prune
     // below. Ask for a republish when main no longer holds that accepted renderer
@@ -78,7 +130,7 @@ export class OrcaRuntimeWithSyncMobileSessionTabs extends OrcaRuntimeWithWriteOr
       // which outlives the dropped snapshot and would reject the republish.
       this.acceptedRendererMobileSnapshotByWorktree.delete(worktreeId)
     }
-    for (const snapshot of snapshots) {
+    for (const snapshot of acceptedSnapshots) {
       nextWorktrees.add(snapshot.worktree)
       const existing = this.mobileSessionTabsByWorktree.get(snapshot.worktree)
       // Why: judge renderer publication ordering against the renderer's own

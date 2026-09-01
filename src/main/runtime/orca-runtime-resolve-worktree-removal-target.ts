@@ -52,15 +52,32 @@ export class OrcaRuntimeWithResolveWorktreeRemovalTarget extends OrcaRuntimeWith
       ((persistedHostId && persistedHostId !== hostId) ||
         (repoId && hasWorktreeRemovalRepoOwnerOnOtherHost(store, repoId, hostId)))
     )
+    const removedMeta = store.getWorktreeMeta(worktreeId)
+    const acceptedRendererSnapshot = this.acceptedRendererMobileSnapshotByWorktree.get(worktreeId)
+    const storedSnapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
     if (hostId) {
       store.removeWorktreeMeta(worktreeId, hostId)
     } else {
       store.removeWorktreeMeta(worktreeId)
     }
     if (!preservesSameIdOwner) {
+      const removedPublicationEpoch =
+        acceptedRendererSnapshot?.publicationEpoch ??
+        storedSnapshot?.publicationEpoch ??
+        this.rendererGeneration ??
+        undefined
+      this.removedMobileSessionWorktreeIds.set(worktreeId, {
+        ...(removedMeta?.instanceId ? { removedInstanceId: removedMeta.instanceId } : {}),
+        ...(removedPublicationEpoch ? { removedPublicationEpoch } : {}),
+        blockedPublicationEpochs: removedPublicationEpoch
+          ? new Set([removedPublicationEpoch])
+          : new Set()
+      })
       this.mobileSessionTabsByWorktree.delete(worktreeId)
       this.mobileSessionTabsAgentStatusHeartbeat.removeWorktree(worktreeId)
       this.acceptedRendererMobileSnapshotByWorktree.delete(worktreeId)
+      this.cancelScheduledMobileSessionTabsChanged(worktreeId)
+      this.notifyMobileSessionTabsRemoved(worktreeId)
       advertisedUrlWatcher.forgetWorktree(worktreeId)
       deleteWorktreeHistoryDir(worktreeId)
       this.closeHeadlessBrowserPagesForWorktree(worktreeId)

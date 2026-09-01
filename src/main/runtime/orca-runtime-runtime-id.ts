@@ -126,6 +126,16 @@ export class OrcaRuntimeWithRuntimeId {
     }
   >()
 
+  protected readonly removedMobileSessionWorktreeIds = new Map<
+    string,
+    {
+      removedInstanceId?: string
+      removedPublicationEpoch?: string
+      acceptedPublicationEpoch?: string
+      blockedPublicationEpochs: Set<string>
+    }
+  >()
+
   protected clientSessionTabSelections = new ClientSessionTabSelectionStore()
 
   // Why: idempotency map for mobile terminal creation — a retried create with the

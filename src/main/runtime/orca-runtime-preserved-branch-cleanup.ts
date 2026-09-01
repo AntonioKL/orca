@@ -38,6 +38,7 @@ import { RuntimeRepositoryForkBackfill } from './runtime-repository-fork-backfil
 import { RuntimeWorkspaceSessionController } from './runtime-workspace-session-controller'
 import { RuntimeAiVaultCommands } from './runtime-ai-vault-commands'
 import { ClaudeAgentTeamsService } from './claude-agent-teams-service'
+import { killAllProcessesForWorktree } from './worktree-teardown'
 
 export class OrcaRuntimeWithPreservedBranchCleanup extends OrcaRuntimeWithTerminalDrivers {
   protected readonly preservedBranchCleanup = new RuntimePreservedBranchCleanup(() =>
@@ -203,7 +204,32 @@ export class OrcaRuntimeWithPreservedBranchCleanup extends OrcaRuntimeWithTermin
   protected readonly projectGroups = new RuntimeProjectGroupController({
     getStore: () => this.store,
     resolveRepo: (selector) => this.resolveRepoSelector(selector),
-    notifyReposChanged: () => this.notifyReposChanged()
+    notifyReposChanged: () => this.notifyReposChanged(),
+    resolveFolderConnectionId: (workspace) => this.resolveFolderWorkspaceConnectionId(workspace),
+    teardownFolderWorkspacePtys: async (worktreeId, connectionId) => {
+      const sshPtyProvider = connectionId ? this.getSshProviderFn?.(connectionId) : undefined
+      const ptyProvider = sshPtyProvider ?? this.getLocalProvider()
+      if (!ptyProvider) {
+        return
+      }
+      await killAllProcessesForWorktree(worktreeId, {
+        runtime: this,
+        resolvedWorktreeId: worktreeId,
+        ...(connectionId ? { resolvedConnectionId: connectionId } : {}),
+        localProvider: ptyProvider,
+        onPtyStopped: this.onPtyStopped ?? undefined,
+        ...(connectionId
+          ? { includeProviderInventory: Boolean(sshPtyProvider), includeLocalRegistry: false }
+          : {})
+      }).catch((error) => {
+        console.warn(`[worktree-teardown] failed for ${worktreeId}:`, error)
+      })
+    },
+    cleanupRemovedFolderWorkspaceState: (worktreeId) => {
+      if (this.store) {
+        this.removeWorktreeMetadataAndHistory(this.store, worktreeId)
+      }
+    }
   })
 
   protected readonly nestedRepoImport = new RuntimeNestedRepoImport({

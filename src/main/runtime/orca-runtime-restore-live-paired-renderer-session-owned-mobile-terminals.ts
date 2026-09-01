@@ -20,6 +20,12 @@ export class OrcaRuntimeWithRestoreLivePairedRendererSessionOwnedMobileTerminals
         continue
       }
       const targetWorktreeId = worktreeId ?? pty.worktreeId
+      if (
+        this.removedMobileSessionWorktreeIds.has(targetWorktreeId) &&
+        !this.store?.getWorktreeMeta(targetWorktreeId)
+      ) {
+        continue
+      }
       const pane = parsePaneKey(pty.paneKey ?? '')
       if (!pane || pane.tabId !== pty.tabId) {
         continue
