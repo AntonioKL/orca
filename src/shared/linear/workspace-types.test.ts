@@ -47,6 +47,18 @@ describe('linearWorkspaceScopeSignature', () => {
     expect(linearWorkspaceScopeSignature(second)).not.toBe(linearWorkspaceScopeSignature(first))
   })
 
+  it('changes when the active workspace changes while all workspaces are selected', () => {
+    const first: LinearConnectionStatus = {
+      connected: true,
+      viewer: null,
+      selectedWorkspaceId: 'all',
+      activeWorkspaceId: 'workspace-1'
+    }
+    const second = { ...first, activeWorkspaceId: 'workspace-2' }
+
+    expect(linearWorkspaceScopeSignature(second)).not.toBe(linearWorkspaceScopeSignature(first))
+  })
+
   it('changes when a workspace credential revision changes', () => {
     const first: LinearConnectionStatus = {
       connected: true,

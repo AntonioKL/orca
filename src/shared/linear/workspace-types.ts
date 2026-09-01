@@ -61,6 +61,8 @@ export function linearWorkspaceScopeSignature(
     connected: status.connected === true,
     credentialError: status.credentialError ?? null,
     workspaceId: status.selectedWorkspaceId ?? status.activeWorkspaceId ?? null,
+    // Why: under 'all', URL lookup still falls back to the active workspace, so it must key reads too.
+    activeWorkspaceId: status.activeWorkspaceId ?? null,
     // Why: URL resolution routes by organizationUrlKey, and credentialRevision changes what a read returns.
     viewerOrganizationUrlKey: status.viewer?.organizationUrlKey ?? null,
     workspaces: (status.workspaces ?? [])
