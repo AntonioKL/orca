@@ -1,4 +1,11 @@
-import React, { useState } from 'react'
+import React, { useCallback, useMemo, useRef, useState } from 'react'
+import {
+  defaultRangeExtractor,
+  measureElement as measureVirtualElementSize,
+  observeElementRect,
+  useVirtualizer,
+  type Range
+} from '@tanstack/react-virtual'
 import { BellDot, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,14 +20,31 @@ import { Toggle } from '@/components/ui/toggle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
+import { getActiveStickyHeaderIndex } from '../sidebar/worktree-list/viewport/virtual-rows'
 import { ActivityStatusGroupHeader, ActivityThreadOptionsMenu } from './activity-thread-controls'
 import { ActivityThreadRow } from './activity-thread-row'
+import {
+  buildActivityVirtualItems,
+  estimateActivityVirtualItemSize,
+  findActivityThreadItemIndex,
+  getActivityHeaderItemIndexes,
+  getActivityVirtualItemKey
+} from './activity-thread-virtual-items'
 import type {
   ActivityGroupBy,
   ActivityThreadGroup,
   AgentPaneThread,
   ThreadReadFilter
 } from './activity-thread-types'
+
+// Why: a scroll container measuring 0 (layout-less test DOM, transiently hidden layout)
+// makes TanStack compute a null range and mount nothing; substitute a viewport-sized
+// fallback so the first rows always exist until a real measurement lands.
+const ZERO_RECT_FALLBACK_VIEWPORT = { width: 320, height: 600 }
+const observeActivityListRect: typeof observeElementRect = (instance, cb) =>
+  observeElementRect(instance, (rect) => {
+    cb(rect.height > 0 ? rect : ZERO_RECT_FALLBACK_VIEWPORT)
+  })
 
 export function ActivityThreadListPane({
   threadListRef,
@@ -38,6 +62,8 @@ export function ActivityThreadListPane({
   onCompactModeChange,
   onShowChildAgentsChange,
   onMarkAllThreadsRead,
+  hasCompletedThreads,
+  onClearCompleted,
   visibleThreadGroups,
   visibleThreadCount,
   selectedPaneKey,
@@ -68,6 +94,8 @@ export function ActivityThreadListPane({
   onCompactModeChange: (compactMode: boolean) => void
   onShowChildAgentsChange?: (showChildAgents: boolean) => void
   onMarkAllThreadsRead: () => void
+  hasCompletedThreads?: boolean
+  onClearCompleted?: () => void
   visibleThreadGroups: ActivityThreadGroup[]
   visibleThreadCount: number
   selectedPaneKey: string | null
@@ -101,6 +129,79 @@ export function ActivityThreadListPane({
           return next
         })
       }
+
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  // Why virtualized: with hundreds of agents, mounting every row (markdown previews,
+  // tooltips, hover cards) makes every status tick and keystroke re-render the world;
+  // flattening headers + threads into virtual rows bounds mounted rows by the viewport.
+  const virtualItems = useMemo(
+    () =>
+      buildActivityVirtualItems({
+        groups: visibleThreadGroups,
+        groupBy,
+        collapsedGroupKeys: effectiveCollapsedGroupKeys
+      }),
+    [visibleThreadGroups, groupBy, effectiveCollapsedGroupKeys]
+  )
+  const headerItemIndexes = useMemo(
+    () => getActivityHeaderItemIndexes(virtualItems),
+    [virtualItems]
+  )
+  const selectedItemIndex = useMemo(
+    () => findActivityThreadItemIndex(virtualItems, selectedPaneKey),
+    [virtualItems, selectedPaneKey]
+  )
+
+  const virtualizer = useVirtualizer({
+    count: virtualItems.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: (index) => estimateActivityVirtualItemSize(virtualItems[index], compactMode),
+    getItemKey: (index) => {
+      const item = virtualItems[index]
+      return item ? getActivityVirtualItemKey(item) : `__stale_${index}`
+    },
+    // Why: a measured 0 (hidden/offscreen container, test DOM) must not collapse rows to
+    // nothing — fall back to the estimate so layout stays sane until a real measure lands.
+    measureElement: (element, entry, instance) => {
+      const measured = measureVirtualElementSize(element, entry, instance)
+      if (measured > 0) {
+        return measured
+      }
+      const index = Number.parseInt(element.getAttribute('data-index') ?? '', 10)
+      return estimateActivityVirtualItemSize(
+        Number.isNaN(index) ? undefined : virtualItems[index],
+        compactMode
+      )
+    },
+    // Why: TanStack memoizes rangeExtractor by identity; the selected index must be a dep or it pins a stale row.
+    rangeExtractor: useCallback(
+      (range: Range) => {
+        const indexes = defaultRangeExtractor(range)
+        // Why: the selected row must never be virtualized away — unmounting it drops focus and hides the active selection.
+        if (
+          selectedItemIndex !== null &&
+          selectedItemIndex >= 0 &&
+          !indexes.includes(selectedItemIndex)
+        ) {
+          indexes.push(selectedItemIndex)
+          indexes.sort((a, b) => a - b)
+        }
+        return indexes
+      },
+      [selectedItemIndex]
+    ),
+    overscan: 8,
+    observeElementRect: observeActivityListRect,
+    // Why: sync-flushing row renders inside the scroll listener stalls wheel input; async + overscan keeps rows filled.
+    useFlushSync: false
+  })
+
+  // Why: replicate the pre-virtualization `sticky top-0` group header — absolute rows
+  // can't use CSS sticky, so the active group's header is mirrored as a pinned overlay.
+  const rangeStartIndex = virtualizer.range?.startIndex ?? 0
+  const stickyHeaderIndex =
+    groupBy !== 'none' ? getActiveStickyHeaderIndex(headerItemIndexes, rangeStartIndex) : null
+  const stickyHeaderItem = stickyHeaderIndex === null ? null : virtualItems[stickyHeaderIndex]
 
   // Why: the sidebar hosts this list as a fill-width column, so width and the
   // resize handle are page-only; omitting them lets the flex parent size it.
@@ -215,10 +316,10 @@ export function ActivityThreadListPane({
                       'Show unread threads only'
                     )}
                   >
-                    <BellDot className="size-3" />
+                    <BellDot className="size-3.5" strokeWidth={2.25} />
                   </Toggle>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">
+                <TooltipContent side="bottom" sideOffset={6}>
                   {translate(
                     'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
                     'Show unread threads only'
@@ -234,62 +335,89 @@ export function ActivityThreadListPane({
                 compactMode={compactMode}
                 showChildAgents={showChildAgents}
                 hasUnreadThreads={hasUnreadThreads}
+                hasCompletedThreads={hasCompletedThreads}
                 onCompactModeChange={onCompactModeChange}
                 onShowChildAgentsChange={onShowChildAgentsChange}
                 onMarkAllThreadsRead={onMarkAllThreadsRead}
+                onClearCompleted={onClearCompleted}
               />
             ) : null}
           </div>
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-1.5 scrollbar-sleek">
-        {visibleThreadGroups.map((group) => {
-          const isCollapsed = groupBy !== 'none' && effectiveCollapsedGroupKeys.has(group.key)
-          return (
-            <section
-              key={group.key}
-              aria-label={
-                groupBy === 'none'
-                  ? undefined
-                  : translate(
-                      'auto.components.activity.ActivityPrototypePage.a2b4437bfb',
-                      '{{value0}} activity',
-                      { value0: group.label }
-                    )
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scrollContainerRef}
+          className="h-full overflow-y-auto overflow-x-hidden p-1.5 scrollbar-sleek"
+        >
+          <div
+            className="relative w-full"
+            style={{ height: virtualizer.getTotalSize() }}
+            data-activity-virtual-list=""
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const item = virtualItems[virtualRow.index]
+              if (!item) {
+                return null
               }
-              className="flex flex-col gap-1 pb-1.5"
-            >
-              {groupBy !== 'none' ? (
-                <ActivityStatusGroupHeader
-                  group={group}
-                  collapsed={isCollapsed}
-                  onToggle={() => handleToggleGroup(group.key)}
-                />
-              ) : null}
-              {!isCollapsed
-                ? group.threads.map((thread) => (
-                    <ActivityThreadRow
-                      key={thread.paneKey}
-                      thread={thread}
-                      selected={thread.paneKey === selectedPaneKey}
-                      onSelect={() => onSelectThread(thread)}
-                      onJump={() => onJumpToWorkspace(thread)}
-                      onMarkUnread={() => onMarkThreadUnread(thread)}
-                      canJump={canJumpToWorkspace(thread)}
-                      compactMode={compactMode}
-                      showJumpAction={showJumpAction}
-                    />
-                  ))
-                : null}
-            </section>
-          )
-        })}
-        {visibleThreadCount === 0 ? (
-          <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-            {translate(
-              'auto.components.activity.ActivityPrototypePage.7cd632006b',
-              'No agent activity matches these filters.'
-            )}
+              return (
+                <div
+                  key={virtualRow.key}
+                  ref={virtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  className="absolute left-0 top-0 w-full"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  {item.type === 'header' ? (
+                    <div
+                      role="group"
+                      aria-label={translate(
+                        'auto.components.activity.ActivityPrototypePage.a2b4437bfb',
+                        '{{value0}} activity',
+                        { value0: item.group.label }
+                      )}
+                      className="pb-1"
+                    >
+                      <ActivityStatusGroupHeader
+                        group={item.group}
+                        collapsed={effectiveCollapsedGroupKeys.has(item.group.key)}
+                        onToggle={() => handleToggleGroup(item.group.key)}
+                      />
+                    </div>
+                  ) : (
+                    <div className="pb-1">
+                      <ActivityThreadRow
+                        thread={item.thread}
+                        selected={item.thread.paneKey === selectedPaneKey}
+                        onSelect={onSelectThread}
+                        onJump={onJumpToWorkspace}
+                        onMarkUnread={onMarkThreadUnread}
+                        canJump={canJumpToWorkspace(item.thread)}
+                        compactMode={compactMode}
+                        showJumpAction={showJumpAction}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          {visibleThreadCount === 0 ? (
+            <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+              {translate(
+                'auto.components.activity.ActivityPrototypePage.7cd632006b',
+                'No agent activity matches these filters.'
+              )}
+            </div>
+          ) : null}
+        </div>
+        {stickyHeaderItem?.type === 'header' ? (
+          <div className="absolute inset-x-1.5 top-0 z-10">
+            <ActivityStatusGroupHeader
+              group={stickyHeaderItem.group}
+              collapsed={effectiveCollapsedGroupKeys.has(stickyHeaderItem.group.key)}
+              onToggle={() => handleToggleGroup(stickyHeaderItem.group.key)}
+            />
           </div>
         ) : null}
       </div>

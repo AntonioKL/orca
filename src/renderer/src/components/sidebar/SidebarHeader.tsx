@@ -38,7 +38,7 @@ const SidebarHeader = React.memo(function SidebarHeader({
 
   return (
     <>
-      <div className="mt-2 flex h-8 items-center justify-between px-2 gap-2">
+      <div className="mt-2 flex min-h-8 min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2">
         <SidebarViewToggle
           ariaLabel={translate('auto.components.sidebar.SidebarHeader.views', 'Sidebar view')}
           value={sidebarBody === 'agents' ? 'agents' : 'workspaces'}
@@ -57,9 +57,9 @@ const SidebarHeader = React.memo(function SidebarHeader({
             }
           ]}
         />
-        {sidebarBody === 'agents' ? agentToolbar : null}
+        {sidebarBody === 'agents' ? <div className="shrink-0">{agentToolbar}</div> : null}
         {sidebarBody === 'workspaces' ? (
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex shrink-0 items-center gap-1">
             <SidebarWorkspaceOptionsMenu
               preserveWorkspaceBoardOpen
               onMenuOpenChange={onWorkspaceBoardMenuOpenChange}
@@ -70,6 +70,7 @@ const SidebarHeader = React.memo(function SidebarHeader({
                 <Button
                   variant="ghost"
                   size="icon-xs"
+                  type="button"
                   className="text-muted-foreground"
                   aria-label={translate(
                     'auto.components.sidebar.SidebarHeader.25a95899c9',
@@ -90,6 +91,8 @@ const SidebarHeader = React.memo(function SidebarHeader({
                 <Button
                   variant="ghost"
                   size="icon-xs"
+                  type="button"
+                  className="text-muted-foreground"
                   // Why: the parallel-work tour must click the real sidebar
                   // control so it can hand off to the workspace-creation tour.
                   onClick={openWorkspaceCreationComposerWithTourHandoff}
@@ -102,7 +105,7 @@ const SidebarHeader = React.memo(function SidebarHeader({
                   <Plus className="size-3.5" strokeWidth={2.25} />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="right" sideOffset={6}>
+              <TooltipContent side="bottom" sideOffset={6}>
                 {translate(
                   'auto.components.sidebar.SidebarHeader.ca6f729da2',
                   'New workspace ({{value0}})',

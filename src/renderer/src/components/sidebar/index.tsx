@@ -20,7 +20,10 @@ import { useWorkspaceBoardPanel } from './useWorkspaceBoardPanel'
 import { resolveLeftSidebarStyleVariables } from '@/lib/left-sidebar-appearance'
 import { useSystemPrefersDark } from '@/components/terminal-pane/use-system-prefers-dark'
 import { lazyWithRetry } from '@/lib/lazy-with-retry'
-import SidebarAgentsList from './SidebarAgentsList'
+
+// Why lazy: the Agents list pulls the whole activity pipeline (virtualizer, markdown
+// previews, thread derivation); users on the workspace view should not load or render any of it.
+const SidebarAgentsList = lazyWithRetry(() => import('./SidebarAgentsList'))
 
 const WorktreeMetaDialog = lazyWithRetry(() => import('./WorktreeMetaDialog'))
 const RemoveFolderDialog = lazyWithRetry(() => import('./RemoveFolderDialog'))
@@ -136,15 +139,20 @@ function Sidebar({
                         type="button"
                         variant="ghost"
                         size="icon-xs"
-                        className="shrink-0 text-muted-foreground"
+                        className={cn(
+                          'text-muted-foreground',
+                          agentSearchOpen && 'bg-accent text-accent-foreground'
+                        )}
                         aria-label="Search agent activity"
                         aria-pressed={agentSearchOpen}
                         onClick={() => setAgentSearchOpen((open) => !open)}
                       >
-                        <Search className="size-3" />
+                        <Search className="size-3.5" strokeWidth={2.25} />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom">Search agent activity</TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={6}>
+                      Search agent activity
+                    </TooltipContent>
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -157,16 +165,18 @@ function Sidebar({
                           setAgentReadFilter((filter) => (filter === 'unread' ? 'all' : 'unread'))
                         }
                         className={cn(
-                          'shrink-0 text-muted-foreground',
+                          'text-muted-foreground',
                           agentReadFilter === 'unread' &&
                             'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
                         )}
                         aria-label="Show unread threads only"
                       >
-                        <BellDot className="size-3" />
+                        <BellDot className="size-3.5" strokeWidth={2.25} />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom">Show unread threads only</TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={6}>
+                      Show unread threads only
+                    </TooltipContent>
                   </Tooltip>
                   <div ref={setAgentOptionsTarget} className="flex items-center" />
                 </div>
@@ -187,15 +197,17 @@ function Sidebar({
               }
             />
             {sidebarBody === 'agents' ? (
-              <SidebarAgentsList
-                readFilter={agentReadFilter}
-                setReadFilter={setAgentReadFilter}
-                groupBy={agentGroupBy}
-                setGroupBy={setAgentGroupBy}
-                query={agentQuery}
-                setQuery={setAgentQuery}
-                optionsTarget={agentOptionsTarget}
-              />
+              <React.Suspense fallback={<div className="min-h-0 flex-1" />}>
+                <SidebarAgentsList
+                  readFilter={agentReadFilter}
+                  setReadFilter={setAgentReadFilter}
+                  groupBy={agentGroupBy}
+                  setGroupBy={setAgentGroupBy}
+                  query={agentQuery}
+                  setQuery={setAgentQuery}
+                  optionsTarget={agentOptionsTarget}
+                />
+              </React.Suspense>
             ) : (
               <WorktreeList
                 scrollOffsetRef={worktreeScrollOffsetRef}

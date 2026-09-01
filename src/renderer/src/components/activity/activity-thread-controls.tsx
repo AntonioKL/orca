@@ -63,18 +63,22 @@ export function ActivityThreadOptionsMenu({
   compactMode,
   showChildAgents = false,
   hasUnreadThreads,
+  hasCompletedThreads = false,
   onCompactModeChange,
   onShowChildAgentsChange,
-  onMarkAllThreadsRead
+  onMarkAllThreadsRead,
+  onClearCompleted
 }: {
   groupBy?: ActivityGroupBy
   onGroupByChange?: (groupBy: ActivityGroupBy) => void
   compactMode: boolean
   showChildAgents?: boolean
   hasUnreadThreads: boolean
+  hasCompletedThreads?: boolean
   onCompactModeChange: (compactMode: boolean) => void
   onShowChildAgentsChange?: (showChildAgents: boolean) => void
   onMarkAllThreadsRead: () => void
+  onClearCompleted?: () => void
 }): React.JSX.Element {
   return (
     <DropdownMenu>
@@ -87,13 +91,13 @@ export function ActivityThreadOptionsMenu({
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                className="text-muted-foreground"
                 aria-label={translate(
                   'auto.components.activity.ActivityPrototypePage.db8a1878b5',
                   'Thread list options'
                 )}
               >
-                <MoreVertical className="size-3" />
+                <MoreVertical className="size-3.5" strokeWidth={2.25} />
               </Button>
             </DropdownMenuTrigger>
           </span>
@@ -134,13 +138,26 @@ export function ActivityThreadOptionsMenu({
             <DropdownMenuSeparator />
           </>
         ) : null}
-        <DropdownMenuCheckboxItem
-          checked={compactMode}
-          onCheckedChange={(checked) => onCompactModeChange(checked === true)}
-          onSelect={(event) => event.preventDefault()}
-        >
-          {translate('auto.components.activity.ActivityPrototypePage.f70e4bec47', 'Compact mode')}
-        </DropdownMenuCheckboxItem>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuCheckboxItem
+              checked={compactMode}
+              onCheckedChange={(checked) => onCompactModeChange(checked === true)}
+              onSelect={(event) => event.preventDefault()}
+            >
+              {translate(
+                'auto.components.activity.ActivityPrototypePage.f70e4bec47',
+                'Compact mode'
+              )}
+            </DropdownMenuCheckboxItem>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={8}>
+            {translate(
+              'auto.components.activity.ActivityPrototypePage.compactModeDescription',
+              'Shows shorter thread rows with one-line titles and two-line status messages.'
+            )}
+          </TooltipContent>
+        </Tooltip>
         {onShowChildAgentsChange ? (
           <DropdownMenuCheckboxItem
             checked={showChildAgents}
@@ -157,6 +174,14 @@ export function ActivityThreadOptionsMenu({
         <DropdownMenuItem onSelect={onMarkAllThreadsRead} disabled={!hasUnreadThreads}>
           {translate('auto.components.activity.ActivityPrototypePage.023ff75afe', 'Mark all read')}
         </DropdownMenuItem>
+        {onClearCompleted ? (
+          <DropdownMenuItem onSelect={onClearCompleted} disabled={!hasCompletedThreads}>
+            {translate(
+              'auto.components.activity.ActivityPrototypePage.clearCompleted',
+              'Clear completed'
+            )}
+          </DropdownMenuItem>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   )
