@@ -18,6 +18,15 @@ export async function readHostTabs(
 
 type HostBrowserPageRow = { browserPageId: string; url: string }
 
+/**
+ * The host's own browser page registry for a workspace, addressed by worktree selector.
+ *
+ * Why not readHostTabs: a headless paired host does not project browser pages into
+ * session.tabs.list — that snapshot carries only terminals, and it additionally hides client-placed
+ * pages from any peer that does not advertise `BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY`, which the
+ * CLI socket deliberately does not. `browser.tabList` has neither limitation, so it is the only
+ * oracle that answers "does the host still hold this page" for both placements.
+ */
 async function readHostBrowserPages(
   hostClient: RuntimeClient,
   worktreeSelector: string,
@@ -31,14 +40,7 @@ async function readHostBrowserPages(
   return response.result.tabs
 }
 
-/**
- * The browser pages the host itself still holds for a worktree.
- *
- * Why not readHostTabs: a headless paired host does not project browser pages into
- * session.tabs.list — that snapshot carries only terminals — so asking it whether a page survived
- * a close answers "no" whether or not the close ever reached the host. browser.tabList reads the
- * host's own page registry, which is the thing a close has to empty.
- */
+/** The page ids the host still holds for a repo-backed worktree. */
 export async function readHostBrowserPageIds(
   hostClient: RuntimeClient,
   repoPath: string
@@ -63,6 +65,13 @@ export async function readHostBrowserPageUrl(
   return tabs.find((tab) => tab.browserPageId === browserPageId)?.url ?? null
 }
 
+/**
+ * Every browser page URL the host holds, for callers that address the workspace by selector
+ * (`id:`/`path:`) rather than repo path — a folder workspace has no repo path.
+ *
+ * Why the explicit ceiling: a paired host's client is constructed with a 5s default, which the
+ * first tabList can outrun while the host brings its browser session up.
+ */
 export async function readHostBrowserPageUrls(
   hostClient: RuntimeClient,
   worktreeSelector: string
