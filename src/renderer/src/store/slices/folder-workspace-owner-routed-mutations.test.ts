@@ -439,6 +439,7 @@ describe('folder workspace owner-routed mutations', () => {
     })
     folderWorkspacesDelete.mockResolvedValue(true)
     const store = createTestStore()
+    const shutdownWorktreeBrowsers = vi.fn().mockResolvedValue(undefined)
     store.setState({
       settings: { activeRuntimeEnvironmentId: null } as never,
       activeWorktreeId: `folder:${localFolder.id}`,
@@ -447,7 +448,8 @@ describe('folder workspace owner-routed mutations', () => {
         { ...projectGroup, executionHostId: 'local' },
         { ...projectGroup, executionHostId: 'runtime:env-owner' }
       ],
-      folderWorkspaces: [localFolder, runtimeFolder]
+      folderWorkspaces: [localFolder, runtimeFolder],
+      shutdownWorktreeBrowsers
     })
 
     await expect(store.getState().deleteFolderWorkspace(localFolder.id)).resolves.toBe(true)
@@ -458,6 +460,7 @@ describe('folder workspace owner-routed mutations', () => {
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
     // Delete is owner-scoped: the sibling host's row keeps the bare ID alive.
     expect(store.getState().folderWorkspaces).toEqual([runtimeFolder])
+    expect(shutdownWorktreeBrowsers).not.toHaveBeenCalled()
   })
 
   it('deletes a runtime folder through its owner instead of the focused runtime', async () => {
