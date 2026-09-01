@@ -21,8 +21,15 @@ export class OrcaRuntimeWithCloseStructuredAgentSessionTab extends OrcaRuntimeWi
     tab: RuntimeMobileSessionAgentTab
   ): Promise<void> {
     const host = getStructuredAgentSessionHost()
-    if (typeof host?.setSessionTabVisibility === 'function') {
-      await host.setSessionTabVisibility(tab.sessionId, false)
+    if (host) {
+      // Closing the mobile tab is the structured-session view close: stop the
+      // provider child before removing the durable tab reference.
+      if (typeof host.close === 'function') {
+        await host.close(tab.sessionId)
+      }
+      if (typeof host.setSessionTabVisibility === 'function') {
+        await host.setSessionTabVisibility(tab.sessionId, false)
+      }
     }
     const nextTabs = snapshot.tabs.filter((candidate) => candidate.id !== tab.id)
     const active = nextTabs.find((candidate) => candidate.isActive) ?? nextTabs[0] ?? null
