@@ -7,6 +7,7 @@ import type {
 import type { ClaudeStructuredLaunch } from './claude-structured-launch-resolution'
 import type { ClaudeJournalTranslator } from './claude-structured-journal-translation'
 import type { ClaudePendingPrompt, ClaudePromptRegistry } from './claude-structured-prompt-replies'
+import { cancelProcessAcquisition } from '../../shared/child-process/cancel-process-acquisition'
 
 export type ClaudeAuthDiagnostic = {
   apiKeySourceConfigured: boolean
@@ -77,6 +78,7 @@ export type ClaudeAcquisitionAttempt = {
   buffered: (() => void)[]
   published: boolean
   cancelled: boolean
+  exitProven: boolean
   finished: Promise<void>
   finish: () => void
 }
@@ -94,6 +96,7 @@ export function createClaudeAcquisitionAttempt(
     buffered: [],
     published: false,
     cancelled: false,
+    exitProven: false,
     finished,
     finish
   }
@@ -139,6 +142,16 @@ export class ClaudeAcquisitionRegistry {
     }
   }
 
+  restoreIfCurrent(
+    sessionId: string,
+    replacement: ClaudeAcquisitionAttempt,
+    previous: ClaudeAcquisitionAttempt
+  ): void {
+    if (this.attempts.get(sessionId) === replacement) {
+      this.attempts.set(sessionId, previous)
+    }
+  }
+
   sessionIds(): IterableIterator<string> {
     return this.attempts.keys()
   }
@@ -150,11 +163,16 @@ export class ClaudeAcquisitionRegistry {
 
 export async function cancelClaudeAcquisitionAttempt(
   attempt: ClaudeAcquisitionAttempt | undefined
-): Promise<void> {
+): Promise<boolean> {
   if (!attempt) {
-    return
+    return true
   }
-  attempt.cancelled = true
-  await attempt.connection?.close()
-  await attempt.finished
+  return cancelProcessAcquisition({
+    cancel: () => {
+      attempt.cancelled = true
+    },
+    connection: () => attempt.connection,
+    exitProven: () => attempt.exitProven,
+    finished: attempt.finished
+  })
 }

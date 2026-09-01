@@ -101,6 +101,7 @@ function fakeClaude() {
       respondWithError: async () => {},
       close: async () => {
         connection.closed = true
+        return true
       }
     }
     connections.push(connection)

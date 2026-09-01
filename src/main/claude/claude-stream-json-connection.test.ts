@@ -193,9 +193,9 @@ describe('Claude stream-json connection', () => {
     process.child.emit('error', new Error('spawn missing-claude ENOENT'))
 
     await expect(Promise.all([connection.close(), connection.close()])).resolves.toEqual([
-      undefined,
-      undefined
+      true,
+      true
     ])
-    await expect(connection.close()).resolves.toBeUndefined()
+    await expect(connection.close()).resolves.toBe(true)
   })
 })

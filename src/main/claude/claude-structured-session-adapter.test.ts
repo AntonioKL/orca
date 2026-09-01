@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type {
   AgentJournalMessageItem,
   AgentSessionJournalIdentity
@@ -135,6 +135,7 @@ function fakeClaude(
       close: async () => {
         connection.closeCount += 1
         connection.closed = true
+        return true
       }
     }
     connections.push(connection)
@@ -537,6 +538,27 @@ describe('ClaudeStructuredSessionAdapter turns and controls', () => {
       'custom-model'
     ])
     expect(result.current).toEqual({ model: 'custom-model', effort: 'high' })
+  })
+})
+
+describe('ClaudeStructuredSessionAdapter acquisition cleanup', () => {
+  it('reports unproven published-session cleanup so callers can retry safely', async () => {
+    const claude = fakeClaude()
+    const adapter = await acquired(claude)
+    const connection = claude.connections[0]
+    connection.close = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true) as unknown as FakeConnection['close']
+
+    await expect(adapter.releaseAcquisition({ sessionId: 'session-1' })).resolves.toBe(false)
+    expect(await adapter.readOptions({ sessionId: 'session-1', fence: 7 })).toMatchObject({
+      current: { model: 'claude-sonnet-5' }
+    })
+    await expect(adapter.releaseAcquisition({ sessionId: 'session-1' })).resolves.toBe(true)
+    expect(() => adapter.readOptions({ sessionId: 'session-1', fence: 7 })).toThrow(
+      'no live claude stream-json session'
+    )
   })
 })
 

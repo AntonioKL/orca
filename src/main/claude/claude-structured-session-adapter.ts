@@ -1,3 +1,4 @@
+import { AgentSessionAcquisitionExitUnprovenError } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type {
   AgentSessionAcquisition,
   StructuredAgentSessionAcquireInput,
@@ -45,7 +46,9 @@ import {
   type ClaudeStructuredSessionEvent
 } from './claude-structured-session-state'
 import {
-  closeClaudePublishedSession,
+  closeAllClaudeSessions,
+  closeClaudePublishedSessionForDeps,
+  closeClaudeSession,
   settleClaudeExitedSession
 } from './claude-structured-session-close'
 
@@ -110,9 +113,18 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     }
 
     try {
-      await cancelClaudeAcquisitionAttempt(previous)
+      if (previous && !(await cancelClaudeAcquisitionAttempt(previous))) {
+        this.acquisitions.restoreIfCurrent(sessionId, attempt, previous)
+        throw new AgentSessionAcquisitionExitUnprovenError(
+          new Error(`claude acquisition for session ${sessionId} could not be stopped`)
+        )
+      }
       this.acquisitions.assertCurrent(sessionId, attempt)
-      await this.closePublishedSession(sessionId)
+      if (!(await closeClaudePublishedSessionForDeps(this.sessions, sessionId, this.deps))) {
+        throw new AgentSessionAcquisitionExitUnprovenError(
+          new Error(`claude session ${sessionId} could not be stopped`)
+        )
+      }
       this.acquisitions.assertCurrent(sessionId, attempt)
       const launch = await this.deps.resolveLaunch({ identity: input.identity })
       observedLeafUuid = launch.resumeLeafUuid
@@ -213,12 +225,15 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       return acquired
     } catch (error) {
       initDeadline.clear()
-      this.acquisitions.deleteIfCurrent(sessionId, attempt)
       if (this.sessions.get(sessionId)?.connection !== attempt.connection) {
         translator?.dispose()
         prompts.clear()
-        await attempt.connection?.close()
+        const closed = (await attempt.connection?.close()) ?? true
+        if (!closed) {
+          throw new AgentSessionAcquisitionExitUnprovenError(error)
+        }
       }
+      this.acquisitions.deleteIfCurrent(sessionId, attempt)
       throw error
     } finally {
       attempt.finish()
@@ -272,47 +287,31 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
 
   cancelTurn: StructuredAgentSessionAdapter['cancelTurn'] = (input) =>
     cancelClaudeTurn(this.session(input.sessionId), this.deps.requestTimeoutMs)
-
   answerPrompt: StructuredAgentSessionAdapter['answerPrompt'] = (input) =>
     answerClaudePrompt(this.session(input.sessionId), input)
-
   setOption: StructuredAgentSessionAdapter['setOption'] = (input) =>
     setClaudeStructuredOption(this.session(input.sessionId), input, this.deps.requestTimeoutMs)
-
   readOptions = (input: { sessionId: string; fence: number }) =>
     readClaudeStructuredSessionOptions(this.session(input.sessionId), this.deps.requestTimeoutMs)
 
-  releaseAcquisition(input: { sessionId: string }): Promise<boolean> {
-    return this.closeSession(input.sessionId)
-  }
+  releaseAcquisition = (input: { sessionId: string }): Promise<boolean> =>
+    this.closeSession(input.sessionId)
 
-  async closeSession(sessionId: string): Promise<boolean> {
-    const attempt = this.acquisitions.get(sessionId)
-    if (attempt) {
-      attempt.cancelled = true
-      await attempt.connection?.close()
-      await attempt.finished
-    }
-    await this.closePublishedSession(sessionId)
-    return true
-  }
-
-  private async closePublishedSession(sessionId: string): Promise<void> {
-    await closeClaudePublishedSession({
-      sessions: this.sessions,
+  closeSession = (sessionId: string): Promise<boolean> =>
+    closeClaudeSession({
       sessionId,
+      sessions: this.sessions,
+      acquisitions: this.acquisitions,
       ...(this.deps.persistHandle ? { persistHandle: this.deps.persistHandle } : {}),
       ...(this.deps.onEvent ? { onEvent: this.deps.onEvent } : {})
     })
-  }
 
-  async closeAll(): Promise<void> {
-    this.acquisitions.close()
-    while (this.sessions.size > 0 || this.acquisitions.size > 0) {
-      const ids = new Set([...this.sessions.keys(), ...this.acquisitions.sessionIds()])
-      await Promise.all([...ids].map((sessionId) => this.closeSession(sessionId)))
-    }
-  }
+  closeAll = (): Promise<void> =>
+    closeAllClaudeSessions({
+      sessions: this.sessions,
+      acquisitions: this.acquisitions,
+      closeSession: this.closeSession
+    })
 
   private session(sessionId: string): ClaudeSession {
     const session = this.sessions.get(sessionId)

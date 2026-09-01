@@ -45,7 +45,8 @@ export type ClaudeStreamJsonConnection = {
   ) => Promise<unknown>
   respond: (requestId: string, response: unknown) => Promise<void>
   respondWithError: (requestId: string, error: string) => Promise<void>
-  close: () => Promise<void>
+  /** Resolves true only after the child emitted exit/close; false is unproven. */
+  close: () => Promise<boolean>
 }
 
 export class ClaudeControlRequestError extends Error {
@@ -96,7 +97,7 @@ export async function openClaudeStreamJsonConnection(
   let closing = false
   let terminalError: Error | null = null
   let writeChain: Promise<void> = Promise.resolve()
-  let closePromise: Promise<void> | null = null
+  let closePromise: Promise<boolean> | null = null
 
   let settleExit = (): void => {}
   const exitPromise = new Promise<void>((resolve) => {
@@ -251,7 +252,7 @@ export async function openClaudeStreamJsonConnection(
     return promise
   }
 
-  const close = (): Promise<void> => {
+  const close = (): Promise<boolean> => {
     closePromise ??= (async () => {
       closing = true
       try {
@@ -267,6 +268,11 @@ export async function openClaudeStreamJsonConnection(
         }
       }
       failPending(new Error('claude stream-json connection closed'))
+      const proven = exited
+      if (!proven) {
+        closePromise = null
+      }
+      return proven
     })()
     return closePromise
   }
