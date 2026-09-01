@@ -803,4 +803,22 @@ describe('useMobileStructuredAgentSession', () => {
     expect(hook?.session.messages).toHaveLength(1)
     expect(hook?.session.status).toBe('ready')
   })
+
+  it('keeps the transcript visible while a reconnect is loading', async () => {
+    await act(async () => {
+      renderer = create(createElement(Harness, { connected: true }))
+    })
+    await vi.waitFor(() => expect(listener).toEqual(expect.any(Function)))
+    act(() => listener?.(snapshotWithMessage()))
+    expect(hook?.session.messages).toHaveLength(1)
+
+    await act(async () => {
+      renderer?.update(createElement(Harness, { connected: false }))
+    })
+    await act(async () => {
+      renderer?.update(createElement(Harness, { connected: true }))
+    })
+
+    expect(hook?.session.messages).toHaveLength(1)
+  })
 })

@@ -40,6 +40,7 @@ export function useMobileStructuredAgentState(args: {
   const [state, setState] = useState<StructuredAgentSessionState>(EMPTY_STRUCTURED_AGENT_SESSION)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const stateRef = useRef(state)
+  const sessionIdentityRef = useRef<{ client: RpcClient; sessionId: string } | null>(null)
   useLayoutEffect(() => {
     stateRef.current = state
   }, [state])
@@ -50,6 +51,7 @@ export function useMobileStructuredAgentState(args: {
 
   useEffect(() => {
     if (!client || !sessionId || !enabled) {
+      sessionIdentityRef.current = null
       setState(EMPTY_STRUCTURED_AGENT_SESSION)
       setLoadingOlder(false)
       return
@@ -59,6 +61,14 @@ export function useMobileStructuredAgentState(args: {
       // transcript on screen for the outage: clearing it renders neither spinner
       // nor empty-state copy, so the chat reads as gone rather than offline.
       return
+    }
+    const sessionChanged =
+      sessionIdentityRef.current?.client !== client ||
+      sessionIdentityRef.current?.sessionId !== sessionId
+    sessionIdentityRef.current = { client, sessionId }
+    if (sessionChanged) {
+      // Do not leak the previous tab's transcript while the new session loads.
+      setState(EMPTY_STRUCTURED_AGENT_SESSION)
     }
     apply({ type: 'loading' })
     const holderId = structuredAgentSessionHolderId('mobile-chat')
