@@ -1,6 +1,5 @@
 import { useAppStore } from '../../store'
 import { isExplicitAgentStatusFresh } from '@/lib/agent-status'
-import { getAgentStatusEpochNow } from '@/lib/agent-status-epoch-clock'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
   type AgentStatusEntry,
@@ -29,14 +28,12 @@ export function useNativeChatHookStatus(
   // Freshness is time-based; subscribe to the scheduler epoch so a silent
   // working row stops driving Native Chat when its TTL expires.
   const agentStatusEpoch = useAppStore((store) => store.agentStatusEpoch)
-  // Use the same epoch-scoped timestamp as other freshness consumers so a
-  // render cannot disagree with the sidebar at the stale boundary.
-  const agentStatusNow = getAgentStatusEpochNow(agentStatusEpoch)
+  void agentStatusEpoch
   // Why: primitive selectors keep unrelated pane/status updates from rerendering
   // native chat while still exposing the three fields used for reconciliation.
   const state = useAppStore((store) => {
     const entry = store.agentStatusByPaneKey[paneKey]
-    return resolveNativeChatHookState(entry, agentStatusNow)
+    return resolveNativeChatHookState(entry)
   })
   const stateStartedAt = useAppStore(
     (store) => store.agentStatusByPaneKey[paneKey]?.stateStartedAt ?? null
