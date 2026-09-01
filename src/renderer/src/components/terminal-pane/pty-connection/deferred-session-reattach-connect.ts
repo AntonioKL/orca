@@ -1,6 +1,5 @@
 import { warnTerminalLifecycleAnomaly } from '../terminal-lifecycle-diagnostics'
-import { recordPtyConnectDiagnostic } from './pty-connect-limits'
-import { isSshSessionGoneError } from './pty-connect-limits'
+import { isSshSessionGoneError, recordPtyConnectDiagnostic } from './pty-connect-limits'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import { toProcessExitStartup } from './process-exit-startup'
 import { recoverUnverifiableDirectSshReattach } from './direct-ssh-reattach-recovery'
