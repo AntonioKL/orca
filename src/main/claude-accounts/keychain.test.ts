@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   deleteActiveClaudeKeychainCredentials,
+  getActiveClaudeService,
   readActiveClaudeKeychainCredentials,
   readActiveClaudeKeychainCredentialsStrict,
   writeActiveClaudeKeychainCredentials,
@@ -119,6 +120,12 @@ describe('Claude Keychain credentials', () => {
       '-w',
       'credentials-json'
     ])
+  })
+
+  it('derives the scoped service from the exact absolute config path', () => {
+    const configDir = '/private/var/folders/orca/claude-accounts/account-a/auth'
+
+    expect(getActiveClaudeService(configDir)).toBe(serviceForConfigDir(configDir))
   })
 
   it('writes runtime credentials to scoped and legacy services for pre-2.1 CLIs', async () => {

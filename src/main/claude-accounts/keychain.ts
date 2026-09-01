@@ -100,7 +100,7 @@ function getKeychainUser(): string {
   return process.env.USER || process.env.USERNAME || 'user'
 }
 
-function getActiveClaudeService(configDir?: string): string {
+export function getActiveClaudeService(configDir?: string): string {
   if (!configDir) {
     return ACTIVE_CLAUDE_SERVICE
   }
