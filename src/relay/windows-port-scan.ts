@@ -263,6 +263,11 @@ export function parseWindowsNetstatOutput(output: string): DetectedPort[] {
  * real host (51 against 0 here), so the largest zero-peer group is the
  * listening one. An exact tie keeps every tied group rather than guessing,
  * which is no worse than reading shape alone.
+ *
+ * A majority rule inverts if the majority is wrong: enough transient zero-peer
+ * sockets and the phantoms win, publishing those and dropping the real
+ * listeners. The hatch is to return [] here and defer to the PowerShell reader,
+ * which reads the state word instead of inferring it.
  */
 function readDominantZeroPeerState(rows: NetstatTcpRow[]): DetectedPort[] {
   const countByState = new Map<string, number>()
