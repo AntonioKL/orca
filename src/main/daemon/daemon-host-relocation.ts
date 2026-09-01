@@ -291,7 +291,9 @@ export function materializeRelocatedDaemonHost(): RelocatedDaemonHost | null {
       entryRelPath: sources.entryRelPath
     }
     writeFileSync(join(staging, MARKER_NAME), JSON.stringify(marker))
-    // Replace any stale/partial dest, then publish the staging dir atomically.
+    // Replace any stale/partial dest, then publish atomically. Windows refuses to delete a running
+    // image, so a live daemon already hosted in THIS version's dir (same-version reinstall, or a dev
+    // channel reusing a version) throws here and materialization fails open to the install-dir host.
     rmSync(dest, { recursive: true, force: true })
     renameSync(staging, dest)
   } catch {

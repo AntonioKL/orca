@@ -19,10 +19,11 @@
     Push $0
     ; The host exe is a verbatim copy of the app exe, so the app's own image name
     ; reaches it; the second name covers hosts left by builds that renamed the copy.
-    ; Both are the product being uninstalled, so a name-wide kill has no collateral.
-    nsExec::Exec 'taskkill /F /IM ${APP_EXECUTABLE_FILENAME}'
+    ; Filtered to the current user like upstream's per-user KILL_PROCESS, so an
+    ; elevated machine-wide uninstall cannot reach another logged-on user's session.
+    nsExec::Exec '"$SYSDIR\cmd.exe" /C taskkill /F /IM "${APP_EXECUTABLE_FILENAME}" /FI "USERNAME eq %USERNAME%"'
     Pop $0
-    nsExec::Exec 'taskkill /F /IM orca-terminal-daemon.exe'
+    nsExec::Exec '"$SYSDIR\cmd.exe" /C taskkill /F /IM "orca-terminal-daemon.exe" /FI "USERNAME eq %USERNAME%"'
     Pop $0
     Pop $0
     ; Give the OS a moment to release the image lock before removing the tree.
