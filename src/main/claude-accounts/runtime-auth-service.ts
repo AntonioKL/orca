@@ -5,6 +5,8 @@ import {
 } from './runtime-selection'
 import { ClaudeRuntimeAuthSync } from './runtime-auth/runtime-auth-sync'
 import type { ClaudeRuntimeAuthPreparation } from './runtime-auth/runtime-auth-types'
+import { migrateLegacySharedClaudeAuth } from './legacy-shared-claude-auth-migration'
+import { readActiveClaudeKeychainCredentialsStrict } from './keychain'
 
 export type { ClaudeRuntimeAuthPreparation } from './runtime-auth/runtime-auth-types'
 
@@ -13,6 +15,7 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
     super(store)
     this.initializeLastSyncedState()
     void this.safeSyncForCurrentSelection()
+    void this.migrateLegacySharedAuth()
   }
 
   async prepareForClaudeLaunch(
@@ -78,6 +81,28 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
       await this.syncForCurrentSelection()
     } catch (error) {
       console.warn('[claude-runtime-auth] Failed to sync runtime auth state:', error)
+    }
+  }
+
+  private async migrateLegacySharedAuth(): Promise<void> {
+    const settings = this.store.getSettings()
+    const paths = this.pathResolver.getRuntimePaths()
+    const metadataDir = this.getRuntimeMetadataDir()
+    try {
+      await migrateLegacySharedClaudeAuth({
+        accounts: settings.claudeManagedAccounts,
+        sharedAuthPath: paths.credentialsPath,
+        metadataDir,
+        readLegacyKeychain:
+          process.platform === 'darwin'
+            ? () => readActiveClaudeKeychainCredentialsStrict()
+            : undefined,
+        readManagedCredentials: (account) => this.readManagedCredentials(account),
+        writeManagedCredentials: (account, contents) =>
+          this.writeManagedCredentials(account, contents)
+      })
+    } catch (error) {
+      console.warn('[claude-runtime-auth] Legacy auth migration deferred:', error)
     }
   }
 

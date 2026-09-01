@@ -229,7 +229,13 @@ export class ClaudeManagedAuthStorage {
     if (process.platform !== 'win32') {
       if (
         !existsSync(candidatePath) ||
-        !existsSync(join(candidatePath, '.orca-managed-claude-auth'))
+        !existsSync(join(candidatePath, '.orca-managed-claude-auth')) ||
+        lstatSync(candidatePath).isSymbolicLink() ||
+        lstatSync(join(candidatePath, '.orca-managed-claude-auth')).isSymbolicLink() ||
+        !lstatSync(join(candidatePath, '.orca-managed-claude-auth')).isFile() ||
+        (expectedAccountId !== undefined &&
+          readFileSync(join(candidatePath, '.orca-managed-claude-auth'), 'utf-8').trim() !==
+            expectedAccountId)
       ) {
         throw new Error('Managed Claude auth storage is not owned by Orca.')
       }
@@ -249,6 +255,8 @@ export class ClaudeManagedAuthStorage {
           'managed_root="${HOME%/}/.local/share/orca/claude-accounts"',
           'candidate_real=$(readlink -f -- "$candidate")',
           'managed_root_real=$(readlink -f -- "$managed_root")',
+          'test ! -L "$candidate"',
+          'test ! -L "$candidate_real/.orca-managed-claude-auth"',
           'test -f "$candidate_real/.orca-managed-claude-auth"',
           expected,
           'case "$candidate_real" in "$managed_root_real"/*/auth) printf "%s\\n" "$candidate_real" ;; *) exit 35 ;; esac'

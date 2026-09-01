@@ -8,7 +8,6 @@ import {
 } from '../runtime-selection'
 import { hasLiveClaudePtys } from '../live-pty-gate'
 import { isOauthTokenExpiring } from '../oauth-refresh'
-import { writeActiveClaudeKeychainCredentialsForRuntime } from '../keychain'
 import { ClaudeRuntimeAuthPreparationService } from './runtime-auth-preparation'
 
 export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
@@ -263,20 +262,10 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
       }
     }
 
-    const paths = this.pathResolver.getRuntimePaths()
     this.writeRuntimeCredentials(credentialsJson)
-    if (process.platform === 'darwin') {
-      // Why: Claude Code 2.1+ reads the scoped service, older builds the legacy unsuffixed one; runtime switching must satisfy both.
-      try {
-        await writeActiveClaudeKeychainCredentialsForRuntime(credentialsJson, paths.configDir)
-      } catch (error) {
-        await this.restoreSystemDefaultSnapshot(
-          credentialsJson,
-          await this.readManagedOauthAccount(activeAccount)
-        )
-        throw error
-      }
-    }
+    // Isolated accounts are self-contained config roots. Never mirror their
+    // credentials into either active Keychain service (the legacy service is
+    // shared by all accounts and creates stale siblings).
     const managedOauthAccount = await this.readManagedOauthAccount(activeAccount)
     if (this.writeRuntimeOauthAccount(managedOauthAccount)) {
       this.lastWrittenOauthAccount = managedOauthAccount

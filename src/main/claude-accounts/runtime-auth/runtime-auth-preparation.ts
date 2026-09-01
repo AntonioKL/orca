@@ -21,6 +21,19 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
     )
     const activeAccountId = getSelectedClaudeAccountIdForTarget(settings, normalizedTarget)
     const activeAccount = this.getActiveAccount(settings.claudeManagedAccounts, activeAccountId)
+    // An explicit user config root is authoritative; account selection must not
+    // silently redirect a pane away from it.
+    if (process.env.CLAUDE_CONFIG_DIR?.trim()) {
+      return {
+        configDir: paths.configDir,
+        runtime: normalizedTarget.runtime,
+        wslDistro: normalizedTarget.wslDistro,
+        wslLinuxConfigDir: null,
+        envPatch: paths.envPatch,
+        stripAuthEnv: false,
+        provenance: 'system:explicit-config-dir'
+      }
+    }
     if (
       normalizeClaudeAccountSelectionTarget(normalizedTarget).runtime === 'wsl' &&
       activeAccount?.managedAuthRuntime === 'wsl' &&

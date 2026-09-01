@@ -1,5 +1,4 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { writeActiveClaudeKeychainCredentialsForRuntime } from '../keychain'
 import { startSpan } from '../../observability/tracer'
 import { ClaudeRuntimeAuthCredentialMatching } from './runtime-auth-credential-matching'
 import type {
@@ -114,10 +113,8 @@ export class ClaudeRuntimeAuthReadback extends ClaudeRuntimeAuthCredentialMatchi
       if (options.updateLastWrittenCredentialsJson) {
         this.writeRuntimeCredentials(runtimeContents)
         this.lastWrittenCredentialsJson = runtimeContents
-        if (process.platform === 'darwin') {
-          const paths = this.pathResolver.getRuntimePaths()
-          await writeActiveClaudeKeychainCredentialsForRuntime(runtimeContents, paths.configDir)
-        }
+        // The managed account remains the source of truth; do not write the
+        // shared active Keychain service for an isolated account.
       }
       decisionSpan.end()
       return { status: 'persisted' }
