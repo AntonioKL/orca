@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { spawn } from 'node:child_process'
+import type { spawnProcess } from '../../shared/child-process/run-process'
 import {
   openClaudeStreamJsonConnection,
   type ClaudeControlRequest
@@ -22,10 +22,8 @@ function fakeSpawn() {
   child.stdout = new PassThrough()
   child.stderr = new PassThrough()
   child.kill = vi.fn(() => true)
-  const spawnMock = vi.fn(
-    (_command: string, _args: readonly string[], _options: { env?: NodeJS.ProcessEnv }) => child
-  )
-  const spawnImpl = spawnMock as unknown as typeof spawn
+  const spawnMock = vi.fn((_spec: Parameters<typeof spawnProcess>[0]) => child)
+  const spawnImpl = spawnMock as unknown as typeof spawnProcess
   return { child, spawnImpl, spawnMock }
 }
 
@@ -75,12 +73,12 @@ describe('Claude stream-json connection', () => {
 
     await expect(listing).resolves.toEqual({ models: [{ value: 'sonnet' }] })
     expect(process.spawnImpl).toHaveBeenCalledWith(
-      'claude',
-      ['-p'],
       expect.objectContaining({
+        program: 'claude',
+        args: ['-p'],
         cwd: '/work/repo',
         env: expect.objectContaining({ CLAUDE_CONFIG_DIR: '/accounts/one' }),
-        windowsHide: true
+        stdio: ['pipe', 'pipe', 'pipe']
       })
     )
   })
@@ -173,7 +171,7 @@ describe('Claude stream-json connection', () => {
       process.spawnImpl
     )
 
-    const env = process.spawnMock.mock.calls[0]?.[2]?.env
+    const env = process.spawnMock.mock.calls[0]?.[0]?.env
     expect(env).toMatchObject({
       ANTHROPIC_AUTH_TOKEN: 'configured-token',
       ANTHROPIC_BASE_URL: 'https://gateway.example.test',
