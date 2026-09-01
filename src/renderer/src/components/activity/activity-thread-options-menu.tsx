@@ -1,6 +1,7 @@
 import React from 'react'
 import {
   BellDot,
+  Check,
   CheckCheck,
   GitFork,
   Layers,
@@ -26,6 +27,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
 import type { ActivityGroupBy } from './activity-thread-types'
+
+const ALIGNED_CHECKBOX_ITEM_CLASS = 'pl-2 [&>span.absolute]:hidden'
 
 function getActivityGroupByLabel(groupBy: ActivityGroupBy): string {
   switch (groupBy) {
@@ -131,25 +134,25 @@ export function ActivityThreadOptionsMenu({
                 <TooltipTrigger asChild>
                   <DropdownMenuCheckboxItem
                     checked={unreadOnly}
+                    className={ALIGNED_CHECKBOX_ITEM_CLASS}
                     onCheckedChange={() => onToggleUnread()}
                     onSelect={(event) => event.preventDefault()}
                   >
                     <BellDot className="size-3.5 text-muted-foreground" />
-                    <span className="flex flex-1 items-center justify-between gap-2">
-                      <span className="truncate">
-                        {translate(
-                          'auto.components.activity.ActivityPrototypePage.showUnreadOnly',
-                          'Show unread only'
-                        )}
-                      </span>
-                      {hasUnreadThreads ? (
-                        <span
-                          className="size-1.5 shrink-0 rounded-full bg-primary"
-                          aria-hidden="true"
-                          data-unread-dot=""
-                        />
-                      ) : null}
+                    <span className="min-w-0 flex-1 truncate">
+                      {translate(
+                        'auto.components.activity.ActivityPrototypePage.showUnreadOnly',
+                        'Show unread only'
+                      )}
                     </span>
+                    {hasUnreadThreads ? (
+                      <span
+                        className="size-1.5 shrink-0 rounded-full bg-primary"
+                        aria-hidden="true"
+                        data-unread-dot=""
+                      />
+                    ) : null}
+                    {unreadOnly ? <Check className="size-3.5" /> : null}
                   </DropdownMenuCheckboxItem>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
@@ -215,14 +218,18 @@ export function ActivityThreadOptionsMenu({
           <TooltipTrigger asChild>
             <DropdownMenuCheckboxItem
               checked={compactMode}
+              className={ALIGNED_CHECKBOX_ITEM_CLASS}
               onCheckedChange={(checked) => onCompactModeChange(checked === true)}
               onSelect={(event) => event.preventDefault()}
             >
               <Rows3 className="size-3.5 text-muted-foreground" />
-              {translate(
-                'auto.components.activity.ActivityPrototypePage.f70e4bec47',
-                'Compact mode'
-              )}
+              <span className="min-w-0 flex-1 truncate">
+                {translate(
+                  'auto.components.activity.ActivityPrototypePage.f70e4bec47',
+                  'Compact mode'
+                )}
+              </span>
+              {compactMode ? <Check className="size-3.5" /> : null}
             </DropdownMenuCheckboxItem>
           </TooltipTrigger>
           <TooltipContent side="right" sideOffset={8}>
@@ -235,14 +242,18 @@ export function ActivityThreadOptionsMenu({
         {onShowChildAgentsChange ? (
           <DropdownMenuCheckboxItem
             checked={showChildAgents}
+            className={ALIGNED_CHECKBOX_ITEM_CLASS}
             onCheckedChange={(checked) => onShowChildAgentsChange(checked === true)}
             onSelect={(event) => event.preventDefault()}
           >
             <GitFork className="size-3.5 text-muted-foreground" />
-            {translate(
-              'auto.components.activity.ActivityPrototypePage.showChildAgents',
-              'Show child agents'
-            )}
+            <span className="min-w-0 flex-1 truncate">
+              {translate(
+                'auto.components.activity.ActivityPrototypePage.showChildAgents',
+                'Show child agents'
+              )}
+            </span>
+            {showChildAgents ? <Check className="size-3.5" /> : null}
           </DropdownMenuCheckboxItem>
         ) : null}
         <DropdownMenuSeparator />
