@@ -11,6 +11,25 @@ const DIRECTORY = import.meta.dirname + '/'
 
 // Every operation whose gate must survive a refactor. A gate added without a row here fails, and a
 // row whose gate is deleted fails.
+// Which predicate each file passes: 'consume' spends the gesture, 'witness' only observes it.
+// alert is the one witness: it precedes the consuming action a confirm dialog exists to confirm.
+const GESTURE_PREDICATES: Record<string, string[]> = {
+  'mobile-web-account-operations.ts': ['consume', 'consume'],
+  'mobile-web-agent-history-operations.ts': ['consume'],
+  'mobile-web-native-capability-operations.ts': [
+    'witness',
+    'consume',
+    'consume',
+    'consume',
+    'consume'
+  ],
+  'mobile-web-native-chat-image-operations.ts': ['consume'],
+  'mobile-web-navigation-operations.ts': ['consume', 'consume', 'consume'],
+  'mobile-web-speech-operations.ts': ['consume', 'consume', 'consume', 'consume'],
+  'mobile-web-terminal-streams.ts': ['consume'],
+  'mobile-web-workspace-creation-create-operations.ts': ['consume', 'consume']
+}
+
 const GESTURE_GATED_DISCRIMINATORS: Record<string, string[]> = {
   'mobile-web-account-operations.ts': ['consumeResetCredit', 'select'],
   'mobile-web-agent-history-operations.ts': ['resume'],
@@ -43,10 +62,12 @@ describe('mobile web user gesture requirement census', () => {
 
     expect(gated.toSorted()).toEqual(Object.keys(GESTURE_GATED_DISCRIMINATORS).toSorted())
     for (const name of gated) {
-      expect([name, guardedDiscriminators(readFileSync(DIRECTORY + name, 'utf8'))]).toEqual([
+      const source = readFileSync(DIRECTORY + name, 'utf8')
+      expect([name, guardedDiscriminators(source)]).toEqual([
         name,
         GESTURE_GATED_DISCRIMINATORS[name]
       ])
+      expect([name, gesturePredicates(source)]).toEqual([name, GESTURE_PREDICATES[name]])
     }
   })
 
@@ -119,9 +140,27 @@ function guardedDiscriminators(source: string): string[] {
   for (const call of source.matchAll(/requireRecentUserGesture\(/g)) {
     const guardStart = source.lastIndexOf('if (', call.index)
     expect(guardStart).toBeGreaterThan(-1)
-    for (const match of source.slice(guardStart, call.index).matchAll(/=== '([A-Za-z]+)'/g)) {
+    for (const match of source
+      .slice(guardStart, call.index)
+      .matchAll(/=== '([A-Za-z][A-Za-z0-9.-]*)'/g)) {
       names.add(match[1]!)
     }
   }
   return [...names].toSorted()
+}
+
+// In call order: the argument each requireRecentUserGesture call receives, classified by whether
+// it spends the gesture (consumeRecentUserGesture / mobileWebUserGestureConsumer) or witnesses it.
+function gesturePredicates(source: string): string[] {
+  return [...source.matchAll(/requireRecentUserGesture\(([^)]*\)?[^)]*)\)/g)].map(
+    ([, argument]) => {
+      if (/hasRecentUserGesture|mobileWebUserGestureWitness/.test(argument)) {
+        return 'witness'
+      }
+      if (/consumeRecentUserGesture|mobileWebUserGestureConsumer/.test(argument)) {
+        return 'consume'
+      }
+      throw new Error(`unclassified gesture predicate: ${argument}`)
+    }
+  )
 }

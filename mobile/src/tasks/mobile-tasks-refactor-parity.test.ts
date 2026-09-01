@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   readFlattenedMobileTasksHookSignatures,
@@ -21,7 +23,10 @@ const hash = (parts: string[] | string): string =>
  * Every statement, render token, and style below was compared against that file
  * before these digests were frozen; statements and render tokens matched it
  * exactly, and the two digests carried over unchanged from the pre-split
- * baseline prove the diff renderer and the stylesheet never moved.
+ * baseline prove the diff renderer and the stylesheet never moved. Hook order
+ * differs from the monolith in one place: useMobileTaskCopyFeedback moved two
+ * positions later (index 123 to 125) so its setters and ref exist before it
+ * runs; nothing between those points reads its result.
  */
 const SCREEN_HOOKS = '2e7b6ef35be986914ea8ee2bd23bca2b991f763e4417dbcc51e3d30483b318e5'
 const DIFF_HOOKS = '93c7189b32bed8456cc51814fffa8ce80cf62011ef968a9d53ddec2b9686f58f'
@@ -71,7 +76,14 @@ describe('Mobile Tasks refactor parity', () => {
   })
 
   it('keeps the route a thin composition over the stage hooks', () => {
-    const route = readFlattenedMobileTasksHookSignatures('MobileTasksScreen')
-    expect(route.every((entry) => !entry.startsWith('useMobileTasks'))).toBe(true)
+    const route = readFileSync(
+      resolve(import.meta.dirname, '../../app/h/[hostId]/tasks.tsx'),
+      'utf8'
+    )
+    const body = route.slice(route.indexOf('export default function'))
+    expect(route.split('\n').length).toBeLessThan(120)
+    expect(body).not.toMatch(/\b(useState|useEffect|useMemo|useCallback|useRef)\(/)
+    expect(body).not.toContain('sendRequest')
+    expect(body).not.toContain('<View')
   })
 })
