@@ -97,9 +97,11 @@ restarting must not make an affected Desktop safe.
    build.
 2. Disable promotion to additional tracks or audiences and preserve the signed
    release artifact.
-3. Direct affected users to the retained native workspace route when it is
-   safe. Do not direct users through a broken pairing, credential, or recovery
-   boundary.
+3. In the ordinary native-default build only, direct affected users to the
+   retained native workspace route when it is safe. This step does not apply to
+   the dedicated hybrid candidate, where every `/h/...` workspace route
+   redirects to `/hybrid` and no native workspace fallback exists. Do not direct
+   users through a broken pairing, credential, or recovery boundary.
 4. Classify whether cached generations remain trustworthy under the affected
    shell. If the native verifier, origin, activation, or bridge is suspect,
    treat the cache as untrusted until a corrected shell revalidates it.

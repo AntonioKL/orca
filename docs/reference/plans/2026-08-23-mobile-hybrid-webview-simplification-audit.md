@@ -159,10 +159,13 @@ Tasks, Files, and Session before any broad conversion.
 | Parity bounds              | `2094dde1f9`      | Made native CDP exclusion fail closed above its inspection limit and expanded the bounded session-capability response allowance                                    |
 | Relay process boundary     | `c3725a60fc`      | Moved Relay Markdown discovery to the shared cross-platform process launcher and preserved the child-process import ratchet                                        |
 
-The declarative registry prototype covered Tasks, Files, and Session and proved
-that metadata, grants, and typed calls can be generated without replacing the
-handwritten authorization executors. Converting all 225 operations in this PR
-would increase review and compatibility risk, so the registry remains a
+No declarative registry prototype was built.
+`src/shared/mobile-web/bridge-operation-registry.ts` is an operation-name list
+with a capability enum and a membership check; `bridge-contract.ts` and one
+focused test were its only consumers. Nothing about metadata, grants, or typed
+calls was generated, so the claim that a Tasks/Files/Session prototype proved
+generation is withdrawn. Converting all 225 operations in this PR would
+increase review and compatibility risk, so the registry remains an unstarted
 non-blocking follow-up.
 
 ## Living Checklist
@@ -179,8 +182,9 @@ non-blocking follow-up.
 - [x] Integrate and validate the iOS host-root boundary fix.
 - [x] Complete the parity-cutover audit without changing the shared
       presentation.
-- [x] Prototype the declarative registry on Tasks, Files, and Session and defer
-      broad conversion to a follow-up.
+- [ ] Prototype the declarative registry on Tasks, Files, and Session. Not
+      started; the registry file remains an operation-name list and broad
+      conversion stays deferred.
 - [x] Rerun deterministic package verification, full mobile/root suites,
       typecheck/lint, bridge/cache/security suites, and diff hygiene after
       integrated simplifications.
@@ -191,3 +195,61 @@ non-blocking follow-up.
 - [ ] Keep the [release-gate tracker](2026-07-27-mobile-hybrid-webview-remaining-work.md)
       current; do not promote simulator/local evidence into physical, store,
       production cloud Relay, mixed-version, performance, or App Review proof.
+
+## 2026-09-01 Cleanup Addendum
+
+A follow-up branch removed accidental complexity this audit did not catch and
+restored the parts of `main` the migration had inlined. Work is referenced by
+merge subject rather than SHA, because the branch is still rebased.
+
+`Merge mr-p1-deps: restore dependency versions and wire Android WebView patches`
+
+- Mobile dependency downgrades are back at `main`'s versions.
+- The Android WebView debugging patches now actually apply. They are declared
+  in `mobile/pnpm-workspace.yaml` against the installed versions instead of an
+  inert `mobile/package.json` block.
+
+`Merge mr-p1-registry: register creationRetiredNames and type bridge operation names`
+
+- `workspace.creationRetiredNames` is registered.
+- Page request clients are typed against the registry, and a census test
+  asserts that every operation a page request client names is registered.
+
+`Merge mr-p1-security: broker teardown on restart, Android network blocker, alert gesture gate`
+
+- A WebView process restart below the crash-loop threshold now retires and
+  rebuilds the capability broker through a `viewEpoch` remount.
+- Android installs a document-start script denying `fetch`, `XMLHttpRequest`,
+  `WebSocket`, and `serviceWorker`, matching iOS.
+- `native.alert` is gated on a gesture witness that does not spend the gesture.
+  The gesture requirement now lives in one module with its own census.
+
+`Merge mr-p1-ci: run native shell tests in CI and fix the Android module build`
+
+- The Swift and Kotlin store suites run from
+  `.github/workflows/mobile-native-shell-tests.yml`.
+- The Kotlin module's compile errors and a stage-symlink defect were fixed
+  first.
+
+`Merge mr-p1-cleanup: drop dead modules, stale overrides, and duplicated guards`
+
+- Unreferenced renderer and bridge modules are gone, along with the max-lines
+  overrides for files that shrank.
+
+`Merge mr-p2-tasks: restore the Tasks route as a hook composition`
+
+- The Tasks route is 80 lines again, down from 14,452, with the hosted
+  operations delta threaded through restored stage hooks and
+  statement/render-token parity oracles re-frozen.
+- Its max-lines baseline entry and the modules the inlined screen orphaned were
+  removed.
+
+`Merge mr-p2-session: restore the split session route and RPC client`
+
+- The session route is 10 lines, down from 4,984, and `rpc-client.ts` is 64
+  lines, down from 1,202.
+- Both are back on `main`'s decomposition with the hybrid delta re-applied.
+
+This addendum records completed cleanup. It does not change the audit's
+conclusions and closes no gate in the
+[release-gate tracker](2026-07-27-mobile-hybrid-webview-remaining-work.md).
