@@ -498,9 +498,19 @@ jobs:
             # copy"); this workflow has no such step, which is why the clobber is
             # visible here and not there. Mirroring that step here would not help:
             # it only swaps when the copy is already Valid and SignPath-signed, so
-            # it no-ops under the test certificate. Fixing elevate.exe belongs in
-            # its own PR - it is a UAC elevation helper, and it deserves more
-            # scrutiny than a footnote in an uninstaller change.
+            # it no-ops under the test certificate.
+            #
+            # DO NOT relax that Valid + SignPath-signed guard to make this
+            # rehearsal go green. This workflow and release-cut.yml share the
+            # cache key `electron-builder-win-<lockfile hash>`, and that guard is
+            # the only thing stopping a test certificate from being seeded into
+            # the cache a real release restores from. Shipping users a binary
+            # signed by "Test certificate for 'Orca agent ide [OSS]'" is worse
+            # than shipping it unsigned.
+            #
+            # Fixing elevate.exe belongs in its own PR - it is a UAC elevation
+            # helper, and it deserves more scrutiny than a footnote in an
+            # uninstaller change.
             if ($relative -eq 'resources\elevate.exe') {
               Test-Signature "installed: $relative" $path -Advisory
             } else {
