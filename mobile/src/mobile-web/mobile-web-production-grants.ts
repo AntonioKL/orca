@@ -1,6 +1,6 @@
 import { MOBILE_WEB_PRODUCTION_BROWSER_GRANTS } from './mobile-web-production-browser-grants'
 import { MOBILE_WEB_PRODUCTION_FILE_GRANTS } from './mobile-web-production-file-grants'
-import { capabilityGrants, grantLimits } from './mobile-web-production-grant-table'
+import { capabilityGrants, grantLimits, indexGrants } from './mobile-web-production-grant-table'
 import { MOBILE_WEB_PRODUCTION_NAVIGATION_GRANTS } from './mobile-web-production-navigation-grants'
 import { MOBILE_WEB_PRODUCTION_NATIVE_GRANTS } from './mobile-web-production-native-grants'
 import { MOBILE_WEB_PRODUCTION_NATIVE_CHAT_GRANTS } from './mobile-web-production-native-chat-grants'
@@ -58,3 +58,5 @@ export const MOBILE_WEB_PRODUCTION_GRANTS = [
     submitReview: grantLimits(96 * 1024, 8 * 1024, 1, 2, 0.1)
   })
 ]
+
+export const MOBILE_WEB_PRODUCTION_GRANT_INDEX = indexGrants(MOBILE_WEB_PRODUCTION_GRANTS)

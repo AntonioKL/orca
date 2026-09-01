@@ -43,3 +43,11 @@ export function capabilityGrants<TCapability extends MobileWebBridgeCapability>(
     limits: limits as MobileWebOperationGrantLimits
   }))
 }
+
+/** Grants indexed by `capability.operation`. The broker resolves one per request, including every
+ * terminal keystroke, so a linear scan of all 226 entries is not an option. */
+export function indexGrants(
+  grants: readonly MobileWebOperationGrant[]
+): ReadonlyMap<string, MobileWebOperationGrant> {
+  return new Map(grants.map((grant) => [`${grant.capability}.${grant.operation}`, grant]))
+}
