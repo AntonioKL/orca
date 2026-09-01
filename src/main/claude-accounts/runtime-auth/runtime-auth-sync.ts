@@ -94,7 +94,18 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
     }
 
     if (activeAccount.managedAuthRuntime === 'wsl') {
-      if (!(await this.getOwnedManagedAuthPath(activeAccount))) {
+      const wslOwnership = await this.resolveManagedAuthVerdict(activeAccount)
+      if (wslOwnership.kind === 'indeterminate') {
+        // Why return rather than clear: a distro that would not start, or a
+        // probe that timed out, is not evidence about the account. Clearing here
+        // is how a cold distro used to log the user out (STA-5674).
+        console.warn(
+          '[claude-runtime-auth] Could not verify the active WSL managed account; leaving the selection in place',
+          wslOwnership.error
+        )
+        return
+      }
+      if (wslOwnership.kind === 'untrusted') {
         console.warn(
           '[claude-runtime-auth] Active WSL managed account is not owned by Orca, restoring system default'
         )
@@ -110,7 +121,10 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
         })
         return
       }
-      const credentialsJson = await this.readManagedCredentials(activeAccount)
+      const credentialsJson = await this.readManagedCredentialsAt(
+        activeAccount,
+        wslOwnership.authPath
+      )
       if (!credentialsJson || !this.isValidCredentialsJsonObject(credentialsJson)) {
         console.warn(
           '[claude-runtime-auth] Active WSL managed account is missing or has invalid credentials, restoring system default'
@@ -132,7 +146,15 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
       return
     }
 
-    if (!(await this.getOwnedManagedAuthPath(activeAccount))) {
+    const hostOwnership = await this.resolveManagedAuthVerdict(activeAccount)
+    if (hostOwnership.kind === 'indeterminate') {
+      console.warn(
+        '[claude-runtime-auth] Could not verify the active managed account; leaving the selection in place',
+        hostOwnership.error
+      )
+      return
+    }
+    if (hostOwnership.kind === 'untrusted') {
       console.warn(
         '[claude-runtime-auth] Active managed account is not owned by Orca, restoring system default'
       )
@@ -156,7 +178,7 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
       return
     }
 
-    let credentialsJson = await this.readManagedCredentials(activeAccount)
+    let credentialsJson = await this.readManagedCredentialsAt(activeAccount, hostOwnership.authPath)
     if (!credentialsJson || !this.isValidCredentialsJsonObject(credentialsJson)) {
       console.warn(
         '[claude-runtime-auth] Active managed account is missing or has invalid credentials, restoring system default'

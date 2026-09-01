@@ -1,11 +1,17 @@
+import { lstatSync } from 'node:fs'
+import { join } from 'node:path'
+import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 import { toWindowsWslPath } from '../wsl'
-import type { WslResult } from '../wsl/wsl-runner'
+import { runWslProcess, type WslResult } from '../wsl/wsl-runner'
 import {
   MISSING_MANAGED_AUTH_MESSAGE,
   OUTSIDE_MANAGED_AUTH_ROOT_MESSAGE,
   UNTRUSTED_MANAGED_AUTH_MESSAGE,
   type ClaudeManagedAuthVerdict
 } from './claude-managed-auth-ownership'
+import { MANAGED_AUTH_MARKER, readManagedAuthMarkerState } from './managed-auth-path'
+
+const MANAGED_GUEST_ROOT_SEGMENT = '/.local/share/orca/claude-accounts/'
 
 /**
  * Why a tagged line instead of exit codes: under `set -e` a missing marker, a
@@ -40,16 +46,48 @@ export function buildWslManagedAuthProbeScript(
     `tag() { printf '${VERDICT_TAG}%s\\n' "$1"; exit 0; }`,
     `candidate=${shellQuote(linuxPath)}`,
     'managed_root="${HOME%/}/.local/share/orca/claude-accounts"',
+    'test -h "$candidate" && tag candidate-is-symlink',
     'candidate_real=$(readlink -f -- "$candidate") || exit 1',
     'managed_root_real=$(readlink -f -- "$managed_root") || exit 1',
+    // A directory we cannot search reports "no such marker" exactly as an empty
+    // one does, so prove we can look before believing anything we did not find.
+    // (`readlink -f` above tolerates a missing trailing component on GNU but not
+    // on BSD/BusyBox; there an absent directory exits 1, which is a refusal too.)
+    'if test ! -d "$candidate_real"; then',
+    '  test -e "$candidate_real" && tag not-a-directory',
+    '  parent=$(dirname -- "$candidate_real") || exit 1',
+    '  test -d "$parent" && test -r "$parent" && test -x "$parent" || exit 1',
+    '  tag missing-directory',
+    'fi',
+    'test -r "$candidate_real" && test -x "$candidate_real" || exit 1',
     'marker="$candidate_real/.orca-managed-claude-auth"',
-    'test -f "$marker" || tag missing-marker',
+    'test -h "$marker" && tag marker-is-symlink',
+    'if test ! -f "$marker"; then',
+    '  test -e "$marker" && tag marker-not-a-file',
+    '  tag missing-marker',
+    'fi',
     'contents=$(cat -- "$marker") || exit 1',
     `${markerTest} || tag marker-mismatch`,
     'case "$candidate_real" in "$managed_root_real"/*/auth) ;; *) tag outside-managed-root ;; esac',
     "encoded=$(printf '%s' \"$candidate_real\" | base64 | tr -d '\\n') || exit 1",
     'tag "owned:$encoded"'
   ].join('\n')
+}
+
+/**
+ * Every tag the guest emits after an observation it completed. A tag absent from
+ * this table is not a default — an unknown verdict is indeterminate, because it
+ * means the guest and this parser disagree about the protocol.
+ */
+const DISPOSITIVE_TAGS: Record<string, string | undefined> = {
+  'missing-directory': MISSING_MANAGED_AUTH_MESSAGE,
+  'missing-marker': MISSING_MANAGED_AUTH_MESSAGE,
+  'marker-mismatch': UNTRUSTED_MANAGED_AUTH_MESSAGE,
+  'marker-not-a-file': UNTRUSTED_MANAGED_AUTH_MESSAGE,
+  'marker-is-symlink': UNTRUSTED_MANAGED_AUTH_MESSAGE,
+  'candidate-is-symlink': UNTRUSTED_MANAGED_AUTH_MESSAGE,
+  'not-a-directory': UNTRUSTED_MANAGED_AUTH_MESSAGE,
+  'outside-managed-root': OUTSIDE_MANAGED_AUTH_ROOT_MESSAGE
 }
 
 function indeterminate(message: string, cause?: unknown): ClaudeManagedAuthVerdict {
@@ -90,14 +128,9 @@ export function classifyWslManagedAuthProbe(
     return indeterminate('WSL Claude ownership probe did not report exactly one verdict.')
   }
   const value = tagged[0].slice(VERDICT_TAG.length)
-  if (value === 'missing-marker') {
-    return { kind: 'untrusted', reason: MISSING_MANAGED_AUTH_MESSAGE }
-  }
-  if (value === 'marker-mismatch') {
-    return { kind: 'untrusted', reason: UNTRUSTED_MANAGED_AUTH_MESSAGE }
-  }
-  if (value === 'outside-managed-root') {
-    return { kind: 'untrusted', reason: OUTSIDE_MANAGED_AUTH_ROOT_MESSAGE }
+  const untrustedReason = DISPOSITIVE_TAGS[value]
+  if (untrustedReason !== undefined) {
+    return { kind: 'untrusted', reason: untrustedReason }
   }
   if (!value.startsWith('owned:')) {
     return indeterminate('WSL Claude ownership probe reported an unknown verdict.')
@@ -106,4 +139,80 @@ export function classifyWslManagedAuthProbe(
   return canonicalPath
     ? { kind: 'owned', authPath: toWindowsWslPath(canonicalPath, distro) }
     : indeterminate('WSL Claude ownership probe reported an undecodable path.')
+}
+
+/**
+ * The one place a WSL-spelled managed auth path is judged, shared by the storage
+ * gate and the runtime-auth sync so the two lanes cannot drift apart on what a
+ * failed probe means (STA-5674).
+ */
+export async function resolveWslManagedAuthVerdict(
+  candidatePath: string,
+  wslInfo: { distro: string; linuxPath: string },
+  expectedAccountId?: string
+): Promise<ClaudeManagedAuthVerdict> {
+  if (!hasManagedGuestPathShape(wslInfo.linuxPath, expectedAccountId)) {
+    return { kind: 'untrusted', reason: OUTSIDE_MANAGED_AUTH_ROOT_MESSAGE }
+  }
+  if (process.platform !== 'win32') {
+    return resolveHostVisibleGuestVerdict(candidatePath, expectedAccountId)
+  }
+  let probe: WslResult
+  try {
+    probe = await runWslProcess({
+      distro: wslInfo.distro,
+      loginPath: 'none',
+      shell: 'bash',
+      script: buildWslManagedAuthProbeScript(wslInfo.linuxPath, expectedAccountId),
+      timeoutMs: 5000
+    })
+  } catch (error) {
+    // A spawn failure says nothing about the directory; it says wsl.exe did not run.
+    return { kind: 'indeterminate', error }
+  }
+  return classifyWslManagedAuthProbe(probe, wslInfo.distro)
+}
+
+function hasManagedGuestPathShape(linuxPath: string, expectedAccountId?: string): boolean {
+  if (!linuxPath.includes(MANAGED_GUEST_ROOT_SEGMENT) || !linuxPath.endsWith('/auth')) {
+    return false
+  }
+  // The account segment is the caller's claim about whose storage this is;
+  // another account's directory is not evidence about this one.
+  return (
+    expectedAccountId === undefined ||
+    linuxPath.endsWith(`/claude-accounts/${expectedAccountId}/auth`)
+  )
+}
+
+/**
+ * A guest path the host can address directly (a non-win32 host holding a
+ * WSL-spelled record). Held to the same bar as the guest probe: a symlinked
+ * candidate or marker, and a marker naming another account, are all refusals.
+ */
+function resolveHostVisibleGuestVerdict(
+  candidatePath: string,
+  expectedAccountId?: string
+): ClaudeManagedAuthVerdict {
+  let candidateStats: ReturnType<typeof lstatSync>
+  try {
+    candidateStats = lstatSync(candidatePath)
+  } catch (error) {
+    return isDefinitiveAbsence(error)
+      ? { kind: 'untrusted', reason: MISSING_MANAGED_AUTH_MESSAGE }
+      : { kind: 'indeterminate', error }
+  }
+  if (candidateStats.isSymbolicLink() || !candidateStats.isDirectory()) {
+    return { kind: 'untrusted', reason: UNTRUSTED_MANAGED_AUTH_MESSAGE }
+  }
+  const marker = readManagedAuthMarkerState(
+    join(candidatePath, MANAGED_AUTH_MARKER),
+    expectedAccountId
+  )
+  if (marker.kind === 'indeterminate') {
+    return marker
+  }
+  return marker.kind === 'valid'
+    ? { kind: 'owned', authPath: candidatePath }
+    : { kind: 'untrusted', reason: UNTRUSTED_MANAGED_AUTH_MESSAGE }
 }

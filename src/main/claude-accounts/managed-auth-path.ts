@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { app } from 'electron'
-import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
+import { isDefinitiveAbsence, readErrnoCode } from '../../shared/definitive-filesystem-absence'
 import { writeFileAtomically } from '../codex-accounts/fs-utils'
 import {
   MISSING_MANAGED_AUTH_MESSAGE,
@@ -82,7 +82,9 @@ function classifyReadFailure(error: unknown, absenceReason: string): ClaudeManag
     : { kind: 'indeterminate', error }
 }
 
-type MarkerState = { kind: 'valid' | 'invalid' } | { kind: 'indeterminate'; error: unknown }
+export type ManagedAuthMarkerState =
+  | { kind: 'valid' | 'invalid' }
+  | { kind: 'indeterminate'; error: unknown }
 
 function resolveMarkerVerdict(
   canonicalCandidate: string,
@@ -90,7 +92,7 @@ function resolveMarkerVerdict(
   options: { adoptLegacyMarker?: boolean }
 ): ClaudeManagedAuthVerdict {
   const markerPath = join(canonicalCandidate, MANAGED_AUTH_MARKER)
-  const marker = readMarkerState(markerPath, accountId)
+  const marker = readManagedAuthMarkerState(markerPath, accountId)
   if (marker.kind !== 'invalid' || !options.adoptLegacyMarker) {
     return toMarkerVerdict(marker, canonicalCandidate)
   }
@@ -99,15 +101,15 @@ function resolveMarkerVerdict(
   } catch (error) {
     // EEXIST means a marker is present but did not validate: a real trust
     // failure. Anything else is a write we could not complete.
-    return (error as NodeJS.ErrnoException | null)?.code === 'EEXIST'
+    return readErrnoCode(error) === 'EEXIST'
       ? { kind: 'untrusted', reason: UNTRUSTED_MANAGED_AUTH_MESSAGE }
       : { kind: 'indeterminate', error }
   }
-  return toMarkerVerdict(readMarkerState(markerPath, accountId), canonicalCandidate)
+  return toMarkerVerdict(readManagedAuthMarkerState(markerPath, accountId), canonicalCandidate)
 }
 
 function toMarkerVerdict(
-  marker: MarkerState,
+  marker: ManagedAuthMarkerState,
   canonicalCandidate: string
 ): ClaudeManagedAuthVerdict {
   if (marker.kind === 'indeterminate') {
@@ -118,7 +120,15 @@ function toMarkerVerdict(
     : { kind: 'untrusted', reason: UNTRUSTED_MANAGED_AUTH_MESSAGE }
 }
 
-function readMarkerState(markerPath: string, accountId: string): MarkerState {
+/**
+ * Whether the ownership marker in `markerPath` proves this directory is ours.
+ * With no `accountId` the marker only has to name some account, which is the
+ * weaker question `assertOwned` asks when the caller did not supply an ID.
+ */
+export function readManagedAuthMarkerState(
+  markerPath: string,
+  accountId?: string
+): ManagedAuthMarkerState {
   let markerStats: ReturnType<typeof lstatSync>
   try {
     markerStats = lstatSync(markerPath)
@@ -130,13 +140,14 @@ function readMarkerState(markerPath: string, accountId: string): MarkerState {
   if (markerStats.isSymbolicLink() || !markerStats.isFile()) {
     return { kind: 'invalid' }
   }
+  let contents: string
   try {
-    return readFileSync(markerPath, 'utf-8').trim() === accountId
-      ? { kind: 'valid' }
-      : { kind: 'invalid' }
+    contents = readFileSync(markerPath, 'utf-8').trim()
   } catch (error) {
     return isDefinitiveAbsence(error) ? { kind: 'invalid' } : { kind: 'indeterminate', error }
   }
+  const matches = accountId === undefined ? contents.length > 0 : contents === accountId
+  return matches ? { kind: 'valid' } : { kind: 'invalid' }
 }
 
 export function readClaudeManagedAuthFile(

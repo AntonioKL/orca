@@ -53,16 +53,36 @@ const MAX_CAUSE_DEPTH = 8
 
 /**
  * True when `error`, or anything it wraps, reports storage Orca could not read.
- * Walks `cause` because a failure crosses several layers before the caller that
- * has to decide whether deleting is authorised.
+ *
+ * Walks `cause` because the failure crosses several layers before reaching the
+ * caller that decides whether deleting is authorised, and traverses any object
+ * rather than only `Error` -- an IPC or dependency boundary can reject with a
+ * plain wrapper around the typed error.
+ *
+ * A value it cannot inspect answers `true`, not `false`: the question is whether
+ * the failure is *proven* dispositive, and a shape that throws when read has
+ * proven nothing. Deletion requires proof, so the unreadable case must land on
+ * the side that keeps the directory.
  */
 export function isUnprovenManagedClaudeAuthError(error: unknown): boolean {
+  const seen = new Set<unknown>()
   let current = error
-  for (let depth = 0; depth < MAX_CAUSE_DEPTH && current instanceof Error; depth += 1) {
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth += 1) {
+    if (current === null || (typeof current !== 'object' && typeof current !== 'function')) {
+      return false
+    }
+    if (seen.has(current)) {
+      return false
+    }
+    seen.add(current)
     if (current instanceof ManagedClaudeAuthTemporarilyUnavailableError) {
       return true
     }
-    current = (current as { cause?: unknown }).cause
+    try {
+      current = (current as { cause?: unknown }).cause
+    } catch {
+      return true
+    }
   }
   return false
 }

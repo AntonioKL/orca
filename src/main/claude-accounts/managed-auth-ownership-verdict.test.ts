@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { restorePlatform, setPlatform } from './claude-account-service-test-harness'
 import type * as NodeFsModule from 'node:fs'
+import type * as WslPathsModule from '../../shared/wsl-paths'
 
 // Fault injection at the filesystem, so the classifier under test is the thing
 // deciding what an errno means. Keyed by path suffix: the probe reads several
@@ -44,6 +45,19 @@ vi.mock('node:fs', async (importOriginal) => {
 const paths = vi.hoisted(() => ({ userDataRoot: '' }))
 
 vi.mock('electron', () => ({ app: { getPath: () => paths.userDataRoot } }))
+
+// Makes a POSIX temp path addressable as a guest path, so the host-visible WSL
+// branch can be exercised without a distro.
+vi.mock('../../shared/wsl-paths', async (importOriginal) => {
+  const original = await importOriginal<typeof WslPathsModule>()
+  return {
+    ...original,
+    parseWslUncPath: (path: string) =>
+      path.includes('/.local/share/orca/claude-accounts/')
+        ? { distro: 'Ubuntu', linuxPath: path }
+        : original.parseWslUncPath(path)
+  }
+})
 
 vi.mock('./keychain', () => ({
   deleteManagedClaudeKeychainCredentials: vi.fn(async () => {}),
@@ -150,12 +164,81 @@ describe('host Claude managed-auth verdict', () => {
 
 describe('WSL Claude managed-auth verdict', () => {
   beforeEach(() => {
+    fsFaults.lockedReadSuffix = null
+    fsFaults.lockedLstatSuffix = null
     paths.userDataRoot = mkdtempSync(join(tmpdir(), 'sta5674-verdict-wsl-'))
   })
 
   afterEach(() => {
     restorePlatform()
+    fsFaults.lockedReadSuffix = null
+    fsFaults.lockedLstatSuffix = null
     rmSync(paths.userDataRoot, { recursive: true, force: true })
+  })
+
+  function seedGuestAuth(accountId: string, marker: { contents?: string; symlink?: boolean }) {
+    const guestAuth = join(
+      paths.userDataRoot,
+      'home/dev/.local/share/orca/claude-accounts',
+      accountId,
+      'auth'
+    )
+    mkdirSync(guestAuth, { recursive: true })
+    const markerPath = join(guestAuth, MANAGED_AUTH_MARKER)
+    if (marker.symlink) {
+      writeFileSync(join(guestAuth, 'real-marker'), marker.contents ?? '')
+      symlinkSync('real-marker', markerPath)
+    } else if (marker.contents !== undefined) {
+      writeFileSync(markerPath, marker.contents)
+    }
+    return guestAuth
+  }
+
+  it('host-visible guest path: a marker naming another account is not proof of ownership', async () => {
+    setPlatform('linux')
+    const guestAuth = seedGuestAuth(ACCOUNT_ID, { contents: 'someone-elses-account\n' })
+    const storage = new ClaudeManagedAuthStorage()
+    expect((await storage.resolveVerdict(guestAuth, ACCOUNT_ID)).kind).toBe('untrusted')
+  })
+
+  it('host-visible guest path: a symlinked marker is not proof of ownership', async () => {
+    setPlatform('linux')
+    const guestAuth = seedGuestAuth(ACCOUNT_ID, { contents: `${ACCOUNT_ID}\n`, symlink: true })
+    const storage = new ClaudeManagedAuthStorage()
+    expect((await storage.resolveVerdict(guestAuth, ACCOUNT_ID)).kind).toBe('untrusted')
+  })
+
+  it('host-visible guest path: a path whose account segment is another account is refused', async () => {
+    setPlatform('linux')
+    const guestAuth = seedGuestAuth('another-account', { contents: `${ACCOUNT_ID}\n` })
+    const storage = new ClaudeManagedAuthStorage()
+    expect((await storage.resolveVerdict(guestAuth, ACCOUNT_ID)).kind).toBe('untrusted')
+  })
+
+  it('host-visible guest path: a matching marker is owned', async () => {
+    setPlatform('linux')
+    const guestAuth = seedGuestAuth(ACCOUNT_ID, { contents: `${ACCOUNT_ID}\n` })
+    const storage = new ClaudeManagedAuthStorage()
+    expect(await storage.resolveVerdict(guestAuth, ACCOUNT_ID)).toMatchObject({ kind: 'owned' })
+  })
+
+  it('host-visible guest path: an unreadable marker is indeterminate', async () => {
+    setPlatform('linux')
+    const guestAuth = seedGuestAuth(ACCOUNT_ID, { contents: `${ACCOUNT_ID}\n` })
+    fsFaults.lockedReadSuffix = MANAGED_AUTH_MARKER
+    const storage = new ClaudeManagedAuthStorage()
+    expect((await storage.resolveVerdict(guestAuth, ACCOUNT_ID)).kind).toBe('indeterminate')
+  })
+
+  it('host-visible guest path: an empty marker is not proof, even with no expected account', async () => {
+    setPlatform('linux')
+    // `assertOwned(path)` with no account ID still requires the marker to name
+    // some account; an empty file is a marker Orca never wrote.
+    const guestAuth = seedGuestAuth(ACCOUNT_ID, { contents: '   \n' })
+    const storage = new ClaudeManagedAuthStorage()
+    expect((await storage.resolveVerdict(guestAuth)).kind).toBe('untrusted')
+    const named = seedGuestAuth('other-account', { contents: 'other-account\n' })
+    expect(await storage.resolveVerdict(named)).toMatchObject({ kind: 'owned' })
   })
 
   it('refuses a guest path outside the managed accounts root without running a probe', async () => {

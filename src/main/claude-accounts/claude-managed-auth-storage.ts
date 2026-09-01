@@ -1,14 +1,11 @@
-import { lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
-import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import { toWindowsWslPath } from '../wsl'
 import { runWslProcess } from '../wsl/wsl-runner'
 import {
   assertOwnedClaudeManagedAuthPath,
   MISSING_MANAGED_AUTH_MESSAGE,
-  OUTSIDE_MANAGED_AUTH_ROOT_MESSAGE,
-  UNTRUSTED_MANAGED_AUTH_MESSAGE,
   type ClaudeManagedAuthVerdict
 } from './claude-managed-auth-ownership'
 import {
@@ -18,10 +15,7 @@ import {
   resolveClaudeManagedAuthVerdict,
   writeClaudeManagedAuthFile
 } from './managed-auth-path'
-import {
-  buildWslManagedAuthProbeScript,
-  classifyWslManagedAuthProbe
-} from './wsl-managed-auth-probe'
+import { resolveWslManagedAuthVerdict } from './wsl-managed-auth-probe'
 import {
   deleteManagedClaudeKeychainCredentials,
   readManagedClaudeKeychainCredentials,
@@ -147,14 +141,93 @@ export class ClaudeManagedAuthStorage {
     }
   }
 
+  /**
+   * Removal the user asked for. Their request is the authority, so this runs no
+   * ownership probe: a gate that cannot complete must not turn "remove it" into
+   * "quietly keep it", which leaves credentials on disk with nothing in the UI
+   * still pointing at them (STA-5674 follow-up).
+   *
+   * Safety comes from the spelling instead, and it is stricter than the probe it
+   * replaces: the old path deleted `resolve(canonicalAuthPath, '..')`, which
+   * follows a symlink out of the managed root, while this deletes only the
+   * directory Orca itself would have created for this account ID.
+   */
   async remove(accountId: string, candidatePath: string): Promise<void> {
-    try {
-      const managedAuthPath = await this.assertOwned(candidatePath, accountId)
-      rmSync(resolve(managedAuthPath, '..'), { recursive: true, force: true })
-    } catch (error) {
-      console.warn('[claude-accounts] Refusing to remove untrusted managed auth:', error)
+    const accountDir = this.resolveOwnSpellingAccountDir(accountId, candidatePath)
+    if (accountDir === null) {
+      console.warn(
+        '[claude-accounts] Not removing a managed auth path Orca did not choose:',
+        candidatePath
+      )
+    } else {
+      try {
+        // Recursive removal never traverses a symlink -- it unlinks the link --
+        // so a planted link cannot redirect this outside the root.
+        rmSync(accountDir, { recursive: true, force: true })
+      } catch (error) {
+        // Non-throwing by contract: the caller has already committed the
+        // settings change and must not roll it back over a failed unlink.
+        console.warn('[claude-accounts] Could not remove managed auth directory:', error)
+      }
     }
     await deleteManagedClaudeKeychainCredentials(accountId)
+  }
+
+  /**
+   * Cleanup Orca decided to do on its own after a failed add. Unlike an explicit
+   * removal this has no user intent behind it, so only a dispositive verdict
+   * authorises deleting anything -- including the keychain entry.
+   */
+  async removeAfterFailedAdd(accountId: string, candidatePath: string): Promise<void> {
+    const verdict = await this.resolveVerdict(candidatePath, accountId)
+    if (verdict.kind === 'indeterminate') {
+      console.warn(
+        '[claude-accounts] Leaving managed auth in place after a failed add:',
+        verdict.error
+      )
+      return
+    }
+    await this.remove(accountId, candidatePath)
+  }
+
+  private resolveOwnSpellingAccountDir(accountId: string, candidatePath: string): string | null {
+    const wslInfo = parseWslUncPath(candidatePath)
+    if (wslInfo) {
+      const suffix = `/.local/share/orca/claude-accounts/${accountId}/auth`
+      return wslInfo.linuxPath.endsWith(suffix)
+        ? toWindowsWslPath(wslInfo.linuxPath.slice(0, -'/auth'.length), wslInfo.distro)
+        : null
+    }
+    const resolvedCandidate = resolve(candidatePath)
+    for (const root of this.getAccountsRootSpellings()) {
+      if (pathsEqual(resolvedCandidate, resolve(root, accountId, 'auth'))) {
+        return resolve(root, accountId)
+      }
+    }
+    return null
+  }
+
+  /**
+   * Both spellings of the accounts root. The persisted path is canonical (the
+   * gate that produced it resolved symlinks) while `getRoot()` is not, so a
+   * userData directory behind a symlink makes the two disagree — and this is
+   * spelling normalisation, not an ownership check, so a failed realpath just
+   * leaves the lexical spelling to match against.
+   */
+  private getAccountsRootSpellings(): string[] {
+    let root: string
+    try {
+      root = resolve(this.getRoot())
+    } catch (error) {
+      console.warn('[claude-accounts] Could not resolve the managed accounts root:', error)
+      return []
+    }
+    try {
+      const canonicalRoot = realpathSync(root)
+      return pathsEqual(canonicalRoot, root) ? [root] : [root, canonicalRoot]
+    } catch {
+      return [root]
+    }
   }
 
   async assertOwned(candidatePath: string, expectedAccountId?: string): Promise<string> {
@@ -170,7 +243,7 @@ export class ClaudeManagedAuthStorage {
   ): Promise<ClaudeManagedAuthVerdict> {
     const wslInfo = parseWslUncPath(candidatePath)
     if (wslInfo) {
-      return this.resolveWslVerdict(candidatePath, wslInfo, expectedAccountId)
+      return resolveWslManagedAuthVerdict(candidatePath, wslInfo, expectedAccountId)
     }
     try {
       this.getRoot()
@@ -232,37 +305,6 @@ export class ClaudeManagedAuthStorage {
     }
   }
 
-  private async resolveWslVerdict(
-    candidatePath: string,
-    wslInfo: NonNullable<ReturnType<typeof parseWslUncPath>>,
-    expectedAccountId?: string
-  ): Promise<ClaudeManagedAuthVerdict> {
-    if (
-      !wslInfo.linuxPath.includes('/.local/share/orca/claude-accounts/') ||
-      !wslInfo.linuxPath.endsWith('/auth')
-    ) {
-      return { kind: 'untrusted', reason: OUTSIDE_MANAGED_AUTH_ROOT_MESSAGE }
-    }
-    if (process.platform !== 'win32') {
-      return resolveHostVisibleGuestVerdict(candidatePath)
-    }
-    let probe: Awaited<ReturnType<typeof runWslProcess>>
-    try {
-      probe = await runWslProcess({
-        distro: wslInfo.distro,
-        loginPath: 'none',
-        shell: 'bash',
-        script: buildWslManagedAuthProbeScript(wslInfo.linuxPath, expectedAccountId),
-        timeoutMs: 5000
-      })
-    } catch (error) {
-      // A spawn failure says nothing about the directory; it says wsl.exe did
-      // not run.
-      return { kind: 'indeterminate', error }
-    }
-    return classifyWslManagedAuthProbe(probe, wslInfo.distro)
-  }
-
   private getRoot(): string {
     const root = getClaudeManagedAccountsRoot()
     mkdirSync(root, { recursive: true, mode: 0o700 })
@@ -276,20 +318,6 @@ export class ClaudeManagedAuthStorage {
   }
 }
 
-/**
- * A guest path that the host can address directly (a non-win32 host reading a
- * WSL-spelled record). Only a definitive absence is a verdict; an unreadable
- * directory is not evidence that it is a stranger's.
- */
-function resolveHostVisibleGuestVerdict(candidatePath: string): ClaudeManagedAuthVerdict {
-  for (const path of [candidatePath, join(candidatePath, MANAGED_AUTH_MARKER)]) {
-    try {
-      lstatSync(path)
-    } catch (error) {
-      return isDefinitiveAbsence(error)
-        ? { kind: 'untrusted', reason: UNTRUSTED_MANAGED_AUTH_MESSAGE }
-        : { kind: 'indeterminate', error }
-    }
-  }
-  return { kind: 'owned', authPath: candidatePath }
+function pathsEqual(left: string, right: string): boolean {
+  return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right
 }

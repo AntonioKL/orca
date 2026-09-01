@@ -375,6 +375,41 @@ describe('STA-5674: fail-once ownership probe during Claude managed-account add'
     expect(existsSync(join(accountsRoot, leaked[0], 'auth', '.credentials.json'))).toBe(false)
   })
 
+  it("a user-requested removal does not delete a path that is not this account's own storage", async () => {
+    setPlatform('linux')
+    const { service, settings, keychainDelete } = await buildService()
+    await service.addAccount({ runtime: 'host' })
+    const account = settings().claudeManagedAccounts[0] as { id: string; managedAuthPath: string }
+    // Settings tampering, or a stale record: the persisted path is not the one
+    // Orca would have chosen for this account.
+    const foreign = mkdtempSync(join(tmpdir(), 'sta5674-foreign-'))
+    writeFileSync(join(foreign, 'precious.txt'), 'not ours to delete')
+    account.managedAuthPath = join(foreign, 'auth')
+
+    await service.removeAccount(account.id)
+
+    expect(existsSync(join(foreign, 'precious.txt'))).toBe(true)
+    expect(settings().claudeManagedAccounts).toHaveLength(0)
+    expect(keychainDelete).toHaveBeenCalledWith(account.id)
+    rmSync(foreign, { recursive: true, force: true })
+  })
+
+  it('cleanup after a non-ownership add failure still refuses to delete on an unprovable gate', async () => {
+    setPlatform('linux')
+    // The add fails at login, so the failure carries no ownership verdict and
+    // cleanup's error check cannot short-circuit. The removal gate is then the
+    // only thing standing between a transient fault and a deleted directory.
+    const { service, failLoginWith } = await buildService()
+    failLoginWith(new Error('Claude login was cancelled.'))
+    // create() is probe 1; cleanup's own gate is probe 2.
+    authPathMocks.failOwnershipOnCall = 2
+
+    await expect(service.addAccount({ runtime: 'host' })).rejects.toThrow(/login was cancelled/)
+
+    const { readdirSync } = await import('node:fs')
+    expect(readdirSync(join(paths.userDataRoot, 'claude-accounts'))).toHaveLength(1)
+  })
+
   it('reports the add failure, not the cleanup failure, when cleanup itself throws', async () => {
     setPlatform('linux')
     authPathMocks.failOwnershipOnCall = 0
@@ -385,6 +420,26 @@ describe('STA-5674: fail-once ownership probe during Claude managed-account add'
     failLoginWith(loginFailure)
 
     await expect(service.addAccount({ runtime: 'host' })).rejects.toBe(loginFailure)
+  })
+
+  it('a user-requested removal whose probe cannot complete still deletes the account directory', async () => {
+    setPlatform('linux')
+    const { service, settings, keychainDelete } = await buildService()
+    await service.addAccount({ runtime: 'host' })
+    const accountId = (settings().claudeManagedAccounts[0] as { id: string }).id
+    const accountsRoot = join(paths.userDataRoot, 'claude-accounts')
+    // The add used probes 1-3; the removal's own gate is the next one.
+    authPathMocks.failOwnershipOnCall = 4
+
+    await service.removeAccount(accountId)
+
+    // The user asked for the account to be gone. Refusing to delete on an
+    // unprovable probe leaves credentials on disk with no UI reference to them
+    // — quietly kept is worse than visibly lost.
+    expect(settings().claudeManagedAccounts).toHaveLength(0)
+    expect(existsSync(join(accountsRoot, accountId, 'auth', '.credentials.json'))).toBe(false)
+    expect(existsSync(join(accountsRoot, accountId))).toBe(false)
+    expect(keychainDelete).toHaveBeenCalledWith(accountId)
   })
 
   it('CONTROL — a user-requested removal still deletes the account directory and its keychain credentials', async () => {
