@@ -101,9 +101,6 @@ export async function closeLocalWatcherForWorktreePath(
   if (!root) {
     return
   }
-  if (root.batch.timer) {
-    clearTimeout(root.batch.timer)
-  }
   cancelLocalBatchFlush(root)
   watcherLifecycleState.watchedRoots.delete(rootKey)
   // Why: the in-process Parcel fallback has no unsubscribe timeout of its own, so an unbounded await
