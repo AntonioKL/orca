@@ -3,229 +3,45 @@ import {
   MOBILE_WEB_SOURCE_CONTROL_COMPARE_RESPONSE_MAX_BYTES,
   MOBILE_WEB_SOURCE_CONTROL_HISTORY_RESPONSE_MAX_BYTES
 } from '../../../src/shared/mobile-web/source-control-history-contract'
-import type { MobileWebOperationGrant } from './mobile-web-production-grants'
+import { capabilityGrants, grantLimits } from './mobile-web-production-grant-table'
 import { MOBILE_WEB_PRODUCTION_SOURCE_CONTROL_REVIEW_GRANTS } from './mobile-web-production-source-control-review-grants'
 
 export const MOBILE_WEB_PRODUCTION_SOURCE_CONTROL_GRANTS = [
-  {
-    capability: 'sourceControl',
-    operation: 'status',
-    limits: {
-      maxRequestBytes: 2048,
-      maxResponseBytes: 192 * 1024,
-      maxConcurrent: 2,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'subscribe',
-    limits: {
-      maxRequestBytes: 2048,
-      maxResponseBytes: 2048,
-      maxConcurrent: 1,
-      rateCapacity: 4,
-      rateRefillPerSecond: 1
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'diff',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: 192 * 1024 + MOBILE_WEB_DIFF_LINE_MAX_CHARACTERS,
-      maxConcurrent: 2,
-      rateCapacity: 12,
-      rateRefillPerSecond: 3
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'branches',
-    limits: {
-      maxRequestBytes: 2048,
-      maxResponseBytes: 64 * 1024,
-      maxConcurrent: 2,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'history',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: MOBILE_WEB_SOURCE_CONTROL_HISTORY_RESPONSE_MAX_BYTES,
-      maxConcurrent: 2,
-      rateCapacity: 6,
-      rateRefillPerSecond: 1
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'branchCompare',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: MOBILE_WEB_SOURCE_CONTROL_COMPARE_RESPONSE_MAX_BYTES,
-      maxConcurrent: 2,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'commitCompare',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: MOBILE_WEB_SOURCE_CONTROL_COMPARE_RESPONSE_MAX_BYTES,
-      maxConcurrent: 2,
-      rateCapacity: 12,
-      rateRefillPerSecond: 3
-    }
-  },
+  ...capabilityGrants('sourceControl', {
+    status: grantLimits(2 * 1024, 192 * 1024, 2, 8, 2),
+    subscribe: grantLimits(2 * 1024, 2 * 1024, 1, 4, 1),
+    diff: grantLimits(4 * 1024, 192 * 1024 + MOBILE_WEB_DIFF_LINE_MAX_CHARACTERS, 2, 12, 3),
+    branches: grantLimits(2 * 1024, 64 * 1024, 2, 8, 2),
+    history: grantLimits(4 * 1024, MOBILE_WEB_SOURCE_CONTROL_HISTORY_RESPONSE_MAX_BYTES, 2, 6, 1),
+    branchCompare: grantLimits(
+      4 * 1024,
+      MOBILE_WEB_SOURCE_CONTROL_COMPARE_RESPONSE_MAX_BYTES,
+      2,
+      8,
+      2
+    ),
+    commitCompare: grantLimits(
+      4 * 1024,
+      MOBILE_WEB_SOURCE_CONTROL_COMPARE_RESPONSE_MAX_BYTES,
+      2,
+      12,
+      3
+    )
+  }),
   ...MOBILE_WEB_PRODUCTION_SOURCE_CONTROL_REVIEW_GRANTS,
-  {
-    capability: 'sourceControl',
-    operation: 'stage',
-    limits: {
-      maxRequestBytes: 96 * 1024,
-      maxResponseBytes: 40 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 8,
-      rateRefillPerSecond: 4
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'unstage',
-    limits: {
-      maxRequestBytes: 96 * 1024,
-      maxResponseBytes: 40 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 8,
-      rateRefillPerSecond: 4
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'discard',
-    limits: {
-      maxRequestBytes: 96 * 1024,
-      maxResponseBytes: 40 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 4,
-      rateRefillPerSecond: 1
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'commit',
-    limits: {
-      maxRequestBytes: 96 * 1024,
-      maxResponseBytes: 8 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 4,
-      rateRefillPerSecond: 1
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'generateCommitMessage',
-    limits: {
-      maxRequestBytes: 96 * 1024,
-      maxResponseBytes: 16 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 4,
-      rateRefillPerSecond: 0.25
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'cancelCommitMessageGeneration',
-    limits: {
-      maxRequestBytes: 2048,
-      maxResponseBytes: 2048,
-      maxConcurrent: 2,
-      rateCapacity: 8,
-      rateRefillPerSecond: 4
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'upstream',
-    limits: {
-      maxRequestBytes: 2048,
-      maxResponseBytes: 8 * 1024,
-      maxConcurrent: 2,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'branch',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: 8 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 4,
-      rateRefillPerSecond: 1
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'fetch',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: 8 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 4,
-      rateRefillPerSecond: 1
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'pull',
-    limits: {
-      maxRequestBytes: 8192,
-      maxResponseBytes: 8 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 3,
-      rateRefillPerSecond: 0.5
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'push',
-    limits: {
-      maxRequestBytes: 8192,
-      maxResponseBytes: 8 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 3,
-      rateRefillPerSecond: 0.5
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'rebase',
-    limits: {
-      maxRequestBytes: 8192,
-      maxResponseBytes: 8 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 2,
-      rateRefillPerSecond: 0.25
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'abort',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: 8 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 4,
-      rateRefillPerSecond: 1
-    }
-  }
-] as const satisfies readonly MobileWebOperationGrant[]
+  ...capabilityGrants('sourceControl', {
+    stage: grantLimits(96 * 1024, 40 * 1024, 1, 8, 4),
+    unstage: grantLimits(96 * 1024, 40 * 1024, 1, 8, 4),
+    discard: grantLimits(96 * 1024, 40 * 1024, 1, 4, 1),
+    commit: grantLimits(96 * 1024, 8 * 1024, 1, 4, 1),
+    generateCommitMessage: grantLimits(96 * 1024, 16 * 1024, 1, 4, 0.25),
+    cancelCommitMessageGeneration: grantLimits(2 * 1024, 2 * 1024, 2, 8, 4),
+    upstream: grantLimits(2 * 1024, 8 * 1024, 2, 8, 2),
+    branch: grantLimits(4 * 1024, 8 * 1024, 1, 4, 1),
+    fetch: grantLimits(4 * 1024, 8 * 1024, 1, 4, 1),
+    pull: grantLimits(8 * 1024, 8 * 1024, 1, 3, 0.5),
+    push: grantLimits(8 * 1024, 8 * 1024, 1, 3, 0.5),
+    rebase: grantLimits(8 * 1024, 8 * 1024, 1, 2, 0.25),
+    abort: grantLimits(4 * 1024, 8 * 1024, 1, 4, 1)
+  })
+]

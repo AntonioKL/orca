@@ -1,169 +1,18 @@
-import type { MobileWebBridgeShellMessage } from '../../../src/shared/mobile-web/bridge-contract'
-import {
-  MOBILE_WEB_FILE_CHUNK_MAX_BASE64_CHARS,
-  MOBILE_WEB_FILE_CONTENT_MAX_BASE64_CHARS
-} from '../../../src/shared/mobile-web/bridge-operation-contract'
-import { MOBILE_WEB_FILE_EDIT_MAX_BASE64_CHARACTERS } from '../../../src/shared/mobile-web/file-edit-contract'
-import { MOBILE_WEB_MARKDOWN_CONTENT_MAX_BASE64_CHARACTERS } from '../../../src/shared/mobile-web/markdown-operation-contract'
+import { capabilityGrants, grantLimits } from './mobile-web-production-grant-table'
 
-type MobileWebFileOperationGrant = Extract<
-  MobileWebBridgeShellMessage,
-  { type: 'init' }
->['grants'][number]
-
-export const MOBILE_WEB_PRODUCTION_FILE_GRANTS = [
-  {
-    capability: 'file',
-    operation: 'list',
-    limits: {
-      maxRequestBytes: 2048,
-      maxResponseBytes: 64 * 1024,
-      maxConcurrent: 2,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'search',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: 64 * 1024,
-      maxConcurrent: 2,
-      rateCapacity: 12,
-      rateRefillPerSecond: 4
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'directory',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: 64 * 1024,
-      maxConcurrent: 2,
-      rateCapacity: 12,
-      rateRefillPerSecond: 4
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'read',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: MOBILE_WEB_FILE_CONTENT_MAX_BASE64_CHARS + 4096,
-      maxConcurrent: 2,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'readChunk',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: MOBILE_WEB_FILE_CHUNK_MAX_BASE64_CHARS + 4096,
-      maxConcurrent: 2,
-      rateCapacity: 16,
-      rateRefillPerSecond: 4
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'write',
-    limits: {
-      maxRequestBytes: MOBILE_WEB_FILE_EDIT_MAX_BASE64_CHARACTERS + 4096,
-      maxResponseBytes: 2048,
-      maxConcurrent: 1,
-      rateCapacity: 3,
-      rateRefillPerSecond: 0.5
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'markdownRead',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: MOBILE_WEB_MARKDOWN_CONTENT_MAX_BASE64_CHARACTERS + 4096,
-      maxConcurrent: 2,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'markdownSave',
-    limits: {
-      maxRequestBytes: MOBILE_WEB_MARKDOWN_CONTENT_MAX_BASE64_CHARACTERS + 4096,
-      maxResponseBytes: MOBILE_WEB_MARKDOWN_CONTENT_MAX_BASE64_CHARACTERS + 4096,
-      maxConcurrent: 1,
-      rateCapacity: 3,
-      rateRefillPerSecond: 0.5
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'markdownDraftRead',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: MOBILE_WEB_MARKDOWN_CONTENT_MAX_BASE64_CHARACTERS + 4096,
-      maxConcurrent: 2,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'markdownDraftWrite',
-    limits: {
-      maxRequestBytes: MOBILE_WEB_MARKDOWN_CONTENT_MAX_BASE64_CHARACTERS + 4096,
-      maxResponseBytes: 256,
-      maxConcurrent: 1,
-      rateCapacity: 12,
-      rateRefillPerSecond: 4
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'open',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: 256,
-      maxConcurrent: 1,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'resolveTerminalPath',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: 4096,
-      maxConcurrent: 2,
-      rateCapacity: 12,
-      rateRefillPerSecond: 4
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'readTerminalArtifactChunk',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: MOBILE_WEB_FILE_CHUNK_MAX_BASE64_CHARS + 4096,
-      maxConcurrent: 2,
-      rateCapacity: 16,
-      rateRefillPerSecond: 4
-    }
-  },
-  {
-    capability: 'file',
-    operation: 'releaseTerminalArtifact',
-    limits: {
-      maxRequestBytes: 2048,
-      maxResponseBytes: 256,
-      maxConcurrent: 2,
-      rateCapacity: 24,
-      rateRefillPerSecond: 8
-    }
-  }
-] as const satisfies readonly MobileWebFileOperationGrant[]
+export const MOBILE_WEB_PRODUCTION_FILE_GRANTS = capabilityGrants('file', {
+  list: grantLimits(2 * 1024, 64 * 1024, 2, 8, 2),
+  search: grantLimits(4 * 1024, 64 * 1024, 2, 12, 4),
+  directory: grantLimits(4 * 1024, 64 * 1024, 2, 12, 4),
+  read: grantLimits(4 * 1024, 244396, 2, 8, 2),
+  readChunk: grantLimits(4 * 1024, 178860, 2, 16, 4),
+  write: grantLimits(178860, 2 * 1024, 1, 3, 0.5),
+  markdownRead: grantLimits(4 * 1024, 353624, 2, 8, 2),
+  markdownSave: grantLimits(353624, 353624, 1, 3, 0.5),
+  markdownDraftRead: grantLimits(4 * 1024, 353624, 2, 8, 2),
+  markdownDraftWrite: grantLimits(353624, 256, 1, 12, 4),
+  open: grantLimits(4 * 1024, 256, 1, 8, 2),
+  resolveTerminalPath: grantLimits(4 * 1024, 4 * 1024, 2, 12, 4),
+  readTerminalArtifactChunk: grantLimits(4 * 1024, 178860, 2, 16, 4),
+  releaseTerminalArtifact: grantLimits(2 * 1024, 256, 2, 24, 8)
+})

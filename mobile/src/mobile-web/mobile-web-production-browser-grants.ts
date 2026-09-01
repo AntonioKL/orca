@@ -1,64 +1,12 @@
-import type { MobileWebBridgeShellMessage } from '../../../src/shared/mobile-web/bridge-contract'
+import { capabilityGrants, grantLimits } from './mobile-web-production-grant-table'
 
-type MobileWebBrowserOperationGrant = Extract<
-  MobileWebBridgeShellMessage,
-  { type: 'init' }
->['grants'][number]
-
-export const MOBILE_WEB_PRODUCTION_BROWSER_GRANTS = [
-  {
-    capability: 'browser',
-    operation: 'subscribe',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: 1024,
-      maxConcurrent: 1,
-      rateCapacity: 4,
-      rateRefillPerSecond: 1
-    }
-  },
-  {
-    capability: 'browser',
-    operation: 'navigate',
-    limits: {
-      maxRequestBytes: 8192,
-      maxResponseBytes: 8192,
-      maxConcurrent: 1,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  ...(['back', 'forward', 'reload', 'dialog'] as const).map((operation) => ({
-    capability: 'browser' as const,
-    operation,
-    limits: {
-      maxRequestBytes: 2048,
-      maxResponseBytes: 256,
-      maxConcurrent: 2,
-      rateCapacity: 12,
-      rateRefillPerSecond: 4
-    }
-  })),
-  {
-    capability: 'browser',
-    operation: 'pointer',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: 256,
-      maxConcurrent: 2,
-      rateCapacity: 40,
-      rateRefillPerSecond: 20
-    }
-  },
-  {
-    capability: 'browser',
-    operation: 'keyboard',
-    limits: {
-      maxRequestBytes: 40 * 1024,
-      maxResponseBytes: 256,
-      maxConcurrent: 2,
-      rateCapacity: 20,
-      rateRefillPerSecond: 10
-    }
-  }
-] as const satisfies readonly MobileWebBrowserOperationGrant[]
+export const MOBILE_WEB_PRODUCTION_BROWSER_GRANTS = capabilityGrants('browser', {
+  subscribe: grantLimits(4 * 1024, 1 * 1024, 1, 4, 1),
+  navigate: grantLimits(8 * 1024, 8 * 1024, 1, 8, 2),
+  back: grantLimits(2 * 1024, 256, 2, 12, 4),
+  forward: grantLimits(2 * 1024, 256, 2, 12, 4),
+  reload: grantLimits(2 * 1024, 256, 2, 12, 4),
+  dialog: grantLimits(2 * 1024, 256, 2, 12, 4),
+  pointer: grantLimits(4 * 1024, 256, 2, 40, 20),
+  keyboard: grantLimits(40 * 1024, 256, 2, 20, 10)
+})
