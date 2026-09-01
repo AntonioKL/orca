@@ -1,5 +1,8 @@
 import type { AgentSessionMutationResult } from '../../../src/shared/agent-session-wire'
-import { structuredAgentSessionPayloadFingerprint } from '../../../src/shared/structured-agent-session-mutation'
+import {
+  createStructuredAgentSessionOperationId,
+  structuredAgentSessionPayloadFingerprint
+} from '../../../src/shared/structured-agent-session-mutation'
 import { isRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
 import type { RpcClient } from '../transport/rpc-client'
 import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
@@ -41,11 +44,15 @@ export async function callAgentSession<TResult>(
 }
 
 export function structuredSessionOperationId(): string {
-  const random =
+  const randomUuid =
     typeof globalThis.crypto?.randomUUID === 'function'
-      ? globalThis.crypto.randomUUID()
-      : Math.random().toString(36).slice(2)
-  return `${Date.now().toString(36)}-${random}`
+      ? () => globalThis.crypto.randomUUID()
+      : () => {
+          return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join(
+            ''
+          )
+        }
+  return createStructuredAgentSessionOperationId(randomUuid)
 }
 
 export function timeoutForDeadline(deadline: number | undefined): number | null {
@@ -63,10 +70,19 @@ export async function requestStructuredAgentSessionMutation<TValue>(args: {
   sessionId: string
   expectedRuntimeFence: number
   fields: Record<string, unknown>
+  clientOperationId?: string
   timeoutMs?: number
 }): Promise<StructuredAgentSessionMutationCallResult<TValue>> {
-  const { client, method, fingerprintMethod, sessionId, expectedRuntimeFence, fields, timeoutMs } =
-    args
+  const {
+    client,
+    method,
+    fingerprintMethod,
+    sessionId,
+    expectedRuntimeFence,
+    fields,
+    clientOperationId,
+    timeoutMs
+  } = args
   try {
     const result = await callAgentSession<AgentSessionMutationResult<TValue>>(
       client,
@@ -74,7 +90,7 @@ export async function requestStructuredAgentSessionMutation<TValue>(args: {
       {
         envelope: {
           sessionId,
-          clientOperationId: structuredSessionOperationId(),
+          clientOperationId: clientOperationId ?? structuredSessionOperationId(),
           expectedRuntimeFence,
           payloadFingerprint: structuredAgentSessionPayloadFingerprint({
             method: fingerprintMethod,

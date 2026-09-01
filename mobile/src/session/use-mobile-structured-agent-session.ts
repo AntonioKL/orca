@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import type {
   AgentSessionCancelResult,
   AgentSessionPromptResult,
@@ -26,6 +26,7 @@ import {
 } from './mobile-structured-agent-prompts'
 import {
   requestStructuredAgentSessionMutation,
+  structuredSessionOperationId,
   timeoutForDeadline,
   type StructuredAgentSessionMutationResult
 } from './mobile-structured-agent-session-rpc'
@@ -68,6 +69,7 @@ export function useMobileStructuredAgentSession(args: {
   onSendError: (message: string) => void
 }): StructuredMobileSession {
   const { agent, client, sessionId, enabled, onSendError } = args
+  const operationIdsRef = useRef(new Map<string, string>())
   const { state, stateRef, loadingOlder, loadEarlier } = useMobileStructuredAgentState({
     client,
     sessionId,
@@ -85,15 +87,20 @@ export function useMobileStructuredAgentSession(args: {
         return { status: 'rejected' }
       }
       const targetFence = current.fence
+      const key = `${sessionId}:${fingerprintMethod}:${JSON.stringify(fields)}`
+      const clientOperationId = operationIdsRef.current.get(key) ?? structuredSessionOperationId()
+      operationIdsRef.current.set(key, clientOperationId)
       const result = await requestStructuredAgentSessionMutation<TValue>({
         client,
         method,
         fingerprintMethod,
         sessionId,
         expectedRuntimeFence: targetFence,
-        fields
+        fields,
+        clientOperationId
       })
       if (result.status === 'accepted') {
+        operationIdsRef.current.delete(key)
         return {
           status: 'accepted',
           value: result.value,
@@ -103,6 +110,7 @@ export function useMobileStructuredAgentSession(args: {
       if (result.status === 'unknown') {
         return result
       }
+      operationIdsRef.current.delete(key)
       onSendError(result.message)
       return { status: 'rejected' }
     },
@@ -151,6 +159,9 @@ export function useMobileStructuredAgentSession(args: {
         return 'rejected'
       }
       const fields = { body }
+      const key = `${sessionId}:agentSession.send:${JSON.stringify(fields)}`
+      const clientOperationId = operationIdsRef.current.get(key) ?? structuredSessionOperationId()
+      operationIdsRef.current.set(key, clientOperationId)
       const result = await requestStructuredAgentSessionMutation<AgentSessionSendResult>({
         client,
         method: 'agentSession.send',
@@ -158,14 +169,17 @@ export function useMobileStructuredAgentSession(args: {
         sessionId,
         expectedRuntimeFence: currentFence,
         fields,
+        clientOperationId,
         timeoutMs
       })
       if (result.status === 'accepted') {
+        operationIdsRef.current.delete(key)
         return 'accepted'
       }
       if (result.status === 'unknown') {
         return 'unknown'
       }
+      operationIdsRef.current.delete(key)
       onSendError(result.message === 'Request not sent' ? 'Message not sent' : result.message)
       return 'rejected'
     },
@@ -226,14 +240,21 @@ export function useMobileStructuredAgentSession(args: {
       return
     }
     const fields = { turnId }
+    const key = `${sessionId}:agentSession.cancel:${JSON.stringify(fields)}`
+    const clientOperationId = operationIdsRef.current.get(key) ?? structuredSessionOperationId()
+    operationIdsRef.current.set(key, clientOperationId)
     void requestStructuredAgentSessionMutation<AgentSessionCancelResult>({
       client,
       method: 'agentSession.cancel',
       fingerprintMethod: 'agentSession.cancel',
       sessionId,
       expectedRuntimeFence: current.fence,
-      fields
+      fields,
+      clientOperationId
     }).then((result) => {
+      if (result.status !== 'unknown') {
+        operationIdsRef.current.delete(key)
+      }
       if (result.status === 'unknown') {
         onSendError('Stop unconfirmed — check chat before retrying')
       } else if (result.status === 'refused') {

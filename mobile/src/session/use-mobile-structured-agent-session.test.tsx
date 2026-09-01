@@ -273,7 +273,7 @@ describe('useMobileStructuredAgentSession', () => {
         envelope: expect.objectContaining({
           sessionId: 'session-1',
           expectedRuntimeFence: 3,
-          clientOperationId: expect.any(String),
+          clientOperationId: expect.stringMatching(/^\d{13}-[0-9a-f]{32}$/),
           payloadFingerprint: expect.any(String)
         }),
         body: {
@@ -552,6 +552,43 @@ describe('useMobileStructuredAgentSession', () => {
       expect(await hook!.respondQuestion(hook!.question!.optionTokens[0]!)).toBe(false)
     })
     expect(onSendError).toHaveBeenCalledWith('Answer unconfirmed — check chat before retrying')
+  })
+
+  it('reuses an operation id when a prompt response delivery is unknown', async () => {
+    act(() => {
+      renderer = create(createElement(Harness))
+    })
+    await vi.waitFor(() => expect(listener).toEqual(expect.any(Function)))
+    act(() =>
+      listener?.({
+        ...snapshotEvent(3),
+        page: { ...snapshotEvent(3).page, items: [approvalItem()] }
+      })
+    )
+    let attempts = 0
+    sendRequest.mockImplementation(async (method, params) => {
+      if (method === 'agentSession.respondToApproval' && attempts++ === 0) {
+        throw markRpcDeliveryUnknown(new Error('Connection closed'))
+      }
+      return defaultSendRequest(method, params)
+    })
+
+    const token = hook!.permission!.options[0]!.send
+    await act(async () => {
+      expect(await hook!.respondPermission(token)).toBe(false)
+      expect(await hook!.respondPermission(token)).toBe(true)
+    })
+
+    const calls = sendRequest.mock.calls.filter(
+      ([method]) => method === 'agentSession.respondToApproval'
+    )
+    expect(calls).toHaveLength(2)
+    const firstId = (calls[0]![1] as { envelope: { clientOperationId: string } }).envelope
+      .clientOperationId
+    const retryId = (calls[1]![1] as { envelope: { clientOperationId: string } }).envelope
+      .clientOperationId
+    expect(firstId).toMatch(/^\d{13}-[0-9a-f]{32}$/)
+    expect(retryId).toBe(firstId)
   })
 
   it('keeps structured option changes dispatched after unknown delivery', async () => {
