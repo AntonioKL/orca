@@ -1,6 +1,8 @@
 import type { ClaudeManagedAccount } from '../../../shared/managed-account-types'
 import type { ClaudeEnvPatch } from '../environment'
 
+export const CLAUDE_MANAGED_KEYCHAIN_UNAVAILABLE_PROVENANCE = 'system:managed-keychain-unavailable'
+
 export type ClaudeRuntimeAuthPreparation = {
   configDir: string
   runtime?: 'host' | 'wsl'

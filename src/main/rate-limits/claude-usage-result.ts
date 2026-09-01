@@ -5,6 +5,7 @@ import type {
   UsageRateLimitSource
 } from '../../shared/rate-limit-types'
 import type { ClaudeRuntimeAuthPreparation } from '../claude-accounts/runtime-auth-service'
+import { CLAUDE_MANAGED_KEYCHAIN_UNAVAILABLE_PROVENANCE } from '../claude-accounts/runtime-auth/runtime-auth-types'
 import type { ClaudeOAuthCredentialReadResult } from './claude-oauth-credentials'
 import { OAuthUsageError } from './claude-oauth-usage-error'
 
@@ -72,10 +73,14 @@ export function metadataForClaudeUsageAttempt(input: {
   deferredByLiveClaudeSession?: boolean
   retryAtMs?: number
 }): UsageRateLimitMetadata {
+  const failureKind =
+    input.authPreparation?.provenance === CLAUDE_MANAGED_KEYCHAIN_UNAVAILABLE_PROVENANCE
+      ? 'managed-keychain-unavailable'
+      : input.failureKind
   return {
     source: input.source,
     attemptedSources: [...input.attemptedSources],
-    failureKind: input.failureKind,
+    failureKind,
     credentialSource: input.oauthCredentials.source,
     authProvenance: input.authPreparation?.provenance ?? 'system',
     deferredByLiveClaudeSession: input.deferredByLiveClaudeSession,

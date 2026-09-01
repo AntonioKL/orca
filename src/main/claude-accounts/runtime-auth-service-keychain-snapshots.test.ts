@@ -172,6 +172,40 @@ describe('ClaudeRuntimeAuthService', () => {
     expect(testState.scopedKeychainCredentials).toBe(managedCredentials)
   })
 
+  it('retains a visible degraded provenance after scoped Keychain bridge failure', async () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+    const credentials = createClaudeCredentialsJson('user@example.com', 'managed')
+    const managedAuthPath = createManagedClaudeAuth(testState.userDataDir, 'account-1', credentials)
+    const store = createStore(
+      createSettings({
+        claudeManagedAccounts: [
+          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
+        ],
+        activeClaudeManagedAccountId: 'account-1'
+      })
+    )
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    testState.throwScopedKeychainWrite = true
+
+    const launchPreparation = await service.prepareForClaudeLaunch()
+    expect(launchPreparation.provenance).toBe('system:managed-keychain-unavailable')
+
+    testState.throwScopedKeychainWrite = false
+    await expect(service.prepareForRateLimitFetch()).resolves.toMatchObject({
+      provenance: 'system:managed-keychain-unavailable',
+      stripAuthEnv: false
+    })
+
+    await service.prepareForClaudeLaunch()
+    await expect(service.prepareForRateLimitFetch()).resolves.toMatchObject({
+      provenance: 'managed:account-1',
+      stripAuthEnv: true
+    })
+  })
+
   it('reads back refreshed active keychain credentials on macOS', async () => {
     if (process.platform !== 'darwin') {
       return

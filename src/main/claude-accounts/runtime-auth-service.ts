@@ -5,7 +5,10 @@ import {
   type ClaudeAccountSelectionTarget
 } from './runtime-selection'
 import { ClaudeRuntimeAuthSync } from './runtime-auth/runtime-auth-sync'
-import type { ClaudeRuntimeAuthPreparation } from './runtime-auth/runtime-auth-types'
+import {
+  CLAUDE_MANAGED_KEYCHAIN_UNAVAILABLE_PROVENANCE,
+  type ClaudeRuntimeAuthPreparation
+} from './runtime-auth/runtime-auth-types'
 import { migrateLegacySharedClaudeAuth } from './legacy-shared-claude-auth-migration'
 import {
   readActiveClaudeKeychainCredentialsStrict,
@@ -15,6 +18,11 @@ import {
 export type { ClaudeRuntimeAuthPreparation } from './runtime-auth/runtime-auth-types'
 
 export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
+  private managedKeychainUnavailable: {
+    accountId: string
+    preparation: ClaudeRuntimeAuthPreparation
+  } | null = null
+
   constructor(store: Store) {
     super(store)
     this.initializeLastSyncedState()
@@ -96,19 +104,27 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
         if (managed && this.isValidCredentialsJsonObject(managed)) {
           await writeActiveClaudeKeychainCredentials(managed, preparation.configDir)
         }
+        if (this.managedKeychainUnavailable?.accountId === selected.id) {
+          this.managedKeychainUnavailable = null
+        }
       } catch {
         console.warn('[claude-runtime-auth] Failed to bridge macOS managed Claude Keychain')
         // Never route a pane at a home whose credential surface could not be
         // synchronized; fall back to the system lane instead.
-        return {
+        const fallbackPreparation: ClaudeRuntimeAuthPreparation = {
           configDir: this.pathResolver.getRuntimePaths().configDir,
           runtime: 'host',
           wslDistro: null,
           wslLinuxConfigDir: null,
           envPatch: this.pathResolver.getRuntimePaths().envPatch,
           stripAuthEnv: false,
-          provenance: 'system:managed-keychain-unavailable'
+          provenance: CLAUDE_MANAGED_KEYCHAIN_UNAVAILABLE_PROVENANCE
         }
+        this.managedKeychainUnavailable = {
+          accountId: selected.id,
+          preparation: fallbackPreparation
+        }
+        return fallbackPreparation
       }
     }
     return preparation
@@ -119,7 +135,14 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
   ): Promise<ClaudeRuntimeAuthPreparation> {
     const effectiveTarget = target ?? this.getDefaultAccountSelectionTarget()
     // Rate-limit reads must never materialize or refresh credentials.
-    return this.getPreparation(effectiveTarget)
+    const preparation = this.getPreparation(effectiveTarget)
+    const selectedId = getSelectedClaudeAccountIdForTarget(
+      this.store.getSettings(),
+      effectiveTarget
+    )
+    return this.managedKeychainUnavailable?.accountId === selectedId
+      ? this.managedKeychainUnavailable.preparation
+      : preparation
   }
 
   async syncForCurrentSelection(target?: ClaudeAccountSelectionTarget): Promise<void> {

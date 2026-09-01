@@ -98,6 +98,11 @@ export function getProviderUsageStatusLabel(p: ProviderRateLimits): string {
         return translate('auto.components.status.bar.tooltip.f8f0f9d8cc', 'Network issue')
       case 'keychain-unavailable':
         return translate('auto.components.status.bar.tooltip.bf2e739f18', 'Sign-in unavailable')
+      case 'managed-keychain-unavailable':
+        return translate(
+          'auto.components.status.bar.tooltip.7fe52bf9dc',
+          'Managed sign-in unavailable'
+        )
       case 'token_expired':
         return translate('auto.components.status.bar.tooltip.b1f47ac902', 'Sign-in expired')
       case 'cli-unavailable':
@@ -165,6 +170,11 @@ export function getProviderUsageErrorMessage(p: ProviderRateLimits): string {
         return translate(
           'auto.components.status.bar.tooltip.cabdc2a9e0',
           'Claude sign-in credentials could not be read.'
+        )
+      case 'managed-keychain-unavailable':
+        return translate(
+          'auto.components.status.bar.tooltip.9195af66c1',
+          'Claude could not load the selected managed sign-in. This session is using your personal Claude sign-in.'
         )
       // Why: Orca no longer refreshes Claude tokens; the CLI owns refresh, so running it repairs this.
       case 'token_expired':
