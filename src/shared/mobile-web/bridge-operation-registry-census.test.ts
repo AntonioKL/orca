@@ -47,21 +47,6 @@ describe('mobile web bridge operation registry census', () => {
     expect(untyped).toEqual([])
   })
 
-  it('names every registered operation in a shell module outside the grant tables', () => {
-    const files = sources(SHELL_DIR, (name) => !name.startsWith('mobile-web-production-'))
-    const named = new Set<string>()
-    for (const { text } of files) {
-      for (const match of text.matchAll(/'([A-Za-z][A-Za-z0-9]*)'/g)) {
-        named.add(match[1]!)
-      }
-    }
-    const undispatched = [...registered].filter(
-      (pair) => !named.has(pair.slice(pair.indexOf('.') + 1))
-    )
-
-    expect(files.length).toBeGreaterThanOrEqual(100)
-    expect(undispatched).toEqual([])
-  })
   // A page client that reaches one operation through two different schema pairs has an arm nobody
   // reviews; a factory rewrite that swaps a schema shows up here as a second pair.
   it('binds every directly named operation to exactly one payload and result schema', () => {
@@ -90,9 +75,10 @@ describe('mobile web bridge operation registry census', () => {
     ).toEqual([])
   })
 
-  // The old form of this only asked whether the name appeared anywhere in the shell tree, which a
-  // stray comment satisfied. A dispatch position is what actually routes the request.
-  it('routes every registered operation from a shell dispatch position', () => {
+  // Capability-level routing is proven against the real table in the shell's dispatch census. This
+  // covers the step inside an arm: the operation name has to be matched somewhere, not merely
+  // quoted, which a stray comment or an unrelated string used to satisfy.
+  it('matches every registered operation at a shell dispatch position', () => {
     const shell = sources(SHELL_DIR, (name) => !name.startsWith('mobile-web-production-'))
     const undispatched = [...registered].filter((pair) => {
       const operation = pair.slice(pair.indexOf('.') + 1)
