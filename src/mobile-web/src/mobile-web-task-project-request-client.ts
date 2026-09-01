@@ -1,3 +1,4 @@
+import type { MobileWebBridgeOperationName } from '../../shared/mobile-web/bridge-operation-registry'
 import {
   MobileWebTaskProjectAssignableUsersPayloadSchema,
   MobileWebTaskProjectAssignableUsersResultSchema,
@@ -266,7 +267,11 @@ export class MobileWebTaskProjectRequestClient {
     return this.mutate('mergeProjectPullRequest', payload, MobileWebTaskProjectMergePayloadSchema)
   }
 
-  private mutate(operation: string, payload: unknown, payloadSchema: ZodType) {
+  private mutate(
+    operation: MobileWebBridgeOperationName<'task'>,
+    payload: unknown,
+    payloadSchema: ZodType
+  ) {
     return this.requests.request(
       'task',
       operation,

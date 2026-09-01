@@ -1,4 +1,5 @@
 import type { ZodType } from 'zod'
+import type { MobileWebBridgeOperationName } from '../../shared/mobile-web/bridge-operation-registry'
 import {
   MobileWebTaskItemChecksPayloadSchema,
   MobileWebTaskItemChecksResultSchema,
@@ -148,7 +149,11 @@ export class MobileWebTaskItemRequestClient extends MobileWebTaskProjectRequestC
     )
   }
 
-  private mutateReview(operation: string, payload: unknown, schema: ZodType) {
+  private mutateReview(
+    operation: MobileWebBridgeOperationName<'task'>,
+    payload: unknown,
+    schema: ZodType
+  ) {
     return this.requests.request(
       'task',
       operation,
@@ -158,7 +163,11 @@ export class MobileWebTaskItemRequestClient extends MobileWebTaskProjectRequestC
     )
   }
 
-  private mutateFile(operation: string, payload: unknown, schema: ZodType) {
+  private mutateFile(
+    operation: MobileWebBridgeOperationName<'task'>,
+    payload: unknown,
+    schema: ZodType
+  ) {
     return this.requests.request(
       'task',
       operation,

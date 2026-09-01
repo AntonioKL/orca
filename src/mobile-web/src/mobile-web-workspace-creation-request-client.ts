@@ -1,3 +1,4 @@
+import type { MobileWebBridgeOperationName } from '../../shared/mobile-web/bridge-operation-registry'
 import {
   MobileWebCreationAgentDetectionPayloadSchema,
   MobileWebCreationAgentDetectionResultSchema,
@@ -171,7 +172,7 @@ export class MobileWebWorkspaceCreationRequestClient {
     )
   }
 
-  private availability(operation: string): Promise<boolean> {
+  private availability(operation: MobileWebBridgeOperationName<'workspace'>): Promise<boolean> {
     return this.emptyRequest<{ available: boolean }>(
       operation,
       MobileWebCreationAvailabilityPayloadSchema,
@@ -180,7 +181,7 @@ export class MobileWebWorkspaceCreationRequestClient {
   }
 
   private repoRequest<TResult>(
-    operation: string,
+    operation: MobileWebBridgeOperationName<'workspace'>,
     payload: MobileWebCreationRepoPayload,
     resultSchema: Parameters<MobileWebOneShotRequestClient['request']>[4]
   ): Promise<TResult> {
@@ -194,7 +195,7 @@ export class MobileWebWorkspaceCreationRequestClient {
   }
 
   private emptyRequest<TResult>(
-    operation: string,
+    operation: MobileWebBridgeOperationName<'workspace'>,
     payloadSchema: Parameters<MobileWebOneShotRequestClient['request']>[3],
     resultSchema: Parameters<MobileWebOneShotRequestClient['request']>[4]
   ): Promise<TResult> {
