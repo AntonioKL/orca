@@ -144,10 +144,7 @@ function Sidebar({
                             type="button"
                             variant="ghost"
                             size="icon-xs"
-                            className={cn(
-                              'text-muted-foreground',
-                              agentSearchOpen && 'bg-accent text-accent-foreground'
-                            )}
+                            className="text-muted-foreground"
                             aria-label="Search agent activity"
                             aria-pressed={agentSearchOpen}
                             onClick={() => setAgentSearchOpen((open) => !open)}
