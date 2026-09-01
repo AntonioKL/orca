@@ -52,6 +52,33 @@ describe('buildMobileSessionTabSnapshots', () => {
     expect(restored.snapshotVersion).toBeGreaterThan(initial.snapshotVersion)
   })
 
+  it('publishes a new instance identity when unchanged content is recreated', () => {
+    const worktree = {
+      id: 'wt-1',
+      instanceId: 'old-instance',
+      repoId: 'repo-1'
+    }
+    const base = makeState({
+      worktreesByRepo: { 'repo-1': [worktree] } as unknown as AppState['worktreesByRepo'],
+      tabsByWorktree: {
+        'wt-1': [{ id: 'term-1', title: 'Terminal 1' }]
+      } as unknown as AppState['tabsByWorktree']
+    })
+    const initial = buildMobileSessionTabSnapshots(base)[0]!
+    const recreated = {
+      ...base,
+      worktreesByRepo: {
+        'repo-1': [{ ...worktree, instanceId: 'new-instance' }]
+      } as unknown as AppState['worktreesByRepo']
+    }
+
+    const next = buildMobileSessionTabSnapshots(recreated)[0]!
+
+    expect(initial.worktreeInstanceId).toBe('old-instance')
+    expect(next.worktreeInstanceId).toBe('new-instance')
+    expect(next.snapshotVersion).toBeGreaterThan(initial.snapshotVersion)
+  })
+
   it('publishes browser and editor color + pin state from unified tabs', () => {
     const fileId = '/repo/README.md'
     const state = makeState({
