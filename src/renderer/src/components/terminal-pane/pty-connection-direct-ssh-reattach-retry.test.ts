@@ -282,6 +282,128 @@ describe('connectPanePty', () => {
     )
   })
 
+  // Positive control for the test below. Without it that assertion is untestable: it would pass on a
+  // build where nothing can fresh-spawn at all. This pins that THIS harness does respawn on the one
+  // token that authorises it, so "did not respawn" there is a real result.
+  it('fresh-spawns when the host proves the reattach session is gone', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const restoredPtyId = toAppSshPtyId('target-a', 'pty-gone-session')
+    const transport = createMockTransport()
+    transport.connect.mockImplementationOnce(async (options) => {
+      options.callbacks?.onError?.(`SSH_SESSION_EXPIRED: target-a@@pty-gone-session`)
+      return undefined
+    })
+    transportFactoryQueue.push(transport)
+    const pendingRetry = {
+      attemptId: 'attempt-gone-session',
+      authority: {
+        targetId: 'target-a',
+        providerEpoch: 'epoch-1',
+        connectionGeneration: 3
+      },
+      tabGeneration: 7,
+      startedAt: 1
+    }
+    const settleDirectSshPaneRetry = vi.fn()
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: restoredPtyId, generation: 7 }]
+      },
+      ptyIdsByTabId: { 'tab-1': [restoredPtyId] },
+      repos: [{ id: 'repo1', connectionId: 'target-a', displayName: 'orca' }],
+      sshConnectionStates: new Map([
+        [
+          'target-a',
+          {
+            targetId: 'target-a',
+            status: 'connected',
+            providerEpoch: 'epoch-1',
+            connectionGeneration: 3
+          }
+        ]
+      ]),
+      directSshPaneRetryByTabId: { 'tab-1': pendingRetry },
+      settleDirectSshPaneRetry
+    }
+    const deps = createDeps({
+      restoredLeafId: LEAF_1,
+      restoredPtyIdByLeafId: { [LEAF_1]: restoredPtyId }
+    })
+
+    connectPanePty(createPane(1) as never, createManager(1) as never, deps as never)
+    await flushAsyncTicks(16)
+
+    expect(deps.clearTabPtyId).toHaveBeenCalledWith('tab-1', restoredPtyId)
+  })
+
+  it('does not fresh-spawn when reattach only needs its live source restored', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const restoredPtyId = toAppSshPtyId('target-a', 'pty-live-source')
+    const transport = createMockTransport()
+    transport.connect.mockImplementationOnce(async (options) => {
+      options.callbacks?.onError?.('SSH_SOURCE_RESTORE_REQUIRED: target-a@@pty-live-source')
+      return undefined
+    })
+    transportFactoryQueue.push(transport)
+    const pendingRetry = {
+      attemptId: 'attempt-live-source-restore',
+      authority: {
+        targetId: 'target-a',
+        providerEpoch: 'epoch-1',
+        connectionGeneration: 3
+      },
+      tabGeneration: 7,
+      startedAt: 1
+    }
+    const settleDirectSshPaneRetry = vi.fn()
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: restoredPtyId, generation: 7 }]
+      },
+      ptyIdsByTabId: { 'tab-1': [restoredPtyId] },
+      repos: [{ id: 'repo1', connectionId: 'target-a', displayName: 'orca' }],
+      sshConnectionStates: new Map([
+        [
+          'target-a',
+          {
+            targetId: 'target-a',
+            status: 'connected',
+            providerEpoch: 'epoch-1',
+            connectionGeneration: 3
+          }
+        ]
+      ]),
+      directSshPaneRetryByTabId: { 'tab-1': pendingRetry },
+      settleDirectSshPaneRetry
+    }
+    const deps = createDeps({
+      restoredLeafId: LEAF_1,
+      restoredPtyIdByLeafId: { [LEAF_1]: restoredPtyId }
+    })
+
+    connectPanePty(createPane(1) as never, createManager(1) as never, deps as never)
+    await flushAsyncTicks(16)
+
+    expect(transport.connect).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ sessionId: restoredPtyId })
+    )
+    // The exact call the positive control above proves this harness makes on SSH_SESSION_EXPIRED.
+    expect(deps.clearTabPtyId).not.toHaveBeenCalled()
+    expect(transport.connect).not.toHaveBeenCalledWith(
+      expect.not.objectContaining({ sessionId: restoredPtyId })
+    )
+    expect(settleDirectSshPaneRetry).toHaveBeenCalledWith({
+      status: 'failed',
+      tabId: 'tab-1',
+      attemptId: pendingRetry.attemptId,
+      authority: pendingRetry.authority,
+      tabGeneration: pendingRetry.tabGeneration
+    })
+    expect(window.api.pty.kill).not.toHaveBeenCalled()
+  })
+
   // Why both directions: #15166 dropped #14844's reconnect model-paint gate and pinned the
   // degraded relay-only paint here. The gate's contract is that the relay wins only when the
   // replay SHOWS the app left the alternate screen, so pin the veto and its absence together.

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   SSH_PTY_IDENTITY_MISMATCH_ERROR,
   SSH_SESSION_EXPIRED_ERROR,
+  SSH_SOURCE_RESTORE_REQUIRED_ERROR,
   isSshPtyAbsentFromRelayError
 } from './ssh-pty-errors'
 import { SshPtyProvider } from './ssh-pty-provider'
@@ -73,6 +74,9 @@ describe('SSH PTY relay absence verdict', () => {
     )
 
     expect(isSshPtyAbsentFromRelayError(rejection)).toBe(false)
-    expect((rejection as Error).message).toContain(SSH_SESSION_EXPIRED_ERROR)
+    // restoreRequired is a SUCCESSFUL answer proving the PTY live, so it must not carry the one
+    // token that authorises a respawn.
+    expect((rejection as Error).message).toBe(`${SSH_SOURCE_RESTORE_REQUIRED_ERROR}: pty-1`)
+    expect((rejection as Error).message).not.toContain(SSH_SESSION_EXPIRED_ERROR)
   })
 })

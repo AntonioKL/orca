@@ -2,7 +2,7 @@ import { e2eConfig } from '@/lib/e2e-config'
 
 export const pendingSpawnByPaneKey = new Map<string, Promise<string | null>>()
 export const pendingSpawnGenerationByPaneKey = new Map<string, number>()
-export const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
+export { SSH_SESSION_EXPIRED_ERROR } from '../../../../../shared/ssh-pty-failure-tokens'
 // Why: relay requests expire at 30s; leave one second for their fallback before re-arming locally.
 export const DIRECT_SSH_PANE_RETRY_SETTLEMENT_TIMEOUT_MS = 31_000
 export const REMOTE_PTY_ID_PREFIX = 'remote:'

@@ -148,6 +148,16 @@ describe('humanizeTerminalError', () => {
     expect(humanized).not.toContain('exited')
   })
 
+  // A live PTY whose delivery was retired must never get the "open a new terminal" copy: acting on
+  // that abandons a running agent on the host.
+  it('describes a retired output source as reconnecting, not as a lost session', () => {
+    const humanized = humanizeTerminalError('SSH_SOURCE_RESTORE_REQUIRED: ssh:conn@@pty-7')
+    expect(humanized).not.toContain('SSH_SOURCE_RESTORE_REQUIRED')
+    expect(humanized).not.toContain('ssh:conn@@pty-7')
+    expect(humanized).not.toContain('Open a new terminal')
+    expect(humanized).toContain('still running')
+  })
+
   it('replaces only the unreattachable line in an aggregated error', () => {
     const humanized = humanizeTerminalError('Paste failed.\nSSH_SESSION_EXPIRED: orca:2f1c@@pty-7')
     expect(humanized.startsWith('Paste failed.\n')).toBe(true)
@@ -177,6 +187,10 @@ describe('isExplainedTerminalError', () => {
     expect(
       isExplainedTerminalError('connect ECONNREFUSED /tmp/orca-terminal-host-v30-14cb7f94b511.sock')
     ).toBe(true)
+  })
+
+  it('suppresses the issue link while a live session restores its output source', () => {
+    expect(isExplainedTerminalError('SSH_SOURCE_RESTORE_REQUIRED: ssh:conn@@pty-7')).toBe(true)
   })
 
   it('suppresses the issue link for a session the host cannot reattach', () => {
