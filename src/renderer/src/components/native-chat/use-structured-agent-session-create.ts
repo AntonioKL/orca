@@ -10,6 +10,7 @@ import {
   structuredAgentSessionCreateFingerprint
 } from '../../../../shared/structured-agent-session-mutation'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { canUseStructuredNativeChat } from '@/lib/structured-native-chat-availability'
 import { useAppStore } from '@/store'
 import {
   getActiveRuntimeTarget,
@@ -36,12 +37,22 @@ export function useStructuredAgentSessionCreate(
     () => getActiveRuntimeTarget({ activeRuntimeEnvironmentId: environmentId }),
     [environmentId]
   )
+  const structuredNativeChatEnabled = useAppStore(
+    (state) =>
+      state.settings?.experimentalNativeChat === true &&
+      canUseStructuredNativeChat(state, worktreeId)
+  )
   const [supported, setSupported] = useState(false)
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
     let stale = false
     setSupported(false)
+    if (!structuredNativeChatEnabled) {
+      return () => {
+        stale = true
+      }
+    }
     void (async () => {
       const hostCapability =
         target.kind === 'local'
@@ -73,10 +84,10 @@ export function useStructuredAgentSessionCreate(
     return () => {
       stale = true
     }
-  }, [agent, target, worktreeId])
+  }, [agent, structuredNativeChatEnabled, target, worktreeId])
 
   const create = useCallback(async (): Promise<boolean> => {
-    if (!supported || creating) {
+    if (!structuredNativeChatEnabled || !supported || creating) {
       return false
     }
     setCreating(true)
@@ -111,7 +122,7 @@ export function useStructuredAgentSessionCreate(
     } finally {
       setCreating(false)
     }
-  }, [agent, creating, supported, target, worktreeId])
+  }, [agent, creating, structuredNativeChatEnabled, supported, target, worktreeId])
 
   return { supported, creating, create }
 }
