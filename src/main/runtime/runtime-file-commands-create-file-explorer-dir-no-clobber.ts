@@ -5,7 +5,10 @@ import {
   SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE,
   getSshFilesystemProvider
 } from '../providers/ssh-filesystem-dispatch'
-import { resolveAuthorizedMutablePath } from './repository-admin-path-authorization'
+import {
+  assertMutableRemotePath,
+  resolveAuthorizedMutablePath
+} from './repository-admin-path-authorization'
 import { constants, copyFile, mkdir, rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { renameLocalPathSerializedByDestination } from '../destination-serialized-local-rename'
@@ -30,6 +33,9 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
       if (!provider) {
         throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
       }
+      await assertMutableRemotePath(provider, target.path, target.worktree.path, {
+        followsLink: false
+      })
       await provider.createDirNoClobber(target.path)
       return { ok: true }
     }
@@ -64,6 +70,12 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
       if (!provider) {
         throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
       }
+      await assertMutableRemotePath(provider, tempTarget.path, tempTarget.worktree.path, {
+        followsLink: true
+      })
+      await assertMutableRemotePath(provider, finalTarget.path, finalTarget.worktree.path, {
+        followsLink: false
+      })
       await provider.copy(tempTarget.path, finalTarget.path)
       await provider.deletePath(tempTarget.path, false).catch(() => {})
       return { ok: true }
@@ -107,6 +119,12 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
       if (!provider) {
         throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
       }
+      await assertMutableRemotePath(provider, oldTarget.path, oldTarget.worktree.path, {
+        followsLink: false
+      })
+      await assertMutableRemotePath(provider, newTarget.path, newTarget.worktree.path, {
+        followsLink: false
+      })
       await provider.renameNoClobber(oldTarget.path, newTarget.path)
       return { ok: true }
     }
@@ -147,6 +165,17 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
       if (!provider) {
         throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
       }
+      await assertMutableRemotePath(provider, sourceTarget.path, sourceTarget.worktree.path, {
+        followsLink: true
+      })
+      await assertMutableRemotePath(
+        provider,
+        destinationTarget.path,
+        destinationTarget.worktree.path,
+        {
+          followsLink: true
+        }
+      )
       await provider.copy(sourceTarget.path, destinationTarget.path)
       return { ok: true }
     }
@@ -188,6 +217,9 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
       if (!provider) {
         throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
       }
+      await assertMutableRemotePath(provider, target.path, target.worktree.path, {
+        followsLink: false
+      })
       await provider.deletePath(target.path, recursive)
       return { ok: true }
     }

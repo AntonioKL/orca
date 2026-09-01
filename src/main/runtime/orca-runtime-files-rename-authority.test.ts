@@ -44,7 +44,7 @@ vi.mock(
 )
 
 function mockStats(dev: number, ino: number) {
-  return { dev, ino, isDirectory: () => false }
+  return { dev, ino, isDirectory: () => false, isSymbolicLink: () => false }
 }
 
 function mockLocalPathStats(entries: Record<string, [number, number]>) {

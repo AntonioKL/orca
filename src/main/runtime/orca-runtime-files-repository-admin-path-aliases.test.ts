@@ -8,6 +8,11 @@ import { REPOSITORY_ADMIN_PATH_DENIED_MESSAGE } from '../../shared/repository-ad
 import { REPOSITORY_ADMIN_HARD_LINK_DENIED_MESSAGE } from './repository-admin-path-authorization'
 import type { RuntimeFileCommands } from './orca-runtime-files'
 import {
+  registerSshFilesystemProvider,
+  unregisterSshFilesystemProvider
+} from '../providers/ssh-filesystem-dispatch'
+import { setSshConnectionGeneration } from '../ssh/ssh-connection-generation'
+import {
   buildRepo,
   dispatchFileMethod,
   expectRefused,
@@ -566,5 +571,163 @@ describe.skipIf(process.platform === 'win32')('files.writeTerminalArtifact', () 
       )
     ).resolves.toEqual({ ok: true })
     expect(await readFile(join(scratchRepo, 'notes.txt'), 'utf-8')).toBe('edited\n')
+  })
+})
+
+// Why: the SSH branch returns before any local authorization, so the relative spelling is all the
+// client sees — and a guest-side symlink makes it lie. Classification happens on the execution
+// host's canonical path, via the relay's fs.realpath.
+describe('SSH lane refuses aliased .git paths', () => {
+  const dispatched: string[] = []
+  let realpathImpl: (remotePath: string) => Promise<string>
+
+  beforeEach(async () => {
+    await buildRepo()
+    fixture.connectionId = 'conn-1'
+    fixture.pathOverride = '/remote/repo'
+    dispatched.length = 0
+    realpathImpl = async (remotePath) => remotePath
+    setSshConnectionGeneration('conn-1', 7)
+    fixture.sshGeneration = 7
+    registerSshFilesystemProvider('conn-1', {
+      realpath: (remotePath: string) => realpathImpl(remotePath),
+      writeFile: async (p: string) => void dispatched.push(`writeFile:${p}`),
+      writeFileBase64: async (p: string) => void dispatched.push(`writeFileBase64:${p}`),
+      writeFileBase64Chunk: async (p: string) => void dispatched.push(`chunk:${p}`),
+      createFile: async (p: string) => void dispatched.push(`createFile:${p}`),
+      createDir: async (p: string) => void dispatched.push(`createDir:${p}`),
+      createDirNoClobber: async (p: string) => void dispatched.push(`createDirNoClobber:${p}`),
+      deletePath: async (p: string) => void dispatched.push(`deletePath:${p}`),
+      renameNoClobber: async (a: string, b: string) => void dispatched.push(`rename:${a}->${b}`),
+      copy: async (a: string, b: string) => void dispatched.push(`copy:${a}->${b}`)
+    } as never)
+  })
+
+  afterEach(async () => {
+    unregisterSshFilesystemProvider('conn-1')
+    fixture.connectionId = undefined
+    fixture.pathOverride = undefined
+    fixture.sshGeneration = undefined
+    await rm(fixture.repoPath, { recursive: true, force: true })
+  })
+
+  /** `safe -> .git` on the remote host. */
+  function aliasSafeToGit(): void {
+    realpathImpl = async (remotePath) =>
+      remotePath.replace(/^\/remote\/repo\/safe(?=\/|$)/, '/remote/repo/.git')
+  }
+
+  it('refuses a write through a remote symlinked ancestor', async () => {
+    aliasSafeToGit()
+
+    const response = await dispatchFileMethod('files.write', {
+      relativePath: 'safe/config',
+      content: 'EVIL\n'
+    })
+
+    expectRefused(response)
+    expect(dispatched).toEqual([])
+  })
+
+  it('refuses a delete through a remote symlinked ancestor', async () => {
+    aliasSafeToGit()
+
+    const response = await dispatchFileMethod('files.delete', {
+      relativePath: 'safe/config',
+      recursive: false
+    })
+
+    expectRefused(response)
+    expect(dispatched).toEqual([])
+  })
+
+  it('refuses a copy whose remote source is a leaf symlink into .git', async () => {
+    realpathImpl = async (remotePath) =>
+      remotePath === '/remote/repo/hook-link' ? '/remote/repo/.git/hooks/pre-commit' : remotePath
+
+    const response = await dispatchFileMethod('files.copy', {
+      sourceRelativePath: 'hook-link',
+      destinationRelativePath: 'stolen'
+    })
+
+    expectRefused(response)
+    expect(dispatched).toEqual([])
+  })
+
+  it('refuses a rename whose remote destination resolves into .git', async () => {
+    aliasSafeToGit()
+
+    const response = await dispatchFileMethod('files.rename', {
+      oldRelativePath: 'tracked.txt',
+      newRelativePath: 'safe/hooks'
+    })
+
+    expectRefused(response)
+    expect(dispatched).toEqual([])
+  })
+
+  // Why: over-blocking ordinary remote editing would be worse than the hole.
+  it('still dispatches ordinary remote mutations', async () => {
+    const written = await dispatchFileMethod('files.write', {
+      relativePath: 'src/app.ts',
+      content: 'ok\n'
+    })
+    const deleted = await dispatchFileMethod('files.delete', {
+      relativePath: 'src/old.ts',
+      recursive: false
+    })
+
+    expect(written.ok).toBe(true)
+    expect(deleted.ok).toBe(true)
+    expect(dispatched).toEqual([
+      'writeFile:/remote/repo/src/app.ts',
+      'deletePath:/remote/repo/src/old.ts'
+    ])
+  })
+
+  // Why: deleting the link itself is legitimate; only following it in is not.
+  it('still deletes a remote symlink itself', async () => {
+    aliasSafeToGit()
+
+    const response = await dispatchFileMethod('files.delete', {
+      relativePath: 'safe',
+      recursive: false
+    })
+
+    expect(response.ok).toBe(true)
+    expect(dispatched).toEqual(['deletePath:/remote/repo/safe'])
+  })
+
+  // Why: an older provider may not implement realpath at all. Calling a missing method throws
+  // synchronously, which no .catch() around the call would absorb, so it is checked up front.
+  it('stays permissive when the provider has no realpath at all', async () => {
+    unregisterSshFilesystemProvider('conn-1')
+    registerSshFilesystemProvider('conn-1', {
+      writeFile: async (p: string) => void dispatched.push(`writeFile:${p}`)
+    } as never)
+
+    const response = await dispatchFileMethod('files.write', {
+      relativePath: 'safe/config',
+      content: 'ok\n'
+    })
+
+    expect(response.ok).toBe(true)
+    expect(dispatched).toEqual(['writeFile:/remote/repo/safe/config'])
+  })
+
+  // Why: fs.realpath has been on the relay since 2026-07-26, but a host predating it must keep
+  // working. Permissive by design — this leaves the hole open there rather than bricking editing.
+  it('stays permissive when the remote host cannot canonicalize', async () => {
+    realpathImpl = async () => {
+      throw new Error('unknown method fs.realpath')
+    }
+
+    const response = await dispatchFileMethod('files.write', {
+      relativePath: 'safe/config',
+      content: 'ok\n'
+    })
+
+    expect(response.ok).toBe(true)
+    expect(dispatched).toEqual(['writeFile:/remote/repo/safe/config'])
   })
 })

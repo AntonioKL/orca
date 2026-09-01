@@ -6,7 +6,10 @@ import {
   getSshFilesystemProvider
 } from '../providers/ssh-filesystem-dispatch'
 import { lstat, mkdir, writeFile } from 'node:fs/promises'
-import { resolveAuthorizedMutablePath } from './repository-admin-path-authorization'
+import {
+  assertMutableRemotePath,
+  resolveAuthorizedMutablePath
+} from './repository-admin-path-authorization'
 import { isENOENT } from '../ipc/filesystem-path-containment'
 import { dirname } from 'node:path'
 import {
@@ -35,6 +38,9 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
       if (!provider) {
         throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
       }
+      await assertMutableRemotePath(provider, target.path, target.worktree.path, {
+        followsLink: true
+      })
       await provider.writeFile(target.path, content)
       return { ok: true }
     }
@@ -78,6 +84,9 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
       if (!provider) {
         throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
       }
+      await assertMutableRemotePath(provider, target.path, target.worktree.path, {
+        followsLink: false
+      })
       await provider.writeFileBase64(target.path, contentBase64)
       return { ok: true }
     }
@@ -110,6 +119,9 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
       if (!provider) {
         throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
       }
+      await assertMutableRemotePath(provider, target.path, target.worktree.path, {
+        followsLink: append
+      })
       await provider.writeFileBase64Chunk(target.path, contentBase64, append)
       return { ok: true }
     }
@@ -141,6 +153,9 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
       if (!provider) {
         throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
       }
+      await assertMutableRemotePath(provider, target.path, target.worktree.path, {
+        followsLink: false
+      })
       await provider.createFile(target.path)
       return { ok: true }
     }
@@ -174,6 +189,9 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
       if (!provider) {
         throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
       }
+      await assertMutableRemotePath(provider, target.path, target.worktree.path, {
+        followsLink: false
+      })
       await provider.createDir(target.path)
       return { ok: true }
     }

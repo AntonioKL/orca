@@ -16,11 +16,13 @@ export const fixture: {
   repoPath: string
   connectionId: string | undefined
   pathOverride: string | undefined
-} = { repoPath: '', connectionId: undefined, pathOverride: undefined }
+  sshGeneration: number | undefined
+} = { repoPath: '', connectionId: undefined, pathOverride: undefined, sshGeneration: undefined }
 
 export function resetFixture(): void {
   fixture.connectionId = undefined
   fixture.pathOverride = undefined
+  fixture.sshGeneration = undefined
 }
 
 /** A RuntimeFileCommands whose terminal grants stay on the returned instance. */
@@ -122,6 +124,13 @@ export function dispatchFileMethod(
         ? `id:repo-1::${fixture.pathOverride ?? fixture.repoPath}`
         : `path:${fixture.repoPath}`,
       expectedExecutionHostId: fixture.connectionId ? `ssh:${fixture.connectionId}` : 'local',
+      // A real client pairs the host id with the target and its connection generation.
+      ...(fixture.connectionId && fixture.sshGeneration !== undefined
+        ? {
+            expectedSshTargetId: fixture.connectionId,
+            expectedSshConnectionGeneration: fixture.sshGeneration
+          }
+        : {}),
       ...params
     }
   })
