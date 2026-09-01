@@ -94,6 +94,8 @@ function validateHardenedDacl(sddl: string, plan: AclPlan): string | null {
   if (!dacl.isProtected) {
     return 'DACL is not protected; the parent still propagates into it'
   }
+  // Exactly these, in any order: a directory's rules must be inheritable and nothing else.
+  const expectedFlags = plan.isDirectory ? ['OI', 'CI'] : []
   const observed = new Set<string>()
   for (const ace of dacl.aces) {
     if (ace.type !== 'A') {
@@ -105,8 +107,15 @@ function validateHardenedDacl(sddl: string, plan: AclPlan): string | null {
     if (ace.rights !== 'FA') {
       return `rule for ${ace.sid} grants ${ace.rights || 'nothing'}, not full control`
     }
-    if (ace.flags.includes('OI') !== plan.isDirectory) {
-      return `wrong inheritance flags for ${ace.sid}`
+    // The whole set, not just OI. (OI) without (CI) leaves subdirectories unprotected, and
+    // adding (IO) makes every rule inherit-only, so the directory object itself grants nobody
+    // anything and Orca cannot even write into it. Both used to be repaired blindly on every
+    // pass; since hardening short-circuits on a DACL that verifies, whatever this accepts stays.
+    if (
+      ace.flags.length !== expectedFlags.length ||
+      !expectedFlags.every((flag) => ace.flags.includes(flag))
+    ) {
+      return `wrong inheritance flags (${ace.flags.join('') || 'none'}) for ${ace.sid}`
     }
     observed.add(ace.sid)
   }

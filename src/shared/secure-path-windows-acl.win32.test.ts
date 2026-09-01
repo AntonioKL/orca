@@ -25,6 +25,16 @@ const describeOnWindows = process.platform === 'win32' ? describe : describe.ski
 
 const EVERYONE_SID = 'S-1-1-0'
 
+/** The SID the production code will grant to, so a planted DACL can differ only in its flags. */
+function currentUserSid(): string {
+  const result = runProcessSync({
+    program: windowsSystem32Binary('whoami.exe'),
+    args: ['/user', '/fo', 'csv', '/nh'],
+    timeoutMs: 10_000
+  })
+  return result.stdout.trim().split(/","/)[1]!.replace(/"$/, '')
+}
+
 function icacls(...args: string[]): { code: number | null; stdout: string } {
   const result = runProcessSync({
     program: windowsSystem32Binary('icacls.exe'),
@@ -178,6 +188,52 @@ describeOnWindows('restrictWindowsPathSync against a real filesystem', () => {
     const after = readAclEntries(file)
     expect(after).toHaveLength(3)
     expect(after.some((entry) => entry.startsWith('Everyone:'))).toBe(false)
+  })
+
+  /**
+   * Wrong *flags* rather than a wrong principal. Both of these are protected, carry three
+   * non-inherited full-control rules for exactly the right SIDs, and differ from correct only in
+   * their inheritance flags — so a check that tests OI alone accepts them.
+   *
+   * That under-check was harmless while /reset + /grant ran unconditionally and repaired whatever
+   * was there. Verify-first made it load-bearing: what verification accepts is now left alone.
+   */
+  it.each([
+    ['(OI) without (CI), leaving subdirectories unprotected', '(OI)(F)'],
+    ['(OI)(CI)(IO), which grants nobody anything on the directory itself', '(OI)(CI)(IO)(F)']
+  ])('repairs a directory whose rules are %s', (_label, rights) => {
+    const dir = join(root, `wrong-flags-${rights.replace(/[^A-Z]/g, '')}`)
+    mkdirSync(dir)
+    expect(
+      icacls(
+        dir,
+        '/inheritance:r',
+        '/grant:r',
+        `*${currentUserSid()}:${rights}`,
+        '/grant:r',
+        `*S-1-5-18:${rights}`,
+        '/grant:r',
+        `*S-1-5-32-544:${rights}`,
+        '/q'
+      ).code
+    ).toBe(0)
+
+    const before = readAclEntries(dir)
+    expect(before).toHaveLength(3)
+    expect(before.every((entry) => !entry.includes('(I)'))).toBe(true)
+    expect(before.every((entry) => entry.endsWith(rights))).toBe(true)
+
+    expect(restrictWindowsPathSync(dir, true)).toBe(true)
+
+    const after = readAclEntries(dir)
+    expect(after).toHaveLength(3)
+    expect(after.every((entry) => entry.endsWith(':(OI)(CI)(F)'))).toBe(true)
+
+    // The point of the (IO) case: before the repair the directory object grants nobody anything,
+    // so Orca cannot write into the directory it just cached as hardened.
+    const child = join(dir, 'child.json')
+    expect(() => writeFileSync(child, '{}')).not.toThrow()
+    expect(readAclEntries(child).every((entry) => entry.includes('(I)'))).toBe(true)
   })
 
   it('is idempotent: a second harden leaves the same DACL', () => {
