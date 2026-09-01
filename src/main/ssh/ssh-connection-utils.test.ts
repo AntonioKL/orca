@@ -14,6 +14,14 @@ function testHomePath(...parts: string[]): string {
   return join(TEST_HOME, ...parts)
 }
 
+const MACOS_ONEPASSWORD_SOCKET = testHomePath(
+  'Library',
+  'Group Containers',
+  '2BUA8C4S2C.com.1password',
+  't',
+  'agent.sock'
+)
+
 vi.mock('fs', () => ({
   existsSync: (...args: unknown[]) => mockExistsSync(...args),
   readFileSync: (...args: unknown[]) => mockReadFileSync(...args)
@@ -578,6 +586,40 @@ describe('buildConnectConfig', () => {
     } finally {
       platformSpy.mockRestore()
     }
+  })
+
+  it('discovers the 1Password agent socket when SSH_AUTH_SOCK is unset', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    delete process.env.SSH_AUTH_SOCK
+    mockExistsSync.mockImplementation((path: unknown) => path === MACOS_ONEPASSWORD_SOCKET)
+
+    expect(buildConnectConfig(makeTarget(), null).agent).toBe(MACOS_ONEPASSWORD_SOCKET)
+  })
+
+  it('keeps SSH_AUTH_SOCK ahead of the 1Password agent socket', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    mockExistsSync.mockReturnValue(true)
+
+    expect(buildConnectConfig(makeTarget(), null).agent).toBe('/tmp/agent.sock')
+  })
+
+  it('keeps an explicit IdentityAgent ahead of the 1Password agent socket', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    delete process.env.SSH_AUTH_SOCK
+    mockExistsSync.mockReturnValue(true)
+
+    const config = buildConnectConfig(
+      makeTarget({ identityAgent: '/tmp/explicit-agent.sock' }),
+      null
+    )
+    expect(config.agent).toBe('/tmp/explicit-agent.sock')
+  })
+
+  it('offers no agent when neither SSH_AUTH_SOCK nor a 1Password socket exists', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    delete process.env.SSH_AUTH_SOCK
+
+    expect(buildConnectConfig(makeTarget(), null).agent).toBeUndefined()
   })
 
   it('wraps agent auth with IdentityFile filtering when IdentitiesOnly is enabled', () => {

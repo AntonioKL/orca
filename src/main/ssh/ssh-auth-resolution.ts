@@ -3,6 +3,7 @@ import { utils, type BaseAgent, type ParsedKey } from 'ssh2'
 import type { SshTarget } from '../../shared/ssh-types'
 import type { SshResolvedConfig } from './ssh-config-parser'
 import { createIdentityFilteredAgent } from './ssh-agent-identity-filter'
+import { discoverNativeAgentSocket } from './ssh-agent-socket-discovery'
 import { resolveSshConfigHomePath } from './ssh-config-path-expansion'
 import { isOpenSshConfigBackedTarget } from './system-ssh-args'
 
@@ -16,7 +17,6 @@ const DEFAULT_KEY_PATHS = DEFAULT_KEY_NAMES.map((name) => `~/.ssh/${name}`)
 const DEFAULT_IDENTITY_PATHS = [...DEFAULT_KEY_NAMES, ...DEFAULT_SECURITY_KEY_NAMES].map(
   (name) => `~/.ssh/${name}`
 )
-const WINDOWS_OPENSSH_AGENT_PIPE = '\\\\.\\pipe\\openssh-ssh-agent'
 
 // Why: resolved IdentityFile paths are expanded before auth resolution, so they
 // won't match the ~/... form in DEFAULT_KEY_PATHS.
@@ -63,13 +63,6 @@ function expandIdentityAgentEnv(value: string): string | undefined {
   return missingEnv ? undefined : expanded
 }
 
-function resolveDefaultAgentSocket(): string | undefined {
-  return (
-    process.env.SSH_AUTH_SOCK ||
-    (process.platform === 'win32' ? WINDOWS_OPENSSH_AGENT_PIPE : undefined)
-  )
-}
-
 export function resolveAgentSocket(
   target: Pick<SshTarget, 'identityAgent' | 'configHost' | 'source' | 'host'>,
   resolved: Pick<SshResolvedConfig, 'identityAgent'> | null
@@ -86,7 +79,9 @@ export function resolveAgentSocket(
     }
     return expandIdentityAgentEnv(resolveSshConfigHomePath(trimmed))
   }
-  return resolveDefaultAgentSocket()
+  // Why: the agent runs on the client that drives ssh2, never on target.host — a
+  // remote or WSL host's agent is a different machine's and must not be answered here.
+  return discoverNativeAgentSocket()
 }
 
 function resolveExplicitPrivateKeyPaths(
