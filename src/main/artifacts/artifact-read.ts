@@ -169,10 +169,12 @@ function parseIframe(wrapper: string, id: string, apiUrl: string): string {
   } catch {
     throw new Error('Artifact content URL is invalid.')
   }
-  const apiHost = new URL(apiUrl).hostname
-  const allowed = url.hostname === CONTENT_HOST || (isLoopback(apiHost) && url.origin === apiUrl)
+  const apiOrigin = new URL(apiUrl)
+  const allowed =
+    url.origin === `https://${CONTENT_HOST}` ||
+    (isLoopback(apiOrigin.hostname) && url.origin === apiUrl)
   if (
-    url.protocol !== new URL(apiUrl).protocol ||
+    url.protocol !== apiOrigin.protocol ||
     !allowed ||
     url.username ||
     url.password ||

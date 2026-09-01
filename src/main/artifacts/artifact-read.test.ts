@@ -120,4 +120,17 @@ describe('readArtifactContent', () => {
       /allowed Orca content URL/
     )
   })
+
+  it('rejects noncanonical ports on the trusted content host', async () => {
+    const api = await serve({
+      '/v1/artifacts/abc123': { body: JSON.stringify(metadata), type: 'application/json' },
+      '/a/abc123': {
+        body: '<iframe src="https://content.orcausercontent.dev:444/usercontent/abc123/artifact.html">',
+        type: 'text/html'
+      }
+    })
+    await expect(readArtifactContent('abc123', { apiUrl: api })).rejects.toThrow(
+      /allowed Orca content URL/
+    )
+  })
 })
