@@ -9,6 +9,7 @@ import { useMobileNativeChatCancelAsk } from './use-mobile-native-chat-cancel-as
 import { useMobileNativeChatDrafts } from './use-mobile-native-chat-drafts'
 import { useMobileNativeChatFileSearch } from './use-mobile-native-chat-file-search'
 import { useMobileNativeChatMessageSend } from './use-mobile-native-chat-message-send'
+import { mobileNativeChatStreamPreview } from './mobile-native-chat-streaming-gate'
 import { useMobileNativeChatSession } from './use-mobile-native-chat-session'
 import { useMobileNativeChatSessionOptionController } from './use-mobile-native-chat-session-option-controller'
 import { useMobileStructuredAgentSession } from './use-mobile-structured-agent-session'
@@ -101,6 +102,7 @@ export function useMobileNativeChatController(args: {
   const {
     composerText: chatComposerText,
     setComposerText: setChatComposerText,
+    getComposerEditGeneration: getChatComposerEditGeneration,
     pending: chatPending,
     imagePreviewsByMessageId: chatImagePreviewsByMessageId,
     captureSendOrigin,
@@ -137,9 +139,9 @@ export function useMobileNativeChatController(args: {
   // Throttle the streaming bubble: OpenCode emits a status frame per streamed
   // part, and each one re-renders and re-parses the whole accumulated markdown.
   const nativeChatStreamingText = useThrottledLatestValue(
-    !activeChatStructured && nativeChatAgentWorking
-      ? nativeChatStatus?.lastAssistantMessage
-      : undefined,
+    activeChatStructured
+      ? undefined
+      : mobileNativeChatStreamPreview(nativeChatStatus, nativeChatAgentWorking),
     NATIVE_CHAT_STREAM_THROTTLE_MS
   )
   const {
@@ -295,6 +297,7 @@ export function useMobileNativeChatController(args: {
     nativeChatAgent: activeChatResolution?.agent ?? null,
     chatComposerText,
     setChatComposerText,
+    getChatComposerEditGeneration,
     chatPending,
     chatImagePreviewsByMessageId,
     nativeChatSession,

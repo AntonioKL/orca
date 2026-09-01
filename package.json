@@ -11,7 +11,7 @@
   "main": "./out/main/index.js",
   "scripts": {
     "format": "oxfmt --write .",
-    "lint": "oxlint && pnpm run audit:code-quality:native && pnpm run audit:code-quality:type-aware && pnpm run check:reliability-gates && pnpm run check:max-lines-ratchet && pnpm run check:runtime-electron-ratchet && pnpm run verify:bundled-skill-guides && pnpm run verify:skill-bundle-manifest && pnpm run verify:localization-catalog && pnpm run verify:localization-extraction && pnpm run verify:localization-coverage",
+    "lint": "oxlint && pnpm run audit:code-quality:native && pnpm run audit:code-quality:type-aware && pnpm run check:reliability-gates && pnpm run check:max-lines-ratchet && pnpm run check:ts-nocheck-ratchet && pnpm run check:runtime-electron-ratchet && pnpm run verify:bundled-skill-guides && pnpm run verify:skill-bundle-manifest && pnpm run verify:localization-catalog && pnpm run verify:localization-extraction && pnpm run verify:localization-coverage",
     "audit:code-quality": "pnpm run audit:code-quality:native && pnpm run audit:code-quality:type-aware && pnpm run audit:react-doctor",
     "audit:code-quality:native": "oxlint --config config/oxlint-code-quality-native-plugins.json src config tests mobile --deny-warnings",
     "audit:code-quality:type-aware": "oxlint --type-aware --config config/oxlint-code-quality-type-aware.json src config tests --deny-warnings",
@@ -29,6 +29,7 @@
     "test:repro:remote-agent-session": "pnpm run build:cli && pnpm run build:electron-vite && node config/scripts/remote-agent-session-authority-repro.mjs",
     "check:reliability-gates": "node config/scripts/check-reliability-gates.mjs",
     "check:max-lines-ratchet": "node config/scripts/check-max-lines-ratchet.mjs",
+    "check:ts-nocheck-ratchet": "node config/scripts/check-ts-nocheck-ratchet.mjs",
     "check:runtime-electron-ratchet": "node config/scripts/check-runtime-electron-ratchet.mjs",
     "build:orcad": "node config/scripts/build-orcad.mjs",
     "build:orcad-prebuilds": "node config/scripts/build-orcad-prebuilds.mjs",
@@ -85,6 +86,8 @@
     "build:release:parallel": "pnpm run build:relay && pnpm run build:native && pnpm run verify:computer-native && pnpm run build:cli && pnpm run build:electron-vite:parallel && pnpm run verify:built-skills-cli && pnpm run build:web-from-renderer",
     "postinstall": "node config/scripts/rebuild-native-deps.mjs",
     "rebuild:electron": "node config/scripts/rebuild-native-deps.mjs",
+    "reclaim:electron-dists": "node config/scripts/reclaim-electron-dists.mjs",
+    "reclaim:dev-bundles": "node config/scripts/reclaim-dev-electron-bundles.mjs",
     "rebuild:node": "pnpm rebuild node-pty",
     "build:unpack": "pnpm run build && pnpm run ensure:electron-runtime && electron-builder --config config/electron-builder.config.cjs --dir",
     "build:win": "pnpm run build:desktop && pnpm run ensure:electron-runtime && electron-builder --config config/electron-builder.config.cjs --win",
@@ -151,8 +154,8 @@
     "@floating-ui/dom": "1.7.6",
     "@linear/sdk": "^82.1.0",
     "@parcel/watcher": "^2.5.6",
-    "@xterm/addon-serialize": "0.15.0-beta.287",
-    "@xterm/headless": "6.1.0-beta.287",
+    "@xterm/addon-serialize": "0.15.0-beta.300",
+    "@xterm/headless": "6.1.0-beta.302",
     "agent-browser": "~0.27.0",
     "electron-updater": "^6.8.9",
     "i18next": "^26.3.1",
@@ -169,7 +172,7 @@
     "tweetnacl": "^1.0.3",
     "ws": "^8.21.3",
     "yaml": "^2.8.4",
-    "zod": "~4.4.3"
+    "zod": "~4.5.4"
   },
   "devDependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -211,13 +214,13 @@
     "@types/ssh2": "^1.15.5",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.2.0",
-    "@xterm/addon-fit": "0.12.0-beta.287",
-    "@xterm/addon-ligatures": "0.11.0-beta.287",
-    "@xterm/addon-search": "0.17.0-beta.287",
-    "@xterm/addon-unicode11": "0.10.0-beta.287",
-    "@xterm/addon-web-links": "0.13.0-beta.287",
-    "@xterm/addon-webgl": "0.20.0-beta.286",
-    "@xterm/xterm": "6.1.0-beta.287",
+    "@xterm/addon-fit": "0.12.0-beta.300",
+    "@xterm/addon-ligatures": "0.11.0-beta.300",
+    "@xterm/addon-search": "0.17.0-beta.300",
+    "@xterm/addon-unicode11": "0.10.0-beta.300",
+    "@xterm/addon-web-links": "0.13.0-beta.300",
+    "@xterm/addon-webgl": "0.20.0-beta.299",
+    "@xterm/xterm": "6.1.0-beta.303",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -300,6 +303,37 @@
   },
   "packageManager": "pnpm@12.0.0+sha512.9e2e3dc3911995868dc94b8175c217c27e95408fa03b4a22749778f2b34f773b77cdd3b39ede8171b22fcd53be6a35342e9fac9948a68ef58df6488ce89a7e67",
   "reactDoctor": {
+    "ignore": {
+      "overrides": [
+        {
+          "files": [
+            "src/renderer/src/components/editor/combined-diff/review-controls/use-combined-diff-view-preferences.ts"
+          ],
+          "rules": [
+            "react-doctor/no-derived-state-effect"
+          ]
+        },
+        {
+          "files": [
+            "src/renderer/src/components/use-task-page-github-issue-draft.ts",
+            "src/renderer/src/components/use-task-page-jira-creation-state.ts"
+          ],
+          "rules": [
+            "react-doctor/no-adjust-state-on-prop-change"
+          ]
+        },
+        {
+          "files": [
+            "src/renderer/src/components/editor/combined-diff/browse-files/use-combined-diff-tree-navigation.ts",
+            "src/renderer/src/components/editor/combined-diff/load-sections/combined-diff-section-load-registry.ts",
+            "src/renderer/src/components/editor/combined-diff/review-controls/use-combined-diff-section-actions.ts"
+          ],
+          "rules": [
+            "react-doctor/no-ref-current-in-render"
+          ]
+        }
+      ]
+    },
     "rules": {
       "react-doctor/js-combine-iterations": "off"
     }

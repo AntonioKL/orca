@@ -31,6 +31,7 @@ jobs:
       static_analysis: ${{ steps.filter.outputs.static_analysis }}
       typecheck: ${{ steps.filter.outputs.typecheck }}
       git_compatibility: ${{ steps.filter.outputs.git_compatibility }}
+      codex_index_heal_contract: ${{ steps.filter.outputs.codex_index_heal_contract }}
       xterm_patch_sync: ${{ steps.filter.outputs.xterm_patch_sync }}
       shell_contracts: ${{ steps.filter.outputs.shell_contracts }}
       test: ${{ steps.filter.outputs.test }}
@@ -130,6 +131,9 @@ jobs:
       - name: Enforce max-lines ratchet
         run: pnpm run check:max-lines-ratchet
 
+      - name: Enforce ts-nocheck ratchet
+        run: pnpm run check:ts-nocheck-ratchet
+
       - name: Enforce runtime Electron-import ratchet
         run: pnpm run check:runtime-electron-ratchet
 
@@ -214,16 +218,16 @@ jobs:
       - uses: ./.github/actions/install-node-dependencies
 
       # Why: every project is `composite`, so tsc already writes a .tsbuildinfo that lets
-      # the next run skip unchanged files. CI threw it away each time. The key is per-SHA
-      # so each run saves its own; restore-keys inherit the newest prior graph to diff against.
+      # the next run skip unchanged files. Share one cache entry across commits while the
+      # PR base stays stable; actions/cache keeps the first successful graph and the
+      # compiler still invalidates stale files from its content hashes.
       - name: Cache TypeScript incremental state
         uses: actions/cache@v5
         with:
           path: config/*.tsbuildinfo
-          key: tsbuildinfo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'config/tsconfig*.json') }}-${{ github.sha }}
+          key: tsbuildinfo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'config/tsconfig*.json') }}-${{ github.event.pull_request.base.sha }}
           restore-keys: |
             tsbuildinfo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'config/tsconfig*.json') }}-
-            tsbuildinfo-${{ runner.os }}-
 
       - run: pnpm run typecheck
 
@@ -294,6 +298,47 @@ jobs:
           done
           exit "$status"
 
+  # Why this job: Orca's session index-heal depends on a Codex behavior — a
+  # `thread/read` of an unindexed rollout performs a read-repair that inserts the
+  # `threads` row. Every unit test drives a stub app-server and asserts only that the
+  # call did not error, so if Codex dropped the repair they would all stay green while
+  # the subsystem went inert. This runs the pinned real binary and fails when the
+  # repair stops happening. Pinned because the binary is the thing expected to drift.
+  codex_index_heal_contract:
+    name: Codex index-heal contract
+    needs: [code_paths]
+    if: needs.code_paths.outputs.codex_index_heal_contract == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CODEX_CLI_VERSION: '0.150.1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/install-node-dependencies
+
+      - name: Install pinned Codex CLI
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --prefix "$RUNNER_TEMP/codex-cli" \
+            "@openai/codex@$CODEX_CLI_VERSION"
+
+      - name: Verify Codex index-heal contract
+        env:
+          # Why REQUIRED: without a binary the suite skips, and a job that skips
+          # reports success. This turns a failed or missing install into a red test
+          # instead of a green no-op.
+          ORCA_CODEX_CONTRACT_REQUIRED: '1'
+          ORCA_CODEX_CONTRACT_VERSION: ${{ env.CODEX_CLI_VERSION }}
+        run: |
+          set -euo pipefail
+          ORCA_CODEX_CONTRACT_BINARY="$RUNNER_TEMP/codex-cli/node_modules/.bin/codex" \
+            pnpm exec vitest run --config config/vitest.config.ts \
+            src/main/codex/codex-index-heal-binary-contract.test.ts
+
   xterm_patch_sync:
     name: xterm patch sync
     needs: [code_paths]
@@ -308,9 +353,12 @@ jobs:
 
       - uses: ./.github/actions/install-node-dependencies
 
-      # Why: the check rebuilds xterm.js from a pinned upstream commit. Caching the
-      # npm metadata and the shallow clone turns a ~4 min cold run into well under a
-      # minute; the key is the manifest, so a commit or toolchain bump invalidates it.
+      # Why: the check rebuilds every package in the manifest from a pinned upstream
+      # commit — @xterm/xterm and the two addons, each built twice (once unmodified to
+      # prove the toolchain still reproduces the published bundles, once patched). Caching
+      # the npm metadata and the shallow clone keeps the repeated cost to the builds
+      # themselves; the key is the manifest, so a commit, package or toolchain bump
+      # invalidates it.
       - name: Restore upstream xterm build inputs
         uses: actions/cache@v5
         with:
@@ -585,9 +633,7 @@ jobs:
       - name: Cache electron-builder downloads
         uses: actions/cache@v5
         with:
-          path: |
-            ~/.cache/electron
-            ~/.cache/electron-builder
+          path: ~/.cache/electron-builder
           key: electron-builder-linux-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             electron-builder-linux-
@@ -678,6 +724,7 @@ jobs:
           persist-native-cache: 'false'
 
       - name: Save compiled Node native modules
+        if: steps.deps.outputs.native-cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: |
@@ -843,6 +890,7 @@ jobs:
       - root_directory_guard
       - typecheck
       - git_compatibility
+      - codex_index_heal_contract
       - xterm_patch_sync
       - shell_contracts
       - test
@@ -873,6 +921,8 @@ jobs:
           TYPECHECK_SHOULD_RUN: ${{ needs.code_paths.outputs.typecheck }}
           GIT_COMPATIBILITY: ${{ needs.git_compatibility.result }}
           GIT_COMPATIBILITY_SHOULD_RUN: ${{ needs.code_paths.outputs.git_compatibility }}
+          CODEX_INDEX_HEAL_CONTRACT: ${{ needs.codex_index_heal_contract.result }}
+          CODEX_INDEX_HEAL_CONTRACT_SHOULD_RUN: ${{ needs.code_paths.outputs.codex_index_heal_contract }}
           XTERM_PATCH_SYNC: ${{ needs.xterm_patch_sync.result }}
           XTERM_PATCH_SYNC_SHOULD_RUN: ${{ needs.code_paths.outputs.xterm_patch_sync }}
           SHELL_CONTRACTS: ${{ needs.shell_contracts.result }}
@@ -918,6 +968,7 @@ jobs:
           check_job static_analysis "$STATIC_ANALYSIS" "$STATIC_ANALYSIS_SHOULD_RUN"
           check_job typecheck "$TYPECHECK" "$TYPECHECK_SHOULD_RUN"
           check_job git_compatibility "$GIT_COMPATIBILITY" "$GIT_COMPATIBILITY_SHOULD_RUN"
+          check_job codex_index_heal_contract "$CODEX_INDEX_HEAL_CONTRACT" "$CODEX_INDEX_HEAL_CONTRACT_SHOULD_RUN"
           check_job xterm_patch_sync "$XTERM_PATCH_SYNC" "$XTERM_PATCH_SYNC_SHOULD_RUN"
           check_job shell_contracts "$SHELL_CONTRACTS" "$SHELL_CONTRACTS_SHOULD_RUN"
           check_job test "$TEST" "$TEST_SHOULD_RUN"
