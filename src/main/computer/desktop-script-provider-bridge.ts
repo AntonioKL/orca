@@ -1,28 +1,50 @@
 import { execFile } from 'node:child_process'
+import { windowsPowerShellPath } from '../../shared/child-process/windows-system-binary'
 import { RuntimeClientError } from './runtime-client-error'
 import type { DesktopScriptPlatform } from './desktop-script-provider-paths'
+import {
+  FALLBACK_WINDOWS_EXECUTION_POLICY,
+  PREFERRED_WINDOWS_EXECUTION_POLICY,
+  isExecutionPolicyBlocked,
+  windowsPowerShellRuntimeArgs
+} from './windows-powershell-execution-policy'
 
 const REQUEST_TIMEOUT_MS = 30_000
 const FORCE_KILL_GRACE_MS = 1_000
 
-export function execBridge(
+export async function execBridge(
   platform: DesktopScriptPlatform,
   scriptPath: string,
   operationPath: string
 ): Promise<{ stdout: string; stderr: string }> {
-  const command = platform === 'windows' ? 'powershell.exe' : 'python3'
-  const args =
-    platform === 'windows'
-      ? [
-          '-NoProfile',
-          '-NonInteractive',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-File',
-          scriptPath,
-          operationPath
-        ]
-      : [scriptPath, operationPath]
+  if (platform !== 'windows') {
+    return await runBridgeProcess('python3', [scriptPath, operationPath])
+  }
+  const command = windowsPowerShellPath()
+  try {
+    return await runBridgeProcess(
+      command,
+      windowsPowerShellRuntimeArgs(scriptPath, PREFERRED_WINDOWS_EXECUTION_POLICY, [operationPath])
+    )
+  } catch (error) {
+    // The script never loaded under a blocking policy, so re-running is safe.
+    if (!isExecutionPolicyBlocked(error instanceof Error ? error.message : String(error))) {
+      throw error
+    }
+    console.warn(
+      `[computer-use] bridge start blocked at ${PREFERRED_WINDOWS_EXECUTION_POLICY}; retrying once with ${FALLBACK_WINDOWS_EXECUTION_POLICY}`
+    )
+    return await runBridgeProcess(
+      command,
+      windowsPowerShellRuntimeArgs(scriptPath, FALLBACK_WINDOWS_EXECUTION_POLICY, [operationPath])
+    )
+  }
+}
+
+function runBridgeProcess(
+  command: string,
+  args: readonly string[]
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof execFile> | null = null
     let settled = false
@@ -76,7 +98,7 @@ export function execBridge(
     try {
       child = execFile(
         command,
-        args,
+        [...args],
         {
           env: process.env,
           maxBuffer: 20 * 1024 * 1024,

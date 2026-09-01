@@ -1,6 +1,9 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$OperationPath
+    [Parameter(Position = 0)]
+    [string]$OperationPath,
+    # Serve mode keeps one process alive so the Add-Type P/Invoke assembly below
+    # is emitted once per session instead of once per operation.
+    [switch]$Serve
 )
 
 $ErrorActionPreference = "Stop"
@@ -1313,9 +1316,33 @@ function Invoke-OrcaOperation($Operation) {
     [pscustomobject]@{ ok = $true; action = $action; snapshot = $snapshot }
 }
 
-try {
-    $operation = Read-OrcaOperation $OperationPath
-    Write-OrcaJson (Invoke-OrcaOperation $operation)
-} catch {
-    Write-OrcaJson ([pscustomobject]@{ ok = $false; error = [string]$_.Exception.Message })
+function Invoke-OrcaServeLoop {
+    # One NDJSON request per line in, one response per line out, until stdin closes.
+    # Responses carry base64 screenshots and routinely exceed a megabyte; ReadLine
+    # and the console writer are both length-bounded only by memory.
+    while ($true) {
+        $line = [Console]::In.ReadLine()
+        if ($null -eq $line) { break }
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try {
+            $json = ConvertTo-Json (Invoke-OrcaOperation ($line | ConvertFrom-Json)) -Depth 100 -Compress
+        } catch {
+            $json = ConvertTo-Json ([pscustomobject]@{ ok = $false; error = [string]$_.Exception.Message }) -Depth 100 -Compress
+        }
+        [Console]::Out.WriteLine($json)
+        [Console]::Out.Flush()
+    }
+}
+
+if ($Serve) {
+    Invoke-OrcaServeLoop
+} elseif ([string]::IsNullOrWhiteSpace($OperationPath)) {
+    Write-OrcaJson ([pscustomobject]@{ ok = $false; error = "runtime.ps1 requires an operation path or -Serve" })
+} else {
+    try {
+        $operation = Read-OrcaOperation $OperationPath
+        Write-OrcaJson (Invoke-OrcaOperation $operation)
+    } catch {
+        Write-OrcaJson ([pscustomobject]@{ ok = $false; error = [string]$_.Exception.Message })
+    }
 }
