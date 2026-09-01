@@ -14,6 +14,7 @@ export type MobileWebNavigationAuthority = {
   reconnect(): void | Promise<void>
   removeHost(): void | Promise<void>
   consumeRecentUserGesture(): boolean
+  hasRecentUserGesture(): boolean
 }
 
 export async function executeMobileWebNavigationOperation(args: {

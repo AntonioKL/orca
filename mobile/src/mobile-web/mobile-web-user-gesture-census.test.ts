@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 import {
   mobileWebUserGestureConsumer,
+  mobileWebUserGestureWitness,
   requireRecentUserGesture
 } from './mobile-web-user-gesture-requirement'
 
@@ -14,6 +15,7 @@ const GESTURE_GATED_DISCRIMINATORS: Record<string, string[]> = {
   'mobile-web-account-operations.ts': ['consumeResetCredit', 'select'],
   'mobile-web-agent-history-operations.ts': ['resume'],
   'mobile-web-native-capability-operations.ts': [
+    'alert',
     'clipboardWrite',
     'openExternal',
     'terminalCustomKeysUpdate',
@@ -78,6 +80,21 @@ describe('mobile web user gesture requirement census', () => {
         consumeRecentUserGesture: () => true
       })()
     ).toBe(true)
+  })
+
+  it('witnesses a gesture without spending it', () => {
+    const consumeRecentUserGesture = vi.fn(() => true)
+    const authority = {
+      route: () => {},
+      reconnect: () => {},
+      removeHost: () => {},
+      consumeRecentUserGesture,
+      hasRecentUserGesture: () => true
+    }
+
+    expect(mobileWebUserGestureWitness(authority)()).toBe(true)
+    expect(mobileWebUserGestureWitness(undefined)()).toBe(false)
+    expect(consumeRecentUserGesture).not.toHaveBeenCalled()
   })
 
   it('spends the gesture exactly once so a replayed request is denied', () => {

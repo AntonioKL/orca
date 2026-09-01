@@ -31,9 +31,11 @@ export async function executeMobileWebNativeCapabilityOperation(args: {
   browserAuthority?: MobileWebBrowserAuthority
   workspaceAuthority?: MobileWebWorkspaceAuthority
   consumeRecentUserGesture: () => boolean
+  hasRecentUserGesture: () => boolean
 }): Promise<unknown> {
   if (args.operation === 'alert') {
     const payload = MobileWebNativeAlertPayloadSchema.parse(args.payload)
+    requireRecentUserGesture(args.hasRecentUserGesture)
     if (!args.authority.alert) {
       throw new MobileWebBrokerError('unavailable')
     }

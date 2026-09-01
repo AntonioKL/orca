@@ -148,6 +148,13 @@ async function createPrimedHarness(alert?: MobileWebNativeCapabilityAuthority['a
       terminalPreferences: vi.fn(),
       terminalTextScaleUpdate: vi.fn()
     },
+    navigationAuthority: {
+      route: vi.fn(),
+      reconnect: vi.fn(),
+      removeHost: vi.fn(),
+      consumeRecentUserGesture: () => true,
+      hasRecentUserGesture: () => true
+    },
     terminalClientId: 'device-token',
     randomBytes: (length) => new Uint8Array(length).fill(1)
   })

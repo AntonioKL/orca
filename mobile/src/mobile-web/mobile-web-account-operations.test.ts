@@ -128,7 +128,8 @@ function createHarness() {
       route: vi.fn(),
       reconnect: vi.fn(),
       removeHost: vi.fn(),
-      consumeRecentUserGesture
+      consumeRecentUserGesture,
+      hasRecentUserGesture: () => true
     },
     terminalClientId: 'device-token',
     randomBytes: (length) => new Uint8Array(length).fill(1)

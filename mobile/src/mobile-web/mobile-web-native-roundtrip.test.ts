@@ -40,7 +40,8 @@ describe('mobile web native capability round trip', () => {
         route: vi.fn(),
         reconnect: vi.fn(),
         removeHost: vi.fn(),
-        consumeRecentUserGesture
+        consumeRecentUserGesture,
+        hasRecentUserGesture: () => true
       }
     })
 

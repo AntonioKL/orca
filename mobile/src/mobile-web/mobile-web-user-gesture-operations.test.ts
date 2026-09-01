@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
 import { executeMobileWebAccountOperation } from './mobile-web-account-operations'
 import { executeMobileWebNativeCapabilityOperation } from './mobile-web-native-capability-operations'
@@ -43,6 +43,42 @@ describe.each(CASES)('gesture-gated $name', ({ run }) => {
   it('lets the operation past the gate with a recent user gesture', async () => {
     expect(await failureCode(run(() => true))).not.toBe('permission_required')
   })
+})
+
+describe('gesture-gated native alert', () => {
+  const ALERT = {
+    title: 'Discard changes?',
+    buttons: [{ text: 'Stay', style: 'cancel' as const }]
+  }
+
+  it('denies an OS alert the page raises without a recent user gesture', async () => {
+    await expect(runAlert(() => false)).rejects.toMatchObject({ code: 'permission_required' })
+  })
+
+  it('witnesses the gesture without spending it, so the confirmed action still has one', async () => {
+    const consumeRecentUserGesture = vi.fn(() => true)
+
+    await expect(runAlert(() => true, consumeRecentUserGesture)).resolves.toEqual({
+      kind: 'dismissed'
+    })
+    expect(consumeRecentUserGesture).not.toHaveBeenCalled()
+  })
+
+  function runAlert(
+    hasRecentUserGesture: () => boolean,
+    consumeRecentUserGesture: () => boolean = () => true
+  ): Promise<unknown> {
+    return executeMobileWebNativeCapabilityOperation({
+      operation: 'alert',
+      payload: ALERT,
+      authority: {
+        alert: async () => ({ kind: 'dismissed' }),
+        hapticFeedback: () => {}
+      } as unknown as MobileWebNativeCapabilityAuthority,
+      consumeRecentUserGesture,
+      hasRecentUserGesture
+    })
+  }
 })
 
 describe('gesture-gated operations reached through other executors', () => {
@@ -90,7 +126,8 @@ function nativeCase(name: string, payload: unknown): GatedCase {
           terminalTextScaleUpdate: async () => {},
           terminalCustomKeysUpdate: async () => {}
         } as MobileWebNativeCapabilityAuthority,
-        consumeRecentUserGesture
+        consumeRecentUserGesture,
+        hasRecentUserGesture: () => false
       })
   }
 }

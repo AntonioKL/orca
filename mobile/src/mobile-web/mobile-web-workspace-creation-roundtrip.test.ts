@@ -45,7 +45,8 @@ describe('mobile web workspace creation round trip', () => {
         route: vi.fn(),
         reconnect: vi.fn(),
         removeHost: vi.fn(),
-        consumeRecentUserGesture
+        consumeRecentUserGesture,
+        hasRecentUserGesture: () => true
       }
     })
 

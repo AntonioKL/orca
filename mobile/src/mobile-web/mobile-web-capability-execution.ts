@@ -6,7 +6,10 @@ import { MobileWebSourceControlSubscribePayloadSchema } from '../../../src/share
 import { MobileWebSpeechSubscribePayloadSchema } from '../../../src/shared/mobile-web/speech-operation-contract'
 import { executeMobileWebAccountCapability } from './mobile-web-account-capability'
 import { executeMobileWebAgentHistoryOperation } from './mobile-web-agent-history-operations'
-import { mobileWebUserGestureConsumer } from './mobile-web-user-gesture-requirement'
+import {
+  mobileWebUserGestureConsumer,
+  mobileWebUserGestureWitness
+} from './mobile-web-user-gesture-requirement'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 import { executeMobileWebBrowserOperation } from './mobile-web-browser-operations'
 import type { MobileWebCapabilityExecutionDependencies } from './mobile-web-capability-execution-dependencies'
@@ -34,7 +37,8 @@ export async function executeMobileWebCapabilityRequest(
       authority: args.nativeAuthority,
       browserAuthority: args.browserAuthority,
       workspaceAuthority: args.workspaceAuthority,
-      consumeRecentUserGesture: mobileWebUserGestureConsumer(args.navigationAuthority)
+      consumeRecentUserGesture: mobileWebUserGestureConsumer(args.navigationAuthority),
+      hasRecentUserGesture: mobileWebUserGestureWitness(args.navigationAuthority)
     })
   }
   if (request.capability === 'nativeChat') {

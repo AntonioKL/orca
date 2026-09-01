@@ -13,7 +13,8 @@ describe('mobile web native capability operations', () => {
         operation: 'terminalPreferences',
         payload: {},
         authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture
+        consumeRecentUserGesture: harness.consumeRecentUserGesture,
+        hasRecentUserGesture: harness.hasRecentUserGesture
       })
     ).resolves.toEqual({
       textScale: 1.25,
@@ -32,7 +33,8 @@ describe('mobile web native capability operations', () => {
         operation: 'terminalAccessoryPreferences',
         payload: {},
         authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture
+        consumeRecentUserGesture: harness.consumeRecentUserGesture,
+        hasRecentUserGesture: harness.hasRecentUserGesture
       })
     ).resolves.toEqual({
       customKeys,
@@ -46,7 +48,8 @@ describe('mobile web native capability operations', () => {
         operation: 'terminalCustomKeysUpdate',
         payload: { customKeys },
         authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture
+        consumeRecentUserGesture: harness.consumeRecentUserGesture,
+        hasRecentUserGesture: harness.hasRecentUserGesture
       })
     ).resolves.toBeNull()
     expect(harness.terminalCustomKeysUpdate).toHaveBeenCalledWith(customKeys)
@@ -61,7 +64,8 @@ describe('mobile web native capability operations', () => {
         operation: 'clipboardAvailability',
         payload: {},
         authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture
+        consumeRecentUserGesture: harness.consumeRecentUserGesture,
+        hasRecentUserGesture: harness.hasRecentUserGesture
       })
     ).resolves.toEqual({ hasText: true, hasImage: false })
     expect(harness.clipboardAvailability).toHaveBeenCalledOnce()
@@ -76,7 +80,8 @@ describe('mobile web native capability operations', () => {
         operation: 'clipboardWrite',
         payload: { text: 'selected text' },
         authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture
+        consumeRecentUserGesture: harness.consumeRecentUserGesture,
+        hasRecentUserGesture: harness.hasRecentUserGesture
       })
     ).rejects.toMatchObject({ code: 'permission_required' })
     expect(harness.clipboardWrite).not.toHaveBeenCalled()
@@ -87,7 +92,8 @@ describe('mobile web native capability operations', () => {
         operation: 'clipboardWrite',
         payload: { text: 'selected text' },
         authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture
+        consumeRecentUserGesture: harness.consumeRecentUserGesture,
+        hasRecentUserGesture: harness.hasRecentUserGesture
       })
     ).resolves.toEqual({ confirmation: 'in-app' })
     expect(harness.clipboardWrite).toHaveBeenCalledWith('selected text')
@@ -101,7 +107,8 @@ describe('mobile web native capability operations', () => {
         operation: 'openExternal',
         payload: { url: 'javascript:alert(1)' },
         authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture
+        consumeRecentUserGesture: harness.consumeRecentUserGesture,
+        hasRecentUserGesture: harness.hasRecentUserGesture
       })
     ).rejects.toThrow()
     expect(harness.openExternal).not.toHaveBeenCalled()
@@ -110,13 +117,15 @@ describe('mobile web native capability operations', () => {
       operation: 'openExternal',
       payload: { url: 'https://example.com/path' },
       authority: harness.authority,
-      consumeRecentUserGesture: harness.consumeRecentUserGesture
+      consumeRecentUserGesture: harness.consumeRecentUserGesture,
+      hasRecentUserGesture: harness.hasRecentUserGesture
     })
     await executeMobileWebNativeCapabilityOperation({
       operation: 'terminalTextScaleUpdate',
       payload: { textScale: 1.5 },
       authority: harness.authority,
-      consumeRecentUserGesture: harness.consumeRecentUserGesture
+      consumeRecentUserGesture: harness.consumeRecentUserGesture,
+      hasRecentUserGesture: harness.hasRecentUserGesture
     })
 
     expect(harness.openExternal).toHaveBeenCalledWith('https://example.com/path')
@@ -130,7 +139,8 @@ describe('mobile web native capability operations', () => {
       operation: 'hapticFeedback',
       payload: { kind: 'edge-bump' },
       authority: harness.authority,
-      consumeRecentUserGesture: harness.consumeRecentUserGesture
+      consumeRecentUserGesture: harness.consumeRecentUserGesture,
+      hasRecentUserGesture: harness.hasRecentUserGesture
     })
 
     expect(harness.hapticFeedback).toHaveBeenCalledWith('edge-bump')
@@ -154,7 +164,8 @@ describe('mobile web native capability operations', () => {
         authority: harness.authority,
         browserAuthority,
         workspaceAuthority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture
+        consumeRecentUserGesture: harness.consumeRecentUserGesture,
+        hasRecentUserGesture: harness.hasRecentUserGesture
       })
     ).resolves.toEqual({ text: 'saved draft' })
     await expect(
@@ -164,7 +175,8 @@ describe('mobile web native capability operations', () => {
         authority: harness.authority,
         browserAuthority,
         workspaceAuthority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture
+        consumeRecentUserGesture: harness.consumeRecentUserGesture,
+        hasRecentUserGesture: harness.hasRecentUserGesture
       })
     ).resolves.toBeNull()
 
@@ -192,6 +204,7 @@ function createHarness(hasRecentGesture = true) {
   const terminalCustomKeysUpdate = vi.fn().mockResolvedValue(undefined)
   const terminalTextScaleUpdate = vi.fn().mockResolvedValue(undefined)
   const consumeRecentUserGesture = vi.fn(() => hasRecentGesture)
+  const hasRecentUserGesture = vi.fn(() => hasRecentGesture)
   const authority: MobileWebNativeCapabilityAuthority = {
     hapticFeedback,
     clipboardAvailability,
@@ -207,6 +220,7 @@ function createHarness(hasRecentGesture = true) {
     clipboardAvailability,
     clipboardWrite,
     consumeRecentUserGesture,
+    hasRecentUserGesture,
     hapticFeedback,
     openExternal,
     terminalCustomKeysUpdate,

@@ -54,7 +54,10 @@ export default function HybridScreen() {
   const postInitRef = useRef<() => Promise<void>>(() => Promise.resolve())
   const nativeRouteHandoffRef = useRef(new MobileWebNativeRouteHandoff())
   const recentWebGestureAtRef = useRef<number | null>(null)
-  const consumeRecentUserGesture = useGestureAuthority(recentWebGestureAtRef, brokerRef)
+  const { consumeRecentUserGesture, hasRecentUserGesture } = useGestureAuthority(
+    recentWebGestureAtRef,
+    brokerRef
+  )
   const responseDropRef = useRef(
     new MobileWebOneShotResponseDrop(process.env.EXPO_PUBLIC_ORCA_E2E_MOBILE_WEB_DROP_RESPONSE_ONCE)
   )
@@ -179,7 +182,8 @@ export default function HybridScreen() {
     clearColdResumeRoute: coldResumeRoute.clearRoute,
     closeHostClient,
     forceReconnectHost,
-    consumeRecentUserGesture
+    consumeRecentUserGesture,
+    hasRecentUserGesture
   })
   const createBroker = useCallback(
     (page: MobileWebBrokerPageIdentity) => {
