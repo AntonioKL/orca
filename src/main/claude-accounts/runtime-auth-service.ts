@@ -82,6 +82,17 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
         }
       } catch (error) {
         console.warn('[claude-runtime-auth] Failed to bridge macOS managed Claude Keychain', error)
+        // Never route a pane at a home whose credential surface could not be
+        // synchronized; fall back to the system lane instead.
+        return {
+          configDir: this.pathResolver.getRuntimePaths().configDir,
+          runtime: 'host',
+          wslDistro: null,
+          wslLinuxConfigDir: null,
+          envPatch: this.pathResolver.getRuntimePaths().envPatch,
+          stripAuthEnv: false,
+          provenance: 'system:managed-keychain-unavailable'
+        }
       }
     }
     return preparation
