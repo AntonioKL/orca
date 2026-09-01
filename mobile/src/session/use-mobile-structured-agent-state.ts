@@ -27,13 +27,16 @@ export function useMobileStructuredAgentState(args: {
   client: RpcClient | null
   sessionId: string | null
   enabled: boolean
+  /** Live transport only. The hold dies with the connection and has to be retaken,
+   *  but the transcript must survive the outage rather than blank out with it. */
+  connected: boolean
 }): {
   state: StructuredAgentSessionState
   stateRef: { readonly current: StructuredAgentSessionState }
   loadingOlder: boolean
   loadEarlier: () => void
 } {
-  const { client, enabled, sessionId } = args
+  const { client, connected, enabled, sessionId } = args
   const [state, setState] = useState<StructuredAgentSessionState>(EMPTY_STRUCTURED_AGENT_SESSION)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const stateRef = useRef(state)
@@ -49,6 +52,12 @@ export function useMobileStructuredAgentState(args: {
     if (!client || !sessionId || !enabled) {
       setState(EMPTY_STRUCTURED_AGENT_SESSION)
       setLoadingOlder(false)
+      return
+    }
+    if (!connected) {
+      // The cleanup above already dropped the dead hold and stream. Hold the last
+      // transcript on screen for the outage: clearing it renders neither spinner
+      // nor empty-state copy, so the chat reads as gone rather than offline.
       return
     }
     apply({ type: 'loading' })
@@ -101,7 +110,7 @@ export function useMobileStructuredAgentState(args: {
         )
         .catch(() => undefined)
     }
-  }, [apply, client, enabled, sessionId])
+  }, [apply, client, connected, enabled, sessionId])
 
   const loadEarlier = useCallback(() => {
     const current = stateRef.current

@@ -92,9 +92,12 @@ export function useMobileNativeChatController(args: {
   const structuredNativeChat = useMobileStructuredAgentSession({
     client,
     sessionId: activeChatStructured ? activeChatSessionId : null,
-    // Holds are connection-scoped; disabling on transport loss lets the hook
-    // reacquire the provider when the client authenticates again.
-    enabled: showNativeChat && connState === 'connected',
+    enabled: showNativeChat,
+    // Holds are connection-scoped; dropping this on transport loss lets the hook
+    // reacquire the provider when the client authenticates again. Deliberately
+    // separate from `enabled`: folding it in would also tear the transcript down
+    // to a blank pane for the whole outage.
+    connected: connState === 'connected',
     agent: activeChatStructured ? activeChatAgent : null,
     onSendError
   })
@@ -133,11 +136,6 @@ export function useMobileNativeChatController(args: {
   const nativeChatAgentWorking = activeChatStructured
     ? structuredNativeChat.isWorking
     : activeChatResolution != null && activeTabAgentWorking
-  // Deliberately not gated on the chat view being visible: the streaming gate
-  // has to tell "hidden mid-turn" from "the turn ended".
-  const nativeChatStreamLive = activeChatStructured
-    ? structuredNativeChat.isWorking
-    : activeTabAgentWorking
   // Throttle the streaming bubble: OpenCode emits a status frame per streamed
   // part, and each one re-renders and re-parses the whole accumulated markdown.
   const nativeChatStreamingText = useThrottledLatestValue(
@@ -305,7 +303,11 @@ export function useMobileNativeChatController(args: {
     nativeChatSession,
     nativeChatAgentWorking,
     nativeChatStreamingText,
-    nativeChatStreamLive,
+    // Deliberately not gated on the chat view being visible: the streaming gate
+    // has to tell "hidden mid-turn" from "the turn ended".
+    nativeChatStreamLive: activeChatStructured
+      ? structuredNativeChat.isWorking
+      : activeTabAgentWorking,
     nativeChatStreamScopeKey: streamScopeKey,
     nativeChatPermission: activeChatStructured
       ? structuredNativeChat.permission

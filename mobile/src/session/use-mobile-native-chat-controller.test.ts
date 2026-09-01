@@ -16,7 +16,7 @@ const holdUnconfirmedSend = vi.fn()
 const viewMode = { isTabChatView: (_tabId: string) => true }
 const sessionState = { messages: [] as unknown[], status: 'ready', transcriptLoading: false }
 const structuredSendWithOutcome = vi.fn()
-const structuredSessionArgs: { enabled?: boolean }[] = []
+const structuredSessionArgs: { enabled?: boolean; connected?: boolean }[] = []
 const structuredCancel = vi.fn()
 const structuredRespondPermission = vi.fn(async () => true)
 const structuredRespondQuestion = vi.fn(async () => true)
@@ -85,7 +85,7 @@ vi.mock('./use-mobile-native-chat-session', () => ({
   useMobileNativeChatSession: () => sessionState
 }))
 vi.mock('./use-mobile-structured-agent-session', () => ({
-  useMobileStructuredAgentSession: (args: { enabled?: boolean }) => {
+  useMobileStructuredAgentSession: (args: { enabled?: boolean; connected?: boolean }) => {
     structuredSessionArgs.push(args)
     return {
       session: structuredSessionState,
@@ -358,12 +358,14 @@ describe('useMobileNativeChatController handleNativeChatSend', () => {
     await act(async () => {
       renderer?.update(createElement(Harness, { tab, connState: 'reconnecting' }))
     })
-    expect(structuredSessionArgs.at(-1)?.enabled).toBe(false)
+    // Only the connection-scoped hold drops. Collapsing `enabled` too would tear
+    // the transcript down to a blank pane for the length of the outage.
+    expect(structuredSessionArgs.at(-1)).toMatchObject({ enabled: true, connected: false })
 
     await act(async () => {
       renderer?.update(createElement(Harness, { tab, connState: 'connected' }))
     })
-    expect(structuredSessionArgs.at(-1)?.enabled).toBe(true)
+    expect(structuredSessionArgs.at(-1)).toMatchObject({ enabled: true, connected: true })
   })
 
   it('exposes structured prompt cards and session options on structured tabs', async () => {

@@ -40,6 +40,35 @@ function snapshotEvent(fence = 3): AgentSessionSubscribeEvent {
   }
 }
 
+function snapshotWithMessage(): AgentSessionSubscribeEvent {
+  const event = snapshotEvent()
+  return {
+    ...event,
+    page: {
+      ...event.page,
+      items: [
+        {
+          itemId: 'msg-1',
+          revision: 1,
+          sequence: 1,
+          observedAt: 10,
+          body: {
+            kind: 'message',
+            role: 'user',
+            blocks: [{ type: 'text', text: 'sent before the blip' }]
+          }
+        }
+      ],
+      window: {
+        oldest: { epoch: 'epoch-1', sequence: 1 },
+        newest: { epoch: 'epoch-1', sequence: 1 },
+        nextCursor: { epoch: 'epoch-1', sequence: 2 }
+      },
+      liveCursor: { epoch: 'epoch-1', sequence: 1 }
+    }
+  } as AgentSessionSubscribeEvent
+}
+
 function pendingResolution(): AgentJournalResolution {
   return {
     state: 'pending',
@@ -201,15 +230,18 @@ describe('useMobileStructuredAgentSession', () => {
 
   function Harness({
     sessionId = 'session-1',
-    agent = 'codex'
+    agent = 'codex',
+    connected = true
   }: {
     sessionId?: string | null
     agent?: string | null
+    connected?: boolean
   }): null {
     hook = useMobileStructuredAgentSession({
       client,
       sessionId,
       enabled: true,
+      connected,
       agent,
       onSendError
     } as never)
@@ -731,5 +763,44 @@ describe('useMobileStructuredAgentSession', () => {
         expect.any(Object)
       )
     )
+  })
+
+  it('takes a fresh hold once the transport is back', async () => {
+    await act(async () => {
+      renderer = create(createElement(Harness, { connected: true }))
+    })
+    await vi.waitFor(() =>
+      expect(sendRequest.mock.calls.filter((call) => call[0] === 'agentSession.hold')).toHaveLength(
+        1
+      )
+    )
+
+    await act(async () => {
+      renderer?.update(createElement(Harness, { connected: false }))
+    })
+    await act(async () => {
+      renderer?.update(createElement(Harness, { connected: true }))
+    })
+
+    const holds = sendRequest.mock.calls.filter((call) => call[0] === 'agentSession.hold')
+    expect(holds).toHaveLength(2)
+    const holderIds = holds.map((call) => (call[1] as { holderId: string }).holderId)
+    expect(holderIds[0]).not.toBe(holderIds[1])
+  })
+
+  it('keeps the transcript on screen while the transport is down', async () => {
+    await act(async () => {
+      renderer = create(createElement(Harness, { connected: true }))
+    })
+    await vi.waitFor(() => expect(listener).toEqual(expect.any(Function)))
+    act(() => listener?.(snapshotWithMessage()))
+    expect(hook?.session.messages).toHaveLength(1)
+
+    await act(async () => {
+      renderer?.update(createElement(Harness, { connected: false }))
+    })
+
+    expect(hook?.session.messages).toHaveLength(1)
+    expect(hook?.session.status).toBe('ready')
   })
 })
