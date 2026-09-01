@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { startWindowsTerminalCapabilityReprobe } from './windows-terminal-capability-reprobe'
 import {
   readWindowsTerminalCapabilities,
+  resetWindowsTerminalCapabilityReadCacheForTests,
   type WindowsTerminalCapabilityLoadTarget
 } from './windows-terminal-capability-read'
 
@@ -307,4 +308,5 @@ export function resetWindowsTerminalCapabilitiesForTests(): void {
   nextCapabilityRequestId = 0
   latestCapabilityRequestIdByOwnerKey.clear()
   subscribersByOwnerKey.clear()
+  resetWindowsTerminalCapabilityReadCacheForTests()
 }

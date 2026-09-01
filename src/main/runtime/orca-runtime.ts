@@ -21,6 +21,7 @@ import {
 import { resolveNestedWorkerMaxDepth } from '../../shared/nested-worker-depth'
 import { sortDirEntries } from '../../shared/file-name-sort'
 import { isServerDriveListRequest, listWindowsDrives } from './windows-drive-listing'
+import { isWindowsProcessStartTimeAvailable } from '../windows/windows-process-table'
 import { extractLastOsc7Uri, extractOscScanTail } from '../daemon/osc7-uri-extraction'
 import { parseFileUriPathParts } from '../daemon/osc7-file-uri'
 import type { AgentStatus } from '../../shared/agent-detection'
@@ -6598,6 +6599,8 @@ export class OrcaRuntimeService {
     if (terminalDegradation) {
       degradations.push(terminalDegradation)
     }
+    const windowsProcessStartTimeAvailable =
+      process.platform === 'win32' && isWindowsProcessStartTimeAvailable()
     return {
       runtimeId: this.runtimeId,
       rendererGraphEpoch: this.rendererGraphEpoch,
@@ -6613,6 +6616,7 @@ export class OrcaRuntimeService {
       capabilities,
       ...(degradations.length > 0 ? { degradations } : {}),
       worktreeCreateIdempotency: { dedupeTtlMs: WORKTREE_CREATE_RESULT_TTL_MS },
+      ...(windowsProcessStartTimeAvailable ? { windowsProcessStartTimeAvailable } : {}),
       hostPlatform: process.platform,
       terminalWindowsShell: this.store?.getSettings?.().terminalWindowsShell ?? null,
       floatingWorkspaceEnabled: this.store?.getSettings?.().floatingTerminalEnabled !== false,
@@ -12264,7 +12268,10 @@ export class OrcaRuntimeService {
     if (input.agent === 'claude') {
       return this.resolveStructuredAgentSessionIntent(
         input,
-        async ({ launchEnv }) => launchEnv.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
+        async ({ launchEnv }) =>
+          launchEnv.CLAUDE_CONFIG_DIR?.trim() ||
+          this.accountServices?.claudeAccounts.getRuntimeConfigDir()?.trim() ||
+          join(homedir(), '.claude')
       )
     }
     return this.resolveStructuredAgentSessionIntent(input, async ({ workspacePath, launchEnv }) => {

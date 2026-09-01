@@ -1,5 +1,6 @@
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-provider-handle'
+import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import { getSpawnArgsForWindows } from '../win32-utils'
 import { buildClaudeChildProcessEnv } from './claude-child-process-environment'
@@ -58,12 +59,13 @@ export function createClaudeTuiResumeLaunchBuilder(
       },
       { inheritedEnv: deps.inheritedEnv }
     )
+    const pairedEnv = withCliRuntimeOnPath(command, env, { platform: process.platform })
 
     return {
       command: spawnCmd,
       args: spawnArgs,
       cwd: await deps.resolveWorkspacePath(record.location.workspaceId),
-      env,
+      env: pairedEnv,
       providerSessionId: head.handle.sessionId,
       resumeLeafUuid: head.handle.leafUuid
     }

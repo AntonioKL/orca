@@ -1,3 +1,6 @@
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
@@ -28,6 +31,14 @@ function record(overrides: Partial<AgentSessionRecord> = {}): AgentSessionRecord
     providerHandleChain: [],
     ...overrides
   } as AgentSessionRecord
+}
+
+function makeExecutable(path: string): void {
+  mkdirSync(join(path, '..'), { recursive: true })
+  writeFileSync(path, '')
+  if (process.platform !== 'win32') {
+    chmodSync(path, 0o755)
+  }
 }
 
 function resolverFor(value: AgentSessionRecord | null, resolveEnv?: () => Record<string, string>) {
@@ -97,6 +108,27 @@ describe('claude structured launch resolution', () => {
       ANTHROPIC_BASE_URL: 'https://gateway.example.test'
     })
     expect((await resolver({ identity: IDENTITY })).env?.ANTHROPIC_AUTH_TOKEN).toBe('rotated-token')
+  })
+
+  it('pairs a resolved Claude CLI with its sibling Node runtime', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'orca-claude-launch-'))
+    const binDir = join(root, 'bin')
+    const claudeCommand = join(binDir, process.platform === 'win32' ? 'claude.cmd' : 'claude')
+    const nodeCommand = join(binDir, process.platform === 'win32' ? 'node.cmd' : 'node')
+    makeExecutable(claudeCommand)
+    makeExecutable(nodeCommand)
+
+    const launch = await createClaudeStructuredLaunchResolver({
+      store: { getRecord: () => record() } as unknown as AgentSessionRecordStore,
+      resolveWorkspacePath: async (id) => `/repos/${id}`,
+      resolveCommand: () => claudeCommand,
+      resolveEnv: () => ({
+        PATH: '/usr/bin',
+        CLAUDE_CONFIG_DIR: '/accounts/selected/home'
+      })
+    })({ identity: IDENTITY })
+
+    expect((launch.env?.PATH ?? launch.env?.Path)?.split(delimiter)[0]).toBe(binDir)
   })
 
   it('refuses other hosts, WSL, providers, and account-home variables', async () => {

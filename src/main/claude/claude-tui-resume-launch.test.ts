@@ -1,3 +1,6 @@
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { CLAUDE_DEFAULT_SETTING_SOURCES } from './claude-structured-launch-resolution'
@@ -26,6 +29,14 @@ function record(overrides: Partial<AgentSessionRecord> = {}): AgentSessionRecord
     ],
     ...overrides
   } as AgentSessionRecord
+}
+
+function makeExecutable(path: string): void {
+  mkdirSync(join(path, '..'), { recursive: true })
+  writeFileSync(path, '')
+  if (process.platform !== 'win32') {
+    chmodSync(path, 0o755)
+  }
 }
 
 describe('Claude TUI resume launch', () => {
@@ -71,6 +82,26 @@ describe('Claude TUI resume launch', () => {
     // Endpoint selection is not credential material; the existing adapter pinning preserves it.
     expect(launch.env.ANTHROPIC_BASE_URL).toBe('https://inherited-gateway.invalid')
     expect(launch.env.CLAUDE_CODE_SESSION_ID).toBeUndefined()
+  })
+
+  it('pairs the resumed Claude CLI with its sibling Node runtime', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'orca-claude-resume-'))
+    const binDir = join(root, 'bin')
+    const claudeCommand = join(binDir, process.platform === 'win32' ? 'claude.cmd' : 'claude')
+    const nodeCommand = join(binDir, process.platform === 'win32' ? 'node.cmd' : 'node')
+    makeExecutable(claudeCommand)
+    makeExecutable(nodeCommand)
+
+    const build = createClaudeTuiResumeLaunchBuilder({
+      resolveWorkspacePath: async () => '/workspace',
+      resolveCommand: () => claudeCommand,
+      resolveEnv: () => ({ PATH: '/usr/bin' }),
+      inheritedEnv: {}
+    })
+
+    const launch = await build({ record: record(), spawnToken: 'spawn' })
+
+    expect((launch.env.PATH ?? launch.env.Path)?.split(delimiter)[0]).toBe(binDir)
   })
 
   it('uses the durable session environment instead of current account settings', async () => {

@@ -2,6 +2,7 @@ import type { AppState } from '@/store/types'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { getRendererAppPlatform } from '@/lib/renderer-app-platform'
+import { getCachedLocalWindowsProcessStartTimeAvailable } from './windows-terminal-capability-read'
 
 export function canUseStructuredNativeChat(state: AppState, worktreeId: string): boolean {
   if (state.settings?.experimentalStructuredNativeChat !== true) {
@@ -20,7 +21,10 @@ export function canUseStructuredNativeChat(state: AppState, worktreeId: string):
   // the host advertises that proof, refuse every local Windows execution path —
   // windows-host, WSL, and keys that resolve no project runtime (folder
   // workspaces, floating terminal) — so create cannot fail after the click.
-  if (getRendererAppPlatform() === 'win32') {
+  if (
+    getRendererAppPlatform() === 'win32' &&
+    getCachedLocalWindowsProcessStartTimeAvailable() !== true
+  ) {
     return false
   }
   // Refuse WSL and repair-required runtimes even if resolution ever runs

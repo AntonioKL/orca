@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
 import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-provider-handle'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
+import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import { getSpawnArgsForWindows } from '../win32-utils'
@@ -22,6 +23,16 @@ export const CLAUDE_STRUCTURED_BASE_ARGS = [
   '--setting-sources',
   CLAUDE_DEFAULT_SETTING_SOURCES.join(',')
 ]
+
+function cloneDefinedEnv(env: NodeJS.ProcessEnv | Record<string, string>): Record<string, string> {
+  const next: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) {
+      next[key] = value
+    }
+  }
+  return next
+}
 
 export type ClaudeStructuredLaunch = {
   command: string
@@ -88,12 +99,15 @@ export function createClaudeStructuredLaunchResolver(
       ...CLAUDE_STRUCTURED_BASE_ARGS,
       ...providerArgs
     ])
-    const env = await deps.resolveEnv?.()
+    const resolvedEnv = await deps.resolveEnv?.()
+    const env = withCliRuntimeOnPath(command, cloneDefinedEnv(resolvedEnv ?? process.env), {
+      platform: process.platform
+    })
     return {
       command: spawnCmd,
       args: spawnArgs,
       cwd: await deps.resolveWorkspacePath(record.location.workspaceId),
-      ...(env ? { env } : {}),
+      ...(resolvedEnv !== undefined || env !== process.env ? { env } : {}),
       claudeConfigDir: record.accountHome.path,
       providerSessionId,
       resumeLeafUuid: head?.handle.provider === 'claude' ? head.handle.leafUuid : null,

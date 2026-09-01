@@ -1,7 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '@/store/types'
 import type * as localPreflightContext from '@/lib/local-preflight-context'
 import type { ProjectExecutionRuntimeResolution } from '../../../shared/project-execution-runtime'
+import {
+  loadWindowsTerminalCapabilities,
+  resetWindowsTerminalCapabilitiesForTests
+} from './windows-terminal-capabilities'
 import { canUseStructuredNativeChat } from './structured-native-chat-availability'
 
 const { mockGetRendererAppPlatform } = vi.hoisted(() => ({
@@ -94,6 +98,11 @@ describe('canUseStructuredNativeChat', () => {
     })
   })
 
+  afterEach(() => {
+    resetWindowsTerminalCapabilitiesForTests()
+    vi.unstubAllGlobals()
+  })
+
   it('allows the structured stack on a local worktree', () => {
     expect(canUseStructuredNativeChat(stateFor({}), 'wt-1')).toBe(true)
   })
@@ -156,6 +165,30 @@ describe('canUseStructuredNativeChat', () => {
     mockGetRendererAppPlatform.mockReturnValue('win32')
     expect(canUseStructuredNativeChat(stateFor({ windowsRuntime: 'windows-host' }), 'wt-1')).toBe(
       false
+    )
+  })
+
+  it('allows Windows-host projects once native start-time proof is cached', async () => {
+    vi.stubGlobal('window', {
+      api: {
+        wsl: {
+          isAvailable: vi.fn().mockResolvedValue(false),
+          listDistros: vi.fn().mockResolvedValue([])
+        },
+        pwsh: { isAvailable: vi.fn().mockResolvedValue(false) },
+        gitBash: { isAvailable: vi.fn().mockResolvedValue(false) },
+        runtime: {
+          getStatus: vi.fn().mockResolvedValue({
+            hostPlatform: 'win32',
+            windowsProcessStartTimeAvailable: true
+          })
+        }
+      }
+    })
+    await loadWindowsTerminalCapabilities()
+    mockGetRendererAppPlatform.mockReturnValue('win32')
+    expect(canUseStructuredNativeChat(stateFor({ windowsRuntime: 'windows-host' }), 'wt-1')).toBe(
+      true
     )
   })
 
