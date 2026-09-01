@@ -76,6 +76,10 @@ function withoutComments(source: string): string {
 // case-sensitive pattern would wave through. Verified to add no false positive across the real
 // importers. Each entry carries the fixtures it must catch AND the near-misses it must not, so
 // a future tightening cannot quietly trade one for the other.
+//
+// Limit: this is a source-text scan, so a script file reached only through a variable
+// (`& $scriptPath`) never appears in source and no pattern here can catch it — this narrows
+// the hole rather than sealing it. The invariant note on `powerShellCommand` covers the rest.
 const POLICY_GATED_CONSTRUCTS = [
   {
     label: 'a PowerShell script file (.ps1/.psm1)',
