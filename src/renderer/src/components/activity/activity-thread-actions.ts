@@ -69,7 +69,7 @@ export function createActivityThreadActions({
     activateTabAndFocusPane(
       thread.tab.id,
       parsed && parsed.tabId === thread.tab.id ? parsed.leafId : null,
-      { scrollToBottomIfOutputSinceLastView: true }
+      { flashFocusedPane: true, scrollToBottomIfOutputSinceLastView: true }
     )
   }
 

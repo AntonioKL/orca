@@ -76,7 +76,7 @@ describe('activity thread host routing', () => {
     expect(mocks.activateTabAndFocusPane).toHaveBeenCalledWith(
       thread.tab.id,
       '11111111-1111-4111-8111-111111111111',
-      { scrollToBottomIfOutputSinceLastView: true }
+      { flashFocusedPane: true, scrollToBottomIfOutputSinceLastView: true }
     )
   })
 
