@@ -1,7 +1,29 @@
 import { hasBinaryFileExtension } from '../../../../shared/binary-file-extensions'
+import type { GitBranchChangeEntry } from '../../../../shared/git-diff-compare-types'
 import type { GitStatusEntry } from '../../../../shared/git-status-types'
 
 export const MAX_AUTOMATIC_DIFF_CHANGED_LINES = 10_000
+
+// Line counts come from independent passes that fail independently: one numstat
+// per staging area, the untracked scan, and the compare diff.
+export function getCombinedDiffCountingPassKey(
+  entry: GitStatusEntry | GitBranchChangeEntry
+): string {
+  return 'area' in entry ? entry.area : 'compare'
+}
+
+/** Passes that counted at least one row, so counting demonstrably ran for them. */
+export function collectCountedCombinedDiffPasses(
+  entries: readonly (GitStatusEntry | GitBranchChangeEntry)[]
+): ReadonlySet<string> {
+  const countedPasses = new Set<string>()
+  for (const entry of entries) {
+    if (entry.added !== undefined || entry.removed !== undefined) {
+      countedPasses.add(getCombinedDiffCountingPassKey(entry))
+    }
+  }
+  return countedPasses
+}
 
 export function shouldLoadCombinedDiffOnDemand({
   added,
@@ -16,8 +38,9 @@ export function shouldLoadCombinedDiffOnDemand({
   path?: string
   area?: GitStatusEntry['area']
   submodule?: GitStatusEntry['submodule']
-  // True when another row in the same status pass carried line counts, so
-  // counting ran and this row is uncounted for a reason of its own.
+  // True when another row in the SAME counting pass carried line counts, so
+  // counting ran and this row is uncounted for a reason of its own. A sibling
+  // from another pass proves nothing: passes fail independently.
   hasCountedSiblings?: boolean
 }): boolean {
   if (added === undefined && removed === undefined) {
@@ -34,9 +57,11 @@ export function shouldLoadCombinedDiffOnDemand({
     if (hasCountedSiblings === true && area !== 'untracked') {
       return false
     }
-    // Otherwise the size is unknown, not zero: an oversized untracked file, or
-    // a status pass that skipped counting entirely (entry cap hit, numstat
-    // failed). Defer everything Monaco would open as unbounded text.
+    // Otherwise the size is unknown, not zero: an oversized untracked file, a
+    // pass that skipped counting entirely (entry cap hit, numstat failed), or a
+    // lone row with no sibling to prove counting ran. Numstat's binary marker
+    // would settle the last case, but it never leaves the host. Defer them all:
+    // Monaco would open unbounded text.
     return true
   }
   return (added ?? 0) + (removed ?? 0) > MAX_AUTOMATIC_DIFF_CHANGED_LINES
