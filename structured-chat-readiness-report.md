@@ -1,7 +1,7 @@
 # Structured native-chat readiness report
 
 Integration branch: `brennanb2025/structured-chat-integration-latest`
-Implementation/test head (code): `62521d69c6c0472d94695b5e92e6739fb9de7589`
+Implementation/test head (code): `be52c0d6dcd9478f0303335de5eda5224039e82b`
 
 ## Architecture decision
 
@@ -25,16 +25,25 @@ the recoverable legacy terminal path is retained.
 - **Native macOS/Linux:** provider lifecycle, journal, prompts, options, images, resume, close,
   and unexpected-exit recovery are covered by passing suites. Packaged provider-process smoke was
   not run here.
-- **Windows:** structured capability is advertised only when the process-table addon proves
-  creation-time identity; otherwise the renderer stays on terminal chat. Real Windows native and
-  fallback execution, packaging, and path-length CI remain unverified.
+- **Windows:** exact pushed head was checked out on the Windows high-spec paired runtime. The
+  process-table suite (25 tests), runtime suite (1,221 tests), Claude suite (41 files, 344 passed,
+  11 skipped), and structured RPC/router suites (38 tests) passed. Claude native structured launch
+  remains intentionally unsupported on native Windows and is covered by the truthful capability
+  fallback; `Claude Code 2.1.251` and `codex-cli 0.151.0` were present. Packaging, path-length,
+  and a live authenticated provider turn remain unverified.
 - **WSL:** absolute executable resolution, distro-aware routing, WSL git probes, and location
-  tests pass. A selected-distro provider attach/teardown run was unavailable.
-- **SSH/Linux:** verdict vocabulary remains exactly `live`, `unverifiable`, `exited`; transport
-  loss never proves death. Real OpenClaw disconnect/reconnect evidence is unavailable.
-- **Paired remote Orca:** owning-host target resolution, publication/lifecycle routing, and
-  cross-version unit coverage pass. A paired-host Electron run and live mixed-version run were
-  unavailable.
+  tests pass. The selected-distro probe on the Windows runtime listed `Ubuntu-24.04` and
+  `Sta4593-Federated`, but attach failed with `ERROR_SHARING_VIOLATION` while mounting the
+  Ubuntu VHDX; provider-in-WSL execution remains unverified.
+- **SSH/Linux:** exact pushed head ran on `neil-ubuntu` (Linux 7.0.0-28, x86_64): structured
+  adapter/runtime tests passed (37), SSH verdict/reconnect/liveness suites passed (19), and
+  Claude 2.1.233 plus Codex 0.151.0 were present on the execution host. A live authenticated
+  provider turn and forced network disconnect/reconnect remain unverified.
+- **Paired remote Orca:** the desktop client reached the Windows high-spec paired runtime at
+  app version `1.4.193-adhoc.20260830235404`; runtime state was `ready` and it advertised
+  `agent-session.structured`, `agent-session.host-authority`, and shared-control capabilities.
+  The exact branch was checked out and exercised through the paired terminal; live mixed-version
+  publication/reconnect and authenticated provider-turn evidence remain unverified.
 - **Electron:** exact-head Playwright CDP proof passed from the integration worktree. The app
   identity reported `structured-chat-integration-final` on this branch; Experimental settings
   visibly exposed the Chat UI and structured-chat controls, the host-aware scope copy rendered,
