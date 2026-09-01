@@ -127,7 +127,7 @@ export async function resolveProjectCreateTarget(
   }
   const ready = result.result.setups.filter(isReadyProjectHostSetup)
   const setup = projectHostSetupId
-    ? ready.find((candidate) => candidate.id === projectHostSetupId)
+    ? findReadySetupById(ready, projectHostSetupId)
     : findReadySetupOnHost(ready, projectId, host)
   if (!setup) {
     throw new RuntimeClientError(
@@ -141,6 +141,18 @@ export async function resolveProjectCreateTarget(
     repoSelector: `id:${setup.repoId}`,
     setup
   }
+}
+
+function findReadySetupById(
+  setups: readonly ProjectHostSetup[],
+  requestedId: string
+): ProjectHostSetup | undefined {
+  // Raw ids take precedence for backwards compatibility; the escaped form is only a fallback for
+  // ids copied from the ambiguity diagnostic.
+  return (
+    setups.find((candidate) => candidate.id === requestedId) ??
+    setups.find((candidate) => terminalSafe(candidate.id) === requestedId)
+  )
 }
 
 // Why: setup ids and paths are persisted metadata printed straight to a terminal, so anything that

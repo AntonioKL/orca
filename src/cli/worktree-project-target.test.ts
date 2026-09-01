@@ -44,6 +44,40 @@ const flagsFor = (host: string): Map<string, string | boolean> =>
   ])
 
 describe('resolveProjectCreateTarget host selection', () => {
+  it.each([
+    ['C0', 'setup\n', 'setup\\u000a'],
+    ['C1', 'setup\u009b', 'setup\\u009b'],
+    ['zero-width', 'setup\u200b', 'setup\\u200b'],
+    ['line separator', 'setup\u2028', 'setup\\u2028'],
+    ['bidi override', 'setup\u202e', 'setup\\u202e'],
+    ['word joiner', 'setup\u2060', 'setup\\u2060'],
+    ['BOM', 'setup\ufeff', 'setup\\ufeff'],
+    ['backslash', 'setup\\value', 'setup\\\\value']
+  ])('resolves an %s id copied from the ambiguity diagnostic', async (_name, id, escapedId) => {
+    const client = clientReturning([readySetup({ id, repoId: 'repo-selected' })])
+    const flags = new Map<string, string | boolean>([['project-host-setup', escapedId]])
+
+    await expect(resolveProjectCreateTarget(flags, client)).resolves.toEqual(
+      expect.objectContaining({
+        repoSelector: 'id:repo-selected',
+        setup: expect.objectContaining({ id })
+      })
+    )
+  })
+
+  it('preserves raw id matching when it collides with another id display', async () => {
+    const rawId = 'setup\\u000a'
+    const client = clientReturning([
+      readySetup({ id: rawId, repoId: 'repo-raw' }),
+      readySetup({ id: 'setup\n', repoId: 'repo-escaped' })
+    ])
+    const flags = new Map<string, string | boolean>([['project-host-setup', rawId]])
+
+    await expect(resolveProjectCreateTarget(flags, client)).resolves.toEqual(
+      expect.objectContaining({ repoSelector: 'id:repo-raw' })
+    )
+  })
+
   it('refuses, and names the candidates, when several setups could match', async () => {
     const client = clientReturning([
       readySetup({ id: 'a', repoId: 'repo-a', path: 'C:\\Users\\neil\\orca\\orca' }),
