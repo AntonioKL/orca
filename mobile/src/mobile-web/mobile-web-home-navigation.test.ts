@@ -20,13 +20,14 @@ afterEach(() => {
 })
 
 describe('mobile web Home navigation', () => {
-  it('hands a typed destination to the production hosted route', () => {
+  it('hands a typed destination to the selected architecture route', () => {
     const router = { push: vi.fn() }
 
     navigateFromMobileHome({
       router,
       hostId: 'host',
-      target: { kind: 'tasks', taskSource: 'linear' }
+      target: { kind: 'tasks', taskSource: 'linear' },
+      nativeBaselineEnabled: false
     })
 
     expect(router.push).toHaveBeenCalledWith('/hybrid?hostId=host')

@@ -2,9 +2,9 @@
 
 React Native/Expo companion app for Orca Desktop. Pairing, encrypted
 connectivity, device capabilities, recovery, settings, and diagnostics remain
-native. The production hybrid route renders the existing mobile workspace UI
-through React Native Web from a verified package shipped with each paired
-Desktop.
+native. Ordinary release builds preserve the existing native workspace UI. A
+dedicated hybrid release renders that same UI through React Native Web from a
+verified package shipped with each paired Desktop.
 
 This is one shared UI, not a replacement web implementation. Read the
 [hybrid architecture reference](../docs/reference/mobile-hybrid-webview-architecture.md)
@@ -128,8 +128,17 @@ that imports those screens and supplies hosted operation adapters.
   screen changes.
 
 Host, session, task, account, onboarding, notification, and cold-resume entry
-always use the production hybrid route. There is no Experimental Settings
-launcher or environment-controlled native workspace fallback.
+follow the selected mobile architecture. Ordinary release builds default to
+the native routes; a hybrid TestFlight/APK opts in at build time:
+
+```bash
+EXPO_PUBLIC_ORCA_MOBILE_ARCHITECTURE=hybrid pnpm exec expo run:ios
+EXPO_PUBLIC_ORCA_MOBILE_ARCHITECTURE=hybrid pnpm exec expo run:android
+```
+
+Unset or `native` keeps the current native workspace experience. The
+development-only `EXPO_PUBLIC_ORCA_E2E_MOBILE_NATIVE_BASELINE=1` override still
+selects native routes for parity captures.
 
 ## Package Build
 

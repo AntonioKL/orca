@@ -34,18 +34,22 @@ The architecture removes the broad workspace UI/RPC version boundary:
 
 ## Current Rollout State
 
-The dedicated mobile release candidate always uses the production `/hybrid`
-route for host-workspace destinations. It has no Experimental Settings entry,
-environment-controlled route flag, or user-selectable native workspace
-fallback. Restored legacy `/h/...` shell routes redirect to `/hybrid`.
+The hybrid architecture is merged into the shared source tree but is selected
+at mobile build time. Ordinary release builds default to the existing native
+workspace routes. A dedicated candidate opts into `/hybrid` with
+`EXPO_PUBLIC_ORCA_MOBILE_ARCHITECTURE=hybrid`; it has no user-selectable
+fallback. Restored legacy `/h/...` shell routes redirect to `/hybrid` only in
+that hybrid build.
 
 The screen modules under `mobile/app/h/` remain because the hosted React Native
 Web package imports that shared source. They are no longer native-shell
 workspace destinations.
 
 Use separate Desktop RC channels and TestFlight/internal mobile releases to
-validate the hybrid-only candidate without placing two architectures in one
-app. Promote the exact reviewed candidate only after the security,
+validate the hybrid candidate while daily native mobile builds remain
+unchanged. A current Desktop can serve both native and hybrid mobile builds;
+pre-feature Desktops cannot serve the hybrid package. Promote the exact
+reviewed candidate only after the security,
 physical-device, sustained-performance, rollback, and App Store gates in the
 active tracker pass. TestFlight evidence does not establish App Store
 acceptance.

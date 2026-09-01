@@ -44,9 +44,11 @@ Adopt the hybrid architecture conditionally:
    all gates in the [remaining-work tracker](2026-07-27-mobile-hybrid-webview-remaining-work.md)
    pass.
 
-The dedicated candidate has no native workspace fallback. Native shell routes
-remain for connection and device responsibilities; all workspace destinations
-enter the hosted route.
+The dedicated hybrid candidate has no native workspace fallback. The shared
+tree also supports a native-default release mode so daily mobile builds remain
+unchanged while the candidate is tested. Native shell routes remain for
+connection and device responsibilities; hybrid workspace destinations enter
+the hosted route.
 
 ## Rejected Alternatives
 

@@ -12,9 +12,16 @@ export function navigateFromMobileHome(args: {
   router: MobileHomeRouter
   hostId: string
   target: MobileWebNavigationIntentTarget
+  nativeBaselineEnabled?: boolean
 }): void {
   MOBILE_WEB_NAVIGATION_INTENTS.publishHostTarget(args.hostId, args.target)
-  args.router.push(mobileHomeDestination(args.hostId, args.target, MOBILE_NATIVE_BASELINE_MODE))
+  args.router.push(
+    mobileHomeDestination(
+      args.hostId,
+      args.target,
+      args.nativeBaselineEnabled ?? MOBILE_NATIVE_BASELINE_MODE
+    )
+  )
 }
 
 export function mobileHostWorkspaceEntry(

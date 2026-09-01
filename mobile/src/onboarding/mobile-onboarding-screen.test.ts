@@ -101,7 +101,7 @@ describe('MobileOnboardingScreen', () => {
     await act(async () => pages()[1].props.onNotificationChoice('skip'))
     expect(mocks.ensureNotificationPermissions).not.toHaveBeenCalled()
     expect(mocks.savePushNotificationsEnabled).toHaveBeenCalledWith(false)
-    expect(mocks.replace).toHaveBeenCalledWith('/hybrid?hostId=paired-host')
+    expect(mocks.replace).toHaveBeenCalledWith('/h/paired-host')
   })
 
   it('finishes immediately when the plan contains only one outstanding step', async () => {
@@ -109,7 +109,7 @@ describe('MobileOnboardingScreen', () => {
     await renderScreen()
 
     await act(async () => pages()[0].props.onSessionChoice('terminal'))
-    expect(mocks.replace).toHaveBeenCalledWith('/hybrid?hostId=paired-host')
+    expect(mocks.replace).toHaveBeenCalledWith('/h/paired-host')
   })
 
   it('keeps the current step retryable when persistence fails', async () => {
@@ -124,7 +124,7 @@ describe('MobileOnboardingScreen', () => {
 
     await act(async () => pages()[0].props.onSessionChoice('chat'))
     expect(mocks.saveDefaultSessionView).toHaveBeenCalledTimes(2)
-    expect(mocks.replace).toHaveBeenCalledWith('/hybrid?hostId=paired-host')
+    expect(mocks.replace).toHaveBeenCalledWith('/h/paired-host')
   })
 
   it('resets carousel state when the route supplies a new onboarding plan', async () => {

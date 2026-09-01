@@ -22,7 +22,10 @@ import {
   retiredNativeWorkspaceHostId
 } from '../src/mobile-web/mobile-web-production-route'
 import { MOBILE_NATIVE_BASELINE_MODE } from '../src/mobile-web/mobile-native-baseline-mode'
-import { mobileHostWorkspaceEntry } from '../src/mobile-web/mobile-web-home-navigation'
+import {
+  mobileHomeDestination,
+  mobileHostWorkspaceEntry
+} from '../src/mobile-web/mobile-web-home-navigation'
 import { loadHosts } from '../src/transport/host-store'
 import { extractPairingCodeFromUrl } from '../src/transport/pairing'
 import { recoverMobileRelayPairing } from '../src/transport/mobile-relay-pairing-recovery'
@@ -49,7 +52,7 @@ Notifications.setNotificationHandler({
 export default function RootLayout() {
   const router = useRouter()
   const pathname = usePathname()
-  const { notice } = useGlobalSearchParams<{ notice?: string }>()
+  const { hostId, notice } = useGlobalSearchParams<{ hostId?: string; notice?: string }>()
   const pathnameRef = useRef(pathname)
   const handledNotificationIdsRef = useRef<Set<string>>(new Set())
   const notificationNavigationResolverRef = useRef<LatestNotificationNavigationResolver | null>(
@@ -62,6 +65,10 @@ export default function RootLayout() {
   }, [pathname])
 
   useEffect(() => {
+    if (MOBILE_NATIVE_BASELINE_MODE && pathname === '/hybrid') {
+      router.replace(hostId ? mobileHostWorkspaceEntry(hostId, true) : '/')
+      return
+    }
     if (isRetiredNativeWorkspaceRoute(pathname, MOBILE_NATIVE_BASELINE_MODE)) {
       const hostId = retiredNativeWorkspaceHostId(pathname)
       if (hostId && notice === 'worktree-missing') {
@@ -73,7 +80,7 @@ export default function RootLayout() {
       }
       router.replace(hostId ? mobileHostWorkspaceEntry(hostId, false) : '/hybrid')
     }
-  }, [notice, pathname, router])
+  }, [hostId, notice, pathname, router])
 
   useEffect(() => {
     // Why: pairing publication is journaled across process death; startup must
@@ -195,7 +202,15 @@ export default function RootLayout() {
         }
         MOBILE_WEB_NAVIGATION_INTENTS.publish(navigation.target)
         if (pathnameRef.current !== '/hybrid') {
-          router.push(mobileHostWorkspaceEntry(navigation.target.hostId, false))
+          router.push(
+            mobileHomeDestination(
+              navigation.target.hostId,
+              navigation.target.kind === 'session'
+                ? { kind: 'session', hostWorkspaceId: navigation.target.hostWorkspaceId }
+                : { kind: 'workspaceList' },
+              MOBILE_NATIVE_BASELINE_MODE
+            )
+          )
         }
       }
     }
