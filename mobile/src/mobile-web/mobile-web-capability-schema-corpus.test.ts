@@ -1,17 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-  type MobileWebBridgePageMessage,
-  type MobileWebBridgeShellMessage
-} from '../../../src/shared/mobile-web/bridge-contract'
+import type { MobileWebBridgePageMessage } from '../../../src/shared/mobile-web/bridge-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
+import {
+  createMobileWebBrokerFixture,
+  mobileWebBridgeRequestMessage
+} from './mobile-web-bridge-roundtrip-fixture'
 import { MOBILE_WEB_PRODUCTION_GRANTS } from './mobile-web-production-grants'
-
-const CONTEXT = {
-  shellSessionId: 'S'.repeat(43),
-  buildId: 'a'.repeat(64)
-}
 const MALFORMED_PAYLOADS: unknown[] = [null, true, false, 0, 1.5, '', 'payload', []]
 
 describe('mobile web capability schema corpus', () => {
@@ -61,17 +55,12 @@ describe('mobile web capability schema corpus', () => {
 })
 
 function createHarness() {
-  const messages: MobileWebBridgeShellMessage[] = []
   const sendRequest = vi.fn<RpcClient['sendRequest']>()
   const subscribe = vi.fn<RpcClient['subscribe']>()
   const nativeCalls: string[] = []
   const client = { sendRequest, subscribe } as unknown as RpcClient
-  const broker = new MobileWebCapabilityBroker({
-    context: CONTEXT,
+  const { broker, messages } = createMobileWebBrokerFixture({
     getClient: () => client,
-    isConnected: () => true,
-    isActive: () => true,
-    postMessage: (message) => messages.push(message),
     nativeAuthority: {
       hapticFeedback: async () => {
         nativeCalls.push('haptic')
@@ -89,9 +78,7 @@ function createHarness() {
       terminalTextScaleUpdate: async () => {
         nativeCalls.push('terminalTextScale')
       }
-    },
-    terminalClientId: 'device-token',
-    randomBytes: (length) => new Uint8Array(length).fill(1)
+    }
   })
   return { broker, messages, sendRequest, subscribe, nativeCalls }
 }
@@ -102,33 +89,11 @@ function requestFor(
   index: number
 ): Extract<MobileWebBridgePageMessage, { type: 'request' }> {
   const requestId = index.toString(36).padStart(22, '0').slice(-22)
-  if (grant.operation === 'subscribe') {
-    return {
-      ...envelope(),
-      type: 'request',
-      mode: 'subscription',
-      requestId,
-      subscriptionId: `s${requestId.slice(1)}`,
-      capability: grant.capability,
-      operation: grant.operation,
-      payload
-    }
-  }
-  return {
-    ...envelope(),
-    type: 'request',
-    mode: 'once',
+  return mobileWebBridgeRequestMessage({
     requestId,
     capability: grant.capability,
     operation: grant.operation,
-    payload
-  }
-}
-
-function envelope() {
-  return {
-    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-    shellSessionId: CONTEXT.shellSessionId,
-    buildId: CONTEXT.buildId
-  } as const
+    payload,
+    ...(grant.operation === 'subscribe' ? { subscriptionId: `s${requestId.slice(1)}` } : {})
+  })
 }

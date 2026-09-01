@@ -1,17 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-  type MobileWebBridgePageMessage,
-  type MobileWebBridgeShellMessage
+import type {
+  MobileWebBridgePageMessage,
+  MobileWebBridgeShellMessage
 } from '../../../src/shared/mobile-web/bridge-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
+import {
+  createMobileWebBrokerFixture,
+  mobileWebBridgeCancelMessage,
+  mobileWebBridgeRequestMessage
+} from './mobile-web-bridge-roundtrip-fixture'
 import { MobileWebSpeechAuthority } from './mobile-web-speech-authority'
-
-const CONTEXT = {
-  shellSessionId: 'S'.repeat(43),
-  buildId: 'a'.repeat(64)
-}
 const OPAQUE_WORKSPACE_ID = `workspace_0_${'01'.repeat(16)}`
 
 describe('mobile web capability broker', () => {
@@ -644,7 +642,6 @@ describe('mobile web capability broker', () => {
 })
 
 function createHarness() {
-  const messages: MobileWebBridgeShellMessage[] = []
   const sendRequest = vi.fn<RpcClient['sendRequest']>()
   const subscribe = vi.fn<RpcClient['subscribe']>()
   const hapticFeedback = vi.fn()
@@ -653,24 +650,13 @@ function createHarness() {
   const state = { active: true, connected: true }
   let nonce = 0
   const client = { sendRequest, subscribe } as unknown as RpcClient
-  const broker = new MobileWebCapabilityBroker({
-    context: CONTEXT,
+  const { broker, messages } = createMobileWebBrokerFixture({
     getClient: () => client,
     isConnected: () => state.connected,
     isActive: () => state.active,
-    postMessage: (message) => {
-      messages.push(message)
-    },
-    nativeAuthority: {
-      hapticFeedback,
-      clipboardWrite: vi.fn(),
-      openExternal: vi.fn(),
-      terminalPreferences: vi.fn(),
-      terminalTextScaleUpdate: vi.fn()
-    },
+    nativeAuthority: { hapticFeedback },
     rememberRoute,
     rememberHostRoute,
-    terminalClientId: 'device-token',
     randomBytes: (length) => new Uint8Array(length).fill(++nonce),
     now: () => 1000
   })
@@ -699,18 +685,13 @@ function subscriptionRequestWithIds(
   requestId: string,
   subscriptionId: string
 ): Extract<MobileWebBridgePageMessage, { type: 'request' }> {
-  return {
-    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-    type: 'request',
-    mode: 'subscription',
-    shellSessionId: CONTEXT.shellSessionId,
-    buildId: CONTEXT.buildId,
+  return mobileWebBridgeRequestMessage({
     requestId,
     subscriptionId,
     capability: 'session',
     operation: 'subscribe',
     payload: { workspaceId: OPAQUE_WORKSPACE_ID }
-  }
+  })
 }
 
 async function primeWorkspaceAuthority(harness: ReturnType<typeof createHarness>): Promise<void> {
@@ -724,32 +705,20 @@ async function primeWorkspaceAuthority(harness: ReturnType<typeof createHarness>
 }
 
 function subscriptionCancel(id = 'S'): Extract<MobileWebBridgePageMessage, { type: 'cancel' }> {
-  return {
-    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-    type: 'cancel',
-    shellSessionId: CONTEXT.shellSessionId,
-    buildId: CONTEXT.buildId,
-    target: 'subscription',
-    id: id.repeat(22)
-  }
+  return mobileWebBridgeCancelMessage({ target: 'subscription', id: id.repeat(22) })
 }
 
 function sourceControlSubscriptionRequest(): Extract<
   MobileWebBridgePageMessage,
   { type: 'request' }
 > {
-  return {
-    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-    type: 'request',
-    mode: 'subscription',
-    shellSessionId: CONTEXT.shellSessionId,
-    buildId: CONTEXT.buildId,
+  return mobileWebBridgeRequestMessage({
     requestId: 'X'.repeat(22),
     subscriptionId: 'Y'.repeat(22),
     capability: 'sourceControl',
     operation: 'subscribe',
     payload: { workspaceId: OPAQUE_WORKSPACE_ID }
-  }
+  })
 }
 
 function sessionEvent(snapshotVersion: number, title: string) {
@@ -777,15 +746,12 @@ function request(
   overrides: Partial<Extract<MobileWebBridgePageMessage, { type: 'request' }>> = {}
 ): Extract<MobileWebBridgePageMessage, { type: 'request' }> {
   return {
-    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-    type: 'request',
-    mode: 'once',
-    shellSessionId: CONTEXT.shellSessionId,
-    buildId: CONTEXT.buildId,
-    requestId: 'A'.repeat(22),
-    capability: 'workspace',
-    operation: 'snapshot',
-    payload: {},
+    ...mobileWebBridgeRequestMessage({
+      requestId: 'A'.repeat(22),
+      capability: 'workspace',
+      operation: 'snapshot',
+      payload: {}
+    }),
     ...overrides
   } as Extract<MobileWebBridgePageMessage, { type: 'request' }>
 }
@@ -802,14 +768,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function cancel(): Extract<MobileWebBridgePageMessage, { type: 'cancel' }> {
-  return {
-    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-    type: 'cancel',
-    shellSessionId: CONTEXT.shellSessionId,
-    buildId: CONTEXT.buildId,
-    target: 'request',
-    id: 'A'.repeat(22)
-  }
+  return mobileWebBridgeCancelMessage({ target: 'request', id: 'A'.repeat(22) })
 }
 
 function idFor(index: number): string {

@@ -20,7 +20,7 @@ import {
   FakeCdpSocket,
   FakeProcessTerminationSocket,
   fakeCdpConstructor
-} from './hosted-webview-cdp-test-fakes.test'
+} from './hosted-webview-cdp-test-fakes'
 
 const iosShellSource = readFileSync(
   new URL('../../packages/expo-mobile-web-shell/ios/MobileWebShellView.swift', import.meta.url),

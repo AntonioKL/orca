@@ -1,15 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { MOBILE_WEB_BRIDGE_PROTOCOL_VERSION } from '../../../src/shared/mobile-web/bridge-contract'
-import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
+import {
+  createMobileWebBrokerFixture,
+  mobileWebBridgeRequestMessage
+} from './mobile-web-bridge-roundtrip-fixture'
 import {
   completeMobileWebNativeRouteHandoffAfterResponse,
   MobileWebNativeRouteHandoff
 } from './mobile-web-native-route-handoff'
-
-const CONTEXT = {
-  shellSessionId: 'S'.repeat(43),
-  buildId: 'a'.repeat(64)
-}
 
 describe('mobile web native route handoff', () => {
   it('posts the broker response before scheduling navigation', async () => {
@@ -20,12 +17,8 @@ describe('mobile web native route handoff', () => {
     const deactivation = new Promise<void>((resolve) => {
       resolveDeactivation = resolve
     })
-    const broker = new MobileWebCapabilityBroker({
-      context: CONTEXT,
-      getClient: () => null,
+    const { broker } = createMobileWebBrokerFixture({
       isConnected: () => false,
-      isActive: () => true,
-      nativeAuthority: nativeAuthority(),
       navigationAuthority: {
         route(destination, routedRequestId) {
           events.push('record')
@@ -45,17 +38,14 @@ describe('mobile web native route handoff', () => {
       }
     })
 
-    await broker.handle({
-      version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-      type: 'request',
-      shellSessionId: CONTEXT.shellSessionId,
-      buildId: CONTEXT.buildId,
-      requestId,
-      mode: 'once',
-      capability: 'navigation',
-      operation: 'route',
-      payload: { destination: 'terminalSettings' }
-    })
+    await broker.handle(
+      mobileWebBridgeRequestMessage({
+        requestId,
+        capability: 'navigation',
+        operation: 'route',
+        payload: { destination: 'terminalSettings' }
+      })
+    )
 
     let scheduled: (() => Promise<void>) | undefined
     expect(events).toEqual(['record', 'response'])
@@ -118,13 +108,3 @@ describe('mobile web native route handoff', () => {
     expect(events).toEqual(['active:false', 'deactivate', 'active:true', 'failure'])
   })
 })
-
-function nativeAuthority() {
-  return {
-    hapticFeedback: vi.fn(),
-    clipboardWrite: vi.fn(),
-    openExternal: vi.fn(),
-    terminalPreferences: vi.fn(),
-    terminalTextScaleUpdate: vi.fn()
-  }
-}

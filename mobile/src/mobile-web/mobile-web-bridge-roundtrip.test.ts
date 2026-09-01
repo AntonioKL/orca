@@ -5,12 +5,10 @@ import {
 } from '../../../src/shared/mobile-web/bridge-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import { MOBILE_WEB_PRODUCTION_GRANTS } from './mobile-web-production-grants'
-import { createMobileWebBridgeRoundtripFixture } from './mobile-web-bridge-roundtrip-fixture'
-
-const CONTEXT = {
-  shellSessionId: 'S'.repeat(43),
-  buildId: 'a'.repeat(64)
-}
+import {
+  createMobileWebBridgeRoundtripFixture,
+  MOBILE_WEB_BRIDGE_ROUNDTRIP_CONTEXT as CONTEXT
+} from './mobile-web-bridge-roundtrip-fixture'
 const OPAQUE_WORKSPACE_ID = `workspace_0_${'01'.repeat(16)}`
 
 describe('mobile web bridge round trip', () => {

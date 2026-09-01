@@ -893,16 +893,6 @@ final class MobileWebPackageStore {
             try removeMobileWebCacheTree(stagedRoot, within: cacheRoot)
           }
         }
-        let hostChildren = try fileManager.contentsOfDirectory(
-          at: hostRoot,
-          includingPropertiesForKeys: nil
-        )
-        for child in hostChildren
-        where child.lastPathComponent.hasPrefix("activation-")
-          && child.pathExtension == "tmp"
-        {
-          try removeMobileWebCacheTree(child, within: cacheRoot)
-        }
       }
     } catch {
       throw MobileWebStoreError("mobile_web_cache_cleanup_failed")

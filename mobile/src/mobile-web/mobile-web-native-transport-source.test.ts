@@ -71,7 +71,8 @@ describe('mobile web native bridge transport', () => {
   })
 
   it('binds iOS custom-scheme requests to the active session origin', () => {
-    expect(iosSource).toContain('sessionId == activeSessionId')
+    expect(iosSource).toContain('let sessionId = activeSessionId')
+    expect(iosSource).toContain('isAllowedMobileWebOriginForSession(url, sessionId: sessionId)')
     expect(iosSource).toContain('url.port == nil')
     expect(iosSource).toContain('url.user == nil')
     expect(iosSource).toContain('url.fragment == nil')

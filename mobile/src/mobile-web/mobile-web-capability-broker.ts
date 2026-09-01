@@ -34,6 +34,11 @@ import {
 
 type PageRequest = Extract<MobileWebBridgePageMessage, { type: 'request' }>
 type PendingRequest = { operationKey: string; subscriptionId?: string; cancelled: boolean }
+
+// Native alerts outlive client churn and explicit cancels; the OS dialog owns the resolution.
+function survivesCancellation(pending: PendingRequest): boolean {
+  return pending.operationKey === 'native.alert'
+}
 export class MobileWebCapabilityBroker {
   private readonly pending = new Map<string, PendingRequest>()
   private readonly replay = new MobileWebBrokerReplayGuard()
@@ -79,12 +84,9 @@ export class MobileWebCapabilityBroker {
     }
     if (message.type === 'cancel') {
       await this.cancel(message.target, message.id)
-      return
+    } else if (message.type === 'request') {
+      await this.handleRequest(message)
     }
-    if (message.type !== 'request') {
-      return
-    }
-    await this.handleRequest(message)
   }
 
   dispose(): void {
@@ -106,7 +108,7 @@ export class MobileWebCapabilityBroker {
     this.terminalStreams.dispose(null)
     this.speechAuthority.replaceClient()
     for (const [requestId, pending] of this.pending) {
-      if (pending.operationKey === 'native.alert') {
+      if (survivesCancellation(pending)) {
         continue
       }
       pending.cancelled = true
@@ -288,7 +290,7 @@ export class MobileWebCapabilityBroker {
     if (!pending) {
       return
     }
-    if (pending.operationKey === 'native.alert') {
+    if (survivesCancellation(pending)) {
       return
     }
     pending.cancelled = true
