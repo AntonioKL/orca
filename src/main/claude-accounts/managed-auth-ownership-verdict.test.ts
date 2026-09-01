@@ -11,7 +11,8 @@ import type * as WslPathsModule from '../../shared/wsl-paths'
 // paths and only one of them is meant to be locked.
 const fsFaults = vi.hoisted(() => ({
   lockedReadSuffix: null as string | null,
-  lockedLstatSuffix: null as string | null
+  lockedLstatSuffix: null as string | null,
+  hostileWriteSuffix: null as string | null
 }))
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -38,7 +39,18 @@ vi.mock('node:fs', async (importOriginal) => {
     }
     return original.lstatSync(path, options)
   }) as typeof original.lstatSync
-  const mocked = { ...original, readFileSync, lstatSync }
+  const writeFileSync = ((path: never, data: never, options: never) => {
+    if (locked(path, fsFaults.hostileWriteSuffix)) {
+      // What a `catch` can actually receive: a value whose `code` accessor throws.
+      throw {
+        get code(): string {
+          throw new Error('unreadable errno')
+        }
+      }
+    }
+    return original.writeFileSync(path, data, options)
+  }) as typeof original.writeFileSync
+  const mocked = { ...original, readFileSync, lstatSync, writeFileSync }
   return { ...mocked, default: mocked }
 })
 
@@ -85,6 +97,7 @@ describe('host Claude managed-auth verdict', () => {
   beforeEach(() => {
     fsFaults.lockedReadSuffix = null
     fsFaults.lockedLstatSuffix = null
+    fsFaults.hostileWriteSuffix = null
     paths.userDataRoot = mkdtempSync(join(tmpdir(), 'sta5674-verdict-'))
   })
 
@@ -92,6 +105,7 @@ describe('host Claude managed-auth verdict', () => {
     restorePlatform()
     fsFaults.lockedReadSuffix = null
     fsFaults.lockedLstatSuffix = null
+    fsFaults.hostileWriteSuffix = null
     rmSync(paths.userDataRoot, { recursive: true, force: true })
   })
 
@@ -143,6 +157,18 @@ describe('host Claude managed-auth verdict', () => {
     expect(
       resolveClaudeManagedAuthVerdict(ACCOUNT_ID, authPath, { adoptLegacyMarker: true }).kind
     ).toBe('untrusted')
+  })
+
+  it('does not let an unreadable adoption failure escape as a trust verdict', () => {
+    // The write can fail for reasons that are not EEXIST, and the thrown value is
+    // whatever the failing layer produced — reading `.code` off it must not throw
+    // out of the classifier that exists to fail closed.
+    const authPath = seedAccount('someone-elses-account\n')
+    fsFaults.hostileWriteSuffix = MANAGED_AUTH_MARKER
+    const verdict = resolveClaudeManagedAuthVerdict(ACCOUNT_ID, authPath, {
+      adoptLegacyMarker: true
+    })
+    expect(verdict.kind).toBe('indeterminate')
   })
 
   it('adopts a legacy directory that has no marker at all', () => {

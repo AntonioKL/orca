@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { app } from 'electron'
-import { isDefinitiveAbsence, readErrnoCode } from '../../shared/definitive-filesystem-absence'
+import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 import { writeFileAtomically } from '../codex-accounts/fs-utils'
 import {
   MISSING_MANAGED_AUTH_MESSAGE,
@@ -101,7 +101,7 @@ function resolveMarkerVerdict(
   } catch (error) {
     // EEXIST means a marker is present but did not validate: a real trust
     // failure. Anything else is a write we could not complete.
-    return readErrnoCode(error) === 'EEXIST'
+    return isExistingMarkerCollision(error)
       ? { kind: 'untrusted', reason: UNTRUSTED_MANAGED_AUTH_MESSAGE }
       : { kind: 'indeterminate', error }
   }
@@ -188,4 +188,22 @@ function isOwnedChildFile(managedAuthPath: string, filePath: string): boolean {
   const canonicalAuthPath = realpathSync(managedAuthPath)
   const canonicalFilePath = realpathSync(filePath)
   return canonicalFilePath.startsWith(canonicalAuthPath + sep)
+}
+
+/**
+ * Whether the adoption write lost a race to a marker that is already there.
+ *
+ * Guarded for the reason `isDefinitiveAbsence` documents: a `catch` receives
+ * whatever was thrown, and a `code` accessor that throws would escape the branch
+ * meant to classify it. Only EEXIST is proof; anything unreadable is not.
+ */
+function isExistingMarkerCollision(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') {
+    return false
+  }
+  try {
+    return (error as { code?: unknown }).code === 'EEXIST'
+  } catch {
+    return false
+  }
 }

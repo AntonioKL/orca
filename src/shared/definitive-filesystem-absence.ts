@@ -12,27 +12,6 @@
  * category error this predicate exists to prevent.
  */
 export function isDefinitiveAbsence(error: unknown): boolean {
-  const code = readErrnoCode(error)
+  const code = (error as NodeJS.ErrnoException | null)?.code
   return code === 'ENOENT' || code === 'ENOTDIR'
-}
-
-/**
- * The errno of a caught value, or null when there is not one to read.
- *
- * Why guarded: a caught value is whatever was thrown, and reading `.code` off it
- * can itself throw -- a partial error object, a proxy, a getter that rejects.
- * That throw would escape the classifier this module exists to keep total, and
- * a caller would see a raw failure on the exact path meant to fail closed.
- * An unreadable code is never a code.
- */
-export function readErrnoCode(error: unknown): string | null {
-  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) {
-    return null
-  }
-  try {
-    const code = (error as NodeJS.ErrnoException).code
-    return typeof code === 'string' ? code : null
-  } catch {
-    return null
-  }
 }
