@@ -17,6 +17,7 @@ export type ClaudeAuthMigrationOutcome =
 
 type MigrationOptions = {
   accounts: ClaudeManagedAccount[]
+  activeAccountId?: string | null
   sharedAuthPath: string
   metadataDir: string
   readLegacyKeychain?: () => Promise<string | null>
@@ -69,6 +70,9 @@ export async function migrateLegacySharedClaudeAuth(
     return 'ambiguous'
   }
   const account = candidates[0]
+  if (options.activeAccountId && account.id !== options.activeAccountId) {
+    return 'ambiguous'
+  }
   if (!resolveOwnedClaudeManagedAuthPath(account.id, account.managedAuthPath)) {
     return 'unavailable'
   }

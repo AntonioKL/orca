@@ -91,6 +91,7 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
     try {
       await migrateLegacySharedClaudeAuth({
         accounts: settings.claudeManagedAccounts,
+        activeAccountId: settings.activeClaudeManagedAccountId,
         sharedAuthPath: paths.credentialsPath,
         metadataDir,
         readLegacyKeychain:
