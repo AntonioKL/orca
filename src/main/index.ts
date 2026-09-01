@@ -6,6 +6,7 @@ import os from 'node:os'
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   nativeTheme,
@@ -230,6 +231,11 @@ import {
 } from './startup/startup-diagnostics'
 import { ensureWindowsUserDataAclGrant } from './startup/windows-user-data-acl'
 import { probeWindowsInstallDirAcl } from './startup/windows-install-dir-acl-probe'
+import {
+  describeInstallDirAclPoison,
+  startWindowsInstallDirAclRepairIfPoisoned
+} from './startup/windows-install-dir-acl-recovery'
+import { presentRendererRecoveryPrompt } from './window/renderer-recovery-prompt'
 import { neutralizeLegacyTerminalShimDir } from './pty/legacy-terminal-shim-dir'
 import { shouldQuitWhenAllWindowsClosed } from './startup/window-all-closed-quit-policy'
 import { registerServeSignalHandlers } from './startup/serve-signal-handlers'
@@ -668,6 +674,9 @@ function maybeAutoRenameBranchOnFirstWorkFromHook(event: {
         }
         currentStore.setWorktreeMeta(worktreeId, {
           displayName,
+          // The first-agent title is an intentional user-facing label; keep it stable after the
+          // generated branch is renamed and across subsequent catalog refreshes.
+          displayNameIsPinned: true,
           pendingFirstAgentMessageRename: false,
           // Success clears the failure badge (redundant with the explicit setRenameError(null)).
           firstAgentMessageRenameError: null
@@ -759,6 +768,16 @@ if (app.isPackaged && process.platform !== 'win32') {
 }
 configureDevUserDataPath(is.dev)
 configureOrcaUserDataPathEnv()
+// Why these four lines are one step (#16761): the two above decide where userData lives, and
+// everything below may resolve a path. Installing the accessor any later leaves a window where an
+// early resolve either throws — which is what killed `orca serve` — or, worse, memoizes the
+// pre-override directory and silently writes user state to the wrong place for the whole session.
+// Safe this early: ElectronAppEnvironment holds no state and calls `app` lazily per accessor, so it
+// changes no timing, and initDataPath only joins strings.
+setAppEnvironment(new ElectronAppEnvironment())
+// Why captured now: after the dev/E2E override above, and before app.setName('Orca') (whenReady)
+// changes how userData resolves on a case-sensitive filesystem. See persistence.ts:20-28.
+initDataPath()
 
 // Why: just past createMainWindow's 10s ready-to-show fallback, so a window revealed that way still gets its tray icon.
 const TRAY_CREATE_FALLBACK_MS = 12_000
@@ -933,12 +952,11 @@ if (!hasSingleInstanceLock) {
 
 // Why: when another process holds the lock we've already exited; skip file-writing side effects so this transient process never touches userData.
 if (hasSingleInstanceLock) {
-  // Why first: both accessors throw until installed, and everything below this line
-  // may resolve a path or read a credential. Neither constructor touches `app` or
-  // `safeStorage` — they resolve lazily per call — so installing here changes no
-  // timing, in particular not the pre-ready Keychain service-name resolution and
-  // the app.setName ordering the userData captures below depend on.
-  setAppEnvironment(new ElectronAppEnvironment())
+  // Why first in this block: the accessor throws until installed and everything below may read a
+  // credential. The constructor does not touch `safeStorage` — it resolves lazily per call — so
+  // installing here changes no timing, in particular not the pre-ready Keychain service-name
+  // resolution. The app-environment port and the userData capture install earlier still, next to
+  // the path decision they depend on.
   setSecretStore(new ElectronSecretStore())
   // Why at process level, not per-window: pty.ts registers against injected surfaces so
   // it can load without electron, and an Electron main process always has ipcMain —
@@ -971,8 +989,6 @@ if (hasSingleInstanceLock) {
   installDevParentDisconnectQuit(shouldCoupleToDevParent)
   installDevParentWatchdog(shouldCoupleToDevParent)
   installDevParentSignalQuit(shouldCoupleToDevParent)
-  // Why: run after configureDevUserDataPath but before app.setName('Orca') (whenReady), which changes the resolved path on case-sensitive filesystems.
-  initDataPath()
   // Why not at module scope with the other lifetime couplings (#16761): this resolves the handoff
   // path, so it throws until setAppEnvironment() above installs the accessor — which killed every
   // `orca serve` process before it could listen. After initDataPath() specifically, so the
@@ -1529,7 +1545,15 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
     })
     // Why here: read-only, and the install DACL is the one thing a 0x80000003
     // child death cannot tell us about itself. See electron/electron#51761.
-    probeWindowsInstallDirAcl({ isServeMode })
+    probeWindowsInstallDirAcl({
+      isServeMode,
+      onDone: (data) =>
+        startWindowsInstallDirAclRepairIfPoisoned(data, {
+          isServeMode,
+          userDataPath: app.getPath('userData'),
+          appVersion: app.getVersion()
+        })
+    })
   }
 
   const window = createMainWindow(store, {
@@ -1561,7 +1585,7 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
         exitCode: details.exitCode ?? null,
         recentRecoveryCount
       })
-      void presentRendererRecoveryPrompt(recentRecoveryCount)
+      void showRendererRecoveryPrompt(recentRecoveryCount)
     },
     deferLoad: true,
     ...(options.revealOnDidFinishLoad === true ? { revealOnDidFinishLoad: true } : {}),
@@ -1851,30 +1875,29 @@ function sendOpenCrashReport(targetWindow?: BrowserWindow | null): void {
 }
 
 // Why: on renderer crash-loop the breaker stops auto-reloading and the window goes blank, so a main-process dialog is the only retry/quit surface.
-async function presentRendererRecoveryPrompt(recentRecoveryCount: number): Promise<void> {
-  if (isQuitting) {
-    return
-  }
-  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined
-  const options = {
-    type: 'error' as const,
-    buttons: ['Reload', 'Quit'],
-    defaultId: 0,
-    cancelId: 1,
-    title: 'Orca keeps failing to load',
-    message: 'The app window crashed repeatedly and stopped reloading automatically.',
-    detail: `Orca tried to recover ${recentRecoveryCount} times in a row without success. This is often a graphics-driver or installation problem. Reload to try again, or quit and relaunch Orca.`
-  }
-  const { response } = window
-    ? await dialog.showMessageBox(window, options)
-    : await dialog.showMessageBox(options)
-  if (response === 0 && mainWindow && !mainWindow.isDestroyed()) {
-    recordDurableCrashBreadcrumb('renderer_recovery_manual_retry')
-    loadMainWindow(mainWindow)
-  } else if (response === 1) {
-    isQuitting = true
-    app.quit()
-  }
+async function showRendererRecoveryPrompt(recentRecoveryCount: number): Promise<void> {
+  await presentRendererRecoveryPrompt({
+    recentRecoveryCount,
+    isQuitting: () => isQuitting,
+    diagnose: describeInstallDirAclPoison,
+    showMessageBox: (options) => {
+      const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined
+      return window ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options)
+    },
+    copyToClipboard: (text) => clipboard.writeText(text),
+    reload: () => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return
+      }
+      recordDurableCrashBreadcrumb('renderer_recovery_manual_retry')
+      // Why: leave the breaker open so a re-crash re-raises this prompt instead of resuming the auto-reload loop.
+      loadMainWindow(mainWindow)
+    },
+    quit: () => {
+      isQuitting = true
+      app.quit()
+    }
+  })
 }
 
 function getGpuFallbackEnvironment(): GpuFallbackEnvironment {
