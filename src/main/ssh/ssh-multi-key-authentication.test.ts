@@ -52,6 +52,11 @@ function makeResolved(overrides: Partial<SshResolvedConfig> = {}): SshResolvedCo
     proxyUseFdpass: false,
     controlMaster: 'no',
     controlPersist: 'no',
+    userKnownHostsFiles: [],
+    globalKnownHostsFiles: [],
+    strictHostKeyChecking: 'ask',
+    hashKnownHosts: false,
+    updateHostKeys: 'no',
     ...overrides
   }
 }
@@ -101,6 +106,7 @@ describe('ordered SSH private-key authentication', () => {
       type: 'publickey',
       key: Buffer.from('/keys/authorized-second')
     })
+    expect(nextAuth(config, false)).toBe('keyboard-interactive')
     expect(nextAuth(config, false)).toBe(false)
     expect(mockReadFileSync).not.toHaveBeenCalledWith('/keys/stale-imported')
   })

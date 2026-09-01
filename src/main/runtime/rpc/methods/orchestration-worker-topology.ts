@@ -1,5 +1,5 @@
 import type { AgentLaunchPreferences } from '../../../../shared/agent-session-host-authority'
-import type { TuiAgent } from '../../../../shared/types'
+import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { OrchestrationDb } from '../../orchestration/db'
 
@@ -135,6 +135,7 @@ export async function createWorkerWorktree(args: {
     name: params.name as string,
     baseBranch: params.baseBranch,
     displayName: params.displayName,
+    ...(params.displayName !== undefined ? { displayNameKind: 'user' as const } : {}),
     comment: params.comment,
     // setupDecision runs setup without the legacy runHooks activation side effect.
     runHooks: false,

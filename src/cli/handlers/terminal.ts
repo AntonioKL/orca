@@ -23,6 +23,7 @@ import {
   formatTerminalShow,
   formatTerminalSplit,
   formatTerminalWait,
+  reportCliError,
   printResult
 } from '../format'
 import {
@@ -42,6 +43,24 @@ import {
 // timeout. Even without an explicit server timeout, the client must allow
 // long waits instead of failing at the generic 15s transport cap.
 const DEFAULT_TERMINAL_WAIT_RPC_TIMEOUT_MS = 5 * 60 * 1000
+
+/** A false stop receipt is an error only when the host supplied a liveness verdict. */
+function terminalCloseFailure(close: RuntimeTerminalClose): RuntimeClientError | null {
+  if (close.ptyKilled || close.ptyStopVerdict === undefined) {
+    return null
+  }
+
+  const verdict = close.ptyStopVerdict
+  const detail =
+    verdict === 'live'
+      ? 'The PTY is live.'
+      : `The PTY was not confirmed stopped: ${close.ptyStopReason ?? 'its host could not be reached'}.`
+  return new RuntimeClientError(
+    verdict === 'live' ? 'terminal_stop_live' : 'terminal_stop_unverifiable',
+    `Terminal ${close.handle} close failed to confirm the PTY stopped (${verdict}). ${detail}`,
+    { close }
+  )
+}
 
 const terminalFocusHandler: CommandHandler = async ({ flags, client, cwd, json }) => {
   const result = await client.call<{ focus: RuntimeTerminalFocus }>('terminal.focus', {
@@ -76,22 +95,48 @@ export const TERMINAL_HANDLERS: Record<string, CommandHandler> = {
     if (cursorFlag !== undefined && cursor === undefined) {
       throw new RuntimeClientError('invalid_argument', '--cursor must be a non-negative integer')
     }
+    const screen = flags.get('screen') === true
+    // Why: a cursor pages through accumulated output. A screen read is the current frame and has
+    // nothing behind it to page, so accepting both would imply history that is not there.
+    if (screen && cursorFlag !== undefined) {
+      throw new RuntimeClientError(
+        'invalid_argument',
+        '--screen reads the current rendered screen, which has no cursor to page from. Use --cursor without --screen to page through accumulated output.'
+      )
+    }
     const result = await client.call<{ terminal: RuntimeTerminalRead }>('terminal.read', {
       terminal: await getTerminalHandle(flags, cwd, client),
       ...(cursor !== undefined ? { cursor } : {}),
+      ...(screen ? { screen: true } : {}),
       limit: getOptionalPositiveIntegerFlag(flags, 'limit')
     })
+    // Why: an older host drops the unknown `screen` param and answers with its ordinary stream
+    // read, which carries no source. Returning that silently is the exact failure this flag
+    // exists to prevent, so refuse rather than hand back the other question's answer.
+    if (screen && result.result.terminal.source === undefined) {
+      throw new RuntimeClientError(
+        'incompatible_runtime',
+        'This Orca host does not support --screen reads, so it answered with accumulated output instead of the rendered screen. Update Orca on the host, or drop --screen to read accumulated output deliberately.'
+      )
+    }
     printResult(result, json, formatTerminalRead)
   },
   'terminal send': async ({ flags, client, cwd, json }) => {
+    const text = getOptionalStringFlag(flags, 'text')
+    const enter = flags.get('enter') === true
+    const interrupt = flags.get('interrupt') === true
     const result = await client.call<{ send: RuntimeTerminalSend }>('terminal.send', {
       terminal: await getTerminalHandle(flags, cwd, client),
-      text: getOptionalStringFlag(flags, 'text'),
-      enter: flags.get('enter') === true,
-      interrupt: flags.get('interrupt') === true,
+      text,
+      enter,
+      interrupt,
+      ...(text && enter && !interrupt ? { agentPrompt: true } : {}),
       client: { id: 'orca-cli', type: 'desktop' }
     })
     printResult(result, json, formatTerminalSend)
+    if (!result.result.send.accepted) {
+      process.exitCode = 1
+    }
   },
   'terminal wait': async ({ flags, client, cwd, json }) => {
     const timeoutMs = getOptionalPositiveIntegerFlag(flags, 'timeout-ms')
@@ -157,6 +202,20 @@ export const TERMINAL_HANDLERS: Record<string, CommandHandler> = {
     const result = await client.call<{ close: RuntimeTerminalClose }>(method, {
       terminal: await getTerminalHandle(flags, cwd, client)
     })
+    // Why: a transport-level success must not hide a live or unverifiable PTY. Keep the receipt in
+    // error.data so JSON callers retain the host's exact evidence while receiving a failing outcome.
+    const failure = terminalCloseFailure(result.result.close)
+    if (failure) {
+      // Keep the established human receipt (including its liveness warning); JSON needs the
+      // standard failure envelope so callers do not mistake transport success for a stopped PTY.
+      if (json) {
+        reportCliError(failure, true)
+      } else {
+        printResult(result, false, formatTerminalClose)
+      }
+      process.exitCode = 1
+      return
+    }
     printResult(result, json, formatTerminalClose)
   },
   'terminal split': async ({ flags, client, cwd, json }) => {

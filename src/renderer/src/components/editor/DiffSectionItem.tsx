@@ -13,7 +13,7 @@ import {
 } from '../diff-comments/diff-comment-popover-position'
 import { applyDiffEditorLineNumberOptions } from './diff-editor-line-number-options'
 import { DiffSectionHeader } from './DiffSectionHeader'
-import type { DiffComment } from '../../../../shared/types'
+import type { DiffComment } from '../../../../shared/diff-comment-types'
 import { isDiffComment } from '@/lib/diff-comment-compat'
 import { installEditorSaveShortcut, installMonacoEditorFindShortcut } from './editor-shortcuts'
 import { DiffSectionBody } from './DiffSectionBody'
@@ -34,6 +34,7 @@ export function DiffSectionItem({
   sectionHeight,
   worktreeId,
   loadSection,
+  loadDeferredSection,
   retrySection,
   toggleSection,
   openSection,
@@ -376,6 +377,7 @@ export function DiffSectionItem({
           onCancelComment={() => setPopover(null)}
           onSubmitComment={handleSubmitComment}
           onRetrySection={retrySection}
+          onLoadDeferredSection={loadDeferredSection ?? loadSection}
           onSaveLimitedDiff={() => void handleSectionSaveRef.current(index)}
           onMount={handleMount}
         />

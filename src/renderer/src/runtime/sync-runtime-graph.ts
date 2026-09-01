@@ -6,6 +6,10 @@ import {
 } from '@/components/terminal-pane/layout-serialization'
 import { warnTerminalLifecycleAnomaly } from '@/components/terminal-pane/terminal-lifecycle-diagnostics'
 import { getEagerPtyBufferHandle } from '@/components/terminal-pane/pty-dispatcher'
+import {
+  collectParkedTerminalWatcherPtyIds,
+  getParkedTerminalWatcherPaneIdsByPtyId
+} from '@/components/terminal-pane/terminal-parked-watcher-registry'
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import { resolveLeafIdForManager } from '@/lib/pane-manager/pane-key-resolution'
@@ -20,21 +24,24 @@ import type {
   RuntimeMobileSessionSnapshotTab,
   RuntimeMobileTerminalTheme,
   RuntimeMobileSessionTabsSnapshot,
-  RuntimeSyncWindowGraph
+  RuntimeRendererSyncWindowGraph
 } from '../../../shared/runtime-types'
 import { isTerminalLeafId, makePaneKey, parsePaneKey } from '../../../shared/stable-pane-id'
 import { isWebTerminalSurfaceTabId } from '../../../shared/terminal-surface-id'
 import { isClaudeManagementTitle } from '../../../shared/agent-detection'
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
+import type { Tab, TabGroup, TabGroupLayoutNode } from '../../../shared/tab-types'
 import type {
-  Tab,
-  TabGroup,
-  TabGroupLayoutNode,
   TerminalLayoutSnapshot,
   TerminalPaneLayoutNode,
   TerminalTab
-} from '../../../shared/types'
+} from '../../../shared/terminal-tab-types'
 import { resolveTerminalTabTitle } from '../../../shared/tab-title-resolution'
+import {
+  isNativeChatTabWideFallbackSafe,
+  nativeChatLaunchAgentForLeaf,
+  resolveNativeChatActiveLayoutLeafId
+} from '../components/native-chat/native-chat-leaf-routing'
 import {
   getActiveTabNavOrder,
   getGroupVisibleTabOrder,
@@ -50,6 +57,7 @@ type RegisteredTerminalTab = {
   getManager: () => PaneManager | null
   getContainer: () => HTMLDivElement | null
   getPtyIdForPane: (paneId: number) => string | null
+  getTabWideAgentHintLeafId: () => string | null
 }
 
 type OpenFileByWorktreeAndId = Map<string, Map<string, AppState['openFiles'][number]>>
@@ -108,6 +116,7 @@ type MountedTerminalSurfaceCapture = {
   liveLayoutRoot: TerminalPaneLayoutNode | null
   numericPaneIdByLeafId: ReadonlyMap<string, number | null>
   ptyIdByNumericPaneId: ReadonlyMap<number, string | null>
+  tabWideAgentHintLeafId: string | null
 }
 /**
  * One worktree's complete mobile-snapshot input set.
@@ -128,7 +137,7 @@ type MobileSessionWorktreeInputs = {
   openFileIds: readonly string[]
   terminalLayoutByTabId: ReadonlyMap<string, AppState['terminalLayoutsByTabId'][string]>
   paneTitlesByTabId: ReadonlyMap<string, AppState['runtimePaneTitlesByTabId'][string]>
-  launchDraftByTabId: ReadonlyMap<
+  launchDraftByPaneKey: ReadonlyMap<
     string,
     NonNullable<AppState['nativeChatLaunchDraftByTabId']>[string]
   >
@@ -151,9 +160,57 @@ type MobileSessionWorktreeInputs = {
   mountedSurfaceCaptureByTabId: ReadonlyMap<string, MountedTerminalSurfaceCapture>
 }
 
-const registeredTabs = new Map<string, RegisteredTerminalTab>()
+type RegisteredTerminalTabKey = string
+
+const registeredTabs = new Map<RegisteredTerminalTabKey, RegisteredTerminalTab>()
 // Why: registration time suppresses the "no live transport" warning during the async PTY-connect window; after the grace period it's a real stuck state.
-const tabRegisteredAt = new Map<string, number>()
+const tabRegisteredAt = new Map<RegisteredTerminalTabKey, number>()
+
+function registeredTerminalTabKey(worktreeId: string, tabId: string): RegisteredTerminalTabKey {
+  return `${worktreeId}\0${tabId}`
+}
+
+function findRegisteredTerminalTab(
+  tabId: string,
+  worktreeId?: string
+): { key: RegisteredTerminalTabKey; tab: RegisteredTerminalTab } | null {
+  if (worktreeId !== undefined) {
+    const key = registeredTerminalTabKey(worktreeId, tabId)
+    const tab = registeredTabs.get(key)
+    return tab ? { key, tab } : null
+  }
+
+  let match: { key: RegisteredTerminalTabKey; tab: RegisteredTerminalTab } | null = null
+  for (const [key, tab] of registeredTabs) {
+    if (tab.tabId !== tabId) {
+      continue
+    }
+    // A tab id without its worktree is ambiguous; callers must fail closed.
+    if (match) {
+      return null
+    }
+    match = { key, tab }
+  }
+  return match
+}
+
+/** IDs occurring more than once cannot address the legacy tab-keyed runtime maps safely. */
+function collectAmbiguousTerminalTabIds(
+  tabsByWorktree: AppState['tabsByWorktree']
+): ReadonlySet<string> {
+  const seen = new Set<string>()
+  const ambiguous = new Set<string>()
+  for (const tabs of Object.values(tabsByWorktree)) {
+    for (const tab of tabs) {
+      if (seen.has(tab.id)) {
+        ambiguous.add(tab.id)
+      } else {
+        seen.add(tab.id)
+      }
+    }
+  }
+  return ambiguous
+}
 const NO_TRANSPORT_GRACE_MS = 10_000
 const EMPTY_ACTIVE_BROWSER_TAB_ID_BY_WORKTREE: AppState['activeBrowserTabIdByWorktree'] = {}
 const EMPTY_BROWSER_TABS_BY_WORKTREE: AppState['browserTabsByWorktree'] = {}
@@ -241,28 +298,33 @@ export function setRuntimeGraphStoreStateGetter(getter: (() => AppState) | null)
   getStoreState = getter
 }
 
-/** True while a TerminalPane for this tab is mounted (lifecycle effect ran). */
-export function hasRegisteredRuntimeTerminalTab(tabId: string): boolean {
-  return registeredTabs.has(tabId)
+/** True while the target TerminalPane is mounted (lifecycle effect ran). */
+export function hasRegisteredRuntimeTerminalTab(tabId: string, worktreeId?: string): boolean {
+  return findRegisteredTerminalTab(tabId, worktreeId) !== null
 }
 
 export function registerRuntimeTerminalTab(tab: RegisteredTerminalTab): () => void {
-  registeredTabs.set(tab.tabId, tab)
-  tabRegisteredAt.set(tab.tabId, Date.now())
+  const key = registeredTerminalTabKey(tab.worktreeId, tab.tabId)
+  registeredTabs.set(key, tab)
+  tabRegisteredAt.set(key, Date.now())
   scheduleRuntimeGraphSync()
   return () => {
     // Why: React can mount a replacement surface before the prior effect cleans up; stale cleanup must not erase the successor's registry.
-    if (registeredTabs.get(tab.tabId) !== tab) {
+    if (registeredTabs.get(key) !== tab) {
       return
     }
-    registeredTabs.delete(tab.tabId)
-    tabRegisteredAt.delete(tab.tabId)
+    registeredTabs.delete(key)
+    tabRegisteredAt.delete(key)
     scheduleRuntimeGraphSync()
   }
 }
 
-export function focusRuntimeTerminalSurface(tabId: string, leafId?: string | null): boolean {
-  const registered = registeredTabs.get(tabId)
+export function focusRuntimeTerminalSurface(
+  tabId: string,
+  leafId?: string | null,
+  worktreeId?: string
+): boolean {
+  const registered = findRegisteredTerminalTab(tabId, worktreeId)?.tab
   const manager = registered?.getManager()
   if (!manager) {
     return false
@@ -611,6 +673,7 @@ function serializeRuntimeMobileAgentStatusEntry(
     paneKey,
     entryPaneKey: entry.paneKey,
     state: entry.state,
+    workingMode: entry.workingMode ?? null,
     prompt: entry.prompt,
     updatedAtBucket: Math.floor(entry.updatedAt / AGENT_STATUS_SYNC_UPDATED_AT_BUCKET_MS),
     stateStartedAt: entry.stateStartedAt,
@@ -714,28 +777,46 @@ async function syncRuntimeGraph(): Promise<void> {
   // Why: can't import the store directly (terminal slice imports this module); inject the getter to break the construction cycle.
   const state = getStoreState()
   const systemPrefersDark = getSystemPrefersDark()
+  const ambiguousTerminalTabIds = collectAmbiguousTerminalTabIds(state.tabsByWorktree)
   // Why: build lookup maps once per sync instead of re-flattening every worktree's tabs for each registered terminal.
-  const terminalTabById = new Map(
-    Object.values(state.tabsByWorktree)
-      .flat()
-      .map((tab) => [tab.id, tab])
-  )
+  const terminalTabsByWorktree = new Map<string, Map<string, TerminalTab>>()
+  for (const [worktreeId, tabs] of Object.entries(state.tabsByWorktree)) {
+    const tabsById = new Map<string, TerminalTab>()
+    for (const tab of tabs) {
+      // Duplicate ids in one worktree are malformed persisted state; don't
+      // guess which PTY a mounted surface owns.
+      if (tabsById.has(tab.id)) {
+        tabsById.delete(tab.id)
+        continue
+      }
+      tabsById.set(tab.id, tab)
+    }
+    terminalTabsByWorktree.set(worktreeId, tabsById)
+  }
   const generatedTitlesEnabled = state.settings?.tabAutoGenerateTitle === true
-  const mobileSessionTabs = buildMobileSessionTabSnapshots(state, systemPrefersDark)
+  const mobileSessionTabs = buildMobileSessionTabSnapshots(
+    state,
+    systemPrefersDark,
+    ambiguousTerminalTabIds
+  )
   const publication = partitionMobileSessionPublication(mobileSessionTabs)
-  const graph: RuntimeSyncWindowGraph = {
+  const graph: RuntimeRendererSyncWindowGraph = {
     tabs: [],
     leaves: [],
+    rendererGeneration: mobileSessionPublicationEpoch,
     mobileSessionTabs: publication.changed,
     unchangedMobileSessionWorktrees: publication.unchangedWorktrees
   }
 
-  for (const [tabId, registeredTab] of registeredTabs) {
-    const tab = terminalTabById.get(tabId)
+  for (const [registrationKey, registeredTab] of registeredTabs) {
+    if (ambiguousTerminalTabIds.has(registeredTab.tabId)) {
+      continue
+    }
+    const tab = terminalTabsByWorktree.get(registeredTab.worktreeId)?.get(registeredTab.tabId)
     if (!tab) {
       continue
     }
-    if (isWebOnlyMirroredTerminalTab(tab, state.terminalLayoutsByTabId[tabId])) {
+    if (isWebOnlyMirroredTerminalTab(tab, state.terminalLayoutsByTabId[registeredTab.tabId])) {
       continue
     }
 
@@ -746,31 +827,32 @@ async function syncRuntimeGraph(): Promise<void> {
       container?.firstElementChild instanceof HTMLElement ? container.firstElementChild : null
 
     graph.tabs.push({
-      tabId,
+      tabId: registeredTab.tabId,
       worktreeId: registeredTab.worktreeId,
       title: resolveRuntimeTerminalTitle(tab, generatedTitlesEnabled),
       activeLeafId: activePaneId === null ? null : (manager?.getLeafId(activePaneId) ?? null),
       layout: serializePaneTree(root)
     })
 
-    const savedPtyIdsByLeafId = state.terminalLayoutsByTabId[tabId]?.ptyIdsByLeafId ?? {}
+    const savedPtyIdsByLeafId =
+      state.terminalLayoutsByTabId[registeredTab.tabId]?.ptyIdsByLeafId ?? {}
     for (const pane of manager?.getPanes() ?? []) {
       const leafId = pane.leafId
       const ptyId = registeredTab.getPtyIdForPane(pane.id)
       const savedPtyId = savedPtyIdsByLeafId[leafId] ?? null
-      const registeredTime = tabRegisteredAt.get(tabId) ?? 0
+      const registeredTime = tabRegisteredAt.get(registrationKey) ?? 0
       if (!ptyId && savedPtyId && Date.now() - registeredTime > NO_TRANSPORT_GRACE_MS) {
         warnTerminalLifecycleAnomaly('mounted terminal leaf has saved PTY but no live transport', {
-          tabId,
+          tabId: registeredTab.tabId,
           worktreeId: registeredTab.worktreeId,
           leafId,
           paneId: pane.id,
           ptyId: savedPtyId
         })
       }
-      const paneTitles = state.runtimePaneTitlesByTabId[tabId] ?? {}
+      const paneTitles = state.runtimePaneTitlesByTabId[registeredTab.tabId] ?? {}
       graph.leaves.push({
-        tabId,
+        tabId: registeredTab.tabId,
         worktreeId: registeredTab.worktreeId,
         leafId,
         paneRuntimeId: pane.id,
@@ -779,17 +861,30 @@ async function syncRuntimeGraph(): Promise<void> {
         title: resolveRuntimeTerminalTitle(
           tab,
           generatedTitlesEnabled,
-          state.runtimePaneTitlesByTabId[tabId]?.[pane.id] ?? tab.title
+          state.runtimePaneTitlesByTabId[registeredTab.tabId]?.[pane.id] ?? tab.title
         )
       })
     }
   }
 
   // Why: inactive automation tabs never mount a TerminalPane; publish their leaf+ptyId from persisted layout (gated on a live buffer) or the live PTY looks orphaned.
+  // Cold-parked tabs are the same shape with a different liveness proof: their
+  // pane is unmounted but a parked watcher still owns the PTY. Dropping their
+  // leaf invalidates the terminal handle every paired subscriber is bound to,
+  // stalling a remotely-driven terminal the host merely stopped displaying.
+  // Built once for the whole publication; a per-leaf registry scan would be
+  // quadratic across a many-worktree workspace.
+  const parkedWatcherPtyIds = collectParkedTerminalWatcherPtyIds()
   for (const [worktreeId, tabs] of Object.entries(state.tabsByWorktree)) {
     for (const tab of tabs) {
+      if (ambiguousTerminalTabIds.has(tab.id)) {
+        continue
+      }
       const layout = state.terminalLayoutsByTabId[tab.id]
-      if (registeredTabs.has(tab.id) || isWebOnlyMirroredTerminalTab(tab, layout)) {
+      if (
+        hasRegisteredRuntimeTerminalTab(tab.id, worktreeId) ||
+        isWebOnlyMirroredTerminalTab(tab, layout)
+      ) {
         continue
       }
       const savedPtyIdsByLeafId = layout?.ptyIdsByLeafId
@@ -801,17 +896,27 @@ async function syncRuntimeGraph(): Promise<void> {
           typeof ptyId === 'string' &&
           ptyId.length > 0 &&
           isTerminalLeafId(leafId) &&
-          Boolean(getEagerPtyBufferHandle(ptyId))
+          (Boolean(getEagerPtyBufferHandle(ptyId)) || parkedWatcherPtyIds.has(ptyId))
       )
       if (liveLeaves.length === 0) {
         continue
       }
       const title = resolveRuntimeTerminalTitle(tab, generatedTitlesEnabled)
+      // Why: partial coverage is legitimate — one leaf's watcher can be disposed
+      // while its siblings stay parked — so a saved activeLeafId that did not
+      // survive the filter would name a leaf this publication never sends.
+      const publishedLeafIds = new Set(liveLeaves.map(([leafId]) => leafId))
+      const savedActiveLeafId = layout?.activeLeafId
+      const parkedPaneIdsByPtyId = getParkedTerminalWatcherPaneIdsByPtyId(tab.id)
+      const parkedPaneTitles = state.runtimePaneTitlesByTabId[tab.id] ?? {}
       graph.tabs.push({
         tabId: tab.id,
         worktreeId,
         title,
-        activeLeafId: layout?.activeLeafId ?? liveLeaves[0][0],
+        activeLeafId:
+          savedActiveLeafId && publishedLeafIds.has(savedActiveLeafId)
+            ? savedActiveLeafId
+            : liveLeaves[0][0],
         layout: resolveTerminalLayoutRoot({
           authoritativeRoot: layout?.root,
           leafIds: liveLeaves.map(([leafId]) => leafId),
@@ -822,13 +927,22 @@ async function syncRuntimeGraph(): Promise<void> {
         })
       })
       liveLeaves.forEach(([leafId, ptyId], index) => {
+        // Why the watcher's id wins: PaneManager ids are allocated monotonically
+        // and closing a pane retires its id without renumbering, so an ordinal
+        // can name a pane that no longer exists — and main routes split/close and
+        // the paneKey fallback through this value.
+        const parkedPaneId = parkedPaneIdsByPtyId.get(ptyId)
         graph.leaves.push({
           tabId: tab.id,
           worktreeId,
           leafId,
-          paneRuntimeId: index + 1,
+          paneRuntimeId: parkedPaneId ?? index + 1,
           ptyId,
-          paneTitle: null,
+          // Why not null: the parked byte watcher keeps writing this pane's
+          // runtime title, and main prefers leaf.paneTitle over its own older
+          // lastOscTitle. Dropping it would pin a parked agent pane to a stale
+          // title for as long as it stays parked.
+          paneTitle: (parkedPaneId === undefined ? null : parkedPaneTitles[parkedPaneId]) ?? null,
           title
         })
       })
@@ -988,10 +1102,24 @@ function buildMobileSessionAgentStatusByWorktree(
 function buildMobileSessionWorktreeInputs(
   state: AppState,
   worktreeId: string,
-  publication: MobileSessionPublicationInputs
+  publication: MobileSessionPublicationInputs,
+  ambiguousTerminalTabIds: ReadonlySet<string>
 ): MobileSessionWorktreeInputs {
-  const terminalTabs = state.tabsByWorktree[worktreeId] ?? EMPTY_WORKTREE_TERMINAL_TABS
+  // Legacy layout/title maps are keyed only by tab id. Omit ambiguous ids until
+  // hydration repairs ownership instead of publishing one worktree's metadata for another.
+  const sourceTerminalTabs = state.tabsByWorktree[worktreeId] ?? EMPTY_WORKTREE_TERMINAL_TABS
+  // Preserve the source reference when there is nothing to filter; the mobile
+  // snapshot cache uses this identity to avoid rebuilding on title ticks.
+  const terminalTabs = sourceTerminalTabs.some((tab) => ambiguousTerminalTabIds.has(tab.id))
+    ? sourceTerminalTabs.filter((tab) => !ambiguousTerminalTabIds.has(tab.id))
+    : sourceTerminalTabs
   const terminalTabIds = terminalTabs.map((tab) => tab.id)
+  const terminalLayoutByTabId = narrowRecordByKeys(state.terminalLayoutsByTabId, terminalTabIds)
+  const mountedSurfaceCaptureByTabId = captureMountedTerminalSurfaces(
+    terminalTabs,
+    state.terminalLayoutsByTabId,
+    worktreeId
+  )
   const browserWorkspaces =
     publication.browserTabsByWorktree[worktreeId] ?? EMPTY_WORKTREE_BROWSER_WORKSPACES
   const pagesByBrowserWorkspaceId = narrowRecordByKeys(
@@ -1023,9 +1151,14 @@ function buildMobileSessionWorktreeInputs(
     tabGroupLayout: (state.layoutByWorktree ?? EMPTY_LAYOUT_BY_WORKTREE)[worktreeId],
     openFilesById,
     openFileIds,
-    terminalLayoutByTabId: narrowRecordByKeys(state.terminalLayoutsByTabId, terminalTabIds),
+    terminalLayoutByTabId,
     paneTitlesByTabId: narrowRecordByKeys(state.runtimePaneTitlesByTabId, terminalTabIds),
-    launchDraftByTabId: narrowRecordByKeys(state.nativeChatLaunchDraftByTabId, terminalTabIds),
+    launchDraftByPaneKey: buildMobileLaunchDraftsByPaneKey({
+      terminalTabs,
+      terminalLayoutByTabId,
+      mountedSurfaceCaptureByTabId,
+      launchDraftByTabId: narrowRecordByKeys(state.nativeChatLaunchDraftByTabId, terminalTabIds)
+    }),
     agentStatusByPaneKey:
       publication.agentStatusByWorktreeId.get(worktreeId) ?? EMPTY_NARROWED_BY_KEY,
     editorDraftVersionByFileId: narrowMapByKeys(
@@ -1046,20 +1179,18 @@ function buildMobileSessionWorktreeInputs(
     activeBrowserWorkspaceId: state.activeBrowserTabIdByWorktree?.[worktreeId] ?? null,
     generatedTitlesEnabled: publication.generatedTitlesEnabled,
     terminalTheme: publication.terminalTheme,
-    mountedSurfaceCaptureByTabId: captureMountedTerminalSurfaces(
-      terminalTabs,
-      state.terminalLayoutsByTabId
-    )
+    mountedSurfaceCaptureByTabId
   }
 }
 
 function captureMountedTerminalSurfaces(
   terminalTabs: AppState['tabsByWorktree'][string],
-  terminalLayoutsByTabId: AppState['terminalLayoutsByTabId']
+  terminalLayoutsByTabId: AppState['terminalLayoutsByTabId'],
+  worktreeId: string
 ): ReadonlyMap<string, MountedTerminalSurfaceCapture> {
   let captures: Map<string, MountedTerminalSurfaceCapture> | null = null
   for (const tab of terminalTabs) {
-    const registered = registeredTabs.get(tab.id)
+    const registered = findRegisteredTerminalTab(tab.id, worktreeId)?.tab
     if (!registered) {
       continue
     }
@@ -1099,7 +1230,8 @@ function captureMountedTerminalSurface(
       typeof HTMLElement !== 'undefined' && firstChild instanceof HTMLElement ? firstChild : null
     ),
     numericPaneIdByLeafId,
-    ptyIdByNumericPaneId
+    ptyIdByNumericPaneId,
+    tabWideAgentHintLeafId: registered.getTabWideAgentHintLeafId()
   }
 }
 
@@ -1114,6 +1246,7 @@ function mountedTerminalSurfaceCaptureEquals(
     a.paneLeafIds.every((leafId, index) => b.paneLeafIds[index] === leafId) &&
     narrowedEntriesEqual(a.numericPaneIdByLeafId, b.numericPaneIdByLeafId) &&
     narrowedEntriesEqual(a.ptyIdByNumericPaneId, b.ptyIdByNumericPaneId) &&
+    a.tabWideAgentHintLeafId === b.tabWideAgentHintLeafId &&
     // Why: serialization allocates a fresh tree per capture, so it compares by content.
     jsonContentEquals(a.liveLayoutRoot, b.liveLayoutRoot)
   )
@@ -1182,7 +1315,7 @@ function canReuseMobileSessionSnapshot(
     previous.terminalTheme === next.terminalTheme &&
     narrowedEntriesEqual(previous.terminalLayoutByTabId, next.terminalLayoutByTabId) &&
     narrowedEntriesEqual(previous.paneTitlesByTabId, next.paneTitlesByTabId) &&
-    narrowedEntriesEqual(previous.launchDraftByTabId, next.launchDraftByTabId) &&
+    narrowedEntriesEqual(previous.launchDraftByPaneKey, next.launchDraftByPaneKey) &&
     narrowedEntriesEqual(previous.agentStatusByPaneKey, next.agentStatusByPaneKey) &&
     narrowedEntriesEqual(previous.editorDraftVersionByFileId, next.editorDraftVersionByFileId) &&
     narrowedEntriesEqual(previous.pagesByBrowserWorkspaceId, next.pagesByBrowserWorkspaceId) &&
@@ -1201,7 +1334,10 @@ function canReuseMobileSessionSnapshot(
 
 export function buildMobileSessionTabSnapshots(
   state: AppState,
-  systemPrefersDark = getSystemPrefersDark()
+  systemPrefersDark = getSystemPrefersDark(),
+  ambiguousTerminalTabIds: ReadonlySet<string> = collectAmbiguousTerminalTabIds(
+    state.tabsByWorktree
+  )
 ): RuntimeMobileSessionTabsSnapshot[] {
   // Why: high-frequency title ticks fire mobile sync; cache indexes/hashes by store-slice ref to skip rescanning editor state.
   const openFileIndexes = getOpenFileIndexes(state.openFiles)
@@ -1238,7 +1374,12 @@ export function buildMobileSessionTabSnapshots(
       mobileSessionSnapshotCacheByWorktree.delete(worktreeId)
       continue
     }
-    const inputs = buildMobileSessionWorktreeInputs(state, worktreeId, publicationInputs)
+    const inputs = buildMobileSessionWorktreeInputs(
+      state,
+      worktreeId,
+      publicationInputs,
+      ambiguousTerminalTabIds
+    )
     const cached = mobileSessionSnapshotCacheByWorktree.get(worktreeId)
     // Why: invalidate before computing — building the maps, projection, and tab
     // array first made the cache save the fanout but none of the per-worktree work.
@@ -1266,7 +1407,9 @@ export function buildMobileSessionTabSnapshots(
     const groupProjection = buildMobileSessionGroupProjection(inputs, {
       terminalIds: publishableTerminalIds,
       editorIds,
-      browserIds: [...browserWorkspaceByIdForWorktree.keys()]
+      browserIds: [...browserWorkspaceByIdForWorktree.values()]
+        .filter((workspace) => isMobilePublishableBrowserWorkspace(workspace))
+        .map((workspace) => workspace.id)
     })
     const tabs: RuntimeMobileSessionSnapshotTab[] = []
     const emittedEditorFileIds = new Set<string>()
@@ -1307,7 +1450,7 @@ export function buildMobileSessionTabSnapshots(
         emittedEditorTabIds.add(item.tabId ?? item.id)
       } else if (item.type === 'browser') {
         const workspace = browserWorkspaceByIdForWorktree.get(item.id)
-        if (!workspace) {
+        if (!workspace || !isMobilePublishableBrowserWorkspace(workspace)) {
           continue
         }
         tabs.push(
@@ -1693,7 +1836,9 @@ function buildMobileSessionGroupProjection(
       groupTabs,
       terminalIds,
       editorIds,
-      browserIds
+      browserIds,
+      new Set(),
+      true
     )
     if (visibleOrder.length === 0) {
       continue
@@ -1811,6 +1956,58 @@ function getRuntimeLeafIdsForTerminal(
   return []
 }
 
+function resolveMobileTabWideAgentHintLeafId(
+  capture: MountedTerminalSurfaceCapture | undefined,
+  savedLayout: AppState['terminalLayoutsByTabId'][string] | undefined
+): string | null {
+  if (capture) {
+    return capture.tabWideAgentHintLeafId
+  }
+  return isNativeChatTabWideFallbackSafe(savedLayout)
+    ? resolveNativeChatActiveLayoutLeafId(savedLayout)
+    : null
+}
+
+function buildMobileLaunchDraftsByPaneKey(args: {
+  terminalTabs: AppState['tabsByWorktree'][string]
+  terminalLayoutByTabId: MobileSessionWorktreeInputs['terminalLayoutByTabId']
+  mountedSurfaceCaptureByTabId: MobileSessionWorktreeInputs['mountedSurfaceCaptureByTabId']
+  launchDraftByTabId: ReadonlyMap<
+    string,
+    NonNullable<AppState['nativeChatLaunchDraftByTabId']>[string]
+  >
+}): MobileSessionWorktreeInputs['launchDraftByPaneKey'] {
+  if (args.launchDraftByTabId.size === 0) {
+    return EMPTY_NARROWED_BY_KEY
+  }
+  let draftsByPaneKey: Map<
+    string,
+    NonNullable<AppState['nativeChatLaunchDraftByTabId']>[string]
+  > | null = null
+  for (const terminal of args.terminalTabs) {
+    const draft = args.launchDraftByTabId.get(terminal.id)
+    if (!draft || draft.resolved) {
+      continue
+    }
+    const capture = args.mountedSurfaceCaptureByTabId.get(terminal.id)
+    const savedLayout = args.terminalLayoutByTabId.get(terminal.id)
+    const leafIds = getRuntimeLeafIdsForTerminal(capture, savedLayout)
+    const ownerLeafId = resolveMobileTabWideAgentHintLeafId(capture, savedLayout)
+    const launchAgent = nativeChatLaunchAgentForLeaf({
+      launchAgent: terminal.launchAgent,
+      launchAgentLeafId: ownerLeafId,
+      leafId: ownerLeafId,
+      leafIds
+    })
+    if (!launchAgent || launchAgent !== draft.agent || !ownerLeafId) {
+      continue
+    }
+    draftsByPaneKey ??= new Map()
+    draftsByPaneKey.set(makePaneKey(terminal.id, ownerLeafId), draft)
+  }
+  return draftsByPaneKey ?? EMPTY_NARROWED_BY_KEY
+}
+
 function buildMobileTerminalSurfaceTabs(
   inputs: MobileSessionWorktreeInputs,
   terminal: NonNullable<AppState['tabsByWorktree'][string]>[number],
@@ -1822,6 +2019,7 @@ function buildMobileTerminalSurfaceTabs(
     : inputs.activeTerminalTabId === terminal.id
   const savedLayout = inputs.terminalLayoutByTabId.get(terminal.id)
   const leafIds = getRuntimeLeafIdsForTerminal(capture, savedLayout)
+  const launchAgentLeafId = resolveMobileTabWideAgentHintLeafId(capture, savedLayout)
   const activeLeafId = capture?.hasLiveActivePane
     ? capture.liveActiveLeafId
     : (savedLayout?.activeLeafId ?? leafIds[0] ?? null)
@@ -1832,16 +2030,6 @@ function buildMobileTerminalSurfaceTabs(
     : undefined
   const savedPtyIdsByLeafId = sanitizedSavedLayout?.ptyIdsByLeafId ?? {}
   const terminalTheme = inputs.terminalTheme
-  // Agent-matched like the desktop consumer: a pane whose agent changed keeps its
-  // tab id, so an unmatched seed would prefill the new agent's chat with stale text.
-  const seededLaunchDraft = inputs.launchDraftByTabId.get(terminal.id)
-  const launchDraftEntry =
-    seededLaunchDraft &&
-    !seededLaunchDraft.resolved &&
-    seededLaunchDraft.agent === terminal.launchAgent
-      ? seededLaunchDraft
-      : null
-  const publishedLaunchDraft = launchDraftEntry?.text.trim() ? launchDraftEntry : null
   const liveLayoutRoot = capture?.liveLayoutRoot ?? null
   const parentLayout = normalizeTerminalLayoutSnapshot({
     // Why: live DOM tree is authoritative when mounted, else the saved tree; synthesize only as a last resort, never re-guess.
@@ -1874,22 +2062,38 @@ function buildMobileTerminalSurfaceTabs(
         : legacyPaneId
           ? paneTitles[Number(legacyPaneId)]
           : undefined
+    const leafTitle = paneTitle?.trim() || sanitizedSavedLayout?.titlesByLeafId?.[leafId]?.trim()
     const paneKey = isTerminalLeafId(leafId) ? makePaneKey(terminal.id, leafId) : null
-    const title = resolveRuntimeTerminalTitle(
-      terminal,
-      generatedTitlesEnabled,
-      paneTitle ?? terminal.title ?? 'Terminal'
-    )
-    const agentStatusTitle = paneTitle ?? terminal.title ?? ''
+    const tabWideFallbackSafe =
+      isNativeChatTabWideFallbackSafe(parentLayout) && launchAgentLeafId === leafId
+    const title = tabWideFallbackSafe
+      ? resolveRuntimeTerminalTitle(
+          terminal,
+          generatedTitlesEnabled,
+          leafTitle ?? terminal.title ?? 'Terminal'
+        )
+      : (leafTitle ?? 'Terminal')
+    const agentStatusTitle = leafTitle ?? (tabWideFallbackSafe ? terminal.title : '') ?? ''
     const agentStatus =
       paneKey && !isClaudeManagementTitle(agentStatusTitle)
         ? inputs.agentStatusByPaneKey.get(paneKey)
         : undefined
+    const launchAgent = nativeChatLaunchAgentForLeaf({
+      launchAgent: terminal.launchAgent,
+      launchAgentLeafId,
+      leafId,
+      leafIds
+    })
+    const launchDraft = paneKey ? inputs.launchDraftByPaneKey.get(paneKey) : undefined
+    const publishedLaunchDraft =
+      launchDraft && launchDraft.agent === launchAgent && launchDraft.text.trim()
+        ? launchDraft
+        : null
     return {
       type: 'terminal' as const,
       id: mobileTerminalSurfaceId(terminal.id, leafId),
       title,
-      ...(terminal.quickCommandLabel?.trim()
+      ...(tabWideFallbackSafe && terminal.quickCommandLabel?.trim()
         ? { quickCommandLabel: terminal.quickCommandLabel.trim() }
         : {}),
       parentTabId: terminal.id,
@@ -1897,7 +2101,7 @@ function buildMobileTerminalSurfaceTabs(
       ptyId,
       ...(terminalTheme ? { terminalTheme } : {}),
       ...(agentStatus ? { agentStatus } : {}),
-      ...(terminal.launchAgent ? { launchAgent: terminal.launchAgent } : {}),
+      ...(launchAgent ? { launchAgent } : {}),
       // Launch context that exists only as an unsent TUI-input draft; mobile
       // prefills its chat composer from it (desktop keeps its own seed store).
       ...(publishedLaunchDraft
@@ -2007,6 +2211,18 @@ function isMobileUnsupportedCombinedDiffSource(
 function isMobilePublishableOpenFile(file: AppState['openFiles'][number]): boolean {
   // Why: combined diff tabs use display labels as paths and need the desktop renderer; mobile would mis-call files.read.
   return !isMobileUnsupportedCombinedDiffSource(file.diffSource)
+}
+
+/**
+ * Why a workspace document is held back: it is served to one desktop guest through a grant no
+ * mobile client holds, so there is nothing on the other side that could render it — and the wire
+ * has no tab kind for it, so an old client would take it for an ordinary browser tab and offer
+ * navigation for a page that has no URL. Host and phone parity ships behind capability negotiation.
+ */
+function isMobilePublishableBrowserWorkspace(
+  workspace: NonNullable<AppState['browserTabsByWorktree'][string]>[number]
+): boolean {
+  return !workspace.docLocation
 }
 
 // Why: the store buckets a workspace under its own worktreeId, so this worktree's scoped inputs are the workspace's own scope.

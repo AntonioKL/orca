@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import type {
   AiVaultListResult,
   AiVaultScanIssue,
@@ -14,6 +13,7 @@ import {
 } from './codex-session-root-dedup'
 import {
   createAntigravityWorkspaceResolver,
+  readLocalAntigravityHistory,
   type AntigravityWorkspaceResolver
 } from './session-scanner-antigravity-history'
 import { antigravityHistoryPathForBrainDir } from './session-scanner-antigravity-paths'
@@ -27,6 +27,7 @@ import {
   parseAgentSessionFileCached,
   type SessionParseStats
 } from './session-scanner-parse-cache'
+import { recordSessionScanIssue } from './session-scan-issues'
 import { discoverInScopeClaudeFiles } from './session-scanner-scope-discovery'
 import {
   DEFAULT_CODEX_HOME_DIR,
@@ -71,7 +72,9 @@ export async function scanAiVaultSessions(
     const executionHostId = options.executionHostId ?? LOCAL_EXECUTION_HOST_ID
     const issues: AiVaultScanIssue[] = []
     const parseStats = createSessionParseStats()
-    const antigravityWorkspaceResolver = createAntigravityWorkspaceResolver(readOptionalTextFile)
+    const antigravityWorkspaceResolver = createAntigravityWorkspaceResolver(
+      readLocalAntigravityHistory
+    )
     // Why: persisted entries must be seeded before any candidate is parsed, or
     // the cold scan gains nothing from the cache file (#9210).
     throwIfAiVaultScanCancelled(options.signal)
@@ -82,23 +85,21 @@ export async function scanAiVaultSessions(
     const candidates = dedupeCodexRolloutFileAliases(
       discoveries
         .flatMap((discovery) =>
-          discovery.files.map(
-            (file): SessionFileCandidate => ({
-              agent: discovery.agent,
-              file,
-              codexHome:
-                discovery.agent === 'codex'
-                  ? codexHomeForSessionsDir(
-                      discovery.rootDir,
-                      options.defaultCodexHomeDir ?? DEFAULT_CODEX_HOME_DIR
-                    )
-                  : null,
-              antigravityHistoryPath:
-                discovery.agent === 'antigravity'
-                  ? antigravityHistoryPathForBrainDir(discovery.rootDir)
-                  : undefined
-            })
-          )
+          discovery.files.map((file): SessionFileCandidate => ({
+            agent: discovery.agent,
+            file,
+            codexHome:
+              discovery.agent === 'codex'
+                ? codexHomeForSessionsDir(
+                    discovery.rootDir,
+                    options.defaultCodexHomeDir ?? DEFAULT_CODEX_HOME_DIR
+                  )
+                : null,
+            antigravityHistoryPath:
+              discovery.agent === 'antigravity'
+                ? antigravityHistoryPathForBrainDir(discovery.rootDir)
+                : undefined
+          }))
         )
         .sort((left, right) => right.file.mtimeMs - left.file.mtimeMs),
       {
@@ -200,9 +201,11 @@ async function scanInScopeSessions(args: {
     excludedFilePaths: args.alreadyParsedFilePaths,
     issues: args.issues
   })
-  const candidates = files.map(
-    (file): SessionFileCandidate => ({ agent: 'claude', file, codexHome: null })
-  )
+  const candidates = files.map((file): SessionFileCandidate => ({
+    agent: 'claude',
+    file,
+    codexHome: null
+  }))
   if (candidates.length === 0) {
     return []
   }
@@ -255,7 +258,7 @@ async function parseSessionCandidates(args: {
 
     for (const result of results) {
       if (result.issue) {
-        args.issues.push(result.issue)
+        recordSessionScanIssue(args.issues, result.issue)
       }
       if (result.session) {
         sessions.push(result.session)
@@ -302,14 +305,6 @@ async function parseSessionCandidate(
         message: errorMessage(err)
       }
     }
-  }
-}
-
-async function readOptionalTextFile(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, 'utf-8')
-  } catch {
-    return null
   }
 }
 

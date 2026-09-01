@@ -1,8 +1,9 @@
 import type { TerminalOscLinkRange } from '../../shared/terminal-osc-link-ranges'
-import type { TuiAgent } from '../../shared/types'
+import type { TuiAgent } from '../../shared/tui-agent'
 import type { AgentSessionClaimedSpawnResult } from '../../shared/agent-session-host-authority'
 import type { PtyIncarnationId } from '../../shared/pty-incarnation'
 import type { PtySourceReceivingActivation } from '../../shared/pty-source-receiving-activation'
+import type { TerminalOwner } from '../../shared/terminal-owner'
 
 export type PtySpawnResult = {
   agentSessionEnsure?: AgentSessionClaimedSpawnResult
@@ -13,7 +14,7 @@ export type PtySpawnResult = {
   incarnationId?: PtyIncarnationId
   /** Relay source identity installed before adjacent source frames are decoded. */
   sourceActivation?: PtySourceReceivingActivation
-  /** The provider observed this exact spawn exit before its control reply settled. */
+  /** The provider observed this exact spawn exit before returning its spawn result. */
   exitedBeforeSpawnReply?: true
   /** OS-level pid of the shell process, when available at spawn time.
    *  Why: the memory collector needs this to walk each PTY's process
@@ -49,6 +50,11 @@ export type PtySpawnResult = {
    *  (terminal-query-authority.md §kitty). Never replayed into a renderer
    *  xterm — POST_REPLAY_REATTACH_RESET's kitty reset stays authoritative. */
   snapshotKittyKeyboardFlags?: number
+  /** Renderer-domain sequence main reconciled for the attach boundary those
+   *  flags describe. Set by main, not the provider. */
+  snapshotSeq?: number
+  /** Ordered ownership evidence proven by the provider snapshot. */
+  snapshotTerminalOwner?: TerminalOwner
   /** True when the spawn reattached to an existing daemon session. */
   isReattach?: boolean
   /** Last OSC title tracked by the daemon session the snapshot came from.

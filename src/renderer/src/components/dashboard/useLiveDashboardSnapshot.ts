@@ -13,6 +13,7 @@ export function useLiveDashboardSnapshot(): DashboardSnapshot {
   const repos = useAppStore((s) => s.repos)
   const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
   const tabsByWorktree = useAppStore((s) => s.tabsByWorktree)
+  const unifiedTabsByWorktree = useAppStore((s) => s.unifiedTabsByWorktree)
   const agentStatusByPaneKey = useAppStore((s) => s.agentStatusByPaneKey)
   const retainedAgentsByPaneKey = useAppStore((s) => s.retainedAgentsByPaneKey)
   const migrationUnsupportedByPtyId = useAppStore((s) => s.migrationUnsupportedByPtyId)
@@ -41,6 +42,7 @@ export function useLiveDashboardSnapshot(): DashboardSnapshot {
   // these two instead of worktreesByRepo.
   const folderWorkspaces = useAppStore((s) => s.folderWorkspaces)
   const projectGroups = useAppStore((s) => s.projectGroups)
+  const sshTargetLabels = useAppStore((s) => s.sshTargetLabels)
   const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
   const sshStateByEnvironment = useAppStore((s) => s.sshStateByEnvironment)
   const runtimeStatusByEnvironmentId = useAppStore((s) => s.runtimeStatusByEnvironmentId)
@@ -67,6 +69,7 @@ export function useLiveDashboardSnapshot(): DashboardSnapshot {
           repos,
           worktreesByRepo,
           tabsByWorktree,
+          unifiedTabsByWorktree,
           agentStatusByPaneKey,
           retainedAgentsByPaneKey,
           migrationUnsupportedByPtyId,
@@ -82,6 +85,7 @@ export function useLiveDashboardSnapshot(): DashboardSnapshot {
           detectedWorktreesByRepo,
           folderWorkspaces,
           projectGroups,
+          sshTargetLabels,
           sshConnectionStates,
           sshStateByEnvironment,
           runtimeStatusByEnvironmentId,
@@ -105,6 +109,7 @@ export function useLiveDashboardSnapshot(): DashboardSnapshot {
       repos,
       worktreesByRepo,
       tabsByWorktree,
+      unifiedTabsByWorktree,
       agentStatusByPaneKey,
       retainedAgentsByPaneKey,
       migrationUnsupportedByPtyId,
@@ -120,6 +125,7 @@ export function useLiveDashboardSnapshot(): DashboardSnapshot {
       detectedWorktreesByRepo,
       folderWorkspaces,
       projectGroups,
+      sshTargetLabels,
       sshConnectionStates,
       sshStateByEnvironment,
       runtimeStatusByEnvironmentId,

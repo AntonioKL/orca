@@ -1,5 +1,6 @@
-import type { GitWorktreeInfo, Repo } from '../shared/types'
-import { listWorktrees } from './git/worktree'
+import type { Repo } from '../shared/repo-types'
+import type { GitWorktreeInfo } from '../shared/worktree/types'
+import { listWorktrees, listWorktreesStrict } from './git/worktree'
 import { isFolderRepo } from '../shared/repo-kind'
 import { getSshGitProvider } from './providers/ssh-git-dispatch'
 import { areWorktreePathsEqual } from './ipc/worktree-logic'
@@ -49,4 +50,19 @@ export async function listRepoWorktrees(
   return hasLocalRepoWorktreeListOptions(options)
     ? await listWorktrees(repo.path, options)
     : await listWorktrees(repo.path)
+}
+
+export async function listLocalRepoWorktreesStrict(
+  repo: Repo,
+  options?: LocalRepoWorktreeListOptions
+): Promise<GitWorktreeInfo[]> {
+  if (repo.connectionId) {
+    throw new Error('Cannot list worktrees for a remote repository')
+  }
+  if (isFolderRepo(repo)) {
+    return [createFolderWorktree(repo)]
+  }
+  return hasLocalRepoWorktreeListOptions(options)
+    ? await listWorktreesStrict(repo.path, options)
+    : await listWorktreesStrict(repo.path)
 }

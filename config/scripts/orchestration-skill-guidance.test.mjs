@@ -25,6 +25,17 @@ function getSection(markdown, heading) {
 }
 
 describe('orchestration skill guidance', () => {
+  it('keeps external browser routing at the OS/page boundary', () => {
+    const description = readFileSync(guidePath, 'utf8').replace(/\s+/gu, ' ')
+
+    expect(description).toContain(
+      "Use Computer Use for external browser windows, webviews, Orca app UI, or desktop UI outside Orca's embedded browser only when the task requires OS/window-level control such as focus, menus, dialogs, coordinates, or screenshots."
+    )
+    expect(description).toContain(
+      "`orca-cli` for Orca's embedded pages and a page-automation tool such as Playwright or CDP for external pages."
+    )
+  })
+
   it('requires Orca runtime state before claiming a worker was orchestrated', () => {
     const skill = readSkill()
     const toolBoundary = getSection(skill, 'Tool Boundary')
@@ -221,16 +232,20 @@ describe('orchestration skill guidance', () => {
     expect(skill).toContain('the named owner edits files and creates the PR')
   })
 
-  it('keeps worker_done post-completion guidance idle instead of polling', () => {
+  it('keeps post-completion workers idle without subordinating the user', () => {
     const skill = readSkill()
     const agentGuidance = getSection(skill, 'Agent Guidance')
 
-    expect(agentGuidance).toContain('After sending `worker_done`, end your turn')
+    expect(agentGuidance).toContain('After sending `worker_done`, end that dispatched turn')
     expect(agentGuidance).toContain('idle at the agent prompt')
+    expect(agentGuidance).toContain('Do not autonomously start more work, poll')
+    expect(agentGuidance).toContain('A direct user instruction takes precedence')
+    expect(agentGuidance).toContain('follow it without coordinator approval or a fresh Dispatch')
+    expect(agentGuidance).toContain('never refuse it because of worker/coordinator roles')
+    expect(agentGuidance).toContain("do not reuse the settled Dispatch's lifecycle IDs")
     expect(agentGuidance).toContain(
-      'do not start more work, poll, or attempt to close the terminal yourself'
+      'A coordinator-supervised follow-up still arrives with a fresh preamble + TASK block'
     )
-    expect(agentGuidance).toContain('fresh preamble + TASK block delivered as new terminal input')
     expect(skill).not.toContain('post-completion polling messages')
     expect(skill).not.toContain('every 2 minutes')
   })
@@ -281,7 +296,7 @@ describe('orchestration skill guidance', () => {
     expect(workerLoop).toContain('opaque provider model id with `--model`')
     expect(workerLoop).toContain('`--effort` requires `--model`')
     expect(workerLoop).toContain('neither option can combine with `--terminal`')
-    expect(workerLoop).toContain('--agent claude --model aws-bedrock-opus-5 --effort high --json')
+    expect(workerLoop).toContain('--agent claude --model opus --effort high --json')
     expect(workerLoop).toContain('`launch.requested` and `launch.effective`')
   })
 
@@ -305,7 +320,7 @@ describe('orchestration skill guidance', () => {
       /\b(?:after|on|upon) (?:a |the )?(?:tui-?idle|idle state|timeout|heartbeat)\b[^.]*\brelease/iu
     )
     expect(agentGuidance).toContain(
-      'do not start more work, poll, or attempt to close the terminal yourself'
+      'Do not autonomously start more work, poll, or attempt to close the terminal yourself'
     )
     expect(agentGuidance).not.toMatch(/worker-release[^.]*\byourself\b/iu)
   })

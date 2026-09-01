@@ -1,6 +1,9 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import type { Repo, Worktree } from '../../shared/types'
+import type { Repo } from '../../shared/repo-types'
+import type { Worktree } from '../../shared/worktree/types'
 import { resolveWorkspaceCleanupActivityWorktree } from './workspace-cleanup-activity'
 
 const REPO: Repo = {
@@ -134,8 +137,38 @@ describe('resolveWorkspaceCleanupActivityWorktree', () => {
       readTextFile
     )
 
-    expect(readTextFile).toHaveBeenCalledWith(reflogPath)
+    // Why: only the tail of the reflog is read — the newest entry is enough.
+    expect(readTextFile).toHaveBeenCalledWith(reflogPath, { tailBytes: 8192 })
     expect(worktree.lastActivityAt).toBe(1_700_000_900_000)
+  })
+
+  it('falls back to a full reflog read when the newest entry exceeds the tail window', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cleanup-activity-'))
+    try {
+      const gitDir = path.join(dir, 'gitdir')
+      await mkdir(path.join(gitDir, 'logs'), { recursive: true })
+      const worktreePath = path.join(dir, 'wt')
+      await mkdir(worktreePath, { recursive: true })
+      await writeFile(path.join(worktreePath, '.git'), `gitdir: ${gitDir}\n`)
+      // Why: a single record longer than the 8192-byte tail window keeps its
+      // timestamp before the window; the reader must fall back to a full read.
+      await writeFile(
+        path.join(gitDir, 'logs', 'HEAD'),
+        '0000 1111 Dev <dev@example.com> 1700000000 -0700\tbranch: Created from HEAD\n' +
+          `1111 2222 Dev <dev@example.com> 1700000900 -0700\tcommit: ${'x'.repeat(9000)}\n`
+      )
+      const statPath = vi.fn(async () => ({ mtimeMs: 10_000 }))
+
+      const worktree = await resolveWorkspaceCleanupActivityWorktree(
+        REPO,
+        makeWorktree({ path: worktreePath }),
+        statPath
+      )
+
+      expect(worktree.lastActivityAt).toBe(1_700_000_900_000)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('degrades to other probes when the reflog was expired to an empty file', async () => {
@@ -204,6 +237,46 @@ describe('resolveWorkspaceCleanupActivityWorktree', () => {
       path.join('/home/me/repo/.git/worktrees/repo-feature', 'HEAD')
     )
     expect(worktree.lastActivityAt).toBe(70_000)
+  })
+
+  it('maps a drvfs gitdir pointer to its drive spelling on a Windows host', async () => {
+    const originalPlatform = process.platform
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    try {
+      const statPath = vi.fn(async (targetPath: string) => ({
+        mtimeMs: targetPath.endsWith('COMMIT_EDITMSG') ? 70_000 : 10_000
+      }))
+      // A WSL git writes the pointer in the guest namespace even for a drive-path worktree.
+      const readTextFile = vi.fn(
+        async (_targetPath: string) => 'gitdir: /mnt/c/Users/me/repo/.git/worktrees/repo-feature\n'
+      )
+
+      const worktree = await resolveWorkspaceCleanupActivityWorktree(
+        REPO,
+        makeWorktree({ path: String.raw`C:\Users\me\repo-feature` }),
+        statPath,
+        readTextFile
+      )
+
+      // Separators are normalized because the probe join uses the host separator;
+      // what this pins is the drive spelling of every resolved probe target.
+      const normalize = (target: string): string => target.replaceAll('/', '\\')
+      expect(statPath.mock.calls.map(([target]) => normalize(target)).sort()).toEqual(
+        [
+          String.raw`C:\Users\me\repo-feature`,
+          String.raw`C:\Users\me\repo-feature\.git`,
+          String.raw`C:\Users\me\repo\.git\worktrees\repo-feature\HEAD`,
+          String.raw`C:\Users\me\repo\.git\worktrees\repo-feature\COMMIT_EDITMSG`,
+          String.raw`C:\Users\me\repo\.git\worktrees\repo-feature\ORIG_HEAD`
+        ].sort()
+      )
+      expect(readTextFile.mock.calls.map(([target]) => normalize(target))).toContain(
+        String.raw`C:\Users\me\repo\.git\worktrees\repo-feature\logs\HEAD`
+      )
+      expect(worktree.lastActivityAt).toBe(70_000)
+    } finally {
+      Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform })
+    }
   })
 
   it('keeps persisted activity when it is newer than local metadata', async () => {

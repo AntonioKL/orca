@@ -2,6 +2,7 @@ export type InspectionPriority = 'cadence' | 'pending-title'
 
 type InspectionTask = {
   priority: InspectionPriority
+  canRun: () => boolean
   run: () => Promise<void>
 }
 
@@ -37,6 +38,16 @@ function scheduleInspectionPump(delayMs = 0): void {
 }
 
 function pumpInspectionQueue(): void {
+  // Drop disposed tasks before slot/rate accounting.
+  for (let index = inspectionQueue.length - 1; index >= 0; index -= 1) {
+    const task = inspectionQueue[index]
+    if (task && !task.canRun()) {
+      inspectionQueue.splice(index, 1)
+    }
+  }
+  if (inspectionQueue.length === 0) {
+    return
+  }
   const now = Date.now()
   if (!canStartInspection(now)) {
     scheduleInspectionPump(100)
@@ -45,7 +56,7 @@ function pumpInspectionQueue(): void {
 
   const priorityIndex = inspectionQueue.findIndex((task) => task.priority === 'pending-title')
   const next =
-    priorityIndex >= 0 ? inspectionQueue.splice(priorityIndex, 1)[0] : inspectionQueue.shift()
+    priorityIndex !== -1 ? inspectionQueue.splice(priorityIndex, 1)[0] : inspectionQueue.shift()
   if (!next) {
     return
   }

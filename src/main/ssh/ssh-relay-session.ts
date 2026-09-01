@@ -6,6 +6,7 @@ import type { BrowserWindow } from 'electron'
 import { deployAndLaunchRelay } from './ssh-relay-deploy'
 import { execCommand } from './ssh-relay-deploy-helpers'
 import { isRelayVersionMismatchError } from './ssh-relay-version-mismatch-error'
+import { replayPendingSshPtyKills } from './ssh-pending-pty-kill-replay'
 import { SshChannelMultiplexer } from './ssh-channel-multiplexer'
 import { SshPtyProvider } from '../providers/ssh-pty-provider'
 import type { SshPtyAttachResult } from '../providers/ssh-pty-session-reattach'
@@ -79,6 +80,10 @@ import {
 import { normalizeRemoteArtifactInput } from '../../shared/artifact-cli-bridge'
 import type { Store } from '../persistence'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import {
+  findTerminalTabIdForLeaf,
+  hasHostAuthoritativeTerminalMembership
+} from '../runtime/workspace-session-terminal-membership-authority'
 import { DEFAULT_PTY_SOURCE_WINDOW_SU } from '../../shared/pty-source-credit-contract'
 import { PTY_CONSUMER_STALE_OWNER_RECOVERY_ERROR } from '../../shared/pty-consumer-session'
 import {
@@ -134,6 +139,7 @@ export type RelaySessionState = 'idle' | 'deploying' | 'ready' | 'reconnecting' 
 type SshPtyExitPayload = Parameters<SshPtyExitCallback>[0]
 type SshPtyDataPayload = Parameters<SshPtyDataCallback>[0]
 type SshPtyLease = ReturnType<Store['getSshRemotePtyLeases']>[number]
+type ReattachedPtyRuntimeRestore = 'restored' | 'missing-surface'
 const SSH_PTY_REATTACH_MAX_CONCURRENCY = 8
 const SSH_PTY_REATTACH_ATTEMPT_TIMEOUT_MS = 10_000
 const SSH_PTY_REATTACH_RETRY_MIN_DELAY_MS = 50
@@ -438,7 +444,7 @@ export class SshRelaySession {
   async requestAiVaultSessionList(
     params: SshAiVaultRelayListParams,
     options: { signal?: AbortSignal; timeoutMs?: number } = {}
-  ): Promise<unknown | null> {
+  ): Promise<unknown> {
     if (this.aiVaultListMethodSupported === false) {
       return null
     }
@@ -465,7 +471,7 @@ export class SshRelaySession {
   async requestAiVaultSessionTitles(
     params: SshAiVaultRelayTitleParams,
     options: { signal?: AbortSignal; timeoutMs?: number } = {}
-  ): Promise<unknown | null> {
+  ): Promise<unknown> {
     if (this.aiVaultTitleMethodSupported === false) {
       return null
     }
@@ -1436,7 +1442,7 @@ export class SshRelaySession {
     })
   }
 
-  // Why: ship plugin/extension source from Orca so agent-event changes don't force a relay redeploy (agent-status-over-ssh.md §4/§8). Best-effort.
+  // Why: ship plugin/extension source from Orca so agent-event changes don't force a relay redeploy — the relay is versioned independently. Best-effort: failure only costs agent status on this host.
   private async installPluginsOnRelay(mux: SshChannelMultiplexer): Promise<void> {
     if (!isRemoteAgentHooksEnabled() || !this.areAgentStatusHooksEnabled()) {
       return
@@ -1502,6 +1508,7 @@ export class SshRelaySession {
         compactTrigger?: unknown
         toolUseId?: unknown
         toolAgentId?: unknown
+        teammateName?: unknown
         toolAgentType?: unknown
         isReplay?: unknown
         providerSession?: unknown
@@ -1513,7 +1520,7 @@ export class SshRelaySession {
       if (typeof envelope.paneKey !== 'string') {
         return
       }
-      // Why: forward env/version verbatim so cross-build warn-once diagnostics fire on remote events too (agent-status-over-ssh.md §3).
+      // Why: forward the agent CLI's env/version verbatim (not the relay's) so warn-once protocol-mismatch diagnostics fire for remote events too.
       agentHookServer.ingestRemote(
         {
           paneKey: envelope.paneKey,
@@ -1534,6 +1541,8 @@ export class SshRelaySession {
           compactTrigger: envelope.compactTrigger,
           toolUseId: typeof envelope.toolUseId === 'string' ? envelope.toolUseId : undefined,
           toolAgentId: typeof envelope.toolAgentId === 'string' ? envelope.toolAgentId : undefined,
+          teammateName:
+            typeof envelope.teammateName === 'string' ? envelope.teammateName : undefined,
           toolAgentType:
             typeof envelope.toolAgentType === 'string' ? envelope.toolAgentType : undefined,
           isReplay: envelope.isReplay === true ? true : undefined,
@@ -2245,6 +2254,23 @@ export class SshRelaySession {
     mux: SshChannelMultiplexer,
     shouldContinue: () => boolean
   ): Promise<void> {
+    const ptyProvider = getSshPtyProvider(this.targetId) as SshPtyProvider | undefined
+    const providerGeneration = this.activePtyProviderGeneration
+    if (!ptyProvider || providerGeneration === null || this.mux !== mux) {
+      return
+    }
+    // Why before the lease read: a stop the user asked for and this client could not deliver is
+    // replayed here, and a confirmed one tombstones its lease — so it must land before the filter
+    // below decides what to reattach, or the reattach revives a PTY that is about to die.
+    await replayPendingSshPtyKills({
+      targetId: this.targetId,
+      store: this.store,
+      provider: ptyProvider,
+      shouldContinue
+    })
+    if (!shouldContinue()) {
+      return
+    }
     const activeLeases = this.store
       .getSshRemotePtyLeases(this.targetId)
       .filter((lease) => lease.state !== 'terminated' && lease.state !== 'expired')
@@ -2269,11 +2295,6 @@ export class SshRelaySession {
         ...leasedPtyIds
       ])
     )
-    const ptyProvider = getSshPtyProvider(this.targetId) as SshPtyProvider | undefined
-    const providerGeneration = this.activePtyProviderGeneration
-    if (!ptyProvider || providerGeneration === null || this.mux !== mux) {
-      return
-    }
     let nextPtyIndex = 0
     const worker = async (): Promise<void> => {
       while (shouldContinue()) {
@@ -2462,14 +2483,29 @@ export class SshRelaySession {
       if (!shouldContinue() || !this.ownsPtyRecoveryAttempt(appPtyId, pendingReattach)) {
         return
       }
-      setPtyOwnership(appPtyId, this.targetId)
+      const activeLease = activeLeaseByPtyId.get(ptyId)
+      if (this.isRetiredReattachedPtySurface(activeLease, appPtyId, attachResult.incarnationId)) {
+        await this.suppressRetiredReattachedPty(
+          ptyProvider,
+          ptyId,
+          appPtyId,
+          attachResult.incarnationId
+        )
+        return
+      }
       if (attachResult.incarnationId) {
-        restorePtyIncarnation(appPtyId, attachResult.incarnationId)
-        this.restoreReattachedPtyRuntime(
+        const restoreResult = this.restoreReattachedPtyRuntime(
           appPtyId,
           attachResult.incarnationId,
-          activeLeaseByPtyId.get(ptyId)
+          activeLease
         )
+        if (restoreResult !== 'restored') {
+          clearProviderPtyState(appPtyId)
+          deletePtyOwnership(appPtyId)
+          return
+        }
+      } else {
+        setPtyOwnership(appPtyId, this.targetId)
       }
       attachedLeaseIds.add(ptyId)
       pendingReattach.activated = true
@@ -2542,31 +2578,146 @@ export class SshRelaySession {
     this.runtime?.acceptPtyIncarnationForExit(appPtyId, ptyIncarnation)
   }
 
+  private isRetiredReattachedPtySurface(
+    lease: SshPtyLease | undefined,
+    appPtyId: string,
+    incarnationId: string | undefined
+  ): boolean {
+    if (!lease?.worktreeId || !lease.tabId || !lease.leafId || !isTerminalLeafId(lease.leafId)) {
+      return false
+    }
+    const leafId = lease.leafId
+    const session = this.store.getWorkspaceSession?.()
+    const hostSession = this.store.getWorkspaceSession?.(toSshExecutionHostId(this.targetId))
+    const candidates = [session, hostSession]
+    const currentTabIds = candidates
+      .map((candidate) => findTerminalTabIdForLeaf(candidate, leafId))
+      .filter((tabId): tabId is string => Boolean(tabId && isValidTerminalTabId(tabId)))
+    const tombstoneMatches = (tabId: string): boolean => {
+      const paneKey = makePaneKey(tabId, leafId)
+      return candidates.some((candidate) => {
+        const tombstone = candidate?.terminalSurfaceTombstonesByPaneKey?.[paneKey]
+        return Boolean(
+          tombstone?.ptyId === appPtyId &&
+          (!incarnationId || tombstone.incarnationId === incarnationId)
+        )
+      })
+    }
+    const hasLiveCurrentBinding = currentTabIds.some((tabId) => {
+      const paneKey = makePaneKey(tabId, leafId)
+      return (
+        !tombstoneMatches(tabId) &&
+        candidates.some(
+          (candidate) =>
+            candidate?.terminalLayoutsByTabId?.[tabId]?.ptyIdsByLeafId?.[leafId] === appPtyId &&
+            (!incarnationId ||
+              !candidate.terminalPtyIncarnationsByPaneKey?.[paneKey] ||
+              candidate.terminalPtyIncarnationsByPaneKey[paneKey] === incarnationId)
+        )
+      )
+    })
+    if (hasLiveCurrentBinding) {
+      return false
+    }
+    return [lease.tabId, ...currentTabIds]
+      .filter((tabId) => isValidTerminalTabId(tabId))
+      .some(tombstoneMatches)
+  }
+
+  private async suppressRetiredReattachedPty(
+    ptyProvider: SshPtyProvider,
+    relayPtyId: string,
+    appPtyId: string,
+    incarnationId: string | undefined
+  ): Promise<void> {
+    try {
+      this.store.markSshRemotePtyLease(this.targetId, appPtyId, 'expired')
+    } catch (error) {
+      console.error('[ssh-relay-session] Failed to expire retired PTY lease:', error)
+    }
+    if (incarnationId) {
+      try {
+        this.store.recordSshRemotePtyKillIntent(this.targetId, relayPtyId, {
+          requestedAt: Date.now(),
+          incarnationId,
+          attempts: 0
+        })
+      } catch (error) {
+        console.error('[ssh-relay-session] Failed to persist retired PTY stop:', error)
+      }
+      try {
+        await ptyProvider.shutdown(appPtyId, {
+          immediate: true,
+          expectedIncarnationId: incarnationId
+        })
+      } catch (error) {
+        console.warn(
+          '[ssh-relay-session] Retired PTY stop is unverifiable and remains pending:',
+          error
+        )
+      }
+    }
+    clearProviderPtyState(appPtyId)
+    deletePtyOwnership(appPtyId)
+  }
+
   private restoreReattachedPtyRuntime(
     appPtyId: string,
     incarnationId: string,
     lease: SshPtyLease | undefined
-  ): void {
+  ): ReattachedPtyRuntimeRestore {
     if (lease?.worktreeId && lease.tabId && lease.leafId) {
+      const session = this.store.getWorkspaceSession?.()
+      // The lease froze its tabId at write time; `detachTerminalPaneToTab` moves a live pane, so
+      // trusting it would fence this reattach to the tab the pane LEFT and refuse a pane that
+      // merely moved. Leaf is the identity, the tab is only where it currently sits.
+      // SSH spawns bind panes into `ssh:<target>` while this reattach binds into `local`, so a
+      // fence that consulted only one partition would read "no pane" for a pane the other holds.
+      const hostSession = this.store.getWorkspaceSession?.(toSshExecutionHostId(this.targetId))
+      const tabId =
+        findTerminalTabIdForLeaf(session, lease.leafId) ??
+        findTerminalTabIdForLeaf(hostSession, lease.leafId) ??
+        lease.tabId
+      // Absence of the pane only means "the user closed it" once the persisted membership
+      // speaks for this worktree. Before that it means the renderer has not published its
+      // layout yet, and refusing there drops a tab the user still has — the regression that
+      // reverted this fix twice. Losing a tab is worse than keeping a duplicate, so an
+      // unauthoritative session still gets the creating write.
+      // Authority is read from `local` because that is the partition this write lands in — it
+      // is local's absence we would be interpreting. But a pane the other partition still holds
+      // is not gone, so it keeps its creating write: refusing there would strand a live pane
+      // behind a binding reattach can no longer reach.
+      const mayCreate =
+        !hasHostAuthoritativeTerminalMembership(session, lease.worktreeId) ||
+        findTerminalTabIdForLeaf(hostSession, lease.leafId) !== undefined
+      const bound = this.store.persistPtyBinding({
+        worktreeId: lease.worktreeId,
+        tabId,
+        leafId: lease.leafId,
+        ptyId: appPtyId,
+        incarnationId,
+        ...(mayCreate ? {} : { mayCreate: false }),
+        mayReviveRetiredSurface: false
+      })
+      if (bound === false) {
+        // Topology absence alone is not authority to kill a process, but neither refusal may
+        // publish or replay into a missing pane.
+        this.store.markSshRemotePtyLease(this.targetId, appPtyId, 'expired')
+        return 'missing-surface'
+      }
+      setPtyOwnership(appPtyId, this.targetId)
+      restorePtyIncarnation(appPtyId, incarnationId)
       this.runtime?.registerPty(appPtyId, lease.worktreeId, this.targetId, {
-        tabId: lease.tabId,
+        tabId,
         leafId: lease.leafId,
         incarnationId
       })
-      try {
-        this.store.persistPtyBinding({
-          worktreeId: lease.worktreeId,
-          tabId: lease.tabId,
-          leafId: lease.leafId,
-          ptyId: appPtyId,
-          incarnationId
-        })
-      } catch (error) {
-        console.error('[ssh-relay-session] Failed to persist reconnect incarnation:', error)
-      }
-      return
+      return 'restored'
     }
+    setPtyOwnership(appPtyId, this.targetId)
+    restorePtyIncarnation(appPtyId, incarnationId)
     this.runtime?.onPtySpawned(appPtyId, incarnationId, { awaitsRegistration: false })
+    return 'restored'
   }
 
   private async attachPtyWithRetry(
