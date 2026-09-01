@@ -77,7 +77,9 @@ export abstract class UpdaterInstallSupport extends UpdaterCheckState {
    * behavior). Supervised headless serve is excluded — its supervisor owns restart/recovery, and
    * the monitor's recovery launch would open the GUI on a headless host.
    */
-  protected armMacUpdateInstallAttemptSafely(pendingVersion: string): MacUpdateInstallAttempt | null {
+  protected armMacUpdateInstallAttemptSafely(
+    pendingVersion: string
+  ): MacUpdateInstallAttempt | null {
     if (
       process.platform !== 'darwin' ||
       !app.isPackaged ||

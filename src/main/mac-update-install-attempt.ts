@@ -235,11 +235,12 @@ function resolveMacUpdateInstallStartupUnsafe(options: {
   if (!attempt) {
     return { action: 'allow', reason: 'no-attempt' }
   }
-  const monitorAlive = getMacUpdateProcessIdentityState(
-    attempt.monitorPid,
-    attempt.monitorStartedAtMs,
-    options.readProcessStartedAtMs
-  ) !== 'dead'
+  const monitorAlive =
+    getMacUpdateProcessIdentityState(
+      attempt.monitorPid,
+      attempt.monitorStartedAtMs,
+      options.readProcessStartedAtMs
+    ) !== 'dead'
   let shipItAlive = false
   if (!monitorAlive) {
     try {
