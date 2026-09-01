@@ -8,8 +8,7 @@ function buildWindowsRestrictAclArgs(
   currentUserSid: string,
   isDirectory: boolean
 ): string[] {
-  // Why: no -ExecutionPolicy switch -- policy gates script *files*, not -Command,
-  // so the switch was a no-op that Defender weights heavily (#17858).
+  // Why: policy gates script *files*, not -Command, so the switch was a Defender-weighted no-op.
   return [
     '-NoProfile',
     '-NonInteractive',

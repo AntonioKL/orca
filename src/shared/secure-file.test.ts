@@ -472,7 +472,11 @@ function getPowerShellTarget(call: unknown[]): string {
 // Why derive from -Command rather than a fixed index: the switch list ahead of the
 // script is what #17858 trimmed, and positional asserts silently rot when it moves.
 function powershellScriptArgs(args: string[]): string[] {
-  return args.slice(args.indexOf('-Command') + 1)
+  const commandIndex = args.indexOf('-Command')
+  // Why assert: without it a -Command -> -File swap surfaces as a path mismatch
+  // several asserts later instead of naming the switch shape that actually moved.
+  expect(commandIndex).toBeGreaterThanOrEqual(0)
+  return args.slice(commandIndex + 1)
 }
 
 async function waitForFileTimestampTick(): Promise<void> {

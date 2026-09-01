@@ -89,8 +89,7 @@ $fonts.Families | ForEach-Object { $_.Name }
 
   return execFileText(
     windowsPowerShellPath(),
-    // Why: no -ExecutionPolicy switch -- policy gates script *files*, not -Command,
-    // so the switch was a no-op that Defender weights heavily (#17858).
+    // Why: policy gates script *files*, not -Command, so the switch was a Defender-weighted no-op.
     ['-NoProfile', '-NonInteractive', '-Command', script],
     8 * 1024 * 1024
   ).then((output) =>
