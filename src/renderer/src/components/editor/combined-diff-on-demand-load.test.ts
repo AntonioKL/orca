@@ -3,6 +3,7 @@ import {
   MAX_AUTOMATIC_DIFF_CHANGED_LINES,
   collectCountedCombinedDiffPasses,
   getCombinedDiffCountingPassKey,
+  isCombinedDiffSizeUnknown,
   shouldLoadCombinedDiffOnDemand
 } from './combined-diff-on-demand-load'
 
@@ -121,6 +122,22 @@ describe('combined diff on-demand loading', () => {
         getCombinedDiffCountingPassKey({ path: 'a', status: 'modified', area: 'unstaged' })
       )
     ).toBe(false)
+  })
+
+  it('separates the two deferral reasons the prompt has to explain', () => {
+    // Both defer, but only one is actually large; the prompt copy splits here.
+    const overLimit = { added: MAX_AUTOMATIC_DIFF_CHANGED_LINES + 1, path: 'src/schema.ts' }
+    const uncounted = {
+      path: 'resources/build/icon.icns',
+      area: 'unstaged' as const,
+      added: undefined,
+      removed: undefined
+    }
+    expect(shouldLoadCombinedDiffOnDemand(overLimit)).toBe(true)
+    expect(shouldLoadCombinedDiffOnDemand(uncounted)).toBe(true)
+    expect(isCombinedDiffSizeUnknown(overLimit)).toBe(false)
+    expect(isCombinedDiffSizeUnknown(uncounted)).toBe(true)
+    expect(isCombinedDiffSizeUnknown({ added: 0, removed: 0 })).toBe(false)
   })
 
   it('keeps counted binary-extension rows on the line-count rule', () => {

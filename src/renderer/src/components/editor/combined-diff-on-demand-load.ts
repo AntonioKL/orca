@@ -25,6 +25,21 @@ export function collectCountedCombinedDiffPasses(
   return countedPasses
 }
 
+/**
+ * Why a deferred row was deferred. Uncounted rows are deferred because their
+ * size is unknown, not because it is over the limit — the prompt must not
+ * claim otherwise. Mirrors the uncounted branch of the predicate below.
+ */
+export function isCombinedDiffSizeUnknown({
+  added,
+  removed
+}: {
+  added?: number
+  removed?: number
+}): boolean {
+  return added === undefined && removed === undefined
+}
+
 export function shouldLoadCombinedDiffOnDemand({
   added,
   removed,
