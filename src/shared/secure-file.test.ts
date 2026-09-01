@@ -91,18 +91,28 @@ describe('hardenSecurePath', () => {
       expect.arrayContaining([
         '-NoProfile',
         '-NonInteractive',
-        '-ExecutionPolicy',
-        'Bypass',
         'C:\\Users\\me\\.orca\\secret.json',
         'S-1-5-21-1000',
         '0'
       ])
     )
-    const script = (powershellArgs as string[])[5]!
+    const script = powershellScriptArgs(powershellArgs as string[])[0]!
     expect(script).toContain('SetAccessRuleProtection($true, $false)')
     expect(script).toContain('RemoveAccessRuleSpecific')
     expect(script).toContain('Unexpected ACL entry')
     expect(powershellOptions).toEqual(expect.objectContaining({ windowsHide: true, timeout: 5000 }))
+  })
+
+  it('passes no -ExecutionPolicy switch to the ACL PowerShell', () => {
+    // Why: execution policy gates script *files*, never -Command, so the switch
+    // never did anything here -- and it is the highest-weighted token on the
+    // command lines Defender flags (#17858).
+    hardenSecurePath('C:\\Users\\me\\.orca\\secret.json', { isDirectory: false, platform: 'win32' })
+
+    const powershellArgs = vi.mocked(execFile).mock.calls[0]![1] as string[]
+    expect(powershellArgs).not.toContain('-ExecutionPolicy')
+    expect(powershellArgs).not.toContain('Bypass')
+    expect(powershellArgs.slice(0, 3)).toEqual(['-NoProfile', '-NonInteractive', '-Command'])
   })
 
   it('adds inheritable rules when hardening a Windows directory', () => {
@@ -110,8 +120,9 @@ describe('hardenSecurePath', () => {
 
     const powershellArgs = vi.mocked(execFile).mock.calls[0]![1] as string[]
     expect(powershellArgs.at(-1)).toBe('1')
-    expect(powershellArgs[5]).toContain('ContainerInherit')
-    expect(powershellArgs[5]).toContain('ObjectInherit')
+    const script = powershellScriptArgs(powershellArgs)[0]!
+    expect(script).toContain('ContainerInherit')
+    expect(script).toContain('ObjectInherit')
   })
 
   it('keeps Windows hardening best-effort when ACL rewriting fails', () => {
@@ -455,7 +466,13 @@ function getSyncPowerShellCalls(): unknown[][] {
 }
 
 function getPowerShellTarget(call: unknown[]): string {
-  return (call[1] as string[])[6]!
+  return powershellScriptArgs(call[1] as string[])[1]!
+}
+
+// Why derive from -Command rather than a fixed index: the switch list ahead of the
+// script is what #17858 trimmed, and positional asserts silently rot when it moves.
+function powershellScriptArgs(args: string[]): string[] {
+  return args.slice(args.indexOf('-Command') + 1)
 }
 
 async function waitForFileTimestampTick(): Promise<void> {
