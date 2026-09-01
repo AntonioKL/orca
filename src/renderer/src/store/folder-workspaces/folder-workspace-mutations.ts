@@ -248,6 +248,9 @@ export function createFolderWorkspaceMutationActions(
           return false
         }
         const workspaceKey = folderWorkspaceKey(folderWorkspaceId)
+        // Folder workspaces use the same browser registry key as worktrees;
+        // tear down Chromium guests before purging the remaining renderer state.
+        await get().shutdownWorktreeBrowsers(workspaceKey)
         set((s) => ({
           folderWorkspaces: s.folderWorkspaces.filter(
             (workspace) =>

@@ -413,10 +413,12 @@ describe('folder workspace owner-routed mutations', () => {
     const folderWorkspace = makeFolderWorkspace()
     folderWorkspacesDelete.mockResolvedValue(true)
     const store = createTestStore()
+    const shutdownWorktreeBrowsers = vi.fn().mockResolvedValue(undefined)
     store.setState({
       settings: { activeRuntimeEnvironmentId: 'env-focused' } as never,
       projectGroups: [{ ...projectGroup, executionHostId: 'local' }],
-      folderWorkspaces: [folderWorkspace]
+      folderWorkspaces: [folderWorkspace],
+      shutdownWorktreeBrowsers
     })
 
     await expect(store.getState().deleteFolderWorkspace(folderWorkspace.id)).resolves.toBe(true)
@@ -424,6 +426,7 @@ describe('folder workspace owner-routed mutations', () => {
     expect(folderWorkspacesDelete).toHaveBeenCalledWith({
       folderWorkspaceId: folderWorkspace.id
     })
+    expect(shutdownWorktreeBrowsers).toHaveBeenCalledWith(folderWorkspaceKey(folderWorkspace.id))
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
   })
 
