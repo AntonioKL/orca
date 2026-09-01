@@ -23,6 +23,13 @@ const androidSource = readFileSync(
   ),
   'utf8'
 )
+const androidBlockerSource = readFileSync(
+  new URL(
+    '../../packages/expo-mobile-web-shell/android/src/main/java/expo/modules/mobilewebshell/MobileWebNetworkApiBlocker.kt',
+    import.meta.url
+  ),
+  'utf8'
+)
 const androidModuleSource = readFileSync(
   new URL(
     '../../packages/expo-mobile-web-shell/android/src/main/java/expo/modules/mobilewebshell/ExpoMobileWebShellModule.kt',
@@ -118,6 +125,23 @@ describe('mobile web native bridge transport', () => {
     expect(androidSource).toContain('): Boolean = false')
   })
 
+  it('denies the same page network APIs at document start on both platforms', () => {
+    const blocker = nativeBlockerScript(iosSource, 'mobileWebNetworkApiBlocker = """')
+    expect(blocker).toContain('Network access is disabled')
+    expect(blocker).toContain('WebSocket:{')
+    expect(nativeBlockerScript(androidBlockerSource, 'MOBILE_WEB_NETWORK_API_BLOCKER = """')).toBe(
+      blocker
+    )
+    expect(androidBlockerSource).toContain('WebViewFeature.DOCUMENT_START_SCRIPT')
+    expect(androidBlockerSource).toContain('WebViewCompat.addDocumentStartJavaScript(')
+    expect(androidBlockerSource).toContain('setOf(allowedOrigin)')
+    expect(androidBlockerSource).toContain('mobile_web_network_api_blocker_unavailable')
+    // The session load and the in-place onRenderProcessGone reload both need the blocker.
+    expect(androidSource.match(/installMobileWebNetworkApiBlocker\(/g)).toHaveLength(2)
+    expect(androidSource).toContain('mobileWebOriginForSession(sessionId)')
+    expect(androidSource).toContain('networkBlockerScriptHandler?.remove()')
+  })
+
   it('exposes the iOS document inspector only in debug builds', () => {
     expect(iosSource).toContain(
       '#if DEBUG\n    if #available(iOS 16.4, *) {\n      webView.isInspectable = true\n    }\n    #endif'
@@ -205,6 +229,24 @@ describe('mobile web native bridge transport', () => {
     expect(androidSource).toContain('!request.isForMainFrame && isAllowedEmbeddedDocumentUrl(url)')
   })
 })
+
+const KOTLIN_ESCAPED_DOLLAR = '$' + "{'$'}"
+
+function nativeBlockerScript(source: string, declaration: string): string {
+  const opening = source.indexOf(declaration)
+  if (opening === -1) {
+    return ''
+  }
+  const bodyStart = source.indexOf('\n', opening + declaration.length) + 1
+  const closing = source.indexOf('"""', bodyStart)
+  return source
+    .slice(bodyStart, closing)
+    .replaceAll(KOTLIN_ESCAPED_DOLLAR, () => '$')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join('\n')
+}
 
 function nativeCspDirectives(source: string, declaration: string): string[] {
   const kotlinStart = source.indexOf(`${declaration} = listOf(`)
