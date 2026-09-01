@@ -187,19 +187,27 @@ function isOwnedChildFile(
     if (!authStat.isDirectory() || authStat.isSymbolicLink()) {
       return false
     }
-    const fileStat = lstatSync(filePath)
-    if (fileStat.isSymbolicLink() || (!fileStat.isFile() && !allowMissing)) {
-      return false
-    }
     const canonicalAuthPath = realpathSync(managedAuthPath)
-    const canonicalFilePath = allowMissing ? resolve(filePath) : realpathSync(filePath)
+    let canonicalFilePath: string
+    try {
+      const fileStat = lstatSync(filePath)
+      if (fileStat.isSymbolicLink() || (!fileStat.isFile() && !allowMissing)) {
+        return false
+      }
+      canonicalFilePath = realpathSync(filePath)
+    } catch (error) {
+      if (!allowMissing || !isDefinitiveAbsence(error)) {
+        throw error
+      }
+      canonicalFilePath = resolve(filePath)
+    }
     return (
       pathIsInsideOrEqual(canonicalAuthPath, canonicalFilePath) &&
       canonicalFilePath !== canonicalAuthPath
     )
   } catch (error) {
     if (isDefinitiveAbsence(error)) {
-      return allowMissing
+      return false
     }
     throw error
   }

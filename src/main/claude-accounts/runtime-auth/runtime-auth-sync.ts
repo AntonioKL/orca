@@ -144,8 +144,6 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
         '[claude-runtime-auth] Active managed account is not owned by Orca, restoring system default'
       )
       if (activeAccount.managedAuthRuntime === undefined) {
-        // Legacy accounts cannot safely restore a missing managed credential;
-        // retain the shared runtime while ensuring a valid snapshot marker.
         if (!this.readSystemDefaultSnapshot(this.getSystemDefaultSnapshotPath())) {
           await this.captureSystemDefaultSnapshot({ force: false })
         }
@@ -282,9 +280,6 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
     }
 
     this.writeRuntimeCredentials(credentialsJson)
-    // Legacy accounts predate per-account runtime isolation and still need both
-    // Keychain services for old and new Claude Code builds. Isolated accounts
-    // must never touch the shared active services.
     if (process.platform === 'darwin' && activeAccount.managedAuthRuntime === undefined) {
       const paths = this.pathResolver.getRuntimePaths()
       try {

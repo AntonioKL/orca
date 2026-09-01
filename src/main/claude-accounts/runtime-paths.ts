@@ -20,7 +20,10 @@ export class ClaudeRuntimePathResolver {
       configDir,
       credentialsPath: join(configDir, '.credentials.json'),
       configPath: this.resolveConfigPath(configDir, inheritedConfigDir),
-      envPatch: { CLAUDE_CONFIG_DIR: configDir, ORCA_CLAUDE_CONFIG_DIR: configDir }
+      // Keep an inherited user override visible without forcing the system
+      // default into every pane; managed-account branches provide their own
+      // isolation patch.
+      envPatch: inheritedConfigDir ? { CLAUDE_CONFIG_DIR: configDir } : {}
     }
   }
 

@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, symlinkSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ClaudeManagedAccount } from '../../../shared/managed-account-types'
 import { resolveLocalAccountRuntimeTarget } from '../../../shared/local-account-runtime'
@@ -88,18 +88,23 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
         { adoptLegacyMarker: true }
       )
       if (managedPath) {
-        provisionClaudeManagedHome(paths.configDir, managedPath)
-        return {
-          configDir: managedPath,
-          runtime: 'host',
-          wslDistro: null,
-          wslLinuxConfigDir: null,
-          envPatch: {
-            CLAUDE_CONFIG_DIR: managedPath,
-            ORCA_CLAUDE_CONFIG_DIR: managedPath
-          },
-          stripAuthEnv: true,
-          provenance: `managed:${activeAccount.id}`
+        if (!provisionClaudeManagedHome(paths.configDir, managedPath)) {
+          console.warn(
+            '[claude-runtime-auth] Refusing managed Claude routing after home provisioning failed'
+          )
+        } else {
+          return {
+            configDir: managedPath,
+            runtime: 'host',
+            wslDistro: null,
+            wslLinuxConfigDir: null,
+            envPatch: {
+              CLAUDE_CONFIG_DIR: managedPath,
+              ORCA_CLAUDE_CONFIG_DIR: managedPath
+            },
+            stripAuthEnv: true,
+            provenance: `managed:${activeAccount.id}`
+          }
         }
       }
     }
@@ -156,11 +161,12 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
 
 // Keep account homes useful without copying credential-bearing runtime state.
 // Missing user resources are linked once; existing files remain user-owned.
-function provisionClaudeManagedHome(systemConfigDir: string, managedPath: string): void {
+function provisionClaudeManagedHome(systemConfigDir: string, managedPath: string): boolean {
   if (systemConfigDir === managedPath) {
-    return
+    return true
   }
   const resources = ['settings.json', 'CLAUDE.md', 'projects', 'plugins'] as const
+  let succeeded = true
   for (const name of resources) {
     const source = join(systemConfigDir, name)
     const target = join(managedPath, name)
@@ -170,9 +176,19 @@ function provisionClaudeManagedHome(systemConfigDir: string, managedPath: string
     try {
       const sourceIsDirectory = lstatSync(source).isDirectory()
       mkdirSync(managedPath, { recursive: true, mode: 0o700 })
-      symlinkSync(source, target, sourceIsDirectory ? 'dir' : 'file')
+      if (process.platform === 'win32') {
+        if (sourceIsDirectory) {
+          symlinkSync(source, target, 'junction')
+        } else {
+          copyFileSync(source, target)
+        }
+      } else {
+        symlinkSync(source, target, sourceIsDirectory ? 'dir' : 'file')
+      }
     } catch {
-      // Best effort: auth routing remains safe if an optional resource cannot link.
+      // Do not route into a partially provisioned home.
+      succeeded = false
     }
   }
+  return succeeded
 }

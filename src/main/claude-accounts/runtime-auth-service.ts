@@ -7,7 +7,10 @@ import {
 import { ClaudeRuntimeAuthSync } from './runtime-auth/runtime-auth-sync'
 import type { ClaudeRuntimeAuthPreparation } from './runtime-auth/runtime-auth-types'
 import { migrateLegacySharedClaudeAuth } from './legacy-shared-claude-auth-migration'
-import { readActiveClaudeKeychainCredentialsStrict } from './keychain'
+import {
+  readActiveClaudeKeychainCredentialsStrict,
+  writeActiveClaudeKeychainCredentials
+} from './keychain'
 
 export type { ClaudeRuntimeAuthPreparation } from './runtime-auth/runtime-auth-types'
 
@@ -29,10 +32,8 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
     const selected = selectedId
       ? settings.claudeManagedAccounts.find((account) => account.id === selectedId)
       : null
-    // Isolated accounts are already Claude's runtime store; never copy them into ~/.claude.
-    // Legacy accounts with valid credentials still use the shared runtime and
-    // must be synchronized before launch; missing legacy credentials are left
-    // for the background cleanup path to handle without a second restore.
+    // Isolated accounts are already Claude's runtime store; legacy accounts
+    // with valid credentials still use the shared runtime before launch.
     const legacyCredentials =
       selected && selected.managedAuthRuntime === undefined
         ? await this.readManagedCredentials(selected)
@@ -41,12 +42,11 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
     if (selected && selected.managedAuthRuntime === undefined && legacyCredentials === null) {
       const runtimeCredentials = this.readRuntimeCredentialsFile()
       const managedOauth = await this.readManagedOauthAccount(selected)
-      const runtimeMatches = this.runtimeCredentialsBelongToAccount(
+      cleanupMissingLegacy = this.runtimeCredentialsBelongToAccount(
         runtimeCredentials,
         selected,
         managedOauth
       )
-      cleanupMissingLegacy = runtimeMatches
     }
     if (
       !selected ||
@@ -58,7 +58,33 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
     ) {
       await this.syncForCurrentSelection(effectiveTarget)
     }
-    return this.getPreparation(effectiveTarget)
+    const preparation = this.getPreparation(effectiveTarget)
+    // Claude Code on macOS reads the config-scoped Keychain item, while Orca
+    // stores managed credentials under its account-scoped service. Bridge the
+    // two surfaces only for the selected managed home; never touch the legacy
+    // unsuffixed service.
+    if (
+      process.platform === 'darwin' &&
+      selected?.managedAuthRuntime === 'host' &&
+      preparation.provenance.startsWith(`managed:${selected.id}`)
+    ) {
+      try {
+        const scoped = await readActiveClaudeKeychainCredentialsStrict(preparation.configDir)
+        if (scoped && this.isValidCredentialsJsonObject(scoped)) {
+          const managed = await this.readManagedCredentials(selected)
+          if (scoped !== managed) {
+            await this.writeManagedCredentials(selected, scoped)
+          }
+        }
+        const managed = await this.readManagedCredentials(selected)
+        if (managed && this.isValidCredentialsJsonObject(managed)) {
+          await writeActiveClaudeKeychainCredentials(managed, preparation.configDir)
+        }
+      } catch (error) {
+        console.warn('[claude-runtime-auth] Failed to bridge macOS managed Claude Keychain', error)
+      }
+    }
+    return preparation
   }
 
   async prepareForRateLimitFetch(
