@@ -1,14 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { readMobileSessionRouteSourceFamily } from './mobile-session-route-source-family.test-support'
 
 const hostedSessionRoute = readFileSync(
   new URL('../../host-web-app/h/[hostId]/session/[worktreeId].tsx', import.meta.url),
   'utf8'
 )
-const nativeSessionRoute = readFileSync(
-  new URL('../../app/h/[hostId]/session/[worktreeId].tsx', import.meta.url),
-  'utf8'
-)
+const nativeSessionRoute = readMobileSessionRouteSourceFamily()
 const hostedLayout = readFileSync(
   new URL('../../host-web-app/_layout.tsx', import.meta.url),
   'utf8'
