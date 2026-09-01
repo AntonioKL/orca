@@ -1,4 +1,5 @@
 import type { UISlice, UISliceGet, UISliceSet } from './ui-slice-contract'
+import type { AppState } from '../../types'
 import type { PersistedUIState } from '../../../../../shared/persisted-ui-state-types'
 import { normalizeRightSidebarRoute } from '../../right-sidebar-route'
 import {
@@ -338,7 +339,7 @@ export function createUiHydrationActions(set: UISliceSet, _get: UISliceGet): Par
           ...hydrated,
           persistedUIWriteBaseline: nextWriteBaseline,
           persistedUIWriteBaselineGeneration: nextWriteBaselineGeneration
-        }
+        } as Partial<AppState>
       })
   }
 }

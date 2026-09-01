@@ -90,6 +90,11 @@ export function normalizeLoadedGlobalSettings(
     showAgentsSidebar:
       parsed.settings?.showAgentsSidebar ??
       parsed.settings?.experimentalAgentDashboardPopout !== false,
+    // Preserve the legacy opt-in before the experimental setting is normalized away. This
+    // drives the migration-specific introduction copy without changing runtime behavior.
+    agentsSidebarMigratedFromExperimental:
+      parsed.settings?.agentsSidebarMigratedFromExperimental === true ||
+      parsed.settings?.experimentalActivity === true,
     // Why: compact worktree cards graduated from Experimental; preserve the old opt-in for rollout-era profiles.
     compactWorktreeCards: loadedCompactWorktreeCards,
     experimentalCompactWorktreeCards: undefined,

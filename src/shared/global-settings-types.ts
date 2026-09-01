@@ -429,6 +429,10 @@ export type GlobalSettings = {
   experimentalAgentDashboardPopout?: boolean
   /** Whether the Agents dashboard tab is shown in the left sidebar. Defaults on. */
   showAgentsSidebar?: boolean
+  /** Set after the graduated Agents tab introduction has been acknowledged. */
+  agentsSidebarIntroShown?: boolean
+  /** True when the profile previously opted into the legacy experimental Agents view. */
+  agentsSidebarMigratedFromExperimental?: boolean
   /** How the Agent Dashboard opens: an in-window companion board or a separate pop-out window. Defaults to in-window. */
   experimentalAgentDashboardMode?: AgentDashboardMode
   /** Includes stale quiet agents as a fourth Agent Dashboard column. */
