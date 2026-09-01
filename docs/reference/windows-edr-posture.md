@@ -33,7 +33,7 @@ Four independent evidence clusters, from six incidents:
 
 | Cluster           | Incidents | Evidence                                                                                                             |
 | ----------------- | --------- | -------------------------------------------------------------------------------------------------------------------- |
-| **Update**        | A, B, C   | `orca-windows-setup.exe` → `old-uninstaller.exe`, `Uninstall Orca.exe`                                               |
+| **Update**        | A, B, C   | `orca-windows-setup.exe` → `old-uninstaller.exe`, `Uninstall Orca.exe` (electron-builder generates these; they are in no repo file) |
 | **Spawn**         | all six   | `Orca.exe` → `orca-terminal-daemon.exe` → `powershell.exe` / `pwsh.exe` / `cmd.exe` / `reg.exe` → `claude.exe`, `gh.exe`, `codex.cmd` |
 | **Process table** | D         | "suspicious memory activity" — `OpenProcess` plus a PEB read against every process on a repeating cadence            |
 | **Computer use**  | E, F      | `runtime.ps1`, `computer-sidecar.js`, many `operation.json`, a burst of ~10 short-lived `powershell.exe`             |
@@ -84,7 +84,8 @@ ran every ~2 seconds (#15209); a Group Policy or AV block turned a query into
 "unavailable", which callers read as "no evidence", which is how a PTY tree
 survived its own teardown (#9045, #10475); and the scan cost ~700 ms per pane, so
 panes multiplied it (#15036). The native snapshot answers the same question in
-15.9 ms (30.6 ms with memory and command line) against 706 ms for CIM. See
+15.9 ms (30.6 ms with memory and command line) against 706 ms for CIM — p50,
+measured on Windows 11 at 1050 processes. See
 [`windows-process-enumeration.md`](./windows-process-enumeration.md).
 
 Asking for fewer fields would be cheaper, but the module deliberately does not:
@@ -113,10 +114,33 @@ Three sites are named in the incident analysis:
   bootstrap.
 - `src/main/agent-hooks/windows-powershell-hook-launcher.ts` wraps managed hooks.
 
-Several more spell the same flags: `src/main/ssh/ssh-remote-powershell.ts`,
+Several more spell the same pair of `-ExecutionPolicy Bypass` and
+`-EncodedCommand`: `src/main/ssh/ssh-remote-powershell.ts`,
 `src/shared/setup-agent-sequencing.ts`,
-`src/shared/windows-cmd-runner-delayed-launch.ts`, `src/main/system-fonts.ts`,
-and `src/main/computer/desktop-script-provider-bridge.ts`.
+`src/shared/windows-cmd-runner-delayed-launch.ts`, and
+`src/shared/windows-interactive-login-spawn.ts`.
+`src/main/runtime/windows-mobile-firewall.ts` encodes a script and launches it
+_elevated_ through `Start-Process -Verb RunAs`, which is a stronger shape than
+any of those.
+
+A further set spells `-EncodedCommand` without the bypass — the PTY bootstraps
+(`src/main/daemon/shell-ready.ts`, `src/main/providers/local-pty-shell-ready.ts`,
+`src/main/providers/windows-shell-args.ts`), the hook wrappers
+(`src/main/agent-hooks/runtime-home-hook-command.ts`,
+`src/main/agent-hooks/installer-utils.ts`, `src/main/claude/hook-settings.ts`),
+`src/main/runtime/windows-default-route-interfaces.ts`,
+`src/main/runtime/orchestration/setup-completion-signal.ts`, and
+`src/shared/hermes-startup-query.ts`.
+
+A third set spells `-ExecutionPolicy Bypass` with **no** encoding, which is the
+weaker signal: `src/main/system-fonts.ts` (`-Command`),
+`src/main/computer/desktop-script-provider-bridge.ts` (`-File`),
+`src/shared/secure-path-windows-acl.ts`, and `src/main/cli/wsl-cli-scripts.ts`.
+
+Regenerate with `rg -- '-EncodedCommand|-ExecutionPolicy' src/` rather than
+trusting the lists above, and note that a raw grep under-reports: the hook sites
+reach `-EncodedCommand` through `wrapWindowsPowerShellEncodedCommand` and never
+spell the flag themselves.
 
 Encoding is not gratuitous: it shields paths and switches from `cmd.exe` and MSYS
 rewriting (#6078, #14815), which is a real class of corruption. But
@@ -128,10 +152,17 @@ The hook launcher is prior art worth knowing about. #16003 measured, on a
 reporting Kaspersky host, that `-WindowStyle Hidden` paired with
 `-EncodedCommand` was denied at `CreateProcess` with exit 126 regardless of
 payload — `exit 0` was denied too. The fix was to stop *spelling* the flags:
-`WINDOWS_POWERSHELL_HOOK_SWITCHES` is now just `-NoProfile`, and the execution
-policy bypass moved inside the encoded payload as a process-scope
-`Set-ExecutionPolicy`. That is a real reduction in command-line signal, and it is
-also honest that the underlying behaviour did not change.
+`WINDOWS_POWERSHELL_HOOK_SWITCHES` is now just `-NoProfile`, and separately, in
+#16576, the execution policy bypass moved in-payload as a process-scope
+`Set-ExecutionPolicy` — a real command-line signal reduction, though #16003's
+measured denial keyed on `-WindowStyle Hidden` + `-EncodedCommand`, not on the
+bypass. It is also honest that the underlying behaviour did not change.
+
+Copy the pattern, but copy its caveat too. `windows-powershell-hook-launcher.ts`
+records that dropping `-WindowStyle Hidden` was a real tradeoff whose suppression
+"was never measured" and "remains unverified on a real box". Reducing spelled
+flags is the right instinct; treat any specific claim about what a removed flag
+was doing as unproven until someone measures it.
 
 ### `cmd.exe /c` carrying caret-escaped free text
 
@@ -166,7 +197,7 @@ a scored edge, which is why the shipped doctrine of #15520 and #15595 is to
 
 ### Computer use: screen capture, synthetic input, runtime-compiled MSIL
 
-`native/computer-use-windows/runtime.ps1` is a 1321-line PowerShell script.
+`native/computer-use-windows/runtime.ps1` is a large PowerShell script.
 `src/main/computer/desktop-script-provider-bridge.ts` launches it as
 `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File
 runtime.ps1 <operation.json>` — **once per operation**, with
@@ -183,6 +214,14 @@ That is four separate high-signal behaviours stacked in one process:
 | `SendInput` synthetic keyboard/mouse            | input synthesis against other applications           |
 | `Add-Type -TypeDefinition` on every operation   | MSIL compiled at runtime; incident F's "suspicious MSIL code" |
 | One `powershell.exe` per operation              | a burst of short-lived interpreters under one parent |
+
+The bottom two rows are the two the incident text named directly, and they are
+also the two a persistent runtime host would remove: a long-lived helper compiles
+its P/Invoke stubs once and answers operations over a channel, so neither the
+MSIL recompilation nor the interpreter burst repeats. A change doing that is in
+flight and unmerged at the time of writing; check the code rather than this
+paragraph for what the shipped build does. Screen capture and `SendInput` are
+inherent to the feature and no refactor removes them.
 
 ## Signing is not the gate
 
@@ -213,7 +252,8 @@ non-update clusters contain no unsigned binary at all.
 Two limits the incident analysis recorded, kept here rather than smoothed over:
 
 - **No data on Hermes.** Nothing in this document describes how Hermes behaves
-  under the same tenant policy.
+  under the same tenant policy — though `src/shared/hermes-startup-query.ts` does
+  spell `-EncodedCommand`, so the gap is telemetry, not surface.
 - **Antigravity not being flagged is absence of evidence, not proof.** It is one
   reporter's recollection from one machine, not a measurement. It is strong
   enough to falsify "the problem is that we are not signed well enough"; it is
@@ -277,7 +317,14 @@ on:
 
 Scope it as narrowly as your tenant will tolerate, and review it when Orca
 updates: the `daemon-host` path carries a `<version>` segment, so a rule pinned
-to one version will silently stop matching.
+to one version will silently stop matching. Two traps in that path in particular.
+Materialization stages into a `<version>.staging-<hex>` sibling before renaming
+it into place, so an exact-version rule misses the tree **mid-update** — which is
+precisely when the update-cluster incidents fire. And the root falls back to the
+Electron `userData` path when `LOCALAPPDATA` is unset, so
+`%LOCALAPPDATA%\Orca\daemon-host\` is the normal location rather than a
+guaranteed one. Prefer a prefix match on `…\Orca\daemon-host\` over a rule
+pinned to one full path.
 
 Add AV path exclusions for those two directories as well — they cut scan cost on
 a tree that is rewritten on every update — but understand the division of
