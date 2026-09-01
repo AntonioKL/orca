@@ -1,6 +1,7 @@
 import { quotePosixShell } from '../../shared/wsl-login-shell-command'
 import { toWindowsWslPath } from '../wsl'
 import {
+  MARKER_NOT_REGULAR_FILE_MESSAGE,
   MISSING_MANAGED_HOME_MESSAGE,
   MISSING_OWNERSHIP_MARKER_MESSAGE,
   type HostCodexManagedHomeVerdict
@@ -42,15 +43,26 @@ export function buildWslCodexManagedHomeProbeScript(
   return [
     'set -uo pipefail',
     `tag() { printf '${VERDICT_TAG}%s\\n' "$1"; exit 0; }`,
+    // `test -e` returns the same status for "absent" and "cannot look" (EACCES on
+    // a parent, EIO, ELOOP), so a bare `|| tag missing` would rebuild the very
+    // collapse this probe exists to remove. Absence is only dispositive when the
+    // parent can be listed AND the entry is not in it; every other shape exits
+    // non-zero, which the host reads as indeterminate.
+    'prove_absent() { ls -A -- "$1" >/dev/null 2>&1 || exit 1; ' +
+      'ls -A -- "$1" 2>/dev/null | grep -Fxq -- "$2" && exit 1; tag "$3"; }',
     `candidate=${quotePosixShell(linuxPath)}`,
     'managed_root="${HOME%/}/.local/share/orca/codex-accounts"',
-    // Definitive absence is the one structural fact the host lane also treats as
-    // a verdict; re-auth recreates the home from it rather than refusing.
-    'test -e "$candidate" || tag missing-home',
+    'candidate_parent=$(dirname -- "$candidate") || exit 1',
+    'candidate_name=$(basename -- "$candidate") || exit 1',
+    'test -e "$candidate" || prove_absent "$candidate_parent" "$candidate_name" missing-home',
     'candidate_real=$(readlink -f -- "$candidate") || exit 1',
     'managed_root_real=$(readlink -f -- "$managed_root") || exit 1',
     'marker="$candidate_real/.orca-managed-home"',
-    'test -f "$marker" || tag missing-marker',
+    // lstat before stat, mirroring the host lane: a symlink marker is not
+    // ownership proof however trustworthy the file it points at looks.
+    'test -h "$marker" && tag marker-not-regular',
+    'test -e "$marker" || prove_absent "$candidate_real" .orca-managed-home missing-marker',
+    'test -f "$marker" || tag marker-not-regular',
     'contents=$(cat -- "$marker") || exit 1',
     'case "$candidate_real" in "$managed_root_real"/*/home) ;; *) tag outside-managed-root ;; esac',
     ...(expectedAccountId === undefined
@@ -81,6 +93,7 @@ function decodeCanonicalPath(encoded: string): string | null {
 const UNTRUSTED_TAGS = new Map<string, string>([
   ['missing-home', MISSING_MANAGED_HOME_MESSAGE],
   ['missing-marker', MISSING_OWNERSHIP_MARKER_MESSAGE],
+  ['marker-not-regular', MARKER_NOT_REGULAR_FILE_MESSAGE],
   ['marker-mismatch', MARKER_ACCOUNT_MISMATCH_MESSAGE],
   ['account-mismatch', ACCOUNT_ID_MISMATCH_MESSAGE],
   ['outside-managed-root', OUTSIDE_MANAGED_ROOT_MESSAGE]

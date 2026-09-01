@@ -13,6 +13,9 @@ export const MISSING_MANAGED_HOME_MESSAGE = 'Managed Codex home directory does n
 /** Shared with the WSL probe so the two lanes cannot drift apart on this wording. */
 export const MISSING_OWNERSHIP_MARKER_MESSAGE =
   'Managed Codex home is missing Orca ownership marker.'
+/** A marker that is not a regular file proves nothing, whatever it resolves to. */
+export const MARKER_NOT_REGULAR_FILE_MESSAGE =
+  'Managed Codex home ownership marker is not a regular file.'
 
 /**
  * Why: the gate answers two different questions and callers act on them very
@@ -164,10 +167,7 @@ function evaluate({
     return { kind: 'indeterminate', error }
   }
   if (!markerIsRegularFile) {
-    return {
-      kind: 'untrusted',
-      reason: 'Managed Codex home ownership marker is not a regular file.'
-    }
+    return { kind: 'untrusted', reason: MARKER_NOT_REGULAR_FILE_MESSAGE }
   }
   if (expectedAccountId !== undefined && markerContents.trim() !== expectedAccountId) {
     return {

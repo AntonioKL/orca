@@ -13,6 +13,7 @@ import {
   OUTSIDE_MANAGED_ROOT_MESSAGE
 } from './wsl-codex-managed-home-probe'
 import {
+  MARKER_NOT_REGULAR_FILE_MESSAGE,
   MISSING_MANAGED_HOME_MESSAGE,
   MISSING_OWNERSHIP_MARKER_MESSAGE
 } from './host-codex-managed-home-ownership'
@@ -51,6 +52,26 @@ describe('buildWslCodexManagedHomeProbeScript', () => {
     expect(script).toContain('test -n "$contents" || tag marker-mismatch')
   })
 
+  it('never tags absence straight off a failed `test`', () => {
+    const script = buildWslCodexManagedHomeProbeScript(LINUX_HOME, 'account-1')
+
+    // `test -e ... || tag missing-*` is the collapse: a status of 1 means
+    // "absent OR could not look". Absence must route through prove_absent.
+    expect(script).not.toMatch(/test -e [^\n]*\|\| tag missing/)
+    expect(script).toMatch(/test -e "\$candidate" \|\| prove_absent /)
+    expect(script).toMatch(/test -e "\$marker" \|\| prove_absent /)
+  })
+
+  it('rejects a symlinked marker before reading it', () => {
+    const script = buildWslCodexManagedHomeProbeScript(LINUX_HOME, 'account-1')
+    const lines = script.split('\n')
+
+    expect(script).toContain('test -h "$marker" && tag marker-not-regular')
+    expect(lines.findIndex((l) => l.includes('test -h "$marker"'))).toBeLessThan(
+      lines.findIndex((l) => l.includes('cat -- "$marker"'))
+    )
+  })
+
   it('never lets the guest end on a bare non-zero exit for an ownership fact', () => {
     const script = buildWslCodexManagedHomeProbeScript(LINUX_HOME, 'account-1')
 
@@ -87,6 +108,7 @@ describe('classifyWslCodexManagedHomeProbe', () => {
   it.each([
     ['missing-home', MISSING_MANAGED_HOME_MESSAGE],
     ['missing-marker', MISSING_OWNERSHIP_MARKER_MESSAGE],
+    ['marker-not-regular', MARKER_NOT_REGULAR_FILE_MESSAGE],
     ['marker-mismatch', MARKER_ACCOUNT_MISMATCH_MESSAGE],
     ['account-mismatch', ACCOUNT_ID_MISMATCH_MESSAGE],
     ['outside-managed-root', OUTSIDE_MANAGED_ROOT_MESSAGE]

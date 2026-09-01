@@ -2,11 +2,10 @@ import { lstatSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'nod
 import { join, resolve } from 'node:path'
 import { app } from 'electron'
 import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
-import { quotePosixShell } from '../../shared/wsl-login-shell-command'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import type { CodexManagedAccount } from '../../shared/managed-account-types'
 import { getSystemCodexHomePath } from '../codex/codex-home-paths'
-import { runWslProcess } from '../wsl/wsl-runner'
+import { runWslProcess, type WslResult, type WslSpec } from '../wsl/wsl-runner'
 import {
   assertOwnedCodexManagedHomeVerdict,
   assertOwnedHostCodexManagedHomePath,
@@ -23,14 +22,12 @@ import {
   MARKER_ACCOUNT_MISMATCH_MESSAGE,
   OUTSIDE_MANAGED_ROOT_MESSAGE
 } from './wsl-codex-managed-home-probe'
+import {
+  buildWslManagedHomePreparationScript,
+  WSL_PREPARE_UNTRUSTED_EXITS
+} from './wsl-codex-managed-home-preparation'
 
 const WSL_MANAGED_HOME_TIMEOUT_MS = 5_000
-
-/** Exit codes the preparation script uses to report a *proven* foreign directory. */
-const WSL_PREPARE_UNTRUSTED_EXITS = new Map<number, string>([
-  [41, MISSING_OWNERSHIP_MARKER_MESSAGE],
-  [42, MARKER_ACCOUNT_MISMATCH_MESSAGE]
-])
 
 export class CodexManagedHomePath {
   constructor(private readonly validateWslPath: (distro: string, script: string) => string) {}
@@ -122,19 +119,10 @@ export class CodexManagedHomePath {
     ) {
       return
     }
-    const result = await runWslProcess({
+    const result = await this.runManagedHomePreparation({
       distro: wslInfo.distro,
       loginPath: 'none',
-      script: [
-        'set -euo pipefail',
-        `candidate=${quotePosixShell(wslInfo.linuxPath)}`,
-        `expected_marker=${quotePosixShell(account.id)}`,
-        'marker="$candidate/.orca-managed-home"',
-        'if [ -e "$candidate" ] && [ ! -f "$marker" ]; then exit 41; fi',
-        'if [ -f "$marker" ] && [ "$(cat "$marker")" != "$expected_marker" ]; then exit 42; fi',
-        'mkdir -p -- "$candidate"',
-        'printf "%s\\n" "$expected_marker" > "$marker"'
-      ].join('\n'),
+      script: buildWslManagedHomePreparationScript(wslInfo.linuxPath, account.id),
       shell: 'bash',
       timeoutMs: WSL_MANAGED_HOME_TIMEOUT_MS
     })
@@ -160,6 +148,20 @@ export class CodexManagedHomePath {
           `Preparing the managed Codex home in WSL ${wslInfo.distro} exited with code ${String(result.code)}.`
         )
       })
+    }
+  }
+
+  /**
+   * Why: `runWslProcess` rejects outright when `wsl.exe` cannot be launched —
+   * the canonical "could not check". Awaiting it bare let that rejection reach
+   * callers as a raw spawn error, or as a wrapper's non-Error string, so nothing
+   * downstream could recognise it as an unproven observation.
+   */
+  private async runManagedHomePreparation(spec: WslSpec): Promise<WslResult> {
+    try {
+      return await runWslProcess(spec)
+    } catch (error) {
+      throw new ManagedCodexHomeTemporarilyUnavailableError(undefined, { cause: error })
     }
   }
 
