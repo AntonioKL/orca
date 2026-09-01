@@ -102,6 +102,8 @@ docs/**
 !docs/STYLEGUIDE.md
 !docs/agent-skill-sharing-implementation-checklist.md
 !docs/mobile-terminal-shortcut-bar.md
+# Cited as the design reference by six files under src/main/ssh and src/relay.
+!docs/ssh-relay-versioned-install-dirs.md
 !docs/reference/
 !docs/reference/git-compatibility.md
 !docs/reference/headless-linux-server.md
