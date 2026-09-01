@@ -124,6 +124,42 @@ describe('remote AI Vault transcript re-reads', () => {
     expect(result.sessions[0]?.title).toBe('A much longer first prompt than before')
   })
 
+  // Codex names threads in $CODEX_HOME/session_index.jsonl asynchronously, after
+  // the rollout's last append — so the transcript's mtime+size never changes to
+  // signal it. That file sits outside `sessions/`, hence outside the read count.
+  it('picks up a session_index title written after the transcript was cached', async () => {
+    const provider = new CountingRemoteProvider()
+    const path = '/home/ada/.codex/sessions/2026/08/31/rollout-named-later.jsonl'
+    provider.addFile(
+      path,
+      transcript('named-later-session', 'First prompt', '2026-08-31T01:00:00.000Z'),
+      1_000
+    )
+    provider.addFile(
+      '/home/ada/.codex/session_index.jsonl',
+      jsonLines([{ id: 'some-other-session', thread_name: 'Unrelated thread' }]),
+      1_000
+    )
+
+    const first = await scan(provider)
+    expect(first.sessions[0]?.title).toBe('First prompt')
+
+    provider.readFilePaths.length = 0
+    provider.addFile(
+      '/home/ada/.codex/session_index.jsonl',
+      jsonLines([
+        { id: 'some-other-session', thread_name: 'Unrelated thread' },
+        { id: 'named-later-session', thread_name: 'Named by Codex after the fact' }
+      ]),
+      2_000
+    )
+    const second = await scan(provider)
+
+    expect(second.sessions[0]?.title).toBe('Named by Codex after the fact')
+    // The #13753 win is preserved: the index is read, the transcript is not.
+    expect(provider.readFilePaths).toEqual([])
+  })
+
   it('does not serve a cached parse to a different execution host', async () => {
     const provider = new CountingRemoteProvider()
     const path = '/home/ada/.codex/sessions/2026/08/31/rollout-host.jsonl'

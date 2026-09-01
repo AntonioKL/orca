@@ -58,7 +58,10 @@ function storeEntry(path: string, entry: RemoteSessionParseCacheEntry): void {
  * `(mtimeMs, sizeBytes)` is a sound validity key here because discovery already
  * folds a source's `contentDependencyPath` stat into both fields
  * (remote-session-scanner-discovery.ts), so a metadata-only transcript whose
- * companion file changed still looks changed.
+ * companion file changed still looks changed. Sources whose parse reads a file
+ * discovery does not stat — Codex looks its title up in `session_index.jsonl` —
+ * are not covered by that key and pass `refreshReusedSession` to re-derive the
+ * uncovered part without touching the transcript.
  *
  * Only a completed parse is stored. A read that threw stays uncached so a
  * transient filesystem failure cannot pin a wrong answer for the corpus's life.
@@ -67,6 +70,8 @@ export async function parseRemoteSessionFileCached(args: {
   candidate: RemoteSessionCandidate
   hostKey: string
   parse: () => Promise<AiVaultSession | null>
+  // Applied to a reused session only; must not re-read the transcript.
+  refreshReusedSession?: (session: AiVaultSession) => Promise<AiVaultSession>
   stats?: RemoteSessionParseStats
 }): Promise<AiVaultSession | null> {
   const { file } = args.candidate
@@ -79,6 +84,9 @@ export async function parseRemoteSessionFileCached(args: {
   if (unchanged) {
     if (args.stats) {
       args.stats.reused++
+    }
+    if (entry.session && args.refreshReusedSession) {
+      entry.session = await args.refreshReusedSession(entry.session)
     }
     // Refresh recency without re-parsing so the LRU evicts cold paths first.
     storeEntry(file.path, entry)
