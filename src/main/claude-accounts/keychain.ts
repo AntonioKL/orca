@@ -104,9 +104,14 @@ export function getActiveClaudeService(configDir?: string): string {
   if (!configDir) {
     return ACTIVE_CLAUDE_SERVICE
   }
-  // Why: Claude Code 2.1+ scopes macOS Keychain credentials by config dir
-  // using the first 8 hex chars of sha256(CLAUDE_CONFIG_DIR).
-  const suffix = createHash('sha256').update(configDir).digest('hex').slice(0, 8)
+  // Why: Claude Code 2.1+ scopes macOS Keychain credentials by config dir using the first 8 hex
+  // chars of sha256 over the NFC-normalized env literal. macOS hands back decomposed (NFD) paths,
+  // so skipping the normalize yields a different service name than the CLI reads — and a missing
+  // Keychain item fails over to the file silently, with no error anywhere.
+  const suffix = createHash('sha256')
+    .update(configDir.normalize('NFC'), 'utf8')
+    .digest('hex')
+    .slice(0, 8)
   return `${ACTIVE_CLAUDE_SERVICE}-${suffix}`
 }
 
