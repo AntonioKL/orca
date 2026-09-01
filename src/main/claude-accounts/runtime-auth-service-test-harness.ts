@@ -115,7 +115,11 @@ export function createKeychainMock() {
         testState.runtimeWriteConfigDir = configDir
         testState.scopedKeychainCredentials = contents
         if (testState.throwLegacyRuntimeKeychainWrite) {
-          throw new Error('legacy runtime keychain write failed')
+          console.warn(
+            '[claude-runtime-auth] Failed to refresh legacy shared Keychain:',
+            new Error('legacy runtime keychain write failed')
+          )
+          return
         }
         testState.legacyKeychainCredentials = contents
         testState.activeKeychainCredentials = contents

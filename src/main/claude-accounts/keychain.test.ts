@@ -121,7 +121,7 @@ describe('Claude Keychain credentials', () => {
     ])
   })
 
-  it('writes runtime credentials only to the scoped service', async () => {
+  it('writes runtime credentials to scoped and legacy services for pre-2.1 CLIs', async () => {
     const configDir = '/tmp/orca-claude-login-test'
     const scopedService = serviceForConfigDir(configDir)
     execFileMock.mockImplementation((_file, _args, _options, callback) => {
@@ -141,8 +141,43 @@ describe('Claude Keychain credentials', () => {
         process.env.USER || process.env.USERNAME || 'user',
         '-w',
         'credentials-json'
+      ],
+      [
+        'add-generic-password',
+        '-U',
+        '-s',
+        'Claude Code-credentials',
+        '-a',
+        process.env.USER || process.env.USERNAME || 'user',
+        '-w',
+        'credentials-json'
       ]
     ])
+  })
+
+  it('does not reject the runtime write when the legacy compatibility write fails', async () => {
+    const configDir = '/tmp/orca-claude-login-test'
+    const legacyFailure = new Error('legacy write failed')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    execFileMock
+      .mockImplementationOnce((_file, _args, _options, callback) => {
+        invokeExecFileCallback(callback, null, '', '')
+        return null as never
+      })
+      .mockImplementationOnce((_file, _args, _options, callback) => {
+        invokeExecFileCallback(callback, legacyFailure, '', 'legacy write failed')
+        return null as never
+      })
+
+    await expect(
+      writeActiveClaudeKeychainCredentialsForRuntime('credentials-json', configDir)
+    ).resolves.toBeUndefined()
+
+    expect(warn).toHaveBeenCalledWith(
+      '[claude-runtime-auth] Failed to refresh legacy shared Keychain:',
+      expect.any(Error)
+    )
+    warn.mockRestore()
   })
 
   it('strictly reads only the requested active credentials service', async () => {
