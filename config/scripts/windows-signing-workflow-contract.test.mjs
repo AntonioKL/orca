@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
@@ -212,6 +213,7 @@ describe('Windows signing workflow contract', () => {
       'Notify Slack that inner-binary signing is waiting for approval',
       'Download signed inner binaries from SignPath',
       'Restore signed inner binaries into unpacked app',
+      'Restore signed uninstaller for the installer rebuild',
       'Replace cached elevate.exe with the signed copy',
       'Rebuild NSIS installer from signed unpacked app'
     ]
@@ -220,5 +222,111 @@ describe('Windows signing workflow contract', () => {
       expect(step, stepName).toBeDefined()
       expect(step['continue-on-error'], stepName).toBe(true)
     }
+  })
+})
+
+// Why these exist: the NSIS uninstaller is generated inside electron-builder's
+// uninstaller pass and deleted immediately after being embedded, so the only way
+// CI can sign it is the export/import relay through win.signtoolOptions.sign.
+// Every link is asserted here the way Orca.exe and conpty_console_list.node are.
+describe('Windows NSIS uninstaller signing', () => {
+  const releaseSteps = () => readWorkflow('.github/workflows/release-cut.yml').jobs.build.steps
+  const stepNamed = (steps, name) => steps.find((step) => step.name === name)
+
+  const EXPORT_ENV = 'ORCA_WIN_UNINSTALLER_EXPORT_PATH'
+  const SIGNED_ENV = 'ORCA_WIN_UNINSTALLER_SIGNED_PATH'
+
+  it('exports the uninstaller from the first Windows build', () => {
+    const build = stepNamed(releaseSteps(), 'Build Windows release artifacts')
+
+    expect(build.env[EXPORT_ENV]).toContain('uninstaller-signing')
+    expect(build.env[EXPORT_ENV]).toContain('orca-uninstaller.exe')
+  })
+
+  it('stages the uninstaller into the same request as the inner binaries', () => {
+    const stage = stepNamed(releaseSteps(), 'Stage unsigned inner PE files for signing')
+
+    expect(stage.run).toContain('uninstaller-signing\\unsigned\\orca-uninstaller.exe')
+    expect(stage.run).toContain('uninstaller\\orca-uninstaller.exe')
+    // No third SignPath request: exactly two submissions, as budgeted for the
+    // 1h + 4h approval waits inside the 360-minute job cap.
+    const submissions = releaseSteps().filter(
+      (step) => step.uses === 'signpath/github-action-submit-signing-request@v2'
+    )
+    expect(submissions).toHaveLength(2)
+  })
+
+  // A staged-but-unreturned uninstaller must not fail the inner chain, or a
+  // SignPath artifact-configuration gap would cost the inner-binary signatures.
+  it('keeps the uninstaller out of the inner-binary copy-back list', () => {
+    const stage = stepNamed(releaseSteps(), 'Stage unsigned inner PE files for signing')
+    const restoreInner = stepNamed(
+      releaseSteps(),
+      'Restore signed inner binaries into unpacked app'
+    )
+
+    expect(stage.run).not.toMatch(/\$list\.Add\(['"]uninstaller/)
+    expect(restoreInner.run).not.toContain('orca-uninstaller.exe')
+  })
+
+  it('re-injects the signed uninstaller into the rebuilt installer', () => {
+    const steps = releaseSteps()
+    const restore = stepNamed(steps, 'Restore signed uninstaller for the installer rebuild')
+    const rebuild = stepNamed(steps, 'Rebuild NSIS installer from signed unpacked app')
+    const names = steps.map((step) => step.name)
+
+    expect(restore.if).toContain('github.run_attempt == 1')
+    expect(restore.if).toContain("steps.restore-signed-inner.outcome == 'success'")
+    expect(restore.run).toContain('orca-uninstaller.exe')
+    expect(names.indexOf(restore.name)).toBeLessThan(names.indexOf(rebuild.name))
+    expect(rebuild.env[SIGNED_ENV]).toContain('uninstaller-signing')
+    // The rebuild must not depend on the uninstaller leg: a missing signed
+    // uninstaller ships today's installer, it does not skip the rebuild.
+    expect(rebuild.if).not.toContain('restore-signed-uninstaller')
+  })
+
+  // NSIS hides the uninstaller in a compressed data section the bundled 7za
+  // cannot read, so the gate proves it from the sign hook's digest receipt
+  // instead of extracting it — and only when the relay actually ran.
+  it('reports the embedded uninstaller in the inner-binary evidence gate', () => {
+    const gate = stepNamed(releaseSteps(), 'Verify Windows inner binary signatures')
+
+    expect(gate.env.UNINSTALLER_SIGNING_COMPLETED).toBe(
+      "${{ steps.restore-signed-uninstaller.outcome == 'success' }}"
+    )
+    expect(gate.run).toContain('.embedded-sha256')
+    expect(gate.run).toContain("$env:UNINSTALLER_SIGNING_COMPLETED -eq 'true'")
+    expect(gate.run).toContain('not signed by SignPath Foundation: Uninstall Orca.exe')
+    // The uninstaller must not join the 7z payload loop, which cannot see it.
+    expect(gate.run).not.toContain("$targets += 'Uninstall Orca.exe'")
+  })
+
+  it('rehearses the uninstaller leg end to end', () => {
+    const steps = readWorkflow('.github/workflows/windows-signing-rehearsal.yml').jobs.rehearse
+      .steps
+    const names = steps.map((step) => step.name)
+    const pack = stepNamed(steps, 'Package Windows app and export the NSIS uninstaller')
+    const rebuild = stepNamed(steps, 'Build NSIS installer from signed unpacked app')
+    const verify = stepNamed(steps, 'Verify signatures end to end')
+
+    // --dir never produces an uninstaller, so the rehearsal has to build the
+    // installer the way release-cut's first Windows pass does.
+    expect(pack.run).toContain('--win --publish never')
+    expect(pack.run).not.toContain('--dir')
+    expect(pack.env[EXPORT_ENV]).toContain('orca-uninstaller.exe')
+    expect(names).toContain('Restore signed uninstaller for the installer rebuild')
+    expect(rebuild.env[SIGNED_ENV]).toContain('orca-uninstaller.exe')
+    expect(verify.run).toContain('.embedded-sha256')
+    expect(verify.run).toContain('embedded: Uninstall Orca.exe')
+  })
+
+  it('wires the electron-builder sign hook that the relay depends on', () => {
+    const require = createRequire(import.meta.url)
+    const configPath = resolve(projectDir, 'config/electron-builder.config.cjs')
+    delete require.cache[require.resolve(configPath)]
+    const config = require(configPath)
+
+    expect(typeof config.win.signtoolOptions.sign).toBe('function')
+    delete require.cache[require.resolve(configPath)]
   })
 })

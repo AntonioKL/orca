@@ -3,9 +3,11 @@
 # Why: SignPath cannot deep-sign inside NSIS installers, so shipping signed
 # inner binaries (Orca.exe, node-pty *.node, DLLs — see issue #7785) requires
 # a two-request flow: sign the unpacked PE files first, then build the NSIS
-# installer from the signed tree, then sign the installer. This workflow
-# rehearses that entire flow from a branch, end to end, without publishing
-# anything — so the release pipeline on main is never at risk while we verify.
+# installer from the signed tree, then sign the installer. The NSIS uninstaller
+# rides that same first request — it is captured through electron-builder's sign
+# hook and swapped back in during the rebuild — so it adds no third approval.
+# This workflow rehearses that entire flow from a branch, end to end, without
+# publishing anything — so the release pipeline on main is never at risk.
 #
 # Runs only via manual dispatch. Use the test-signing policy for iteration
 # (auto-approved test certificate) and release-signing to rehearse the
@@ -81,15 +83,24 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
-      - name: Package unpacked Windows app
+      # Why a full --win build and not --dir: the NSIS uninstaller only exists
+      # inside the installer build, and it is the file the MDE update cluster
+      # flags. --dir would never produce it, so the rehearsal would not rehearse
+      # the uninstaller leg at all. This mirrors release-cut's first Windows pass.
+      - name: Package Windows app and export the NSIS uninstaller
         shell: pwsh
+        env:
+          ORCA_WIN_UNINSTALLER_EXPORT_PATH: ${{ github.workspace }}\uninstaller-signing\unsigned\orca-uninstaller.exe
         run: |
           node config/scripts/ensure-native-runtime.mjs --runtime=electron
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          pnpm exec electron-builder --config config/electron-builder.config.cjs --win --dir --publish never
+          pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish never
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path 'dist/win-unpacked/Orca.exe')) {
-            throw 'electron-builder --dir did not produce dist/win-unpacked/Orca.exe'
+            throw 'electron-builder --win did not produce dist/win-unpacked/Orca.exe'
+          }
+          if (-not (Test-Path -LiteralPath $env:ORCA_WIN_UNINSTALLER_EXPORT_PATH)) {
+            throw "The sign hook did not export the NSIS uninstaller to $env:ORCA_WIN_UNINSTALLER_EXPORT_PATH"
           }
 
       # Why: only unsigned PE files go to SignPath. Files that already carry a
@@ -131,6 +142,15 @@ jobs:
           $list | ForEach-Object { Write-Host "  $_" }
           Write-Host "Skipped $($skipped.Count) already-signed files:"
           $skipped | ForEach-Object { Write-Host "  $_" }
+
+          # Why kept out of inner-signing-list.txt: that list drives the copy-back
+          # into dist/win-unpacked, and the uninstaller does not live there — it is
+          # re-injected through the electron-builder sign hook during the rebuild.
+          $exportedUninstaller = Join-Path $env:GITHUB_WORKSPACE 'uninstaller-signing\unsigned\orca-uninstaller.exe'
+          $uninstallerStagePath = Join-Path $stage.FullName 'uninstaller\orca-uninstaller.exe'
+          New-Item -ItemType Directory -Force -Path (Split-Path $uninstallerStagePath) | Out-Null
+          Copy-Item -LiteralPath $exportedUninstaller -Destination $uninstallerStagePath -Force
+          Write-Host 'Staged the NSIS uninstaller for signing: uninstaller\orca-uninstaller.exe'
 
       - name: Upload unsigned inner binaries for SignPath
         id: upload-unsigned-inner
@@ -200,8 +220,26 @@ jobs:
             throw "Signed inner artifact did not round-trip cleanly ($($failures.Count) failures)."
           }
 
+      - name: Restore signed uninstaller for the installer rebuild
+        shell: pwsh
+        run: |
+          $signed = Get-ChildItem -Path signed-inner -Recurse -File -Filter 'orca-uninstaller.exe' |
+            Select-Object -First 1
+          if ($null -eq $signed) {
+            throw 'SignPath did not return uninstaller/orca-uninstaller.exe; check the inner-binaries artifact configuration covers it.'
+          }
+          $signature = Get-AuthenticodeSignature -FilePath $signed.FullName
+          if ($null -eq $signature.SignerCertificate) {
+            throw 'The returned NSIS uninstaller carries no signature.'
+          }
+          New-Item -ItemType Directory -Force -Path 'uninstaller-signing\signed' | Out-Null
+          Copy-Item -LiteralPath $signed.FullName -Destination 'uninstaller-signing\signed\orca-uninstaller.exe' -Force
+          Write-Host ("{0,-14} uninstaller  <{1}>" -f $signature.Status, $signature.SignerCertificate.Subject)
+
       - name: Build NSIS installer from signed unpacked app
         shell: pwsh
+        env:
+          ORCA_WIN_UNINSTALLER_SIGNED_PATH: ${{ github.workspace }}\uninstaller-signing\signed\orca-uninstaller.exe
         run: |
           pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish never --prepackaged "$env:GITHUB_WORKSPACE\dist\win-unpacked"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -323,6 +361,19 @@ jobs:
           & $7za x 'dist/orca-windows-setup.exe' '-oextracted-app' -y | Out-Null
 
           $root = Resolve-Path 'extracted-app'
+          # NSIS embeds the uninstaller in its own compressed data section, not in
+          # the app 7z payload above, so it is verified from the sign hook's
+          # receipt: the digest of the bytes handed to makensis must match the
+          # SignPath-returned file, which is then checked for a signature.
+          $signedUninstaller = 'uninstaller-signing\signed\orca-uninstaller.exe'
+          $receipt = "$signedUninstaller.embedded-sha256"
+          if (-not (Test-Path -LiteralPath $receipt)) {
+            $failures.Add('the sign hook did not embed the signed uninstaller into the rebuilt installer')
+          } elseif ((Get-Content -LiteralPath $receipt -Raw).Trim() -ne (Get-FileHash -LiteralPath $signedUninstaller -Algorithm SHA256).Hash.ToLowerInvariant()) {
+            $failures.Add('the rebuilt installer embedded different uninstaller bytes than the signed one')
+          } else {
+            Test-Signature 'embedded: Uninstall Orca.exe' $signedUninstaller
+          }
           foreach ($relative in Get-Content 'inner-signing-list.txt') {
             $path = Join-Path $root $relative
             if (-not (Test-Path $path)) {
@@ -337,7 +388,7 @@ jobs:
             $failures | ForEach-Object { Write-Host "::error::$_" }
             throw "Signing rehearsal failed with $($failures.Count) problems."
           }
-          Write-Host "All $((Get-Content 'inner-signing-list.txt').Count) inner binaries plus the installer are signed."
+          Write-Host "All $((Get-Content 'inner-signing-list.txt').Count) inner binaries plus the uninstaller and the installer are signed."
 
       - name: Upload rehearsal evidence and installer
         if: always()
