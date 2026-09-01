@@ -9,6 +9,7 @@ import {
   type TerminalStreamFrame
 } from '../transport/terminal-stream-protocol'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { requireRecentUserGesture } from './mobile-web-user-gesture-requirement'
 import { runMobileWebTerminalAction } from './mobile-web-terminal-actions'
 import {
   acknowledgeMobileWebTerminalOutput,
@@ -141,11 +142,8 @@ export class MobileWebTerminalStreams {
         request
       }).then(() => null)
     }
-    if (
-      (request.operation === 'clipboardPaste' || request.operation === 'attachImage') &&
-      !consumeRecentUserGesture()
-    ) {
-      throw new MobileWebBrokerError('permission_required')
+    if (request.operation === 'clipboardPaste' || request.operation === 'attachImage') {
+      requireRecentUserGesture(consumeRecentUserGesture)
     }
     return handleMobileWebTerminalStreamRequest({
       client,

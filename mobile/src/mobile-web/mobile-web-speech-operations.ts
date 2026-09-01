@@ -7,6 +7,7 @@ import {
 } from '../../../src/shared/mobile-web/speech-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { requireRecentUserGesture } from './mobile-web-user-gesture-requirement'
 import type { MobileWebSpeechAuthority } from './mobile-web-speech-authority'
 import {
   configureMobileWebSpeech,
@@ -55,10 +56,4 @@ export async function executeMobileWebSpeechOperation(args: {
     return null
   }
   throw new MobileWebBrokerError('unsupported_capability')
-}
-
-function requireRecentUserGesture(consumeRecentUserGesture: () => boolean): void {
-  if (!consumeRecentUserGesture()) {
-    throw new MobileWebBrokerError('permission_required')
-  }
 }

@@ -19,6 +19,7 @@ import {
   MobileWebTerminalTextScaleUpdatePayloadSchema
 } from '../../../src/shared/mobile-web/native-operation-contract'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { requireRecentUserGesture } from './mobile-web-user-gesture-requirement'
 import type { MobileWebNativeCapabilityAuthority } from './mobile-web-native-capability-authority'
 import type { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
@@ -127,10 +128,4 @@ export async function executeMobileWebNativeCapabilityOperation(args: {
     return null
   }
   throw new MobileWebBrokerError('unsupported_capability')
-}
-
-function requireRecentUserGesture(consumeRecentUserGesture: () => boolean): void {
-  if (!consumeRecentUserGesture()) {
-    throw new MobileWebBrokerError('permission_required')
-  }
 }

@@ -12,6 +12,7 @@ import type { MobileComposerCreateSelection } from '../tasks/mobile-composer-sou
 import { normalizeWorkspaceAgent } from '../tasks/workspace-agent-selection'
 import { nativeHostWorkspaceCreationOperations } from '../worktree/native-host-workspace-creation-operations'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { requireRecentUserGesture } from './mobile-web-user-gesture-requirement'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 
 export async function executeMobileWebWorkspaceCreationCreateOperation(args: {
@@ -24,7 +25,7 @@ export async function executeMobileWebWorkspaceCreationCreateOperation(args: {
   const operations = nativeHostWorkspaceCreationOperations(args.client)
   if (args.operation === 'creationCreateBlank') {
     const payload = MobileWebCreationBlankPayloadSchema.parse(args.payload)
-    requireUserGesture(args.consumeRecentUserGesture)
+    requireRecentUserGesture(args.consumeRecentUserGesture)
     const capabilities = await operations.readRuntimeCapabilities()
     const hostRepoId = args.authority.hostRepoId(payload.repoId)
     const result = await operations.createBlankWorkspace({
@@ -38,7 +39,7 @@ export async function executeMobileWebWorkspaceCreationCreateOperation(args: {
   }
   if (args.operation === 'creationCreateFromSource') {
     const payload = MobileWebCreationFromSourcePayloadSchema.parse(args.payload)
-    requireUserGesture(args.consumeRecentUserGesture)
+    requireRecentUserGesture(args.consumeRecentUserGesture)
     const capabilities = await operations.readRuntimeCapabilities()
     const hostRepoId = args.authority.hostRepoId(payload.targetRepoId)
     const selection = await authoritativeSelection(payload.selection, operations, args.authority)
@@ -190,12 +191,6 @@ function requiredAgentChoice(value: string) {
     throw new MobileWebBrokerError('invalid_request')
   }
   return choice
-}
-
-function requireUserGesture(consumeRecentUserGesture: (() => boolean) | undefined): void {
-  if (!consumeRecentUserGesture?.()) {
-    throw new MobileWebBrokerError('permission_required')
-  }
 }
 
 function gitLabProjectPath(value: string): string {

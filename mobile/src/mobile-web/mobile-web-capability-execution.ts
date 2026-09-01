@@ -6,6 +6,7 @@ import { MobileWebSourceControlSubscribePayloadSchema } from '../../../src/share
 import { MobileWebSpeechSubscribePayloadSchema } from '../../../src/shared/mobile-web/speech-operation-contract'
 import { executeMobileWebAccountCapability } from './mobile-web-account-capability'
 import { executeMobileWebAgentHistoryOperation } from './mobile-web-agent-history-operations'
+import { mobileWebUserGestureConsumer } from './mobile-web-user-gesture-requirement'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 import { executeMobileWebBrowserOperation } from './mobile-web-browser-operations'
 import type { MobileWebCapabilityExecutionDependencies } from './mobile-web-capability-execution-dependencies'
@@ -33,7 +34,7 @@ export async function executeMobileWebCapabilityRequest(
       authority: args.nativeAuthority,
       browserAuthority: args.browserAuthority,
       workspaceAuthority: args.workspaceAuthority,
-      consumeRecentUserGesture: () => args.navigationAuthority?.consumeRecentUserGesture() ?? false
+      consumeRecentUserGesture: mobileWebUserGestureConsumer(args.navigationAuthority)
     })
   }
   if (request.capability === 'nativeChat') {
@@ -86,7 +87,7 @@ export async function executeMobileWebCapabilityRequest(
       client: args.connectedClient(),
       authority: args.workspaceAuthority,
       snapshots: args.workspaceSnapshots,
-      consumeRecentUserGesture: () => args.navigationAuthority?.consumeRecentUserGesture() ?? false
+      consumeRecentUserGesture: mobileWebUserGestureConsumer(args.navigationAuthority)
     })
     if (request.capability === 'workspace' && request.operation === 'activate') {
       args.terminalArtifactAuthority.clear()
@@ -162,7 +163,7 @@ export async function executeMobileWebCapabilityRequest(
     return args.terminalStreams.handle(
       request.payload,
       args.connectedClient(),
-      () => args.navigationAuthority?.consumeRecentUserGesture() ?? false
+      mobileWebUserGestureConsumer(args.navigationAuthority)
     )
   }
   if (request.mode === 'once' && request.capability === 'file') {
@@ -254,7 +255,7 @@ export async function executeMobileWebCapabilityRequest(
       payload: request.payload,
       client: args.connectedClient(),
       authority: args.speechAuthority,
-      consumeRecentUserGesture: () => args.navigationAuthority?.consumeRecentUserGesture() ?? false
+      consumeRecentUserGesture: mobileWebUserGestureConsumer(args.navigationAuthority)
     })
   }
   if (request.mode === 'once' && request.capability === 'task') {

@@ -4,6 +4,10 @@ import {
   MobileWebAgentHistoryResumeResultSchema
 } from '../../../src/shared/mobile-web/agent-history-operation-contract'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import {
+  mobileWebUserGestureConsumer,
+  requireRecentUserGesture
+} from './mobile-web-user-gesture-requirement'
 import type { MobileWebCapabilityExecutionDependencies } from './mobile-web-capability-execution-dependencies'
 import { mobileWebAgentHistoryPreview } from './mobile-web-agent-history-presentation'
 
@@ -27,9 +31,7 @@ export async function executeMobileWebAgentHistoryOperation(
   }
   if (request.operation === 'resume') {
     const payload = MobileWebAgentHistoryResumePayloadSchema.parse(request.payload)
-    if (!args.navigationAuthority?.consumeRecentUserGesture()) {
-      throw new MobileWebBrokerError('permission_required')
-    }
+    requireRecentUserGesture(mobileWebUserGestureConsumer(args.navigationAuthority))
     const result = await args.agentHistoryResume.resume({
       payload,
       client: args.connectedClient(),
