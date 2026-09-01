@@ -1,16 +1,21 @@
 import { spawnSync } from 'node:child_process'
 import process from 'node:process'
 import { resolvePullRequestDiffBase } from './git-pull-request-diff-base.mjs'
+import { resolvePnpmCliInvocation } from './pnpm-cli-invocation.mjs'
 
 const requestedBase =
   process.argv.slice(2).find((argument) => argument !== '--') ??
   process.env.ORCA_CODE_QUALITY_BASE ??
   'origin/main'
 const base = resolvePullRequestDiffBase(process.cwd(), requestedBase)
-const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
+// Why the shim and not a direct binary: `dlx` fetches react-doctor on demand, so
+// only the pnpm CLI can run it. resolvePnpmCliInvocation picks the shell-free
+// `node <pnpm cli>` form whenever npm_execpath exposes one.
+const { command, prefixArgs, shell } = resolvePnpmCliInvocation()
 const result = spawnSync(
-  pnpm,
+  command,
   [
+    ...prefixArgs,
     'dlx',
     'react-doctor@0.9.1',
     '.',
@@ -26,7 +31,7 @@ const result = spawnSync(
     '--blocking',
     'error'
   ],
-  { stdio: 'inherit' }
+  { stdio: 'inherit', shell, windowsHide: true }
 )
 
 if (result.error) {
