@@ -88,6 +88,13 @@ describe('shouldHandleAutomationRunHistoryKey', () => {
     expect(shouldHandleAutomationRunHistoryKey(makeEvent({ key: 'Enter', target: link }))).toBe(
       false
     )
+
+    const tabTrigger = document.createElement('div')
+    tabTrigger.setAttribute('role', 'tab')
+    expect(
+      shouldHandleAutomationRunHistoryKey(makeEvent({ key: 'Enter', target: tabTrigger }))
+    ).toBe(false)
+
     expect(
       shouldHandleAutomationRunHistoryKey(makeEvent({ key: 'ArrowDown', target: button }))
     ).toBe(true)
