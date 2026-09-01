@@ -163,12 +163,11 @@ export class TerminalHost {
     sessionId: string,
     opts: { immediate?: boolean; intent?: PtyKillIntent; incarnationId?: string } = {}
   ): Promise<PtyShutdownResult | void> {
-    const currentSession = this.sessions.get(sessionId)
     const pending = this.sessionTeardown.get(sessionId)
     if (pending) {
       if (
         opts.incarnationId &&
-        (!currentSession || opts.incarnationId !== currentSession.incarnationId)
+        opts.incarnationId !== this.sessions.get(sessionId)?.incarnationId
       ) {
         return Promise.resolve({ fenceUnavailable: true })
       }
