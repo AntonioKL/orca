@@ -27,6 +27,7 @@ export class RuntimeWorkspaceSessionController {
   tryGetHostId(worktreeId: string): ExecutionHostId | null {
     const store = this.deps.getStore()
     const scope = parseWorkspaceKey(worktreeId)
+    let preferredHostId: ExecutionHostId
     if (scope?.type === 'folder') {
       const workspace = store
         ?.getFolderWorkspaces?.()
@@ -37,14 +38,39 @@ export class RuntimeWorkspaceSessionController {
       // An explicit host is authoritative for folder workspaces. The connection
       // id is only a legacy fallback for records written before host ids existed.
       if (workspace.executionHostId != null) {
-        return parseExecutionHostId(workspace.executionHostId)?.id ?? null
+        const parsedHostId = parseExecutionHostId(workspace.executionHostId)?.id
+        if (!parsedHostId) {
+          return null
+        }
+        preferredHostId = parsedHostId
+      } else {
+        const connectionId = this.deps.resolveFolderConnectionId(workspace)
+        preferredHostId = connectionId
+          ? toSshExecutionHostId(connectionId)
+          : LOCAL_EXECUTION_HOST_ID
       }
-      const connectionId = this.deps.resolveFolderConnectionId(workspace)
-      return connectionId ? toSshExecutionHostId(connectionId) : LOCAL_EXECUTION_HOST_ID
+    } else {
+      const resolvedWorktreeId = scope?.type === 'worktree' ? scope.worktreeId : worktreeId
+      const repo = store?.getRepo?.(getRepoIdFromWorktreeId(resolvedWorktreeId))
+      preferredHostId = repo ? getRepoExecutionHostId(repo) : LOCAL_EXECUTION_HOST_ID
     }
-    const resolvedWorktreeId = scope?.type === 'worktree' ? scope.worktreeId : worktreeId
-    const repo = store?.getRepo?.(getRepoIdFromWorktreeId(resolvedWorktreeId))
-    return repo ? getRepoExecutionHostId(repo) : LOCAL_EXECUTION_HOST_ID
+    const getWorkspaceSession = store?.getWorkspaceSession
+    const persistedHostIds = store?.getWorkspaceSessionHostIds?.()
+    if (
+      !getWorkspaceSession ||
+      !persistedHostIds ||
+      Object.hasOwn(getWorkspaceSession(preferredHostId).tabsByWorktree, worktreeId)
+    ) {
+      return preferredHostId
+    }
+    const persistedOwners = persistedHostIds.filter(
+      (hostId) =>
+        hostId !== preferredHostId &&
+        Object.hasOwn(getWorkspaceSession(hostId).tabsByWorktree, worktreeId)
+    )
+    // Relay restarts can leave catalog metadata on an obsolete partition while
+    // the durable tab owner remains unique.
+    return persistedOwners.length === 1 ? persistedOwners[0]! : preferredHostId
   }
 
   getHostId(worktreeId: string): ExecutionHostId {
@@ -120,12 +146,13 @@ export class RuntimeWorkspaceSessionController {
       }
       for (const [worktreeId, tabs] of Object.entries(session.tabsByWorktree ?? {})) {
         const scope = parseWorkspaceKey(worktreeId)
-        const ownerHostId =
+        const catalogOwnerHostId =
           scope?.type === 'folder'
             ? (folderHostIdByWorkspaceId.get(scope.folderWorkspaceId) ?? null)
             : (repoHostIdByRepoId.get(
                 getRepoIdFromWorktreeId(scope?.type === 'worktree' ? scope.worktreeId : worktreeId)
               ) ?? LOCAL_EXECUTION_HOST_ID)
+        const ownerHostId = this.tryGetHostId(worktreeId) ?? catalogOwnerHostId
         if (
           ownerHostId === hostId &&
           (includeAllPersistedWorktrees ||
