@@ -2,6 +2,7 @@ import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { TabCreateEntryArgs } from './tab-create-entry-action'
 import type { TabAgentLaunchOption } from './tab-agent-launch-options'
 import type { TabCreateMenuOption } from './tab-create-menu-options'
+import type { HostedTerminalQuickCommand } from '@/hooks/use-terminal-quick-command-hosts'
 
 export type TabBarCreateEntryProps = {
   agentOptions?: readonly TabAgentLaunchOption[]
@@ -12,9 +13,11 @@ export type TabBarCreateEntryProps = {
   onLaunchAgent?: (agent: TuiAgent) => void
   onOpenDefaultTerminal?: () => void
   onOpenEntry?: (args: TabCreateEntryArgs) => Promise<void>
+  onRunQuickCommand?: (entry: HostedTerminalQuickCommand) => void
   onQueryChange?: (query: string) => void
   /** Runs after the menu closes, so the tab jumped to actually takes focus. */
   onQueueSwitchFocus?: (focus: () => void) => void
   onSelectMenuOption?: (option: TabCreateMenuOption) => void
+  quickCommandOptions?: readonly HostedTerminalQuickCommand[]
   worktreeId: string
 }

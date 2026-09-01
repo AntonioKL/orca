@@ -3,23 +3,16 @@ import { Input } from '@/components/ui/input'
 import { useRuntimeFileListForWorktree } from '../quick-open-file-list'
 import {
   createTabEntryAllowAbsolutePathsSelector,
-  getTabEntryOptions,
   isTabEntryAbsolutePathLike
 } from './tab-create-entry-action'
-import { findMatchingTabAgentLaunchOptions } from './tab-agent-launch-options'
-import { findMatchingTabCreateMenuOptions } from './tab-create-menu-options'
-import {
-  getActiveOptionId,
-  isActiveEntryOption,
-  type ActiveOption
-} from './tab-create-entry-active-option'
+import { getActiveOptionId, type ActiveOption } from './tab-create-entry-active-option'
+import { useTabCreateEntryActiveOptions } from './use-tab-create-entry-active-options'
 import {
   EntryActionRow,
   EntryStatusRow,
   RESULT_LISTBOX_ID,
   resultOptionDomId
 } from './TabBarCreateEntryRow'
-import { dropFileEntriesCoveredByTabResults } from './open-tab-entry-dedupe'
 import { activateOpenTabSearchResult } from './open-tab-selection-routing'
 import { useTabCreateEntrySearchResults } from './use-tab-create-entry-search-results'
 import { DEFAULT_SEARCH_ENGINE } from '../../../../shared/browser-url'
@@ -33,7 +26,11 @@ import {
   getTabEntryChooseActionMessage,
   getTabEntryOmniboxPlaceholder
 } from './tab-create-entry-copy'
-import { EMPTY_AGENT_OPTIONS, EMPTY_MENU_OPTIONS } from './tab-create-entry-empty-options'
+import {
+  EMPTY_AGENT_OPTIONS,
+  EMPTY_MENU_OPTIONS,
+  EMPTY_QUICK_COMMAND_OPTIONS
+} from './tab-create-entry-empty-options'
 import type { TabBarCreateEntryProps } from './tab-create-entry-props'
 
 export default function TabBarCreateEntry(props: TabBarCreateEntryProps): React.JSX.Element {
@@ -51,7 +48,9 @@ function TabBarCreateEntrySession({
   onOpenEntry,
   onQueryChange,
   onQueueSwitchFocus,
+  onRunQuickCommand,
   onSelectMenuOption,
+  quickCommandOptions = EMPTY_QUICK_COMMAND_OPTIONS,
   worktreeId
 }: TabBarCreateEntryProps): React.JSX.Element {
   const [query, setQuery] = useState('')
@@ -69,7 +68,10 @@ function TabBarCreateEntrySession({
     },
     []
   )
-  const fileList = useRuntimeFileListForWorktree({ enabled: menuOpen, worktreeId })
+  const fileList = useRuntimeFileListForWorktree({
+    enabled: menuOpen,
+    worktreeId
+  })
   const rawQueryOversized = isQuickOpenQueryTooLarge(query)
   const forcedSearch = parseForcedSearchQuery(query)
   const terminalQueryMode = rawQueryOversized || forcedSearch.forced
@@ -135,64 +137,22 @@ function TabBarCreateEntrySession({
     return () => cancelAnimationFrame(focusFrame)
   }, [menuOpen])
 
-  const matchingMenuOptions = useMemo(
-    () =>
-      terminalQueryMode ? EMPTY_MENU_OPTIONS : findMatchingTabCreateMenuOptions(query, menuOptions),
-    [menuOptions, query, terminalQueryMode]
-  )
-  const options = useMemo(() => {
-    const entryOptions = dropFileEntriesCoveredByTabResults(
-      getTabEntryOptions(query, fileList, 4, {
-        allowAbsolutePaths,
-        localPlatform,
-        searchEngine
-      }),
-      tabResults,
-      worktreePath
-    )
-    if (matchingMenuOptions.length === 0) {
-      return entryOptions
-    }
-    // Why: a matched create-menu action should win over a generic new-file fallback.
-    return entryOptions.filter((option) => option.classification.kind !== 'new-file')
-  }, [
+  const { activeOptions, entryOptions } = useTabCreateEntryActiveOptions({
+    agentOptions,
     allowAbsolutePaths,
     fileList,
     localPlatform,
-    matchingMenuOptions.length,
+    menuOptions,
     query,
+    quickCommandOptions,
     searchEngine,
     tabResults,
+    terminalQueryMode,
     worktreePath
-  ])
-  const matchingAgentOptions = useMemo(
-    () =>
-      terminalQueryMode
-        ? EMPTY_AGENT_OPTIONS
-        : findMatchingTabAgentLaunchOptions(query, agentOptions),
-    [agentOptions, query, terminalQueryMode]
-  )
-
+  })
   const disabled = !onOpenEntry
   const hasQuery = query.trim().length > 0
-  const activeOptions: ActiveOption[] = [
-    ...tabResults.map((option) => ({
-      kind: 'tab' as const,
-      option
-    })),
-    ...matchingMenuOptions.map((option) => ({
-      kind: 'menu' as const,
-      option
-    })),
-    ...matchingAgentOptions.map((option) => ({
-      kind: 'agent' as const,
-      option
-    })),
-    ...options.filter(isActiveEntryOption).map((option) => ({
-      kind: 'entry' as const,
-      option
-    }))
-  ]
+
   const { activeSelectedIndex, selectedActiveOption } = useNetworkSafeTabEntrySelection({
     activeOptions,
     fileIndexFailed: Boolean(fileList.loadError),
@@ -202,7 +162,7 @@ function TabBarCreateEntrySession({
     pinnedOptionId,
     query
   })
-  const statusOption = options.find(
+  const statusOption = entryOptions.find(
     (option) => option.classification.kind === 'empty' || option.classification.kind === 'blocked'
   )
   const statusMessage =
@@ -252,6 +212,11 @@ function TabBarCreateEntrySession({
     }
     if (selectedOption.kind === 'agent') {
       onLaunchAgent?.(selectedOption.option.agent)
+      onDidOpenEntry?.()
+      return
+    }
+    if (selectedOption.kind === 'quick-command') {
+      onRunQuickCommand?.(selectedOption.option)
       onDidOpenEntry?.()
       return
     }

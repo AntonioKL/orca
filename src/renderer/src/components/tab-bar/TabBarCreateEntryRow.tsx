@@ -5,6 +5,7 @@ import {
   GitCompare,
   Globe,
   Loader2,
+  Play,
   Search,
   Smartphone,
   TerminalSquare
@@ -14,6 +15,10 @@ import { cn } from '@/lib/utils'
 import { FilePathCursorTooltip, splitTrailingSegment } from '@/components/file-path-cursor-tooltip'
 import { translate } from '@/i18n/i18n'
 import { SEARCH_ENGINE_LABELS } from '../../../../shared/browser-url'
+import {
+  getTerminalQuickCommandBody,
+  isTerminalAgentQuickCommand
+} from '../../../../shared/terminal-quick-commands'
 import type { ActiveOption } from './tab-create-entry-active-option'
 
 export const RESULT_LISTBOX_ID = 'tab-create-entry-results'
@@ -72,6 +77,7 @@ export function EntryActionRow({
             'text-muted-foreground hover:bg-black/8 hover:text-accent-foreground disabled:hover:bg-transparent disabled:hover:text-muted-foreground dark:hover:bg-white/14 dark:disabled:hover:bg-transparent'
       )}
       onClick={onClick}
+      title={presentation.title}
     >
       {loading ? (
         <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
@@ -154,6 +160,7 @@ function getActionPresentation(option: ActiveOption): {
   label: string
   prioritizeFilename?: boolean
   showDetail: boolean
+  title?: string
 } {
   if (option.kind === 'menu') {
     const icon =
@@ -181,6 +188,30 @@ function getActionPresentation(option: ActiveOption): {
       icon: getOpenTabIcon(option.option),
       label: translate('auto.components.tab.bar.TabBarCreateEntry.8f0a1c4d92', 'Switch to tab'),
       showDetail: true
+    }
+  }
+  if (option.kind === 'quick-command') {
+    const { command } = option.option
+    return {
+      detail: command.label,
+      icon: isTerminalAgentQuickCommand(command) ? (
+        <AgentIcon agent={command.agent} size={14} />
+      ) : (
+        <Play
+          className="size-3.5 shrink-0"
+          fill="currentColor"
+          strokeWidth={0}
+          aria-hidden="true"
+        />
+      ),
+      label: translate(
+        'auto.components.tab.bar.TabBarCreateEntry.runQuickCommand',
+        'Run quick command'
+      ),
+      showDetail: true,
+      // Why: the row names the command, but what runs is its body — surface it
+      // before Enter commits to a shell command.
+      title: getTerminalQuickCommandBody(command)
     }
   }
   if (option.kind === 'agent') {

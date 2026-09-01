@@ -3326,7 +3326,9 @@
             "2148f65e04": "PowerShell",
             "ab589350e5": "Could not build launch command for {{value0}}.",
             "7a9b4af2af": "Scroll tabs left",
-            "232e075b07": "Scroll tabs right"
+            "232e075b07": "Scroll tabs right",
+            "quickCommandsSection": "Quick Commands",
+            "quickCommandLaunchFailed": "Could not run \"{{value0}}\"."
           },
           "TabBarCreateEntry": {
             "d62d63b807": "Create file",
@@ -3340,7 +3342,8 @@
             "d7d496a451": "Browser page no longer exists",
             "7726ce9970": "Mobile emulator tab no longer exists",
             "chooseAction": "Choose an action.",
-            "searchProvider": "Search {{value0}}"
+            "searchProvider": "Search {{value0}}",
+            "runQuickCommand": "Run quick command"
           },
           "TabBarQuickCommandsButton": {
             "a2c7a33831": "Command",
