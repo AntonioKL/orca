@@ -36,14 +36,30 @@ survived its own teardown (#9045).
 
 ## Two flag sets: ask for a command line only if you read one
 
-`ProcessDataFlag.CommandLine` is not a wider column on the same query. For every
-process on the box the addon opens a handle —
-`OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)` — then
-`NtQueryInformationProcess` for the PEB address and three `ReadProcessMemory`
-calls to pull the command line out of the target's address space. On a repeating
-cadence that is the same primitive a credential dumper uses, and Microsoft
-Defender for Endpoint scores it as suspicious memory activity. `Memory` costs a
-second handle of exactly that shape.
+Neither flag is a wider column on the same query. Each is a separate
+per-process syscall sequence, and they are not equally expensive to the EDR
+watching:
+
+- `CommandLine` (`process_commandline.cc`) —
+  `OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)`, then
+  `NtQueryInformationProcess` for the PEB address, then **three chained
+  `ReadProcessMemory` calls** to pull the command line out of the target's
+  address space. On a repeating cadence this is the primitive a credential
+  dumper uses, and it is the heavily weighted half of the signal.
+- `Memory` (`process.cc`) — `OpenProcess` with the **same** access mask, then
+  `GetProcessMemoryInfo`. **Zero `ReadProcessMemory`.** It acquires `VM_READ`
+  and never uses it.
+
+Measured here (541 processes, 405 openable), per detailed scan, before → after
+dropping `Memory`: `OpenProcess(… | VM_READ)` 1082 → 541,
+`NtQueryInformationProcess` 541 → 541, `ReadProcessMemory` **1215 → 1215,
+unchanged**.
+
+So be precise about what these two flag sets buy. Dropping `Memory` halves the
+handle-open count and halves the rate of `PROCESS_VM_READ` opens against
+protected processes (which is itself scored), but it moves the PEB/RPM telemetry
+not at all — a detailed scan still opens `lsass.exe` with `PROCESS_VM_READ`
+every 750 ms. Removing the PEB read itself is separate work.
 
 So the module exposes two snapshots, and the row types differ so a cheap caller
 cannot read what its flag set did not pay for:
@@ -72,13 +88,41 @@ exists to prevent is one scan per _caller_, and each reader still serves every
 caller wanting its flag set, so a 32-wide teardown still collapses into one scan
 of each. A third cache would need a third flag set, not a third caller.
 
-The wedge gate and the 3 s deadline below are **shared** between them, because
-both call the same addon: one wedged read latches the one `requestInProgress`
-and pins the one libuv slot whichever flags asked for it.
+### Only one native read may be in flight, ever
+
+This is the price of having two flag sets, and it is not optional.
+
+The npm wrapper **coalesces rather than queues**. `getRawProcessList` pushes the
+callback onto one list and calls the addon only when no request is in progress,
+so a second concurrent caller's `flags` are **discarded** and it is handed the
+first caller's rows. Measured against the real addon: issue identity first, both
+callers get the same array, 0 of 541 rows carry a command line. A detailed read
+that overlaps an identity read therefore returns a table with **every command
+line empty**, and agent recognition reads that as "no agent" — silently, and
+only under concurrency.
+
+Nothing else in this module prevents that. Each snapshot cache single-flights
+only within itself (`inFlight` is a closure per reader), and the wedge set
+latches only *after* a read misses its 3 s deadline, so through the healthy
+~12 ms of a scan neither excludes the other. Overlap is the normal state rather
+than an edge case: other panes keep polling detailed at 750 ms while a teardown
+takes identity snapshots, and `codex-structured-turn-processes.ts` issues fresh
+detailed scans on turn stop.
+
+`nativeReadGate` serializes every native read across both flag sets. It is also
+what makes the relay's bare addon safe: `adaptAddon` has no queue at all, and
+two simultaneous `CreateToolhelp32Snapshot` calls are the crash the vendor's
+queue exists to prevent. Every link settles — a wedged read still rejects on its
+deadline — so a waiter is never stranded; it re-checks the wedge and rejects.
+
+Because only one native call is ever outstanding, the wedge gate and the 3 s
+deadline stay **shared** and retention stays bounded at exactly one callback,
+not one per reader. Read ids are module-global and monotonic, so a late callback
+can only clear its own wedge.
 
 With no native binding there is only one scan to run and it is the 1.4 s
-PowerShell one, so the identity view rides the detailed snapshot rather than
-forking a second `powershell.exe`.
+PowerShell one, so the identity view rides the detailed snapshot — projected
+through `toIdentityRow`, so an identity row carries no command line on any host.
 
 ### Which callers need which
 
@@ -94,8 +138,22 @@ forking a second `powershell.exe`.
 The per-pane foreground tracker is the hot one (750 ms / 2 s cadence) and it
 genuinely needs the command line, so the repeating PEB read is not something the
 split removes. What the split removes is the PEB read from teardown identity and
-from the owner probe, and dropping `Memory` removes one of the two handles from
-every scan including the hot one.
+from the owner probe.
+
+### `creationTimeMs` does not exist on any shipped build
+
+Nothing in the repo supplies a `CreationTime` flag. The package enum is
+`None`/`Memory`/`CommandLine`, `process_worker.cc` emits no `creationTimeMs`,
+the vendored patch adds none, and `adaptAddon`'s `PROCESS_DATA_FLAG` lacks the
+bit. So `creationTimeMs` is always `undefined` in production and
+`isWindowsProcessStartTimeAvailable()` is always `false` — a latent product gap
+that predates the split and needs its own owner.
+
+Two consequences. `IDENTITY_PROJECTION.flags` evaluates to `0` today, so the
+identity reader really does open zero handles. And
+`agent-session-process-identity-probe.ts` early-returns on
+`isWindowsProcessStartTimeAvailable()` rather than scanning the whole table to
+produce `null`. Do not build anything on Windows start time working.
 
 Those CIM numbers are from a 1050-process host. The scan scales with process
 count: on a 1486-process Windows SSH host it measured **1.36 s** and produced

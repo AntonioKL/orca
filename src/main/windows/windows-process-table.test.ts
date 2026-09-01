@@ -9,7 +9,9 @@ import {
   readWindowsProcessIdentityTableFresh,
   readWindowsProcessTable,
   readWindowsProcessTableFresh,
-  resetWindowsProcessTableForTests
+  resetWindowsProcessTableForTests,
+  type WindowsProcessIdentityRow,
+  type WindowsProcessRow
 } from './windows-process-table'
 
 /** None | CreationTime, and CommandLine on top of it. Memory (1) is never asked for. */
@@ -21,23 +23,81 @@ const getAllProcesses = vi.fn()
 // A real snapshot always contains the querying process; the reader rejects a
 // table without it, because that is what a blocked CreateToolhelp32Snapshot
 // returns -- an empty list rather than an error.
-const SELF = { pid: process.pid, ppid: 0, name: 'vitest.exe' }
-const NATIVE = [
+type NativeRow = {
+  pid: number
+  ppid: number
+  name: string
+  commandLine?: string
+  creationTimeMs?: number
+}
+
+const SELF: NativeRow = { pid: process.pid, ppid: 0, name: 'vitest.exe' }
+const NATIVE: NativeRow[] = [
   SELF,
   {
     pid: 100,
     ppid: 4,
     name: 'orca.exe',
     commandLine: '"C:/a b/orca.exe" --x',
-    memory: 4096,
     creationTimeMs: 1_700_000_000_000
   }
 ]
+
+/**
+ * The vendored wrapper, faithfully: one `requestInProgress` latch over a shared
+ * callback queue, resolved asynchronously. A second caller that arrives while a
+ * request is in flight has its `flags` DISCARDED and is served the first
+ * caller's rows -- the defect this module's read gate has to exclude. A
+ * synchronous mock cannot express it, because nothing ever overlaps.
+ */
+let coalescingCalls: { flags: number }[] = []
+let maxConcurrentNativeCalls = 0
+
+function coalescingModule(): {
+  ProcessDataFlag: { None: number; Memory: number; CommandLine: number; CreationTime: number }
+  getAllProcesses: (cb: (rows: NativeRow[] | undefined) => void, flags?: number) => void
+} {
+  let requestInProgress = false
+  let outstanding = 0
+  const queue: ((rows: NativeRow[]) => void)[] = []
+  return {
+    ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
+    getAllProcesses: (cb, flags) => {
+      queue.push(cb)
+      if (requestInProgress) {
+        return
+      }
+      requestInProgress = true
+      coalescingCalls.push({ flags: flags ?? 0 })
+      outstanding += 1
+      maxConcurrentNativeCalls = Math.max(maxConcurrentNativeCalls, outstanding)
+      // The rows the addon would produce for exactly these flags.
+      const rows: NativeRow[] = NATIVE.map((row) =>
+        ((flags ?? 0) & 2) === 0 ? { pid: row.pid, ppid: row.ppid, name: row.name } : row
+      )
+      setTimeout(() => {
+        outstanding -= 1
+        while (queue.length) {
+          queue.splice(0).forEach((callback) => callback(rows))
+        }
+        requestInProgress = false
+      }, 0)
+    }
+  }
+}
+
+/** One instance for the whole test: the latch it models is module-global. */
+function installCoalescingModule(): void {
+  const native = coalescingModule()
+  __setWindowsProcessTreeLoaderForTests(() => native)
+}
 
 describe('windows process table', () => {
   let platform: PropertyDescriptor | undefined
 
   beforeEach(() => {
+    coalescingCalls = []
+    maxConcurrentNativeCalls = 0
     getAllProcesses.mockReset()
     getAllProcesses.mockImplementation((cb: (rows: unknown) => void) => cb(NATIVE))
     platform = Object.getOwnPropertyDescriptor(process, 'platform')
@@ -90,19 +150,51 @@ describe('windows process table', () => {
     expect(rows.every((row) => !('command' in row))).toBe(true)
   })
 
-  it('single-flights each flag set independently', async () => {
+  it('collapses a 32-wide burst into one scan per flag set', async () => {
+    installCoalescingModule()
     const [identity, detailed] = await Promise.all([
       Promise.all(Array.from({ length: 16 }, () => readWindowsProcessIdentityTable())),
       Promise.all(Array.from({ length: 16 }, () => readWindowsProcessTable()))
     ])
-    // A 32-wide teardown still collapses to one scan per flag set, not per caller.
-    expect(getAllProcesses).toHaveBeenCalledTimes(2)
-    expect(getAllProcesses.mock.calls.map((call) => call[1]).sort()).toEqual([
+    expect(coalescingCalls.map((call) => call.flags).sort()).toEqual([
       IDENTITY_FLAGS,
       DETAILED_FLAGS
     ])
     expect(identity).toHaveLength(16)
     expect(detailed).toHaveLength(16)
+  })
+
+  // The npm wrapper coalesces rather than queues: a second concurrent caller's
+  // flags are discarded and it is served the first caller's rows. Overlapping an
+  // identity read with a detailed one therefore used to hand agent recognition a
+  // table with every command line empty.
+  async function expectEachViewGotItsOwnFlags(
+    identity: Promise<WindowsProcessIdentityRow[]>,
+    detailed: Promise<WindowsProcessRow[]>
+  ): Promise<void> {
+    const [identityRows, detailedRows] = await Promise.all([identity, detailed])
+    expect(detailedRows.some((row) => row.command === '"C:/a b/orca.exe" --x')).toBe(true)
+    expect(identityRows.every((row) => !('command' in row))).toBe(true)
+    // Two calls, each with its own flags, and never two at once.
+    expect(coalescingCalls.map((call) => call.flags).sort()).toEqual([
+      IDENTITY_FLAGS,
+      DETAILED_FLAGS
+    ])
+    expect(maxConcurrentNativeCalls).toBe(1)
+  }
+
+  it('gives each flag set its own data when the identity read is issued first', async () => {
+    installCoalescingModule()
+    const identity = readWindowsProcessIdentityTableFresh()
+    const detailed = readWindowsProcessTableFresh()
+    await expectEachViewGotItsOwnFlags(identity, detailed)
+  })
+
+  it('gives each flag set its own data when the detailed read is issued first', async () => {
+    installCoalescingModule()
+    const detailed = readWindowsProcessTableFresh()
+    const identity = readWindowsProcessIdentityTableFresh()
+    await expectEachViewGotItsOwnFlags(identity, detailed)
   })
 
   it('does not serve one flag set from the other cache', async () => {
@@ -245,9 +337,12 @@ describe('PowerShell fallback when the native binding is absent', () => {
     // With no binding there is only one scan to run and it costs ~1.4s and a
     // powershell.exe, so the cheap view must ride it rather than fork a second.
     __setWindowsProcessTreeLoaderForTests(() => null)
+    // Projected, not merely widened: an identity row carries no command line on
+    // any host, so nothing can come to depend on the fallback happening to have
+    // one.
     await expect(readWindowsProcessIdentityTableFresh()).resolves.toEqual([
-      { pid: process.pid, ppid: 0, name: 'node.exe', command: 'node relay.js' },
-      { pid: 200, ppid: process.pid, name: 'claude.exe', command: 'claude --resume' }
+      { pid: process.pid, ppid: 0, name: 'node.exe' },
+      { pid: 200, ppid: process.pid, name: 'claude.exe' }
     ])
     await readWindowsProcessTable()
     expect(cimScan).toHaveBeenCalledTimes(1)

@@ -15,7 +15,10 @@ import type {
 } from '../../shared/agent-session-lease-adjudication'
 import type { AgentSessionProcessIdentity } from '../../shared/agent-session-record'
 import { runProcess } from '../../shared/child-process/run-process'
-import { readWindowsProcessIdentityTableFresh } from '../windows/windows-process-table'
+import {
+  isWindowsProcessStartTimeAvailable,
+  readWindowsProcessIdentityTableFresh
+} from '../windows/windows-process-table'
 
 /** Start times drift by scheduler granularity and clock reads; compare with a tolerance. */
 export const PROCESS_START_TIME_TOLERANCE_MS = 2_000
@@ -111,6 +114,11 @@ async function readDarwinProcessStartTimesMs(
 }
 
 async function readWindowsProcessStartTimeMs(pid: number): Promise<number | null> {
+  // No shipped addon build exposes the creation-time flag, so without this the
+  // whole table gets scanned to produce `null` every time.
+  if (!isWindowsProcessStartTimeAvailable()) {
+    return null
+  }
   try {
     // Identity flag set: only the creation time is read, so no command line is
     // worth a PEB read per process here.
