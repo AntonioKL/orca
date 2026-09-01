@@ -307,9 +307,8 @@ private final class MobileWebSchemeHandler: NSObject, WKURLSchemeHandler {
         request.value(forHTTPHeaderField: "Range") == nil,
         let url = request.url,
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-        isAllowedMobileWebOriginForSession(url, sessionId: url.host ?? ""),
-        let sessionId = url.host,
-        sessionId == activeSessionId,
+        let sessionId = activeSessionId,
+        isAllowedMobileWebOriginForSession(url, sessionId: sessionId),
         url.query == nil,
         url.fragment == nil,
         !components.percentEncodedPath.contains("%")
