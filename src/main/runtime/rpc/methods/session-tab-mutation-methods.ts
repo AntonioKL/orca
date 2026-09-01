@@ -38,7 +38,12 @@ export const SESSION_TAB_MUTATION_METHODS: RpcAnyMethod[] = [
           })
         }
       )
-      return projectSessionTabsForMutationClient(result, clientKind, clientCapabilities)
+      return projectSessionTabsForMutationClient(
+        result,
+        clientKind,
+        clientCapabilities,
+        clientKind === 'mobile' ? isStructuredNativeChatEnabled(runtime) : undefined
+      )
     }
   }),
   defineMethod({
