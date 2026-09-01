@@ -28,7 +28,7 @@ export type SshPtyAttachResult = {
   sourceActivationLease?: SshPtyReceivingActivationLease
 }
 
-type SshPtyReattachResult = PtySpawnResult & {
+export type SshPtyReattachResult = PtySpawnResult & {
   sourceRecovery?: PtySourceRecoveryResult
   sourceActivationLease?: SshPtyReceivingActivationLease
 }
@@ -172,6 +172,8 @@ function sameSourceActivation(
 
 export type { PtySourceRecoveryRequest }
 
+const SSH_PTY_RESTORE_REQUIRED_ATTACH_ATTEMPTS = 3
+
 export async function reattachSshPtySession(args: {
   mux: SshChannelMultiplexer
   connectionId: string
@@ -189,27 +191,51 @@ export async function reattachSshPtySession(args: {
     // Why: expected pane identity prevents a reused relay id from attaching the wrong shell.
     const expectedPaneKey = args.options.paneKey ?? args.options.env?.ORCA_PANE_KEY
     const expectedTabId = args.options.tabId ?? args.options.env?.ORCA_TAB_ID
-    const attachResult = await requestSshPtyAttach({
-      mux: args.mux,
-      relayPtyId: relaySessionId,
-      params: {
-        id: relaySessionId,
-        cols: args.options.cols,
-        rows: args.options.rows,
-        suppressReplayNotification: true,
-        // A reattach always paints into a NEW terminal: a reconnect bumps tab.generation, which is
-        // the pane's React key, so TerminalPane remounts and the old xterm is disposed with its
-        // buffer. Without this the relay sees a delivery still open under our unchanged client id,
-        // answers "you already have this", and the pane stays blank until new output arrives.
-        requireReplay: true,
-        ...(expectedPaneKey ? { expectedPaneKey } : {}),
-        ...(expectedTabId ? { expectedTabId } : {})
-      },
-      installSourceActivation: args.installSourceActivation,
-      rememberPtyIncarnation: args.rememberPtyIncarnation
-    })
+    let attachResult: SshPtyAttachResult
+    for (let attempt = 1; ; attempt += 1) {
+      attachResult = await requestSshPtyAttach({
+        mux: args.mux,
+        relayPtyId: relaySessionId,
+        params: {
+          id: relaySessionId,
+          cols: args.options.cols,
+          rows: args.options.rows,
+          suppressReplayNotification: true,
+          // A reattach always paints into a NEW terminal: a reconnect bumps tab.generation, which is
+          // the pane's React key, so TerminalPane remounts and the old xterm is disposed with its
+          // buffer. Without this the relay sees a delivery still open under our unchanged client id,
+          // answers "you already have this", and the pane stays blank until new output arrives.
+          requireReplay: true,
+          ...(expectedPaneKey ? { expectedPaneKey } : {}),
+          ...(expectedTabId ? { expectedTabId } : {})
+        },
+        installSourceActivation: args.installSourceActivation,
+        rememberPtyIncarnation: args.rememberPtyIncarnation
+      })
+      if (
+        attachResult.sourceRecovery?.status !== 'restoreRequired' ||
+        attempt >= SSH_PTY_RESTORE_REQUIRED_ATTACH_ATTEMPTS
+      ) {
+        break
+      }
+      // restoreRequired proves the PTY is live and only its delivery was retired, so retrying the
+      // attach is the repair. Cancel the provisional delivery first, or the retry races the lease
+      // it is meant to replace; if cancellation cannot be confirmed, stop rather than stack leases.
+      const staleDeliveryCanceled = attachResult.sourceActivationLease
+        ? await attachResult.sourceActivationLease.rollback()
+        : true
+      if (!staleDeliveryCanceled) {
+        console.warn(
+          `[ssh-pty] pty.attach for ${args.sessionId} could not confirm stale delivery cancellation; failing closed`
+        )
+        break
+      }
+      console.warn(
+        `[ssh-pty] pty.attach for ${args.sessionId} requires restore (${attachResult.sourceRecovery.reason}), retrying attach ${attempt + 1}/${SSH_PTY_RESTORE_REQUIRED_ATTACH_ATTEMPTS}`
+      )
+    }
     console.warn(
-      `[ssh-pty] pty.attach succeeded for ${args.sessionId}, replay=${!!attachResult.replay}`
+      `[ssh-pty] pty.attach ${attachResult.sourceRecovery?.status === 'restoreRequired' ? 'still requires restore' : 'succeeded'} for ${args.sessionId}, replay=${!!attachResult.replay}`
     )
     return {
       id: toAppSshPtyId(args.connectionId, relaySessionId),
@@ -265,41 +291,5 @@ export async function reattachSshPtySessionWithExitFence(
     throw error
   } finally {
     args.exitRaceTracker.finish(operation)
-  }
-}
-
-/**
- * The full reattach path a spawn takes when it carries a sessionId: fence the
- * exit race, reject a session the relay can no longer restore, and commit or
- * roll back the source-activation lease.
- *
- * Lives here rather than in SshPtyProvider.spawn so the lease's commit and
- * rollback stay in one place — a caller that only wrapped the fence could
- * return without committing and silently leak the activation.
- */
-export async function reattachSshPtySessionForSpawn(
-  args: Parameters<typeof reattachSshPtySessionWithExitFence>[0] & {
-    acceptLivePty: (relayPtyId: string) => void
-  }
-): Promise<PtySpawnResult> {
-  let result: SshPtyReattachResult | undefined
-  try {
-    result = await reattachSshPtySessionWithExitFence(args)
-    if (result.sourceRecovery?.status === 'restoreRequired') {
-      throw new Error(
-        `${SSH_SESSION_EXPIRED_ERROR}: ${toRelaySshPtyId(args.connectionId, result.id)}`
-      )
-    }
-    args.acceptLivePty(result.id)
-    result.sourceActivationLease?.commit()
-    const {
-      sourceActivationLease: _lease,
-      sourceRecovery: _sourceRecovery,
-      ...spawnResult
-    } = result
-    return spawnResult
-  } catch (error) {
-    result?.sourceActivationLease?.rollback()
-    throw error
   }
 }
