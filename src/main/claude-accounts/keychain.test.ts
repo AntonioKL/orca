@@ -174,9 +174,10 @@ describe('Claude Keychain credentials', () => {
     ).resolves.toBeUndefined()
 
     expect(warn).toHaveBeenCalledWith(
-      '[claude-runtime-auth] Failed to refresh legacy shared Keychain:',
-      expect.any(Error)
+      '[claude-runtime-auth] Failed to refresh legacy shared Keychain',
+      { code: undefined, stderr: 'legacy write failed' }
     )
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('credentials-json')
     warn.mockRestore()
   })
 

@@ -21,6 +21,7 @@ type MigrationOptions = {
   sharedAuthPath: string
   metadataDir: string
   readLegacyKeychain?: () => Promise<string | null>
+  readLegacyOauthAccount?: () => Promise<unknown> | unknown
   readManagedCredentials: (account: ClaudeManagedAccount) => Promise<string | null>
   writeManagedCredentials: (account: ClaudeManagedAccount, contents: string) => Promise<void>
 }
@@ -55,7 +56,7 @@ export async function migrateLegacySharedClaudeAuth(
     return stamp(markerPath, 'no-shared-auth')
   }
 
-  const identity = parseIdentity(shared)
+  const identity = await parseIdentity(shared, options.readLegacyOauthAccount)
   if (!identity) {
     return 'unavailable'
   }
@@ -87,9 +88,10 @@ export async function migrateLegacySharedClaudeAuth(
   return stamp(markerPath, existing ? 'already-present' : 'migrated', account.id)
 }
 
-function parseIdentity(
-  contents: string
-): { email: string | null; organizationUuid: string | null } | null {
+async function parseIdentity(
+  contents: string,
+  readOauthAccount?: () => Promise<unknown> | unknown
+): Promise<{ email: string | null; organizationUuid: string | null } | null> {
   try {
     const root = JSON.parse(contents) as Record<string, unknown>
     const oauth = root.claudeAiOauth
@@ -100,7 +102,27 @@ function parseIdentity(
     const email = typeof value.email === 'string' ? value.email.trim().toLowerCase() : null
     const organizationUuid =
       typeof value.organizationUuid === 'string' ? value.organizationUuid.trim() : null
-    return email ? { email, organizationUuid } : null
+    if (email) {
+      return { email, organizationUuid }
+    }
+    const runtime = readOauthAccount ? await readOauthAccount() : null
+    if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) {
+      return null
+    }
+    const runtimeValue = runtime as Record<string, unknown>
+    const runtimeEmail =
+      typeof runtimeValue.emailAddress === 'string'
+        ? runtimeValue.emailAddress.trim().toLowerCase()
+        : typeof runtimeValue.email === 'string'
+          ? runtimeValue.email.trim().toLowerCase()
+          : null
+    const runtimeOrg =
+      typeof runtimeValue.organizationUuid === 'string'
+        ? runtimeValue.organizationUuid.trim()
+        : typeof runtimeValue.organizationId === 'string'
+          ? runtimeValue.organizationId.trim()
+          : null
+    return runtimeEmail ? { email: runtimeEmail, organizationUuid: runtimeOrg } : null
   } catch {
     return null
   }

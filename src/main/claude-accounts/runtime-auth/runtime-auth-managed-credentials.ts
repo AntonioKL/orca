@@ -4,7 +4,7 @@ import { parseWslUncPath } from '../../../shared/wsl-paths'
 import { toWindowsWslPath } from '../../wsl'
 import { runWslProcess } from '../../wsl/wsl-runner'
 import {
-  assertOwnedClaudeManagedAuthPath,
+  ClaudeManagedAuthTemporarilyUnavailableError,
   readClaudeManagedAuthFile,
   resolveClaudeManagedAuthOwnership,
   resolveOwnedClaudeManagedAuthPath,
@@ -142,7 +142,7 @@ export class ClaudeRuntimeAuthManagedCredentials extends ClaudeRuntimeAuthCreden
     try {
       const verdict = resolveClaudeManagedAuthOwnership(account.id, account.managedAuthPath)
       if (verdict.kind === 'indeterminate') {
-        return assertOwnedClaudeManagedAuthPath(account.id, account.managedAuthPath)
+        throw new ClaudeManagedAuthTemporarilyUnavailableError({ cause: verdict.error })
       }
       return verdict.kind === 'owned'
         ? verdict.authPath
@@ -150,7 +150,7 @@ export class ClaudeRuntimeAuthManagedCredentials extends ClaudeRuntimeAuthCreden
             adoptLegacyMarker: true
           })
     } catch (error) {
-      if (error instanceof Error && error.message.includes('temporarily unavailable')) {
+      if (error instanceof ClaudeManagedAuthTemporarilyUnavailableError) {
         throw error
       }
       return null

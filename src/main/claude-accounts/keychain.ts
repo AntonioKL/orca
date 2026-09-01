@@ -42,7 +42,9 @@ export async function writeActiveClaudeKeychainCredentialsForRuntime(
   const user = getKeychainUser()
   const scopedService = getActiveClaudeService(configDir)
   await writeKeychainPassword(scopedService, user, contents)
-  await syncLegacySharedClaudeKeychainForPre21Cli(contents, user)
+  if (scopedService !== ACTIVE_CLAUDE_SERVICE) {
+    await syncLegacySharedClaudeKeychainForPre21Cli(contents, user)
+  }
 }
 
 async function syncLegacySharedClaudeKeychainForPre21Cli(
@@ -53,7 +55,13 @@ async function syncLegacySharedClaudeKeychainForPre21Cli(
     await writeKeychainPassword(ACTIVE_CLAUDE_SERVICE, user, contents)
   } catch (error) {
     // Why: pre-2.1 CLIs only read this shared service; retire it when Step 2 isolates accounts.
-    console.warn('[claude-runtime-auth] Failed to refresh legacy shared Keychain:', error)
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
+    const stderr =
+      error && typeof error === 'object' && 'stderr' in error ? error.stderr : undefined
+    console.warn('[claude-runtime-auth] Failed to refresh legacy shared Keychain', {
+      code: typeof code === 'string' ? code : undefined,
+      stderr: typeof stderr === 'string' ? stderr.slice(0, 200) : undefined
+    })
   }
 }
 
