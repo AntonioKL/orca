@@ -13,6 +13,7 @@ import {
 import { ptyIncarnationById, ptyOwnership } from '../provider/ownership-state'
 import { isPtyAlreadyGoneError } from '../provider/liveness'
 import { clearProviderPtyState } from '../provider/state-cleanup'
+import { deriveStablePaneFreshSpawnOptions } from './relay-pty-mint-epoch'
 
 export type StablePaneOwner = {
   handle?: string
@@ -287,7 +288,18 @@ export async function spawnForStablePane(
       return attached
     }
   }
-  const result = await args.provider.spawn(args.spawnOptions)
+  const freshSpawn = args.owner
+    ? await deriveStablePaneFreshSpawnOptions({
+        provider: args.provider,
+        ownerPtyId: args.owner.ptyId,
+        connectionId: args.connectionId,
+        spawnOptions: args.spawnOptions
+      })
+    : { options: args.spawnOptions, agentResumeDeclined: false }
+  const providerResult = await args.provider.spawn(freshSpawn.options)
+  const result = freshSpawn.agentResumeDeclined
+    ? { ...providerResult, agentResumeUnavailable: true as const }
+    : providerResult
   args.onFreshSpawn?.(result)
   return { result, owner: null }
 }

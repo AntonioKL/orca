@@ -2289,7 +2289,10 @@ export function createRemoteRuntimePtyTransport(
         return {
           id: remotePtyId,
           replay: '',
-          ...(createdTerminal.isReattach === true ? { isReattach: true } : {})
+          ...(createdTerminal.isReattach === true ? { isReattach: true } : {}),
+          ...(createdTerminal.agentResumeUnavailable
+            ? { agentResumeUnavailable: true as const }
+            : {})
         } satisfies PtyConnectResult
       } catch (error) {
         if (!destroyed && lifecycleEpoch === connectLifecycleEpoch) {
