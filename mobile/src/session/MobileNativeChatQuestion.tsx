@@ -2,7 +2,11 @@ import { useMemo, useRef, useState } from 'react'
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { ArrowUp, Check, CircleHelp } from 'lucide-react-native'
 import { colors, radii, spacing, typography } from '../theme/mobile-theme'
-import { formatQuestionAnswer, type MobileChatQuestion } from './mobile-native-chat-question'
+import {
+  formatQuestionAnswer,
+  formatQuestionFreeTextAnswer,
+  type MobileChatQuestion
+} from './mobile-native-chat-question'
 
 type Props = {
   question: MobileChatQuestion
@@ -59,8 +63,7 @@ export function MobileNativeChatQuestion({ question, onAnswer }: Props): React.J
     if (trimmedFreeText.length === 0) {
       return
     }
-    // Free text is an unknown entry; formatQuestionAnswer passes it through.
-    if (await sendAnswer(formatQuestionAnswer(question, [trimmedFreeText]))) {
+    if (await sendAnswer(formatQuestionFreeTextAnswer(question, trimmedFreeText))) {
       setFreeText('')
     }
   }
@@ -95,7 +98,9 @@ export function MobileNativeChatQuestion({ question, onAnswer }: Props): React.J
                   isSelected && styles.optionSelected,
                   pressed && styles.pressed
                 ]}
-                onPress={() => (question.multiSelect ? toggle(label) : answerSingle(label, optIndex))}
+                onPress={() =>
+                  question.multiSelect ? toggle(label) : answerSingle(label, optIndex)
+                }
               >
                 {question.multiSelect ? (
                   <View style={[styles.checkbox, isSelected && styles.checkboxOn]}>

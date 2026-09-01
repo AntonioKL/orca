@@ -88,8 +88,12 @@ export function useMobileStructuredNativeChatSendBridge(args: {
     ]
   )
   const send = useCallback(
-    async (text: string, images?: string[], deadline?: number, attachments?: readonly StructuredNativeChatAttachment[]) =>
-      (await sendWithOutcome(text, images, deadline, attachments)) !== 'rejected',
+    async (
+      text: string,
+      images?: string[],
+      deadline?: number,
+      attachments?: readonly StructuredNativeChatAttachment[]
+    ) => (await sendWithOutcome(text, images, deadline, attachments)) !== 'rejected',
     [sendWithOutcome]
   )
   return { send, sendWithOutcome }

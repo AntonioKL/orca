@@ -1,9 +1,14 @@
 import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentJournalRenderItem, AgentJournalResolution } from '../../../src/shared/agent-session-journal-types'
+import type {
+  AgentJournalRenderItem,
+  AgentJournalResolution
+} from '../../../src/shared/agent-session-journal-types'
 import type { AgentSessionSubscribeEvent } from '../../../src/shared/agent-session-wire'
 import type { RpcClient } from '../transport/rpc-client'
+import { markRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
+import { formatQuestionFreeTextAnswer } from './mobile-native-chat-question'
 import { useMobileStructuredAgentSession } from './use-mobile-structured-agent-session'
 
 function ok(result: unknown) {
@@ -63,6 +68,10 @@ function approvalItem(): AgentJournalRenderItem {
   }
 }
 
+function approvalItemWithIdentity(itemId: string, revision: number): AgentJournalRenderItem {
+  return { ...approvalItem(), itemId, revision }
+}
+
 function questionItem(): AgentJournalRenderItem {
   return {
     itemId: 'question-1',
@@ -82,75 +91,105 @@ function questionItem(): AgentJournalRenderItem {
   }
 }
 
+function questionItemWithIdentity(itemId: string, revision: number): AgentJournalRenderItem {
+  return { ...questionItem(), itemId, revision }
+}
+
+function runningStatusItem(): AgentJournalRenderItem {
+  return {
+    itemId: 'status-1',
+    revision: 1,
+    sequence: 3,
+    observedAt: 14,
+    body: {
+      kind: 'status',
+      text: 'Working',
+      turnLifecycle: { turnId: 'turn-1', state: 'running' }
+    }
+  }
+}
+
+function defaultSendRequest(method: string, params?: Record<string, unknown>) {
+  if (method === 'agentSession.send') {
+    return ok({
+      ok: true,
+      replayed: false,
+      fence: 3,
+      cursor: { epoch: 'epoch-1', sequence: 1 },
+      value: { turnId: 'turn-1' }
+    })
+  }
+  if (method === 'agentSession.options') {
+    return ok({
+      models: [
+        {
+          id: 'gpt-fast',
+          label: 'GPT Fast',
+          isDefault: true,
+          defaultEffort: 'low',
+          efforts: [
+            { value: 'low', label: 'Low' },
+            { value: 'high', label: 'High' }
+          ]
+        },
+        {
+          id: 'gpt-slow',
+          label: 'GPT Slow',
+          isDefault: false,
+          defaultEffort: 'high',
+          efforts: [
+            { value: 'low', label: 'Low' },
+            { value: 'high', label: 'High' }
+          ]
+        }
+      ],
+      current: {
+        model: 'gpt-fast',
+        effort: 'low'
+      }
+    })
+  }
+  if (method === 'agentSession.setOption') {
+    return ok({
+      ok: true,
+      replayed: false,
+      fence: 3,
+      cursor: { epoch: 'epoch-1', sequence: 2 },
+      value: {
+        key: 'model',
+        value: 'gpt-fast',
+        options: { model: 'gpt-fast' }
+      }
+    })
+  }
+  if (method === 'agentSession.respondToApproval' || method === 'agentSession.respondToQuestion') {
+    return ok({
+      ok: true,
+      replayed: false,
+      fence: 3,
+      cursor: { epoch: 'epoch-1', sequence: 3 },
+      value: {
+        itemId: String(params?.itemId ?? ''),
+        revision: 2,
+        resolution: {
+          state: 'resolved',
+          selectedOptionId: String(params?.optionId ?? ''),
+          resolvedBy: 'mobile',
+          resolvedAt: 123
+        }
+      }
+    })
+  }
+  return ok({})
+}
+
 describe('useMobileStructuredAgentSession', () => {
   let renderer: ReactTestRenderer | null = null
   let hook: ReturnType<typeof useMobileStructuredAgentSession> | null = null
   let listener: ((value: unknown) => void) | null = null
   const onSendError = vi.fn()
   const unsubscribe = vi.fn()
-  const sendRequest = vi.fn(async (method: string, params?: Record<string, unknown>) => {
-    if (method === 'agentSession.send') {
-      return ok({
-        ok: true,
-        replayed: false,
-        fence: 3,
-        cursor: { epoch: 'epoch-1', sequence: 1 },
-        value: { turnId: 'turn-1' }
-      })
-    }
-    if (method === 'agentSession.options') {
-      return ok({
-        models: [
-          {
-            id: 'gpt-fast',
-            label: 'GPT Fast',
-            isDefault: true,
-            defaultEffort: 'low',
-            efforts: [
-              { value: 'low', label: 'Low' },
-              { value: 'high', label: 'High' }
-            ]
-          }
-        ],
-        current: {
-          model: 'gpt-fast',
-          effort: 'low'
-        }
-      })
-    }
-    if (method === 'agentSession.setOption') {
-      return ok({
-        ok: true,
-        replayed: false,
-        fence: 3,
-        cursor: { epoch: 'epoch-1', sequence: 2 },
-        value: {
-          key: 'model',
-          value: 'gpt-fast',
-          options: { model: 'gpt-fast' }
-        }
-      })
-    }
-    if (method === 'agentSession.respondToApproval' || method === 'agentSession.respondToQuestion') {
-      return ok({
-        ok: true,
-        replayed: false,
-        fence: 3,
-        cursor: { epoch: 'epoch-1', sequence: 3 },
-        value: {
-          itemId: String(params?.itemId ?? ''),
-          revision: 2,
-          resolution: {
-            state: 'resolved',
-            selectedOptionId: String(params?.optionId ?? ''),
-            resolvedBy: 'mobile',
-            resolvedAt: 123
-          }
-        }
-      })
-    }
-    return ok({})
-  })
+  const sendRequest = vi.fn(defaultSendRequest)
   const subscribe = vi.fn((_method: string, _params: unknown, onData: (value: unknown) => void) => {
     listener = onData
     return unsubscribe
@@ -179,6 +218,7 @@ describe('useMobileStructuredAgentSession', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    sendRequest.mockImplementation(defaultSendRequest)
     listener = null
   })
 
@@ -253,13 +293,15 @@ describe('useMobileStructuredAgentSession', () => {
     await vi.waitFor(() => expect(listener).toEqual(expect.any(Function)))
     act(() => listener?.(snapshotEvent(3)))
     act(() => listener?.(snapshotEvent(3)))
-    act(() => listener?.({
-      ...snapshotEvent(3),
-      page: {
-        ...snapshotEvent(3).page,
-        items: [approvalItem(), questionItem()]
-      }
-    }))
+    act(() =>
+      listener?.({
+        ...snapshotEvent(3),
+        page: {
+          ...snapshotEvent(3).page,
+          items: [approvalItem(), questionItem()]
+        }
+      })
+    )
 
     if (!hook) {
       throw new Error('hook not ready')
@@ -273,14 +315,15 @@ describe('useMobileStructuredAgentSession', () => {
       title: 'Allow Bash?',
       detail: 'rm -rf build',
       options: [
-        { label: 'Allow once', send: 'allow-once' },
-        { label: 'Deny', send: 'deny' }
+        { label: 'Allow once', send: expect.any(String) },
+        { label: 'Deny', send: expect.any(String) }
       ]
     })
     expect(hook.question).toMatchObject({
       question: 'Pick destination',
       allowOther: true,
-      optionTokens: ['choice-a', 'choice-b']
+      optionTokens: [expect.any(String), expect.any(String)],
+      freeTextToken: expect.any(String)
     })
     expect(hook.optionSurface.getSnapshot()).toEqual(hook.optionSnapshot)
 
@@ -303,7 +346,7 @@ describe('useMobileStructuredAgentSession', () => {
     )
 
     await act(async () => {
-      expect(await hook.respondPermission('allow-once')).toBe(true)
+      expect(await hook.respondPermission(hook.permission!.options[0]!.send)).toBe(true)
     })
     expect(sendRequest).toHaveBeenCalledWith(
       'agentSession.respondToApproval',
@@ -319,7 +362,9 @@ describe('useMobileStructuredAgentSession', () => {
     )
 
     await act(async () => {
-      expect(await hook.respondQuestion('custom answer')).toBe(true)
+      expect(
+        await hook.respondQuestion(formatQuestionFreeTextAnswer(hook.question!, 'custom answer'))
+      ).toBe(true)
     })
     expect(sendRequest).toHaveBeenCalledWith(
       'agentSession.respondToQuestion',
@@ -370,6 +415,200 @@ describe('useMobileStructuredAgentSession', () => {
       }),
       expect.any(Object)
     )
+  })
+
+  it('rejects preview-only structured image URIs instead of sending them as host paths', async () => {
+    act(() => {
+      renderer = create(createElement(Harness))
+    })
+    await vi.waitFor(() => expect(listener).toEqual(expect.any(Function)))
+    act(() => listener?.(snapshotEvent(3)))
+    sendRequest.mockClear()
+
+    let outcome: 'accepted' | 'unknown' | 'rejected' = 'accepted'
+    await act(async () => {
+      outcome = await hook!.sendWithOutcome('look at this', ['file:///a.jpg'])
+    })
+
+    expect(outcome).toBe('rejected')
+    expect(onSendError).toHaveBeenCalledWith('Message not sent')
+    expect(sendRequest).not.toHaveBeenCalledWith(
+      'agentSession.send',
+      expect.objectContaining({
+        body: expect.objectContaining({
+          blocks: expect.arrayContaining([{ type: 'image-ref', path: 'file:///a.jpg' }])
+        })
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('answers the prompt captured by a structured card after a newer prompt lands', async () => {
+    act(() => {
+      renderer = create(createElement(Harness))
+    })
+    await vi.waitFor(() => expect(listener).toEqual(expect.any(Function)))
+    act(() =>
+      listener?.({
+        ...snapshotEvent(3),
+        page: {
+          ...snapshotEvent(3).page,
+          items: [
+            approvalItemWithIdentity('approval-old', 4),
+            questionItemWithIdentity('question-old', 8)
+          ]
+        }
+      })
+    )
+    const approvalToken = hook!.permission!.options[0]!.send
+    const questionToken = hook!.question!.optionTokens[0]!
+    const freeText = formatQuestionFreeTextAnswer(hook!.question!, 'old answer')
+
+    act(() =>
+      listener?.({
+        ...snapshotEvent(3),
+        page: {
+          ...snapshotEvent(3).page,
+          items: [
+            approvalItemWithIdentity('approval-new', 9),
+            questionItemWithIdentity('question-new', 10)
+          ]
+        }
+      })
+    )
+    sendRequest.mockClear()
+
+    await act(async () => {
+      expect(await hook!.respondPermission(approvalToken)).toBe(true)
+      expect(await hook!.respondQuestion(questionToken)).toBe(true)
+      expect(await hook!.respondQuestion(freeText)).toBe(true)
+    })
+
+    expect(sendRequest).toHaveBeenCalledWith(
+      'agentSession.respondToApproval',
+      expect.objectContaining({
+        itemId: 'approval-old',
+        expectedRevision: 4,
+        optionId: 'allow-once'
+      }),
+      expect.any(Object)
+    )
+    expect(sendRequest).toHaveBeenCalledWith(
+      'agentSession.respondToQuestion',
+      expect.objectContaining({
+        itemId: 'question-old',
+        expectedRevision: 8,
+        optionId: 'choice-a'
+      }),
+      expect.any(Object)
+    )
+    expect(sendRequest).toHaveBeenCalledWith(
+      'agentSession.respondToQuestion',
+      expect.objectContaining({
+        itemId: 'question-old',
+        expectedRevision: 8,
+        optionId: `${encodeURIComponent('free-q')}:${encodeURIComponent('old answer')}`
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('surfaces unknown structured prompt responses as unconfirmed', async () => {
+    act(() => {
+      renderer = create(createElement(Harness))
+    })
+    await vi.waitFor(() => expect(listener).toEqual(expect.any(Function)))
+    act(() =>
+      listener?.({
+        ...snapshotEvent(3),
+        page: {
+          ...snapshotEvent(3).page,
+          items: [approvalItem(), questionItem()]
+        }
+      })
+    )
+    sendRequest.mockImplementation(async (method, params) => {
+      if (method === 'agentSession.respondToApproval') {
+        throw markRpcDeliveryUnknown(new Error('Connection closed'))
+      }
+      return defaultSendRequest(method, params)
+    })
+    onSendError.mockClear()
+
+    await act(async () => {
+      expect(await hook!.respondPermission(hook!.permission!.options[0]!.send)).toBe(false)
+    })
+    expect(onSendError).toHaveBeenCalledWith('Response unconfirmed — check chat before retrying')
+
+    sendRequest.mockImplementation(async (method, params) => {
+      if (method === 'agentSession.respondToQuestion') {
+        throw markRpcDeliveryUnknown(new Error('Connection closed'))
+      }
+      return defaultSendRequest(method, params)
+    })
+    onSendError.mockClear()
+
+    await act(async () => {
+      expect(await hook!.respondQuestion(hook!.question!.optionTokens[0]!)).toBe(false)
+    })
+    expect(onSendError).toHaveBeenCalledWith('Answer unconfirmed — check chat before retrying')
+  })
+
+  it('keeps structured option changes dispatched after unknown delivery', async () => {
+    act(() => {
+      renderer = create(createElement(Harness))
+    })
+    await vi.waitFor(() => expect(listener).toEqual(expect.any(Function)))
+    act(() => listener?.(snapshotEvent(3)))
+    await vi.waitFor(() => expect(hook!.optionSnapshot.length).toBeGreaterThan(0))
+    sendRequest.mockImplementation(async (method, params) => {
+      if (method === 'agentSession.setOption') {
+        throw markRpcDeliveryUnknown(new Error('Connection closed'))
+      }
+      return defaultSendRequest(method, params)
+    })
+    onSendError.mockClear()
+
+    await act(async () => {
+      expect(await hook!.setStructuredOption('model', 'gpt-slow')).toBe(true)
+    })
+
+    const model = hook!.optionSnapshot.find((descriptor) => descriptor.id === 'model')
+    expect(model).toMatchObject({
+      valueSource: 'dispatched',
+      kind: expect.objectContaining({ currentValue: 'gpt-slow' })
+    })
+    expect(onSendError).not.toHaveBeenCalled()
+  })
+
+  it('reports structured Stop as unconfirmed after unknown delivery', async () => {
+    act(() => {
+      renderer = create(createElement(Harness))
+    })
+    await vi.waitFor(() => expect(listener).toEqual(expect.any(Function)))
+    act(() =>
+      listener?.({
+        ...snapshotEvent(3),
+        page: {
+          ...snapshotEvent(3).page,
+          items: [runningStatusItem()]
+        }
+      })
+    )
+    sendRequest.mockImplementation(async (method, params) => {
+      if (method === 'agentSession.cancel') {
+        throw markRpcDeliveryUnknown(new Error('Connection closed'))
+      }
+      return defaultSendRequest(method, params)
+    })
+    onSendError.mockClear()
+
+    await act(async () => {
+      hook!.cancel()
+      await Promise.resolve()
+    })
+
+    expect(onSendError).toHaveBeenCalledWith('Stop unconfirmed — check chat before retrying')
   })
 
   it('releases a landed hold when the structured tab unmounts', async () => {

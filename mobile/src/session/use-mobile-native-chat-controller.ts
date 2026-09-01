@@ -1,9 +1,7 @@
-import { useCallback, useLayoutEffect, useRef, type MutableRefObject } from 'react'
-import { encodeNativeChatTranscriptIdentity } from '../../../src/shared/native-chat-transcript-retention'
-import { useMobileSessionViewMode } from './use-mobile-session-view-mode'
+import { useLayoutEffect, useRef, type MutableRefObject } from 'react'
 import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState } from '../transport/types'
-import { type MobileNativeChatTab, resolveMobileNativeChat } from './mobile-native-chat-eligibility'
+import type { MobileNativeChatTab } from './mobile-native-chat-eligibility'
 import { useMobileNativeChatPermissionSend } from './mobile-native-chat-permission-send'
 import { useMobileNativeChatAnswerSend } from './use-mobile-native-chat-answer-send'
 import { useMobileNativeChatAskDismiss } from './use-mobile-native-chat-ask-dismiss'
@@ -11,10 +9,8 @@ import { useMobileNativeChatCancelAsk } from './use-mobile-native-chat-cancel-as
 import { useMobileNativeChatDrafts } from './use-mobile-native-chat-drafts'
 import { useMobileNativeChatFileSearch } from './use-mobile-native-chat-file-search'
 import { useMobileNativeChatMessageSend } from './use-mobile-native-chat-message-send'
-import { mobileNativeChatScopeKey } from './mobile-native-chat-scope-key'
 import { useMobileNativeChatSession } from './use-mobile-native-chat-session'
-import { useMobileNativeChatSessionOptions } from './use-mobile-native-chat-session-options'
-import type { MobileNativeChatSessionOptionsController } from './use-mobile-native-chat-session-options'
+import { useMobileNativeChatSessionOptionController } from './use-mobile-native-chat-session-option-controller'
 import { useMobileStructuredAgentSession } from './use-mobile-structured-agent-session'
 import { useMobileStructuredNativeChatSendBridge } from './use-mobile-structured-native-chat-send-bridge'
 import { useMobileNativeChatPrompts } from './use-mobile-native-chat-prompts'
@@ -22,6 +18,7 @@ import { useMobileNativeChatStop } from './use-mobile-native-chat-stop'
 import { useNativeChatAcceptedAction } from './use-native-chat-action-outcomes'
 import { useThrottledLatestValue } from './use-throttled-latest-value'
 import type { MobileNativeChatController } from './mobile-native-chat-controller-contract'
+import { useMobileNativeChatActiveResolution } from './use-mobile-native-chat-active-resolution'
 
 export type { MobileNativeChatController } from './mobile-native-chat-controller-contract'
 
@@ -60,37 +57,33 @@ export function useMobileNativeChatController(args: {
     onSendError,
     onSendResolved
   } = args
-  const { isTabChatView, toggleTabChatView } = useMobileSessionViewMode({ hostId, worktreeId })
-
-  const tabWantsChat =
-    activeSessionTab?.type === 'agent-session' ||
-    (activeSessionTabId ? isTabChatView(activeSessionTabId) : false)
-  const activeChatResolution =
-    activeSessionTab && activeSessionTabId && tabWantsChat
-      ? resolveMobileNativeChat(activeSessionTab, nativeChatTranscriptIsLocalReadable)
-      : null
-  const showNativeChat = activeChatResolution != null
-  const showNativeChatRef = useRef(showNativeChat)
-  const activeChatAgent = activeChatResolution?.agent ?? null
-  const activeChatAgentRef = useRef<string | null>(activeChatAgent)
-  useLayoutEffect(() => {
-    showNativeChatRef.current = showNativeChat
-    activeChatAgentRef.current = activeChatAgent
-  }, [activeChatAgent, showNativeChat])
-
-  const activeChatSessionId = activeChatResolution?.sessionId ?? null
-  const activeChatStructured =
-    activeChatResolution != null && activeSessionTab?.type === 'agent-session'
-  const routeKey = `${hostId}\0${worktreeId}\0${activeSessionTabId ?? ''}`
-  const streamIdentity = `${routeKey}\0${activeChatSessionId ?? ''}\0${activeHandleRef.current ?? ''}`
-  // Same chat, but keyed off the tab rather than the view-gated resolution:
-  // `streamIdentity` goes session-less the moment the user peeks at the terminal,
-  // and a scope that flips on a view toggle throws the gate's baseline away.
-  const streamScopeKey = `${routeKey}\0${activeChatSessionId ?? activeSessionTab?.agentStatus?.providerSession?.id ?? ''}\0${activeHandleRef.current ?? ''}`
+  const {
+    activeChatAgent,
+    activeChatAgentRef,
+    activeChatResolution,
+    activeChatSessionId,
+    activeChatStructured,
+    activeTabAgentWorking,
+    isTabChatView,
+    nativeChatStatus,
+    showNativeChat,
+    showNativeChatRef,
+    sourceIdentity,
+    streamIdentity,
+    streamScopeKey,
+    toggleTabChatView
+  } = useMobileNativeChatActiveResolution({
+    hostId,
+    worktreeId,
+    activeSessionTab,
+    activeSessionTabId,
+    activeHandleRef,
+    nativeChatTranscriptIsLocalReadable
+  })
 
   const legacyNativeChatSession = useMobileNativeChatSession({
     client,
-    sourceIdentity: encodeNativeChatTranscriptIdentity([hostId, worktreeId]),
+    sourceIdentity,
     agent: activeChatStructured ? null : (activeChatResolution?.agent ?? null),
     sessionId: activeChatStructured ? null : activeChatSessionId,
     transcriptPath: activeChatStructured ? null : (activeChatResolution?.transcriptPath ?? null)
@@ -133,10 +126,6 @@ export function useMobileNativeChatController(args: {
     transcriptSettled: nativeChatSession.status === 'ready'
   })
 
-  const activeTabStatus = activeSessionTab?.agentStatus
-  const activeTabAgentWorking =
-    activeTabStatus?.state === 'working' && activeTabStatus.workingMode !== 'monitoring'
-  const nativeChatStatus = activeChatResolution && !activeChatStructured ? activeTabStatus : null
   const nativeChatAgentWorking = activeChatStructured
     ? structuredNativeChat.isWorking
     : activeChatResolution != null && activeTabAgentWorking
@@ -268,33 +257,28 @@ export function useMobileNativeChatController(args: {
     onSendError
   })
 
-  // Bring the terminal view forward when an agent-owned picker command is used.
-  const handleAgentPicker = useCallback(() => {
-    if (activeSessionTabId && isTabChatView(activeSessionTabId)) {
-      toggleTabChatView(activeSessionTabId)
-    }
-  }, [activeSessionTabId, isTabChatView, toggleTabChatView])
-
-  const sessionOptions = useMobileNativeChatSessionOptions({
-    agent: activeChatStructured ? null : (activeChatResolution?.agent ?? null),
-    scopeKey: mobileNativeChatScopeKey(hostId, worktreeId, activeSessionTabId),
-    reportedModel: activeSessionTab?.agentStatus?.model ?? null,
-    dispatchCommand: handleNativeChatDispatchCommand,
-    onAgentPicker: handleAgentPicker
-  })
-  const structuredSessionOptionsController: MobileNativeChatSessionOptionsController | null =
-    activeChatStructured && structuredNativeChat.optionSnapshot.length > 0
-      ? {
-          snapshot: structuredNativeChat.optionSnapshot,
-          pendingId: structuredNativeChat.pendingOptionId,
-          setOption: structuredNativeChat.setStructuredOption,
-          invokeAction: structuredNativeChat.invokeStructuredOption,
-          recordCommand: () => {}
-        }
-      : null
+  const { nativeChatSessionOptions, recordCommand: recordNativeChatSessionOptionCommand } =
+    useMobileNativeChatSessionOptionController({
+      activeChatStructured,
+      activeSessionTabId,
+      agent: activeChatResolution?.agent ?? null,
+      dispatchCommand: handleNativeChatDispatchCommand,
+      hostId,
+      isTabChatView,
+      isWorking: nativeChatAgentWorking,
+      reportedModel: activeSessionTab?.agentStatus?.model ?? null,
+      structured: {
+        snapshot: structuredNativeChat.optionSnapshot,
+        pendingId: structuredNativeChat.pendingOptionId,
+        setOption: structuredNativeChat.setStructuredOption,
+        invokeAction: structuredNativeChat.invokeStructuredOption
+      },
+      toggleTabChatView,
+      worktreeId
+    })
   useLayoutEffect(() => {
-    recordSessionOptionCommandRef.current = sessionOptions.recordCommand
-  }, [sessionOptions.recordCommand])
+    recordSessionOptionCommandRef.current = recordNativeChatSessionOptionCommand
+  }, [recordNativeChatSessionOptionCommand])
   // Card actions retire the route's held failure banner too, not just sends.
   const answerAsk = useNativeChatAcceptedAction(handleNativeChatAnswerAsk, onSendResolved)
   const cancelAsk = useNativeChatAcceptedAction(handleNativeChatCancelAsk, onSendResolved)
@@ -343,12 +327,6 @@ export function useMobileNativeChatController(args: {
       ? structuredNativeChatSend.sendWithOutcome
       : handleNativeChatSendWithOutcome,
     readSeededLaunchDraft,
-    nativeChatSessionOptions: activeChatStructured
-      ? structuredSessionOptionsController
-        ? { controller: structuredSessionOptionsController, isWorking: nativeChatAgentWorking }
-        : null
-      : sessionOptions.snapshot.length > 0
-        ? { controller: sessionOptions, isWorking: nativeChatAgentWorking }
-        : null
+    nativeChatSessionOptions
   }
 }

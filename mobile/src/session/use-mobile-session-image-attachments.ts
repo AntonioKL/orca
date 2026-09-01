@@ -94,7 +94,7 @@ export function useMobileSessionImageAttachments({
     getActiveWorktreeConnectionId,
     connState,
     scopeKey: nativeChatScopeKey,
-    enabled: nativeChatInputLeaseReady,
+    enabled: structuredNativeChat ? connState === 'connected' : nativeChatInputLeaseReady,
     structuredNativeChat,
     showToast,
     onSendError: onNativeChatSendError,
