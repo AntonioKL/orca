@@ -47,7 +47,7 @@ describe('desktop script provider runtime host routing', () => {
     expectDesktopProviderSubprocessStartCount(0)
   })
 
-  it('degrades to the one-shot bridge when the runtime host cannot start', async () => {
+  it('degrades to the one-shot bridge for the operations a host cannot serve', async () => {
     const request = vi.fn(async () => {
       throw new RuntimeClientError('runtime_host_unavailable', 'could not start')
     })
@@ -58,12 +58,34 @@ describe('desktop script provider runtime host routing', () => {
     const client = await createDesktopScriptProviderClient('windows', 'C:\\runtime.ps1', host)
 
     await expect(client.listApps()).resolves.toMatchObject({ apps: [{ pid: 42 }] })
-    expect(dispose).toHaveBeenCalled()
-
-    // The host is dropped for the session rather than re-probed per operation.
     await client.listApps()
-    expect(request).toHaveBeenCalledTimes(1)
+
+    // The host is kept and asked again: it owns its own cooldown, so one bad
+    // spawn must not stand the session down to a powershell.exe per click.
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(dispose).not.toHaveBeenCalled()
     expectDesktopProviderSubprocessStartCount(2)
+  })
+
+  it('returns to the runtime host once it recovers', async () => {
+    let healthy = false
+    const request = vi.fn(async () => {
+      if (!healthy) {
+        throw new RuntimeClientError('runtime_host_unavailable', 'could not start')
+      }
+      return { ok: true, apps: [] } as BridgeResponse
+    })
+    const { host } = fakeRuntimeHost(request)
+    mockBridgeResponse({ ok: true, apps: [] })
+
+    const client = await createDesktopScriptProviderClient('windows', 'C:\\runtime.ps1', host)
+
+    await client.listApps()
+    expectDesktopProviderSubprocessStartCount(1)
+
+    healthy = true
+    await expect(client.listApps()).resolves.toEqual({ apps: [] })
+    expectDesktopProviderSubprocessStartCount(1)
   })
 
   it('runs the one-shot bridge under RemoteSigned and falls back to Bypass once', async () => {
@@ -74,6 +96,7 @@ describe('desktop script provider runtime host routing', () => {
 
     await expect(client.listApps()).resolves.toEqual({ apps: [] })
     expectDesktopProviderSubprocessStartCount(2)
+    expect(bridgeProcessArgs(0)).toContain('-NoLogo')
     expect(bridgeProcessArgs(0)).toContain('RemoteSigned')
     expect(bridgeProcessArgs(0)).not.toContain('Bypass')
     expect(bridgeProcessArgs(1)).toContain('Bypass')
@@ -85,6 +108,23 @@ describe('desktop script provider runtime host routing', () => {
     const client = await createDesktopScriptProviderClient('windows', 'C:\\runtime.ps1')
 
     await expect(client.listApps()).rejects.toMatchObject({ code: 'window_not_found' })
+    expectDesktopProviderSubprocessStartCount(1)
+  })
+
+  it('never replays an operation whose own output merely mentions a policy error', async () => {
+    // Window titles and element names are user-controlled text that lands in
+    // stdout; matching them would double a click, a keystroke or a paste.
+    mockBridgeProcessFailure({
+      stdout: JSON.stringify({
+        ok: true,
+        snapshot: { windowTitle: 'SecurityError - UnauthorizedAccess.log - Notepad' }
+      }),
+      stderr: ''
+    })
+
+    const client = await createDesktopScriptProviderClient('windows', 'C:\\runtime.ps1')
+
+    await expect(client.listApps()).rejects.toBeInstanceOf(Error)
     expectDesktopProviderSubprocessStartCount(1)
   })
 

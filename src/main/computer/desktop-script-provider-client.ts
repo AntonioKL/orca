@@ -53,7 +53,10 @@ export class DesktopScriptProviderClient {
   constructor(
     private readonly platform: DesktopScriptPlatform = requiredPlatform(),
     private readonly scriptPath: string = requiredScriptPath(),
-    private runtimeHost: DesktopScriptRuntimeHost | null = defaultRuntimeHost(platform, scriptPath)
+    private readonly runtimeHost: DesktopScriptRuntimeHost | null = defaultRuntimeHost(
+      platform,
+      scriptPath
+    )
   ) {}
 
   shutdown(): void {
@@ -212,11 +215,11 @@ export class DesktopScriptProviderClient {
         return checkedBridgeResponse(await host.request(request), '')
       } catch (error) {
         // Only a helper that cannot start falls back; operation errors surface.
+        // The host is kept: it re-probes after its cooldown, so a transient bad
+        // spawn cannot strand the session on one powershell.exe per operation.
         if (!isRuntimeHostUnavailable(error)) {
           throw error
         }
-        this.runtimeHost = null
-        host.dispose()
       }
     }
     return await this.callOneShotBridge(request)

@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { windowsPowerShellPath } from '../../shared/child-process/windows-system-binary'
+import { reportComputerDiagnostic } from './computer-sidecar-diagnostics'
 import { RuntimeClientError } from './runtime-client-error'
 import type { DesktopScriptPlatform } from './desktop-script-provider-paths'
 import {
@@ -18,7 +19,7 @@ export async function execBridge(
   operationPath: string
 ): Promise<{ stdout: string; stderr: string }> {
   if (platform !== 'windows') {
-    return await runBridgeProcess('python3', [scriptPath, operationPath])
+    return await mapped(runBridgeProcess('python3', [scriptPath, operationPath]))
   }
   const command = windowsPowerShellPath()
   try {
@@ -27,17 +28,58 @@ export async function execBridge(
       windowsPowerShellRuntimeArgs(scriptPath, PREFERRED_WINDOWS_EXECUTION_POLICY, [operationPath])
     )
   } catch (error) {
-    // The script never loaded under a blocking policy, so re-running is safe.
-    if (!isExecutionPolicyBlocked(error instanceof Error ? error.message : String(error))) {
-      throw error
+    if (!isPolicyBlockedStart(error)) {
+      throw error instanceof BridgeProcessFailure ? error.mapped : error
     }
-    console.warn(
-      `[computer-use] bridge start blocked at ${PREFERRED_WINDOWS_EXECUTION_POLICY}; retrying once with ${FALLBACK_WINDOWS_EXECUTION_POLICY}`
+    reportComputerDiagnostic(
+      `bridge start blocked at ${PREFERRED_WINDOWS_EXECUTION_POLICY}; retrying once with ${FALLBACK_WINDOWS_EXECUTION_POLICY}`
     )
-    return await runBridgeProcess(
-      command,
-      windowsPowerShellRuntimeArgs(scriptPath, FALLBACK_WINDOWS_EXECUTION_POLICY, [operationPath])
+    return await mapped(
+      runBridgeProcess(
+        command,
+        windowsPowerShellRuntimeArgs(scriptPath, FALLBACK_WINDOWS_EXECUTION_POLICY, [operationPath])
+      )
     )
+  }
+}
+
+/** Unwrap the raw-stream carrier back into the error callers expect. */
+async function mapped(
+  run: Promise<{ stdout: string; stderr: string }>
+): Promise<{ stdout: string; stderr: string }> {
+  try {
+    return await run
+  } catch (error) {
+    throw error instanceof BridgeProcessFailure ? error.mapped : error
+  }
+}
+
+/**
+ * Only a run that produced no stdout at all may be replayed.
+ *
+ * Why the stdout guard: operations are not idempotent, and the response embeds
+ * window titles and element names. Matching the policy pattern against a
+ * snapshot that merely contains the word "SecurityError" would replay the
+ * operation — a second click, a second keystroke, a second paste. A helper
+ * blocked by the execution policy never reaches its first line of output.
+ */
+function isPolicyBlockedStart(error: unknown): error is BridgeProcessFailure {
+  return (
+    error instanceof BridgeProcessFailure &&
+    !error.stdout.trim() &&
+    isExecutionPolicyBlocked(error.stderr)
+  )
+}
+
+/** Carries the raw streams so the retry decision does not read a mapped message. */
+class BridgeProcessFailure extends Error {
+  constructor(
+    readonly stdout: string,
+    readonly stderr: string,
+    readonly mapped: RuntimeClientError
+  ) {
+    super(mapped.message)
+    this.name = 'BridgeProcessFailure'
   }
 }
 
@@ -108,11 +150,10 @@ function runBridgeProcess(
         (error, stdout, stderr) => {
           if (error) {
             const message = stderr.trim() || stdout.trim() || error.message
-            finish(
-              error.killed
-                ? new RuntimeClientError('action_timeout', message)
-                : mapBridgeError(message)
-            )
+            const mapped = error.killed
+              ? new RuntimeClientError('action_timeout', message)
+              : mapBridgeError(message)
+            finish(new BridgeProcessFailure(stdout, stderr, mapped))
             return
           }
           finish(null, { stdout, stderr })

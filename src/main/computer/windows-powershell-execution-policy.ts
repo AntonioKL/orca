@@ -13,9 +13,16 @@ export type WindowsExecutionPolicy = 'RemoteSigned' | 'Bypass'
 export const PREFERRED_WINDOWS_EXECUTION_POLICY: WindowsExecutionPolicy = 'RemoteSigned'
 export const FALLBACK_WINDOWS_EXECUTION_POLICY: WindowsExecutionPolicy = 'Bypass'
 
-// Matches the SecurityError PowerShell emits for `-File` under a blocking policy.
+/**
+ * Matches the SecurityError PowerShell emits for `-File` under a blocking policy.
+ *
+ * The prose alternative is whitespace-tolerant because PowerShell hard-wraps
+ * error text at the console width, so the sentence arrives split across lines.
+ * The single-token alternatives survive that wrapping unaided and are what
+ * actually carries the match in practice.
+ */
 const EXECUTION_POLICY_BLOCKED =
-  /running scripts is disabled on this system|UnauthorizedAccess|PSSecurityException|SecurityError|about_Execution_Policies/i
+  /running\s+scripts\s+is\s+disabled|UnauthorizedAccess|PSSecurityException|about_Execution_Policies/i
 
 export function isExecutionPolicyBlocked(text: string): boolean {
   return EXECUTION_POLICY_BLOCKED.test(text)
@@ -27,6 +34,8 @@ export function windowsPowerShellRuntimeArgs(
   scriptArgs: readonly string[] = []
 ): string[] {
   return [
+    // -NoLogo: a banner on stdout would be read as a malformed response line.
+    '-NoLogo',
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',

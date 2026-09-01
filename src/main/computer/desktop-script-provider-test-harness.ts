@@ -80,10 +80,11 @@ export function mockBridgeResponse(
   })
 }
 
-export function mockBridgeProcessFailure(stderr: string): void {
+export function mockBridgeProcessFailure(streams: string | { stdout?: string; stderr?: string }) {
+  const { stdout = '', stderr = '' } = typeof streams === 'string' ? { stderr: streams } : streams
   execFileMock.mockImplementationOnce((_command, _args, _options, callback) => {
     const done = callback as (error: Error | null, stdout: string, stderr: string) => void
-    done(new Error('Command failed'), '', stderr)
+    done(new Error('Command failed'), stdout, stderr)
     return null as never
   })
 }

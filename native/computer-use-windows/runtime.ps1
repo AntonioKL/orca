@@ -7,6 +7,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Progress records render to the host, which in serve mode is a pipe carrying
+# one JSON response per line; a stray record would desynchronise the stream.
+$ProgressPreference = "SilentlyContinue"
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 [Console]::InputEncoding = $utf8NoBom
 [Console]::OutputEncoding = $utf8NoBom
@@ -1324,12 +1327,20 @@ function Invoke-OrcaServeLoop {
         $line = [Console]::In.ReadLine()
         if ($null -eq $line) { break }
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $requestId = $null
         try {
-            $json = ConvertTo-Json (Invoke-OrcaOperation ($line | ConvertFrom-Json)) -Depth 100 -Compress
+            $operation = $line | ConvertFrom-Json
+            $requestId = $operation.requestId
+            $response = Invoke-OrcaOperation $operation
         } catch {
-            $json = ConvertTo-Json ([pscustomobject]@{ ok = $false; error = [string]$_.Exception.Message }) -Depth 100 -Compress
+            $response = [pscustomobject]@{ ok = $false; error = [string]$_.Exception.Message }
         }
-        [Console]::Out.WriteLine($json)
+        # Echoed so the caller can prove which request a line answers; a reply it
+        # cannot match is a desynchronised stream, not a usable response.
+        if ($null -ne $requestId) {
+            $response | Add-Member -NotePropertyName requestId -NotePropertyValue $requestId -Force
+        }
+        [Console]::Out.WriteLine((ConvertTo-Json $response -Depth 100 -Compress))
         [Console]::Out.Flush()
     }
 }

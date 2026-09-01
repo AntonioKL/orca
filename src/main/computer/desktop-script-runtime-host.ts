@@ -1,36 +1,41 @@
-import { StringDecoder } from 'node:string_decoder'
-import type { ProcessSpec } from '../../shared/child-process/process-spec'
 import { spawnProcess } from '../../shared/child-process/run-process'
 import { windowsPowerShellPath } from '../../shared/child-process/windows-system-binary'
+import { reportComputerDiagnostic } from './computer-sidecar-diagnostics'
 import type { BridgeRequest, BridgeResponse } from './desktop-script-provider-types'
+import {
+  startServeChannel,
+  type DesktopScriptServeChannel,
+  type RuntimeProcessSpawn
+} from './desktop-script-serve-channel'
+import {
+  MAX_START_ATTEMPTS,
+  RuntimeHostAvailability,
+  START_FAILURE_COOLDOWN_MS
+} from './desktop-script-runtime-availability'
 import { RuntimeClientError } from './runtime-client-error'
 import {
-  FALLBACK_WINDOWS_EXECUTION_POLICY,
-  PREFERRED_WINDOWS_EXECUTION_POLICY,
   isExecutionPolicyBlocked,
-  windowsPowerShellRuntimeArgs,
-  type WindowsExecutionPolicy
+  windowsPowerShellRuntimeArgs
 } from './windows-powershell-execution-policy'
-
-/** The all-pipes child `spawnProcess` returns; avoids a node:child_process import. */
-type RuntimeChildProcess = ReturnType<typeof spawnProcess>
 
 const REQUEST_TIMEOUT_MS = 30_000
 const IDLE_SHUTDOWN_MS = 120_000
-const MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 
-/** Code the client keys on to fall back to the one-shot bridge for the session. */
+/** Code the client keys on to serve this one operation from the one-shot bridge. */
 export const RUNTIME_HOST_UNAVAILABLE = 'runtime_host_unavailable'
 
 export type DesktopScriptRuntimeHostOptions = {
-  spawn?: (spec: ProcessSpec) => RuntimeChildProcess
+  spawn?: RuntimeProcessSpawn
   powerShellPath?: () => string
   requestTimeoutMs?: number
   idleShutdownMs?: number
+  cooldownMs?: number
+  now?: () => number
   warn?: (message: string) => void
 }
 
 type PendingRequest = {
+  id: number
   resolve: (response: BridgeResponse) => void
   reject: (error: Error) => void
   timer: NodeJS.Timeout
@@ -50,23 +55,21 @@ export function isRuntimeHostUnavailable(error: unknown): boolean {
  * screen capture. Compiling once per session collapses a burst of short-lived
  * PIDs into a single process.
  *
- * Requests are strictly serialized: the protocol carries no request id because
- * only one operation is ever in flight, and native automation is not safe to
- * interleave anyway.
+ * Requests are strictly serialized, and each carries an id the helper echoes.
+ * Serialization alone would leave a single stray line answering every later
+ * request with the previous response — silently acting on stale element
+ * indexes, with no error raised — so the id is checked and a mismatch is fatal
+ * to the child rather than merely logged.
  */
 export class DesktopScriptRuntimeHost {
-  private child: RuntimeChildProcess | null = null
-  private detachChild: (() => void) | null = null
-  private decoder = new StringDecoder('utf8')
-  private stdoutBuffer = ''
-  private stderrText = ''
+  private channel: DesktopScriptServeChannel | null = null
   private pending: PendingRequest | null = null
   private queueTail: Promise<void> | null = null
   private idleTimer: NodeJS.Timeout | null = null
-  private policy: WindowsExecutionPolicy = PREFERRED_WINDOWS_EXECUTION_POLICY
-  private policyRetryPending = false
   private childAnswered = false
-  private unavailable = false
+  private disposed = false
+  private nextRequestId = 1
+  private readonly availability: RuntimeHostAvailability
   private readonly requestTimeoutMs: number
   private readonly idleShutdownMs: number
 
@@ -76,6 +79,11 @@ export class DesktopScriptRuntimeHost {
   ) {
     this.requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS
     this.idleShutdownMs = options.idleShutdownMs ?? IDLE_SHUTDOWN_MS
+    this.availability = new RuntimeHostAvailability(
+      options.cooldownMs ?? START_FAILURE_COOLDOWN_MS,
+      options.now ?? Date.now,
+      (message) => (options.warn ?? reportComputerDiagnostic)(message)
+    )
   }
 
   request(request: BridgeRequest): Promise<BridgeResponse> {
@@ -96,10 +104,12 @@ export class DesktopScriptRuntimeHost {
     return result
   }
 
-  /** Stop the helper. A later request starts a fresh one. */
+  /** Permanently stop this host. Callers build a new one for a new session. */
   dispose(): void {
+    this.disposed = true
     this.clearIdleTimer()
-    this.stopChild()
+    this.availability.clearCooldown()
+    this.stopChannel()
     this.rejectPending(
       new RuntimeClientError('accessibility_error', 'desktop provider runtime host was shut down')
     )
@@ -107,39 +117,59 @@ export class DesktopScriptRuntimeHost {
 
   private async send(request: BridgeRequest): Promise<BridgeResponse> {
     this.clearIdleTimer()
-    try {
-      return await this.sendOnce(request)
-    } catch (error) {
-      if (!this.policyRetryPending) {
-        throw error
-      }
-      this.policyRetryPending = false
-      this.policy = FALLBACK_WINDOWS_EXECUTION_POLICY
-      this.warn(
-        `runtime host start blocked at ${PREFERRED_WINDOWS_EXECUTION_POLICY}; retrying once with ${FALLBACK_WINDOWS_EXECUTION_POLICY}`
-      )
-      return await this.sendOnce(request)
+    // Why checked here and not only on entry: requests queue, and dispose can
+    // land while one waits its turn. Without this a teardown respawns a helper.
+    if (this.disposed) {
+      throw this.unavailableError('runtime host was disposed')
     }
+    const cooldown = this.availability.remainingCooldown()
+    if (cooldown > 0) {
+      throw this.unavailableError(`retrying the runtime host in ${cooldown}ms`)
+    }
+    let lastError: unknown
+    for (let attempt = 1; attempt <= MAX_START_ATTEMPTS; attempt++) {
+      try {
+        const response = await this.sendOnce(request)
+        this.availability.recordSuccess()
+        return response
+      } catch (error) {
+        lastError = error
+        if (this.availability.policyRetryPending) {
+          this.availability.escalateExecutionPolicy()
+          continue
+        }
+        // A helper that answered and then died is a crash, not a bad start: the
+        // caller sees it and the next operation gets a fresh process — unless it
+        // keeps happening, which is thrash the one-shot bridge should absorb.
+        if (!isRuntimeHostUnavailable(error)) {
+          if (this.availability.exhausted) {
+            this.availability.enterCooldown()
+          }
+          throw error
+        }
+        this.availability.warn(
+          `runtime host failed to start (attempt ${attempt}/${MAX_START_ATTEMPTS}): ${errorText(error)}`
+        )
+      }
+    }
+    this.availability.enterCooldown()
+    throw lastError
   }
 
   private sendOnce(request: BridgeRequest): Promise<BridgeResponse> {
-    if (this.unavailable) {
-      return Promise.reject(this.unavailableError('runtime host is unavailable'))
-    }
-    let child: RuntimeChildProcess
+    let channel: DesktopScriptServeChannel
     try {
-      child = this.ensureChild()
+      channel = this.ensureChannel()
     } catch (error) {
-      this.unavailable = true
-      return Promise.reject(
-        this.unavailableError(error instanceof Error ? error.message : String(error))
-      )
+      this.availability.recordFailure()
+      return Promise.reject(this.unavailableError(errorText(error)))
     }
+    const id = this.nextRequestId++
     return new Promise((resolve, reject) => {
       // Why kill rather than wait: a hung UI Automation call cannot be
       // cancelled, so the process itself is the only thing left to reclaim.
       const timer = setTimeout(() => {
-        this.abortChild(
+        this.abortChannel(
           new RuntimeClientError(
             'action_timeout',
             `desktop provider timed out after ${this.requestTimeoutMs}ms`
@@ -147,145 +177,107 @@ export class DesktopScriptRuntimeHost {
         )
       }, this.requestTimeoutMs)
       timer.unref?.()
-      this.pending = { resolve, reject, timer }
-      child.stdin.write(`${JSON.stringify(request)}\n`, (error) => {
-        if (error) {
-          this.abortChild(new RuntimeClientError('accessibility_error', error.message))
-        }
-      })
-    })
-  }
-
-  private ensureChild(): RuntimeChildProcess {
-    if (this.child) {
-      return this.child
-    }
-    const spawn = this.options.spawn ?? spawnProcess
-    const child = spawn({
-      program: (this.options.powerShellPath ?? windowsPowerShellPath)(),
-      args: windowsPowerShellRuntimeArgs(this.scriptPath, this.policy, ['-Serve']),
-      env: process.env
-    })
-    this.decoder = new StringDecoder('utf8')
-    this.stdoutBuffer = ''
-    this.stderrText = ''
-    this.childAnswered = false
-
-    const onStdout = (chunk: Buffer | string): void => this.readStdout(chunk)
-    const onStderr = (chunk: Buffer | string): void => {
-      this.stderrText = `${this.stderrText}${chunk.toString()}`.slice(-4096)
-    }
-    const onExit = (code: number | null, signal: NodeJS.Signals | null): void =>
-      this.handleGone(child, signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`)
-    const onError = (error: Error): void => this.handleGone(child, error.message)
-    child.stdout.on('data', onStdout)
-    child.stderr.on('data', onStderr)
-    child.once('exit', onExit)
-    child.once('error', onError)
-    // An unhandled stream error is an uncaught exception in the main process.
-    child.stdin.on('error', () => {})
-    this.detachChild = (): void => {
-      child.stdout.off('data', onStdout)
-      child.stderr.off('data', onStderr)
-      child.off('exit', onExit)
-      child.off('error', onError)
-      child.on('error', () => {})
-    }
-    this.child = child
-    return child
-  }
-
-  private readStdout(chunk: Buffer | string): void {
-    this.stdoutBuffer += typeof chunk === 'string' ? chunk : this.decoder.write(chunk)
-    if (this.stdoutBuffer.length > MAX_RESPONSE_BYTES) {
-      this.abortChild(
-        new RuntimeClientError(
-          'accessibility_error',
-          'desktop provider response exceeded the runtime host buffer'
-        )
+      this.pending = { id, resolve, reject, timer }
+      channel.write(`${JSON.stringify({ ...request, requestId: id })}\n`, (error) =>
+        this.abortChannel(new RuntimeClientError('accessibility_error', error.message))
       )
-      return
+    })
+  }
+
+  private ensureChannel(): DesktopScriptServeChannel {
+    if (this.channel) {
+      return this.channel
     }
-    for (let newline = this.stdoutBuffer.indexOf('\n'); newline >= 0;) {
-      const line = this.stdoutBuffer.slice(0, newline).trim()
-      this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1)
-      if (line) {
-        this.deliver(line)
+    this.childAnswered = false
+    const channel: DesktopScriptServeChannel = startServeChannel(
+      {
+        program: (this.options.powerShellPath ?? windowsPowerShellPath)(),
+        args: windowsPowerShellRuntimeArgs(this.scriptPath, this.availability.executionPolicy, [
+          '-Serve'
+        ]),
+        env: process.env
+      },
+      this.options.spawn ?? spawnProcess,
+      {
+        onLine: (line) => this.deliver(line),
+        // A replaced channel can still report; that must not fail the live one.
+        onGone: (detail) => {
+          if (this.channel === channel) {
+            this.handleGone(detail)
+          }
+        },
+        onOverflow: () =>
+          this.abortChannel(
+            new RuntimeClientError(
+              'accessibility_error',
+              'desktop provider response exceeded the runtime host buffer'
+            )
+          )
       }
-      newline = this.stdoutBuffer.indexOf('\n')
-    }
+    )
+    this.channel = channel
+    return channel
   }
 
   private deliver(line: string): void {
-    this.childAnswered = true
-    const pending = this.takePending()
-    if (!pending) {
+    let parsed: BridgeResponse
+    try {
+      parsed = JSON.parse(line) as BridgeResponse
+    } catch {
+      // Not a response at all — a PowerShell banner, a stray write. Dropping it
+      // is safe now that the id below is what decides which request is answered,
+      // and it keeps a chatty console from making the helper unusable.
       return
     }
-    try {
-      pending.resolve(JSON.parse(line) as BridgeResponse)
-    } catch (error) {
-      pending.reject(
+    const pending = this.pending
+    if (!pending || parsed.requestId !== pending.id) {
+      // One unmatched reply would otherwise shift every later response by one.
+      this.abortChannel(
         new RuntimeClientError(
           'accessibility_error',
-          `desktop provider returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`
+          'desktop provider response did not match the pending request'
         )
       )
-    }
-  }
-
-  private handleGone(child: RuntimeChildProcess, detail: string): void {
-    // A replaced child can still report; that must not fail the live one.
-    if (this.child !== child) {
       return
     }
-    const text = [detail, this.stderrText.trim()].filter(Boolean).join(': ')
+    // Only a reply this host can prove is its own counts as the helper working.
+    this.childAnswered = true
+    this.pending = null
+    clearTimeout(pending.timer)
+    const { requestId: _echoed, ...response } = parsed
+    pending.resolve(response)
+  }
+
+  private handleGone(detail: string): void {
     const answered = this.childAnswered
-    this.releaseChild()
-    if (
-      !answered &&
-      this.policy === PREFERRED_WINDOWS_EXECUTION_POLICY &&
-      isExecutionPolicyBlocked(text)
-    ) {
-      this.policyRetryPending = true
-      this.rejectPending(new RuntimeClientError('accessibility_error', text))
+    this.channel = null
+    this.availability.recordFailure()
+    if (!answered && this.availability.atPreferredPolicy && isExecutionPolicyBlocked(detail)) {
+      this.availability.requestPolicyRetry()
+      this.rejectPending(new RuntimeClientError('accessibility_error', detail))
       return
     }
     if (!answered) {
-      this.unavailable = true
-      this.rejectPending(this.unavailableError(text))
+      this.rejectPending(this.unavailableError(detail))
       return
     }
     this.rejectPending(
-      new RuntimeClientError('accessibility_error', `desktop provider runtime host exited: ${text}`)
+      new RuntimeClientError(
+        'accessibility_error',
+        `desktop provider runtime host exited: ${detail}`
+      )
     )
   }
 
-  private abortChild(error: Error): void {
-    this.stopChild()
+  private abortChannel(error: Error): void {
+    this.stopChannel()
     this.rejectPending(error)
   }
 
-  private stopChild(): void {
-    const child = this.child
-    this.releaseChild()
-    if (!child) {
-      return
-    }
-    // Closing stdin ends the serve loop; the kill covers a wedged helper.
-    try {
-      child.stdin.end()
-    } catch {
-      /* already closed */
-    }
-    child.kill()
-  }
-
-  private releaseChild(): void {
-    const detach = this.detachChild
-    this.detachChild = null
-    detach?.()
-    this.child = null
+  private stopChannel(): void {
+    const channel = this.channel
+    this.channel = null
+    channel?.stop()
   }
 
   private takePending(): PendingRequest | null {
@@ -303,12 +295,12 @@ export class DesktopScriptRuntimeHost {
 
   private armIdleTimer(): void {
     this.clearIdleTimer()
-    if (!this.child) {
+    if (!this.channel) {
       return
     }
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null
-      this.stopChild()
+      this.stopChannel()
     }, this.idleShutdownMs)
     this.idleTimer.unref?.()
   }
@@ -326,8 +318,8 @@ export class DesktopScriptRuntimeHost {
       `desktop provider runtime host could not start: ${message}`
     )
   }
+}
 
-  private warn(message: string): void {
-    ;(this.options.warn ?? ((text: string) => console.warn(`[computer-use] ${text}`)))(message)
-  }
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
