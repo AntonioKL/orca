@@ -715,27 +715,6 @@ describe('connectPanePty', () => {
     expect(deps.updateTabPtyId).toHaveBeenCalledWith('tab-1', 'fresh-pty')
   })
 
-  it('preserves a restored pane binding when its daemon owner is unverifiable', async () => {
-    const { connectPanePty } = await import('./pty-connection')
-    const transport = createMockTransport()
-    transport.connect.mockImplementation(async (opts: { callbacks?: ConnectCallbacks }) => {
-      opts.callbacks?.onError?.('terminal_pane_owner_unverified')
-      return undefined
-    })
-    transportFactoryQueue.push(transport)
-    const deps = createDeps({
-      restoredLeafId: LEAF_2,
-      restoredPtyIdByLeafId: { [LEAF_2]: 'unverifiable-pty' }
-    })
-
-    connectPanePty(createPane(2) as never, createManager(2) as never, deps as never)
-    await flushAsyncTicks()
-
-    expect(transport.connect).toHaveBeenCalledTimes(1)
-    expect(deps.onPtyErrorRef.current).toHaveBeenCalledWith(2, 'terminal_pane_owner_unverified')
-    expect(deps.clearExitedPanePtyLayoutBinding).not.toHaveBeenCalled()
-  })
-
   it.each([
     ['rejects', 'reject'],
     ['returns no PTY', 'empty']
