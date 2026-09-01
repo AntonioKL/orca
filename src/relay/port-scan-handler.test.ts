@@ -119,6 +119,31 @@ function mockLinuxProcScan({
   })
 }
 
+describe('PortScanHandler Linux walk bounds', () => {
+  it('stops walking procfs once every listening socket has an owner', async () => {
+    // Why: this scan repeats for the life of the session, and its unit cost was O(all host
+    // processes x all fds) regardless of how few sockets it was resolving. On a busy remote the
+    // process count only climbs, so the scan got permanently more expensive -- the shape behind
+    // "SSH degrades the longer Orca stays open". One listener means one readlink, not 100,000.
+    mockLinuxProcScan({ pidCount: 1_000, fdCount: 100 })
+
+    await capturePortDetectHandler()({}, requestContext())
+
+    expect(readlinkMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('still walks the whole table when a socket has no reachable owner', async () => {
+    // The inverse: an unattributable inode (another user's process) must not make the scan give up
+    // early on sockets it could still attribute.
+    mockLinuxProcScan({ pidCount: 3, fdCount: 2 })
+    readlinkMock.mockImplementation(() => Promise.resolve('socket:[99999]'))
+
+    await capturePortDetectHandler()({}, requestContext())
+
+    expect(readlinkMock).toHaveBeenCalledTimes(6)
+  })
+})
+
 describe('PortScanHandler Linux cancellation', () => {
   it('does not touch procfs for an already-cancelled request', async () => {
     const controller = new AbortController()
