@@ -21,6 +21,7 @@ export function buildComposerCardProps(state: ComposerModel) {
     detectedAgentIds,
     eligibleRepos,
     ephemeralVmRecipeError,
+    runTargetChoiceCandidates,
     ephemeralVmRecipes,
     ephemeralVmsEnabled,
     filteredLinkItems,
@@ -153,6 +154,7 @@ export function buildComposerCardProps(state: ComposerModel) {
     onEphemeralVmRecipeChange: setSelectedEphemeralVmRecipeId,
     ephemeralVmRecipeError:
       isProjectGroupTarget || !ephemeralVmsEnabled ? null : ephemeralVmRecipeError,
+    runTargetChoiceCandidates: isProjectGroupTarget ? null : runTargetChoiceCandidates,
     repoBackedSearchRepos: isProjectGroupTarget ? folderSourceRepos : undefined,
     repoBackedSourcesDisabled: isProjectGroupTarget ? folderSourceRepos.length === 0 : false,
     allowSmartNameAddProject: !isProjectGroupTarget,
