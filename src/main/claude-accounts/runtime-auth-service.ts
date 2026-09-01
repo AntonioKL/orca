@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import type { Store } from '../persistence'
 import {
   getSelectedClaudeAccountIdForTarget,
@@ -124,6 +125,17 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
           process.platform === 'darwin'
             ? () => readActiveClaudeKeychainCredentialsStrict()
             : undefined,
+        readLegacyOauthAccount: () => {
+          try {
+            const parsed = JSON.parse(readFileSync(paths.configPath, 'utf-8')) as Record<
+              string,
+              unknown
+            >
+            return parsed.oauthAccount ?? null
+          } catch {
+            return null
+          }
+        },
         readManagedCredentials: (account) => this.readManagedCredentials(account),
         writeManagedCredentials: (account, contents) =>
           this.writeManagedCredentials(account, contents)

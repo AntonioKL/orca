@@ -20,7 +20,7 @@ export class ClaudeRuntimePathResolver {
       configDir,
       credentialsPath: join(configDir, '.credentials.json'),
       configPath: this.resolveConfigPath(configDir, inheritedConfigDir),
-      envPatch: inheritedConfigDir ? { CLAUDE_CONFIG_DIR: configDir } : {}
+      envPatch: { CLAUDE_CONFIG_DIR: configDir, ORCA_CLAUDE_CONFIG_DIR: configDir }
     }
   }
 

@@ -1,3 +1,4 @@
+import { existsSync, lstatSync, mkdirSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ClaudeManagedAccount } from '../../../shared/managed-account-types'
 import { resolveLocalAccountRuntimeTarget } from '../../../shared/local-account-runtime'
@@ -44,7 +45,10 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
         runtime: 'wsl',
         wslDistro: activeAccount.wslDistro ?? null,
         wslLinuxConfigDir: activeAccount.wslLinuxAuthPath,
-        envPatch: { CLAUDE_CONFIG_DIR: activeAccount.wslLinuxAuthPath },
+        envPatch: {
+          CLAUDE_CONFIG_DIR: activeAccount.wslLinuxAuthPath,
+          ORCA_CLAUDE_CONFIG_DIR: activeAccount.wslLinuxAuthPath
+        },
         stripAuthEnv: true,
         provenance: `managed:${activeAccount.id}:wsl:${activeAccount.wslDistro ?? ''}`
       }
@@ -84,12 +88,16 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
         { adoptLegacyMarker: true }
       )
       if (managedPath) {
+        provisionClaudeManagedHome(paths.configDir, managedPath)
         return {
           configDir: managedPath,
           runtime: 'host',
           wslDistro: null,
           wslLinuxConfigDir: null,
-          envPatch: { CLAUDE_CONFIG_DIR: managedPath },
+          envPatch: {
+            CLAUDE_CONFIG_DIR: managedPath,
+            ORCA_CLAUDE_CONFIG_DIR: managedPath
+          },
           stripAuthEnv: true,
           provenance: `managed:${activeAccount.id}`
         }
@@ -143,5 +151,28 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
     }
     const defaultDistro = getDefaultWslDistro()
     return defaultDistro ? { runtime: 'wsl', wslDistro: defaultDistro } : target
+  }
+}
+
+// Keep account homes useful without copying credential-bearing runtime state.
+// Missing user resources are linked once; existing files remain user-owned.
+function provisionClaudeManagedHome(systemConfigDir: string, managedPath: string): void {
+  if (systemConfigDir === managedPath) {
+    return
+  }
+  const resources = ['settings.json', 'CLAUDE.md', 'projects', 'plugins'] as const
+  for (const name of resources) {
+    const source = join(systemConfigDir, name)
+    const target = join(managedPath, name)
+    if (!existsSync(source) || existsSync(target)) {
+      continue
+    }
+    try {
+      const sourceIsDirectory = lstatSync(source).isDirectory()
+      mkdirSync(managedPath, { recursive: true, mode: 0o700 })
+      symlinkSync(source, target, sourceIsDirectory ? 'dir' : 'file')
+    } catch {
+      // Best effort: auth routing remains safe if an optional resource cannot link.
+    }
   }
 }

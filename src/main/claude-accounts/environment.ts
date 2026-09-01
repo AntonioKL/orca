@@ -7,6 +7,7 @@ export const CLAUDE_AUTH_ENV_VARS = [
 
 export type ClaudeEnvPatch = {
   CLAUDE_CONFIG_DIR?: string
+  ORCA_CLAUDE_CONFIG_DIR?: string
   ANTHROPIC_CUSTOM_HEADERS?: string
 }
 
@@ -26,6 +27,9 @@ export function applyClaudeEnvPatch(
 
   if (patch.CLAUDE_CONFIG_DIR && !baseEnv.CLAUDE_CONFIG_DIR) {
     baseEnv.CLAUDE_CONFIG_DIR = patch.CLAUDE_CONFIG_DIR
+  }
+  if (patch.ORCA_CLAUDE_CONFIG_DIR && !baseEnv.ORCA_CLAUDE_CONFIG_DIR) {
+    baseEnv.ORCA_CLAUDE_CONFIG_DIR = patch.ORCA_CLAUDE_CONFIG_DIR
   }
   if (patch.ANTHROPIC_CUSTOM_HEADERS !== undefined) {
     baseEnv.ANTHROPIC_CUSTOM_HEADERS = patch.ANTHROPIC_CUSTOM_HEADERS

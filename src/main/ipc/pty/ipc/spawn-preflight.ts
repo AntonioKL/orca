@@ -223,7 +223,10 @@ export async function preparePtyIpcSpawnPreflight(ctx: PtyIpcSpawnState): Promis
   )
   try {
     ctx.claudeAuth =
-      ctx.isClaudeLaunch && ctx.deps.prepareClaudeAuth
+      !ctx.preAdoptedStablePane &&
+      !args.connectionId &&
+      (ctx.isClaudeLaunch || !ctx.launchCommand) &&
+      ctx.deps.prepareClaudeAuth
         ? await ctx.deps.prepareClaudeAuth(initialSelectionTarget)
         : null
   } catch (error) {
