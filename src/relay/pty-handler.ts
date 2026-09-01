@@ -1963,8 +1963,7 @@ export class PtyHandler {
     }
 
     // Why: verify liveness because shells can exit without node-pty onExit.
-    if (managed.pty.pid && !isProcessAlive(managed.pty.pid)) {
-      this.reapExitedPty(managed)
+    if (this.reapPtyProvenExited(managed)) {
       throw new Error(`PTY "${id}" not found`)
     }
 
@@ -2082,8 +2081,34 @@ export class PtyHandler {
     const cols = Math.max(1, Math.min(500, Math.floor(Number(params.cols) || 80)))
     const rows = Math.max(1, Math.min(500, Math.floor(Number(params.rows) || 24)))
     const managed = this.ptys.get(id)
-    if (managed && !managed.disposed) {
+    if (!managed || managed.disposed) {
+      return
+    }
+    // Why probe first (same probe attach() and listProcesses() run): a shell
+    // that exited without node-pty's `onExit` leaves this entry holding a closed
+    // master fd, and `UnixTerminal.resize` has no fd guard — the ioctl throws
+    // `ioctl(2) failed, EBADF` straight out of this notification handler into the
+    // dispatcher's generic parse-error catch, where it is logged and nothing
+    // else. Nothing retired the entry, so it kept being advertised as live and
+    // kept holding `activePtyCount` above zero, which is what stops a relay with
+    // `relayGracePeriodSeconds: 0` from ever reaching its idle-no-ptys exit
+    // (#12423).
+    if (this.reapPtyProvenExited(managed)) {
+      return
+    }
+    try {
       managed.pty.resize(cols, rows)
+    } catch (err) {
+      // A failed ioctl observed the handle, not the host's process table, so on
+      // its own it is `unverifiable`. Re-probe: a now-absent pid retires the
+      // entry, anything else keeps it and is contained here rather than
+      // escaping as a parse error on every later resize.
+      if (this.reapPtyProvenExited(managed)) {
+        return
+      }
+      process.stderr.write(
+        `[pty-handler] resize failed for PTY ${id} whose process is still live or unverifiable: ${err instanceof Error ? err.message : String(err)}\n`
+      )
     }
   }
 
@@ -2183,9 +2208,7 @@ export class PtyHandler {
       if (this.ptys.get(managed.id) !== managed || managed.disposed) {
         return
       }
-      const pid = managed.pty.pid
-      if (pid && !isProcessAlive(pid)) {
-        this.reapExitedPty(managed)
+      if (this.reapPtyProvenExited(managed)) {
         return
       }
       if (attemptsRemaining <= 0) {
@@ -2223,6 +2246,25 @@ export class PtyHandler {
     disposeManagedPty(managed)
     this.removePty(managed.id)
     this.clearPtyFlowState(managed.id)
+  }
+
+  /**
+   * Retire this entry when the host proves its pid is gone; report whether it was.
+   *
+   * `managed.disposed` is bookkeeping, not liveness: it says we tore the record
+   * down, not that the shell died. A shell can exit without node-pty producing
+   * `onExit`, which leaves a non-disposed entry holding a handle whose master fd
+   * is already closed. Only `isProcessAlive` (ESRCH, from the host that owns the
+   * process) is positive evidence of absence; every other outcome is
+   * `unverifiable` and keeps its record and owner claim
+   * (docs/reference/ssh-execution-boundary.md).
+   */
+  private reapPtyProvenExited(managed: ManagedPty): boolean {
+    if (!managed.pty.pid || isProcessAlive(managed.pty.pid)) {
+      return false
+    }
+    this.reapExitedPty(managed)
+    return true
   }
 
   private async sendSignal(params: Record<string, unknown>): Promise<void> {
@@ -2422,8 +2464,11 @@ export class PtyHandler {
       }
     }
     for (const [entryIndex, [id, managed]] of managedEntries.entries()) {
-      if (managed.disposed || (managed.pty.pid && !isProcessAlive(managed.pty.pid))) {
+      if (managed.disposed) {
         this.reapExitedPty(managed)
+        continue
+      }
+      if (this.reapPtyProvenExited(managed)) {
         continue
       }
       // Reuse batched correlation; per-PTY tree scans recreate O(PTY × rows) work.

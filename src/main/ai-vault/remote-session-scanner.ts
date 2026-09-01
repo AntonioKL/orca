@@ -12,6 +12,10 @@ import {
   dedupeCodexRolloutFileAliases,
   dedupeCodexSessionsBySessionId
 } from './codex-session-root-dedup'
+import {
+  parseRemoteSessionFileCached,
+  remoteSessionParseHostKey
+} from './remote-session-parse-cache'
 import { discoverRemoteSourceCandidates } from './remote-session-scanner-discovery'
 import { remoteSessionSources } from './remote-session-scanner-sources'
 import type {
@@ -224,12 +228,20 @@ async function parseRemoteSessionCandidate(
 ): Promise<AiVaultSession | null> {
   try {
     throwIfAiVaultScanCancelled(context.signal)
-    const read = await context.provider.readFile(candidate.file.path)
-    throwIfAiVaultScanCancelled(context.signal)
-    if (read.isBinary) {
-      return null
-    }
-    const session = await candidate.source.parse(candidate.file, read.content, context)
+    // The read is inside the cached parse: an unchanged transcript must not be
+    // pulled off the remote disk at all, which is the whole cost of #13753.
+    const session = await parseRemoteSessionFileCached({
+      candidate,
+      hostKey: remoteSessionParseHostKey(context),
+      parse: async () => {
+        const read = await context.provider.readFile(candidate.file.path)
+        throwIfAiVaultScanCancelled(context.signal)
+        if (read.isBinary) {
+          return null
+        }
+        return await candidate.source.parse(candidate.file, read.content, context)
+      }
+    })
     throwIfAiVaultScanCancelled(context.signal)
     // Mirror the local rule: every session carries its sibling subagent
     // transcript count (row badge; recoverable signal at zero turns). The

@@ -170,15 +170,26 @@ export async function resolveProcessCwd(pid: number, fallbackCwd: string): Promi
 }
 
 /**
- * Check whether a process has child processes (via pgrep).
+ * Check whether a process has child processes.
+ *
+ * Why the shared snapshot and not `pgrep -P`: this answers one field of
+ * `pty.inspectProcess`, which every tracked pane polls on a 750ms/2000ms
+ * cadence, and the fork was neither cached nor coalesced. procps-ng opens six
+ * procfs files per process to resolve a ppid — including a `/proc/<pid>/ctty`
+ * that never exists on Linux — so one call cost O(host process count) syscalls,
+ * ~4k opens per pgrep on a 690-process host, at up to 8 forks/sec (#13537).
+ * `getForegroundProcessName` in the same RPC already captured the TTL-cached
+ * `ps` table, whose index carries the parent/child map, so the answer is free.
  */
 export async function processHasChildren(pid: number): Promise<boolean> {
+  // Windows has no `ps`; the previous `pgrep` fork always failed here too, so
+  // this keeps the same answer without spawning anything to reach it.
+  if (process.platform === 'win32') {
+    return false
+  }
   try {
-    const { stdout } = await execFile('pgrep', ['-P', String(pid)], {
-      encoding: 'utf-8',
-      timeout: 3000
-    })
-    return stdout.trim().length > 0
+    const rows = await getProcessTableSnapshot()
+    return (getProcessTableIndex(rows).childrenByPpid.get(pid)?.length ?? 0) > 0
   } catch {
     return false
   }
