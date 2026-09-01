@@ -166,6 +166,8 @@ describe('structured session proven-dead TUI retry', () => {
       ).request('client-1', request)
     ).toMatchObject({ ok: true })
     await vi.waitFor(() => expect(coordinator.status(SESSION).owner).toBe('native'))
+    // Settle the flow's trailing outcome write before afterEach removes the store root.
+    await coordinator.drain()
     expect(closeTuiOwner).not.toHaveBeenCalled()
     expect(store.getRecord(SESSION)?.lease).toMatchObject({
       runtimeKind: 'native',

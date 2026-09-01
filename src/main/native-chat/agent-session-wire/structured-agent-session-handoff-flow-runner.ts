@@ -56,11 +56,16 @@ export class StructuredAgentSessionHandoffFlowRunner {
         })
       })
       .catch(async (error) => {
-        await this.input.deps.store.recordOperationOutcome({
-          callerKey,
-          operationId: params.envelope.clientOperationId,
-          outcome: { status: 'failed', code: 'agent_session_handoff_failed' }
-        })
+        try {
+          await this.input.deps.store.recordOperationOutcome({
+            callerKey,
+            operationId: params.envelope.clientOperationId,
+            outcome: { status: 'failed', code: 'agent_session_handoff_failed' }
+          })
+        } catch {
+          // Best-effort: a store write failure must not suppress the client's failure
+          // notification or leak the flow as an unhandled rejection.
+        }
         this.input.operationGuard.finish(sessionId, params.envelope.clientOperationId)
         this.input.fail(params, error)
       })
