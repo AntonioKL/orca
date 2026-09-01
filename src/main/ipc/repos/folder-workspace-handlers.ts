@@ -121,7 +121,7 @@ export function registerFolderWorkspaceHandlers(
     const deleted = runtime
       ? (await runtime.deleteFolderWorkspace(args.folderWorkspaceId)).deleted
       : store.removeFolderWorkspace(args.folderWorkspaceId)
-    if (deleted) {
+    if (deleted && !runtime) {
       notifyReposChanged(mainWindow)
     }
     return deleted
