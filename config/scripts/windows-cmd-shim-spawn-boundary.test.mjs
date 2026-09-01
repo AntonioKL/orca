@@ -21,9 +21,15 @@ import { describe, expect, it } from 'vitest'
  * Deliberately a text match on any `.cmd`/`.bat` literal, not on a list of
  * runner names: these trees already spawn vitest, playwright, electron-builder
  * and tsc, and the next offender is as likely to be one of those as it is to be
- * pnpm. A literal is all a copy-paste carries. A shim assembled in a template
- * literal stays uncatchable this way; that is the accepted ceiling of a text
- * ratchet, and the reason `src/` gets a real chokepoint instead.
+ * pnpm. A literal is all a copy-paste carries.
+ *
+ * Two shapes this does not catch, both accepted. A shim assembled in a template
+ * literal, and a drive-lettered path — 'C:\tools\pnpm.cmd' — since a colon is
+ * not in the class. Real code builds those with path.join, whose 'pnpm.cmd'
+ * argument is caught. Also note codeText only drops lines that BEGIN with a
+ * comment marker, so a trailing `// 'pnpm.cmd'` false-positives; that fails
+ * closed. All of which is the ceiling of a text ratchet, and the reason `src/`
+ * gets a real chokepoint instead.
  */
 const WINDOWS_SHIM_LITERAL = /['"][\w./\\-]*\.(?:cmd|bat)['"]/i
 

@@ -10,8 +10,9 @@ const requestedBase =
 const base = resolvePullRequestDiffBase(process.cwd(), requestedBase)
 // Why validate rather than trust: `base` arrives from argv or the environment and
 // below it can reach cmd.exe unquoted, because resolvePnpmCliInvocation still
-// falls back to a shell when it cannot find a directly spawnable pnpm. Everything
-// git accepts as a revision fits this set; nothing cmd.exe treats as syntax does.
+// falls back to a shell when it cannot find a directly spawnable pnpm. It accepts
+// SHAs, tags, ref paths and the ^ ~ .. suffixes -- not reflog syntax like HEAD@{1},
+// because braces stay out of anything bound for cmd.exe. The error names the base.
 const GIT_REVISION = /^[A-Za-z0-9._/@^~-]+$/
 if (!GIT_REVISION.test(base)) {
   throw new Error(`Refusing to pass an unsafe diff base to pnpm: ${base}`)
