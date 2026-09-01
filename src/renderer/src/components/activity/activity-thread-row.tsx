@@ -167,7 +167,7 @@ export const ActivityThreadRow = React.memo(function ActivityThreadRow({
                           onMarkRead(thread)
                         }}
                         onMouseDown={(event) => event.stopPropagation()}
-                        className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded hover:bg-accent/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        className="flex size-3.5 shrink-0 cursor-pointer items-center justify-center rounded hover:bg-accent/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         aria-label={translate(
                           'auto.components.activity.ActivityPrototypePage.markThreadRead',
                           'Mark thread as read'

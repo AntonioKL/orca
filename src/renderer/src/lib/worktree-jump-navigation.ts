@@ -1,9 +1,14 @@
 import { toast } from 'sonner'
 import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
-import { activateAndRevealWorktree } from '@/lib/worktree-activation'
+import {
+  activateAndRevealFolderWorkspace,
+  activateAndRevealWorktree
+} from '@/lib/worktree-activation'
 import { getVisibleWorktreeShortcutTargets } from '@/components/sidebar/visible-worktrees'
+import { worktreePassesSidebarFilters } from '@/components/sidebar/worktree-filter-visibility'
 import { sidebarHasActiveFilters } from '@/components/sidebar/sidebar-filter-actions'
+import { parseWorkspaceKey } from '../../../shared/workspace-scope'
 import { normalizeExecutionHostId, type ExecutionHostId } from '../../../shared/execution-host'
 
 function wasHiddenBySidebarFilters(worktreeId: string, executionHostId?: ExecutionHostId): boolean {
@@ -13,7 +18,7 @@ function wasHiddenBySidebarFilters(worktreeId: string, executionHostId?: Executi
     return false
   }
 
-  return !getVisibleWorktreeShortcutTargets().some((target) => {
+  const inRenderedTargets = getVisibleWorktreeShortcutTargets().some((target) => {
     if (target.id !== worktreeId) {
       return false
     }
@@ -24,6 +29,12 @@ function wasHiddenBySidebarFilters(worktreeId: string, executionHostId?: Executi
       normalizeExecutionHostId(target.executionHostId) === normalizeExecutionHostId(executionHostId)
     )
   })
+  if (inRenderedTargets) {
+    return false
+  }
+  // Absent from the rendered list can mean a collapsed group, not a filter:
+  // collapsed-but-unfiltered targets should be revealed, not toasted.
+  return !worktreePassesSidebarFilters(worktreeId)
 }
 
 /** Navigate from a worktree reference in either sidebar back to the workspace surface. */
@@ -32,6 +43,21 @@ export function jumpToWorktreeFromSidebar(
   options?: { executionHostId?: ExecutionHostId }
 ): boolean {
   const state = useAppStore.getState()
+
+  // Folder workspaces must go through the folder branch so its path-status gate runs.
+  const workspaceScope = parseWorkspaceKey(worktreeId)
+  if (workspaceScope?.type === 'folder') {
+    const activated = activateAndRevealFolderWorkspace(
+      workspaceScope.folderWorkspaceId,
+      options?.executionHostId ? { executionHostId: options.executionHostId } : undefined
+    )
+    if (activated === false) {
+      return false
+    }
+    state.setSidebarBody?.('workspaces')
+    return true
+  }
+
   const hiddenByFilters = wasHiddenBySidebarFilters(worktreeId, options?.executionHostId)
 
   const activated = activateAndRevealWorktree(worktreeId, {

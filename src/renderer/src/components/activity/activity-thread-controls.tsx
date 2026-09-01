@@ -152,7 +152,7 @@ export function ActivityStatusGroupHeader({
       <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.05em] text-foreground/80 transition-colors group-hover:text-foreground">
         {group.label}
       </span>
-      <span className="rounded-full border border-border/80 bg-muted/80 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none text-foreground/80 shadow-2xs">
+      <span className="rounded-full border border-border/80 bg-muted/80 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none text-foreground/80 shadow-xs">
         {group.threads.length}
       </span>
     </div>

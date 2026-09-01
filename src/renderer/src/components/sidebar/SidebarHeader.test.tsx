@@ -8,7 +8,8 @@ import SidebarHeader from './SidebarHeader'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const mocks = vi.hoisted(() => ({
-  openWorkspaceCreationComposerWithTourHandoff: vi.fn()
+  openWorkspaceCreationComposerWithTourHandoff: vi.fn(),
+  unreadCount: { value: 0 }
 }))
 
 type MockState = {
@@ -18,10 +19,14 @@ type MockState = {
   sidebarWidth: number
   setSidebarBody: (body: 'workspaces' | 'agents') => void
   openModal: (modal: string, data?: unknown) => void
+  updateSettings: (patch: Record<string, unknown>) => void
+  openActivityPage: () => void
   activeContextualTourId: string | null
   settings?: {
     showAgentsSidebar?: boolean
     experimentalAgentDashboardPopout?: boolean
+    agentsSidebarIntroShown?: boolean
+    agentsSidebarMigratedFromExperimental?: boolean
   }
 }
 
@@ -60,6 +65,19 @@ vi.mock('../contextual-tours/workspace-creation-tour-handoff', () => ({
   openWorkspaceCreationComposerWithTourHandoff: mocks.openWorkspaceCreationComposerWithTourHandoff
 }))
 
+vi.mock('@/components/activity/useActivityUnreadCount', () => ({
+  useActivityUnreadCount: (enabled: boolean) => (enabled ? mocks.unreadCount.value : 0)
+}))
+
+// Deterministic popover: expose the open flag instead of relying on radix portals.
+vi.mock('@/components/ui/popover', () => ({
+  Popover: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
+    <div data-intro-open={open ? '' : undefined}>{children}</div>
+  ),
+  PopoverAnchor: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  PopoverContent: ({ children }: { children: React.ReactNode }) => <>{children}</>
+}))
+
 let container: HTMLDivElement
 let root: Root
 
@@ -91,8 +109,13 @@ beforeEach(() => {
     sidebarWidth: 280,
     setSidebarBody: vi.fn(),
     openModal: vi.fn(),
-    activeContextualTourId: null
+    updateSettings: vi.fn(),
+    openActivityPage: vi.fn(),
+    activeContextualTourId: null,
+    // Hydrated settings: the Agents tab is hidden until settings load.
+    settings: { showAgentsSidebar: true }
   }
+  mocks.unreadCount.value = 0
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -250,6 +273,96 @@ describe('SidebarHeader', () => {
       newWorkspaceButton().click()
     })
     expect(mocks.openWorkspaceCreationComposerWithTourHandoff).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the unread count badge on the Agents tab', () => {
+    mocks.unreadCount.value = 3
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    const agentTab = container.querySelector<HTMLButtonElement>(
+      'button[data-sidebar-section-title="agents"]'
+    )
+    expect(agentTab?.textContent).toContain('3')
+  })
+
+  it('keeps the intro closed and unstamped before settings hydrate', () => {
+    mockState.settings = undefined
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    expect(container.querySelector('[data-intro-open]')).toBeNull()
+
+    const projectsTab = container.querySelector<HTMLButtonElement>(
+      'button[data-sidebar-section-title="projects"]'
+    )
+    act(() => {
+      projectsTab?.click()
+    })
+    expect(mockState.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it('does not reset a persisted agents body before settings hydrate', () => {
+    mockState.settings = undefined
+    mockState.sidebarBody = 'agents'
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    expect(mockState.setSidebarBody).not.toHaveBeenCalled()
+  })
+
+  it('opens the intro once hydrated and stamps it only while it is on screen', () => {
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    expect(container.querySelector('[data-intro-open]')).toBeTruthy()
+
+    const agentTab = container.querySelector<HTMLButtonElement>(
+      'button[data-sidebar-section-title="agents"]'
+    )
+    act(() => {
+      agentTab?.click()
+    })
+    expect(mockState.updateSettings).toHaveBeenCalledWith({ agentsSidebarIntroShown: true })
+  })
+
+  it('never re-stamps the intro after it was acknowledged', () => {
+    mockState.settings = { showAgentsSidebar: true, agentsSidebarIntroShown: true }
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    expect(container.querySelector('[data-intro-open]')).toBeNull()
+
+    const agentTab = container.querySelector<HTMLButtonElement>(
+      'button[data-sidebar-section-title="agents"]'
+    )
+    act(() => {
+      agentTab?.click()
+    })
+    expect(mockState.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it('opens the full Agents view from the expand button in agents mode', () => {
+    mockState.settings = { showAgentsSidebar: true, agentsSidebarIntroShown: true }
+    mockState.sidebarBody = 'agents'
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    const expandButton = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Open full Agents view"]'
+    )
+    expect(expandButton).toBeTruthy()
+
+    act(() => {
+      expandButton?.click()
+    })
+    expect(mockState.openActivityPage).toHaveBeenCalledTimes(1)
   })
 
   it('switches to compact actions only below the wide-layout breakpoint', () => {

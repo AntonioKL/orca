@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentStatusEntry } from '../../../../shared/agent-status-types'
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import type { RetainedAgentEntry } from './agent-status'
 import { createTestStore } from './store-test-helpers'
+import {
+  sanitizeAcknowledgedAgentsByPaneKey,
+  sanitizeActivityClearedAtByPaneKey
+} from './ui/ui-slice-hydration-sanitizers'
 
 function makeRetained(paneKey: string, worktreeId = 'wt-1'): RetainedAgentEntry {
   const entry: AgentStatusEntry = {
@@ -86,5 +90,80 @@ describe('dismissRetainedAgents', () => {
     const before = store.getState().retainedAgentsByPaneKey
     store.getState().dismissRetainedAgents(['tab-zz:9'])
     expect(store.getState().retainedAgentsByPaneKey).toBe(before)
+  })
+})
+
+describe('dropAgentStatus cleared-at/manual-unread lifecycle', () => {
+  // Why: setAgentStatus schedules a real 30-minute freshness setTimeout.
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function seedLiveWithClearState(store: ReturnType<typeof createTestStore>): void {
+    vi.useFakeTimers()
+    store.getState().setAgentStatus('tab-a:1', { state: 'done', prompt: 'p', agentType: 'claude' })
+    store.getState().applyActivityClearedAt({ 'tab-a:1': 5_000 })
+    store.getState().unacknowledgeAgents(['tab-a:1'])
+    expect(store.getState().activityClearedAtByPaneKey['tab-a:1']).toBe(5_000)
+    expect(store.getState().manuallyUnreadTurnsByPaneKey['tab-a:1']).toBeGreaterThan(0)
+  }
+
+  it('row dismissal keeps the cutoff and manual-unread stamp for a still-live pane', () => {
+    const store = createTestStore()
+    seedLiveWithClearState(store)
+    store.getState().dropAgentStatus('tab-a:1')
+    expect(store.getState().agentStatusByPaneKey['tab-a:1']).toBeUndefined()
+    // The pane may republish its full stateHistory; without the cutoff every
+    // cleared event would flood back as unread (the Clear-completed undo bug).
+    expect(store.getState().activityClearedAtByPaneKey['tab-a:1']).toBe(5_000)
+    expect(store.getState().manuallyUnreadTurnsByPaneKey['tab-a:1']).toBeGreaterThan(0)
+  })
+
+  it('paneRemoved drop clears the cutoff and manual-unread stamp with the pane', () => {
+    const store = createTestStore()
+    seedLiveWithClearState(store)
+    store.getState().dropAgentStatus('tab-a:1', { paneRemoved: true })
+    expect(store.getState().activityClearedAtByPaneKey['tab-a:1']).toBeUndefined()
+    expect(store.getState().manuallyUnreadTurnsByPaneKey['tab-a:1']).toBeUndefined()
+  })
+})
+
+describe('dropAgentStatusByTabPrefix preserveActivityClearedState', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('keeps cutoffs and manual-unread stamps for a mirrored-tab retraction sweep', () => {
+    vi.useFakeTimers()
+    const store = createTestStore()
+    store.getState().setAgentStatus('tab-a:1', { state: 'done', prompt: 'p', agentType: 'claude' })
+    store.getState().applyActivityClearedAt({ 'tab-a:1': 5_000 })
+    store.getState().unacknowledgeAgents(['tab-a:1'])
+
+    store.getState().dropAgentStatusByTabPrefix('tab-a', { preserveActivityClearedState: true })
+
+    expect(store.getState().agentStatusByPaneKey['tab-a:1']).toBeUndefined()
+    // Loss of contact is not pane death: the host republishes the same panes on reconnect,
+    // and the preserved cutoff keeps cleared activity from replaying.
+    expect(store.getState().activityClearedAtByPaneKey['tab-a:1']).toBe(5_000)
+    expect(store.getState().manuallyUnreadTurnsByPaneKey['tab-a:1']).toBeGreaterThan(0)
+
+    store.getState().dropAgentStatusByTabPrefix('tab-a')
+    expect(store.getState().activityClearedAtByPaneKey['tab-a:1']).toBeUndefined()
+    expect(store.getState().manuallyUnreadTurnsByPaneKey['tab-a:1']).toBeUndefined()
+  })
+})
+
+describe('sanitizeActivityClearedAtByPaneKey hydration TTL', () => {
+  it('keeps cutoffs past the 7-day ack TTL so they outlive the persisted entries they guard', () => {
+    const eightDaysAgo = Date.now() - 8 * 24 * 60 * 60 * 1000
+    const record = { 'tab-a:1': eightDaysAgo }
+    // Main prunes persisted entries at 7d from receivedAt; a same-aged cutoff must survive
+    // hydration or the entry it shadows replays as unread on restart.
+    expect(sanitizeAcknowledgedAgentsByPaneKey(record)).toEqual({})
+    expect(sanitizeActivityClearedAtByPaneKey(record)).toEqual(record)
+
+    const fifteenDaysAgo = Date.now() - 15 * 24 * 60 * 60 * 1000
+    expect(sanitizeActivityClearedAtByPaneKey({ 'tab-a:1': fifteenDaysAgo })).toEqual({})
   })
 })

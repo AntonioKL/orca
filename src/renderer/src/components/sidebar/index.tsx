@@ -65,6 +65,11 @@ function Sidebar({
   const [agentGroupBy, setAgentGroupBy] = React.useState<ActivityGroupBy>('status')
   const [agentQuery, setAgentQuery] = React.useState('')
   const [agentSearchOpen, setAgentSearchOpen] = React.useState(false)
+  // Why clear on close: the hidden input's query would keep filtering the list with no visible indicator.
+  const closeAgentSearch = React.useCallback(() => {
+    setAgentSearchOpen(false)
+    setAgentQuery('')
+  }, [])
   const [agentOptionsTarget, setAgentOptionsTarget] = React.useState<HTMLDivElement | null>(null)
   const agentsScrollTopRef = React.useRef(0)
   const fetchAllWorktrees = useAppStore((s) => s.fetchAllWorktrees)
@@ -161,7 +166,13 @@ function Sidebar({
                           'Search'
                         )}
                         aria-pressed={agentSearchOpen}
-                        onClick={() => setAgentSearchOpen((open) => !open)}
+                        onClick={() => {
+                          if (agentSearchOpen) {
+                            closeAgentSearch()
+                          } else {
+                            setAgentSearchOpen(true)
+                          }
+                        }}
                       >
                         <Search className="size-3.5" strokeWidth={2.25} />
                       </Button>
@@ -212,7 +223,7 @@ function Sidebar({
                       onChange={(event) => setAgentQuery(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === 'Escape') {
-                          setAgentSearchOpen(false)
+                          closeAgentSearch()
                         }
                       }}
                       placeholder={translate(

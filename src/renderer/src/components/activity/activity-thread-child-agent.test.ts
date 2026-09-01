@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentStatusEntry } from '../../../../shared/agent-status-types'
-import { isChildAgentEntry, isChildAgentThread } from './activity-thread-child-agent'
+import { collectChildAgentPaneKeys } from './activity-thread-child-agent'
 import type { ActivityEvent, AgentPaneThread } from './activity-thread-types'
 import {
   makeRepo,
@@ -8,13 +8,17 @@ import {
   makeWorkingEntryWithoutHistory,
   makeWorktree,
   PANE_KEY,
-  PANE_KEY_2
+  PANE_KEY_2,
+  PANE_KEY_3
 } from './ActivityPrototypePage-test-fixtures'
 
-function makeTestEntry(overrides: Partial<AgentStatusEntry> = {}): AgentStatusEntry {
+function makeTestEntry(
+  paneKey: string,
+  overrides: Partial<AgentStatusEntry> = {}
+): AgentStatusEntry {
   return {
     ...makeWorkingEntryWithoutHistory(),
-    paneKey: PANE_KEY,
+    paneKey,
     state: 'done',
     prompt: 'test prompt',
     stateHistory: [],
@@ -22,173 +26,146 @@ function makeTestEntry(overrides: Partial<AgentStatusEntry> = {}): AgentStatusEn
   }
 }
 
-function makeTestThread(overrides: Partial<AgentPaneThread> = {}): AgentPaneThread {
-  const repo = makeRepo()
+function makeTestThread(
+  paneKey: string,
+  overrides: Partial<AgentPaneThread> = {}
+): AgentPaneThread {
   const worktree = makeWorktree()
-  const tab = makeTabWithIds('tab-1', worktree.id)
   return {
-    paneKey: PANE_KEY,
+    paneKey,
     paneTitle: 'Test Agent',
     agentType: 'claude',
     worktree,
-    repo,
-    tab,
+    repo: makeRepo(),
+    tab: makeTabWithIds('tab-1', worktree.id),
     events: [],
     latestEvent: null,
     latestTimestamp: 1000,
     currentAgentState: 'working',
-    currentAgentEntry: null,
+    currentAgentEntry: makeTestEntry(paneKey),
     unread: false,
     responsePreview: '',
     ...overrides
   }
 }
 
-describe('isChildAgentEntry', () => {
-  it('returns false for null, undefined, or entries without orchestration', () => {
-    expect(isChildAgentEntry(null)).toBe(false)
-    expect(isChildAgentEntry(undefined)).toBe(false)
-    expect(isChildAgentEntry(makeTestEntry())).toBe(false)
+function makeEventFor(entry: AgentStatusEntry): ActivityEvent {
+  const worktree = makeWorktree()
+  return {
+    id: `event-${entry.paneKey}`,
+    state: 'done',
+    timestamp: 1000,
+    unread: false,
+    worktree,
+    repo: null,
+    tab: makeTabWithIds('tab-1', worktree.id),
+    agentType: 'claude',
+    agentAlive: true,
+    entry
+  }
+}
+
+describe('collectChildAgentPaneKeys', () => {
+  it('returns an empty set when no thread carries orchestration', () => {
+    const threads = [makeTestThread(PANE_KEY), makeTestThread(PANE_KEY_2)]
+    expect(collectChildAgentPaneKeys(threads).size).toBe(0)
   })
 
-  it('returns true when parentPaneKey is different from entry paneKey', () => {
-    const entry = makeTestEntry({
-      orchestration: {
-        parentPaneKey: PANE_KEY_2,
-        taskId: 'task-1',
-        dispatchId: 'ctx-1'
-      }
+  it('classifies a thread whose parent pane is listed as a child', () => {
+    const parent = makeTestThread(PANE_KEY)
+    const child = makeTestThread(PANE_KEY_2, {
+      currentAgentEntry: makeTestEntry(PANE_KEY_2, {
+        orchestration: { parentPaneKey: PANE_KEY, taskId: 'task-1', dispatchId: 'ctx-1' }
+      })
     })
-    expect(isChildAgentEntry(entry)).toBe(true)
+    expect(collectChildAgentPaneKeys([parent, child])).toEqual(new Set([PANE_KEY_2]))
   })
 
-  it('returns false when parentPaneKey matches entry paneKey', () => {
-    const entry = makeTestEntry({
-      orchestration: {
-        parentPaneKey: PANE_KEY,
-        taskId: 'task-1',
-        dispatchId: 'ctx-1'
-      }
+  it('promotes an orphan whose parent pane is no longer listed', () => {
+    const orphan = makeTestThread(PANE_KEY_2, {
+      currentAgentEntry: makeTestEntry(PANE_KEY_2, {
+        orchestration: { parentPaneKey: PANE_KEY, taskId: 'task-1', dispatchId: 'ctx-1' }
+      })
     })
-    expect(isChildAgentEntry(entry)).toBe(false)
+    expect(collectChildAgentPaneKeys([orphan]).size).toBe(0)
   })
 
-  it('returns true when parentTerminalHandle is different from entry terminalHandle', () => {
-    const entry = makeTestEntry({
-      terminalHandle: 'terminal-child',
-      orchestration: {
-        parentTerminalHandle: 'terminal-parent',
-        taskId: 'task-1',
-        dispatchId: 'ctx-1'
-      }
+  it('ignores a self-referencing parentPaneKey', () => {
+    const thread = makeTestThread(PANE_KEY, {
+      currentAgentEntry: makeTestEntry(PANE_KEY, {
+        orchestration: { parentPaneKey: PANE_KEY, taskId: 'task-1', dispatchId: 'ctx-1' }
+      })
     })
-    expect(isChildAgentEntry(entry)).toBe(true)
+    expect(collectChildAgentPaneKeys([thread]).size).toBe(0)
   })
 
-  it('returns true when coordinatorHandle is different from entry terminalHandle', () => {
-    const entry = makeTestEntry({
-      terminalHandle: 'terminal-child',
-      orchestration: {
-        coordinatorHandle: 'terminal-coordinator',
-        taskId: 'task-1',
-        dispatchId: 'ctx-1'
-      }
+  it('resolves coordinatorHandle through a listed thread terminal handle', () => {
+    const coordinator = makeTestThread(PANE_KEY, {
+      currentAgentEntry: makeTestEntry(PANE_KEY, { terminalHandle: 'terminal-coord' })
     })
-    expect(isChildAgentEntry(entry)).toBe(true)
-  })
-
-  it('returns false when coordinator terminal handle matches coordinatorHandle', () => {
-    const entry = makeTestEntry({
-      terminalHandle: 'terminal-coordinator',
-      orchestration: {
-        coordinatorHandle: 'terminal-coordinator',
-        taskId: 'task-1',
-        dispatchId: 'ctx-1'
-      }
-    })
-    expect(isChildAgentEntry(entry)).toBe(false)
-  })
-})
-
-describe('isChildAgentThread', () => {
-  it('returns false for standalone threads', () => {
-    const thread = makeTestThread({
-      currentAgentEntry: makeTestEntry({ prompt: 'standalone task' })
-    })
-    expect(isChildAgentThread(thread)).toBe(false)
-  })
-
-  it('returns true when currentAgentEntry is a child agent', () => {
-    const thread = makeTestThread({
-      currentAgentEntry: makeTestEntry({
+    const worker = makeTestThread(PANE_KEY_2, {
+      currentAgentEntry: makeTestEntry(PANE_KEY_2, {
+        terminalHandle: 'terminal-worker',
         orchestration: {
-          parentPaneKey: PANE_KEY_2,
+          coordinatorHandle: 'terminal-coord',
           taskId: 'task-1',
           dispatchId: 'ctx-1'
         }
       })
     })
-    expect(isChildAgentThread(thread)).toBe(true)
+    expect(collectChildAgentPaneKeys([coordinator, worker])).toEqual(new Set([PANE_KEY_2]))
   })
 
-  it('returns true when latestEvent entry is a child agent', () => {
-    const worktree = makeWorktree()
-    const tab = makeTabWithIds('tab-1', worktree.id)
-    const childEntry = makeTestEntry({
-      terminalHandle: 'terminal-child',
-      orchestration: {
-        coordinatorHandle: 'terminal-coord',
-        taskId: 'task-1',
-        dispatchId: 'ctx-1'
-      }
+  it('promotes a worker whose coordinator handle matches no listed thread', () => {
+    const worker = makeTestThread(PANE_KEY_2, {
+      currentAgentEntry: makeTestEntry(PANE_KEY_2, {
+        terminalHandle: 'terminal-worker',
+        orchestration: { coordinatorHandle: 'terminal-gone', taskId: 'task-1', dispatchId: 'ctx-1' }
+      })
     })
-    const event: ActivityEvent = {
-      id: 'event-1',
-      state: 'done',
-      timestamp: 1000,
-      unread: false,
-      worktree,
-      repo: null,
-      tab,
-      agentType: 'claude',
-      agentAlive: true,
-      entry: childEntry
-    }
-    const thread = makeTestThread({
-      currentAgentEntry: null,
-      latestEvent: event,
-      events: [event]
-    })
-    expect(isChildAgentThread(thread)).toBe(true)
+    expect(collectChildAgentPaneKeys([worker]).size).toBe(0)
   })
 
-  it('returns true when any event in events is a child agent', () => {
-    const worktree = makeWorktree()
-    const tab = makeTabWithIds('tab-1', worktree.id)
-    const childEntry = makeTestEntry({
-      orchestration: {
-        parentPaneKey: PANE_KEY_2,
-        taskId: 'task-1',
-        dispatchId: 'ctx-1'
-      }
+  it('keeps child classification from an older event while the parent is listed', () => {
+    const parent = makeTestThread(PANE_KEY)
+    const childEntry = makeTestEntry(PANE_KEY_2, {
+      orchestration: { parentPaneKey: PANE_KEY, taskId: 'task-1', dispatchId: 'ctx-1' }
     })
-    const event: ActivityEvent = {
-      id: 'event-1',
-      state: 'done',
-      timestamp: 1000,
-      unread: false,
-      worktree,
-      repo: null,
-      tab,
-      agentType: 'claude',
-      agentAlive: true,
-      entry: childEntry
-    }
-    const thread = makeTestThread({
-      currentAgentEntry: null,
-      latestEvent: null,
-      events: [event]
+    const child = makeTestThread(PANE_KEY_2, {
+      currentAgentEntry: makeTestEntry(PANE_KEY_2),
+      events: [makeEventFor(childEntry)]
     })
-    expect(isChildAgentThread(thread)).toBe(true)
+    expect(collectChildAgentPaneKeys([parent, child])).toEqual(new Set([PANE_KEY_2]))
+  })
+
+  it('classifies a grandchild chained through a listed child', () => {
+    const root = makeTestThread(PANE_KEY)
+    const child = makeTestThread(PANE_KEY_2, {
+      currentAgentEntry: makeTestEntry(PANE_KEY_2, {
+        orchestration: { parentPaneKey: PANE_KEY, taskId: 'task-1', dispatchId: 'ctx-1' }
+      })
+    })
+    const grandchild = makeTestThread(PANE_KEY_3, {
+      currentAgentEntry: makeTestEntry(PANE_KEY_3, {
+        orchestration: { parentPaneKey: PANE_KEY_2, taskId: 'task-2', dispatchId: 'ctx-2' }
+      })
+    })
+    expect(collectChildAgentPaneKeys([root, child, grandchild])).toEqual(
+      new Set([PANE_KEY_2, PANE_KEY_3])
+    )
+  })
+
+  it('promotes every member of a parent cycle instead of hiding them all', () => {
+    const a = makeTestThread(PANE_KEY, {
+      currentAgentEntry: makeTestEntry(PANE_KEY, {
+        orchestration: { parentPaneKey: PANE_KEY_2, taskId: 'task-1', dispatchId: 'ctx-1' }
+      })
+    })
+    const b = makeTestThread(PANE_KEY_2, {
+      currentAgentEntry: makeTestEntry(PANE_KEY_2, {
+        orchestration: { parentPaneKey: PANE_KEY, taskId: 'task-2', dispatchId: 'ctx-2' }
+      })
+    })
+    expect(collectChildAgentPaneKeys([a, b]).size).toBe(0)
   })
 })

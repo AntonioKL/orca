@@ -42,8 +42,14 @@ export abstract class AgentHookServerCleanup extends AgentHookServerAuthorityFen
     const existing = this.state.lastStatusByPaneKey.get(resolvedPaneKey) as
       | EnrichedAgentHookEventPayload
       | undefined
-    // Why: renderer-enriched fields can diverge from the main cache; timing fields pin the exact event instance.
-    if (!existing || existing.receivedAt !== identity.receivedAt || existing.stateStartedAt !== identity.stateStartedAt) {
+    // Why: stateStartedAt pins the turn; the renderer's updatedAt is stamped at or after this
+    // receivedAt (runtime-sync and recovery paths use Date.now()/capturedAt), so a strictly
+    // newer cached event is the only replacement worth protecting.
+    if (
+      !existing ||
+      existing.stateStartedAt !== identity.stateStartedAt ||
+      existing.receivedAt > identity.receivedAt
+    ) {
       return false
     }
     this.dropStatusEntry(resolvedPaneKey)

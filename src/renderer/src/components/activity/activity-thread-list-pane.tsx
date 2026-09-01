@@ -36,6 +36,10 @@ const observeActivityListRect: typeof observeElementRect = (instance, cb) =>
     cb(rect.height > 0 ? rect : ZERO_RECT_FALLBACK_VIEWPORT)
   })
 
+// Uncontrolled collapse state must survive remounts alongside the caller's scroll
+// ref, or a restored scrollTop lands on a different (all-expanded) layout.
+const collapsedGroupsByScrollRef = new WeakMap<React.MutableRefObject<number>, Set<string>>()
+
 export function ActivityThreadListPane({
   threadListRef,
   threadListWidth,
@@ -112,7 +116,7 @@ export function ActivityThreadListPane({
   scrollTopRef?: React.MutableRefObject<number>
 }): React.JSX.Element {
   const [internalCollapsedGroupKeys, setInternalCollapsedGroupKeys] = useState<Set<string>>(
-    () => new Set()
+    () => (scrollTopRef ? collapsedGroupsByScrollRef.get(scrollTopRef) : undefined) ?? new Set()
   )
   const isControlled = collapsedGroupKeys !== undefined && onToggleGroupCollapse !== undefined
   const effectiveCollapsedGroupKeys = isControlled ? collapsedGroupKeys : internalCollapsedGroupKeys
@@ -126,24 +130,32 @@ export function ActivityThreadListPane({
           } else {
             next.add(groupKey)
           }
+          if (scrollTopRef) {
+            collapsedGroupsByScrollRef.set(scrollTopRef, next)
+          }
           return next
         })
       }
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const hasRestoredScrollRef = useRef(false)
   const handleScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
-      if (scrollTopRef) {
-        scrollTopRef.current = event.currentTarget.scrollTop
+      if (!scrollTopRef) {
+        return
       }
+      const scrollTop = event.currentTarget.scrollTop
+      // A clamp-to-0 fired before the deferred restore must not wipe the saved offset.
+      if (!hasRestoredScrollRef.current) {
+        if (scrollTop === 0) {
+          return
+        }
+        hasRestoredScrollRef.current = true
+      }
+      scrollTopRef.current = scrollTop
     },
     [scrollTopRef]
   )
-  useEffect(() => {
-    if (scrollContainerRef.current && scrollTopRef) {
-      scrollContainerRef.current.scrollTop = scrollTopRef.current
-    }
-  }, [scrollTopRef])
   const virtualItems = useMemo(
     () =>
       buildActivityVirtualItems({
@@ -209,6 +221,29 @@ export function ActivityThreadListPane({
     observeElementRect: observeActivityListRect,
     useFlushSync: false
   })
+
+  // Row heights differ between densities; drop stale measurements on toggle.
+  useEffect(() => {
+    virtualizer.measure()
+  }, [virtualizer, compactMode])
+
+  // Restore only once the (estimated) content can contain the saved offset, so a
+  // pre-hydration mount doesn't clamp the restore to 0.
+  const totalSize = virtualizer.getTotalSize()
+  useEffect(() => {
+    if (!scrollTopRef || hasRestoredScrollRef.current) {
+      return
+    }
+    if (scrollTopRef.current > 0 && scrollTopRef.current >= totalSize) {
+      return
+    }
+    const scrollContainer = scrollContainerRef.current
+    if (!scrollContainer) {
+      return
+    }
+    scrollContainer.scrollTop = scrollTopRef.current
+    hasRestoredScrollRef.current = true
+  }, [scrollTopRef, totalSize])
 
   const scrollOffset = virtualizer.scrollOffset ?? 0
   const activeStickyHeaderIndex =

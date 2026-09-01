@@ -3912,7 +3912,9 @@
           "searchLinks": "링크 검색",
           "deleteSkills": "스킬 삭제…"
         },
-        "SkillShareSelectionControls": { "01c5a15e02": "스킬 공유" },
+        "SkillShareSelectionControls": {
+          "01c5a15e02": "스킬 공유"
+        },
         "SkillRow": {
           "updatedUnknown": "날짜 없음",
           "pathCopied": "경로 복사됨",
@@ -3922,13 +3924,17 @@
           "viewDetails": "세부 정보 보기",
           "deleteSkill": "삭제…"
         },
-        "SkillsList": { "listLabel": "스킬" },
+        "SkillsList": {
+          "listLabel": "스킬"
+        },
         "sourceStatus": {
           "missing": "폴더를 찾을 수 없음",
           "remoteRepo": "원격 리포지토리 — 검색 안 됨",
           "unavailable": "검색 안 됨"
         },
-        "sources": { "heading": "스킬 폴더" },
+        "sources": {
+          "heading": "스킬 폴더"
+        },
         "sourceKind": {
           "home": "홈",
           "workspace": "워크스페이스",
@@ -3950,7 +3956,10 @@
           "linkOne": "링크 {{count}}개",
           "linkOther": "링크 {{count}}개"
         },
-        "filter": { "allAgents": "모든 에이전트", "sharedAgent": "공유됨 (.agents)" },
+        "filter": {
+          "allAgents": "모든 에이전트",
+          "sharedAgent": "공유됨 (.agents)"
+        },
         "SkillsSelectionHeader": {
           "exit": "선택 나가기",
           "exitTooltip": "선택 나가기 · Esc",
@@ -3959,7 +3968,11 @@
           "clear": "지우기",
           "deleteTitle": "삭제할 스킬 선택"
         },
-        "SkillDetailDialog": { "agents": "에이전트", "updated": "업데이트됨", "copy": "복사" },
+        "SkillDetailDialog": {
+          "agents": "에이전트",
+          "updated": "업데이트됨",
+          "copy": "복사"
+        },
         "SkillFreshnessNudge": {
           "titleOne": "설치된 Orca 스킬이 오래되었습니다",
           "titleMany": "설치된 Orca 스킬 {{value0}}개가 오래되었습니다",
@@ -4383,7 +4396,10 @@
           "5c9c7c16aa": "워크스페이스를 만들려면 프로젝트를 추가하세요.",
           "ca6f729da2": "새 워크스페이스({{value0}})",
           "a30e34eb5c": "워크스페이스 보드 닫기",
-          "25a95899c9": "프로젝트 추가"
+          "25a95899c9": "프로젝트 추가",
+          "openFullAgentsView": "에이전트 전체 보기 열기",
+          "spaces": "스페이스",
+          "views": "사이드바 보기"
         },
         "SidebarNav": {
           "80611a8b10": "검색",
@@ -14187,7 +14203,7 @@
           "b29191b3e0": "워크트리",
           "8c3b621ddf": "프로젝트",
           "4a3986b200": "상태",
-          "770d458144": "agent 활동 그룹화 기준",
+          "770d458144": "그룹화 기준",
           "795cbf26e2": "필터...",
           "4616ea39fd": "워크스페이스로 이동",
           "markThreadRead": "스레드를 읽은 것으로 표시",
@@ -14942,6 +14958,20 @@
         "addressInUse": "Another process may be holding the port. Restart Orca to try again.",
         "unknown": "Restart Orca to try again."
       }
+    }
+  },
+  "agentsSidebarIntro": {
+    "migrated": {
+      "title": "에이전트를 더 쉽게 찾을 수 있습니다",
+      "description": "에이전트 보기가 이제 사이드바 전용 탭이 되었습니다. 활동과 필터는 그대로 유지됩니다.",
+      "dismiss": "확인",
+      "action": "에이전트 열기"
+    },
+    "new": {
+      "title": "에이전트 탭을 만나보세요",
+      "description": "에이전트가 무엇을 작업 중인지, 무엇이 완료되었는지, 어디에 개입이 필요한지 확인하세요.",
+      "dismiss": "나중에",
+      "action": "에이전트 사용해 보기"
     }
   }
 }

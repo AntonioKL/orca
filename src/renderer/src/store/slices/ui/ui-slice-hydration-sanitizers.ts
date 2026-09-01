@@ -15,6 +15,8 @@ import {
   normalizeExecutionHostScope
 } from '../../../../../shared/execution-host'
 import { persistedUIValuesEqual } from '../../../../../shared/persisted-ui-equality'
+// Pure predicate over GlobalSettings; safe to share with the store layer.
+import { shouldShowAgentDashboardSidebarButton } from '@/components/sidebar/agent-dashboard-sidebar-visibility'
 import { DEFAULT_STATUS_BAR_ITEMS } from '../../../../../shared/constants'
 import type { UISlice } from './ui-slice-contract'
 
@@ -104,11 +106,14 @@ export function sanitizePersistedSidebarWidth(
   return Math.min(maxWidth, Math.max(MIN_SIDEBAR_WIDTH, width))
 }
 
-export function sanitizePaneKeyTimestampRecord(value: unknown): Record<string, number> {
+export function sanitizePaneKeyTimestampRecord(
+  value: unknown,
+  maxAgeMs: number = HYDRATE_MAX_AGE_MS
+): Record<string, number> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return {}
   }
-  const cutoff = Date.now() - HYDRATE_MAX_AGE_MS
+  const cutoff = Date.now() - maxAgeMs
   const out: Record<string, number> = {}
   for (const [key, ackAt] of Object.entries(value as Record<string, unknown>)) {
     if (!isSafePersistedRecordKey(key)) {
@@ -123,6 +128,14 @@ export function sanitizePaneKeyTimestampRecord(value: unknown): Record<string, n
 }
 
 export const sanitizeAcknowledgedAgentsByPaneKey = sanitizePaneKeyTimestampRecord
+
+/** Cleared-at cutoffs must outlive any persisted status entry they guard: main prunes entries
+ *  at HYDRATE_MAX_AGE_MS from receivedAt, and cutoff values trail receipt time, so pruning them
+ *  on the same clock can resurrect a cleared entry. Double the TTL keeps the guard alive past
+ *  every entry it can still shadow. */
+export function sanitizeActivityClearedAtByPaneKey(value: unknown): Record<string, number> {
+  return sanitizePaneKeyTimestampRecord(value, 2 * HYDRATE_MAX_AGE_MS)
+}
 
 export function sanitizeWorkspaceCleanupDismissals(
   value: unknown
@@ -162,14 +175,14 @@ export function sanitizeWorkspaceCleanupDismissals(
 
 export function sanitizeHydratedActiveView(
   value: PersistedUIState['activeView'],
-  experimentalActivityEnabled: boolean
+  settings: Parameters<typeof shouldShowAgentDashboardSidebarButton>[0]
 ): TopLevelView {
   // Why: older data (pre-activeView) or a view a different build doesn't have falls back to terminal rather than rendering nothing.
   if (!isTopLevelView(value)) {
     return 'terminal'
   }
-  // Why: activity is hidden when its setting is off, so gate only it (mobile/automations stay functional when hidden).
-  if (value === 'activity' && !experimentalActivityEnabled) {
+  // Why: activity is hidden when its entry points are, so gate only it (mobile/automations stay functional when hidden).
+  if (value === 'activity' && !shouldShowAgentDashboardSidebarButton(settings)) {
     return 'terminal'
   }
   return value

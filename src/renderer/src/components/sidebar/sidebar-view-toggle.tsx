@@ -7,6 +7,8 @@ type SidebarViewToggleOption = {
   /** Every label this slot can ever show; reserves width so switching never resizes the tab. */
   widthLabels?: readonly string[]
   sectionTitle?: string
+  /** Unread count rendered after the label; hidden at 0. */
+  badgeCount?: number
 }
 
 type SidebarViewToggleProps = {
@@ -60,7 +62,14 @@ export function SidebarViewToggle({
                 {widthLabel}
               </span>
             ))}
-            <span className="col-start-1 row-start-1 whitespace-nowrap">{option.label}</span>
+            <span className="col-start-1 row-start-1 inline-flex items-center justify-center gap-1 whitespace-nowrap">
+              {option.label}
+              {option.badgeCount ? (
+                <span className="rounded-full bg-primary px-1.5 py-px text-[10px] font-semibold text-primary-foreground">
+                  {option.badgeCount}
+                </span>
+              ) : null}
+            </span>
           </button>
         )
       })}

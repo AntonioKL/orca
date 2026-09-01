@@ -61,6 +61,19 @@ export function planClearCompletedActivity(
   return { cutoffPatch, restorePatch, retainedSnapshots, cacheIdentities, clearedThreadCount }
 }
 
+// Deferred evictions whose undo toast is still open; flushed on pagehide because the toast's
+// close callbacks never fire on quit/reload, which would let cleared rows replay next launch.
+const pendingDiskEvictions = new Set<() => void>()
+export function flushPendingClearCompletedEvictions(): void {
+  // Set iteration tolerates the self-delete each evict() performs.
+  for (const evict of pendingDiskEvictions) {
+    evict()
+  }
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushPendingClearCompletedEvictions)
+}
+
 /**
  * Clear completed/interrupted activity threads with an undo window.
  *
@@ -93,6 +106,7 @@ export function clearCompletedActivity(threads: readonly AgentPaneThread[]): boo
   let undone = false
   let dropped = false
   const dropRetainedFromDiskCache = (): void => {
+    pendingDiskEvictions.delete(dropRetainedFromDiskCache)
     if (undone || dropped) {
       return
     }
@@ -101,6 +115,7 @@ export function clearCompletedActivity(threads: readonly AgentPaneThread[]): boo
       window.api?.agentStatus?.dropPersisted?.(identity)
     }
   }
+  pendingDiskEvictions.add(dropRetainedFromDiskCache)
   toast(
     plan.clearedThreadCount === 1
       ? translate('auto.components.activity.clearCompleted.clearedOne', 'Cleared 1 completed agent')
@@ -114,6 +129,7 @@ export function clearCompletedActivity(threads: readonly AgentPaneThread[]): boo
         label: translate('auto.components.activity.clearCompleted.undo', 'Undo'),
         onClick: () => {
           undone = true
+          pendingDiskEvictions.delete(dropRetainedFromDiskCache)
           const current = useAppStore.getState()
           const retainedByPaneKey = new Map(
             plan.retainedSnapshots.map((retained) => [retained.entry.paneKey, retained])

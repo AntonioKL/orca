@@ -83,7 +83,7 @@ function ScopeFilterChip({
   onClear: () => void
 }): React.JSX.Element {
   return (
-    <span className="inline-flex min-w-0 items-center gap-1 rounded-full border border-border/80 bg-muted/80 py-0.5 pl-2 pr-1 text-[11px] font-medium leading-none text-foreground/80 shadow-2xs">
+    <span className="inline-flex min-w-0 items-center gap-1 rounded-full border border-border/80 bg-muted/80 py-0.5 pl-2 pr-1 text-[11px] font-medium leading-none text-foreground/80 shadow-xs">
       <span className="min-w-0 truncate">{label}</span>
       <button
         type="button"

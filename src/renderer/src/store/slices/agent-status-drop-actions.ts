@@ -1,6 +1,7 @@
 import type {
   RetainedAgentEntry,
   DropAgentStatusByTabPrefixOptions,
+  DropAgentStatusOptions,
   DropHibernatedAgentPaneOptions
 } from './agent-status-contract'
 import type { AgentStatusSlice } from './agent-status-slice-contract'
@@ -33,7 +34,7 @@ export function createAgentStatusDropActions(
 > {
   const { set, freshness } = runtime
   return {
-    dropAgentStatus: (paneKey) => {
+    dropAgentStatus: (paneKey, opts?: DropAgentStatusOptions) => {
       let liveExisted = false
       set((s) => {
         const hasLive = paneKey in s.agentStatusByPaneKey
@@ -44,8 +45,14 @@ export function createAgentStatusDropActions(
           (entry) => entry.paneKey === paneKey
         )
         const nextAck = removeAcknowledgement(s.acknowledgedAgentsByPaneKey, paneKey)
-        const nextClearedAt = removeAcknowledgement(s.activityClearedAtByPaneKey, paneKey)
-        const nextManualUnread = removeAcknowledgement(s.manuallyUnreadTurnsByPaneKey, paneKey)
+        // Row dismissal keeps cutoff/manual-unread: the pane may still be live, and its next
+        // hook event would replay every cleared stateHistory event as unread without them.
+        const nextClearedAt = opts?.paneRemoved
+          ? removeAcknowledgement(s.activityClearedAtByPaneKey, paneKey)
+          : s.activityClearedAtByPaneKey
+        const nextManualUnread = opts?.paneRemoved
+          ? removeAcknowledgement(s.manuallyUnreadTurnsByPaneKey, paneKey)
+          : s.manuallyUnreadTurnsByPaneKey
         const hasLaunchConfig = paneKey in s.agentLaunchConfigByPaneKey
         const nextLaunchConfigs = hasLaunchConfig
           ? { ...s.agentLaunchConfigByPaneKey }

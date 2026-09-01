@@ -4410,7 +4410,10 @@
           "5c9c7c16aa": "Agregar un proyecto para crear espacios de trabajo",
           "ca6f729da2": "Nuevo espacio de trabajo ({{value0}})",
           "a30e34eb5c": "Cerrar tablero del espacio de trabajo",
-          "25a95899c9": "Agregar proyecto"
+          "25a95899c9": "Agregar proyecto",
+          "openFullAgentsView": "Abrir vista completa de Agentes",
+          "spaces": "Espacios",
+          "views": "Vista de la barra lateral"
         },
         "SidebarNav": {
           "80611a8b10": "Buscar",
@@ -14144,7 +14147,7 @@
           "b29191b3e0": "worktree",
           "8c3b621ddf": "Proyecto",
           "4a3986b200": "Estado",
-          "770d458144": "Agrupar actividad del agente por",
+          "770d458144": "Agrupar por",
           "795cbf26e2": "Filtrar...",
           "4616ea39fd": "Ir al workspace",
           "markThreadRead": "Marcar hilo como leído",
@@ -14838,6 +14841,20 @@
         "addressInUse": "Another process may be holding the port. Restart Orca to try again.",
         "unknown": "Restart Orca to try again."
       }
+    }
+  },
+  "agentsSidebarIntro": {
+    "migrated": {
+      "title": "Los agentes son más fáciles de encontrar",
+      "description": "Tu vista de Agentes ahora es una pestaña dedicada de la barra lateral. Tu actividad y filtros se conservan.",
+      "dismiss": "Entendido",
+      "action": "Abrir Agentes"
+    },
+    "new": {
+      "title": "Conoce tu pestaña de Agentes",
+      "description": "Ve en qué están trabajando tus agentes, qué está terminado y dónde necesitas intervenir.",
+      "dismiss": "Quizás más tarde",
+      "action": "Probar Agentes"
     }
   }
 }

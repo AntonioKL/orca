@@ -55,4 +55,25 @@ describe('SidebarViewToggle', () => {
     expect(visibleLabel?.className).toContain('whitespace-nowrap')
     expect(visibleLabel?.className.includes('truncate')).toBe(false)
   })
+
+  it('renders the unread badge only for a positive badgeCount', () => {
+    act(() => {
+      root.render(
+        <SidebarViewToggle
+          ariaLabel="Sidebar view"
+          value="workspaces"
+          onSelect={() => undefined}
+          options={[
+            { value: 'workspaces', label: 'Projects', sectionTitle: 'projects', badgeCount: 0 },
+            { value: 'agents', label: 'Agents', sectionTitle: 'agents', badgeCount: 5 }
+          ]}
+        />
+      )
+    })
+
+    const agentsTab = container.querySelector('[data-sidebar-section-title="agents"]')
+    expect(agentsTab?.textContent).toContain('5')
+    const projectsTab = container.querySelector('[data-sidebar-section-title="projects"]')
+    expect(projectsTab?.textContent).toBe('ProjectsProjects')
+  })
 })

@@ -55,6 +55,7 @@ vi.mock('sonner', () => ({ toast: toastSpy }))
 
 import {
   clearCompletedActivity,
+  flushPendingClearCompletedEvictions,
   isClearableActivityThread,
   planClearCompletedActivity
 } from './activity-clear-completed'
@@ -137,6 +138,8 @@ describe('clearCompletedActivity', () => {
   })
 
   afterEach(() => {
+    // Drain any eviction left pending by a test that never closed its toast.
+    flushPendingClearCompletedEvictions()
     vi.clearAllMocks()
     vi.unstubAllGlobals()
   })
@@ -269,5 +272,35 @@ describe('clearCompletedActivity', () => {
     expect(clearCompletedActivity([workingThread, blockedThread])).toBe(false)
     expect(toastSpy).not.toHaveBeenCalled()
     expect(mockStore.applyActivityClearedAt).not.toHaveBeenCalled()
+  })
+
+  it('pagehide flush evicts a clear whose undo toast is still open', () => {
+    clearCompletedActivity([doneThread])
+    const drop = (
+      window as unknown as {
+        api: { agentStatus: { dropPersisted: ReturnType<typeof vi.fn> } }
+      }
+    ).api.agentStatus.dropPersisted
+    expect(drop).not.toHaveBeenCalled()
+
+    // Quit/reload path: the toast's close callbacks never fire.
+    flushPendingClearCompletedEvictions()
+    expect(drop).toHaveBeenCalledTimes(1)
+
+    // The flushed eviction is consumed; later toast close must not double-drop.
+    lastToastOptions().onAutoClose()
+    expect(drop).toHaveBeenCalledTimes(1)
+  })
+
+  it('pagehide flush skips a clear that was undone', () => {
+    clearCompletedActivity([doneThread])
+    lastToastOptions().action.onClick()
+    flushPendingClearCompletedEvictions()
+    const drop = (
+      window as unknown as {
+        api: { agentStatus: { dropPersisted: ReturnType<typeof vi.fn> } }
+      }
+    ).api.agentStatus.dropPersisted
+    expect(drop).not.toHaveBeenCalled()
   })
 })

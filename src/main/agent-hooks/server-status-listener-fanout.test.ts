@@ -264,6 +264,49 @@ describe('AgentHookServer listener replay', () => {
     })
   })
 
+  it('evicts when the renderer identity was stamped after receipt but pins the same turn', () => {
+    // Runtime-sync and recovery entries stamp updatedAt with Date.now()/capturedAt, which is
+    // at or after main's receivedAt; the eviction must still land for those rows.
+    const server = new AgentHookServer()
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        payload: { state: 'done', prompt: 'run', agentType: 'claude' }
+      },
+      'conn-1'
+    )
+    const entry = server.getStatusSnapshot()[0]!
+    expect(
+      server.dropPersistedStatusEntry({
+        paneKey: entry.paneKey,
+        receivedAt: entry.receivedAt + 5_000,
+        stateStartedAt: entry.stateStartedAt
+      })
+    ).toBe(true)
+
+    // A different turn never matches, whatever the receivedAt relationship.
+    const other = new AgentHookServer()
+    other.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        payload: { state: 'done', prompt: 'run', agentType: 'claude' }
+      },
+      'conn-1'
+    )
+    const otherEntry = other.getStatusSnapshot()[0]!
+    expect(
+      other.dropPersistedStatusEntry({
+        paneKey: otherEntry.paneKey,
+        receivedAt: otherEntry.receivedAt + 5_000,
+        stateStartedAt: otherEntry.stateStartedAt + 1
+      })
+    ).toBe(false)
+  })
+
   it('notifies pane-status-clear listener when pane teardown evicts a cached status', () => {
     const server = new AgentHookServer()
     const listener = vi.fn()

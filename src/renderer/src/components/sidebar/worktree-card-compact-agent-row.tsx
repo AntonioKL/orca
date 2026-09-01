@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from 'react'
+import React, { useCallback, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { AgentStateDot, agentStateLabel } from '@/components/AgentStateDot'
 import type { DashboardAgentRow as DashboardAgentRowData } from '@/components/dashboard/useDashboardData'
@@ -13,22 +13,7 @@ import { agentNoUpdateLabel } from '@/lib/agent-row-decay-state'
 import { useAgentRowConversationName } from '@/components/dashboard/use-agent-row-conversation-name'
 import { lastEnteredDoneAt } from '@/components/dashboard/agent-finished-timestamp'
 import CacheTimer, { usePromptCacheCountdownForPane } from './CacheTimer'
-
-function formatShortTimeAgo(ts: number, now: number): string {
-  const delta = now - ts
-  if (delta < 60_000) {
-    return 'now'
-  }
-  const minutes = Math.floor(delta / 60_000)
-  if (minutes < 60) {
-    return `${minutes}m`
-  }
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) {
-    return `${hours}h`
-  }
-  return `${Math.floor(hours / 24)}d`
-}
+import { formatShortTimeAgo } from '@/lib/short-time-ago'
 
 function getCompactAgentPrimary(
   agent: DashboardAgentRowData,
@@ -134,21 +119,22 @@ export const CompactAgentRow = React.memo(function CompactAgentRow({
   const primary = getCompactAgentPrimary(agent, conversationName)
   const isLineageChild = agent.lineage?.depth === 1
   // Keep a live row's last assistant line stable while status/tool payloads
-  // briefly omit the hook-only field between updates.
-  const lastAssistantMessageRef = useRef<{ turn: number; message: string } | null>(null)
-  const turn = agent.entry.stateStartedAt ?? 0
+  // briefly omit the hook-only field between updates. State (not a ref) so a
+  // discarded concurrent render can't pin an uncommitted message; a zero
+  // stateStartedAt has no per-turn identity, so those rows never cache.
+  const [heldMessage, setHeldMessage] = useState<{ turn: number; message: string } | null>(null)
+  const turn = agent.entry.stateStartedAt
   const currentMessage = agent.entry.lastAssistantMessage?.trim() ?? ''
-  if (agent.state === 'working' && currentMessage) {
-    lastAssistantMessageRef.current = { turn, message: currentMessage }
-  } else if (agent.state !== 'working') {
-    lastAssistantMessageRef.current = null
-  } else if (lastAssistantMessageRef.current?.turn !== turn) {
-    lastAssistantMessageRef.current = null
+  const turnHoldable = agent.state === 'working' && turn > 0
+  if (turnHoldable && currentMessage) {
+    if (heldMessage?.turn !== turn || heldMessage.message !== currentMessage) {
+      setHeldMessage({ turn, message: currentMessage })
+    }
+  } else if (heldMessage !== null && (!turnHoldable || heldMessage.turn !== turn)) {
+    setHeldMessage(null)
   }
   const stableMessage =
-    agent.state === 'working' && !currentMessage
-      ? lastAssistantMessageRef.current?.message
-      : undefined
+    turnHoldable && !currentMessage && heldMessage?.turn === turn ? heldMessage.message : undefined
   const secondary = getCompactAgentSecondary(agent, now, stableMessage)
   // Why: sidebar truncation must preserve the passive-vs-active distinction.
   const leadingText = dotState === 'monitoring' ? secondary : primary

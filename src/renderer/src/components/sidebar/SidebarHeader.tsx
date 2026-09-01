@@ -1,12 +1,15 @@
 import React, { useEffect } from 'react'
+import { Maximize2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '@/store'
 import { translate } from '@/i18n/i18n'
 import { SidebarViewToggle } from './sidebar-view-toggle'
 import { SidebarHeaderActions } from './sidebar-header-actions'
 import { shouldShowAgentDashboardSidebarButton } from './agent-dashboard-sidebar-visibility'
+import { useActivityUnreadCount } from '@/components/activity/useActivityUnreadCount'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 type SidebarHeaderProps = {
   onWorkspaceBoardMenuOpenChange: (open: boolean) => void
@@ -37,8 +40,13 @@ const SidebarHeader = React.memo(function SidebarHeader({
   const migratedFromExperimental = useAppStore(
     (s) => s.settings?.agentsSidebarMigratedFromExperimental === true
   )
+  // Why: settings are null until hydration; deriving intro visibility from the
+  // null default would flash the popover open (and stamp it shown) every launch.
+  const settingsHydrated = useAppStore((s) => s.settings != null)
+  const openActivityPage = useAppStore((s) => s.openActivityPage)
   const agentsViewActive = showAgentsSidebar && sidebarBody === 'agents'
-  const introOpen = showAgentsSidebar && !agentsSidebarIntroShown
+  const agentsUnreadCount = useActivityUnreadCount(showAgentsSidebar, 'sidebar-badge')
+  const introOpen = settingsHydrated && showAgentsSidebar && !agentsSidebarIntroShown
   const acknowledgeIntro = React.useCallback(() => {
     void updateSettings?.({ agentsSidebarIntroShown: true })
   }, [updateSettings])
@@ -48,10 +56,11 @@ const SidebarHeader = React.memo(function SidebarHeader({
   const workspaceTabLabel = groupBy === 'none' ? spacesLabel : projectsLabel
 
   useEffect(() => {
-    if (!showAgentsSidebar && sidebarBody === 'agents') {
+    // Wait for hydration: settings null must not clobber a persisted 'agents' body.
+    if (settingsHydrated && !showAgentsSidebar && sidebarBody === 'agents') {
       setSidebarBody?.('workspaces')
     }
-  }, [setSidebarBody, showAgentsSidebar, sidebarBody])
+  }, [setSidebarBody, settingsHydrated, showAgentsSidebar, sidebarBody])
 
   return (
     <>
@@ -70,7 +79,10 @@ const SidebarHeader = React.memo(function SidebarHeader({
                 ariaLabel={translate('auto.components.sidebar.SidebarHeader.views', 'Sidebar view')}
                 value={agentsViewActive ? 'agents' : 'workspaces'}
                 onSelect={(value) => {
-                  acknowledgeIntro()
+                  // Only stamp the intro as seen when it is actually on screen.
+                  if (introOpen) {
+                    acknowledgeIntro()
+                  }
                   setSidebarBody?.(value as 'workspaces' | 'agents')
                 }}
                 options={[
@@ -85,7 +97,8 @@ const SidebarHeader = React.memo(function SidebarHeader({
                         {
                           value: 'agents' as const,
                           label: translate('dashboard.sidebar.label', 'Agents'),
-                          sectionTitle: 'agents' as const
+                          sectionTitle: 'agents' as const,
+                          badgeCount: agentsUnreadCount
                         }
                       ]
                     : [])
@@ -134,7 +147,34 @@ const SidebarHeader = React.memo(function SidebarHeader({
             </div>
           </PopoverContent>
         </Popover>
-        {agentsViewActive ? <div className="shrink-0">{agentToolbar}</div> : null}
+        {agentsViewActive ? (
+          <div className="flex shrink-0 items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  type="button"
+                  className="text-muted-foreground"
+                  aria-label={translate(
+                    'auto.components.sidebar.SidebarHeader.openFullAgentsView',
+                    'Open full Agents view'
+                  )}
+                  onClick={() => openActivityPage?.()}
+                >
+                  <Maximize2 className="size-3.5" strokeWidth={2.25} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>
+                {translate(
+                  'auto.components.sidebar.SidebarHeader.openFullAgentsView',
+                  'Open full Agents view'
+                )}
+              </TooltipContent>
+            </Tooltip>
+            {agentToolbar}
+          </div>
+        ) : null}
         {!agentsViewActive ? (
           <SidebarHeaderActions onWorkspaceBoardMenuOpenChange={onWorkspaceBoardMenuOpenChange} />
         ) : null}

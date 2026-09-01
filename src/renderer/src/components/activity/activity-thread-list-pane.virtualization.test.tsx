@@ -140,6 +140,39 @@ describe('ActivityThreadListPane virtualization', () => {
     expect(container.textContent).toContain('Virtual agent 2')
   })
 
+  it('keeps the saved scroll offset when the pane mounts before threads hydrate', () => {
+    const scrollTopRef = { current: 360 }
+    renderPane(root, { threads: [], scrollTopRef })
+    const scrollContainer = container.querySelector<HTMLElement>('.overflow-y-auto')
+    // Empty list cannot contain the offset: restore is deferred, not clamped to 0.
+    act(() => {
+      if (scrollContainer) {
+        scrollContainer.scrollTop = 0
+        scrollContainer.dispatchEvent(new Event('scroll', { bubbles: true }))
+      }
+    })
+    expect(scrollTopRef.current).toBe(360)
+
+    renderPane(root, { threads: makeManyThreads(), scrollTopRef })
+    expect(container.querySelector<HTMLElement>('.overflow-y-auto')?.scrollTop).toBe(360)
+  })
+
+  it('restores collapse state saved alongside the scroll ref across remounts', () => {
+    const scrollTopRef = { current: 0 }
+    renderPane(root, { threads: makeManyThreads(), scrollTopRef })
+    const header = container.querySelector('[role="button"]') as HTMLElement
+    act(() => {
+      header.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(header.getAttribute('aria-expanded')).toBe('false')
+
+    act(() => root.unmount())
+    root = createRoot(container)
+    renderPane(root, { threads: makeManyThreads(), scrollTopRef })
+    const remountedHeader = container.querySelector('[role="button"]')
+    expect(remountedHeader?.getAttribute('aria-expanded')).toBe('false')
+  })
+
   it('restores the Agents scroll position without storing it in React state', () => {
     const scrollTopRef = { current: 240 }
     renderPane(root, { threads: makeManyThreads(), scrollTopRef })

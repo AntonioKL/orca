@@ -6,7 +6,7 @@ import type { AppState } from '@/store/types'
 import { getSettingsFocusedExecutionHostId } from '../../../../shared/execution-host'
 import { buildActivityEvents, createActivityEventBuildCache } from './activity-event-builder'
 import { buildAgentPaneThreads, createAgentPaneThreadReuseCache } from './activity-thread-builder'
-import { isChildAgentThread } from './activity-thread-child-agent'
+import { collectChildAgentPaneKeys } from './activity-thread-child-agent'
 import { filterThreadsByActivityScope, resolveActivityScopeRepoIds } from './activity-scope-filter'
 import {
   activityThreadMatchesSearchQuery,
@@ -53,10 +53,10 @@ export function useAgentPaneThreads(args: {
 }): {
   storeData: AgentPaneThreadsStoreData
   allThreads: AgentPaneThread[]
-  /** Threads inside the persisted host/project scope; bulk actions must not affect rows outside it. */
-  scopedThreads: AgentPaneThread[]
   selectedPaneKeyIsLive: boolean
   effectiveSelectedPaneKey: string | null
+  /** Threads shown after every active filter; bulk actions (mark all read, clear
+   *  completed) operate on exactly this set so they never touch hidden rows. */
   visibleThreads: AgentPaneThread[]
   visibleThreadGroups: ActivityThreadGroup[]
   /** Threads excluded by the persisted host/project scope — the chips row shows this so scope filtering is never silent. */
@@ -141,11 +141,7 @@ export function useAgentPaneThreads(args: {
 
   // Why scope runs before the per-view filters: its hidden count must mean "hidden by
   // the persisted host/project scope alone", not folded into unread/search misses.
-  const {
-    threads: scopeVisibleThreads,
-    matchingThreads: scopedThreads,
-    hiddenCount: scopeHiddenThreadCount
-  } = useMemo(
+  const { threads: scopeVisibleThreads, hiddenCount: scopeHiddenThreadCount } = useMemo(
     () =>
       filterThreadsByActivityScope({
         threads: allThreads,
@@ -166,6 +162,11 @@ export function useAgentPaneThreads(args: {
     ]
   )
 
+  // Why over allThreads (not the scoped list): child classification asks whether the
+  // parent pane still exists at all, and a scope filter hiding the parent must not
+  // reclassify its workers as orphans.
+  const childAgentPaneKeys = useMemo(() => collectChildAgentPaneKeys(allThreads), [allThreads])
+
   // Why deferred: filtering hundreds of threads is interruptible background work; the input
   // echoes the keystroke at full priority while the list catches up on the deferred value.
   const deferredQuery = useDeferredValue(query)
@@ -185,7 +186,7 @@ export function useAgentPaneThreads(args: {
       // Why: child agents (e.g. dispatched orchestration workers) are hidden by default to keep top-level agent views focused on root tasks.
       if (
         !showChildAgents &&
-        isChildAgentThread(thread) &&
+        childAgentPaneKeys.has(thread.paneKey) &&
         thread.paneKey !== effectiveSelectedPaneKey
       ) {
         return false
@@ -195,7 +196,14 @@ export function useAgentPaneThreads(args: {
       }
       return activityThreadMatchesSearchQuery({ thread, searchQuery: normalizedQuery })
     })
-  }, [scopeVisibleThreads, readFilter, deferredQuery, effectiveSelectedPaneKey, showChildAgents])
+  }, [
+    scopeVisibleThreads,
+    readFilter,
+    deferredQuery,
+    effectiveSelectedPaneKey,
+    showChildAgents,
+    childAgentPaneKeys
+  ])
 
   const visibleThreadGroups = useMemo(
     () => buildActivityThreadGroups(visibleThreads, groupBy),
@@ -205,7 +213,6 @@ export function useAgentPaneThreads(args: {
   return {
     storeData,
     allThreads,
-    scopedThreads,
     selectedPaneKeyIsLive,
     effectiveSelectedPaneKey,
     visibleThreads,

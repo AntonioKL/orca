@@ -1,10 +1,14 @@
 import type { UISlice, UISliceGet, UISliceSet } from './ui-slice-contract'
 import { rewindHistoryIndexPastView } from '../worktree-nav-history'
+// Pure predicate over GlobalSettings; safe to share with the store layer.
+import { shouldShowAgentDashboardSidebarButton } from '@/components/sidebar/agent-dashboard-sidebar-visibility'
 
 export function createUiViewActions(set: UISliceSet, get: UISliceGet): Partial<UISlice> {
   return {
     openActivityPage: () => {
-      if (get().settings?.experimentalActivity !== true) {
+      // Agents graduated from experimentalActivity; gate on the same visibility
+      // rule as the sidebar entry points so the view is reachable iff shown.
+      if (!shouldShowAgentDashboardSidebarButton(get().settings)) {
         return
       }
       set((state) => ({

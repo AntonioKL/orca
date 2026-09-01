@@ -58,6 +58,7 @@ export function appendUnsupportedAndRetainedEvents(context: {
         agentAlive: false,
         acknowledgedAt: args.acknowledgedAgentsByPaneKey[entry.paneKey] ?? 0,
         clearedAt: args.activityClearedAtByPaneKey?.[entry.paneKey] ?? 0,
+        migrationUnsupportedPtyId: unsupported.ptyId,
         liveState: 'blocked'
       },
       cache,

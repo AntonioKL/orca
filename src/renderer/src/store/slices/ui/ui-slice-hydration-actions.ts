@@ -51,7 +51,7 @@ import {
   normalizeHydratedVisibleWorkspaceHostIds,
   preserveStringArrayIdentity,
   sanitizeAcknowledgedAgentsByPaneKey,
-  sanitizePaneKeyTimestampRecord,
+  sanitizeActivityClearedAtByPaneKey,
   sanitizeHydratedActiveView,
   sanitizePersistedRepoIds,
   sanitizeShowDotfilesByWorktree,
@@ -267,7 +267,9 @@ export function createUiHydrationActions(set: UISliceSet, _get: UISliceGet): Par
           acknowledgedAgentsByPaneKey: sanitizeAcknowledgedAgentsByPaneKey(
             ui.acknowledgedAgentsByPaneKey
           ),
-          activityClearedAtByPaneKey: sanitizePaneKeyTimestampRecord(ui.activityClearedAtByPaneKey),
+          activityClearedAtByPaneKey: sanitizeActivityClearedAtByPaneKey(
+            ui.activityClearedAtByPaneKey
+          ),
           workspaceCleanupDismissals: sanitizeWorkspaceCleanupDismissals(
             ui.workspaceCleanup?.dismissals
           ),
@@ -282,7 +284,7 @@ export function createUiHydrationActions(set: UISliceSet, _get: UISliceGet): Par
           // Why: restore only on startup; on 'sync' broadcasts it would clobber the window's current per-window view.
           activeView:
             source === 'startup'
-              ? sanitizeHydratedActiveView(ui.activeView, s.settings?.experimentalActivity === true)
+              ? sanitizeHydratedActiveView(ui.activeView, s.settings)
               : s.activeView,
           persistedUIReady: true
         }

@@ -3,16 +3,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   getState: vi.fn(),
   activateAndRevealWorktree: vi.fn(),
+  activateAndRevealFolderWorkspace: vi.fn(),
   getVisibleWorktreeShortcutTargets: vi.fn(),
+  worktreePassesSidebarFilters: vi.fn(),
   warning: vi.fn()
 }))
 
 vi.mock('@/store', () => ({ useAppStore: { getState: mocks.getState } }))
 vi.mock('@/lib/worktree-activation', () => ({
-  activateAndRevealWorktree: mocks.activateAndRevealWorktree
+  activateAndRevealWorktree: mocks.activateAndRevealWorktree,
+  activateAndRevealFolderWorkspace: mocks.activateAndRevealFolderWorkspace
 }))
 vi.mock('@/components/sidebar/visible-worktrees', () => ({
   getVisibleWorktreeShortcutTargets: mocks.getVisibleWorktreeShortcutTargets
+}))
+vi.mock('@/components/sidebar/worktree-filter-visibility', () => ({
+  worktreePassesSidebarFilters: mocks.worktreePassesSidebarFilters
 }))
 vi.mock('sonner', () => ({ toast: { warning: mocks.warning } }))
 
@@ -22,7 +28,9 @@ describe('worktree jump navigation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.activateAndRevealWorktree.mockReturnValue({ primaryTabId: null })
+    mocks.activateAndRevealFolderWorkspace.mockReturnValue({ primaryTabId: null })
     mocks.getVisibleWorktreeShortcutTargets.mockReturnValue([])
+    mocks.worktreePassesSidebarFilters.mockReturnValue(false)
     mocks.getState.mockReturnValue({
       sidebarBody: 'agents',
       setSidebarBody: vi.fn(),
@@ -59,5 +67,36 @@ describe('worktree jump navigation', () => {
     jumpToWorktreeFromSidebar('wt-1')
 
     expect(mocks.warning).not.toHaveBeenCalled()
+  })
+
+  it('reveals instead of warning when the target is only inside a collapsed group', () => {
+    // Absent from the rendered list (collapse elision) but not excluded by filters.
+    mocks.getVisibleWorktreeShortcutTargets.mockReturnValue([])
+    mocks.worktreePassesSidebarFilters.mockReturnValue(true)
+
+    expect(jumpToWorktreeFromSidebar('wt-collapsed')).toBe(true)
+
+    expect(mocks.activateAndRevealWorktree).toHaveBeenCalledWith('wt-collapsed', {})
+    expect(mocks.warning).not.toHaveBeenCalled()
+  })
+
+  it('routes folder workspaces through the path-status-gated folder activation', () => {
+    const state = mocks.getState()
+
+    expect(jumpToWorktreeFromSidebar('folder:folder-1', { executionHostId: 'local' })).toBe(true)
+
+    expect(mocks.activateAndRevealFolderWorkspace).toHaveBeenCalledWith('folder-1', {
+      executionHostId: 'local'
+    })
+    expect(mocks.activateAndRevealWorktree).not.toHaveBeenCalled()
+    expect(state.setSidebarBody).toHaveBeenCalledWith('workspaces')
+  })
+
+  it('propagates a blocked folder-workspace activation as failure', () => {
+    const state = mocks.getState()
+    mocks.activateAndRevealFolderWorkspace.mockReturnValue(false)
+
+    expect(jumpToWorktreeFromSidebar('folder:folder-1')).toBe(false)
+    expect(state.setSidebarBody).not.toHaveBeenCalled()
   })
 })

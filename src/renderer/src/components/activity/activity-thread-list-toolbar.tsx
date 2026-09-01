@@ -147,7 +147,7 @@ export function ActivityThreadListToolbar({
                   className={cn(
                     'size-7 shrink-0 p-0 rounded-md transition-all',
                     readFilter === 'unread'
-                      ? '!border border-primary/50 !bg-primary/20 !text-primary shadow-2xs hover:!bg-primary/30'
+                      ? '!border border-primary/50 !bg-primary/20 !text-primary shadow-xs hover:!bg-primary/30'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                   )}
                   aria-label={translate(

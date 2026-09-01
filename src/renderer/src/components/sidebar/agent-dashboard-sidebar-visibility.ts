@@ -6,5 +6,9 @@ export function shouldShowAgentDashboardSidebarButton(
     | null
     | undefined
 ): boolean {
-  return settings?.showAgentsSidebar ?? settings?.experimentalAgentDashboardPopout ?? true
+  // Null means settings not yet hydrated; hide so opted-out profiles don't flash Agents UI at startup.
+  if (!settings) {
+    return false
+  }
+  return settings.showAgentsSidebar ?? settings.experimentalAgentDashboardPopout ?? true
 }

@@ -5247,7 +5247,8 @@
           "ca6f729da2": "New workspace ({{value0}})",
           "a30e34eb5c": "Close workspace board",
           "views": "Sidebar view",
-          "moreActions": "More workspace actions"
+          "moreActions": "More workspace actions",
+          "openFullAgentsView": "Open full Agents view"
         },
         "SidebarNav": {
           "80611a8b10": "Search",
@@ -17273,6 +17274,20 @@
   "sourceControl": {
     "unlinkedPr": {
       "status": "PR #{{number}} unlinked"
+    }
+  },
+  "agentsSidebarIntro": {
+    "migrated": {
+      "title": "Agents are easier to find",
+      "description": "Your Agents view is now a dedicated sidebar tab. Your activity and filters are preserved.",
+      "dismiss": "Got it",
+      "action": "Open Agents"
+    },
+    "new": {
+      "title": "Meet your Agents tab",
+      "description": "See what your agents are working on, what is done, and where you need to step in.",
+      "dismiss": "Maybe later",
+      "action": "Try Agents"
     }
   }
 }

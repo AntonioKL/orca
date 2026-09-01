@@ -183,7 +183,11 @@ export function buildRetractedMirroredTabSweepPatch(
     // so it must see the post-removal tab list, not the one the snapshot replaced.
     tabsByWorktree: nextTabsByWorktree
   }
-  const sweep = buildRetiredTerminalTabStateSweepPatch(sweepState, retractedTabIds, worktreeId)
+  // Why: a retraction can be a reconnect re-key, not pane death (ssh-execution-boundary); keeping
+  // cutoffs means a republished pane cannot replay activity the user cleared on this client.
+  const sweep = buildRetiredTerminalTabStateSweepPatch(sweepState, retractedTabIds, worktreeId, {
+    preserveActivityClearedState: true
+  })
   if (!sweep?.agentStatusByPaneKey || !batchContext) {
     return sweep ?? null
   }

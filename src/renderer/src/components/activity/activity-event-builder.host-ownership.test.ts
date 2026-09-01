@@ -142,6 +142,38 @@ describe('activity event host ownership', () => {
     expect(result.events[0]?.worktree.displayName).toBe('Docs folder')
   })
 
+  it('carries migrationUnsupportedPtyId on events built for un-migratable panes', () => {
+    const worktree = makeWorktree()
+    const repo = makeRepo()
+    const tab = makeTab()
+
+    const result = buildActivityEvents({
+      agentStatusByPaneKey: {},
+      retainedAgentsByPaneKey: {},
+      migrationUnsupportedByPtyId: {
+        'pty-1': {
+          ptyId: 'pty-1',
+          paneKey: PANE_KEY,
+          tabId: tab.id,
+          reason: 'legacy-numeric-pane-key',
+          source: 'local',
+          updatedAt: 1_000
+        }
+      },
+      tabsByWorktree: { [worktree.id]: [tab] },
+      worktreeMap: new Map([[worktree.id, worktree]]),
+      repoMap: new Map([[repo.id, repo]]),
+      resolveWorktree: () => worktree,
+      acknowledgedAgentsByPaneKey: {},
+      now: 3_000
+    })
+
+    expect(result.events.length).toBeGreaterThan(0)
+    for (const event of result.events) {
+      expect(event.migrationUnsupportedPtyId).toBe('pty-1')
+    }
+  })
+
   it('uses the retained terminal handle to preserve runtime host ownership after teardown', () => {
     const localWorktree = makeWorktree()
     const runtimeWorktree = {

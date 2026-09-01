@@ -17,17 +17,18 @@ export function hasActivityThreadWorkspace(thread: AgentPaneThread): boolean {
 }
 
 export function createActivityThreadActions({
-  allThreads,
+  getVisibleThreads,
   acknowledgeAgents,
   unacknowledgeAgents,
   setSelectedPaneKey
 }: {
-  allThreads: AgentPaneThread[]
+  /** Getter (not a snapshot) so the handlers keep one identity for the row memo
+   *  bail-outs while bulk actions still see the currently rendered thread set. */
+  getVisibleThreads: () => AgentPaneThread[]
   acknowledgeAgents: (paneKeys: string[]) => void
   unacknowledgeAgents: (paneKeys: string[]) => void
   setSelectedPaneKey: (paneKey: string | null) => void
 }): {
-  hasUnreadThreads: boolean
   markThreadRead: (thread: AgentPaneThread) => void
   markThreadUnread: (thread: AgentPaneThread) => void
   selectThread: (thread: AgentPaneThread) => void
@@ -88,10 +89,10 @@ export function createActivityThreadActions({
     })
   }
 
-  const hasUnreadThreads = allThreads.some((thread) => thread.unread)
-
   const markAllThreadsRead = (): void => {
-    const unreadKeys = allThreads.filter((t) => t.unread).map((t) => t.paneKey)
+    const unreadKeys = getVisibleThreads()
+      .filter((t) => t.unread)
+      .map((t) => t.paneKey)
     if (unreadKeys.length === 0) {
       return
     }
@@ -99,7 +100,6 @@ export function createActivityThreadActions({
   }
 
   return {
-    hasUnreadThreads,
     markThreadRead,
     markThreadUnread,
     selectThread,

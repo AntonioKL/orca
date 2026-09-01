@@ -106,16 +106,12 @@ export function buildAgentStatusTabPrefixDropPatch(
       s.recentlyRetiredAgentStatusPaneKeys,
       retiredAliasPaneKeys
     )
-    const nextClearedAt = removePaneKeyRecords(
-      s.activityClearedAtByPaneKey,
-      prefix,
-      completedOrphanKeySet
-    )
-    const nextManualUnread = removePaneKeyRecords(
-      s.manuallyUnreadTurnsByPaneKey,
-      prefix,
-      completedOrphanKeySet
-    )
+    const nextClearedAt = opts?.preserveActivityClearedState
+      ? s.activityClearedAtByPaneKey
+      : removePaneKeyRecords(s.activityClearedAtByPaneKey, prefix, completedOrphanKeySet)
+    const nextManualUnread = opts?.preserveActivityClearedState
+      ? s.manuallyUnreadTurnsByPaneKey
+      : removePaneKeyRecords(s.manuallyUnreadTurnsByPaneKey, prefix, completedOrphanKeySet)
 
     if (
       liveKeys.length === 0 &&
