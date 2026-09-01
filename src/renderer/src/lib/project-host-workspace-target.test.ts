@@ -578,7 +578,7 @@ describe('STA-6080: the renderer never silently picks a checkout', () => {
       projects: [project],
       projectHostSetups: [
         makeSetup('setup-pending', 'github:stablyai/orca', 'local', 'orca-main', {
-          setupState: 'pending'
+          setupState: 'setting-up'
         }),
         sameHostSetups[0]
       ],
