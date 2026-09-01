@@ -138,8 +138,24 @@ index 8c4fca9022a6d6f015bca87f61625cde2278f428..0a01730616488119aa21ef441cf3c441
  process.exit(0);
  //# sourceMappingURL=conpty_console_list_agent.js.map
 \ No newline at end of file
+diff --git a/lib/terminal.js b/lib/terminal.js
+index e2f9bc9131077b53ebc32d207207ad82804ff185..a6af9300900eafa1c695c4207ba550f64937e542 100644
+--- a/lib/terminal.js
++++ b/lib/terminal.js
+@@ -172,6 +172,11 @@ var Terminal = /** @class */ (function () {
+         this.end = function () { };
+         this._writable = false;
+         this._readable = false;
++        // Orca: libuv closes the master fd on EIO/EOF, and the kernel may hand
++        // that number straight to the next open(2). Retire it in the same block
++        // that gives up the handle so no later ioctl can address a reused fd.
++        // Inert on Windows, where `_fd` is written once and never read back.
++        this._fd = -1;
+     };
+     Terminal.prototype._parseEnv = function (env) {
+         var keys = Object.keys(env || {});
 diff --git a/lib/unixTerminal.js b/lib/unixTerminal.js
-index 1ec12f796a822c78fba9ad7f6448c3987e325c23..cec8b67aef02f8199e5606a0d257088bf1865877 100644
+index 1ec12f796a822c78fba9ad7f6448c3987e325c23..09176dcccaa3a040acfbb8ee9534f020f034befd 100644
 --- a/lib/unixTerminal.js
 +++ b/lib/unixTerminal.js
 @@ -28,8 +28,12 @@ var native = utils_1.loadNativeModule('pty');
@@ -157,6 +173,30 @@ index 1ec12f796a822c78fba9ad7f6448c3987e325c23..cec8b67aef02f8199e5606a0d257088b
  var DEFAULT_FILE = 'sh';
  var DEFAULT_NAME = 'xterm';
  var DESTROY_SOCKET_TIMEOUT_MS = 200;
+@@ -234,6 +238,11 @@ var UnixTerminal = /** @class */ (function (_super) {
+          * Gets the name of the process.
+          */
+         get: function () {
++            // Orca: tcgetpgrp on a retired fd would name whatever process now
++            // owns that descriptor, so a closed master reports the spawn file.
++            if (this._fd < 0) {
++                return this._file;
++            }
+             if (process.platform === 'darwin') {
+                 var title = pty.process(this._fd);
+                 return (title !== 'kernel_task') ? title : this._file;
+@@ -250,6 +259,11 @@ var UnixTerminal = /** @class */ (function (_super) {
+         if (cols <= 0 || rows <= 0 || isNaN(cols) || isNaN(rows) || cols === Infinity || rows === Infinity) {
+             throw new Error('resizing must be done using positive cols and rows');
+         }
++        // Orca: a retired master is unreachable rather than EBADF-or-worse; cols
++        // and rows stay at the last size actually applied instead of a claim.
++        if (this._fd < 0) {
++            return;
++        }
+         pty.resize(this._fd, cols, rows);
+         this._cols = cols;
+         this._rows = rows;
 diff --git a/src/conpty_console_list_agent.ts b/src/conpty_console_list_agent.ts
 index 181ccabbbe9c4948a9725fb1db907a68e9de01fc..67f31facf85562b67adbfbd04ce28ddd8eeb4a79 100644
 --- a/src/conpty_console_list_agent.ts

@@ -2060,30 +2060,27 @@ export class PtyHandler {
     if (!managed || managed.disposed) {
       return
     }
-    // Why probe first (same probe attach() and listProcesses() run): a shell
-    // that exited without node-pty's `onExit` leaves this entry holding a closed
-    // master fd, and `UnixTerminal.resize` has no fd guard — the ioctl throws
-    // `ioctl(2) failed, EBADF` straight out of this notification handler into the
-    // dispatcher's generic parse-error catch, where it is logged and nothing
-    // else. Nothing retired the entry, so it kept being advertised as live and
-    // kept holding `activePtyCount` above zero, which is what stops a relay with
+    // Why probe (same probe attach() and listProcesses() run): a shell that
+    // exited without node-pty's `onExit` leaves an undisposed entry behind, and
+    // while it stays the relay keeps advertising a dead shell and keeps holding
+    // `activePtyCount` above zero, which is what stops a relay with
     // `relayGracePeriodSeconds: 0` from ever reaching its idle-no-ptys exit
-    // (#12423).
+    // (#12423). This is retirement, not ioctl safety: only ESRCH from the host
+    // that owns the pid is evidence of `exited`.
     if (this.reapPtyProvenExited(managed)) {
       return
     }
+    // Safety is the handle's own, not this probe's: node-pty retires `_fd` in
+    // the same block that gives up the master (config/patches/node-pty@1.1.0.patch),
+    // so a resize past that point is a no-op instead of a TIOCSWINSZ aimed at a
+    // closed — or kernel-reused — descriptor. What survives is the tick between
+    // libuv closing the fd on a read error and node-pty's handler seeing it, and
+    // an EBADF there is `unverifiable`: it observed the handle, not the host.
     try {
       managed.pty.resize(cols, rows)
     } catch (err) {
-      // A failed ioctl observed the handle, not the host's process table, so on
-      // its own it is `unverifiable`. Re-probe: a now-absent pid retires the
-      // entry, anything else keeps it and is contained here rather than
-      // escaping as a parse error on every later resize.
-      if (this.reapPtyProvenExited(managed)) {
-        return
-      }
       process.stderr.write(
-        `[pty-handler] resize failed for PTY ${id} whose process is still live or unverifiable: ${err instanceof Error ? err.message : String(err)}\n`
+        `[pty-handler] resize failed for PTY ${id}: ${err instanceof Error ? err.message : String(err)}\n`
       )
     }
   }
