@@ -21,7 +21,7 @@ type MigrationOptions = {
   sharedAuthPath: string
   metadataDir: string
   readLegacyKeychain?: () => Promise<string | null>
-  readLegacyOauthAccount?: () => Promise<unknown> | unknown
+  readLegacyOauthAccount?: () => unknown
   readManagedCredentials: (account: ClaudeManagedAccount) => Promise<string | null>
   writeManagedCredentials: (account: ClaudeManagedAccount, contents: string) => Promise<void>
 }
@@ -90,7 +90,7 @@ export async function migrateLegacySharedClaudeAuth(
 
 async function parseIdentity(
   contents: string,
-  readOauthAccount?: () => Promise<unknown> | unknown
+  readOauthAccount?: () => unknown
 ): Promise<{ email: string | null; organizationUuid: string | null } | null> {
   try {
     const root = JSON.parse(contents) as Record<string, unknown>
