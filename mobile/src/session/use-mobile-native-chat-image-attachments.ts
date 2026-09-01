@@ -60,8 +60,11 @@ type Args = {
   readonly baseSend: (
     text: string,
     imagePreviewUris?: string[],
-    deadline?: number
+    deadline?: number,
+    attachments?: readonly PendingNativeChatImage[]
   ) => Promise<MobileNativeChatSendOutcome>
+  /** Structured sessions send attachments without the terminal paste path. */
+  readonly structuredNativeChat: boolean
   /** Launch-context text parked on the agent's TUI input line, or null. The
    *  paste's leading clear must cover every line of it, or the draft's earlier
    *  lines survive and ride along with the image. */
@@ -112,6 +115,7 @@ export function useMobileNativeChatImageAttachments({
   showToast,
   onSendError,
   baseSend,
+  structuredNativeChat,
   readSeededLaunchDraft,
   onAttachSuccess,
   onError,
@@ -136,7 +140,12 @@ export function useMobileNativeChatImageAttachments({
       // The chip lands in the scope that initiated the pick, even if the user
       // switches tabs while the upload is in flight.
       const scope = scopeKey
-      if (!client || !scope || !activeHandleRef.current || connState !== 'connected') {
+      if (
+        !client ||
+        !scope ||
+        connState !== 'connected' ||
+        (!activeHandleRef.current && !structuredNativeChat)
+      ) {
         return
       }
       // Only this call's own increment may be undone in `finally`; a cancelled
@@ -239,6 +248,30 @@ export function useMobileNativeChatImageAttachments({
       try {
         const scope = scopeKey
         const pendingImages = (scope ? attachmentsByScope[scope] : undefined) ?? NO_ATTACHMENTS
+        if (structuredNativeChat && pendingImages.length > 0 && scope) {
+          if (!client || !enabled || connState !== 'connected') {
+            onError?.()
+            onSendError('Message not sent (disconnected)')
+            return false
+          }
+          const outcome = await baseSend(
+            text,
+            pendingImages.map((attachment) => attachment.previewUri),
+            deadline,
+            pendingImages
+          )
+          if (outcome !== 'rejected') {
+            const sentIds = new Set(pendingImages.map((attachment) => attachment.id))
+            setAttachmentsByScope((prev) =>
+              withScopeAttachments(
+                prev,
+                scope,
+                (prev[scope] ?? []).filter((attachment) => !sentIds.has(attachment.id))
+              )
+            )
+          }
+          return outcome !== 'rejected'
+        }
         if (pendingImages.length === 0 || !scope) {
           // Heal a previously failed paste: a text-only send to that terminal would
           // otherwise glue the stale image paste onto this message. Best-effort —

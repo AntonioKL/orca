@@ -14,6 +14,7 @@ import { useMobileNativeChatMessageSend } from './use-mobile-native-chat-message
 import { mobileNativeChatScopeKey } from './mobile-native-chat-scope-key'
 import { useMobileNativeChatSession } from './use-mobile-native-chat-session'
 import { useMobileNativeChatSessionOptions } from './use-mobile-native-chat-session-options'
+import type { MobileNativeChatSessionOptionsController } from './use-mobile-native-chat-session-options'
 import { useMobileStructuredAgentSession } from './use-mobile-structured-agent-session'
 import { useMobileStructuredNativeChatSendBridge } from './use-mobile-structured-native-chat-send-bridge'
 import { useMobileNativeChatPrompts } from './use-mobile-native-chat-prompts'
@@ -98,6 +99,7 @@ export function useMobileNativeChatController(args: {
     client,
     sessionId: activeChatStructured ? activeChatSessionId : null,
     enabled: showNativeChat,
+    agent: activeChatStructured ? activeChatAgent : null,
     onSendError
   })
   const nativeChatSession = activeChatStructured
@@ -152,8 +154,8 @@ export function useMobileNativeChatController(args: {
     NATIVE_CHAT_STREAM_THROTTLE_MS
   )
   const {
-    permission: nativeChatPermission,
-    question: nativeChatQuestion,
+    permission: legacyNativeChatPermission,
+    question: legacyNativeChatQuestion,
     detectedAsk: nativeChatDetectedAsk,
     ask: nativeChatAskPrompt
   } = useMobileNativeChatPrompts({
@@ -207,7 +209,7 @@ export function useMobileNativeChatController(args: {
     onSendError
   })
 
-  const handleNativeChatRespondPermission = useMobileNativeChatPermissionSend({
+  const legacyHandleNativeChatRespondPermission = useMobileNativeChatPermissionSend({
     client,
     enabled: inputSendable && !activeChatStructured,
     handleRef: activeHandleRef,
@@ -238,7 +240,7 @@ export function useMobileNativeChatController(args: {
   const {
     send: handleNativeChatSend,
     sendWithOutcome: handleNativeChatSendWithOutcome,
-    answerQuestion: handleNativeChatQuestionAnswer,
+    answerQuestion: legacyHandleNativeChatQuestionAnswer,
     dispatchCommand: handleNativeChatDispatchCommand
   } = useMobileNativeChatMessageSend({
     client,
@@ -280,12 +282,25 @@ export function useMobileNativeChatController(args: {
     dispatchCommand: handleNativeChatDispatchCommand,
     onAgentPicker: handleAgentPicker
   })
+  const structuredSessionOptionsController: MobileNativeChatSessionOptionsController | null =
+    activeChatStructured && structuredNativeChat.optionSnapshot.length > 0
+      ? {
+          snapshot: structuredNativeChat.optionSnapshot,
+          pendingId: structuredNativeChat.pendingOptionId,
+          setOption: structuredNativeChat.setStructuredOption,
+          invokeAction: structuredNativeChat.invokeStructuredOption,
+          recordCommand: () => {}
+        }
+      : null
   useLayoutEffect(() => {
     recordSessionOptionCommandRef.current = sessionOptions.recordCommand
   }, [sessionOptions.recordCommand])
   // Card actions retire the route's held failure banner too, not just sends.
   const answerAsk = useNativeChatAcceptedAction(handleNativeChatAnswerAsk, onSendResolved)
   const cancelAsk = useNativeChatAcceptedAction(handleNativeChatCancelAsk, onSendResolved)
+  const handleNativeChatRespondPermission = activeChatStructured
+    ? structuredNativeChat.respondPermission
+    : legacyHandleNativeChatRespondPermission
   const respond = useNativeChatAcceptedAction(handleNativeChatRespondPermission, onSendResolved)
 
   return {
@@ -303,8 +318,12 @@ export function useMobileNativeChatController(args: {
     nativeChatStreamingText,
     nativeChatStreamLive,
     nativeChatStreamScopeKey: streamScopeKey,
-    nativeChatPermission: activeChatStructured ? null : nativeChatPermission,
-    nativeChatQuestion: activeChatStructured ? null : nativeChatQuestion,
+    nativeChatPermission: activeChatStructured
+      ? structuredNativeChat.permission
+      : legacyNativeChatPermission,
+    nativeChatQuestion: activeChatStructured
+      ? structuredNativeChat.question
+      : legacyNativeChatQuestion,
     nativeChatAsk: !activeChatStructured && showNativeChatAsk ? nativeChatAskPrompt : null,
     nativeChatAskKey,
     dismissNativeChatAsk,
@@ -315,8 +334,8 @@ export function useMobileNativeChatController(args: {
     nativeChatFilePaths,
     loadNativeChatFiles,
     handleNativeChatQuestionAnswer: activeChatStructured
-      ? structuredNativeChatSend.send
-      : handleNativeChatQuestionAnswer,
+      ? structuredNativeChat.respondQuestion
+      : legacyHandleNativeChatQuestionAnswer,
     handleNativeChatSend: activeChatStructured
       ? structuredNativeChatSend.send
       : handleNativeChatSend,
@@ -324,8 +343,11 @@ export function useMobileNativeChatController(args: {
       ? structuredNativeChatSend.sendWithOutcome
       : handleNativeChatSendWithOutcome,
     readSeededLaunchDraft,
-    nativeChatSessionOptions:
-      sessionOptions.snapshot.length > 0
+    nativeChatSessionOptions: activeChatStructured
+      ? structuredSessionOptionsController
+        ? { controller: structuredSessionOptionsController, isWorking: nativeChatAgentWorking }
+        : null
+      : sessionOptions.snapshot.length > 0
         ? { controller: sessionOptions, isWorking: nativeChatAgentWorking }
         : null
   }

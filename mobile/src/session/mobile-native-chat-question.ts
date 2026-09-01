@@ -7,6 +7,8 @@ export type MobileChatQuestion = {
   question: string
   options: string[]
   multiSelect: boolean
+  /** Structured questions hide the free-text row when the provider does not accept it. */
+  allowOther?: boolean
   /** Per-option leading marker ("1", "b", …) when the source line carried one,
    *  parallel to `options`. Null where the option was a plain bullet. Used to
    *  echo the exact choice the agent listed back to the terminal. */
