@@ -188,7 +188,12 @@ function hasUsableXDisplay(value: string | undefined): boolean {
   }
   const displayNumber = Number(localDisplay[1])
   if (isUnixSocket(xvfbSocketPath(displayNumber))) {
-    return isForeignDisplayServerAlive(displayNumber)
+    // Why the managed number is never treated as foreign: Orca's own teardown unlinks the lock
+    // before the socket, so a lockless socket on VIRTUAL_DISPLAY_NUMBER is our own half-finished
+    // cleanup even when DISPLAY names it explicitly. Trusting it there would accept a dead display.
+    return displayNumber === VIRTUAL_DISPLAY_NUMBER
+      ? isManagedDisplayServerAlive(displayNumber)
+      : isForeignDisplayServerAlive(displayNumber)
   }
   return hasAbstractXSocket(displayNumber)
 }

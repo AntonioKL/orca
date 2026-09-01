@@ -335,6 +335,21 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
       expect(hasUsableLinuxDisplay({ WAYLAND_SOCKET: 'not-an-fd' })).toBe(false)
     })
 
+    // Orca's own teardown unlinks the lock before the socket, so a lockless :99 is our own
+    // half-finished cleanup — trusting it because DISPLAY names it would accept a dead display.
+    it('does not trust a lockless socket on its own managed display number', async () => {
+      setPlatform('linux')
+      statSyncMock.mockReturnValue({ isSocket: () => true })
+      readFileSyncMock.mockImplementation(() => {
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+      })
+      const { hasUsableLinuxDisplay } = await import('./ensure-virtual-display')
+
+      expect(hasUsableLinuxDisplay({ DISPLAY: ':99' })).toBe(false)
+      // A foreign display number with the same shape is still accepted.
+      expect(hasUsableLinuxDisplay({ DISPLAY: ':0' })).toBe(true)
+    })
+
     it('rejects an orphaned local X11 socket whose server PID is gone', async () => {
       setPlatform('linux')
       statSyncMock.mockReturnValue({ isSocket: () => true })
