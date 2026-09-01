@@ -1,6 +1,10 @@
 import { z } from 'zod'
 import { defineMethod, type RpcAnyMethod } from '../core'
 import { FileOpen, WorktreeSelector } from './files-target-schemas'
+import {
+  isRepositoryAdminPath,
+  REPOSITORY_ADMIN_PATH_DENIED_MESSAGE
+} from '../../../../shared/repository-admin-path'
 
 const RUNTIME_FILE_BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/
 
@@ -8,6 +12,15 @@ function isValidRuntimeFileBase64(value: unknown): value is string {
   return (
     typeof value === 'string' && value.length % 4 !== 1 && RUNTIME_FILE_BASE64_PATTERN.test(value)
   )
+}
+
+// Why: the executing host is unknown at this boundary, so classify with the strictest flavour.
+function assertMutablePaths(...paths: readonly unknown[]): void {
+  for (const path of paths) {
+    if (isRepositoryAdminPath(path, 'win32')) {
+      throw new Error(REPOSITORY_ADMIN_PATH_DENIED_MESSAGE)
+    }
+  }
 }
 
 type SshMutationParams = {
@@ -111,109 +124,129 @@ export const FILE_MUTATION_METHODS: RpcAnyMethod[] = [
   defineMethod({
     name: 'files.write',
     params: FileWrite,
-    handler: async (params, { runtime }) =>
-      runtime.writeFileExplorerFile(
+    handler: async (params, { runtime }) => {
+      assertMutablePaths(params.relativePath)
+      return runtime.writeFileExplorerFile(
         params.worktree,
         params.relativePath,
         params.content,
         ...sshMutationArguments(params)
       )
+    }
   }),
   defineMethod({
     name: 'files.writeBase64',
     params: FileWriteBase64,
-    handler: async (params, { runtime }) =>
-      runtime.writeFileExplorerFileBase64(
+    handler: async (params, { runtime }) => {
+      assertMutablePaths(params.relativePath)
+      return runtime.writeFileExplorerFileBase64(
         params.worktree,
         params.relativePath,
         params.contentBase64,
         ...sshMutationArguments(params)
       )
+    }
   }),
   defineMethod({
     name: 'files.writeBase64Chunk',
     params: FileWriteBase64Chunk,
-    handler: async (params, { runtime }) =>
-      runtime.writeFileExplorerFileBase64Chunk(
+    handler: async (params, { runtime }) => {
+      assertMutablePaths(params.relativePath)
+      return runtime.writeFileExplorerFileBase64Chunk(
         params.worktree,
         params.relativePath,
         params.contentBase64,
         params.append === true,
         ...sshMutationArguments(params)
       )
+    }
   }),
   defineMethod({
     name: 'files.createFile',
     params: FileMutationOpen,
-    handler: async (params, { runtime }) =>
-      runtime.createFileExplorerFile(
+    handler: async (params, { runtime }) => {
+      assertMutablePaths(params.relativePath)
+      return runtime.createFileExplorerFile(
         params.worktree,
         params.relativePath,
         ...sshMutationArguments(params)
       )
+    }
   }),
   defineMethod({
     name: 'files.createDir',
     params: FileMutationOpen,
-    handler: async (params, { runtime }) =>
-      runtime.createFileExplorerDir(
+    handler: async (params, { runtime }) => {
+      assertMutablePaths(params.relativePath)
+      return runtime.createFileExplorerDir(
         params.worktree,
         params.relativePath,
         ...sshMutationArguments(params)
       )
+    }
   }),
   defineMethod({
     name: 'files.createDirNoClobber',
     params: FileMutationOpen,
-    handler: async (params, { runtime }) =>
-      runtime.createFileExplorerDirNoClobber(
+    handler: async (params, { runtime }) => {
+      assertMutablePaths(params.relativePath)
+      return runtime.createFileExplorerDirNoClobber(
         params.worktree,
         params.relativePath,
         ...sshMutationArguments(params)
       )
+    }
   }),
   defineMethod({
     name: 'files.commitUpload',
     params: FileCommitUpload,
-    handler: async (params, { runtime }) =>
-      runtime.commitFileExplorerUpload(
+    handler: async (params, { runtime }) => {
+      assertMutablePaths(params.tempRelativePath, params.finalRelativePath)
+      return runtime.commitFileExplorerUpload(
         params.worktree,
         params.tempRelativePath,
         params.finalRelativePath,
         ...sshMutationArguments(params)
       )
+    }
   }),
   defineMethod({
     name: 'files.rename',
     params: FileRename,
-    handler: async (params, { runtime }) =>
-      runtime.renameFileExplorerPath(
+    handler: async (params, { runtime }) => {
+      assertMutablePaths(params.oldRelativePath, params.newRelativePath)
+      return runtime.renameFileExplorerPath(
         params.worktree,
         params.oldRelativePath,
         params.newRelativePath,
         ...sshMutationArguments(params)
       )
+    }
   }),
   defineMethod({
     name: 'files.copy',
     params: FileCopy,
-    handler: async (params, { runtime }) =>
-      runtime.copyFileExplorerPath(
+    handler: async (params, { runtime }) => {
+      assertMutablePaths(params.sourceRelativePath, params.destinationRelativePath)
+      return runtime.copyFileExplorerPath(
         params.worktree,
         params.sourceRelativePath,
         params.destinationRelativePath,
         ...sshMutationArguments(params)
       )
+    }
   }),
   defineMethod({
     name: 'files.delete',
     params: FileDelete,
-    handler: async (params, { runtime }) =>
-      runtime.deleteFileExplorerPath(
+    handler: async (params, { runtime }) => {
+      assertMutablePaths(params.relativePath)
+      return runtime.deleteFileExplorerPath(
         params.worktree,
         params.relativePath,
         params.recursive,
         ...sshMutationArguments(params)
       )
+    }
   })
 ]
