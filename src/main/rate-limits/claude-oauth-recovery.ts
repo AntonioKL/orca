@@ -33,7 +33,8 @@ export function canRetryClaudeOAuthWithLegacyKeychain(input: {
   authPreparation?: ClaudeRuntimeAuthPreparation
 }): boolean {
   return (
-    input.classification.failureKind === 'stale-token' &&
+    (input.classification.failureKind === 'stale-token' ||
+      input.classification.failureKind === 'token_expired') &&
     input.oauthCredentials.source === 'scoped-keychain' &&
     (input.authPreparation?.runtime ?? 'host') === 'host' &&
     !isManagedClaudeAuth(input.authPreparation)

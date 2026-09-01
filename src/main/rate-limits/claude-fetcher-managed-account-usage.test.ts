@@ -246,7 +246,7 @@ describe('fetchClaudeRateLimits', () => {
     expect(deleteActiveClaudeKeychainCredentialsStrict).toHaveBeenCalledWith(canonicalAuthPath)
   })
 
-  it('stages refreshed macOS inactive account credentials before Fable preview', async () => {
+  it('stages macOS inactive account credentials without refreshing them', async () => {
     setPlatform('darwin')
     tempDir = mkdtempSync(join(tmpdir(), 'orca-claude-fetcher-'))
     appGetPathMock.mockReturnValue(tempDir)
@@ -261,16 +261,6 @@ describe('fetchClaudeRateLimits', () => {
     mkdirSync(ownedAuthPath, { recursive: true })
     writeFileSync(join(ownedAuthPath, '.orca-managed-claude-auth'), 'account-1\n', 'utf-8')
     vi.mocked(readManagedClaudeKeychainCredentials).mockResolvedValueOnce(staleCredentialsJson)
-    netFetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          access_token: 'fresh-access',
-          expires_in: 3600,
-          refresh_token: 'fresh-refresh'
-        }),
-        { status: 200 }
-      )
-    )
     netFetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({ five_hour: { utilization: 12 }, seven_day: { utilization: 34 } }),
@@ -313,14 +303,12 @@ describe('fetchClaudeRateLimits', () => {
     expect(result.fableWeekly).toMatchObject({ usedPercent: 58, resetDescription: '3d' })
     expect(JSON.parse(stagedCredentialsJson ?? '{}')).toMatchObject({
       claudeAiOauth: {
-        accessToken: 'fresh-access',
-        refreshToken: 'fresh-refresh'
+        accessToken: 'stale-access',
+        refreshToken: 'stale-refresh'
       }
     })
-    expect(writeManagedClaudeKeychainCredentials).toHaveBeenCalledWith(
-      'account-1',
-      stagedCredentialsJson
-    )
+    expect(writeManagedClaudeKeychainCredentials).not.toHaveBeenCalled()
+    expect(netFetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('does not merge macOS inactive Fable preview when usage windows belong to another account', async () => {
@@ -371,7 +359,7 @@ describe('fetchClaudeRateLimits', () => {
     expect(result.fableWeekly).toBeNull()
   })
 
-  it('refreshes and persists an expiring inactive account before fetching usage', async () => {
+  it('reads an expiring inactive account without refreshing or persisting it', async () => {
     setPlatform('linux')
     tempDir = mkdtempSync(join(tmpdir(), 'orca-claude-fetcher-'))
     appGetPathMock.mockReturnValue(tempDir)
@@ -391,16 +379,6 @@ describe('fetchClaudeRateLimits', () => {
       'utf-8'
     )
 
-    // First net.fetch call is the OAuth refresh (token endpoint); second is the
-    // usage fetch with the refreshed access token.
-    netFetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        access_token: 'fresh-access',
-        expires_in: 3600,
-        refresh_token: 'fresh-refresh'
-      })
-    })
     netFetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ five_hour: { utilization: 12 }, seven_day: { utilization: 34 } })
@@ -412,14 +390,13 @@ describe('fetchClaudeRateLimits', () => {
     })
 
     expect(result.status).toBe('ok')
-    // Rotated token persisted back to managed storage.
     const persisted = JSON.parse(readFileSync(credentialsPath, 'utf-8'))
-    expect(persisted.claudeAiOauth.accessToken).toBe('fresh-access')
-    expect(persisted.claudeAiOauth.refreshToken).toBe('fresh-refresh')
-    // Usage fetch used the fresh access token.
+    expect(persisted.claudeAiOauth.accessToken).toBe('stale-access')
+    expect(persisted.claudeAiOauth.refreshToken).toBe('stale-refresh')
     const usageCall = netFetchMock.mock.calls.find(([url]) =>
       String(url).includes('/api/oauth/usage')
     )
-    expect(usageCall?.[1]?.headers?.Authorization).toBe('Bearer fresh-access')
+    expect(usageCall?.[1]?.headers?.Authorization).toBe('Bearer stale-access')
+    expect(netFetchMock).toHaveBeenCalledTimes(1)
   })
 })

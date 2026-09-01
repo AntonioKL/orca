@@ -308,8 +308,12 @@ describe('fetchClaudeRateLimits', () => {
     await expect(fetchClaudeRateLimits({ authPreparation })).resolves.toMatchObject({
       provider: 'claude',
       status: 'error',
-      error: 'Claude OAuth token expired',
-      usageMetadata: { failureKind: 'token_expired', attemptedSources: ['oauth'] }
+      error:
+        'Claude usage refresh is waiting for the live Claude terminal to rotate its credentials.',
+      usageMetadata: {
+        failureKind: 'deferred-by-live-session',
+        attemptedSources: []
+      }
     })
 
     expect(fetchViaPty).not.toHaveBeenCalled()
