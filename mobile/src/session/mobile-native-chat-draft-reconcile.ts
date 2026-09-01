@@ -166,7 +166,16 @@ export function findLandedImagePreviewEchoes(
         return false
       }
       if (targetText) {
-        return normalizedUserText(message) === targetText
+        const text = normalizedUserText(message)
+        if (text === null) {
+          return false
+        }
+        // Why not equality alone: a send is glued onto the agent's input line with any
+        // send adjacent to it, so an image send that shares a turn with a following
+        // text-only send lands in a row whose text is the concatenation. Requiring the
+        // whole row to equal this echo left it unmatched, and since both other
+        // retirement paths skip image echoes, nothing could ever retire it.
+        return text === targetText || text.startsWith(targetText)
       }
       const imageCount = message.blocks.filter(isImageRefBlock).length
       return message.blocks.length === 0 || imageCount >= entry.images!.length
