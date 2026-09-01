@@ -41,6 +41,29 @@ describe('ClaudeRuntimeAuthService', () => {
     cleanupRuntimeAuthTestState()
   })
 
+  it('bridges host managed credentials into the macOS config-scoped Keychain item', async () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+    const credentials = createClaudeCredentialsJson('user@example.com', 'managed')
+    const managedAuthPath = createManagedClaudeAuth(testState.userDataDir, 'account-1', credentials)
+    const store = createStore(
+      createSettings({
+        claudeManagedAccounts: [
+          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
+        ],
+        activeClaudeManagedAccountId: 'account-1'
+      })
+    )
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+
+    await service.prepareForClaudeLaunch()
+
+    expect(testState.scopedKeychainCredentials).toBe(credentials)
+    expect(testState.legacyKeychainCredentials).toBeNull()
+  })
+
   it('reads back refreshed active keychain credentials on macOS', async () => {
     if (process.platform !== 'darwin') {
       return

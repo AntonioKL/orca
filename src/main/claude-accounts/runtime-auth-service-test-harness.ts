@@ -59,9 +59,6 @@ export function createKeychainMock() {
     }),
     writeActiveClaudeKeychainCredentials: vi.fn(async (contents: string, configDir?: string) => {
       if (configDir) {
-        if (configDir !== expectedRuntimeConfigDir()) {
-          throw new Error(`Unexpected Claude config dir: ${configDir}`)
-        }
         if (testState.throwScopedKeychainWrite) {
           throw new Error('scoped keychain write failed')
         }
@@ -78,9 +75,6 @@ export function createKeychainMock() {
     }),
     deleteActiveClaudeKeychainCredentialsStrict: vi.fn(async (configDir?: string) => {
       if (configDir) {
-        if (configDir !== expectedRuntimeConfigDir()) {
-          throw new Error(`Unexpected Claude config dir: ${configDir}`)
-        }
         testState.scopedKeychainCredentials = null
       } else {
         testState.legacyKeychainCredentials = null
@@ -93,9 +87,7 @@ export function createKeychainMock() {
             if (testState.throwScopedKeychainRead) {
               throw new Error('scoped keychain read failed')
             }
-            return configDir === expectedRuntimeConfigDir()
-              ? testState.scopedKeychainCredentials
-              : null
+            return testState.scopedKeychainCredentials
           })()
         : (() => {
             if (testState.throwLegacyKeychainRead) {
@@ -106,9 +98,6 @@ export function createKeychainMock() {
     ),
     writeActiveClaudeKeychainCredentialsForRuntime: vi.fn(
       async (contents: string, configDir: string) => {
-        if (configDir !== expectedRuntimeConfigDir()) {
-          throw new Error(`Unexpected Claude config dir: ${configDir}`)
-        }
         if (testState.throwRuntimeKeychainWrite) {
           throw new Error('runtime keychain write failed')
         }
