@@ -129,6 +129,7 @@ export function buildComposerCardProps(state: ComposerModel) {
     sourceIntentBlocksCreate,
     requiresExplicitSetupChoice,
     hasSetupDecision: Boolean(setupDecision),
+    hasUnresolvedRunTargetChoice: (runTargetChoiceCandidates?.length ?? 0) > 1,
     selectedRepoRequiresConnection,
     sparseError
   }
