@@ -35,6 +35,16 @@ export type TerminalExitUnknownReason =
 export const OPERATOR_CLOSE_EXIT_CAUSE: TerminalExitCause = { kind: 'operator_close' }
 
 /**
+ * The code every surface uses for "contact was lost before the host could vouch
+ * for this process". `resolveProcessExitCause` reads it as `stop_unverified`
+ * and {@link isProvenProcessExit} rejects it.
+ *
+ * A reader handed an *optional* status by a host must default to this, never to
+ * `0`: `exitCode ?? 0` mints a clean finish out of an absence of evidence.
+ */
+export const UNVERIFIED_PROCESS_EXIT_CODE = -1
+
+/**
  * Build a cause from what the host actually observed.
  *
  * `hostReportsChildExitStatus: false` means the number and signal below describe
