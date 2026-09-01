@@ -4,6 +4,7 @@ import { LOCAL_EXECUTION_HOST_ID, type ExecutionHostId } from '../../shared/exec
 import type { RuntimeMobileSessionTabsSnapshot } from '../../shared/runtime-types'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { OrcaRuntimeService } from './orca-runtime'
+import { RuntimeWorkspaceSessionController } from './runtime-workspace-session-controller'
 
 const CONNECTION_ID = 'conn-1'
 const SSH_HOST_ID: ExecutionHostId = `ssh:${CONNECTION_ID}`
@@ -200,7 +201,14 @@ describe('OrcaRuntimeService terminal retirement host partitioning (STA-3463)', 
     }
     const sessions = new Map<ExecutionHostId, WorkspaceSessionState>([
       [LOCAL_EXECUTION_HOST_ID, localSession],
-      [staleHostId, getDefaultWorkspaceSession()]
+      [
+        staleHostId,
+        {
+          ...getDefaultWorkspaceSession(),
+          // A prior close can leave an empty retained row in the stale partition.
+          tabsByWorktree: { [SSH_WORKTREE_ID]: [] }
+        }
+      ]
     ])
     const store = {
       getRepos: () => [{ ...SSH_REPO, executionHostId: staleHostId }],
@@ -231,7 +239,47 @@ describe('OrcaRuntimeService terminal retirement host partitioning (STA-3463)', 
       closed: true
     })
     expect(sessions.get(LOCAL_EXECUTION_HOST_ID)?.tabsByWorktree[SSH_WORKTREE_ID]).toEqual([])
-    expect(sessions.get(staleHostId)?.tabsByWorktree[SSH_WORKTREE_ID]).toBeUndefined()
+    expect(sessions.get(staleHostId)?.tabsByWorktree[SSH_WORKTREE_ID]).toEqual([])
+  })
+
+  it('does not throw when a folder host is absent from the persisted host index', () => {
+    const folderWorktreeId = 'folder:folder-1'
+    const localSession = {
+      ...getDefaultWorkspaceSession(),
+      tabsByWorktree: {
+        [folderWorktreeId]: [
+          {
+            id: 'folder-tab',
+            ptyId: null,
+            worktreeId: folderWorktreeId,
+            title: 'Folder'
+          }
+        ]
+      }
+    }
+    const folderHostId: ExecutionHostId = 'runtime:folder-host'
+    const store = {
+      getRepos: () => [],
+      getFolderWorkspaces: () => [
+        {
+          id: 'folder-1',
+          projectGroupId: 'project-1',
+          name: 'Folder',
+          folderPath: '/tmp/folder',
+          executionHostId: folderHostId
+        }
+      ],
+      getWorkspaceSessionHostIds: () => [LOCAL_EXECUTION_HOST_ID],
+      getWorkspaceSession: (hostId?: ExecutionHostId) =>
+        hostId === LOCAL_EXECUTION_HOST_ID ? localSession : getDefaultWorkspaceSession()
+    } as never
+    const controller = new RuntimeWorkspaceSessionController({
+      getStore: () => store,
+      resolveFolderConnectionId: () => null,
+      hasRuntimeOwnedPtyCandidate: () => false
+    })
+
+    expect(() => controller.getHydrationTargets(true)).not.toThrow()
   })
 
   it('waits for provider retirement on a direct worktree stop', async () => {

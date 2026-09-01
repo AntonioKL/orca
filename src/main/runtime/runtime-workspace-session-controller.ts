@@ -56,13 +56,13 @@ export class RuntimeWorkspaceSessionController {
     persistedHostIds: readonly ExecutionHostId[],
     getWorkspaceSession: (hostId: ExecutionHostId) => WorkspaceSessionState
   ): ExecutionHostId {
-    if (Object.hasOwn(getWorkspaceSession(preferredHostId).tabsByWorktree, worktreeId)) {
+    const hasPersistedTabs = (hostId: ExecutionHostId): boolean =>
+      (getWorkspaceSession(hostId).tabsByWorktree[worktreeId]?.length ?? 0) > 0
+    if (hasPersistedTabs(preferredHostId)) {
       return preferredHostId
     }
     const persistedOwners = persistedHostIds.filter(
-      (hostId) =>
-        hostId !== preferredHostId &&
-        Object.hasOwn(getWorkspaceSession(hostId).tabsByWorktree, worktreeId)
+      (hostId) => hostId !== preferredHostId && hasPersistedTabs(hostId)
     )
     // Relay restarts can leave catalog metadata on an obsolete partition while
     // the durable tab owner remains unique.
@@ -126,6 +126,9 @@ export class RuntimeWorkspaceSessionController {
 
   getHydrationTargets(includeAllPersistedWorktrees: boolean): Map<string, WorkspaceSessionState> {
     const store = this.deps.getStore()
+    if (!store) {
+      return new Map()
+    }
     const repos = store?.getRepos?.() ?? []
     const repoHostIdByRepoId = new Map(
       repos.map((repo) => [repo.id, getRepoExecutionHostId(repo)] as const)
@@ -174,7 +177,8 @@ export class RuntimeWorkspaceSessionController {
           worktreeId,
           catalogOwnerHostId ?? LOCAL_EXECUTION_HOST_ID,
           [...sessionsByHostId.keys()],
-          (candidateHostId) => sessionsByHostId.get(candidateHostId)!
+          (candidateHostId) =>
+            sessionsByHostId.get(candidateHostId) ?? store.getWorkspaceSession!(candidateHostId)
         )
         if (
           ownerHostId === hostId &&
