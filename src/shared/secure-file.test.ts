@@ -190,50 +190,48 @@ describe('hardenSecurePath', () => {
   })
 
   /**
-   * BLOCKING 2: evicting the cache on every failed apply is the #4901 storm wearing a different
-   * hat. The env store re-hardens on the *read* path at ~2/s, and on a host where hardening
-   * legitimately cannot work (FAT32, network path, restricted token) an unconditional retry is
-   * two icacls spawns and two warnings a second, forever. So: a retry floor, then a hard cap.
+   * Evicting the cache on every failed apply is the #4901 storm wearing a different hat: the env
+   * store re-hardens on the *read* path at ~2/s, so on a host where hardening legitimately cannot
+   * work (FAT32, network path, restricted token) that is two icacls spawns and two warnings a
+   * second, forever.
+   *
+   * The curve itself is pinned in secure-path-hardening-retry-budget.test.ts; what matters here is
+   * that the read path is actually wired to it.
    */
-  it('throttles retries of a failing path instead of re-spawning on every read', async () => {
+  it('collapses a failing read-path poll to a single attempt', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     const targetPath = writeFailingHardenTarget()
 
-    // The read-path polling loop the storm came from: 25 reads, not 25 spawns.
     for (let read = 0; read < 25; read++) {
       hardenExistingSecureFile(targetPath)
       await flushAsyncAcl()
     }
 
-    expect(attemptsFor(targetPath)).toHaveLength(3)
-    // Entering the degraded state is announced once, not once per read.
-    expect(throttleReports(warn, targetPath)).toHaveLength(1)
+    expect(attemptsFor(targetPath)).toHaveLength(1)
     warn.mockRestore()
   })
 
   /**
-   * A cap that never expires latches a transient failure: one AV scan or momentary lock and every
-   * later credential write in the session is unprotected, on a host where hardening would now
-   * work. The rate is bounded; the lifetime is not.
+   * A budget that expires rather than latching: three transient failures used to abandon a path
+   * for the life of the process, so one AV scan or momentary lock left every later credential
+   * write unprotected on a host where hardening would now succeed.
    */
-  it('keeps re-probing a failing path in every later window', async () => {
+  it('re-probes a long-failing path once its backoff has elapsed', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     const targetPath = writeFailingHardenTarget()
     let clock = Date.now()
     const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
 
-    for (let window = 0; window < 6; window++) {
-      for (let read = 0; read < 6; read++) {
-        hardenExistingSecureFile(targetPath)
-        await flushAsyncAcl()
-      }
-      clock += 61_000
+    // A day of failing, well past any fixed cap, stepping by more than the 30-minute ceiling.
+    for (let step = 0; step < 48; step++) {
+      hardenExistingSecureFile(targetPath)
+      await flushAsyncAcl()
+      clock += 31 * 60_000
     }
 
-    // Bounded per window, but never abandoned: 36 reads, 3 attempts in each of 6 windows.
-    expect(attemptsFor(targetPath)).toHaveLength(18)
+    expect(attemptsFor(targetPath)).toHaveLength(48)
     now.mockRestore()
     warn.mockRestore()
   })
@@ -246,14 +244,16 @@ describe('hardenSecurePath', () => {
     let clock = Date.now()
     const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
 
-    for (let read = 0; read < 5; read++) {
+    // Three failures to reach the announced degraded state, each past its own backoff.
+    for (const wait of [0, 61_000, 121_000]) {
+      clock += wait
       hardenExistingSecureFile(targetPath)
       await flushAsyncAcl()
     }
     expect(throttleReports(warn, targetPath)).toHaveLength(1)
 
-    // The transient condition clears; the next window's re-probe must notice.
-    clock += 61_000
+    // The transient condition clears; the next re-probe must notice.
+    clock += 5 * 60_000
     vi.mocked(runProcess).mockImplementation((spec) => Promise.resolve(fakeIcacls(spec)))
     hardenExistingSecureFile(targetPath)
     await flushAsyncAcl()

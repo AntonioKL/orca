@@ -4,21 +4,36 @@ import {
 } from './secure-path-hardening-cache'
 import { reportSecurePathHardening } from './secure-path-windows-acl'
 
-type HardeningFailureRecord = { windowStartedAt: number; attempts: number }
+type HardeningFailureRecord = { at: number; attempts: number }
 
 /**
  * How often a path whose hardening keeps failing may be retried.
  *
- * Why a rate limit and not a lifetime cap: the env store re-hardens on the *read* path at ~2/s
- * (#4901), so retrying every failure is a permanent icacls-and-log storm on hosts where hardening
- * cannot work — FAT32/exFAT have no ACLs, and network paths, redirected profiles and restricted
- * tokens refuse. But a cap that never expires latches a *transient* failure: one AV scan or
- * momentary lock, and every later credential write in the session is unprotected, silently, on a
- * host where hardening would now succeed. So bound the retry *rate*, never the lifetime, and
- * announce both directions of the transition so a stuck host is diagnosable.
+ * Why throttle at all: the env store re-hardens on the *read* path at ~2/s (#4901), so retrying
+ * every failure is an icacls-and-log storm on hosts where hardening cannot work — FAT32/exFAT have
+ * no ACLs, and network paths, redirected profiles and restricted tokens refuse.
+ *
+ * Why exponential and not a cap: a cap that never expires latches a *transient* failure — one AV
+ * scan or momentary lock and the path is abandoned for the life of the process, which can be days.
+ * Backoff bounds the rate without ever bounding the lifetime. It settles at ~2 attempts/hour on a
+ * permanently incapable host, which matters because the budget is per path and there are several
+ * secure files; a fixed one-minute floor would leave a standing five-figure daily spawn count for
+ * work that will never succeed.
+ *
+ * Why slowing it down is close to free: the synchronous write path is deliberately *not*
+ * throttled, so a host that recovers hardens on its very next credential write. This read-path
+ * re-probe is a backstop, not the recovery mechanism.
  */
-const HARDENING_RETRY_WINDOW_MS = 60_000
-const MAX_HARDENING_ATTEMPTS_PER_WINDOW = 3
+const HARDENING_RETRY_FLOOR_MS = 60_000
+const HARDENING_RETRY_CEILING_MS = 30 * 60_000
+
+/** Consecutive failures before the degraded state is announced. */
+const HARDENING_THROTTLE_ANNOUNCE_AFTER = 3
+
+/** Exported so the tests pin the real curve rather than a copy of it. */
+export function hardeningRetryDelayMs(attempts: number): number {
+  return Math.min(HARDENING_RETRY_FLOOR_MS * 2 ** (attempts - 1), HARDENING_RETRY_CEILING_MS)
+}
 
 let hardeningFailures: SecurePathHardeningCache<HardeningFailureRecord> | null = null
 
@@ -38,39 +53,31 @@ export function mayAttemptHardening(targetPath: string): boolean {
   if (!failure) {
     return true
   }
-  // A stale window always re-probes: recovery must never require a restart to be noticed.
-  if (Date.now() - failure.windowStartedAt >= HARDENING_RETRY_WINDOW_MS) {
-    return true
-  }
-  return failure.attempts < MAX_HARDENING_ATTEMPTS_PER_WINDOW
+  // No cap: once the backoff elapses the path is re-probed, however long it has been failing.
+  return Date.now() - failure.at >= hardeningRetryDelayMs(failure.attempts)
 }
 
 export function recordHardeningOutcome(targetPath: string, restricted: boolean): void {
   const previous = failures().get(targetPath)
   if (restricted) {
     failures().delete(targetPath)
-    if (previous && previous.attempts >= MAX_HARDENING_ATTEMPTS_PER_WINDOW) {
+    if (previous && previous.attempts >= HARDENING_THROTTLE_ANNOUNCE_AFTER) {
       reportSecurePathHardening(
         targetPath,
         'recovered',
-        'hardening succeeded again after being rate-limited'
+        `hardening succeeded again after ${previous.attempts} consecutive failures`
       )
     }
     return
   }
-  const now = Date.now()
-  const staleWindow = !previous || now - previous.windowStartedAt >= HARDENING_RETRY_WINDOW_MS
-  const attempts = staleWindow ? 1 : previous.attempts + 1
-  failures().set(targetPath, {
-    windowStartedAt: staleWindow ? now : previous.windowStartedAt,
-    attempts
-  })
-  // Fires exactly once per window: further attempts inside it are refused before they run.
-  if (attempts === MAX_HARDENING_ATTEMPTS_PER_WINDOW) {
+  const attempts = (previous?.attempts ?? 0) + 1
+  failures().set(targetPath, { at: Date.now(), attempts })
+  // Fires exactly once: attempts only rises, and a success clears the record entirely.
+  if (attempts === HARDENING_THROTTLE_ANNOUNCE_AFTER) {
     reportSecurePathHardening(
       targetPath,
       'throttled',
-      `hardening failed ${attempts} times; retrying at most ${MAX_HARDENING_ATTEMPTS_PER_WINDOW} times per ${HARDENING_RETRY_WINDOW_MS / 1000}s until it succeeds`
+      `hardening failed ${attempts} times; backing off toward one retry per ${HARDENING_RETRY_CEILING_MS / 60_000} minutes until it succeeds`
     )
   }
 }
