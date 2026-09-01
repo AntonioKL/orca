@@ -22,7 +22,14 @@ export function buildClaudeChildProcessEnv(
 ): Record<string, string> {
   const inheritedEnv = options.inheritedEnv ?? process.env
   const platform = options.platform ?? process.platform
-  const env = applyClaudeEnvPatch(cloneProcessEnv(inheritedEnv), {}, { stripAuthEnv: true })
+  const env = applyClaudeEnvPatch(
+    cloneProcessEnv(inheritedEnv),
+    {},
+    {
+      stripAuthEnv: true,
+      platform
+    }
+  )
   if (platform === 'win32') {
     const authKeys = new Set(CLAUDE_AUTH_ENV_VARS.map((key) => key.toUpperCase()))
     for (const [key, value] of Object.entries(env)) {

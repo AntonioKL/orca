@@ -13,14 +13,21 @@ export type ClaudeEnvPatch = {
 export function applyClaudeEnvPatch(
   baseEnv: Record<string, string>,
   patch: ClaudeEnvPatch,
-  options?: { stripAuthEnv?: boolean }
+  options?: { stripAuthEnv?: boolean; platform?: NodeJS.Platform }
 ): Record<string, string> {
   if (options?.stripAuthEnv) {
     for (const key of CLAUDE_AUTH_ENV_VARS) {
       delete baseEnv[key]
     }
-    if (isAuthLikeCustomHeaders(baseEnv.ANTHROPIC_CUSTOM_HEADERS)) {
-      delete baseEnv.ANTHROPIC_CUSTOM_HEADERS
+    const platform = options.platform ?? process.platform
+    for (const key of Object.keys(baseEnv)) {
+      const normalized = platform === 'win32' ? key.toUpperCase() : key
+      if (
+        (platform === 'win32' && CLAUDE_AUTH_ENV_VARS.some((authKey) => authKey === normalized)) ||
+        (normalized === 'ANTHROPIC_CUSTOM_HEADERS' && isAuthLikeCustomHeaders(baseEnv[key]))
+      ) {
+        delete baseEnv[key]
+      }
     }
   }
 
