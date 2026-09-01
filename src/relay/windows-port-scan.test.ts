@@ -254,8 +254,47 @@ describe('scanWindowsListeningPorts', () => {
     expect(specs()).toHaveLength(1)
   })
 
+  // The gap the state-word cases cannot cover: on a localized host BOUND is as
+  // unreadable as ABHÖREN, so shape alone would publish 8080 as a listener.
+  // Listeners dominate, and that is what separates them.
+  it('drops a BOUND socket that shape alone would promote on a localized host', async () => {
+    runProcessMock.mockResolvedValueOnce(
+      ok(
+        [
+          `  TCP    0.0.0.0:3000           0.0.0.0:0              ABHÖREN          ${NETSTAT_PID}`,
+          `  TCP    [::]:3000              [::]:0                 ABHÖREN          ${NETSTAT_PID}`,
+          `  TCP    0.0.0.0:8080           0.0.0.0:0              GEBUNDEN         ${NETSTAT_PID}`,
+          `  TCP    192.168.0.5:52000      93.184.216.34:443      HERGESTELLT      ${NETSTAT_PID}`
+        ].join('\r\n')
+      )
+    )
+
+    await expect(scanWindowsListeningPorts()).resolves.toEqual([
+      { host: '::', port: 3000, pid: NETSTAT_PID, processName: 'node' },
+      { host: '0.0.0.0', port: 3000, pid: NETSTAT_PID, processName: 'node' }
+    ])
+  })
+
+  // Only on an exact tie does shape have nothing left to go on, and then it
+  // keeps both rather than guessing — no worse than reading shape alone.
+  it('keeps every tied zero-peer state when none dominates', async () => {
+    runProcessMock.mockResolvedValueOnce(
+      ok(
+        [
+          `  TCP    0.0.0.0:3000           0.0.0.0:0              ABHÖREN          ${NETSTAT_PID}`,
+          `  TCP    0.0.0.0:8080           0.0.0.0:0              GEBUNDEN         ${NETSTAT_PID}`
+        ].join('\r\n')
+      )
+    )
+
+    await expect(scanWindowsListeningPorts()).resolves.toEqual([
+      { host: '0.0.0.0', port: 3000, pid: NETSTAT_PID, processName: 'node' },
+      { host: '0.0.0.0', port: 8080, pid: NETSTAT_PID, processName: 'node' }
+    ])
+  })
+
   // Windows prints BOUND with a zero peer too, so the shape test must stay the
-  // fallback: an English host is read by its word and never sees a bound socket.
+  // fallback: a host with at least one readable LISTENING row never reaches it.
   it('does not promote a BOUND socket on a host whose state word parsed', async () => {
     runProcessMock.mockResolvedValueOnce(
       ok(
@@ -329,13 +368,19 @@ describe('scanWindowsListeningPorts', () => {
       runProcessMock.mockResolvedValue(ok(''))
       await scanWindowsListeningPorts()
       await scanWindowsListeningPorts()
+      // A second, different fault on the same host must still be heard: one
+      // flag for the whole module would have swallowed it.
+      runProcessMock.mockResolvedValue(ok('x'.repeat(4 * 1024 * 1024)))
+      await scanWindowsListeningPorts()
+      await scanWindowsListeningPorts()
     } finally {
       stderr.mockRestore()
     }
 
     const reported = lines.filter((line) => line.includes('[ports] netstat unusable'))
-    expect(reported).toHaveLength(1)
+    expect(reported).toHaveLength(2)
     expect(reported[0]).toContain('no listening row parsed')
+    expect(reported[1]).toContain('truncated')
     // relayLogLine's ISO stamp: an unplaceable line cannot be read against the
     // reconnect flaps around it.
     expect(reported[0]).toMatch(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z /)

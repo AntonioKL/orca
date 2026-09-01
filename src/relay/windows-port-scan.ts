@@ -84,7 +84,8 @@ async function readWindowsNetstatPorts(signal?: AbortSignal): Promise<DetectedPo
   return ports
 }
 
-let reportedNetstatUnusable = false
+/** Reasons already reported. A fixed two-value vocabulary, so it cannot grow. */
+const reportedNetstatFailures = new Set<string>()
 
 /**
  * Say once why the scan left the native path.
@@ -100,16 +101,18 @@ let reportedNetstatUnusable = false
  * most of what this line is for.
  */
 function reportWindowsNetstatUnusable(reason: string): void {
-  if (reportedNetstatUnusable) {
+  // Per reason, not per module: a host that parses nothing today and truncates
+  // tomorrow has two different faults, and one flag would hide the second.
+  if (reportedNetstatFailures.has(reason)) {
     return
   }
-  reportedNetstatUnusable = true
+  reportedNetstatFailures.add(reason)
   relayLogLine(`[ports] netstat unusable on this host (${reason}); falling back to PowerShell`)
 }
 
 /** Test-only: re-arm the one-shot so each case can observe its own line. */
 export function resetWindowsPortScanDiagnosticsForTests(): void {
-  reportedNetstatUnusable = false
+  reportedNetstatFailures.clear()
 }
 
 /**
@@ -238,27 +241,48 @@ export function parseWindowsPowerShellPortRows(json: string): DetectedPort[] {
  *
  * The shape is language-independent: a listening socket has no peer, so its
  * foreign address is `0.0.0.0:0` / `[::]:0`, and on every state Windows prints
- * with a real peer that port is non-zero. It is the fallback rather than the
- * primary test only because `BOUND` also prints a zero peer, and reading a
- * bound socket as a listener is worse than reading an English host by its word.
+ * with a real peer that port is non-zero. Shape stays the fallback because the
+ * converse does not hold — `BOUND` and `CLOSED` print a zero peer too, and on a
+ * localized host their words are just as unreadable as the listening one.
  */
 export function parseWindowsNetstatOutput(output: string): DetectedPort[] {
-  const byStateWord = scanWindowsNetstatRows(
-    output,
-    (fields) => fields[3].toUpperCase() === 'LISTENING'
-  )
-  if (byStateWord.ports.length > 0 || byStateWord.tcpRows === 0) {
-    return byStateWord.ports
+  const { rows, tcpRows } = scanWindowsNetstatTcpRows(output)
+  const byStateWord = rows.filter((row) => row.state === 'LISTENING')
+  if (byStateWord.length > 0 || tcpRows === 0) {
+    return byStateWord.map((row) => row.port)
   }
-  return scanWindowsNetstatRows(output, (fields) => readWindowsNetstatPort(fields[2]) === 0).ports
+  return readDominantZeroPeerState(rows)
 }
 
+/**
+ * Of the zero-peer states, keep only the one that dominates.
+ *
+ * Shape alone would publish a phantom listener: one `BOUND` socket among real
+ * listeners looks identical to them once the state word is unreadable. But it
+ * cannot dominate — listeners outnumber those transients by roughly 50:1 on a
+ * real host (51 against 0 here), so the largest zero-peer group is the
+ * listening one. An exact tie keeps every tied group rather than guessing,
+ * which is no worse than reading shape alone.
+ */
+function readDominantZeroPeerState(rows: NetstatTcpRow[]): DetectedPort[] {
+  const countByState = new Map<string, number>()
+  for (const row of rows) {
+    if (row.zeroPeer) {
+      countByState.set(row.state, (countByState.get(row.state) ?? 0) + 1)
+    }
+  }
+  const largest = Math.max(0, ...countByState.values())
+  const dominant = new Set(
+    [...countByState].filter(([, count]) => count === largest).map(([state]) => state)
+  )
+  return rows.flatMap((row) => (row.zeroPeer && dominant.has(row.state) ? [row.port] : []))
+}
+
+type NetstatTcpRow = { state: string; zeroPeer: boolean; port: DetectedPort }
+
 /** `tcpRows` separates a localized host from one with genuinely no TCP output. */
-function scanWindowsNetstatRows(
-  output: string,
-  isListening: (fields: string[]) => boolean
-): { ports: DetectedPort[]; tcpRows: number } {
-  const ports: DetectedPort[] = []
+function scanWindowsNetstatTcpRows(output: string): { rows: NetstatTcpRow[]; tcpRows: number } {
+  const rows: NetstatTcpRow[] = []
   let tcpRows = 0
 
   for (const line of output.split(/\r?\n/)) {
@@ -267,18 +291,19 @@ function scanWindowsNetstatRows(
       continue
     }
     tcpRows += 1
-    if (!isListening(fields)) {
-      continue
-    }
     const hostPort = parseWindowsNetstatAddress(fields[1])
     const pid = Number.parseInt(fields[4], 10)
     if (!hostPort || !Number.isSafeInteger(pid) || pid <= 0) {
       continue
     }
-    ports.push({ ...hostPort, pid })
+    rows.push({
+      state: fields[3].toUpperCase(),
+      zeroPeer: readWindowsNetstatPort(fields[2]) === 0,
+      port: { ...hostPort, pid }
+    })
   }
 
-  return { ports, tcpRows }
+  return { rows, tcpRows }
 }
 
 function parseWindowsPortRow(row: unknown): DetectedPort[] {
