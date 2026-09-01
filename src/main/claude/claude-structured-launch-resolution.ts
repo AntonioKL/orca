@@ -109,7 +109,14 @@ export function createClaudeStructuredLaunchResolver(
     const env = withCliRuntimeOnPath(
       command,
       {
-        ...applyClaudeEnvPatch(cloneDefinedEnv(process.env), {}, { stripAuthEnv: true }),
+        ...applyClaudeEnvPatch(
+          cloneDefinedEnv(process.env),
+          {},
+          {
+            stripAuthEnv: true,
+            platform: process.platform
+          }
+        ),
         ...(overlay ? cloneDefinedEnv(overlay) : {})
       },
       { platform: process.platform }
