@@ -3,10 +3,13 @@ import { join } from 'node:path'
 import { runProcess, spawnProcess } from '../shared/child-process/run-process'
 import {
   clearMacUpdateInstallAttempt,
-  isMacUpdateProcessIdentityAlive,
+  clearMacUpdateInstallHeartbeat,
+  failMacUpdateInstallAttemptIfCurrent,
+  getMacUpdateProcessIdentityState,
   isMatchingBundleShipItRunning,
+  MAC_UPDATE_INSTALL_ATTEMPT_SCHEMA_VERSION,
   readMacUpdateInstallAttempt,
-  writeMacUpdateInstallAttempt,
+  writeMacUpdateInstallHeartbeat,
   type MacUpdateInstallAttempt,
   type MacUpdateInstallFailureReason
 } from './mac-update-install-attempt'
@@ -16,10 +19,14 @@ export const MAC_UPDATE_MONITOR_SHIPIT_APPEARANCE_MS = 30_000
 export const MAC_UPDATE_MONITOR_SHIPIT_EXIT_GRACE_MS = 5_000
 export const MAC_UPDATE_MONITOR_TIMEOUT_MS = 15 * 60_000
 
+/**
+ * Every probe is tri-state: only a verified observation may drive a failure decision. A ps or
+ * filesystem hiccup must never relaunch the old app into ShipIt's install window.
+ */
 type MonitorObservation = {
   bundleVersion: string | null
-  shipItAlive: boolean
-  sourceAlive: boolean
+  shipIt: 'alive' | 'absent' | 'unknown'
+  source: 'alive' | 'dead' | 'unverifiable'
 }
 
 export type MacUpdateMonitorDecision =
@@ -41,17 +48,20 @@ export function decideMacUpdateMonitorStep(options: {
   if (nowMs - attempt.createdAtMs >= MAC_UPDATE_MONITOR_TIMEOUT_MS) {
     return { action: 'fail', reason: 'install-timed-out' }
   }
-  if (observation.sourceAlive) {
-    return {
-      action: 'continue',
-      shipItSeen: options.shipItSeen || observation.shipItAlive,
-      shipItMissingSinceMs: null
-    }
+  const shipItSeen = options.shipItSeen || observation.shipIt === 'alive'
+  // Why not-dead rather than alive: an unverifiable source may still be quitting; failing early
+  // could relaunch the old app straight into ShipIt's install window.
+  if (observation.source !== 'dead') {
+    return { action: 'continue', shipItSeen, shipItMissingSinceMs: null }
   }
-  if (observation.shipItAlive) {
+  if (observation.shipIt === 'alive') {
     return { action: 'continue', shipItSeen: true, shipItMissingSinceMs: null }
   }
-  if (!options.shipItSeen) {
+  if (observation.shipIt === 'unknown') {
+    // Why: an unverified process list neither confirms nor refutes ShipIt; freeze the clocks.
+    return { action: 'continue', shipItSeen, shipItMissingSinceMs: options.shipItMissingSinceMs }
+  }
+  if (!shipItSeen) {
     if (nowMs - attempt.createdAtMs >= MAC_UPDATE_MONITOR_SHIPIT_APPEARANCE_MS) {
       return { action: 'fail', reason: 'installer-never-started' }
     }
@@ -84,6 +94,7 @@ export async function runMacUpdateInstallMonitor(options: {
   for (;;) {
     const current = readMacUpdateInstallAttempt(options.attemptPath)
     if (!current || current.attemptId !== options.attemptId || current.phase !== 'installing') {
+      clearMacUpdateInstallHeartbeat(options.attemptPath, options.attemptId)
       return 'cancelled'
     }
     attempt = current
@@ -101,24 +112,29 @@ export async function runMacUpdateInstallMonitor(options: {
       return 'completed'
     }
     if (decision.action === 'fail') {
-      const failed: MacUpdateInstallAttempt = {
-        ...attempt,
-        phase: 'failed',
+      // Why guarded: cleanup may have cleared or replaced the attempt while this step observed;
+      // writing an unconditional failure would resurrect a finished attempt and launch a
+      // recovery app nobody asked for.
+      const failed = failMacUpdateInstallAttemptIfCurrent(options.attemptPath, attempt.attemptId, {
         failureReason: decision.reason,
-        heartbeatAtMs: nowMs,
-        recoveryLaunchedAtMs: nowMs
+        nowMs
+      })
+      if (!failed) {
+        clearMacUpdateInstallHeartbeat(options.attemptPath, attempt.attemptId)
+        return 'cancelled'
       }
-      writeMacUpdateInstallAttempt(options.attemptPath, failed)
       await (options.launchRecovery ?? launchRecoveryApp)(failed)
       return 'failed'
     }
     shipItSeen = decision.shipItSeen
     shipItMissingSinceMs = decision.shipItMissingSinceMs
-    writeMacUpdateInstallAttempt(
-      options.attemptPath,
-      { ...attempt, heartbeatAtMs: nowMs },
-      { durable: false }
-    )
+    // Why a sibling file: the recurring heartbeat write must never be able to resurrect or
+    // clobber the attempt record itself after startup cleanup cleared or replaced it.
+    writeMacUpdateInstallHeartbeat(options.attemptPath, {
+      schemaVersion: MAC_UPDATE_INSTALL_ATTEMPT_SCHEMA_VERSION,
+      attemptId: attempt.attemptId,
+      heartbeatAtMs: nowMs
+    })
     await wait(MAC_UPDATE_MONITOR_POLL_MS)
   }
 }
@@ -145,8 +161,13 @@ async function observeInstall(attempt: MacUpdateInstallAttempt): Promise<Monitor
   ])
   return {
     bundleVersion,
-    shipItAlive: isMatchingBundleShipItRunning(attempt.targetBundlePath, processList),
-    sourceAlive: isMacUpdateProcessIdentityAlive(attempt.sourcePid, attempt.sourceStartedAtMs)
+    shipIt:
+      processList === null
+        ? 'unknown'
+        : isMatchingBundleShipItRunning(attempt.targetBundlePath, processList)
+          ? 'alive'
+          : 'absent',
+    source: getMacUpdateProcessIdentityState(attempt.sourcePid, attempt.sourceStartedAtMs)
   }
 }
 
@@ -160,7 +181,8 @@ async function readBundleVersion(bundlePath: string): Promise<string | null> {
   }
 }
 
-async function readProcessList(): Promise<string> {
+/** null means the probe itself failed — callers must treat that as unknown, not as absence. */
+async function readProcessList(): Promise<string | null> {
   try {
     const result = await runProcess({
       program: '/bin/ps',
@@ -168,9 +190,9 @@ async function readProcessList(): Promise<string> {
       timeoutMs: 2_000,
       maxOutputBytes: 16 * 1024 * 1024
     })
-    return result.code === 0 ? result.stdout : ''
+    return result.code === 0 ? result.stdout : null
   } catch {
-    return ''
+    return null
   }
 }
 

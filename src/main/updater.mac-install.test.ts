@@ -413,4 +413,44 @@ describe('updater mac install handoff', () => {
       expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled()
     }
   )
+  it.runIf(process.platform === 'darwin')(
+    'proceeds with the native install when arming the fence throws',
+    async () => {
+      const resourcesPathDescriptor = Object.getOwnPropertyDescriptor(process, 'resourcesPath')
+      Object.defineProperty(process, 'resourcesPath', {
+        value: '/tmp/orca-packaged-resources',
+        configurable: true
+      })
+      armMacUpdateInstallAttemptMock.mockImplementation(() => {
+        throw new Error('monitor entry missing from bundle')
+      })
+      try {
+        autoUpdaterMock.checkForUpdates.mockResolvedValue(undefined)
+        const { quitAndInstall, setupAutoUpdater } = await import('./updater')
+        setupAutoUpdater({ webContents: { send: vi.fn() } } as never)
+        autoUpdaterMock.emit('checking-for-update')
+        autoUpdaterMock.emit('update-available', { version: '1.0.61' })
+        await Promise.resolve()
+        autoUpdaterMock.emit('update-downloaded', { version: '1.0.61' })
+        const nativeDownloadedHandler = nativeUpdaterMock.on.mock.calls.find(
+          ([eventName]) => eventName === 'update-downloaded'
+        )?.[1] as (() => void) | undefined
+        nativeDownloadedHandler?.()
+
+        quitAndInstall()
+
+        // Why: an unfenced install is the pre-fence status quo; a fence failure must never
+        // abort an update that would otherwise succeed.
+        await vi.waitFor(() => expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledOnce())
+        expect(armMacUpdateInstallAttemptMock).toHaveBeenCalledOnce()
+        expect(clearMacUpdateInstallAttemptMock).not.toHaveBeenCalled()
+      } finally {
+        if (resourcesPathDescriptor) {
+          Object.defineProperty(process, 'resourcesPath', resourcesPathDescriptor)
+        } else {
+          Reflect.deleteProperty(process, 'resourcesPath')
+        }
+      }
+    }
+  )
 })

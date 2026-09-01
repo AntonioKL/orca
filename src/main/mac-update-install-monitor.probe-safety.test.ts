@@ -1,0 +1,224 @@
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  clearMacUpdateInstallAttempt,
+  getMacUpdateInstallAttemptPath,
+  getMacUpdateInstallHeartbeatPath,
+  readMacUpdateInstallAttempt,
+  readMacUpdateInstallHeartbeat,
+  writeMacUpdateInstallAttempt,
+  type MacUpdateInstallAttempt
+} from './mac-update-install-attempt'
+import {
+  decideMacUpdateMonitorStep,
+  MAC_UPDATE_MONITOR_SHIPIT_APPEARANCE_MS,
+  MAC_UPDATE_MONITOR_TIMEOUT_MS,
+  runMacUpdateInstallMonitor
+} from './mac-update-install-monitor'
+
+const tempDirectories: string[] = []
+
+function createAttempt(overrides: Partial<MacUpdateInstallAttempt> = {}): MacUpdateInstallAttempt {
+  return {
+    schemaVersion: 1,
+    attemptId: 'attempt-1',
+    sourceVersion: '1.4.192-adhoc.20260828225951',
+    targetVersion: '1.4.192',
+    targetBundlePath: '/Applications/Orca.app',
+    sourcePid: 100,
+    sourceStartedAtMs: 10_000,
+    monitorPid: 101,
+    monitorStartedAtMs: 11_000,
+    phase: 'installing',
+    createdAtMs: 1_000,
+    heartbeatAtMs: 1_000,
+    ...overrides
+  }
+}
+
+function createAttemptFile(): { attempt: MacUpdateInstallAttempt; path: string } {
+  const directory = mkdtempSync(join(tmpdir(), 'orca-update-monitor-probe-'))
+  tempDirectories.push(directory)
+  const attempt = createAttempt()
+  const path = getMacUpdateInstallAttemptPath(directory)
+  writeMacUpdateInstallAttempt(path, attempt)
+  return { attempt, path }
+}
+
+afterEach(() => {
+  for (const directory of tempDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+describe('macOS update monitor probe safety', () => {
+  it('never fails the install on an unverified process list, even past every window', () => {
+    const attempt = createAttempt()
+    for (const nowMs of [
+      attempt.createdAtMs + MAC_UPDATE_MONITOR_SHIPIT_APPEARANCE_MS + 1,
+      attempt.createdAtMs + MAC_UPDATE_MONITOR_TIMEOUT_MS - 1
+    ]) {
+      expect(
+        decideMacUpdateMonitorStep({
+          attempt,
+          observation: { bundleVersion: attempt.sourceVersion, shipIt: 'unknown', source: 'dead' },
+          nowMs,
+          shipItSeen: false,
+          shipItMissingSinceMs: null
+        }).action
+      ).toBe('continue')
+    }
+  })
+
+  it('freezes the exit-grace clock while the process list is unverified', () => {
+    const attempt = createAttempt()
+    const decision = decideMacUpdateMonitorStep({
+      attempt,
+      observation: { bundleVersion: attempt.sourceVersion, shipIt: 'unknown', source: 'dead' },
+      nowMs: 60_000,
+      shipItSeen: true,
+      shipItMissingSinceMs: 3_000
+    })
+    expect(decision).toEqual({
+      action: 'continue',
+      shipItSeen: true,
+      shipItMissingSinceMs: 3_000
+    })
+  })
+
+  it('treats an unverifiable source as still quitting instead of failing early', () => {
+    const attempt = createAttempt()
+    const decision = decideMacUpdateMonitorStep({
+      attempt,
+      observation: {
+        bundleVersion: attempt.sourceVersion,
+        shipIt: 'absent',
+        source: 'unverifiable'
+      },
+      nowMs: attempt.createdAtMs + MAC_UPDATE_MONITOR_SHIPIT_APPEARANCE_MS + 1,
+      shipItSeen: false,
+      shipItMissingSinceMs: null
+    })
+    expect(decision).toEqual({ action: 'continue', shipItSeen: false, shipItMissingSinceMs: null })
+  })
+
+  it('still times out a genuinely stuck install even with unverified probes', () => {
+    const attempt = createAttempt()
+    expect(
+      decideMacUpdateMonitorStep({
+        attempt,
+        observation: {
+          bundleVersion: attempt.sourceVersion,
+          shipIt: 'unknown',
+          source: 'unverifiable'
+        },
+        nowMs: attempt.createdAtMs + MAC_UPDATE_MONITOR_TIMEOUT_MS,
+        shipItSeen: false,
+        shipItMissingSinceMs: null
+      })
+    ).toEqual({ action: 'fail', reason: 'install-timed-out' })
+  })
+
+  it('does not resurrect an attempt cleared mid-observation via the heartbeat write', async () => {
+    const { attempt, path } = createAttemptFile()
+    let observations = 0
+
+    await expect(
+      runMacUpdateInstallMonitor({
+        attemptPath: path,
+        attemptId: attempt.attemptId,
+        now: () => 2_000,
+        wait: async () => {},
+        observe: async () => {
+          observations += 1
+          if (observations === 1) {
+            // Startup cleanup clears the attempt while this observation is in flight.
+            clearMacUpdateInstallAttempt(path, attempt.attemptId)
+          }
+          return { bundleVersion: attempt.sourceVersion, shipIt: 'alive', source: 'alive' }
+        },
+        launchRecovery: vi.fn().mockResolvedValue(true)
+      })
+    ).resolves.toBe('cancelled')
+    expect(readMacUpdateInstallAttempt(path)).toBeNull()
+    expect(existsSync(getMacUpdateInstallHeartbeatPath(path))).toBe(false)
+  })
+
+  it('cancels instead of writing a failure when cleanup cleared the attempt mid-step', async () => {
+    const { attempt, path } = createAttemptFile()
+    const launchRecovery = vi.fn().mockResolvedValue(true)
+
+    await expect(
+      runMacUpdateInstallMonitor({
+        attemptPath: path,
+        attemptId: attempt.attemptId,
+        now: () => attempt.createdAtMs + MAC_UPDATE_MONITOR_TIMEOUT_MS,
+        wait: async () => {},
+        observe: async () => {
+          clearMacUpdateInstallAttempt(path, attempt.attemptId)
+          return { bundleVersion: attempt.sourceVersion, shipIt: 'absent', source: 'dead' }
+        },
+        launchRecovery
+      })
+    ).resolves.toBe('cancelled')
+    expect(readMacUpdateInstallAttempt(path)).toBeNull()
+    expect(launchRecovery).not.toHaveBeenCalled()
+  })
+
+  it('cancels without clobbering a replacement attempt from a newer install', async () => {
+    const { attempt, path } = createAttemptFile()
+    const replacement = createAttempt({ attemptId: 'attempt-2', targetVersion: '1.4.193' })
+
+    await expect(
+      runMacUpdateInstallMonitor({
+        attemptPath: path,
+        attemptId: attempt.attemptId,
+        now: () => attempt.createdAtMs + MAC_UPDATE_MONITOR_TIMEOUT_MS,
+        wait: async () => {},
+        observe: async () => {
+          writeMacUpdateInstallAttempt(path, replacement)
+          return { bundleVersion: attempt.sourceVersion, shipIt: 'absent', source: 'dead' }
+        },
+        launchRecovery: vi.fn().mockResolvedValue(true)
+      })
+    ).resolves.toBe('cancelled')
+    expect(readMacUpdateInstallAttempt(path)).toMatchObject({
+      attemptId: 'attempt-2',
+      phase: 'installing',
+      targetVersion: '1.4.193'
+    })
+  })
+
+  it('writes its liveness to the sibling heartbeat file, not the attempt record', async () => {
+    const { attempt, path } = createAttemptFile()
+    let steps = 0
+    let midRunHeartbeatAtMs: number | null = null
+    let midRunRecordHeartbeatAtMs: number | null = null
+
+    await expect(
+      runMacUpdateInstallMonitor({
+        attemptPath: path,
+        attemptId: attempt.attemptId,
+        now: () => 5_000,
+        wait: async () => {},
+        observe: async () => {
+          steps += 1
+          if (steps === 2) {
+            midRunHeartbeatAtMs = readMacUpdateInstallHeartbeat(path)?.heartbeatAtMs ?? null
+            midRunRecordHeartbeatAtMs = readMacUpdateInstallAttempt(path)?.heartbeatAtMs ?? null
+          }
+          return steps === 1
+            ? { bundleVersion: attempt.sourceVersion, shipIt: 'alive', source: 'alive' }
+            : { bundleVersion: attempt.targetVersion, shipIt: 'absent', source: 'dead' }
+        }
+      })
+    ).resolves.toBe('completed')
+    expect(midRunHeartbeatAtMs).toBe(5_000)
+    // The attempt record's own heartbeat field stays at its armed value.
+    expect(midRunRecordHeartbeatAtMs).toBe(attempt.heartbeatAtMs)
+    expect(readMacUpdateInstallAttempt(path)).toBeNull()
+    expect(readMacUpdateInstallHeartbeat(path)).toBeNull()
+  })
+})

@@ -20,6 +20,9 @@ describe('startup ordering', () => {
     // Why: a blocked launch must stop executing — app.exit does not halt synchronous code.
     const gateBlock = source.slice(updateGate, singleInstanceLock)
     expect(gateBlock).toContain('return false')
+    // Why: a supervised headless serve restart must never be swallowed by the desktop gate.
+    const guardStart = source.lastIndexOf('if (!state.isServeMode) {', updateGate)
+    expect(guardStart).toBeGreaterThan(userDataConfig)
   })
 
   it('passes the startup barrier into PTY handlers without blocking window creation', () => {

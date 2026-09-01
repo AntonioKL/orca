@@ -55,8 +55,8 @@ describe('macOS update install monitor', () => {
         attempt,
         observation: {
           bundleVersion: attempt.sourceVersion,
-          shipItAlive: true,
-          sourceAlive: false
+          shipIt: 'alive',
+          source: 'dead'
         },
         nowMs: 2_000,
         shipItSeen: false,
@@ -68,8 +68,8 @@ describe('macOS update install monitor', () => {
         attempt,
         observation: {
           bundleVersion: attempt.sourceVersion,
-          shipItAlive: false,
-          sourceAlive: false
+          shipIt: 'absent',
+          source: 'dead'
         },
         nowMs: 3_000,
         shipItSeen: true,
@@ -90,8 +90,8 @@ describe('macOS update install monitor', () => {
         wait: async () => {},
         observe: async () => ({
           bundleVersion: attempt.targetVersion,
-          shipItAlive: false,
-          sourceAlive: false
+          shipIt: 'absent',
+          source: 'dead'
         }),
         launchRecovery
       })
@@ -103,9 +103,9 @@ describe('macOS update install monitor', () => {
   it('records one failure and launches one bounded recovery after ShipIt exits', async () => {
     const { attempt, path } = createAttempt(createAppData())
     const observations = [
-      { bundleVersion: attempt.sourceVersion, shipItAlive: true, sourceAlive: false },
-      { bundleVersion: attempt.sourceVersion, shipItAlive: false, sourceAlive: false },
-      { bundleVersion: attempt.sourceVersion, shipItAlive: false, sourceAlive: false }
+      { bundleVersion: attempt.sourceVersion, shipIt: 'alive' as const, source: 'dead' as const },
+      { bundleVersion: attempt.sourceVersion, shipIt: 'absent' as const, source: 'dead' as const },
+      { bundleVersion: attempt.sourceVersion, shipIt: 'absent' as const, source: 'dead' as const }
     ]
     const times = [2_000, 3_000, 9_000]
     const launchRecovery = vi.fn().mockResolvedValue(true)
