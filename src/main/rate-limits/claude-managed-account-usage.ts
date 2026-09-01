@@ -1,6 +1,6 @@
 import type { ProviderRateLimits } from '../../shared/rate-limit-types'
 import {
-  readClaudeManagedCredentialsJson,
+  readClaudeManagedCredentialsObserved,
   resolveClaudeManagedCredentialsLocation,
   type InactiveClaudeAccount
 } from './claude-managed-account-credentials'
@@ -34,11 +34,15 @@ export async function fetchInactiveClaudeAccountUsage(
     return abortedClaudeRateLimitResult()
   }
   const location = resolveClaudeManagedCredentialsLocation(account)
-  let credentialsJson = location ? await readClaudeManagedCredentialsJson(location) : null
+  const readResult = location ? await readClaudeManagedCredentialsObserved(location) : null
+  const credentialsJson = readResult?.kind === 'present' ? readResult.credentialsJson : null
   if (options.signal?.aborted) {
     return abortedClaudeRateLimitResult()
   }
   if (!location || !credentialsJson) {
+    if (readResult?.kind === 'unavailable') {
+      return { ...noClaudeManagedCredentialsResult(), error: 'Credentials unavailable' }
+    }
     return noClaudeManagedCredentialsResult()
   }
 

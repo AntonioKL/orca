@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import path from 'node:path'
+import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import {
   deleteActiveClaudeKeychainCredentialsStrict,
@@ -53,6 +54,25 @@ export async function readClaudeManagedCredentialsJson(
       : readClaudeManagedAuthFile(location.managedAuthPath, '.credentials.json')
   } catch {
     return null
+  }
+}
+
+export type ClaudeManagedCredentialsReadResult =
+  | { kind: 'present'; credentialsJson: string }
+  | { kind: 'absent' }
+  | { kind: 'unavailable'; error: unknown }
+
+export async function readClaudeManagedCredentialsObserved(
+  location: ClaudeManagedCredentialsLocation
+): Promise<ClaudeManagedCredentialsReadResult> {
+  try {
+    const credentialsJson =
+      location.kind === 'keychain'
+        ? await readManagedClaudeKeychainCredentials(location.accountId)
+        : readClaudeManagedAuthFile(location.managedAuthPath, '.credentials.json')
+    return credentialsJson ? { kind: 'present', credentialsJson } : { kind: 'absent' }
+  } catch (error) {
+    return isDefinitiveAbsence(error) ? { kind: 'absent' } : { kind: 'unavailable', error }
   }
 }
 
