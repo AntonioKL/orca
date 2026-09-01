@@ -124,6 +124,11 @@ const METHODS = [
     handler: () => ({ permissions: [] })
   }),
   defineMethod({
+    name: 'computer.permissionsReset',
+    params: z.object({}),
+    handler: () => ({ permissions: [] })
+  }),
+  defineMethod({
     name: 'computer.click',
     params: z.object({}),
     handler: () => ({ clicked: true })
@@ -162,13 +167,14 @@ describe('RpcDispatcher feature interactions', () => {
 
     await dispatcher.dispatch(makeRequest('computer.permissions'))
     await dispatcher.dispatch(makeRequest('computer.permissionsStatus'))
+    await dispatcher.dispatch(makeRequest('computer.permissionsReset'))
     await dispatcher.dispatch(makeRequest('browser.profileImportFromBrowser'))
     await dispatcher.dispatch(makeRequest('browser.profileList'))
     await dispatcher.dispatch(makeRequest('browser.profileClearDefaultCookies'))
 
     expect(runtime.recordFeatureInteraction).toHaveBeenCalledWith('computer-use-setup')
     expect(runtime.recordFeatureInteraction).toHaveBeenCalledWith('cookie-import')
-    expect(runtime.recordFeatureInteraction).toHaveBeenCalledTimes(2)
+    expect(runtime.recordFeatureInteraction).toHaveBeenCalledTimes(3)
   })
 
   it('does not record failed runtime methods', async () => {

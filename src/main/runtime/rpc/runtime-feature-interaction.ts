@@ -25,7 +25,8 @@ export function getRuntimeFeatureInteractionId(
   if (method.startsWith('emulator.')) {
     return null
   }
-  if (method === 'computer.permissions') {
+  // Opening setup and resetting grants are both permission-management flows.
+  if (method === 'computer.permissions' || method === 'computer.permissionsReset') {
     return 'computer-use-setup'
   }
   if (

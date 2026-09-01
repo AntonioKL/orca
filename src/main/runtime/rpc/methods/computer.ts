@@ -62,6 +62,15 @@ export const COMPUTER_METHODS: RpcMethod[] = [
     }
   }),
   defineMethod({
+    name: 'computer.permissionsReset',
+    params: z.object({}),
+    handler: async () => {
+      const { resetComputerUsePermissions } =
+        await import('../../../computer/macos-computer-use-permissions')
+      return resetComputerUsePermissions()
+    }
+  }),
+  defineMethod({
     name: 'computer.listWindows',
     params: ListWindows,
     handler: async (params) => {

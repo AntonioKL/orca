@@ -4,6 +4,7 @@ import type {
   RefreshAgentsResult
 } from '../../../../preload/api-types'
 import type {
+  ComputerUsePermissionResetResult,
   ComputerUsePermissionSetupResult,
   ComputerUsePermissionStatusResult
 } from '../../../../shared/computer-use-permissions-types'
@@ -132,13 +133,20 @@ export function createComputerUsePermissionsApi(): NonNullable<
         nextStep: 'Computer-use permissions are managed on the Orca server.'
       })),
     reset: () =>
-      Promise.resolve({
-        platform: getBrowserPlatform(),
-        helperAppPath: null,
-        helperUnavailableReason: 'web_client',
-        bundleId: null,
-        permissions: []
-      })
+      callRuntimeResult<ComputerUsePermissionResetResult>(
+        'computer.permissionsReset',
+        {},
+        15_000
+      ).catch(
+        () =>
+          ({
+            platform: getBrowserPlatform(),
+            helperAppPath: null,
+            helperUnavailableReason: 'web_client',
+            bundleId: null,
+            permissions: []
+          }) satisfies ComputerUsePermissionResetResult
+      )
   }
 }
 

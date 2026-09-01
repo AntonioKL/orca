@@ -10,7 +10,8 @@ const computerMocks = vi.hoisted(() => ({
   callComputerSidecarSnapshot: vi.fn(),
   resetComputerSidecarForTest: vi.fn(),
   openComputerUsePermissions: vi.fn(),
-  getComputerUsePermissionStatus: vi.fn()
+  getComputerUsePermissionStatus: vi.fn(),
+  resetComputerUsePermissions: vi.fn()
 }))
 
 vi.mock('../../../computer/sidecar-client', () => ({
@@ -24,7 +25,8 @@ vi.mock('../../../computer/sidecar-client', () => ({
 
 vi.mock('../../../computer/macos-computer-use-permissions', () => ({
   openComputerUsePermissions: computerMocks.openComputerUsePermissions,
-  getComputerUsePermissionStatus: computerMocks.getComputerUsePermissionStatus
+  getComputerUsePermissionStatus: computerMocks.getComputerUsePermissionStatus,
+  resetComputerUsePermissions: computerMocks.resetComputerUsePermissions
 }))
 
 import { COMPUTER_METHODS, resetComputerSessionsForTest } from './computer'
@@ -39,6 +41,7 @@ describe('computer RPC methods', () => {
     computerMocks.resetComputerSidecarForTest.mockReset()
     computerMocks.openComputerUsePermissions.mockReset()
     computerMocks.getComputerUsePermissionStatus.mockReset()
+    computerMocks.resetComputerUsePermissions.mockReset()
     resetComputerSessionsForTest()
     computerMocks.resetComputerSidecarForTest.mockClear()
   })
@@ -57,6 +60,7 @@ describe('computer RPC methods', () => {
       'computer.pasteText',
       'computer.performSecondaryAction',
       'computer.permissions',
+      'computer.permissionsReset',
       'computer.permissionsStatus',
       'computer.pressKey',
       'computer.scroll',
@@ -119,6 +123,23 @@ describe('computer RPC methods', () => {
 
     await expect(call('computer.permissionsStatus', {})).resolves.toBe(result)
     expect(computerMocks.getComputerUsePermissionStatus).toHaveBeenCalledWith()
+  })
+
+  it('resets all computer-use permissions', async () => {
+    const result = {
+      platform: 'darwin',
+      helperAppPath: '/Applications/Orca Computer Use.app',
+      helperUnavailableReason: null,
+      bundleId: 'com.stablyai.orca.computer-use',
+      permissions: [
+        { id: 'accessibility', status: 'not-granted' },
+        { id: 'screenshots', status: 'not-granted' }
+      ]
+    }
+    computerMocks.resetComputerUsePermissions.mockReturnValue(result)
+
+    await expect(call('computer.permissionsReset', {})).resolves.toBe(result)
+    expect(computerMocks.resetComputerUsePermissions).toHaveBeenCalledWith()
   })
 
   it('lists windows through the sidecar', async () => {

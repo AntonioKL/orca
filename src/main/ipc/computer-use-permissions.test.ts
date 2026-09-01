@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { handleMock, openComputerUsePermissionsMock, getComputerUsePermissionStatusMock } =
-  vi.hoisted(() => ({
-    handleMock: vi.fn(),
-    openComputerUsePermissionsMock: vi.fn(),
-    getComputerUsePermissionStatusMock: vi.fn()
-  }))
+const {
+  handleMock,
+  openComputerUsePermissionsMock,
+  getComputerUsePermissionStatusMock,
+  resetComputerUsePermissionsMock
+} = vi.hoisted(() => ({
+  handleMock: vi.fn(),
+  openComputerUsePermissionsMock: vi.fn(),
+  getComputerUsePermissionStatusMock: vi.fn(),
+  resetComputerUsePermissionsMock: vi.fn()
+}))
 
 vi.mock('electron', () => ({
   ipcMain: {
@@ -15,7 +20,8 @@ vi.mock('electron', () => ({
 
 vi.mock('../computer/macos-computer-use-permissions', () => ({
   getComputerUsePermissionStatus: getComputerUsePermissionStatusMock,
-  openComputerUsePermissions: openComputerUsePermissionsMock
+  openComputerUsePermissions: openComputerUsePermissionsMock,
+  resetComputerUsePermissions: resetComputerUsePermissionsMock
 }))
 
 import { registerComputerUsePermissionHandlers } from './computer-use-permissions'
@@ -25,6 +31,7 @@ describe('registerComputerUsePermissionHandlers', () => {
     handleMock.mockReset()
     getComputerUsePermissionStatusMock.mockReset()
     openComputerUsePermissionsMock.mockReset()
+    resetComputerUsePermissionsMock.mockReset()
   })
 
   it('launches the computer-use helper setup', async () => {
@@ -67,5 +74,29 @@ describe('registerComputerUsePermissionHandlers', () => {
 
     await expect(registration![1]()).resolves.toBe(result)
     expect(getComputerUsePermissionStatusMock).toHaveBeenCalledWith()
+  })
+
+  it('resets all computer-use permissions', async () => {
+    const result = {
+      platform: 'darwin',
+      helperAppPath: '/Applications/Orca Computer Use.app',
+      helperUnavailableReason: null,
+      bundleId: 'com.stablyai.orca.computer-use',
+      permissions: [
+        { id: 'accessibility', status: 'not-granted' },
+        { id: 'screenshots', status: 'not-granted' }
+      ]
+    }
+    resetComputerUsePermissionsMock.mockReturnValue(result)
+
+    registerComputerUsePermissionHandlers()
+
+    const registration = handleMock.mock.calls.find(
+      ([channel]) => channel === 'computerUsePermissions:reset'
+    )
+    expect(registration).toBeTruthy()
+
+    await expect(registration![1]()).resolves.toBe(result)
+    expect(resetComputerUsePermissionsMock).toHaveBeenCalledWith()
   })
 })
