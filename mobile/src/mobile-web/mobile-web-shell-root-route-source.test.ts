@@ -50,7 +50,8 @@ describe('mobile web shell root route', () => {
     expect(androidShellViewSource).toContain('url.path == "/"')
     expect(androidShellViewSource).toContain('url.encodedPath == "/"')
     expect(androidShellViewSource).toContain('url.query == null')
-    expect(androidShellViewSource).toContain('url.fragment == activeSessionId')
+    expect(androidShellViewSource).toContain('val sessionId = activeSessionId ?: return false')
+    expect(androidShellViewSource).toContain('url.fragment == sessionId &&')
     expect(androidPackageStoreSource).toContain(
       '"url" to "${mobileWebOriginForSession(sessionId)}/#$sessionId"'
     )
