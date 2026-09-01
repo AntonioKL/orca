@@ -7,7 +7,8 @@ import {
   createPane,
   createManager,
   LEAF_2,
-  type ConnectCallbacks
+  type ConnectCallbacks,
+  type MockTransport
 } from './pty-connection-test-pane-fixtures'
 import { buildPaneConnectionDeps, buildDirectSshSplitRetryCommit } from './pty-connection-test-deps'
 import { createInitialStoreState } from './pty-connection-test-store-fixtures'
@@ -16,7 +17,6 @@ import {
   pendingSpawnByPaneKey,
   pendingSpawnGenerationByPaneKey
 } from './pty-connection/pty-connect-limits'
-import type { MockTransport } from './pty-connection-test-pane-fixtures'
 import {
   installTerminalTestGlobals,
   restoreTerminalTestGlobals
