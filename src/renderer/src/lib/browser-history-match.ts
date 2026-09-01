@@ -66,7 +66,10 @@ function matchTier(
   prepared: PreparedBrowserHistoryEntry,
   lowerQuery: string
 ): BrowserHistoryMatchTier | null {
-  if (prepared.lowerHost.startsWith(lowerQuery)) {
+  // A workspace-doc entry's url is a filesystem path, so it has no host: a path
+  // prefix is as deliberate as a host prefix and earns the same top tier.
+  const prefixTarget = prepared.lowerHost === '' ? prepared.lowerUrl : prepared.lowerHost
+  if (prefixTarget.startsWith(lowerQuery)) {
     return 'host-prefix'
   }
   if (prepared.lowerHost.includes(lowerQuery)) {
@@ -106,7 +109,10 @@ export function matchBrowserHistory({
     matches.push({
       entry: candidate.entry,
       tier,
-      score: candidate.frecencyBase + Math.max(0, RECENCY_BONUS_HOURS - ageHours)
+      // Clamped both ends: a future lastVisitedAt must not buy more than a fresh visit.
+      score:
+        candidate.frecencyBase +
+        Math.min(RECENCY_BONUS_HOURS, Math.max(0, RECENCY_BONUS_HOURS - ageHours))
     })
   }
   if (matches.length === 0) {

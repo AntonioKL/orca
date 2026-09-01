@@ -138,6 +138,29 @@ describe('browser history match', () => {
     expect(match([broken], 'brok')).toEqual([{ tier: 'title', url: 'not a url at all' }])
   })
 
+  it('promotes a path prefix to the top tier when the entry has no host', () => {
+    const doc = entry({ url: '/repo/docs/report.html', title: 'Quarterly Report' })
+
+    expect(match([doc], '/repo/docs')).toEqual([
+      { tier: 'host-prefix', url: '/repo/docs/report.html' }
+    ])
+    expect(match([doc], 'docs/report')).toEqual([
+      { tier: 'url-tail', url: '/repo/docs/report.html' }
+    ])
+  })
+
+  it('clamps the recency bonus so a future lastVisitedAt cannot outrank a fresh visit', () => {
+    const rows = match(
+      [
+        entry({ url: 'https://acme.dev/future', visitCount: 1, lastVisitedAt: NOW + 500 * HOUR }),
+        entry({ url: 'https://acme.dev/now', visitCount: 2, lastVisitedAt: NOW })
+      ],
+      'acme'
+    )
+
+    expect(rows.map((row) => row.url)).toEqual(['https://acme.dev/now', 'https://acme.dev/future'])
+  })
+
   it('agrees with a naive reference scan on which entries match', () => {
     const corpus = Array.from({ length: 300 }, (_, index) =>
       entry({

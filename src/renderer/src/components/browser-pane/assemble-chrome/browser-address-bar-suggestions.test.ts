@@ -338,4 +338,22 @@ describe('workspace document suggestions', () => {
     })
     expect(byPath.some((row) => row.docLocation)).toBe(true)
   })
+
+  it('ranks a path-prefix document above a heavily visited url-tail history match', () => {
+    const rows = buildBrowserAddressBarSuggestions({
+      value: '/repo/docs',
+      browserUrlHistory: [
+        {
+          url: 'https://example.com/repo/docs/index.html',
+          normalizedUrl: 'https://example.com/repo/docs/index.html',
+          title: 'Docs Index',
+          lastVisitedAt: Date.now(),
+          visitCount: 500
+        }
+      ],
+      workspaceDocHistory: [DOC_ENTRY]
+    })
+
+    expect(rows.find((row) => !row.isSearch)?.docLocation).toEqual(DOC_ENTRY.docLocation)
+  })
 })
