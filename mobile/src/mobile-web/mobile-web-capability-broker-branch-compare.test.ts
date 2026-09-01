@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { MobileWebBridgePageMessage } from '../../../src/shared/mobile-web/bridge-contract'
+import type {
+  MobileWebBridgePageMessage,
+  MobileWebBridgeShellMessage
+} from '../../../src/shared/mobile-web/bridge-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import {
   createMobileWebBrokerFixture,
