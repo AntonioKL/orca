@@ -1,4 +1,5 @@
 import type { z } from 'zod'
+import type { MobileWebBridgeOperationName } from '../../shared/mobile-web/bridge-operation-registry'
 import {
   MobileWebCreationBranchSearchResultSchema,
   MobileWebCreationGitHubLookupPayloadSchema,
@@ -155,7 +156,7 @@ export class MobileWebWorkspaceCreationSourceRequestClient {
   }
 
   private request<TPayload, TResult>(
-    operation: string,
+    operation: MobileWebBridgeOperationName<'workspace'>,
     payload: TPayload,
     payloadSchema: z.ZodType<TPayload>,
     resultSchema: z.ZodType<TResult>

@@ -1,3 +1,4 @@
+import type { MobileWebBridgeOperationName } from '../../shared/mobile-web/bridge-operation-registry'
 import {
   MobileWebTaskLinearCommentPayloadSchema,
   MobileWebTaskLinearCommentResultSchema,
@@ -122,7 +123,11 @@ export class MobileWebTaskLinearRequestClient extends MobileWebTaskItemRequestCl
     )
   }
 
-  private mutateLinear(operation: string, payload: unknown, schema: ZodType) {
+  private mutateLinear(
+    operation: MobileWebBridgeOperationName<'task'>,
+    payload: unknown,
+    schema: ZodType
+  ) {
     return mutate(schema, this.requests, operation, payload)
   }
 }
@@ -130,7 +135,7 @@ export class MobileWebTaskLinearRequestClient extends MobileWebTaskItemRequestCl
 function mutate(
   schema: ZodType,
   requests: MobileWebOneShotRequestClient,
-  operation: string,
+  operation: MobileWebBridgeOperationName<'task'>,
   payload: unknown
 ) {
   return requests.request(

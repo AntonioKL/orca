@@ -23,6 +23,7 @@ const CREATE_LIMITS = {
 
 export const MOBILE_WEB_PRODUCTION_WORKSPACE_CREATION_GRANTS = [
   { capability: 'workspace', operation: 'creationRepositories', limits: READ_LIMITS },
+  { capability: 'workspace', operation: 'creationRetiredNames', limits: READ_LIMITS },
   { capability: 'workspace', operation: 'creationSettings', limits: READ_LIMITS },
   { capability: 'workspace', operation: 'creationTrustedHooks', limits: READ_LIMITS },
   { capability: 'workspace', operation: 'creationGitLabAvailability', limits: READ_LIMITS },

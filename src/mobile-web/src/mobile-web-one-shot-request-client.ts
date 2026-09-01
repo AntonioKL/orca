@@ -2,6 +2,7 @@ import type { z } from 'zod'
 import {
   MOBILE_WEB_BRIDGE_MAX_PENDING_REQUESTS,
   type MobileWebBridgeCapability,
+  type MobileWebBridgeOperationName,
   type MobileWebBridgePageMessage,
   type MobileWebBridgeShellMessage
 } from '../../shared/mobile-web/bridge-contract'
@@ -23,7 +24,7 @@ export class MobileWebOneShotRequestClient {
     private readonly options: {
       getGrant: (
         capability: MobileWebBridgeCapability,
-        operation: string
+        operation: MobileWebBridgeOperationName
       ) => OperationGrant | undefined
       postMessage: (message: MobileWebBridgePageMessage) => boolean
       envelope: () => Pick<MobileWebBridgePageMessage, 'version' | 'shellSessionId' | 'buildId'>
@@ -33,9 +34,9 @@ export class MobileWebOneShotRequestClient {
     }
   ) {}
 
-  request<TPayload, TResult>(
-    capability: MobileWebBridgeCapability,
-    operation: string,
+  request<TCapability extends MobileWebBridgeCapability, TPayload, TResult>(
+    capability: TCapability,
+    operation: MobileWebBridgeOperationName<TCapability>,
     payload: TPayload,
     payloadSchema: z.ZodType<TPayload>,
     resultSchema: z.ZodType<TResult>,

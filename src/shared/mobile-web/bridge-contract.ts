@@ -23,7 +23,10 @@ export {
   isMobileWebBridgeOperation,
   MOBILE_WEB_BRIDGE_OPERATIONS
 } from './bridge-operation-registry'
-export type { MobileWebBridgeCapability } from './bridge-operation-registry'
+export type {
+  MobileWebBridgeCapability,
+  MobileWebBridgeOperationName
+} from './bridge-operation-registry'
 export {
   MOBILE_WEB_BRIDGE_ENVELOPE_RESERVE_BYTES,
   MOBILE_WEB_BRIDGE_MAX_GRANTS,

@@ -9,6 +9,7 @@ export const MOBILE_WEB_BRIDGE_OPERATIONS = {
     'update',
     'remove',
     'creationRepositories',
+    'creationRetiredNames',
     'creationSettings',
     'creationTrustedHooks',
     'creationGitLabAvailability',
@@ -251,6 +252,12 @@ export const MobileWebBridgeCapabilitySchema = z.enum([
 ])
 
 export type MobileWebBridgeCapability = z.infer<typeof MobileWebBridgeCapabilitySchema>
+
+/** Operation names a page may request for one capability. Keeps request clients from naming an
+ * operation the shell never granted. */
+export type MobileWebBridgeOperationName<
+  TCapability extends MobileWebBridgeCapability = MobileWebBridgeCapability
+> = (typeof MOBILE_WEB_BRIDGE_OPERATIONS)[TCapability][number]
 
 export function isMobileWebBridgeOperation(
   capability: MobileWebBridgeCapability,
