@@ -414,6 +414,38 @@ describe('Windows NSIS uninstaller signing', () => {
     expect(verify.run).toContain("Get-Process -Name 'orca-terminal-daemon'")
   })
 
+  // resources\elevate.exe is downgraded to advisory because app-builder-lib's
+  // CopyElevateHelper clobbers it on every nsis pack — a pre-existing defect
+  // that predates the uninstaller relay and is being tracked separately. The
+  // escape hatch it needed is the kind that quietly grows until the gate
+  // asserts nothing, so pin it to exactly that one file.
+  it('confines the advisory escape hatch to elevate.exe', () => {
+    const steps = readWorkflow('.github/workflows/windows-signing-rehearsal.yml').jobs.rehearse
+      .steps
+    const verify = stepNamed(steps, 'Verify signatures end to end')
+    const advisoryCalls = verify.run
+      .split('\n')
+      .filter((line) => line.includes('-Advisory') && line.includes('Test-Signature'))
+
+    expect(advisoryCalls).toHaveLength(1)
+    expect(advisoryCalls[0]).toContain('installed: $relative')
+    expect(verify.run).toContain("if ($relative -eq 'resources\\elevate.exe')")
+
+    // Both uninstaller verdicts stay fatal — the whole point of the gate.
+    for (const call of ['relayed: orca-uninstaller.exe', 'shipped: Uninstall Orca.exe']) {
+      const line = verify.run
+        .split('\n')
+        .find((it) => it.includes(`Test-Signature`) && it.includes(call))
+      expect(line, call).toBeDefined()
+      expect(line, call).not.toContain('-Advisory')
+    }
+
+    // An advisory must still reach the evidence artifact, or downgrading it
+    // becomes indistinguishable from deleting the check.
+    expect(verify.run).toContain('ADVISORY (known pre-existing')
+    expect(verify.run).toContain('$script:advisories.Add($problem)')
+  })
+
   it('wires the electron-builder sign hook that the relay depends on', () => {
     const require = createRequire(import.meta.url)
     const configPath = resolve(projectDir, 'config/electron-builder.config.cjs')
