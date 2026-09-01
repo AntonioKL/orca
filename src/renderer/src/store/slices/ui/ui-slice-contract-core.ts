@@ -136,6 +136,9 @@ export type UISliceCore = {
   /** Per-pane cutoffs used to hide activity entries cleared by the user. */
   activityClearedAtByPaneKey: Record<string, number>
   applyActivityClearedAt: (patch: Record<string, number | null>) => void
+  /** Session-local protection for turns explicitly marked unread. */
+  manuallyUnreadTurnsByPaneKey: Record<string, number>
+  clearManuallyUnreadTurns: (paneKeys: string[]) => void
   activeView: TopLevelView
   previousViewBeforeTasks: Exclude<UiViewHistory, 'tasks'>
   previousViewBeforeSettings: Exclude<UiViewHistory, 'settings'>

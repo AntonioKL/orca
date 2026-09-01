@@ -178,7 +178,7 @@ describe('clearCompletedActivity', () => {
     lastToastOptions().onAutoClose()
     expect(drop).toHaveBeenCalledTimes(1)
     expect(drop).toHaveBeenCalledWith(
-      expect.objectContaining({ paneKey: 't-done:1', state: 'done', receivedAt: 5_000 })
+      expect.objectContaining({ paneKey: 't-done:1', receivedAt: 5_000, stateStartedAt: 5_000 })
     )
     // A later dismiss must not double-drop.
     lastToastOptions().onDismiss()
@@ -221,6 +221,36 @@ describe('clearCompletedActivity', () => {
     expect(mockStore.activityClearedAtByPaneKey['t-done:1']).toBe(1_111)
     expect(mockStore.retentionSuppressedPaneKeys['t-done:1']).toBeUndefined()
     expect(mockStore.retainedAgentsByPaneKey['t-done:1']).toBeUndefined()
+  })
+
+  it('undo removes the suppressor even after an identity-only live entry replacement', () => {
+    // A runtime orchestration merge replaces the live entry object without a state
+    // change; the suppressor undo must key on the turn, not on object identity.
+    const retained = mockStore.retainedAgentsByPaneKey['t-done:1']
+    mockStore.agentStatusByPaneKey['t-done:1'] = retained.entry
+
+    clearCompletedActivity([doneThread])
+    expect(mockStore.retentionSuppressedPaneKeys['t-done:1']).toBe(true)
+    mockStore.agentStatusByPaneKey['t-done:1'] = { ...retained.entry }
+
+    lastToastOptions().action.onClick()
+
+    expect(mockStore.retentionSuppressedPaneKeys['t-done:1']).toBeUndefined()
+  })
+
+  it('undo keeps the suppressor when the live row has moved to a new turn', () => {
+    const retained = mockStore.retainedAgentsByPaneKey['t-done:1']
+    mockStore.agentStatusByPaneKey['t-done:1'] = retained.entry
+
+    clearCompletedActivity([doneThread])
+    mockStore.agentStatusByPaneKey['t-done:1'] = {
+      ...retained.entry,
+      stateStartedAt: retained.entry.stateStartedAt + 1
+    }
+
+    lastToastOptions().action.onClick()
+
+    expect(mockStore.retentionSuppressedPaneKeys['t-done:1']).toBe(true)
   })
 
   it('does not restore a cleared snapshot over a newer retained run', () => {

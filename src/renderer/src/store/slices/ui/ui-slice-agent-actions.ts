@@ -41,6 +41,8 @@ export function createUiAgentActions(
   | 'unacknowledgeAgents'
   | 'activityClearedAtByPaneKey'
   | 'applyActivityClearedAt'
+  | 'manuallyUnreadTurnsByPaneKey'
+  | 'clearManuallyUnreadTurns'
 > {
   return {
     sidebarOpen: true,
@@ -274,12 +276,22 @@ export function createUiAgentActions(
             next[key] = stamp
           }
         }
-        if (!next && !nextUnreadCompletions) {
+        let nextManual: Record<string, number> | null = null
+        for (const key of paneKeys) {
+          if (s.manuallyUnreadTurnsByPaneKey[key] !== undefined) {
+            if (nextManual === null) {
+              nextManual = { ...s.manuallyUnreadTurnsByPaneKey }
+            }
+            delete nextManual[key]
+          }
+        }
+        if (!next && !nextUnreadCompletions && !nextManual) {
           return s
         }
         return {
           ...(next ? { acknowledgedAgentsByPaneKey: next } : {}),
-          ...(nextUnreadCompletions ? { unreadAgentCompletionPanes: nextUnreadCompletions } : {})
+          ...(nextUnreadCompletions ? { unreadAgentCompletionPanes: nextUnreadCompletions } : {}),
+          ...(nextManual ? { manuallyUnreadTurnsByPaneKey: nextManual } : {})
         }
       })
       const notificationIds = [...notificationIdsToDismiss]
@@ -293,6 +305,7 @@ export function createUiAgentActions(
           return s
         }
         let next: Record<string, number> | null = null
+        let nextManual: Record<string, number> | null = null
         for (const key of paneKeys) {
           if (s.acknowledgedAgentsByPaneKey[key] !== undefined) {
             if (next === null) {
@@ -300,8 +313,38 @@ export function createUiAgentActions(
             }
             delete next[key]
           }
+          const turnTimestamp =
+            s.agentStatusByPaneKey?.[key]?.stateStartedAt ??
+            s.retainedAgentsByPaneKey?.[key]?.entry.stateStartedAt
+          if (turnTimestamp !== undefined && s.manuallyUnreadTurnsByPaneKey[key] !== turnTimestamp) {
+            if (nextManual === null) {
+              nextManual = { ...s.manuallyUnreadTurnsByPaneKey }
+            }
+            nextManual[key] = turnTimestamp
+          }
         }
-        return next ? { acknowledgedAgentsByPaneKey: next } : s
+        if (!next && !nextManual) {
+          return s
+        }
+        return {
+          ...(next ? { acknowledgedAgentsByPaneKey: next } : {}),
+          ...(nextManual ? { manuallyUnreadTurnsByPaneKey: nextManual } : {})
+        }
+      }),
+
+    manuallyUnreadTurnsByPaneKey: {},
+    clearManuallyUnreadTurns: (paneKeys) =>
+      set((s) => {
+        let next: Record<string, number> | null = null
+        for (const key of paneKeys) {
+          if (s.manuallyUnreadTurnsByPaneKey[key] !== undefined) {
+            if (next === null) {
+              next = { ...s.manuallyUnreadTurnsByPaneKey }
+            }
+            delete next[key]
+          }
+        }
+        return next ? { manuallyUnreadTurnsByPaneKey: next } : s
       }),
 
     activityClearedAtByPaneKey: {},

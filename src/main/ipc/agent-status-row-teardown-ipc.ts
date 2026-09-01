@@ -1,11 +1,6 @@
 import { ipcMain } from 'electron'
 import { agentHookServer, isValidPaneKey } from '../agent-hooks/server'
-import {
-  AGENT_STATUS_MAX_FIELD_LENGTH,
-  AGENT_STATUS_STATES,
-  AGENT_TYPE_MAX_LENGTH,
-  type AgentStatusCacheIdentity
-} from '../../shared/agent-status-types'
+import type { AgentStatusCacheIdentity } from '../../shared/agent-status-types'
 import {
   clearMigrationUnsupportedPtysByTabPrefix,
   clearMigrationUnsupportedPtysForPaneKey
@@ -96,21 +91,6 @@ function isValidAgentStatusCacheIdentity(value: unknown): value is AgentStatusCa
   return (
     typeof request.paneKey === 'string' &&
     isValidPaneKey(request.paneKey) &&
-    typeof request.state === 'string' &&
-    (AGENT_STATUS_STATES as readonly string[]).includes(request.state) &&
-    typeof request.prompt === 'string' &&
-    request.prompt.length <= AGENT_STATUS_MAX_FIELD_LENGTH &&
-    (request.agentType === undefined ||
-      (typeof request.agentType === 'string' &&
-        request.agentType.length > 0 &&
-        request.agentType.length <= AGENT_TYPE_MAX_LENGTH)) &&
-    (request.tabId === undefined ||
-      (typeof request.tabId === 'string' && request.tabId.length > 0)) &&
-    (request.worktreeId === undefined ||
-      (typeof request.worktreeId === 'string' && request.worktreeId.length > 0)) &&
-    (request.connectionId === undefined ||
-      request.connectionId === null ||
-      (typeof request.connectionId === 'string' && request.connectionId.length > 0)) &&
     typeof request.receivedAt === 'number' &&
     Number.isFinite(request.receivedAt) &&
     typeof request.stateStartedAt === 'number' &&

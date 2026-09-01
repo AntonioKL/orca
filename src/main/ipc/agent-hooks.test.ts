@@ -291,9 +291,6 @@ describe('agentStatus:dropPersisted IPC', () => {
     expect(handler).toBeDefined()
     const identity = {
       paneKey: PANE_KEY,
-      state: 'done',
-      prompt: 'completed run',
-      agentType: 'claude',
       receivedAt: 2_000,
       stateStartedAt: 1_000
     }
@@ -312,28 +309,10 @@ describe('agentStatus:dropPersisted IPC', () => {
       undefined,
       {},
       { paneKey: PANE_KEY },
-      {
-        paneKey: PANE_KEY,
-        state: 'working',
-        prompt: '',
-        receivedAt: Number.NaN,
-        stateStartedAt: 1
-      },
-      {
-        paneKey: PANE_KEY,
-        state: 'done',
-        prompt: 'x'.repeat(201),
-        receivedAt: 2,
-        stateStartedAt: 1
-      },
-      {
-        paneKey: PANE_KEY,
-        state: 'done',
-        prompt: '',
-        agentType: 'x'.repeat(41),
-        receivedAt: 2,
-        stateStartedAt: 1
-      }
+      { paneKey: PANE_KEY, receivedAt: Number.NaN, stateStartedAt: 1 },
+      { paneKey: PANE_KEY, receivedAt: 2, stateStartedAt: Number.POSITIVE_INFINITY },
+      { paneKey: 'not-a-pane-key', receivedAt: 2, stateStartedAt: 1 },
+      { paneKey: PANE_KEY, receivedAt: '2', stateStartedAt: 1 }
     ]) {
       expect(() => handler({}, value)).not.toThrow()
     }

@@ -48,14 +48,10 @@ export function planClearCompletedActivity(
     if (retained) {
       retainedSnapshots.push(retained)
       const entry = retained.entry
+      // updatedAt mirrors the wire receivedAt; renderer-enriched fields (connectionId,
+      // worktreeId) diverge from main's cache and are deliberately excluded.
       cacheIdentities.push({
         paneKey: thread.paneKey,
-        state: entry.state,
-        prompt: entry.prompt,
-        ...(entry.agentType !== undefined ? { agentType: entry.agentType } : {}),
-        ...(entry.tabId !== undefined ? { tabId: entry.tabId } : {}),
-        ...(entry.worktreeId !== undefined ? { worktreeId: entry.worktreeId } : {}),
-        ...(entry.connectionId !== undefined ? { connectionId: entry.connectionId } : {}),
         receivedAt: entry.updatedAt,
         stateStartedAt: entry.stateStartedAt
       })
@@ -79,12 +75,15 @@ export function clearCompletedActivity(threads: readonly AgentPaneThread[]): boo
     return false
   }
   state.applyActivityClearedAt(plan.cutoffPatch)
-  const introducedSuppressorLiveEntries = new Map(
+  // Why turn timestamps, not entry identity: a runtime orchestration merge replaces the live
+  // entry object without a state change (setRuntimeAgentOrchestrationByPaneKey), and an
+  // identity check would then strand the clear-planted suppressor past Undo, losing the run.
+  const introducedSuppressorLiveTurns = new Map(
     plan.retainedSnapshots.flatMap((retained) => {
       const paneKey = retained.entry.paneKey
       const liveEntry = state.agentStatusByPaneKey[paneKey]
       return liveEntry && !state.retentionSuppressedPaneKeys[paneKey]
-        ? ([[paneKey, liveEntry]] as const)
+        ? ([[paneKey, liveEntry.stateStartedAt]] as const)
         : []
     })
   )
@@ -132,7 +131,8 @@ export function clearCompletedActivity(threads: readonly AgentPaneThread[]): boo
             }
             if (
               cutoffStillOwned &&
-              introducedSuppressorLiveEntries.get(paneKey) === currentLive &&
+              introducedSuppressorLiveTurns.has(paneKey) &&
+              currentLive?.stateStartedAt === introducedSuppressorLiveTurns.get(paneKey) &&
               current.retentionSuppressedPaneKeys[paneKey]
             ) {
               suppressorPaneKeysToClear.push(paneKey)

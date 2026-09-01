@@ -1,5 +1,5 @@
 import { activateTabAndFocusPane } from '@/lib/activate-tab-and-focus-pane'
-import { activateAndRevealWorktree } from '@/lib/worktree-activation'
+import { jumpToWorktreeFromSidebar } from '@/lib/worktree-jump-navigation'
 import { useAppStore } from '@/store'
 import { getWorktreeExecutionHostId } from '../../../../shared/execution-host'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
@@ -83,7 +83,7 @@ export function createActivityThreadActions({
       return
     }
     markThreadRead(thread)
-    activateAndRevealWorktree(thread.worktree.id, {
+    jumpToWorktreeFromSidebar(thread.worktree.id, {
       executionHostId: getActivityThreadExecutionHostId(thread)
     })
   }

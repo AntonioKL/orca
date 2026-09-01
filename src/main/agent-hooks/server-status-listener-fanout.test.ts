@@ -231,9 +231,6 @@ describe('AgentHookServer listener replay', () => {
     )
     server.dropPersistedStatusEntry({
       paneKey: old!.paneKey,
-      state: old!.state,
-      prompt: old!.prompt,
-      agentType: old!.agentType,
       receivedAt: old!.receivedAt,
       stateStartedAt: old!.stateStartedAt
     })
@@ -257,9 +254,6 @@ describe('AgentHookServer listener replay', () => {
     expect(
       resumed.dropPersistedStatusEntry({
         paneKey: resumedIdentity.paneKey,
-        state: resumedIdentity.state,
-        prompt: resumedIdentity.prompt,
-        agentType: resumedIdentity.agentType,
         receivedAt: resumedIdentity.receivedAt,
         stateStartedAt: resumedIdentity.stateStartedAt
       })

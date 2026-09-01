@@ -22,8 +22,12 @@ const SidebarHeader = React.memo(function SidebarHeader({
   // Subscribe this memoized header to locale changes before using translate().
   useTranslation()
   const sidebarBody = useAppStore((s) => s.sidebarBody ?? 'workspaces')
-  const settings = useAppStore((s) => s.settings)
-  const showAgentsSidebar = showAgentsSidebarProp ?? shouldShowAgentDashboardSidebarButton(settings)
+  // Why the derived boolean, not s.settings: the settings object gets a new identity on
+  // every write, which would re-render this memoized header subtree each time.
+  const showAgentsSidebarFromStore = useAppStore((s) =>
+    shouldShowAgentDashboardSidebarButton(s.settings)
+  )
+  const showAgentsSidebar = showAgentsSidebarProp ?? showAgentsSidebarFromStore
   const groupBy = useAppStore((s) => s.groupBy)
   const setSidebarBody = useAppStore((s) => s.setSidebarBody)
   const agentsViewActive = showAgentsSidebar && sidebarBody === 'agents'

@@ -132,6 +132,11 @@ export const getAgentsSidebarEntry = createLocalizedCatalog((): SettingsSearchEn
   keywords: [
     ...translateSearchKeyword('auto.components.settings.general.search.baa263d6d8', 'agents'),
     ...translateSearchKeyword('auto.components.settings.agents.search.96ba2373b6', 'agent'),
+    // Why: the sidebar row is labeled "Agent Dashboard"; searching that name must find this.
+    ...translateSearchKeyword(
+      'auto.components.settings.experimental.search.agentDashboard.dashboard',
+      'dashboard'
+    ),
     ...translateSearchKeyword('auto.components.settings.appearance.search.5bff6a2ef0', 'sidebar'),
     ...translateSearchKeyword('auto.components.settings.general.search.2a254b725e', 'tab'),
     ...translateSearchKeyword('auto.components.settings.appearance.search.648eeada79', 'hide'),

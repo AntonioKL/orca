@@ -270,7 +270,12 @@ export function useAppStartupHydration(onOnboardingLoaded: (state: OnboardingSta
           // Why (issue #1158): unlock the session writer only after hydration and all dependent steps succeeded, so a mid-startup throw can't serialize partially-mutated state to disk.
           actions.setHydrationSucceeded(true)
           actions.setTerminalStartupRestorationReady(true)
-          if (import.meta.env.DEV) {
+          // Why the explicit opt-in: unconditional seeding hijacks every empty dev
+          // profile's active workspace, making onboarding/empty-state flows untestable.
+          if (
+            import.meta.env.DEV &&
+            String(import.meta.env.VITE_ACTIVITY_DEV_FIXTURE).toLowerCase() === 'true'
+          ) {
             seedDevActivityFixture()
           }
           logRendererStartupDiagnostic('startup-hydration-done', {

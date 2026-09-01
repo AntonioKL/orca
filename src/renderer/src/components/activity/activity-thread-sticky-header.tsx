@@ -12,7 +12,7 @@ export function ActivityThreadStickyHeader({
   onToggle: () => void
 }): React.JSX.Element {
   return (
-    <div className="absolute inset-x-1.5 top-0 z-10 rounded-md border border-border/60 bg-sidebar/95 shadow-xs backdrop-blur supports-[backdrop-filter]:bg-sidebar/80">
+    <div className="absolute inset-x-1.5 top-1.5 z-10 rounded-md border border-border/60 bg-sidebar/95 shadow-xs backdrop-blur supports-[backdrop-filter]:bg-sidebar/80">
       <ActivityStatusGroupHeader group={group} collapsed={collapsed} onToggle={onToggle} />
     </div>
   )

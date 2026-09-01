@@ -212,23 +212,12 @@ export function useAutoAckViewedAgent(floatingPanelVisible: boolean): void {
     let lastAcknowledged: unknown = undefined
     let lastLayouts: unknown = undefined
     let lastUnreadAgentCompletionPanes: unknown = undefined
-    const manuallyUnreadTurns = new Map<string, number>()
 
     // `force` re-scans after a signal the store never sees: panel open/closed is React-local state.
     const maybeAck = (options?: { force?: boolean }): void => {
       const s = useAppStore.getState()
       const floatingWorkspaceActiveTabId =
         s.activeTabIdByWorktree[FLOATING_TERMINAL_WORKTREE_ID] ?? null
-      if (lastAcknowledged && s.acknowledgedAgentsByPaneKey !== lastAcknowledged) {
-        for (const paneKey of Object.keys(lastAcknowledged as Record<string, number>)) {
-          if (s.acknowledgedAgentsByPaneKey[paneKey] === undefined) {
-            const turnTimestamp = getAgentTurnTimestamp(s, paneKey)
-            if (turnTimestamp !== null) {
-              manuallyUnreadTurns.set(paneKey, turnTimestamp)
-            }
-          }
-        }
-      }
       if (
         !options?.force &&
         s.activeView === lastActiveView &&
@@ -255,8 +244,10 @@ export function useAutoAckViewedAgent(floatingPanelVisible: boolean): void {
       const targets = resolveAutoAckTabTargets(s, {
         floatingPanelVisible: floatingPanelVisibleRef.current
       })
+      // Why no protection reset here: zero targets just means nothing is on screen
+      // (Settings, browser, an overlay) — a transient view switch must not lapse an
+      // explicit mark-unread the user just made.
       if (targets.length === 0) {
-        manuallyUnreadTurns.clear()
         return
       }
       // Why: advance refs only after gates pass, else the diff is consumed and a gated-out transition never re-acks when focus returns.
@@ -276,10 +267,16 @@ export function useAutoAckViewedAgent(floatingPanelVisible: boolean): void {
           activePaneKeys.add(makePaneKey(target.tabId, activeLeafId))
         }
       }
-      for (const [paneKey, turnTimestamp] of manuallyUnreadTurns) {
+      // Protection lapses when the user moves on to another pane or the agent takes a new
+      // turn; a still-active pane with an unchanged turn keeps its explicit mark-unread.
+      const lapsedProtections: string[] = []
+      for (const [paneKey, turnTimestamp] of Object.entries(s.manuallyUnreadTurnsByPaneKey)) {
         if (!activePaneKeys.has(paneKey) || getAgentTurnTimestamp(s, paneKey) !== turnTimestamp) {
-          manuallyUnreadTurns.delete(paneKey)
+          lapsedProtections.push(paneKey)
         }
+      }
+      if (lapsedProtections.length > 0) {
+        s.clearManuallyUnreadTurns(lapsedProtections)
       }
 
       for (const target of targets) {
@@ -289,7 +286,9 @@ export function useAutoAckViewedAgent(floatingPanelVisible: boolean): void {
         const tabId = target.tabId
         const activeLeafId = resolveActiveLeafId(current, tabId)
         const toAck = computeAutoAckTargets(current, tabId, activeLeafId).filter(
-          (paneKey) => !manuallyUnreadTurns.has(paneKey)
+          (paneKey) =>
+            current.manuallyUnreadTurnsByPaneKey[paneKey] !==
+            getAgentTurnTimestamp(current, paneKey)
         )
         const activePaneKey = computeViewedAgentCompletionPaneKey(current, tabId, activeLeafId)
         if (toAck.length > 0 || activePaneKey) {

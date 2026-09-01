@@ -7,8 +7,6 @@ import type { AgentProviderSessionMetadata } from './agent-session-resume'
 import type { WithAgentStatusObservation } from './agent-status-observation'
 import type {
   AgentStatusOrchestrationContext,
-  AgentStatusState,
-  AgentType,
   ParsedAgentStatusPayload
 } from './agent-status-types'
 
@@ -53,15 +51,12 @@ export type AgentStatusIpcPayload = ParsedAgentStatusPayload & {
   restoredUnconfirmed?: boolean
 } & WithAgentStatusObservation
 
-/** Identity used by UI-only cleanup to evict exactly the status it cleared. */
+/** Identity used by UI-only cleanup to evict exactly the status it cleared.
+ *  Deliberately minimal — receivedAt + stateStartedAt pin the exact event instance
+ *  (the same baseline the interrupt-inference guard uses). Renderer-enriched fields
+ *  (connectionId, worktreeId) diverge from main's cache and must not participate. */
 export type AgentStatusCacheIdentity = {
   paneKey: string
-  state: AgentStatusState
-  prompt: string
-  agentType?: AgentType
-  tabId?: string
-  worktreeId?: string
-  connectionId?: string | null
   receivedAt: number
   stateStartedAt: number
 }

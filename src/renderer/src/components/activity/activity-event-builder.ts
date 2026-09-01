@@ -1,5 +1,6 @@
 import { isExplicitAgentStatusFresh } from '@/lib/agent-status'
 import { findIndexedRepoOwnerForHost } from '@/lib/worktree-runtime-owner-index'
+import { getRemoteRuntimePtyEnvironmentId } from '@/runtime/runtime-terminal-stream'
 import type { RetainedAgentEntry } from '@/store/slices/agent-status'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
@@ -112,6 +113,12 @@ function resolveActivityExecutionHostId(
   if (tabHostId) {
     return tabHostId
   }
+  // Why before connectionId: a runtime pane's status entry publishes connectionId: null,
+  // which would otherwise resolve to LOCAL (see dashboard-card-terminal-input's precedent).
+  const runtimeEnvironmentId = getRemoteRuntimePtyEnvironmentId(terminalPtyId ?? '')
+  if (runtimeEnvironmentId) {
+    return toRuntimeExecutionHostId(runtimeEnvironmentId)
+  }
   if (entry.connectionId !== undefined) {
     return entry.connectionId ? toSshExecutionHostId(entry.connectionId) : LOCAL_EXECUTION_HOST_ID
   }
@@ -124,7 +131,8 @@ function resolveActivityEventOwner(
   context: ActivityTabContext,
   entry: AgentStatusEntry,
   terminalPtyId: string | null | undefined,
-  tabHostIndex: ActivityTabHostIndex
+  tabHostIndex: ActivityTabHostIndex,
+  ownerCache: Map<string, ActivityEventOwner>
 ): ActivityEventOwner {
   const executionHostId = resolveActivityExecutionHostId(
     context,
@@ -132,6 +140,13 @@ function resolveActivityEventOwner(
     terminalPtyId,
     tabHostIndex
   )
+  // Why: resolution runs per pane per rebuild and the miss path scans detected worktrees;
+  // everything below depends only on worktreeId + host, so memoize per build.
+  const ownerCacheKey = `${context.worktreeId}\0${executionHostId ?? ''}`
+  const cached = ownerCache.get(ownerCacheKey)
+  if (cached) {
+    return cached
+  }
   const resolvedWorktree = args.resolveWorktree?.(context.worktreeId, executionHostId)
   const mappedWorktree = args.worktreeMap.get(context.worktreeId)
   const worktree =
@@ -147,13 +162,15 @@ function resolveActivityEventOwner(
       toRuntimeExecutionHostId(worktree.runtimeOwnerEnvironmentId)
     )
   }
-  return {
+  const owner: ActivityEventOwner = {
     worktree,
     repo: repo ?? args.repoMap.get(worktree.repoId) ?? null,
     knownWorktree: Boolean(
       resolvedWorktree || mappedWorktree || args.tabsByWorktree[context.worktreeId]
     )
   }
+  ownerCache.set(ownerCacheKey, owner)
+  return owner
 }
 
 export function buildActivityEvents(
@@ -167,6 +184,7 @@ export function buildActivityEvents(
   const seenEventIds = new Set<string>()
   const tabContext = new Map<string, ActivityTabContext>()
   const tabHostIndex = buildActivityTabHostIndex(args)
+  const ownerCache = new Map<string, ActivityEventOwner>()
   const liveAgentByPaneKey: Record<string, ActivityLiveAgentSnapshot> = {}
   const seenCacheKeys = cache ? new Set<string>() : null
 
@@ -197,7 +215,14 @@ export function buildActivityEvents(
     if (!context) {
       continue
     }
-    const owner = resolveActivityEventOwner(args, context, entry, context.tab.ptyId, tabHostIndex)
+    const owner = resolveActivityEventOwner(
+      args,
+      context,
+      entry,
+      context.tab.ptyId,
+      tabHostIndex,
+      ownerCache
+    )
     const orchestration = args.runtimeAgentOrchestrationByPaneKey?.[paneKey]
     // Why: live status is separate from history; a fresh working turn updates the thread without counting as an unread done/blocked/waiting event.
     // The freshness check runs on the raw entry (orchestration merges never change state/timing fields).
@@ -233,7 +258,7 @@ export function buildActivityEvents(
     liveAgentByPaneKey,
     tabContext,
     resolveOwner: (context, entry, terminalPtyId) =>
-      resolveActivityEventOwner(args, context, entry, terminalPtyId, tabHostIndex),
+      resolveActivityEventOwner(args, context, entry, terminalPtyId, tabHostIndex, ownerCache),
     pushPaneEvents
   })
 
