@@ -90,11 +90,108 @@ describe('ActivityThreadOptionsMenu', () => {
       trigger?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
     })
 
-    expect(document.body.textContent).toContain('Group agent activity by')
+    expect(document.body.textContent).toContain('Group by')
     expect(document.body.textContent).toContain('Status')
+
+    const subTrigger = document.querySelector<HTMLElement>(
+      '[data-slot="dropdown-menu-sub-trigger"]'
+    )
+    expect(subTrigger).not.toBeNull()
+
+    await act(async () => {
+      subTrigger?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowRight' }))
+    })
+
     expect(document.body.textContent).toContain('Project')
     expect(document.body.textContent).toContain('Worktree')
     expect(document.body.textContent).toContain('Agent')
+  })
+
+  it('explains compact mode on hover', async () => {
+    await act(async () => {
+      root.render(<Harness />)
+    })
+
+    const trigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Thread list options"]'
+    )
+    await act(async () => {
+      trigger?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
+    })
+
+    const compactMode = document.querySelector<HTMLElement>('[role="menuitemcheckbox"]')
+    await act(async () => {
+      compactMode?.dispatchEvent(new Event('pointermove', { bubbles: true }))
+    })
+
+    expect(document.body.textContent).toContain(
+      'Shows shorter thread rows with one-line titles and two-line status messages.'
+    )
+  })
+
+  it('puts search and unread actions in the menu when header overflow handlers are provided', async () => {
+    const onSearch = vi.fn()
+    const onToggleUnread = vi.fn()
+    await act(async () => {
+      root.render(
+        <TooltipProvider>
+          <ActivityThreadOptionsMenu
+            compactMode={false}
+            hasUnreadThreads={false}
+            onCompactModeChange={vi.fn()}
+            onMarkAllThreadsRead={vi.fn()}
+            onSearch={onSearch}
+            unreadOnly={false}
+            onToggleUnread={onToggleUnread}
+          />
+        </TooltipProvider>
+      )
+    })
+
+    const trigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Thread list options"]'
+    )
+    await act(async () => {
+      trigger?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
+    })
+
+    expect(document.body.textContent).toContain('Search')
+    expect(document.body.textContent).toContain('Show unread only')
+  })
+
+  it('explains show unread threads only on hover and shows unread dot when hasUnreadThreads is true', async () => {
+    const onToggleUnread = vi.fn()
+    await act(async () => {
+      root.render(
+        <TooltipProvider>
+          <ActivityThreadOptionsMenu
+            compactMode={false}
+            hasUnreadThreads={true}
+            onCompactModeChange={vi.fn()}
+            onMarkAllThreadsRead={vi.fn()}
+            unreadOnly={false}
+            onToggleUnread={onToggleUnread}
+          />
+        </TooltipProvider>
+      )
+    })
+
+    const trigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Thread list options"]'
+    )
+    await act(async () => {
+      trigger?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
+    })
+
+    const unreadItem = document.querySelector<HTMLElement>('[role="menuitemcheckbox"]')
+    await act(async () => {
+      unreadItem?.dispatchEvent(new Event('pointermove', { bubbles: true }))
+    })
+
+    expect(document.body.textContent).toContain(
+      'Filters the activity list to show only threads with unread updates.'
+    )
+    expect(document.querySelector('[data-unread-dot]')).not.toBeNull()
   })
 
   it('renders show child agents checkbox when onShowChildAgentsChange is provided', async () => {

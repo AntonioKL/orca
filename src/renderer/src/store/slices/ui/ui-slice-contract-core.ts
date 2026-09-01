@@ -133,6 +133,9 @@ export type UISliceCore = {
   acknowledgedAgentsByPaneKey: Record<string, number>
   acknowledgeAgents: (paneKeys: string[]) => void
   unacknowledgeAgents: (paneKeys: string[]) => void
+  /** Per-pane cutoffs used to hide activity entries cleared by the user. */
+  activityClearedAtByPaneKey: Record<string, number>
+  applyActivityClearedAt: (patch: Record<string, number | null>) => void
   activeView: TopLevelView
   previousViewBeforeTasks: Exclude<UiViewHistory, 'tasks'>
   previousViewBeforeSettings: Exclude<UiViewHistory, 'settings'>

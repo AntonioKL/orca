@@ -15910,14 +15910,22 @@
           "b29191b3e0": "Worktree",
           "8c3b621ddf": "Project",
           "4a3986b200": "Status",
-          "770d458144": "Group agent activity by",
+          "770d458144": "Group by",
           "795cbf26e2": "Filter...",
           "4616ea39fd": "Jump to workspace",
           "59b131fbd9": "Mark thread unread",
           "beb2c19173": "Unread",
           "5651b216c6": "Unknown project",
           "22b22034bc": "Standalone terminal unavailable in Activity.",
-          "afdc2139a8": "Agent terminal closed. Open a new terminal in this workspace to continue."
+          "afdc2139a8": "Agent terminal closed. Open a new terminal in this workspace to continue.",
+          "compactModeDescription": "Shows shorter thread rows with one-line titles and two-line status messages.",
+          "unreadOnlyDescription": "Filters the activity list to show only threads with unread updates.",
+          "clearCompleted": "Clear completed"
+        },
+        "clearCompleted": {
+          "clearedOne": "Cleared 1 completed agent",
+          "clearedMany": "Cleared {{value0}} completed agents",
+          "undo": "Undo"
         },
         "ActivityTitlebarControls": {
           "f915168c8e": "unread",

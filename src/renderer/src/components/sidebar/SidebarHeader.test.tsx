@@ -15,21 +15,34 @@ type MockState = {
   repos: { id: string }[]
   groupBy: string
   sidebarBody: 'workspaces' | 'agents'
+  sidebarWidth: number
   setSidebarBody: (body: 'workspaces' | 'agents') => void
   openModal: (modal: string, data?: unknown) => void
+  activeContextualTourId: string | null
 }
 
 let mockState: MockState
 
-vi.mock('@/store', () => ({
-  useAppStore: (selector: (state: MockState) => unknown) => selector(mockState)
-}))
+vi.mock('@/store', () => {
+  const useAppStore = (selector: (state: MockState) => unknown) => selector(mockState)
+  useAppStore.getState = () => mockState
+  return { useAppStore }
+})
 
 vi.mock('@/components/dashboard/useAgentBucketCounts', () => ({
   useAgentBucketCounts: () => ({ attention: 0, working: 0, done: 0, idle: 0 })
 }))
 
 vi.mock('./SidebarWorkspaceOptionsMenu', () => ({ default: () => null }))
+
+vi.mock('./workspace-options-menu-items', () => ({
+  useWorkspaceOptionsFilterBadge: () => ({
+    hasAnyFilter: false,
+    activeFilterCount: 0,
+    activeFilterLabel: '0 filters'
+  }),
+  WorkspaceOptionsMenuItems: () => null
+}))
 
 vi.mock('@/hooks/useShortcutLabel', () => ({ useShortcutLabel: () => '⌘N' }))
 
@@ -60,8 +73,10 @@ beforeEach(() => {
     repos: [],
     groupBy: 'repo',
     sidebarBody: 'workspaces',
+    sidebarWidth: 280,
     setSidebarBody: vi.fn(),
-    openModal: vi.fn()
+    openModal: vi.fn(),
+    activeContextualTourId: null
   }
   container = document.createElement('div')
   document.body.append(container)
@@ -146,5 +161,34 @@ describe('SidebarHeader', () => {
 
     expect(container.querySelector('[aria-label="New workspace"]')).toBeNull()
     expect(container.querySelector('[aria-label="Add Project"]')).toBeNull()
+  })
+
+  it('keeps the view toggle and actions on one row at the default sidebar width', () => {
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    const headerRow = container.querySelector('[role="radiogroup"]')?.parentElement
+    const headerClasses = new Set(headerRow?.className.split(/\s+/) ?? [])
+    expect(headerClasses.has('flex-wrap')).toBe(false)
+    expect(headerClasses.has('h-8')).toBe(true)
+    expect(container.querySelector('[aria-label="Add Project"]')).toBeTruthy()
+    expect(container.querySelector('[aria-label="New workspace"]')).toBeTruthy()
+  })
+
+  it('keeps New workspace and a more menu on one row at compact width', () => {
+    mockState.sidebarWidth = 220
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    expect(container.querySelector('[aria-label="Add Project"]')).toBeNull()
+    expect(container.querySelector('[aria-label="New workspace"]')).toBeTruthy()
+    expect(container.querySelector('[aria-label="More workspace actions"]')).toBeTruthy()
+
+    act(() => {
+      newWorkspaceButton().click()
+    })
+    expect(mocks.openWorkspaceCreationComposerWithTourHandoff).toHaveBeenCalledTimes(1)
   })
 })

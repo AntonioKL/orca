@@ -29,6 +29,7 @@ function makeBaseline(overrides: Partial<PersistedUIWriteBaseline> = {}): Persis
     showDotfilesByWorktree: {},
     filterRepoIds: [],
     acknowledgedAgentsByPaneKey: {},
+    activityClearedAtByPaneKey: {},
     ...overrides
   }
 }

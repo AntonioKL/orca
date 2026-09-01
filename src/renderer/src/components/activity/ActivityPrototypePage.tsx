@@ -10,7 +10,9 @@ import {
 } from './activity-portal-thread-reconciliation'
 import { useAgentPaneThreads } from './use-agent-pane-threads'
 import { handleActivityFilterFocusShortcut } from './activity-filter-focus-shortcut'
+import { clearCompletedActivity, isClearableActivityThread } from './activity-clear-completed'
 import { createActivityThreadActions } from './activity-thread-actions'
+import type { AgentPaneThread } from './activity-thread-types'
 import { ActivityThreadListPane } from './activity-thread-list-pane'
 import { ActivityThreadDetailPane } from './activity-thread-detail-pane'
 import {
@@ -33,7 +35,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
   const activityFilterInputRef = useRef<HTMLInputElement | null>(null)
   // Why: bounds auto mark-read to one acknowledgement per selected thread turn.
   const autoAcknowledgedTurnRef = useRef<string | null>(null)
-  const [compactMode, setCompactMode] = useState(false)
+  const [compactMode, setCompactMode] = useState(true)
   const [showChildAgents, setShowChildAgents] = useState(false)
   const [selectedPaneKey, setSelectedPaneKey] = useState<string | null>(null)
   const [displayedPaneKey, setDisplayedPaneKey] = useState<string | null>(null)
@@ -230,13 +232,33 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     return () => window.removeEventListener('keydown', focusActivityFilter, { capture: true })
   }, [activePortalTargetEl, inactivePortalTargetEl])
 
+  // Why useMemo: rows are React.memo'd on these handlers; a fresh closure per render
+  // would defeat the bail-out and re-render every mounted row on unrelated updates.
   const { hasUnreadThreads, markThreadUnread, selectThread, jumpToWorkspace, markAllThreadsRead } =
-    createActivityThreadActions({
-      allThreads,
-      acknowledgeAgents: storeData.acknowledgeAgents,
-      unacknowledgeAgents: storeData.unacknowledgeAgents,
-      setSelectedPaneKey
-    })
+    useMemo(
+      () =>
+        createActivityThreadActions({
+          allThreads,
+          acknowledgeAgents: storeData.acknowledgeAgents,
+          unacknowledgeAgents: storeData.unacknowledgeAgents,
+          setSelectedPaneKey
+        }),
+      [allThreads, storeData.acknowledgeAgents, storeData.unacknowledgeAgents]
+    )
+
+  const hasCompletedThreads = useMemo(
+    () => allThreads.some(isClearableActivityThread),
+    [allThreads]
+  )
+  const handleClearCompleted = useCallback(() => {
+    clearCompletedActivity(allThreads)
+  }, [allThreads])
+
+  const worktreeMap = storeData.worktreeMap
+  const canJumpToWorkspace = useCallback(
+    (thread: AgentPaneThread) => worktreeMap.has(thread.worktree.id),
+    [worktreeMap]
+  )
 
   useEffect(() => {
     if (
@@ -293,13 +315,15 @@ export default function ActivityPrototypePage(): React.JSX.Element {
           onCompactModeChange={setCompactMode}
           onShowChildAgentsChange={setShowChildAgents}
           onMarkAllThreadsRead={markAllThreadsRead}
+          hasCompletedThreads={hasCompletedThreads}
+          onClearCompleted={handleClearCompleted}
           visibleThreadGroups={visibleThreadGroups}
           visibleThreadCount={visibleThreads.length}
           selectedPaneKey={selectedThread?.paneKey ?? null}
           onSelectThread={selectThread}
           onJumpToWorkspace={jumpToWorkspace}
           onMarkThreadUnread={markThreadUnread}
-          canJumpToWorkspace={(thread) => storeData.worktreeMap.has(thread.worktree.id)}
+          canJumpToWorkspace={canJumpToWorkspace}
           isThreadListResizing={isThreadListResizing}
           onResizeStart={onResizeStart}
         />

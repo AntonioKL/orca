@@ -13,7 +13,10 @@ type ActivityUnreadCountSource = Pick<
   | 'migrationUnsupportedByPtyId'
   | 'retainedAgentsByPaneKey'
   | 'worktreesByRepo'
->
+> & {
+  /** Per-pane "Clear completed" cutoffs; hidden events must not count as unread. */
+  activityClearedAtByPaneKey?: Record<string, number>
+}
 
 type ActivityUnreadCountMode = 'agent-events' | 'sidebar-badge'
 
@@ -21,13 +24,15 @@ const EMPTY_WORKTREES_BY_REPO: AppState['worktreesByRepo'] = {}
 const EMPTY_MIGRATION_UNSUPPORTED: AppState['migrationUnsupportedByPtyId'] = {}
 const EMPTY_RETAINED_AGENTS: AppState['retainedAgentsByPaneKey'] = {}
 const EMPTY_ACKNOWLEDGED_AGENTS: AppState['acknowledgedAgentsByPaneKey'] = {}
+const EMPTY_ACTIVITY_CLEARED_AT: Record<string, number> = {}
 
 const DISABLED_ACTIVITY_UNREAD_INPUTS = {
   sortEpoch: 0,
   worktreesByRepo: EMPTY_WORKTREES_BY_REPO,
   migrationUnsupportedByPtyId: EMPTY_MIGRATION_UNSUPPORTED,
   retainedAgentsByPaneKey: EMPTY_RETAINED_AGENTS,
-  acknowledgedAgentsByPaneKey: EMPTY_ACKNOWLEDGED_AGENTS
+  acknowledgedAgentsByPaneKey: EMPTY_ACKNOWLEDGED_AGENTS,
+  activityClearedAtByPaneKey: EMPTY_ACTIVITY_CLEARED_AT
 }
 
 function isUnreadAgentState(state: AgentStatusState): boolean {
@@ -51,11 +56,15 @@ export function countActivityUnread(
   }
 
   const countEntry = (entry: AgentStatusEntry, ackAt: number): void => {
+    // Why: "Clear completed" hides events at or before the pane's cutoff from the feed,
+    // so a hidden event must not keep the badge lit; treat the cutoff like an ack floor.
+    const clearedAt = source.activityClearedAtByPaneKey?.[entry.paneKey] ?? 0
+    const mutedAt = Math.max(ackAt, clearedAt)
     if (mode === 'agent-events') {
       // Why: Activity feed surfaces historical done/blocked/waiting events
       // from stateHistory, so the titlebar badge must mirror that event count.
       for (const history of entry.stateHistory) {
-        if (isUnreadAgentState(history.state) && ackAt < history.startedAt) {
+        if (isUnreadAgentState(history.state) && mutedAt < history.startedAt) {
           count += 1
         }
       }
@@ -68,12 +77,12 @@ export function countActivityUnread(
     if (
       isUnreadAgentState(entry.state) &&
       entry.sessionBoundary !== true &&
-      ackAt < entry.stateStartedAt
+      mutedAt < entry.stateStartedAt
     ) {
       count += 1
     } else if (mode === 'sidebar-badge' && entry.state === 'done' && entry.sessionBoundary) {
       const displaced = entry.stateHistory.at(-1)
-      if (displaced && isUnreadAgentState(displaced.state) && ackAt < displaced.startedAt) {
+      if (displaced && isUnreadAgentState(displaced.state) && mutedAt < displaced.startedAt) {
         count += 1
       }
     }
@@ -104,7 +113,8 @@ export function useActivityUnreadCount(enabled: boolean, mode: ActivityUnreadCou
     worktreesByRepo,
     migrationUnsupportedByPtyId,
     retainedAgentsByPaneKey,
-    acknowledgedAgentsByPaneKey
+    acknowledgedAgentsByPaneKey,
+    activityClearedAtByPaneKey
   } = useAppStore(
     useShallow((state) => {
       if (!enabled) {
@@ -118,7 +128,8 @@ export function useActivityUnreadCount(enabled: boolean, mode: ActivityUnreadCou
         worktreesByRepo: state.worktreesByRepo,
         migrationUnsupportedByPtyId: state.migrationUnsupportedByPtyId,
         retainedAgentsByPaneKey: state.retainedAgentsByPaneKey,
-        acknowledgedAgentsByPaneKey: state.acknowledgedAgentsByPaneKey
+        acknowledgedAgentsByPaneKey: state.acknowledgedAgentsByPaneKey,
+        activityClearedAtByPaneKey: state.activityClearedAtByPaneKey
       }
     })
   )
@@ -134,12 +145,14 @@ export function useActivityUnreadCount(enabled: boolean, mode: ActivityUnreadCou
         migrationUnsupportedByPtyId,
         retainedAgentsByPaneKey,
         worktreesByRepo,
-        acknowledgedAgentsByPaneKey
+        acknowledgedAgentsByPaneKey,
+        activityClearedAtByPaneKey
       },
       mode
     )
   }, [
     acknowledgedAgentsByPaneKey,
+    activityClearedAtByPaneKey,
     enabled,
     migrationUnsupportedByPtyId,
     mode,

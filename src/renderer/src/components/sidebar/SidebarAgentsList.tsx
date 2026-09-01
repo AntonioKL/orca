@@ -1,10 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import {
+  clearCompletedActivity,
+  isClearableActivityThread
+} from '@/components/activity/activity-clear-completed'
 import { createActivityThreadActions } from '@/components/activity/activity-thread-actions'
 import { ActivityThreadListPane } from '@/components/activity/activity-thread-list-pane'
 import { ActivityThreadOptionsMenu } from '@/components/activity/activity-thread-controls'
 import { useAgentPaneThreads } from '@/components/activity/use-agent-pane-threads'
 import type { ActivityGroupBy, ThreadReadFilter } from '@/components/activity/activity-thread-types'
+import type { AgentPaneThread } from '@/components/activity/activity-thread-types'
 
 /**
  * The Activity thread list, hosted in the sidebar as a navigator: selecting a
@@ -22,6 +27,9 @@ export type SidebarAgentsListProps = {
   optionsTarget?: HTMLElement | null
   collapsedGroupKeys?: ReadonlySet<string>
   onToggleGroupCollapse?: (groupKey: string) => void
+  onSearch?: () => void
+  unreadOnly?: boolean
+  onToggleUnread?: () => void
 }
 
 export default function SidebarAgentsList({
@@ -33,7 +41,10 @@ export default function SidebarAgentsList({
   setQuery,
   optionsTarget,
   collapsedGroupKeys,
-  onToggleGroupCollapse
+  onToggleGroupCollapse,
+  onSearch,
+  unreadOnly = false,
+  onToggleUnread
 }: SidebarAgentsListProps): React.JSX.Element {
   const [compactMode, setCompactMode] = useState(true)
   const [showChildAgents, setShowChildAgents] = useState(false)
@@ -74,13 +85,33 @@ export default function SidebarAgentsList({
     }
   }, [selectedPaneKeyIsLive])
 
+  // Why useMemo: rows are React.memo'd on these handlers; a fresh closure per render
+  // would defeat the bail-out and re-render every mounted row on unrelated updates.
   const { hasUnreadThreads, markThreadUnread, selectThread, jumpToWorkspace, markAllThreadsRead } =
-    createActivityThreadActions({
-      allThreads,
-      acknowledgeAgents: storeData.acknowledgeAgents,
-      unacknowledgeAgents: storeData.unacknowledgeAgents,
-      setSelectedPaneKey
-    })
+    useMemo(
+      () =>
+        createActivityThreadActions({
+          allThreads,
+          acknowledgeAgents: storeData.acknowledgeAgents,
+          unacknowledgeAgents: storeData.unacknowledgeAgents,
+          setSelectedPaneKey
+        }),
+      [allThreads, storeData.acknowledgeAgents, storeData.unacknowledgeAgents]
+    )
+
+  const hasCompletedThreads = useMemo(
+    () => allThreads.some(isClearableActivityThread),
+    [allThreads]
+  )
+  const handleClearCompleted = useCallback(() => {
+    clearCompletedActivity(allThreads)
+  }, [allThreads])
+
+  const worktreeMap = storeData.worktreeMap
+  const canJumpToWorkspace = useCallback(
+    (thread: AgentPaneThread) => worktreeMap.has(thread.worktree.id),
+    [worktreeMap]
+  )
 
   return (
     <>
@@ -104,7 +135,7 @@ export default function SidebarAgentsList({
         onSelectThread={selectThread}
         onJumpToWorkspace={jumpToWorkspace}
         onMarkThreadUnread={markThreadUnread}
-        canJumpToWorkspace={(thread) => storeData.worktreeMap.has(thread.worktree.id)}
+        canJumpToWorkspace={canJumpToWorkspace}
         showJumpAction={false}
         showFilterControls={false}
         showOptionsMenu={false}
@@ -119,9 +150,14 @@ export default function SidebarAgentsList({
               compactMode={compactMode}
               showChildAgents={showChildAgents}
               hasUnreadThreads={hasUnreadThreads}
+              hasCompletedThreads={hasCompletedThreads}
               onCompactModeChange={setCompactMode}
               onShowChildAgentsChange={setShowChildAgents}
               onMarkAllThreadsRead={markAllThreadsRead}
+              onClearCompleted={handleClearCompleted}
+              onSearch={onSearch}
+              unreadOnly={unreadOnly}
+              onToggleUnread={onToggleUnread}
             />,
             optionsTarget
           )

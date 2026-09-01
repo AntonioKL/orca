@@ -64,3 +64,33 @@ describe('countActivityUnread session-boundary rows (STA-3386)', () => {
     expect(countActivityUnread(source, 'sidebar-badge')).toBe(1)
   })
 })
+
+describe('countActivityUnread with Clear completed cutoffs', () => {
+  it('does not count events hidden by the pane cutoff', () => {
+    const source = {
+      ...makeSource(
+        makeEntry({
+          stateHistory: [{ state: 'done', prompt: 'older run', startedAt: 1_000 }]
+        })
+      ),
+      activityClearedAtByPaneKey: { [PANE]: 2_000 }
+    }
+    // Both the history event (1_000) and the live done (2_000) are at or before the cutoff.
+    expect(countActivityUnread(source, 'agent-events')).toBe(0)
+    expect(countActivityUnread(source, 'sidebar-badge')).toBe(0)
+  })
+
+  it('keeps counting turns newer than the cutoff', () => {
+    const source = {
+      ...makeSource(
+        makeEntry({
+          stateStartedAt: 3_000,
+          stateHistory: [{ state: 'done', prompt: 'older run', startedAt: 1_000 }]
+        })
+      ),
+      activityClearedAtByPaneKey: { [PANE]: 2_000 }
+    }
+    expect(countActivityUnread(source, 'agent-events')).toBe(1)
+    expect(countActivityUnread(source, 'sidebar-badge')).toBe(1)
+  })
+})

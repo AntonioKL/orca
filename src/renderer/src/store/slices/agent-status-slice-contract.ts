@@ -167,6 +167,9 @@ export type AgentStatusSlice = {
   /** Dismiss a retained entry by its paneKey. */
   dismissRetainedAgent: (paneKey: string) => void
 
+  /** Dismiss several retained entries in one set (Activity "Clear completed"). */
+  dismissRetainedAgents: (paneKeys: readonly string[]) => void
+
   /** Dismiss all retained entries belonging to a worktree. */
   dismissRetainedAgentsByWorktree: (worktreeId: string) => void
 

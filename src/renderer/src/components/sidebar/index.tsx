@@ -10,6 +10,7 @@ import SidebarToolbar from './SidebarToolbar'
 import WorkspaceKanbanDrawer from './WorkspaceKanbanDrawer'
 import type { VirtualizedScrollAnchor } from '@/hooks/useVirtualizedScrollAnchor'
 import { cn } from '@/lib/utils'
+import { SIDEBAR_HEADER_WIDE_MIN_WIDTH } from './sidebar-header-actions'
 import { BellDot, FolderPlus, Loader2, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -62,6 +63,8 @@ function Sidebar({
   const [agentQuery, setAgentQuery] = React.useState('')
   const [agentSearchOpen, setAgentSearchOpen] = React.useState(false)
   const [agentOptionsTarget, setAgentOptionsTarget] = React.useState<HTMLDivElement | null>(null)
+  const agentSearchInputRef = React.useRef<HTMLInputElement>(null)
+  const compactHeader = sidebarWidth < SIDEBAR_HEADER_WIDE_MIN_WIDTH
   const fetchAllWorktrees = useAppStore((s) => s.fetchAllWorktrees)
   const activeModal = useAppStore((s) => s.activeModal)
   const statusBarVisible = useAppStore((s) => s.statusBarVisible)
@@ -133,51 +136,57 @@ function Sidebar({
               onWorkspaceBoardMenuOpenChange={setWorkspaceBoardMenuOpen}
               agentToolbar={
                 <div className="flex items-center gap-1 shrink-0">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className={cn(
-                          'text-muted-foreground',
-                          agentSearchOpen && 'bg-accent text-accent-foreground'
-                        )}
-                        aria-label="Search agent activity"
-                        aria-pressed={agentSearchOpen}
-                        onClick={() => setAgentSearchOpen((open) => !open)}
-                      >
-                        <Search className="size-3.5" strokeWidth={2.25} />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={6}>
-                      Search agent activity
-                    </TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-pressed={agentReadFilter === 'unread'}
-                        onClick={() =>
-                          setAgentReadFilter((filter) => (filter === 'unread' ? 'all' : 'unread'))
-                        }
-                        className={cn(
-                          'text-muted-foreground',
-                          agentReadFilter === 'unread' &&
-                            'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
-                        )}
-                        aria-label="Show unread threads only"
-                      >
-                        <BellDot className="size-3.5" strokeWidth={2.25} />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={6}>
-                      Show unread threads only
-                    </TooltipContent>
-                  </Tooltip>
+                  {compactHeader ? null : (
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            className={cn(
+                              'text-muted-foreground',
+                              agentSearchOpen && 'bg-accent text-accent-foreground'
+                            )}
+                            aria-label="Search agent activity"
+                            aria-pressed={agentSearchOpen}
+                            onClick={() => setAgentSearchOpen((open) => !open)}
+                          >
+                            <Search className="size-3.5" strokeWidth={2.25} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={6}>
+                          Search agent activity
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-pressed={agentReadFilter === 'unread'}
+                            onClick={() =>
+                              setAgentReadFilter((filter) =>
+                                filter === 'unread' ? 'all' : 'unread'
+                              )
+                            }
+                            className={cn(
+                              'text-muted-foreground',
+                              agentReadFilter === 'unread' &&
+                                'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
+                            )}
+                            aria-label="Show unread threads only"
+                          >
+                            <BellDot className="size-3.5" strokeWidth={2.25} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={6}>
+                          Show unread threads only
+                        </TooltipContent>
+                      </Tooltip>
+                    </>
+                  )}
                   <div ref={setAgentOptionsTarget} className="flex items-center" />
                 </div>
               }
@@ -185,12 +194,18 @@ function Sidebar({
                 agentSearchOpen ? (
                   <div className="shrink-0 border-b border-border px-2 py-1.5">
                     <Input
+                      ref={agentSearchInputRef}
                       autoFocus
                       value={agentQuery}
                       onChange={(event) => setAgentQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          setAgentSearchOpen(false)
+                        }
+                      }}
                       placeholder="Filter..."
                       className="h-7 w-full text-[11px]"
-                      aria-label="Filter agent activity"
+                      aria-label="Search"
                     />
                   </div>
                 ) : null
@@ -206,6 +221,23 @@ function Sidebar({
                   query={agentQuery}
                   setQuery={setAgentQuery}
                   optionsTarget={agentOptionsTarget}
+                  onSearch={
+                    compactHeader
+                      ? () => {
+                          setAgentSearchOpen(true)
+                          window.setTimeout(() => {
+                            agentSearchInputRef.current?.focus()
+                          }, 0)
+                        }
+                      : undefined
+                  }
+                  unreadOnly={agentReadFilter === 'unread'}
+                  onToggleUnread={
+                    compactHeader
+                      ? () =>
+                          setAgentReadFilter((filter) => (filter === 'unread' ? 'all' : 'unread'))
+                      : undefined
+                  }
                 />
               </React.Suspense>
             ) : (

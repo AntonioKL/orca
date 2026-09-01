@@ -26,8 +26,8 @@ export function formatAbsoluteDate(timestamp: number): string {
   return absoluteDateFormatter.format(new Date(timestamp))
 }
 
-export function formatRelativeTime(timestamp: number): string {
-  return formatUiRelativeTime(timestamp - Date.now())
+export function formatRelativeTime(timestamp: number, now = Date.now()): string {
+  return formatUiRelativeTime(timestamp - now)
 }
 
 function truncatePreservingSurrogates(value: string, maxLength: number): string {

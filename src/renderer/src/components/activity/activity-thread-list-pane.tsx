@@ -21,8 +21,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import { getActiveStickyHeaderIndex } from '../sidebar/worktree-list/viewport/virtual-rows'
-import { ActivityStatusGroupHeader, ActivityThreadOptionsMenu } from './activity-thread-controls'
-import { ActivityThreadRow } from './activity-thread-row'
+import { ActivityThreadOptionsMenu } from './activity-thread-controls'
+import { ActivityThreadVirtualRow } from './activity-thread-virtual-row'
+import { ActivityThreadListResizeHandle } from './activity-thread-list-resize-handle'
+import { ActivityThreadStickyHeader } from './activity-thread-sticky-header'
 import {
   buildActivityVirtualItems,
   estimateActivityVirtualItemSize,
@@ -37,9 +39,6 @@ import type {
   ThreadReadFilter
 } from './activity-thread-types'
 
-// Why: a scroll container measuring 0 (layout-less test DOM, transiently hidden layout)
-// makes TanStack compute a null range and mount nothing; substitute a viewport-sized
-// fallback so the first rows always exist until a real measurement lands.
 const ZERO_RECT_FALLBACK_VIEWPORT = { width: 320, height: 600 }
 const observeActivityListRect: typeof observeElementRect = (instance, cb) =>
   observeElementRect(instance, (rect) => {
@@ -131,9 +130,6 @@ export function ActivityThreadListPane({
       }
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
-  // Why virtualized: with hundreds of agents, mounting every row (markdown previews,
-  // tooltips, hover cards) makes every status tick and keystroke re-render the world;
-  // flattening headers + threads into virtual rows bounds mounted rows by the viewport.
   const virtualItems = useMemo(
     () =>
       buildActivityVirtualItems({
@@ -160,8 +156,6 @@ export function ActivityThreadListPane({
       const item = virtualItems[index]
       return item ? getActivityVirtualItemKey(item) : `__stale_${index}`
     },
-    // Why: a measured 0 (hidden/offscreen container, test DOM) must not collapse rows to
-    // nothing — fall back to the estimate so layout stays sane until a real measure lands.
     measureElement: (element, entry, instance) => {
       const measured = measureVirtualElementSize(element, entry, instance)
       if (measured > 0) {
@@ -173,11 +167,9 @@ export function ActivityThreadListPane({
         compactMode
       )
     },
-    // Why: TanStack memoizes rangeExtractor by identity; the selected index must be a dep or it pins a stale row.
     rangeExtractor: useCallback(
       (range: Range) => {
         const indexes = defaultRangeExtractor(range)
-        // Why: the selected row must never be virtualized away — unmounting it drops focus and hides the active selection.
         if (
           selectedItemIndex !== null &&
           selectedItemIndex >= 0 &&
@@ -192,19 +184,14 @@ export function ActivityThreadListPane({
     ),
     overscan: 8,
     observeElementRect: observeActivityListRect,
-    // Why: sync-flushing row renders inside the scroll listener stalls wheel input; async + overscan keeps rows filled.
     useFlushSync: false
   })
 
-  // Why: replicate the pre-virtualization `sticky top-0` group header — absolute rows
-  // can't use CSS sticky, so the active group's header is mirrored as a pinned overlay.
   const rangeStartIndex = virtualizer.range?.startIndex ?? 0
   const stickyHeaderIndex =
     groupBy !== 'none' ? getActiveStickyHeaderIndex(headerItemIndexes, rangeStartIndex) : null
   const stickyHeaderItem = stickyHeaderIndex === null ? null : virtualItems[stickyHeaderIndex]
 
-  // Why: the sidebar hosts this list as a fill-width column, so width and the
-  // resize handle are page-only; omitting them lets the flex parent size it.
   const resizable = onResizeStart !== undefined
   const showToolbar = showFilterControls || showOptionsMenu
   return (
@@ -327,7 +314,6 @@ export function ActivityThreadListPane({
                 </TooltipContent>
               </Tooltip>
             ) : null}
-            {/* Why (overflow menu): "Mark all read" is low-frequency and destructive-feeling; behind `…` keeps the toolbar on the frequent Filter + unread toggle. */}
             {showOptionsMenu ? (
               <ActivityThreadOptionsMenu
                 groupBy={groupBy}
@@ -368,36 +354,20 @@ export function ActivityThreadListPane({
                   className="absolute left-0 top-0 w-full"
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
                 >
-                  {item.type === 'header' ? (
-                    <div
-                      role="group"
-                      aria-label={translate(
-                        'auto.components.activity.ActivityPrototypePage.a2b4437bfb',
-                        '{{value0}} activity',
-                        { value0: item.group.label }
-                      )}
-                      className="pb-1"
-                    >
-                      <ActivityStatusGroupHeader
-                        group={item.group}
-                        collapsed={effectiveCollapsedGroupKeys.has(item.group.key)}
-                        onToggle={() => handleToggleGroup(item.group.key)}
-                      />
-                    </div>
-                  ) : (
-                    <div className="pb-1">
-                      <ActivityThreadRow
-                        thread={item.thread}
-                        selected={item.thread.paneKey === selectedPaneKey}
-                        onSelect={onSelectThread}
-                        onJump={onJumpToWorkspace}
-                        onMarkUnread={onMarkThreadUnread}
-                        canJump={canJumpToWorkspace(item.thread)}
-                        compactMode={compactMode}
-                        showJumpAction={showJumpAction}
-                      />
-                    </div>
-                  )}
+                  <ActivityThreadVirtualRow
+                    item={item}
+                    collapsed={
+                      item.type === 'header' && effectiveCollapsedGroupKeys.has(item.group.key)
+                    }
+                    onToggleGroup={handleToggleGroup}
+                    selectedPaneKey={selectedPaneKey}
+                    onSelectThread={onSelectThread}
+                    onJumpToWorkspace={onJumpToWorkspace}
+                    onMarkThreadUnread={onMarkThreadUnread}
+                    canJumpToWorkspace={canJumpToWorkspace}
+                    compactMode={compactMode}
+                    showJumpAction={showJumpAction}
+                  />
                 </div>
               )
             })}
@@ -412,39 +382,18 @@ export function ActivityThreadListPane({
           ) : null}
         </div>
         {stickyHeaderItem?.type === 'header' ? (
-          <div className="absolute inset-x-1.5 top-0 z-10">
-            <ActivityStatusGroupHeader
-              group={stickyHeaderItem.group}
-              collapsed={effectiveCollapsedGroupKeys.has(stickyHeaderItem.group.key)}
-              onToggle={() => handleToggleGroup(stickyHeaderItem.group.key)}
-            />
-          </div>
+          <ActivityThreadStickyHeader
+            group={stickyHeaderItem.group}
+            collapsed={effectiveCollapsedGroupKeys.has(stickyHeaderItem.group.key)}
+            onToggle={() => handleToggleGroup(stickyHeaderItem.group.key)}
+          />
         ) : null}
       </div>
       {resizable ? (
-        <div
-          aria-label={translate(
-            'auto.components.activity.ActivityPrototypePage.443690186e',
-            'Resize activity thread list'
-          )}
-          title={translate(
-            'auto.components.activity.ActivityPrototypePage.866083500b',
-            'Drag to resize'
-          )}
-          className={cn(
-            'group absolute -right-1.5 top-0 z-20 flex h-full w-3 cursor-col-resize items-stretch justify-center',
-            isThreadListResizing && 'bg-ring/10'
-          )}
-          onMouseDown={onResizeStart}
-          role="separator"
-        >
-          <div
-            className={cn(
-              'h-full w-px bg-border transition-colors group-hover:bg-ring/50',
-              isThreadListResizing && 'bg-ring'
-            )}
-          />
-        </div>
+        <ActivityThreadListResizeHandle
+          isResizing={isThreadListResizing}
+          onResizeStart={onResizeStart}
+        />
       ) : null}
     </aside>
   )

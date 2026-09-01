@@ -29,6 +29,7 @@ export type PersistedUIWriteBaseline = {
   showDotfilesByWorktree: Record<string, boolean>
   filterRepoIds: readonly string[]
   acknowledgedAgentsByPaneKey: Record<string, number>
+  activityClearedAtByPaneKey: Record<string, number>
 }
 
 // Why `satisfies Record<...>` rather than a keyof[] annotation: a plain `satisfies
@@ -55,7 +56,8 @@ const PERSISTED_UI_WRITE_BASELINE_FIELD_SET = {
   alwaysShowDefaultBranchWorkspace: true,
   showDotfilesByWorktree: true,
   filterRepoIds: true,
-  acknowledgedAgentsByPaneKey: true
+  acknowledgedAgentsByPaneKey: true,
+  activityClearedAtByPaneKey: true
 } satisfies Record<keyof PersistedUIWriteBaseline, true>
 
 export const PERSISTED_UI_WRITE_BASELINE_FIELDS = Object.keys(
@@ -95,7 +97,11 @@ function writeFieldEqual(field: keyof PersistedUIWriteBaseline, a: unknown, b: u
   if (field === 'filterRepoIds') {
     return stringArrayEqual(a as readonly string[], b as readonly string[])
   }
-  if (field === 'showDotfilesByWorktree' || field === 'acknowledgedAgentsByPaneKey') {
+  if (
+    field === 'showDotfilesByWorktree' ||
+    field === 'acknowledgedAgentsByPaneKey' ||
+    field === 'activityClearedAtByPaneKey'
+  ) {
     return shallowRecordEqual(
       a as Record<string, unknown> | undefined,
       b as Record<string, unknown> | undefined

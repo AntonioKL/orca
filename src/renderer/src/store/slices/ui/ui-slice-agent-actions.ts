@@ -39,6 +39,8 @@ export function createUiAgentActions(
   | 'acknowledgedAgentsByPaneKey'
   | 'acknowledgeAgents'
   | 'unacknowledgeAgents'
+  | 'activityClearedAtByPaneKey'
+  | 'applyActivityClearedAt'
 > {
   return {
     sidebarOpen: true,
@@ -300,6 +302,27 @@ export function createUiAgentActions(
           }
         }
         return next ? { acknowledgedAgentsByPaneKey: next } : s
+      }),
+
+    activityClearedAtByPaneKey: {},
+    applyActivityClearedAt: (patch) =>
+      set((s) => {
+        let next: Record<string, number> | null = null
+        for (const [key, value] of Object.entries(patch)) {
+          const previous = s.activityClearedAtByPaneKey[key]
+          if (value === null ? previous === undefined : previous === value) {
+            continue
+          }
+          if (next === null) {
+            next = { ...s.activityClearedAtByPaneKey }
+          }
+          if (value === null) {
+            delete next[key]
+          } else {
+            next[key] = value
+          }
+        }
+        return next ? { activityClearedAtByPaneKey: next } : s
       })
   }
 }

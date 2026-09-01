@@ -80,7 +80,7 @@ export function buildActivityThreadGroups(
   return groups
 }
 
-function threadStatusGroupId(thread: AgentPaneThread): ActivityStatusGroupId {
+export function threadStatusGroupId(thread: AgentPaneThread): ActivityStatusGroupId {
   const state = threadAgentState(thread)
   if (!thread.currentAgentState && state === 'done' && thread.latestEvent?.entry.interrupted) {
     return 'interrupted'
@@ -124,7 +124,7 @@ export function groupActivityThreadsByStatus(threads: AgentPaneThread[]): Activi
   })
 }
 
-function threadSearchText(thread: AgentPaneThread): string {
+function buildThreadSearchText(thread: AgentPaneThread): string {
   const latest = thread.latestEvent
   const stateLabel = threadAgentStateLabel(thread)
   const currentPrompt = thread.currentAgentEntry
@@ -136,6 +136,28 @@ function threadSearchText(thread: AgentPaneThread): string {
     ? `${agentTitle(latest)} ${agentSummary(latest)} ${agentMeta(latest)}`
     : ''
   return `${thread.paneTitle} ${getActivityThreadWorkspaceTitle(thread.worktree)} ${thread.worktree.branch ?? ''} ${thread.repo?.displayName ?? ''} ${formatAgentTypeLabel(thread.agentType)} ${stateLabel} ${currentPrompt} ${rawCurrentPrompt} ${currentSummary} ${thread.responsePreview} ${latestEventText}`.toLowerCase()
+}
+
+// Why: thread objects are rebuilt only when the underlying store data changes, so their
+// identity is a correct cache key; without this every keystroke re-lowercases a large
+// string per thread. WeakMap so dropped threads release their text.
+const threadSearchTextCache = new WeakMap<AgentPaneThread, string>()
+let threadSearchTextComputeCount = 0
+
+/** Test hook: how many times search text was actually (re)built. */
+export function getThreadSearchTextComputeCount(): number {
+  return threadSearchTextComputeCount
+}
+
+function threadSearchText(thread: AgentPaneThread): string {
+  const cached = threadSearchTextCache.get(thread)
+  if (cached !== undefined) {
+    return cached
+  }
+  threadSearchTextComputeCount += 1
+  const text = buildThreadSearchText(thread)
+  threadSearchTextCache.set(thread, text)
+  return text
 }
 
 export const ACTIVITY_SEARCH_QUERY_MAX_BYTES = 2 * 1024

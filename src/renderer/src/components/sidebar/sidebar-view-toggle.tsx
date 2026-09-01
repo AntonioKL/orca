@@ -14,31 +14,26 @@ type SidebarViewToggleProps = {
   value: string
   options: readonly [SidebarViewToggleOption, SidebarViewToggleOption]
   onSelect: (value: string) => void
+  className?: string
 }
 
-/** Two-up segmented control with a sliding pill; widths are frozen so nothing reflows on toggle. */
+/** Two-up segmented control; tab widths stay frozen so nothing reflows on toggle. */
 export function SidebarViewToggle({
   ariaLabel,
   value,
   options,
-  onSelect
+  onSelect,
+  className
 }: SidebarViewToggleProps): React.JSX.Element {
-  const activeIndex = Math.max(
-    0,
-    options.findIndex((option) => option.value === value)
-  )
-
   return (
     <div
       role="radiogroup"
       aria-label={ariaLabel}
-      className="relative inline-grid grid-cols-2 items-center rounded-lg border border-black/10 bg-black/[0.06] p-0.5 shadow-2xs dark:border-white/10 dark:bg-black/40"
+      className={cn(
+        'inline-flex shrink-0 items-center rounded-lg border border-black/10 bg-black/[0.06] p-0.5 shadow-2xs dark:border-white/10 dark:bg-black/40',
+        className
+      )}
     >
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-md border border-black/[0.06] bg-background shadow-xs transition-transform duration-200 ease-out motion-reduce:transition-none dark:border-white/10 dark:bg-worktree-sidebar-accent"
-        style={{ transform: `translateX(${activeIndex * 100}%)` }}
-      />
       {options.map((option) => {
         const active = option.value === value
         return (
@@ -50,10 +45,10 @@ export function SidebarViewToggle({
             data-sidebar-section-title={option.sectionTitle}
             onClick={() => onSelect(option.value)}
             className={cn(
-              'relative z-10 grid rounded-md px-2.5 py-0.5 text-xs outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring/50 motion-reduce:transition-none',
+              'relative grid grid-cols-1 rounded-md border px-2 py-0.5 text-center text-xs outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring/50 motion-reduce:transition-none',
               active
-                ? 'font-semibold text-foreground dark:text-worktree-sidebar-foreground'
-                : 'font-medium text-worktree-sidebar-foreground/65 hover:text-worktree-sidebar-foreground'
+                ? 'border-black/[0.06] bg-background font-semibold text-foreground shadow-xs dark:border-white/10 dark:bg-worktree-sidebar-accent dark:text-worktree-sidebar-foreground'
+                : 'border-transparent font-medium text-worktree-sidebar-foreground/65 hover:text-worktree-sidebar-foreground'
             )}
           >
             {(option.widthLabels ?? [option.label]).map((widthLabel) => (

@@ -167,7 +167,9 @@ export function usePersistedUIWriter(): void {
       // paths in agent-status.ts (close/dismiss) flow to disk through map identity changes.
       // Without persisting, agent rows that survive restart come back bold even when the
       // user had already visited them.
-      acknowledgedAgentsByPaneKey: s.acknowledgedAgentsByPaneKey
+      acknowledgedAgentsByPaneKey: s.acknowledgedAgentsByPaneKey,
+      // Why: "Clear completed" must survive restart, or cleared done/interrupted rows return.
+      activityClearedAtByPaneKey: s.activityClearedAtByPaneKey
     }))
   )
   useEffect(() => {

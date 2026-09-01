@@ -1,20 +1,9 @@
 import React from 'react'
-import { ChevronDown, MoreVertical } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import { AgentStateDot } from '@/components/AgentStateDot'
-import { Button } from '@/components/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
+import { useNow } from '@/hooks/use-now'
 import { cn } from '@/lib/utils'
 import { RepoBadgeMark } from '@/components/repo/RepoBadgeLabel'
 import type { Repo } from '../../../../shared/repo-types'
@@ -25,7 +14,9 @@ import {
   threadAgentState,
   threadAgentStateLabel
 } from './activity-thread-presentation'
-import type { ActivityGroupBy, ActivityThreadGroup, AgentPaneThread } from './activity-thread-types'
+import type { ActivityThreadGroup, AgentPaneThread } from './activity-thread-types'
+
+export { ActivityThreadOptionsMenu } from './activity-thread-options-menu'
 
 export function EventTime({
   timestamp,
@@ -34,6 +25,10 @@ export function EventTime({
   timestamp: number
   compact?: boolean
 }): React.JSX.Element {
+  // Why: rows reuse their identity across store writes, so this label can't rely on
+  // incidental re-renders to stay honest; the shared visibility-gated clock re-renders
+  // only this leaf (memo'd rows stay bailed out). 30s cadence matches WorktreeCardAgents.
+  const now = useNow(30_000)
   const absolute = formatAbsoluteDate(timestamp)
   return (
     <Tooltip>
@@ -47,143 +42,13 @@ export function EventTime({
           aria-label={absolute}
           onClick={(event) => event.stopPropagation()}
         >
-          {compact ? formatCompactRelativeTime(timestamp) : formatRelativeTime(timestamp)}
+          {compact ? formatCompactRelativeTime(timestamp, now) : formatRelativeTime(timestamp, now)}
         </button>
       </TooltipTrigger>
       <TooltipContent side="right" sideOffset={6}>
         {absolute}
       </TooltipContent>
     </Tooltip>
-  )
-}
-
-export function ActivityThreadOptionsMenu({
-  groupBy,
-  onGroupByChange,
-  compactMode,
-  showChildAgents = false,
-  hasUnreadThreads,
-  hasCompletedThreads = false,
-  onCompactModeChange,
-  onShowChildAgentsChange,
-  onMarkAllThreadsRead,
-  onClearCompleted
-}: {
-  groupBy?: ActivityGroupBy
-  onGroupByChange?: (groupBy: ActivityGroupBy) => void
-  compactMode: boolean
-  showChildAgents?: boolean
-  hasUnreadThreads: boolean
-  hasCompletedThreads?: boolean
-  onCompactModeChange: (compactMode: boolean) => void
-  onShowChildAgentsChange?: (showChildAgents: boolean) => void
-  onMarkAllThreadsRead: () => void
-  onClearCompleted?: () => void
-}): React.JSX.Element {
-  return (
-    <DropdownMenu>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          {/* Why: keep Tooltip and Dropdown from composing refs onto the same button (Radix setRef crash loop). */}
-          <span className="inline-flex shrink-0">
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="text-muted-foreground"
-                aria-label={translate(
-                  'auto.components.activity.ActivityPrototypePage.db8a1878b5',
-                  'Thread list options'
-                )}
-              >
-                <MoreVertical className="size-3.5" strokeWidth={2.25} />
-              </Button>
-            </DropdownMenuTrigger>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          {translate('auto.components.activity.ActivityPrototypePage.a472a14700', 'More options')}
-        </TooltipContent>
-      </Tooltip>
-      <DropdownMenuContent align="end" sideOffset={6}>
-        {groupBy && onGroupByChange ? (
-          <>
-            <DropdownMenuLabel>
-              {translate(
-                'auto.components.activity.ActivityPrototypePage.770d458144',
-                'Group agent activity by'
-              )}
-            </DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={groupBy}
-              onValueChange={(value) => onGroupByChange(value as ActivityGroupBy)}
-            >
-              <DropdownMenuRadioItem value="none">
-                {translate('auto.components.activity.ActivityPrototypePage.none', 'None')}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="status">
-                {translate('auto.components.activity.ActivityPrototypePage.4a3986b200', 'Status')}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="project">
-                {translate('auto.components.activity.ActivityPrototypePage.8c3b621ddf', 'Project')}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="worktree">
-                {translate('auto.components.activity.ActivityPrototypePage.b29191b3e0', 'Worktree')}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="agent">
-                {translate('auto.components.activity.ActivityPrototypePage.f6396e1f85', 'Agent')}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator />
-          </>
-        ) : null}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuCheckboxItem
-              checked={compactMode}
-              onCheckedChange={(checked) => onCompactModeChange(checked === true)}
-              onSelect={(event) => event.preventDefault()}
-            >
-              {translate(
-                'auto.components.activity.ActivityPrototypePage.f70e4bec47',
-                'Compact mode'
-              )}
-            </DropdownMenuCheckboxItem>
-          </TooltipTrigger>
-          <TooltipContent side="right" sideOffset={8}>
-            {translate(
-              'auto.components.activity.ActivityPrototypePage.compactModeDescription',
-              'Shows shorter thread rows with one-line titles and two-line status messages.'
-            )}
-          </TooltipContent>
-        </Tooltip>
-        {onShowChildAgentsChange ? (
-          <DropdownMenuCheckboxItem
-            checked={showChildAgents}
-            onCheckedChange={(checked) => onShowChildAgentsChange(checked === true)}
-            onSelect={(event) => event.preventDefault()}
-          >
-            {translate(
-              'auto.components.activity.ActivityPrototypePage.showChildAgents',
-              'Show child agents'
-            )}
-          </DropdownMenuCheckboxItem>
-        ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onMarkAllThreadsRead} disabled={!hasUnreadThreads}>
-          {translate('auto.components.activity.ActivityPrototypePage.023ff75afe', 'Mark all read')}
-        </DropdownMenuItem>
-        {onClearCompleted ? (
-          <DropdownMenuItem onSelect={onClearCompleted} disabled={!hasCompletedThreads}>
-            {translate(
-              'auto.components.activity.ActivityPrototypePage.clearCompleted',
-              'Clear completed'
-            )}
-          </DropdownMenuItem>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
   )
 }
 
@@ -242,11 +107,13 @@ export function ThreadAgentStateIndicator({
 export function ActivityStatusGroupHeader({
   group,
   collapsed = false,
-  onToggle
+  onToggle,
+  className
 }: {
   group: ActivityThreadGroup
   collapsed?: boolean
   onToggle?: () => void
+  className?: string
 }): React.JSX.Element {
   const isInteractive = Boolean(onToggle)
   return (
@@ -266,13 +133,14 @@ export function ActivityStatusGroupHeader({
           : undefined
       }
       className={cn(
-        'sticky top-0 z-10 flex h-7 items-center gap-1.5 bg-background/95 px-1.5 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/80 select-none',
-        isInteractive && 'cursor-pointer hover:bg-muted/40 transition-colors'
+        'group flex h-7 select-none items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground transition-colors',
+        isInteractive && 'cursor-pointer hover:bg-accent/60 hover:text-foreground',
+        className
       )}
     >
       <ChevronDown
         className={cn(
-          'size-3 shrink-0 text-muted-foreground/70 transition-transform duration-150',
+          'size-3 shrink-0 text-muted-foreground transition-transform duration-150 group-hover:text-foreground',
           collapsed && '-rotate-90'
         )}
       />
@@ -281,10 +149,10 @@ export function ActivityStatusGroupHeader({
           <AgentStateDot state={group.state} size="sm" />
         </span>
       ) : null}
-      <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
+      <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.05em] text-foreground/80 transition-colors group-hover:text-foreground">
         {group.label}
       </span>
-      <span className="rounded-full border border-border/60 bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">
+      <span className="rounded-full border border-border/80 bg-muted/80 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none text-foreground/80 shadow-2xs">
         {group.threads.length}
       </span>
     </div>

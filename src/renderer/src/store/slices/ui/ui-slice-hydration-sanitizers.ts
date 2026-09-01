@@ -91,7 +91,7 @@ export function sanitizePersistedSidebarWidth(
   return Math.min(maxWidth, Math.max(MIN_SIDEBAR_WIDTH, width))
 }
 
-export function sanitizeAcknowledgedAgentsByPaneKey(value: unknown): Record<string, number> {
+export function sanitizePaneKeyTimestampRecord(value: unknown): Record<string, number> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return {}
   }
@@ -108,6 +108,8 @@ export function sanitizeAcknowledgedAgentsByPaneKey(value: unknown): Record<stri
   }
   return out
 }
+
+export const sanitizeAcknowledgedAgentsByPaneKey = sanitizePaneKeyTimestampRecord
 
 export function sanitizeWorkspaceCleanupDismissals(
   value: unknown

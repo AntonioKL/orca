@@ -107,6 +107,24 @@ describe('ActivityStatusGroupHeader', () => {
     const header = container.querySelector('[role="button"]')
     expect(header?.getAttribute('aria-expanded')).toBe('false')
   })
+
+  it('supports custom className and uses accessible contrast tokens without hardcoded white background', () => {
+    act(() => {
+      root.render(
+        <TooltipProvider>
+          <ActivityStatusGroupHeader
+            group={mockGroup}
+            collapsed={false}
+            className="custom-header-class"
+          />
+        </TooltipProvider>
+      )
+    })
+
+    const header = container.querySelector('div')
+    expect(header?.className).toContain('custom-header-class')
+    expect(header?.className).not.toContain('bg-background/95')
+  })
 })
 
 describe('ActivityThreadListPane collapsible sections', () => {

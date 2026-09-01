@@ -120,6 +120,8 @@ export type PersistedUIState = {
   updateReassuranceSeen?: boolean
   /** Per-paneKey "row visited" timestamps that mute seen inline-agent rows; persisted because rows survive restart, else acked rows return bold. Renderer-owned via ui:set. */
   acknowledgedAgentsByPaneKey?: Record<string, number>
+  /** Per-paneKey "Clear completed" cutoffs hiding activity events stamped at or before the cutoff; persisted so cleared rows stay cleared across restart. Renderer-owned via ui:set. */
+  activityClearedAtByPaneKey?: Record<string, number>
   /** User-hidden setup-guide sidebar entry; a reversible declutter pref (Help menu stays available), not completion. */
   setupGuideSidebarDismissed?: boolean
   /** One-shot marker for the browser setup-guide milestone; profiles missing it are evaluated once in the renderer (completion needs runtime probes). */

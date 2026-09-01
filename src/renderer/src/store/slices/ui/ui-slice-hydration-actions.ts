@@ -47,6 +47,7 @@ import {
   hydrateTrustedOrcaHooks,
   normalizeHydratedVisibleWorkspaceHostIds,
   sanitizeAcknowledgedAgentsByPaneKey,
+  sanitizePaneKeyTimestampRecord,
   sanitizeHydratedActiveView,
   sanitizePersistedRepoIds,
   sanitizeShowDotfilesByWorktree,
@@ -265,6 +266,9 @@ export function createUiHydrationActions(set: UISliceSet, _get: UISliceGet): Par
           // Why: stale acks are inert (paneKey reuse beats them via stateStartedAt); sanitizer bounds growth past HYDRATE_MAX_AGE_MS.
           acknowledgedAgentsByPaneKey: sanitizeAcknowledgedAgentsByPaneKey(
             ui.acknowledgedAgentsByPaneKey
+          ),
+          activityClearedAtByPaneKey: sanitizePaneKeyTimestampRecord(
+            ui.activityClearedAtByPaneKey
           ),
           workspaceCleanupDismissals: sanitizeWorkspaceCleanupDismissals(
             ui.workspaceCleanup?.dismissals
