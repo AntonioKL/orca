@@ -212,9 +212,11 @@ let nativeReadGate: Promise<unknown> = Promise.resolve()
 function resetNativeReaderState(): void {
   nativeReaderEpoch += 1
   unreturnedReads.clear()
-  // The abandoned reader's outstanding call belongs to the old epoch; holding
-  // the gate for it would stall every read against the replacement.
-  nativeReadGate = Promise.resolve()
+  // Chain, never replace. Dropping the old chain lets a waiter still holding it
+  // run against a read queued on the new one -- two concurrent calls into one
+  // mock addon, which is precisely the coalescing these suites exist to catch.
+  // Every link settles within the deadline, so the wait this costs is bounded.
+  nativeReadGate = nativeReadGate.then(ignoreSettlement, ignoreSettlement)
 }
 
 /** A flag set and the row shape it can honestly produce. */

@@ -120,6 +120,35 @@ deadline stay **shared** and retention stays bounded at exactly one callback,
 not one per reader. Read ids are module-global and monotonic, so a late callback
 can only clear its own wedge.
 
+`resetNativeReaderState` **chains** onto the gate rather than replacing it. A
+replacement would let a waiter still holding the old chain run beside a read
+queued on the new one; every link settles within the deadline, so chaining costs
+a bounded wait and keeps the exclusion whole. That path is test-only, which is
+exactly why it matters — it would otherwise hand a suite two concurrent calls
+into its own mock, the condition these tests exist to detect.
+
+### Testing this module: assert a positive property, on the right mock
+
+Two defects have now shipped in this file's tests, both the same shape — a case
+that passed for a reason other than the one it claimed to check:
+
+1. A loader that built a **fresh mock per call**, so the coalescing it was meant
+   to reproduce could never happen.
+2. An identity-side assertion of only `!('command' in row)`, which a correctly
+   flagged read and a coalesced one satisfy equally, so the test would go green
+   on the very regression it guards.
+
+So: assert what each flag set **did** get, not only what it lacks — the identity
+set is checked on `creationTimeMs`, which is the field it exists to carry — and
+put those assertions in the helper both orderings run through, or the reverse
+order keeps the blind spot.
+
+And pick the mock to match the claim. The coalescing mock models the npm
+wrapper, whose own latch means it can never report more than one call in flight;
+concurrency has to be measured against the bare-addon mock, which has no queue
+and so makes re-entry observable. Measuring concurrency on the coalescing mock
+yields an assertion that holds whether or not this module excludes anything.
+
 With no native binding there is only one scan to run and it is the 1.4 s
 PowerShell one, so the identity view rides the detailed snapshot — projected
 through `toIdentityRow`, so an identity row carries no command line on any host.

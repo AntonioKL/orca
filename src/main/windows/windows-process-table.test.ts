@@ -58,7 +58,6 @@ function coalescingModule(): {
   getAllProcesses: (cb: (rows: NativeRow[] | undefined) => void, flags?: number) => void
 } {
   let requestInProgress = false
-  let outstanding = 0
   const queue: ((rows: NativeRow[]) => void)[] = []
   return {
     ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
@@ -69,14 +68,22 @@ function coalescingModule(): {
       }
       requestInProgress = true
       coalescingCalls.push({ flags: flags ?? 0 })
-      outstanding += 1
-      maxConcurrentNativeCalls = Math.max(maxConcurrentNativeCalls, outstanding)
-      // The rows the addon would produce for exactly these flags.
-      const rows: NativeRow[] = NATIVE.map((row) =>
-        ((flags ?? 0) & 2) === 0 ? { pid: row.pid, ppid: row.ppid, name: row.name } : row
-      )
+      // The rows the addon would produce for exactly these flags. Each field is
+      // gated on its OWN bit: reusing the CommandLine bit for both would strip
+      // creationTimeMs from an identity read that did request CreationTime, and
+      // no case could then tell a served-someone-else's-rows bug from a
+      // correctly-shaped cheap read.
+      const requested = flags ?? 0
+      const rows: NativeRow[] = NATIVE.map((row) => ({
+        pid: row.pid,
+        ppid: row.ppid,
+        name: row.name,
+        ...(requested & 2 && row.commandLine !== undefined ? { commandLine: row.commandLine } : {}),
+        ...(requested & 4 && row.creationTimeMs !== undefined
+          ? { creationTimeMs: row.creationTimeMs }
+          : {})
+      }))
       setTimeout(() => {
-        outstanding -= 1
         while (queue.length) {
           queue.splice(0).forEach((callback) => callback(rows))
         }
@@ -89,6 +96,33 @@ function coalescingModule(): {
 /** One instance for the whole test: the latch it models is module-global. */
 function installCoalescingModule(): void {
   const native = coalescingModule()
+  __setWindowsProcessTreeLoaderForTests(() => native)
+}
+
+/**
+ * The relay's bare addon: `adaptAddon` over `getProcessList`, with no queue of
+ * any kind. Two simultaneous `CreateToolhelp32Snapshot` calls are the crash the
+ * vendor's queue exists to prevent, so here re-entry is observable rather than
+ * silently absorbed.
+ *
+ * Concurrency has to be measured against this and never against the coalescing
+ * mock, whose own latch means it can only ever report one call in flight -- an
+ * assertion that holds whether or not this module excludes anything.
+ */
+function installBareAddonModule(): void {
+  let inFlight = 0
+  const native = {
+    ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
+    getAllProcesses: (cb: (rows: NativeRow[] | undefined) => void, flags?: number) => {
+      coalescingCalls.push({ flags: flags ?? 0 })
+      inFlight += 1
+      maxConcurrentNativeCalls = Math.max(maxConcurrentNativeCalls, inFlight)
+      setTimeout(() => {
+        inFlight -= 1
+        cb(NATIVE)
+      }, 0)
+    }
+  }
   __setWindowsProcessTreeLoaderForTests(() => native)
 }
 
@@ -175,12 +209,17 @@ describe('windows process table', () => {
     const [identityRows, detailedRows] = await Promise.all([identity, detailed])
     expect(detailedRows.some((row) => row.command === '"C:/a b/orca.exe" --x')).toBe(true)
     expect(identityRows.every((row) => !('command' in row))).toBe(true)
-    // Two calls, each with its own flags, and never two at once.
+    // Both sets carry what their own flags asked for. Without this, a reader
+    // handed the other's rows could still pass every assertion above.
+    expect(identityRows.map((row) => row.creationTimeMs)).toEqual([undefined, 1_700_000_000_000])
+    expect(detailedRows.map((row) => row.creationTimeMs)).toEqual([undefined, 1_700_000_000_000])
+    // Two calls, each with its own flags. Concurrency is asserted separately,
+    // against the bare addon: this mock's own latch means it could never report
+    // more than one call in flight, whatever this module did.
     expect(coalescingCalls.map((call) => call.flags).sort()).toEqual([
       IDENTITY_FLAGS,
       DETAILED_FLAGS
     ])
-    expect(maxConcurrentNativeCalls).toBe(1)
   }
 
   it('gives each flag set its own data when the identity read is issued first', async () => {
@@ -195,6 +234,42 @@ describe('windows process table', () => {
     const detailed = readWindowsProcessTableFresh()
     const identity = readWindowsProcessIdentityTableFresh()
     await expectEachViewGotItsOwnFlags(identity, detailed)
+  })
+
+  /** Microtasks only: the mocks call back on a timer, so nothing completes. */
+  async function parkPendingReadsOnTheGate(): Promise<void> {
+    for (let tick = 0; tick < 20; tick += 1) {
+      await Promise.resolve()
+    }
+  }
+
+  it('never re-enters the bare relay addon when both flag sets overlap', async () => {
+    installBareAddonModule()
+    const detailed = readWindowsProcessTableFresh()
+    const identity = readWindowsProcessIdentityTableFresh()
+    await Promise.all([detailed, identity])
+    expect(coalescingCalls.map((call) => call.flags).sort()).toEqual([
+      IDENTITY_FLAGS,
+      DETAILED_FLAGS
+    ])
+    expect(maxConcurrentNativeCalls).toBe(1)
+  })
+
+  it('keeps one read in flight across a test reset', async () => {
+    // Replacing the gate rather than chaining onto it lets a waiter still
+    // holding the old chain run beside a read queued on the new one. Reachable
+    // only from the test hooks -- which is the problem: it hands a suite two
+    // concurrent calls into its own mock, the exact condition the cases above
+    // exist to detect.
+    installBareAddonModule()
+    const inFlight = readWindowsProcessTableFresh()
+    const waiter = readWindowsProcessIdentityTableFresh()
+    await parkPendingReadsOnTheGate()
+    resetWindowsProcessTableForTests()
+    const afterReset = readWindowsProcessTableFresh()
+
+    await Promise.allSettled([inFlight, waiter, afterReset])
+    expect(maxConcurrentNativeCalls).toBe(1)
   })
 
   it('does not serve one flag set from the other cache', async () => {
