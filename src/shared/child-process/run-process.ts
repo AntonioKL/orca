@@ -6,6 +6,7 @@ import {
   type SpawnOptions as NodeSpawnOptions
 } from 'node:child_process'
 import { buildWindowsCmdShimCommandLine, isCmdInterpretedProgram } from './windows-command-line'
+import { resolveWindowsCmdShim } from './windows-cmd-shim-resolution'
 import { forceTerminateProcessTree, signalProcessTree } from './process-tree-termination'
 
 import { createOutputSink } from './bounded-output-sink'
@@ -74,6 +75,21 @@ export function resolveSpawn(spec: ProcessSpec, platform: NodeJS.Platform): Reso
 
   if (platform !== 'win32' || !isCmdInterpretedProgram(spec.program)) {
     return { file: spec.program, args, options: base }
+  }
+
+  // An npm/pnpm shim is a generated file that only locates node and runs a
+  // script, so reading it lets us spawn that program directly. That drops
+  // cmd.exe from the tree — which is what Defender scores as obfuscation once
+  // the caret-escaped payload is agent prompt text — and lifts cmd's ban on
+  // arguments containing a line break. Unrecognised shims resolve to null and
+  // keep the cmd.exe path below.
+  const shim = resolveWindowsCmdShim(spec.program, spec.env ?? process.env)
+  if (shim) {
+    return {
+      file: shim.program,
+      args: [...shim.prefixArgs, ...args],
+      options: shim.env ? { ...base, env: shim.env } : base
+    }
   }
 
   // Node refuses to spawn `.cmd`/`.bat` without a shell (EINVAL, the
