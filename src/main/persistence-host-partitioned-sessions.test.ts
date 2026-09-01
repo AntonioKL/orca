@@ -449,7 +449,32 @@ describe('Store host-partitioned workspace sessions', () => {
     ).toBeNull()
   })
 
-  it('clears expired SSH PTY bindings from the SSH partition and legacy local copy', async () => {
+  it('clears terminated SSH PTY bindings from the SSH partition and legacy local copy', async () => {
+    const store = await createStore()
+    const ptyId = 'ssh:ssh-1@@remote-pty'
+    store.setWorkspaceSession(makeBoundHostSession(ptyId), 'local')
+    store.setWorkspaceSession(makeBoundHostSession(ptyId), 'ssh:ssh-1')
+    store.upsertSshRemotePtyLease({
+      targetId: 'ssh-1',
+      ptyId: 'remote-pty',
+      worktreeId: 'repo-1::/worktree',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+
+    store.markSshRemotePtyLease('ssh-1', ptyId, 'terminated')
+
+    for (const hostId of ['local', 'ssh:ssh-1']) {
+      const session = store.getWorkspaceSession(hostId)
+      expect(session.tabsByWorktree['repo-1::/worktree'][0]?.ptyId).toBeNull()
+      expect(session.terminalLayoutsByTabId['tab-1']?.ptyIdsByLeafId).toEqual({})
+    }
+  })
+
+  // `expired` only records that the client lost its route, so both partitions keep the binding the
+  // pane needs to reattach to a remote shell nothing has attested is dead.
+  it('keeps expired SSH PTY bindings in the SSH partition and legacy local copy', async () => {
     const store = await createStore()
     const ptyId = 'ssh:ssh-1@@remote-pty'
     store.setWorkspaceSession(makeBoundHostSession(ptyId), 'local')
@@ -467,8 +492,10 @@ describe('Store host-partitioned workspace sessions', () => {
 
     for (const hostId of ['local', 'ssh:ssh-1']) {
       const session = store.getWorkspaceSession(hostId)
-      expect(session.tabsByWorktree['repo-1::/worktree'][0]?.ptyId).toBeNull()
-      expect(session.terminalLayoutsByTabId['tab-1']?.ptyIdsByLeafId).toEqual({})
+      expect(session.tabsByWorktree['repo-1::/worktree'][0]?.ptyId).toBe(ptyId)
+      expect(session.terminalLayoutsByTabId['tab-1']?.ptyIdsByLeafId).toEqual({
+        [TEST_LEAF_1]: ptyId
+      })
     }
   })
 
