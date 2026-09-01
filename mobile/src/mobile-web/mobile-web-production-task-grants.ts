@@ -1,284 +1,68 @@
-import type { MobileWebOperationGrant } from './mobile-web-production-grants'
+import { capabilityGrants, grantLimits } from './mobile-web-production-grant-table'
 
-export const MOBILE_WEB_PRODUCTION_TASK_GRANTS = [
-  {
-    capability: 'task',
-    operation: 'bootstrap',
-    limits: {
-      maxRequestBytes: 256,
-      maxResponseBytes: 128 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 4,
-      rateRefillPerSecond: 1
-    }
-  },
-  {
-    capability: 'task',
-    operation: 'repositories',
-    limits: {
-      maxRequestBytes: 256,
-      maxResponseBytes: 192 * 1024,
-      maxConcurrent: 2,
-      rateCapacity: 6,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'task',
-    operation: 'linearContext',
-    limits: {
-      maxRequestBytes: 256,
-      maxResponseBytes: 192 * 1024,
-      maxConcurrent: 2,
-      rateCapacity: 6,
-      rateRefillPerSecond: 1
-    }
-  },
-  {
-    capability: 'task',
-    operation: 'resolveRepoSlug',
-    limits: {
-      maxRequestBytes: 1024,
-      maxResponseBytes: 1024,
-      maxConcurrent: 4,
-      rateCapacity: 20,
-      rateRefillPerSecond: 5
-    }
-  },
-  {
-    capability: 'task',
-    operation: 'updateResume',
-    limits: {
-      maxRequestBytes: 64 * 1024,
-      maxResponseBytes: 256,
-      maxConcurrent: 1,
-      rateCapacity: 20,
-      rateRefillPerSecond: 5
-    }
-  },
-  {
-    capability: 'task',
-    operation: 'updateSettings',
-    limits: {
-      maxRequestBytes: 64 * 1024,
-      maxResponseBytes: 256,
-      maxConcurrent: 1,
-      rateCapacity: 20,
-      rateRefillPerSecond: 5
-    }
-  },
-  ...['listGitHub', 'listGitLab', 'listGitLabTodos', 'listLinear'].map(
-    (operation) =>
-      ({
-        capability: 'task',
-        operation,
-        limits: {
-          maxRequestBytes: 4 * 1024,
-          maxResponseBytes: 192 * 1024,
-          maxConcurrent: 4,
-          rateCapacity: 20,
-          rateRefillPerSecond: 5
-        }
-      }) as MobileWebOperationGrant
-  ),
-  {
-    capability: 'task',
-    operation: 'countGitHub',
-    limits: {
-      maxRequestBytes: 4 * 1024,
-      maxResponseBytes: 256,
-      maxConcurrent: 4,
-      rateCapacity: 20,
-      rateRefillPerSecond: 5
-    }
-  },
-  ...[
-    'listGitHubLabels',
-    'listGitHubAssignableUsers',
-    'loadGitHubDetail',
-    'loadGitLabDetail',
-    'loadLinearDetail'
-  ].map(
-    (operation) =>
-      ({
-        capability: 'task',
-        operation,
-        limits: {
-          maxRequestBytes: 4 * 1024,
-          maxResponseBytes: 256 * 1024,
-          maxConcurrent: 4,
-          rateCapacity: 20,
-          rateRefillPerSecond: 5
-        }
-      }) as MobileWebOperationGrant
-  ),
-  ...['listProjects', 'listProjectViews', 'resolveProjectRef'].map(
-    (operation) =>
-      ({
-        capability: 'task',
-        operation,
-        limits: {
-          maxRequestBytes: 8 * 1024,
-          maxResponseBytes: 192 * 1024,
-          maxConcurrent: 2,
-          rateCapacity: 8,
-          rateRefillPerSecond: 2
-        }
-      }) as MobileWebOperationGrant
-  ),
-  {
-    capability: 'task',
-    operation: 'projectTable',
-    limits: {
-      maxRequestBytes: 8 * 1024,
-      maxResponseBytes: 192 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 12,
-      rateRefillPerSecond: 3
-    }
-  },
-  ...[
-    'projectItemDetail',
-    'projectItemLabels',
-    'projectItemAssignableUsers',
-    'projectIssueTypes'
-  ].map(
-    (operation) =>
-      ({
-        capability: 'task',
-        operation,
-        limits: {
-          maxRequestBytes: 8 * 1024,
-          maxResponseBytes: 256 * 1024,
-          maxConcurrent: 4,
-          rateCapacity: 20,
-          rateRefillPerSecond: 5
-        }
-      }) as MobileWebOperationGrant
-  ),
-  ...[
-    'updateProjectItem',
-    'addProjectComment',
-    'updateProjectComment',
-    'deleteProjectComment',
-    'updateProjectMetadata',
-    'updateProjectField',
-    'updateProjectIssueType',
-    'resolveProjectReviewThread',
-    'replyProjectReviewComment',
-    'addProjectConversationComment',
-    'requestProjectReviewers',
-    'rerunProjectChecks',
-    'mergeProjectPullRequest'
-  ].map(
-    (operation) =>
-      ({
-        capability: 'task',
-        operation,
-        limits: {
-          maxRequestBytes: 72 * 1024,
-          maxResponseBytes: 72 * 1024,
-          maxConcurrent: 1,
-          rateCapacity: 12,
-          rateRefillPerSecond: 3
-        }
-      }) as MobileWebOperationGrant
-  ),
-  ...[
-    'refreshProjectChecks',
-    'setProjectFileViewed',
-    'loadProjectFileContents',
-    'addProjectInlineComment'
-  ].map(
-    (operation) =>
-      ({
-        capability: 'task',
-        operation,
-        limits: {
-          maxRequestBytes: 72 * 1024,
-          maxResponseBytes: 600 * 1024,
-          maxConcurrent: 1,
-          rateCapacity: 12,
-          rateRefillPerSecond: 3
-        }
-      }) as MobileWebOperationGrant
-  ),
-  ...[
-    'updateHostedTaskStatus',
-    'updateHostedTaskMetadata',
-    'addHostedTaskComment',
-    'requestHostedTaskReviewers',
-    'resolveHostedTaskReviewThread',
-    'replyHostedTaskReviewComment',
-    'mergeHostedTaskReview'
-  ].map(
-    (operation) =>
-      ({
-        capability: 'task',
-        operation,
-        limits: {
-          maxRequestBytes: 72 * 1024,
-          maxResponseBytes: 256,
-          maxConcurrent: 1,
-          rateCapacity: 12,
-          rateRefillPerSecond: 3
-        }
-      }) as MobileWebOperationGrant
-  ),
-  ...[
-    'refreshHostedTaskChecks',
-    'rerunHostedTaskChecks',
-    'setHostedTaskFileViewed',
-    'addHostedTaskInlineComment'
-  ].map(
-    (operation) =>
-      ({
-        capability: 'task',
-        operation,
-        limits: {
-          maxRequestBytes: 72 * 1024,
-          maxResponseBytes: 72 * 1024,
-          maxConcurrent: 1,
-          rateCapacity: 12,
-          rateRefillPerSecond: 3
-        }
-      }) as MobileWebOperationGrant
-  ),
-  {
-    capability: 'task',
-    operation: 'loadHostedTaskFileContents',
-    limits: {
-      maxRequestBytes: 8 * 1024,
-      maxResponseBytes: 600 * 1024,
-      maxConcurrent: 1,
-      rateCapacity: 12,
-      rateRefillPerSecond: 3
-    }
-  },
-  ...[
-    'connectLinear',
-    'listLinearTeams',
-    'listLinearTeamStates',
-    'selectLinearWorkspace',
-    'updateLinearIssueState',
-    'addLinearIssueComment',
-    'loadLinearIssue',
-    'createLinearSubIssue',
-    'createLinearIssue',
-    'createProviderIssue',
-    'updateIssueSource'
-  ].map(
-    (operation) =>
-      ({
-        capability: 'task',
-        operation,
-        limits: {
-          maxRequestBytes: 72 * 1024,
-          maxResponseBytes: 192 * 1024,
-          maxConcurrent: 1,
-          rateCapacity: 12,
-          rateRefillPerSecond: 3
-        }
-      }) as MobileWebOperationGrant
-  )
-] as const satisfies readonly MobileWebOperationGrant[]
+export const MOBILE_WEB_PRODUCTION_TASK_GRANTS = capabilityGrants('task', {
+  bootstrap: grantLimits(256, 128 * 1024, 1, 4, 1),
+  repositories: grantLimits(256, 192 * 1024, 2, 6, 2),
+  linearContext: grantLimits(256, 192 * 1024, 2, 6, 1),
+  resolveRepoSlug: grantLimits(1 * 1024, 1 * 1024, 4, 20, 5),
+  updateResume: grantLimits(64 * 1024, 256, 1, 20, 5),
+  updateSettings: grantLimits(64 * 1024, 256, 1, 20, 5),
+  listGitHub: grantLimits(4 * 1024, 192 * 1024, 4, 20, 5),
+  listGitLab: grantLimits(4 * 1024, 192 * 1024, 4, 20, 5),
+  listGitLabTodos: grantLimits(4 * 1024, 192 * 1024, 4, 20, 5),
+  listLinear: grantLimits(4 * 1024, 192 * 1024, 4, 20, 5),
+  countGitHub: grantLimits(4 * 1024, 256, 4, 20, 5),
+  listGitHubLabels: grantLimits(4 * 1024, 256 * 1024, 4, 20, 5),
+  listGitHubAssignableUsers: grantLimits(4 * 1024, 256 * 1024, 4, 20, 5),
+  loadGitHubDetail: grantLimits(4 * 1024, 256 * 1024, 4, 20, 5),
+  loadGitLabDetail: grantLimits(4 * 1024, 256 * 1024, 4, 20, 5),
+  loadLinearDetail: grantLimits(4 * 1024, 256 * 1024, 4, 20, 5),
+  listProjects: grantLimits(8 * 1024, 192 * 1024, 2, 8, 2),
+  listProjectViews: grantLimits(8 * 1024, 192 * 1024, 2, 8, 2),
+  resolveProjectRef: grantLimits(8 * 1024, 192 * 1024, 2, 8, 2),
+  projectTable: grantLimits(8 * 1024, 192 * 1024, 1, 12, 3),
+  projectItemDetail: grantLimits(8 * 1024, 256 * 1024, 4, 20, 5),
+  projectItemLabels: grantLimits(8 * 1024, 256 * 1024, 4, 20, 5),
+  projectItemAssignableUsers: grantLimits(8 * 1024, 256 * 1024, 4, 20, 5),
+  projectIssueTypes: grantLimits(8 * 1024, 256 * 1024, 4, 20, 5),
+  updateProjectItem: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  addProjectComment: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  updateProjectComment: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  deleteProjectComment: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  updateProjectMetadata: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  updateProjectField: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  updateProjectIssueType: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  resolveProjectReviewThread: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  replyProjectReviewComment: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  addProjectConversationComment: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  requestProjectReviewers: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  rerunProjectChecks: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  mergeProjectPullRequest: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  refreshProjectChecks: grantLimits(72 * 1024, 600 * 1024, 1, 12, 3),
+  setProjectFileViewed: grantLimits(72 * 1024, 600 * 1024, 1, 12, 3),
+  loadProjectFileContents: grantLimits(72 * 1024, 600 * 1024, 1, 12, 3),
+  addProjectInlineComment: grantLimits(72 * 1024, 600 * 1024, 1, 12, 3),
+  updateHostedTaskStatus: grantLimits(72 * 1024, 256, 1, 12, 3),
+  updateHostedTaskMetadata: grantLimits(72 * 1024, 256, 1, 12, 3),
+  addHostedTaskComment: grantLimits(72 * 1024, 256, 1, 12, 3),
+  requestHostedTaskReviewers: grantLimits(72 * 1024, 256, 1, 12, 3),
+  resolveHostedTaskReviewThread: grantLimits(72 * 1024, 256, 1, 12, 3),
+  replyHostedTaskReviewComment: grantLimits(72 * 1024, 256, 1, 12, 3),
+  mergeHostedTaskReview: grantLimits(72 * 1024, 256, 1, 12, 3),
+  refreshHostedTaskChecks: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  rerunHostedTaskChecks: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  setHostedTaskFileViewed: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  addHostedTaskInlineComment: grantLimits(72 * 1024, 72 * 1024, 1, 12, 3),
+  loadHostedTaskFileContents: grantLimits(8 * 1024, 600 * 1024, 1, 12, 3),
+  connectLinear: grantLimits(72 * 1024, 192 * 1024, 1, 12, 3),
+  listLinearTeams: grantLimits(72 * 1024, 192 * 1024, 1, 12, 3),
+  listLinearTeamStates: grantLimits(72 * 1024, 192 * 1024, 1, 12, 3),
+  selectLinearWorkspace: grantLimits(72 * 1024, 192 * 1024, 1, 12, 3),
+  updateLinearIssueState: grantLimits(72 * 1024, 192 * 1024, 1, 12, 3),
+  addLinearIssueComment: grantLimits(72 * 1024, 192 * 1024, 1, 12, 3),
+  loadLinearIssue: grantLimits(72 * 1024, 192 * 1024, 1, 12, 3),
+  createLinearSubIssue: grantLimits(72 * 1024, 192 * 1024, 1, 12, 3),
+  createLinearIssue: grantLimits(72 * 1024, 192 * 1024, 1, 12, 3),
+  createProviderIssue: grantLimits(72 * 1024, 192 * 1024, 1, 12, 3),
+  updateIssueSource: grantLimits(72 * 1024, 192 * 1024, 1, 12, 3)
+})

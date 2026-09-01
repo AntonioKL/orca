@@ -1,83 +1,22 @@
-import { MOBILE_WEB_BRIDGE_MAX_OPERATION_BYTES } from '../../../src/shared/mobile-web/bridge-limits'
+import { MOBILE_WEB_BRIDGE_MAX_OPERATION_BYTES } from '../../../src/shared/mobile-web/bridge-contract'
 import { MOBILE_WEB_DIFF_LINE_MAX_CHARACTERS } from '../../../src/shared/mobile-web/source-control-operation-contract'
-import type { MobileWebOperationGrant } from './mobile-web-production-grants'
+import { capabilityGrants, grantLimits } from './mobile-web-production-grant-table'
 
-export const MOBILE_WEB_PRODUCTION_SOURCE_CONTROL_REVIEW_GRANTS = [
+export const MOBILE_WEB_PRODUCTION_SOURCE_CONTROL_REVIEW_GRANTS = capabilityGrants(
+  'sourceControl',
   {
-    capability: 'sourceControl',
-    operation: 'reviewMetadata',
-    limits: {
-      maxRequestBytes: 2048,
-      maxResponseBytes: MOBILE_WEB_BRIDGE_MAX_OPERATION_BYTES,
-      maxConcurrent: 2,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'reviewMetadataUpdate',
-    limits: {
-      maxRequestBytes: MOBILE_WEB_BRIDGE_MAX_OPERATION_BYTES,
-      maxResponseBytes: MOBILE_WEB_BRIDGE_MAX_OPERATION_BYTES,
-      maxConcurrent: 1,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'reviewLink',
-    limits: {
-      maxRequestBytes: 2048,
-      maxResponseBytes: 2048,
-      maxConcurrent: 2,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'reviewLinkUpdate',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: 2048,
-      maxConcurrent: 1,
-      rateCapacity: 4,
-      rateRefillPerSecond: 1
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'reviewDiff',
-    limits: {
-      maxRequestBytes: 8192,
-      maxResponseBytes: 192 * 1024 + MOBILE_WEB_DIFF_LINE_MAX_CHARACTERS,
-      maxConcurrent: 2,
-      rateCapacity: 12,
-      rateRefillPerSecond: 3
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'reviewOpen',
-    limits: {
-      maxRequestBytes: 4096,
-      maxResponseBytes: 256,
-      maxConcurrent: 1,
-      rateCapacity: 8,
-      rateRefillPerSecond: 2
-    }
-  },
-  {
-    capability: 'sourceControl',
-    operation: 'reviewTerminalSend',
-    limits: {
-      maxRequestBytes: 128 * 1024,
-      maxResponseBytes: 256,
-      maxConcurrent: 1,
-      rateCapacity: 4,
-      rateRefillPerSecond: 1
-    }
+    reviewMetadata: grantLimits(2 * 1024, MOBILE_WEB_BRIDGE_MAX_OPERATION_BYTES, 2, 8, 2),
+    reviewMetadataUpdate: grantLimits(
+      MOBILE_WEB_BRIDGE_MAX_OPERATION_BYTES,
+      MOBILE_WEB_BRIDGE_MAX_OPERATION_BYTES,
+      1,
+      8,
+      2
+    ),
+    reviewLink: grantLimits(2 * 1024, 2 * 1024, 2, 8, 2),
+    reviewLinkUpdate: grantLimits(4 * 1024, 2 * 1024, 1, 4, 1),
+    reviewDiff: grantLimits(8 * 1024, 192 * 1024 + MOBILE_WEB_DIFF_LINE_MAX_CHARACTERS, 2, 12, 3),
+    reviewOpen: grantLimits(4 * 1024, 256, 1, 8, 2),
+    reviewTerminalSend: grantLimits(128 * 1024, 256, 1, 4, 1)
   }
-] as const satisfies readonly MobileWebOperationGrant[]
+)

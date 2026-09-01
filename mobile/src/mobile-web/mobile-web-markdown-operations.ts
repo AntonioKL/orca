@@ -20,7 +20,10 @@ import type { RpcClient } from '../transport/rpc-client'
 import type { RpcFailure } from '../transport/types'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 import type { MobileWebNativeCapabilityAuthority } from './mobile-web-native-capability-authority'
-import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
+import type {
+  MobileWebHostWorkspaceId,
+  MobileWebWorkspaceAuthority
+} from './mobile-web-workspace-authority'
 
 type MarkdownOperationArgs = {
   operation: string
@@ -102,7 +105,7 @@ export async function executeMobileWebMarkdownOperation(
 async function verifyMarkdownTarget(
   args: MarkdownOperationArgs,
   target: MarkdownTarget
-): Promise<string> {
+): Promise<MobileWebHostWorkspaceId> {
   const hostWorkspaceId = args.workspaceAuthority.hostWorkspaceId(target.workspaceId)
   const response = await args.client.sendRequest('session.tabs.list', {
     worktree: `id:${hostWorkspaceId}`

@@ -1,4 +1,7 @@
-import { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
+import {
+  mobileWebHostWorkspaceIdFromHost,
+  MobileWebWorkspaceAuthority
+} from './mobile-web-workspace-authority'
 
 export function createMobileWebWorkspaceAuthorityFixture(
   pageWorkspaceId = 'workspace-1',
@@ -12,7 +15,7 @@ export function createMobileWebWorkspaceAuthorityFixture(
       if (candidate !== pageWorkspaceId) {
         throw new Error('not_found')
       }
-      return hostWorkspaceId
+      return mobileWebHostWorkspaceIdFromHost(hostWorkspaceId)
     }
   }
   return authority

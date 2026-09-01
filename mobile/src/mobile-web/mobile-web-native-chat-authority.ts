@@ -1,8 +1,9 @@
+import type { MobileWebHostWorkspaceId } from './mobile-web-workspace-authority'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 import { MOBILE_WEB_NATIVE_CHAT_IMAGE_LIMIT } from '../../../src/shared/mobile-web/native-chat-operation-contract'
 
 export type MobileWebHostNativeChatBinding = {
-  hostWorkspaceId: string
+  hostWorkspaceId: MobileWebHostWorkspaceId
   hostTabId: string
   hostTerminalId: string | null
   agent: string

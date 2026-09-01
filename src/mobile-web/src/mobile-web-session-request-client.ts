@@ -43,6 +43,7 @@ import {
   type MobileWebQuickCommandSnapshotResult
 } from '../../shared/mobile-web/session-quick-command-contract'
 import { MobileWebBridgeClientError } from './mobile-web-bridge-client-error'
+import { requireEchoedWorkspaceId } from './mobile-web-result-echo'
 import type { MobileWebOneShotRequestClient } from './mobile-web-one-shot-request-client'
 
 export class MobileWebSessionRequestClient {
@@ -79,7 +80,7 @@ export class MobileWebSessionRequestClient {
         MobileWebSessionSnapshotPayloadSchema,
         MobileWebSessionSnapshotResultSchema
       )
-      .then((result) => matchingWorkspace(payload, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   activate(payload: MobileWebSessionTabActionPayload): Promise<MobileWebSessionSnapshotResult> {
@@ -92,7 +93,7 @@ export class MobileWebSessionRequestClient {
         MobileWebSessionSnapshotResultSchema
       )
       .then((result) => {
-        matchingWorkspace(payload, result)
+        requireEchoedWorkspaceId(payload.workspaceId, result)
         if (result.activeTabId !== payload.tabId) {
           throw new MobileWebBridgeClientError('invalid_message', false)
         }
@@ -109,7 +110,7 @@ export class MobileWebSessionRequestClient {
         MobileWebSessionCreatePayloadSchema,
         MobileWebSessionCreateResultSchema
       )
-      .then((result) => matchingWorkspace(payload, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   agentOptions(
@@ -133,7 +134,7 @@ export class MobileWebSessionRequestClient {
         MobileWebSessionCreateAgentPayloadSchema,
         MobileWebSessionCreateResultSchema
       )
-      .then((result) => matchingWorkspace(payload, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   quickCommands(
@@ -171,7 +172,7 @@ export class MobileWebSessionRequestClient {
         MobileWebQuickCommandLaunchPayloadSchema,
         MobileWebQuickCommandLaunchResultSchema
       )
-      .then((result) => matchingWorkspace(payload, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   createBrowser(
@@ -185,7 +186,7 @@ export class MobileWebSessionRequestClient {
         MobileWebSessionBrowserCreatePayloadSchema,
         MobileWebSessionBrowserCreateResultSchema
       )
-      .then((result) => matchingWorkspace(payload, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   close(payload: MobileWebSessionTabActionPayload): Promise<MobileWebSessionCloseResult> {
@@ -198,21 +199,11 @@ export class MobileWebSessionRequestClient {
         MobileWebSessionCloseResultSchema
       )
       .then((result) => {
-        matchingWorkspace(payload, result)
+        requireEchoedWorkspaceId(payload.workspaceId, result)
         if (result.tabId !== payload.tabId) {
           throw new MobileWebBridgeClientError('invalid_message', false)
         }
         return result
       })
   }
-}
-
-function matchingWorkspace<TResult extends { workspaceId: string }>(
-  payload: { workspaceId: string },
-  result: TResult
-): TResult {
-  if (result.workspaceId !== payload.workspaceId) {
-    throw new MobileWebBridgeClientError('invalid_message', false)
-  }
-  return result
 }

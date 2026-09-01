@@ -13,7 +13,10 @@ import { normalizeWorkspaceAgent } from '../tasks/workspace-agent-selection'
 import { nativeHostWorkspaceCreationOperations } from '../worktree/native-host-workspace-creation-operations'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 import { requireRecentUserGesture } from './mobile-web-user-gesture-requirement'
-import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
+import {
+  mobileWebHostRepoIdFromHost,
+  type MobileWebWorkspaceAuthority
+} from './mobile-web-workspace-authority'
 
 export async function executeMobileWebWorkspaceCreationCreateOperation(args: {
   operation: string
@@ -73,7 +76,10 @@ function assertSelectionRepoBinding(
     ) {
       throw new MobileWebBrokerError('conflict')
     }
-    authority.assertHostRepoBinding(pageSelection.item.repoId, hostSelection.item.repoId)
+    authority.assertHostRepoBinding(
+      pageSelection.item.repoId,
+      mobileWebHostRepoIdFromHost(hostSelection.item.repoId)
+    )
   }
 }
 

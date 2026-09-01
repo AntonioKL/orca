@@ -53,6 +53,7 @@ import {
   type MobileWebSourceControlStatusResult
 } from '../../shared/mobile-web/source-control-operation-contract'
 import { MobileWebBridgeClientError } from './mobile-web-bridge-client-error'
+import { requireEchoedWorkspaceId } from './mobile-web-result-echo'
 import type { MobileWebBridgeRequestOptions } from './mobile-web-bridge-request-state'
 import type { MobileWebOneShotRequestClient } from './mobile-web-one-shot-request-client'
 
@@ -76,7 +77,7 @@ export class MobileWebSourceControlRequestClient {
         if (result.entries.length > payload.limit) {
           throw new MobileWebBridgeClientError('invalid_message', false)
         }
-        return matchingIdentity(payload, result)
+        return requireEchoedWorkspaceId(payload.workspaceId, result)
       })
   }
 
@@ -105,7 +106,7 @@ export class MobileWebSourceControlRequestClient {
         ) {
           throw new MobileWebBridgeClientError('invalid_message', false)
         }
-        return matchingIdentity(payload, result)
+        return requireEchoedWorkspaceId(payload.workspaceId, result)
       })
   }
 
@@ -122,7 +123,7 @@ export class MobileWebSourceControlRequestClient {
         MobileWebSourceControlBranchesResultSchema,
         options
       )
-      .then((result) => matchingIdentity(payload, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   history(
@@ -142,7 +143,7 @@ export class MobileWebSourceControlRequestClient {
         if (result.limit !== payload.limit || result.items.length > payload.limit) {
           throw new MobileWebBridgeClientError('invalid_message', false)
         }
-        return matchingIdentity(payload, result)
+        return requireEchoedWorkspaceId(payload.workspaceId, result)
       })
   }
 
@@ -168,7 +169,7 @@ export class MobileWebSourceControlRequestClient {
         ) {
           throw new MobileWebBridgeClientError('invalid_message', false)
         }
-        return matchingIdentity(payload, result)
+        return requireEchoedWorkspaceId(payload.workspaceId, result)
       })
   }
 
@@ -189,7 +190,7 @@ export class MobileWebSourceControlRequestClient {
         if (result.commitId !== payload.commitId) {
           throw new MobileWebBridgeClientError('invalid_message', false)
         }
-        return matchingIdentity(payload, result)
+        return requireEchoedWorkspaceId(payload.workspaceId, result)
       })
   }
 
@@ -259,7 +260,7 @@ export class MobileWebSourceControlRequestClient {
         MobileWebSourceControlCancelCommitMessageResultSchema,
         options
       )
-      .then((result) => matchingIdentity(payload, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   private mutation<TPayload extends { workspaceId: string; entries: { relativePath: string }[] }>(
@@ -278,7 +279,7 @@ export class MobileWebSourceControlRequestClient {
         options
       )
       .then((result) => {
-        matchingIdentity(payload, result)
+        requireEchoedWorkspaceId(payload.workspaceId, result)
         const expectedPaths = payload.entries.map((entry) => entry.relativePath)
         if (
           result.operation !== operation ||
@@ -299,15 +300,5 @@ function matchingCommitIdentity<
   if (result.previousHead !== payload.expectedHead) {
     throw new MobileWebBridgeClientError('invalid_message', false)
   }
-  return matchingIdentity(payload, result)
-}
-
-function matchingIdentity<
-  TPayload extends { workspaceId: string },
-  TResult extends { workspaceId: string }
->(payload: TPayload, result: TResult): TResult {
-  if (result.workspaceId !== payload.workspaceId) {
-    throw new MobileWebBridgeClientError('invalid_message', false)
-  }
-  return result
+  return requireEchoedWorkspaceId(payload.workspaceId, result)
 }

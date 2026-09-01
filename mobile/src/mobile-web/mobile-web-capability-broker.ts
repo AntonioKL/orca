@@ -12,7 +12,7 @@ import {
 import { MobileWebOperationRateLimiter } from './mobile-web-operation-rate-limiter'
 import { MobileWebCommitMessageGeneration } from './mobile-web-commit-message-generation'
 import { MobileWebCapabilitySubscriptions } from './mobile-web-capability-subscriptions'
-import { MOBILE_WEB_PRODUCTION_GRANTS } from './mobile-web-production-grants'
+import { MOBILE_WEB_PRODUCTION_GRANT_INDEX } from './mobile-web-production-grants'
 import { MobileWebTerminalStreams } from './mobile-web-terminal-streams'
 import { MobileWebSpeechAuthority } from './mobile-web-speech-authority'
 import { executeMobileWebCapabilityRequest } from './mobile-web-capability-execution'
@@ -152,9 +152,7 @@ export class MobileWebCapabilityBroker {
       return
     }
 
-    const grant = MOBILE_WEB_PRODUCTION_GRANTS.find(
-      (value) => value.capability === request.capability && value.operation === request.operation
-    )
+    const grant = MOBILE_WEB_PRODUCTION_GRANT_INDEX.get(mobileWebOperationKey(request))
     const expectsSubscription = mobileWebRequestExpectsSubscription(request)
     if (!grant || (request.mode === 'subscription') !== expectsSubscription) {
       await this.messages.error(request.requestId, 'unsupported_capability', false)

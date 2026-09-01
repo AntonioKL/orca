@@ -1,3 +1,4 @@
+import type { MobileWebHostWorkspaceId } from './mobile-web-workspace-authority'
 import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-web/bridge-contract'
 import {
   MOBILE_WEB_SESSION_EVENT_MAX_BYTES,
@@ -37,7 +38,7 @@ export class MobileWebSessionSubscriptions {
     requestId: string
     subscriptionId: string
     pageWorkspaceId: string
-    hostWorkspaceId: string
+    hostWorkspaceId: MobileWebHostWorkspaceId
     client: RpcClient
   }): void {
     if (this.records.has(args.subscriptionId)) {
@@ -121,7 +122,7 @@ export class MobileWebSessionSubscriptions {
   private receive(
     subscriptionId: string,
     record: SubscriptionRecord,
-    hostWorkspaceId: string,
+    hostWorkspaceId: MobileWebHostWorkspaceId,
     pageWorkspaceId: string,
     event: unknown
   ): void {

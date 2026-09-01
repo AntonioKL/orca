@@ -43,6 +43,7 @@ import {
   type MobileWebTerminalPathResolveResult
 } from '../../shared/mobile-web/terminal-artifact-contract'
 import { MobileWebBridgeClientError } from './mobile-web-bridge-client-error'
+import { requireEchoedWorkspaceId } from './mobile-web-result-echo'
 import { decodeMobileWebFileChunk } from './mobile-web-file-chunk'
 import { decodeMobileWebFileBytes, decodeMobileWebFileContent } from './mobile-web-file-content'
 import { mobileWebFileRevision } from './mobile-web-file-edit-content'
@@ -184,7 +185,7 @@ export class MobileWebFileRequestClient {
         MobileWebTerminalPathResolveResultSchema,
         options
       )
-      .then((result) => matchingWorkspace(payload.workspaceId, result))
+      .then((result) => requireEchoedWorkspaceId(payload.workspaceId, result))
   }
 
   readTerminalArtifactChunk(
@@ -254,16 +255,6 @@ function matchingWrite(
   return matchingFile(payload, result)
 }
 
-function matchingWorkspace<TResult extends { workspaceId: string }>(
-  workspaceId: string,
-  result: TResult
-): TResult {
-  if (result.workspaceId !== workspaceId) {
-    throw new MobileWebBridgeClientError('invalid_message', false)
-  }
-  return result
-}
-
 function matchingFileList(
   payload: MobileWebFileListPayload | MobileWebFileSearchPayload,
   result: MobileWebFileListResult
@@ -271,7 +262,7 @@ function matchingFileList(
   if (result.files.length > payload.limit) {
     throw new MobileWebBridgeClientError('invalid_message', false)
   }
-  return matchingWorkspace(payload.workspaceId, result)
+  return requireEchoedWorkspaceId(payload.workspaceId, result)
 }
 
 function matchingFile<
@@ -281,5 +272,5 @@ function matchingFile<
   if (result.relativePath !== payload.relativePath) {
     throw new MobileWebBridgeClientError('invalid_message', false)
   }
-  return matchingWorkspace(payload.workspaceId, result)
+  return requireEchoedWorkspaceId(payload.workspaceId, result)
 }

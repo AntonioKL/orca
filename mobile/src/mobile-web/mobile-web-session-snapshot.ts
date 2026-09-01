@@ -1,3 +1,4 @@
+import type { MobileWebHostWorkspaceId } from './mobile-web-workspace-authority'
 import {
   AGENT_STATUS_ASSISTANT_MESSAGE_MAX_LENGTH,
   AGENT_STATUS_INTERACTIVE_PROMPT_MAX_LENGTH,
@@ -23,7 +24,7 @@ const TAB_TYPES = ['terminal', 'markdown', 'file', 'browser'] as const
 
 export function mobileWebSessionSnapshot(
   result: unknown,
-  hostWorkspaceId: string,
+  hostWorkspaceId: MobileWebHostWorkspaceId,
   pageWorkspaceId: string,
   browserAuthority: MobileWebBrowserAuthority,
   nativeChatAuthority: MobileWebNativeChatAuthority
@@ -101,7 +102,7 @@ function isActiveSessionTab(value: unknown): boolean {
 
 function mobileWebSessionTab(
   value: unknown,
-  hostWorkspaceId: string,
+  hostWorkspaceId: MobileWebHostWorkspaceId,
   browserAuthority: MobileWebBrowserAuthority,
   nativeChatAuthority: MobileWebNativeChatAuthority
 ): MobileWebSessionTab | null {
@@ -236,7 +237,7 @@ function safeNonnegativeInteger(value: unknown): number | undefined {
 
 function mobileWebNativeChatBinding(
   value: unknown,
-  hostWorkspaceId: string
+  hostWorkspaceId: MobileWebHostWorkspaceId
 ): MobileWebHostNativeChatBinding | null {
   if (
     !isRecord(value) ||

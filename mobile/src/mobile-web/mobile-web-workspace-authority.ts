@@ -7,6 +7,24 @@ import {
 import { getProjectIdentityKey } from '../../../src/shared/project-host-setup-projection'
 import type { NewWorkspaceRepository } from '../worktree/host-workspace-creation-operations'
 
+declare const hostWorkspaceIdBrand: unique symbol
+declare const hostRepoIdBrand: unique symbol
+
+/** Host-side identifiers the authority mints from an opaque page handle. Branding keeps a page
+ * handle from being passed back in as if it were already resolved. */
+export type MobileWebHostWorkspaceId = string & { readonly [hostWorkspaceIdBrand]: true }
+export type MobileWebHostRepoId = string & { readonly [hostRepoIdBrand]: true }
+
+/** A value the host itself reported as a host identifier, so it never came from the page. Every
+ * use is a boundary annotation, not a conversion of a page handle. */
+export function mobileWebHostWorkspaceIdFromHost(value: string): MobileWebHostWorkspaceId {
+  return value as MobileWebHostWorkspaceId
+}
+
+export function mobileWebHostRepoIdFromHost(value: string): MobileWebHostRepoId {
+  return value as MobileWebHostRepoId
+}
+
 export type MobileWebHostWorkspaceBinding = {
   workspaceId: string
   repoId: string
@@ -63,15 +81,15 @@ export class MobileWebWorkspaceAuthority {
     return pageRepoId
   }
 
-  hostRepoId(pageRepoId: string): string {
+  hostRepoId(pageRepoId: string): MobileWebHostRepoId {
     const hostRepoId = this.hostRepoIdByPageId.get(pageRepoId)
     if (!hostRepoId) {
       throw new MobileWebBrokerError('not_found')
     }
-    return hostRepoId
+    return hostRepoId as MobileWebHostRepoId
   }
 
-  assertHostRepoBinding(pageRepoId: string, expectedHostRepoId: string): void {
+  assertHostRepoBinding(pageRepoId: string, expectedHostRepoId: MobileWebHostRepoId): void {
     if (this.hostRepoId(pageRepoId) !== expectedHostRepoId) {
       throw new MobileWebBrokerError('conflict')
     }
@@ -119,15 +137,18 @@ export class MobileWebWorkspaceAuthority {
     return connectionId
   }
 
-  hostWorkspaceId(pageWorkspaceId: string): string {
+  hostWorkspaceId(pageWorkspaceId: string): MobileWebHostWorkspaceId {
     const hostWorkspaceId = this.hostWorkspaceIdByPageId.get(pageWorkspaceId)
     if (!hostWorkspaceId) {
       throw new MobileWebBrokerError('not_found')
     }
-    return hostWorkspaceId
+    return hostWorkspaceId as MobileWebHostWorkspaceId
   }
 
-  assertHostWorkspaceBinding(pageWorkspaceId: string, expectedHostWorkspaceId: string): void {
+  assertHostWorkspaceBinding(
+    pageWorkspaceId: string,
+    expectedHostWorkspaceId: MobileWebHostWorkspaceId
+  ): void {
     if (this.hostWorkspaceId(pageWorkspaceId) !== expectedHostWorkspaceId) {
       throw new MobileWebBrokerError('conflict')
     }

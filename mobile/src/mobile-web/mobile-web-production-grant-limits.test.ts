@@ -15,7 +15,7 @@ describe('mobile web production grant limits', () => {
   it('grants every named production operation exactly once', () => {
     const registered = Object.entries(MOBILE_WEB_BRIDGE_OPERATIONS)
       .flatMap(([capability, operations]) =>
-        operations.map((operation) => `${capability}.${operation}`)
+        Object.keys(operations).map((operation) => `${capability}.${operation}`)
       )
       .sort()
     const granted = MOBILE_WEB_PRODUCTION_GRANTS.map(
