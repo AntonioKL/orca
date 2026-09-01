@@ -209,8 +209,11 @@ describe('windows process table', () => {
     const [identityRows, detailedRows] = await Promise.all([identity, detailed])
     expect(detailedRows.some((row) => row.command === '"C:/a b/orca.exe" --x')).toBe(true)
     expect(identityRows.every((row) => !('command' in row))).toBe(true)
-    // Both sets carry what their own flags asked for. Without this, a reader
-    // handed the other's rows could still pass every assertion above.
+    // Both sets carry what their own flags asked for. Not redundant with the
+    // flags check below: that one catches a read served the OTHER set's rows,
+    // this one catches field shaping -- identity dropping CreationTime from its
+    // flags, or toIdentityRow failing to forward it. Neither sees the other's
+    // failure, so keep both.
     expect(identityRows.map((row) => row.creationTimeMs)).toEqual([undefined, 1_700_000_000_000])
     expect(detailedRows.map((row) => row.creationTimeMs)).toEqual([undefined, 1_700_000_000_000])
     // Two calls, each with its own flags. Concurrency is asserted separately,

@@ -129,7 +129,7 @@ into its own mock, the condition these tests exist to detect.
 
 ### Testing this module: assert a positive property, on the right mock
 
-Two defects have now shipped in this file's tests, both the same shape — a case
+Three defects have now shipped in this file's tests, all the same shape — a case
 that passed for a reason other than the one it claimed to check:
 
 1. A loader that built a **fresh mock per call**, so the coalescing it was meant
@@ -137,17 +137,28 @@ that passed for a reason other than the one it claimed to check:
 2. An identity-side assertion of only `!('command' in row)`, which a correctly
    flagged read and a coalesced one satisfy equally, so the test would go green
    on the very regression it guards.
+3. A concurrency assertion placed on the **coalescing** mock, whose own
+   `requestInProgress` latch means it can never report more than one call in
+   flight — so it held whether or not this module excluded anything, and passed
+   against a read gate that had genuinely lost exclusion.
 
-So: assert what each flag set **did** get, not only what it lacks — the identity
-set is checked on `creationTimeMs`, which is the field it exists to carry — and
-put those assertions in the helper both orderings run through, or the reverse
-order keeps the blind spot.
+The third arrived in the fix for the first two, which is the point: this is not a
+mistake you make once.
+
+So: assert what each flag set **did** get, not only what it lacks, and put those
+assertions in the helper both orderings run through, or the reverse order keeps
+the blind spot. The identity set is checked on `creationTimeMs` because that is
+the field it exists to carry. Keep both that check and the flags-array check —
+they catch **different** failures and neither is redundant. The flags array
+catches a read served another flag set's rows (the coalescing bug); the
+positional `creationTimeMs` check catches field shaping — identity dropping
+`CreationTime` from its flags, or `toIdentityRow` failing to forward it — which
+no flags assertion would notice.
 
 And pick the mock to match the claim. The coalescing mock models the npm
-wrapper, whose own latch means it can never report more than one call in flight;
-concurrency has to be measured against the bare-addon mock, which has no queue
-and so makes re-entry observable. Measuring concurrency on the coalescing mock
-yields an assertion that holds whether or not this module excludes anything.
+wrapper's queue semantics and is the only place to assert those. Concurrency has
+to be measured against the bare-addon mock, which has no queue and so makes
+re-entry observable.
 
 With no native binding there is only one scan to run and it is the 1.4 s
 PowerShell one, so the identity view rides the detailed snapshot — projected
