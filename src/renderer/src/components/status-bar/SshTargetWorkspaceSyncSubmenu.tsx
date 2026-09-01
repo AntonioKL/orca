@@ -10,6 +10,23 @@ import {
 } from '@/components/ui/dropdown-menu'
 import type { RemoteWorkspaceSyncStatus } from '../../store/slices/ssh'
 
+function relativeSyncTimeLabel(
+  timestamp: number,
+  phase: RemoteWorkspaceSyncStatus['phase']
+): string | null {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+  return translate(
+    phase === 'synced'
+      ? 'auto.components.status.bar.SshTargetStatusRow.lastSynced'
+      : 'auto.components.status.bar.SshTargetStatusRow.lastSyncAttempt',
+    phase === 'synced' ? 'Last synced {{value0}}' : 'Last sync attempt {{value0}}',
+    { value0: formatUiRelativeTimeFromDate(date.toISOString()) }
+  )
+}
+
 export function syncStatusLabel(status: RemoteWorkspaceSyncStatus | undefined): string | null {
   switch (status?.phase) {
     case 'pulling':
@@ -109,10 +126,15 @@ function syncStatusSummary(status: RemoteWorkspaceSyncStatus): string {
         'Orca is sending the workspace layout to this SSH host.'
       )
     case 'conflict':
-      return translate(
-        'auto.components.status.bar.SshTargetStatusRow.syncConflictSummary',
-        'The workspace layout changed on another device, so this push used an older revision and lost the race.'
-      )
+      return status.direction === 'pull'
+        ? translate(
+            'auto.components.status.bar.SshTargetStatusRow.syncConflictPullSummary',
+            'The workspace layout could not be applied on this client, so sync is paused until it can be reconciled.'
+          )
+        : translate(
+            'auto.components.status.bar.SshTargetStatusRow.syncConflictSummary',
+            'The workspace layout changed on another device, so this push used an older revision and lost the race.'
+          )
     case 'error':
       return translate(
         'auto.components.status.bar.SshTargetStatusRow.syncErrorSummary',
@@ -159,13 +181,7 @@ export function SshTargetWorkspaceSyncSubmenu({
   )
   const lastSyncedLabel =
     typeof syncStatus.lastSyncedAt === 'number' && Number.isFinite(syncStatus.lastSyncedAt)
-      ? translate(
-          'auto.components.status.bar.SshTargetStatusRow.lastSynced',
-          'Last synced {{value0}}',
-          {
-            value0: formatUiRelativeTimeFromDate(new Date(syncStatus.lastSyncedAt).toISOString())
-          }
-        )
+      ? relativeSyncTimeLabel(syncStatus.lastSyncedAt, syncStatus.phase)
       : null
   const directionLabel = syncStatus.direction
     ? translate(
@@ -193,7 +209,9 @@ export function SshTargetWorkspaceSyncSubmenu({
       <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
     ) : action && actionLabel ? (
       <span
-        aria-hidden="true"
+        role="button"
+        tabIndex={0}
+        aria-label={actionLabel}
         onPointerEnter={() => {
           actionPointerActiveRef.current = true
           setSubmenuOpen(false)
@@ -209,7 +227,15 @@ export function SshTargetWorkspaceSyncSubmenu({
           event.stopPropagation()
           void action()
         }}
-        className="shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') {
+            return
+          }
+          event.preventDefault()
+          event.stopPropagation()
+          void action()
+        }}
+        className="shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-[10px] text-muted-foreground outline-hidden hover:bg-accent/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
       >
         {actionLabel}
       </span>
