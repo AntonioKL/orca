@@ -79,6 +79,27 @@ describe('buildMobileSessionTabSnapshots', () => {
     expect(next.snapshotVersion).toBeGreaterThan(initial.snapshotVersion)
   })
 
+  it('does not publish an ambiguous worktree id across hosts', () => {
+    const state = makeState({
+      worktreesByRepo: {
+        'repo-1': [
+          { id: 'wt-duplicate', repoId: 'repo-1', hostId: 'local', instanceId: 'local-instance' },
+          {
+            id: 'wt-duplicate',
+            repoId: 'repo-1',
+            hostId: 'ssh:ssh-1',
+            instanceId: 'ssh-instance'
+          }
+        ]
+      } as unknown as AppState['worktreesByRepo'],
+      tabsByWorktree: {
+        'wt-duplicate': [{ id: 'term-1', title: 'Terminal 1' }]
+      } as unknown as AppState['tabsByWorktree']
+    })
+
+    expect(buildMobileSessionTabSnapshots(state)).toEqual([])
+  })
+
   it('publishes browser and editor color + pin state from unified tabs', () => {
     const fileId = '/repo/README.md'
     const state = makeState({
