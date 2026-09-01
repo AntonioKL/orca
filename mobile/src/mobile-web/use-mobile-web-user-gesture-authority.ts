@@ -2,6 +2,13 @@ import { useCallback, useEffect, type MutableRefObject, type RefObject } from 'r
 import { AppState } from 'react-native'
 import { consumeRecentMobileWebUserGesture } from './mobile-web-user-gesture'
 
+export type MobileWebUserGestureAuthority = {
+  consumeRecentUserGesture: () => boolean
+  // Witnesses the gesture without spending it: presenting an OS dialog must not disarm the gated
+  // action the dialog is confirming.
+  hasRecentUserGesture: () => boolean
+}
+
 type MobileWebAppForegroundAuthority = {
   updateAppForegroundState(foreground: boolean): void
 }
@@ -9,7 +16,7 @@ type MobileWebAppForegroundAuthority = {
 export function useMobileWebUserGestureAuthority(
   occurredAtRef: MutableRefObject<number | null>,
   foregroundAuthorityRef: RefObject<MobileWebAppForegroundAuthority | null>
-): () => boolean {
+): MobileWebUserGestureAuthority {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       foregroundAuthorityRef.current?.updateAppForegroundState(nextState === 'active')
@@ -20,13 +27,20 @@ export function useMobileWebUserGestureAuthority(
     return () => subscription.remove()
   }, [foregroundAuthorityRef, occurredAtRef])
 
-  return useCallback(() => {
-    const occurredAt = occurredAtRef.current
+  const hasRecentUserGesture = useCallback(
+    () =>
+      consumeRecentMobileWebUserGesture({
+        appState: AppState.currentState,
+        occurredAt: occurredAtRef.current,
+        now: Date.now()
+      }),
+    [occurredAtRef]
+  )
+  const consumeRecentUserGesture = useCallback(() => {
+    const recent = hasRecentUserGesture()
     occurredAtRef.current = null
-    return consumeRecentMobileWebUserGesture({
-      appState: AppState.currentState,
-      occurredAt,
-      now: Date.now()
-    })
-  }, [occurredAtRef])
+    return recent
+  }, [hasRecentUserGesture, occurredAtRef])
+
+  return { consumeRecentUserGesture, hasRecentUserGesture }
 }

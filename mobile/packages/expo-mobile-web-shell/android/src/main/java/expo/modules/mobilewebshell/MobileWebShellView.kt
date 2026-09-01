@@ -73,6 +73,7 @@ internal class MobileWebShellView(
   private val packageStore = MobileWebShellEnvironment.packageStore(context)
   private var activeSessionId: String? = null
   private var documentLoaded = false
+  private var networkBlockerScriptHandler: ScriptHandler? = null
   private var debugProbeScriptHandler: ScriptHandler? = null
   private var bridgeMessageListenerAttached = false
   private var webView: WebView
@@ -131,6 +132,11 @@ internal class MobileWebShellView(
     if (sessionId == activeSessionId) return
     activeSessionId = sessionId
     documentLoaded = false
+    networkBlockerScriptHandler?.remove()
+    networkBlockerScriptHandler = installMobileWebNetworkApiBlocker(
+      webView,
+      mobileWebOriginForSession(sessionId)
+    )
     debugProbeScriptHandler?.remove()
     debugProbeScriptHandler = installMobileWebDebugIsolationProbe(
       webView,
@@ -153,6 +159,8 @@ internal class MobileWebShellView(
 
   fun deactivateSessionView() {
     removeBridgeMessageListener()
+    networkBlockerScriptHandler?.remove()
+    networkBlockerScriptHandler = null
     debugProbeScriptHandler?.remove()
     debugProbeScriptHandler = null
     activeSessionId = null
@@ -291,6 +299,8 @@ internal class MobileWebShellView(
     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
       onProcessTerminated(mapOf("sessionId" to (activeSessionId ?: "")))
       removeBridgeMessageListener()
+      networkBlockerScriptHandler?.remove()
+      networkBlockerScriptHandler = null
       debugProbeScriptHandler?.remove()
       debugProbeScriptHandler = null
       removeView(view)
@@ -300,6 +310,10 @@ internal class MobileWebShellView(
       attachWebView()
       val sessionId = activeSessionId
       if (sessionId != null) {
+        networkBlockerScriptHandler = installMobileWebNetworkApiBlocker(
+          webView,
+          mobileWebOriginForSession(sessionId)
+        )
         addBridgeMessageListener(sessionId)
         webView.visibility = View.VISIBLE
         onLoadState(mapOf("state" to "loading"))

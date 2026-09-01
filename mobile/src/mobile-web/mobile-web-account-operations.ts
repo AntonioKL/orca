@@ -9,6 +9,7 @@ import {
 } from '../../../src/shared/mobile-web/account-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { requireRecentUserGesture } from './mobile-web-user-gesture-requirement'
 import { mobileWebAccountsSnapshot } from './mobile-web-account-presentation'
 import type { MobileWebNativeCapabilityAuthority } from './mobile-web-native-capability-authority'
 
@@ -27,9 +28,7 @@ export async function executeMobileWebAccountOperation(args: {
   }
   if (args.operation === 'select') {
     const payload = MobileWebAccountSelectPayloadSchema.parse(args.payload)
-    if (!args.consumeRecentUserGesture()) {
-      throw new MobileWebBrokerError('permission_required')
-    }
+    requireRecentUserGesture(args.consumeRecentUserGesture)
     const method =
       payload.provider === 'claude'
         ? 'accounts.selectClaude'
@@ -52,9 +51,7 @@ export async function executeMobileWebAccountOperation(args: {
   }
   if (args.operation === 'consumeResetCredit') {
     const payload = MobileWebAccountConsumeResetPayloadSchema.parse(args.payload)
-    if (!args.consumeRecentUserGesture()) {
-      throw new MobileWebBrokerError('permission_required')
-    }
+    requireRecentUserGesture(args.consumeRecentUserGesture)
     const consume = args.nativeAuthority.codexResetCreditConsume
     if (!consume) {
       throw new MobileWebBrokerError('unsupported_capability')

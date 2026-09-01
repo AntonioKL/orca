@@ -70,7 +70,8 @@ function createHarness() {
       route: vi.fn(),
       reconnect: vi.fn(),
       removeHost: vi.fn(),
-      consumeRecentUserGesture: vi.fn(() => false)
+      consumeRecentUserGesture: vi.fn(() => false),
+      hasRecentUserGesture: () => true
     },
     now: () => 1000
   })

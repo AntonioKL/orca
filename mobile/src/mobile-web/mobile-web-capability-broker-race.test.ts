@@ -130,7 +130,14 @@ async function createPrimedHarness(alert?: MobileWebNativeCapabilityAuthority['a
   } as unknown as RpcClient
   const { broker, messages } = createMobileWebBrokerFixture({
     getClient: () => client,
-    nativeAuthority: { alert }
+    nativeAuthority: { alert },
+    navigationAuthority: {
+      route: vi.fn(),
+      reconnect: vi.fn(),
+      removeHost: vi.fn(),
+      consumeRecentUserGesture: () => true,
+      hasRecentUserGesture: () => true
+    }
   })
   sendRequest.mockResolvedValueOnce({
     ok: true,

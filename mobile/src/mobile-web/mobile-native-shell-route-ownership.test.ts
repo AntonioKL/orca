@@ -15,6 +15,10 @@ const brokerMessageHandoff = readFileSync(
   new URL('./mobile-web-broker-message-handoff.ts', import.meta.url),
   'utf8'
 )
+const navigationAuthority = readFileSync(
+  new URL('./use-mobile-web-navigation-authority.ts', import.meta.url),
+  'utf8'
+)
 const hardwareBackHook = readFileSync(
   new URL('./use-mobile-web-hardware-back-handoff.ts', import.meta.url),
   'utf8'
@@ -67,10 +71,11 @@ describe('mobile native shell route ownership', () => {
   })
 
   it('opens terminal settings in the shell without clearing the hosted session', () => {
-    const settingsBranch = hybridShell.match(
+    const settingsBranch = navigationAuthority.match(
       /if \(destination === 'terminalSettings'\) \{([\s\S]*?)\n\s*\}/
     )?.[1]
-    expect(settingsBranch).toContain('nativeRouteHandoffRef.current.record(requestId, destination)')
+    expect(settingsBranch).toContain('routeHandoffRef.current.record(requestId, destination)')
+    expect(hybridShell).toContain('routeHandoffRef: nativeRouteHandoffRef')
     expect(settingsBranch).not.toContain('setHostedViewActive(false)')
     expect(hybridShell).toContain('handleMobileWebBrokerMessage')
     expect(brokerMessageHandoff).toContain('completeMobileWebNativeRouteHandoffAfterResponse')

@@ -28,7 +28,8 @@ it('round trips typed account reads, selection, and snapshots through the produc
       route: vi.fn(),
       reconnect: vi.fn(),
       removeHost: vi.fn(),
-      consumeRecentUserGesture: () => true
+      consumeRecentUserGesture: () => true,
+      hasRecentUserGesture: () => true
     }
   })
 

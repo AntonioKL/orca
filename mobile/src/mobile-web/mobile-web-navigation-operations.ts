@@ -4,6 +4,7 @@ import {
   MobileWebNavigationRoutePayloadSchema
 } from '../../../src/shared/mobile-web/navigation-operation-contract'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { requireRecentUserGesture } from './mobile-web-user-gesture-requirement'
 
 export type MobileWebNavigationAuthority = {
   route(
@@ -13,6 +14,7 @@ export type MobileWebNavigationAuthority = {
   reconnect(): void | Promise<void>
   removeHost(): void | Promise<void>
   consumeRecentUserGesture(): boolean
+  hasRecentUserGesture(): boolean
 }
 
 export async function executeMobileWebNavigationOperation(args: {
@@ -24,8 +26,8 @@ export async function executeMobileWebNavigationOperation(args: {
   if (args.operation === 'route') {
     const payload = MobileWebNavigationRoutePayloadSchema.parse(args.payload)
     const authority = requireAuthority(args.authority)
-    if (payload.destination === 'terminalSettings' && !authority.consumeRecentUserGesture()) {
-      throw new MobileWebBrokerError('permission_required')
+    if (payload.destination === 'terminalSettings') {
+      requireRecentUserGesture(() => authority.consumeRecentUserGesture())
     }
     await authority.route(payload.destination, args.requestId)
     return null
@@ -33,18 +35,14 @@ export async function executeMobileWebNavigationOperation(args: {
   if (args.operation === 'reconnect') {
     MobileWebNavigationReconnectPayloadSchema.parse(args.payload)
     const authority = requireAuthority(args.authority)
-    if (!authority.consumeRecentUserGesture()) {
-      throw new MobileWebBrokerError('permission_required')
-    }
+    requireRecentUserGesture(() => authority.consumeRecentUserGesture())
     await authority.reconnect()
     return null
   }
   if (args.operation === 'removeHost') {
     MobileWebNavigationRemoveHostPayloadSchema.parse(args.payload)
     const authority = requireAuthority(args.authority)
-    if (!authority.consumeRecentUserGesture()) {
-      throw new MobileWebBrokerError('permission_required')
-    }
+    requireRecentUserGesture(() => authority.consumeRecentUserGesture())
     await authority.removeHost()
     return null
   }

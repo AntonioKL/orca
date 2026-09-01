@@ -17,7 +17,8 @@ describe('mobile web navigation round trip', () => {
         route,
         reconnect,
         removeHost,
-        consumeRecentUserGesture
+        consumeRecentUserGesture,
+        hasRecentUserGesture: () => true
       }
     })
 

@@ -36,7 +36,8 @@ it('round trips opaque agent history and gesture-gates resume through the produc
       route: vi.fn(),
       reconnect: vi.fn(),
       removeHost: vi.fn(),
-      consumeRecentUserGesture: () => false
+      consumeRecentUserGesture: () => false,
+      hasRecentUserGesture: () => true
     },
     randomBytes: (length) => new Uint8Array(length).fill(5)
   })
