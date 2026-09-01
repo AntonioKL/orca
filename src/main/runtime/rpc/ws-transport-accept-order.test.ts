@@ -99,10 +99,11 @@ describe('WebSocketTransport accepted socket ordering', () => {
     socket.once('open', () => events.push('open'))
     socket.emit('open')
     lifecycle.handleConnection(socket)
+    expect(socket.terminate).not.toHaveBeenCalled()
     // A single silent interval is not evidence: the socket is re-probed, not reaped.
     await vi.advanceTimersByTimeAsync(100)
     expect(socket.terminate).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(199)
+    await vi.advanceTimersByTimeAsync(299)
     expect(socket.terminate).not.toHaveBeenCalled()
 
     await vi.advanceTimersByTimeAsync(1)
@@ -129,7 +130,7 @@ describe('WebSocketTransport accepted socket ordering', () => {
 
     lifecycle.handleConnection(firstSocket)
     const sharedTimer = lifecycle.heartbeat.timer
-    expect(firstPingTimes).toEqual([0])
+    expect(firstPingTimes).toEqual([])
 
     await vi.advanceTimersByTimeAsync(50)
     const laterPingTimes: number[] = []
@@ -161,7 +162,7 @@ describe('WebSocketTransport accepted socket ordering', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(laterSocket.terminate).toHaveBeenCalledTimes(1)
     expect(laterReapTimes).toEqual([400])
-    expect(firstPingTimes).toEqual([0, 100, 200, 300, 400])
+    expect(firstPingTimes).toEqual([100, 200, 300, 400])
     expect(
       ['pong', 'message', 'close', 'error'].map((event) => laterSocket.listenerCount(event))
     ).toEqual([0, 0, 0, 0])
