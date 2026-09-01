@@ -61,9 +61,11 @@ function hardenSecureDirectoryOnce(dirPath: string): void {
   if (hardenedDirectoryPathsThisProcess.get(dirPath)) {
     return
   }
-  applySecurePathRestriction(dirPath, true, process.platform, false)
-  // Cache even though the async ACL may still be in flight — dir restriction is best-effort, no retry.
+  // Cache before the ACL lands so concurrent writes don't restorm; the callback evicts it if the apply failed.
   hardenedDirectoryPathsThisProcess.set(dirPath, true)
+  applySecurePathRestriction(dirPath, true, process.platform, false, () => {
+    hardenedDirectoryPathsThisProcess.delete(dirPath)
+  })
 }
 
 function hardenSecurePathOnce(targetPath: string, isDirectory: boolean): boolean {
@@ -81,7 +83,11 @@ function hardenSecurePathOnce(targetPath: string, isDirectory: boolean): boolean
     return true
   }
   // Why: async re-harden is safe here — read path hardens each file at most once/process; new files harden synchronously on the write path.
-  if (applySecurePathRestriction(targetPath, isDirectory, process.platform, false)) {
+  if (
+    applySecurePathRestriction(targetPath, isDirectory, process.platform, false, () => {
+      hardenedPathsThisProcess.delete(targetPath)
+    })
+  ) {
     rememberHardenedPath(targetPath, isDirectory)
     return true
   }
@@ -191,20 +197,29 @@ export function hardenSecurePath(
   )
 }
 
-/** Applies hardening; async Windows calls only report that best-effort ACL work was accepted. */
+/**
+ * Applies hardening. The async Windows branch cannot know the outcome in time to return it, so it
+ * reports through `onAsyncFailure` instead — the caller uses that to drop the cache entry rather
+ * than leave a failed apply recorded as a success.
+ */
 function applySecurePathRestriction(
   targetPath: string,
   isDirectory: boolean,
   platform: NodeJS.Platform,
-  sync: boolean
+  sync: boolean,
+  onAsyncFailure?: () => void
 ): boolean {
   if (platform === 'win32') {
     if (sync) {
       // Why: apply the ACL synchronously so the credential file isn't briefly readable under inherited ACLs (writeFileSync mode is a no-op on Windows).
       return restrictWindowsPathSync(targetPath, isDirectory)
     }
-    // Why: dir/read-path re-harden runs async to avoid blocking the main thread (#4901); return true optimistically since it's best-effort.
-    bestEffortRestrictWindowsPath(targetPath, isDirectory)
+    // Why: dir/read-path re-harden runs async to avoid blocking the main thread (#4901).
+    bestEffortRestrictWindowsPath(targetPath, isDirectory, (restricted) => {
+      if (!restricted) {
+        onAsyncFailure?.()
+      }
+    })
     return true
   }
   chmodSync(targetPath, isDirectory ? 0o700 : 0o600)
