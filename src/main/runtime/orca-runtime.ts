@@ -19,6 +19,12 @@ import {
   isAgentSkillSharingEnabled
 } from '../../shared/agent-skill-sharing-gate'
 import { resolveNestedWorkerMaxDepth } from '../../shared/nested-worker-depth'
+import {
+  clampRepoSearchRefsLimit,
+  REPO_SEARCH_REFS_DEFAULT_LIMIT,
+  getRepoSearchRefsProbeLimit,
+  isRepoSearchRefsRequestLimit
+} from '../../shared/repo-search-limits'
 import { sortDirEntries } from '../../shared/file-name-sort'
 import { isServerDriveListRequest, listWindowsDrives } from './windows-drive-listing'
 import { extractLastOsc7Uri, extractOscScanTail } from '../daemon/osc7-uri-extraction'
@@ -148,7 +154,6 @@ import {
   iterateTerminalInputChunks
 } from '../../shared/terminal-input'
 import {
-  AGENT_PROMPT_BRACKETED_PASTE_END,
   AGENT_PROMPT_SUBMIT,
   buildAgentPromptPasteBytes,
   getAgentPromptSubmitDelayMs,
@@ -415,6 +420,7 @@ import type {
   WorktreeRemoteBranchConflictEvent
 } from '../../shared/worktree/base-ref-drift-types'
 import type {
+  CreateWorktreeArgs,
   CreateWorktreeResult,
   ForceDeleteWorktreeBranchResult,
   RemoveWorktreeResult
@@ -784,6 +790,10 @@ import type { BrowserExecutionHostKeyResolution } from './runtime-browser-client
 import { browserNetworkExecutionHostKey } from '../browser/browser-network-execution-route'
 import type { BrowserNetworkExecutionHost } from '../../shared/browser-client-host-protocol'
 import { sameRuntimeBrowserPlacement } from '../../shared/runtime-browser-placement'
+import {
+  WorktreeTerminalMutationLock,
+  type WorktreeTerminalMutationKind
+} from './worktree-terminal-mutation-lock'
 import { RemoteRuntimeTerminalCreateIdempotency } from './remote-runtime-terminal-create-idempotency'
 import { deriveRemoteRuntimeTerminalCreateHandle } from './remote-runtime-terminal-create-identity'
 import {
@@ -1253,7 +1263,8 @@ import {
   isOrphanedWorktreeError,
   mergeWorktree,
   sanitizeWorktreeName,
-  shouldSetDisplayName,
+  resolveWorktreeCreateDisplayNameRequest,
+  resolveWorktreeCreateDisplayNameMeta,
   areWorktreePathsEqual
 } from '../ipc/worktree-logic'
 import { resolveCreatedWorktree } from '../ipc/created-worktree-reconciliation'
@@ -2312,11 +2323,9 @@ async function waitForAgentPromptPromise<T>(promise: Promise<T>, signal?: AbortS
   })
 }
 
-// Why not setTimeout(0): it costs a full ~15.19 ms Windows timer tick per chunk (~0.95 s/MB)
-// and never bought backpressure -- 16 KiB per tick paces ~1.07 MB/s, 11x above ConPTY's
-// ~96 KB/s drain, so the in-flight buffer grew regardless. setImmediate keeps the only thing
-// the yield actually did (let abort/permission/data callbacks run between chunks) at ~0.01 ms,
-// and TERMINAL_INPUT_MAX_BYTES still bounds what can be in flight either way.
+// Generic terminal.send uses setImmediate to let abort/permission/data callbacks run between
+// chunks without paying a full Windows timer tick for every 16 KiB write. Agent prompts use an
+// atomic bracketed-paste write below, so they do not rely on this scheduler.
 // Why the global and not node:timers/promises: only the global is intercepted by fake timers,
 // so a chunked paste stays observable on the test clock.
 function yieldBetweenTerminalInputChunks(): Promise<void> {
@@ -3354,7 +3363,7 @@ export class OrcaRuntimeService {
   private readonly terminalCreateIdempotency = new RemoteRuntimeTerminalCreateIdempotency()
   // Why: concurrent clients sleeping one host workspace must share one physical teardown.
   private terminalSleepByWorktreeId = new Map<string, Promise<RuntimeWorktreeTerminalSleepResult>>()
-  private terminalMutationTailByWorktreeId = new Map<string, Promise<void>>()
+  private readonly terminalMutationLock = new WorktreeTerminalMutationLock()
   private terminalSleepStateByWorktreeId = new Map<
     string,
     {
@@ -22075,60 +22084,25 @@ export class OrcaRuntimeService {
     const pasteByteLength = Buffer.byteLength(pastePayload, 'utf8')
     const pasteIngestMs = getTerminalPasteIngestMs(writeHostPlatform, pasteByteLength)
     const renderGate = this.createAgentPromptRenderGate(ptyId, pasteIngestMs)
-    let wrotePasteBytes = false
-    let completedPaste = false
     try {
-      const chunks = iterateTerminalInputChunks(pastePayload)
-      let chunk = chunks.next()
-      let firstChunk = true
-      while (!chunk.done) {
-        const nextChunk = chunks.next()
-        assertAgentPromptRequestActive(options.signal)
-        this.assertAgentPromptGeneration(ptyId, generation)
-        // Why: the first chunk was just admitted above; re-checking the lease there would only
-        // re-read what `assertAdmitted` established.
-        if (!firstChunk) {
-          agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
-        }
-        firstChunk = false
-        await options.beforeWrite?.(ptyId)
-        assertAgentPromptRequestActive(options.signal)
-        this.assertAgentPromptGeneration(ptyId, generation)
-        this.assertAgentPromptPermissionSafe(
-          permissionBaseline,
-          this.getAgentPromptActivity(handle, ptyId)
-        )
-        agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
-        if (nextChunk.done) {
-          renderGate?.arm()
-        }
-        const wrote = this.ptyController?.write(ptyId, chunk.value) ?? false
-        if (!wrote) {
-          throw new Error('terminal_not_writable')
-        }
-        wrotePasteBytes = true
-        chunk = nextChunk
-        if (!chunk.done) {
-          await yieldBetweenTerminalInputChunks()
-        }
+      assertAgentPromptRequestActive(options.signal)
+      this.assertAgentPromptGeneration(ptyId, generation)
+      await options.beforeWrite?.(ptyId)
+      assertAgentPromptRequestActive(options.signal)
+      this.assertAgentPromptGeneration(ptyId, generation)
+      this.assertAgentPromptPermissionSafe(
+        permissionBaseline,
+        this.getAgentPromptActivity(handle, ptyId)
+      )
+      agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
+      // Keep the bracketed paste frame in one PTY write; Claude's composer can drop the
+      // beginning when a large frame is split into independently processed chunks.
+      renderGate?.arm()
+      const wrote = this.ptyController?.write(ptyId, pastePayload) ?? false
+      if (!wrote) {
+        throw new Error('terminal_not_writable')
       }
-      completedPaste = true
     } catch (error) {
-      if (
-        wrotePasteBytes &&
-        !completedPaste &&
-        this.getPtyLifecycleGeneration(ptyId) === generation
-      ) {
-        // Why: a lease that moved mid-paste also refuses this terminator, leaving the TUI in paste
-        // mode — the incoming owner re-establishes the mode, and feeding a session we no longer own
-        // is the worse outcome.
-        try {
-          agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
-          this.ptyController?.write(ptyId, AGENT_PROMPT_BRACKETED_PASTE_END)
-        } catch {
-          // The original refusal is the actionable error.
-        }
-      }
       renderGate?.dispose()
       throw error
     }
@@ -24373,9 +24347,11 @@ export class OrcaRuntimeService {
     query: string,
     limit = DEFAULT_REPO_SEARCH_REFS_LIMIT
   ): Promise<RuntimeRepoSearchRefs> {
-    if (!Number.isInteger(limit) || limit <= 0) {
+    if (!isRepoSearchRefsRequestLimit(limit)) {
       throw new Error('invalid_limit')
     }
+    const effectiveLimit = clampRepoSearchRefsLimit(limit)
+    const probeLimit = getRepoSearchRefsProbeLimit(effectiveLimit)
     const repo = await this.resolveRepoSelector(repoSelector)
     if (isFolderRepo(repo)) {
       return {
@@ -24384,12 +24360,15 @@ export class OrcaRuntimeService {
       }
     }
     const refDetails = repo.connectionId
-      ? await this.searchRemoteRepoRefs(repo, query, limit + 1)
-      : await searchBaseRefDetails(repo.path, query, limit + 1)
+      ? await this.searchRemoteRepoRefs(repo, query, probeLimit)
+      : await searchBaseRefDetails(repo.path, query, probeLimit)
     return {
-      refs: refDetails.slice(0, limit).map((entry) => entry.refName),
-      refDetails: refDetails.slice(0, limit),
-      truncated: refDetails.length > limit
+      refs: refDetails.slice(0, effectiveLimit).map((entry) => entry.refName),
+      refDetails: refDetails.slice(0, effectiveLimit),
+      // An oversized request is intentionally reported as truncated even when
+      // this repo has fewer refs: the execution cap prevented fulfilling the
+      // requested page size.
+      truncated: limit > effectiveLimit || refDetails.length > effectiveLimit
     }
   }
 
@@ -27115,6 +27094,7 @@ export class OrcaRuntimeService {
     linkedTaskSourceContext?: TaskSourceContext | null
     comment?: string
     displayName?: string
+    displayNameKind?: CreateWorktreeArgs['displayNameKind']
     telemetrySource?: WorkspaceCreateTelemetrySource
     workspaceStatus?: string
     manualOrder?: number
@@ -27188,10 +27168,21 @@ export class OrcaRuntimeService {
       const settings = createSettings
       const instanceId = randomUUID()
       const worktreeId = getRuntimeFolderWorkspaceInstanceId(repo, instanceId)
+      const displayNameRequest = resolveWorktreeCreateDisplayNameRequest(
+        args.displayName,
+        args.displayNameKind,
+        args.name,
+        args.cliProvenance?.kind === 'created-by-cli',
+        args.nameWasGenerated === true
+      )
+      const resolvedFolderDisplayName = displayNameRequest.value
       const meta = this.store.setWorktreeMeta(worktreeId, {
         instanceId,
         ...getProjectHostSetupWorktreeMeta(this.store.getProjectHostSetups?.() ?? [], repo),
-        displayName: args.displayName?.trim() || args.name,
+        displayName: resolvedFolderDisplayName ?? args.name,
+        ...(displayNameRequest.kind === 'user' && resolvedFolderDisplayName
+          ? { displayNameIsPinned: true }
+          : {}),
         lastActivityAt: now,
         createdAt: now,
         orcaCreatedAt: now,
@@ -27383,7 +27374,14 @@ export class OrcaRuntimeService {
     }
     const hostedReviewExecutionContext = this.getHostedReviewExecutionOptions(repo)
     let effectiveRequestedName = args.name
-    const requestedDisplayName = args.displayName?.trim() || undefined
+    const displayNameRequest = resolveWorktreeCreateDisplayNameRequest(
+      args.displayName,
+      args.displayNameKind,
+      args.name,
+      args.cliProvenance?.kind === 'created-by-cli',
+      args.nameWasGenerated === true
+    )
+    const requestedDisplayName = displayNameRequest.value
     const sanitizedName = sanitizeWorktreeName(args.name)
     let effectiveSanitizedName = sanitizedName
     // Username and base resolution are independent read-only probes. Starting
@@ -27826,11 +27824,12 @@ export class OrcaRuntimeService {
     // Why: PR/MR-created worktrees can start from a head ref/SHA while Source
     // Control must compare against the review target branch.
     const metadataBaseRef = args.compareBaseRef ?? remoteTrackingBase?.ref ?? baseBranch
-    const displayNameMeta = requestedDisplayName
-      ? { displayName: requestedDisplayName }
-      : shouldSetDisplayName(effectiveRequestedName, branchName, effectiveSanitizedName)
-        ? { displayName: effectiveRequestedName }
-        : {}
+    const displayNameMeta = resolveWorktreeCreateDisplayNameMeta(
+      requestedDisplayName,
+      branchName,
+      displayNameRequest.kind,
+      { requestedName: effectiveRequestedName, sanitizedName: effectiveSanitizedName }
+    )
     const meta = this.store.setWorktreeMeta(worktreeId, {
       // Why: worktree IDs are path-derived. If a path is deleted outside Orca
       // and later recreated, creation must mint a fresh instance identity so
@@ -28280,6 +28279,7 @@ export class OrcaRuntimeService {
       linkedTaskSourceContext?: TaskSourceContext | null
       comment?: string
       displayName?: string
+      displayNameKind?: CreateWorktreeArgs['displayNameKind']
       workspaceStatus?: string
       manualOrder?: number
       sparseCheckout?: { directories: string[]; presetId?: string }
@@ -28317,6 +28317,7 @@ export class OrcaRuntimeService {
         name: args.name,
         ...(args.nameWasGenerated === true ? { nameWasGenerated: true } : {}),
         ...(args.displayName ? { displayName: args.displayName } : {}),
+        ...(args.displayNameKind ? { displayNameKind: args.displayNameKind } : {}),
         ...(args.baseBranch ? { baseBranch: args.baseBranch } : {}),
         ...(args.compareBaseRef ? { compareBaseRef: args.compareBaseRef } : {}),
         ...(args.branchNameOverride ? { branchNameOverride: args.branchNameOverride } : {}),
@@ -33463,7 +33464,7 @@ export class OrcaRuntimeService {
     if (!worktreeId) {
       return () => {}
     }
-    const release = await this.acquireWorktreeTerminalMutation(worktreeId)
+    const release = await this.acquireWorktreeTerminalMutation(worktreeId, 'shared')
     const key = runtimeWorktreeIdentityKey(worktreeId)
     const sleepState = this.terminalSleepStateByWorktreeId.get(key)
     if (sleepState?.phase === 'sleeping' || sleepState?.phase === 'partial') {
@@ -33484,7 +33485,9 @@ export class OrcaRuntimeService {
     worktreeId: string,
     operation: () => Promise<T>
   ): Promise<T> {
-    const release = await this.acquireWorktreeTerminalMutation(worktreeId)
+    // Why exclusive: adoption reconciles this worktree's terminal records, so
+    // it must not interleave with a spawn registering a pty or with a sleep.
+    const release = await this.acquireWorktreeTerminalMutation(worktreeId, 'exclusive')
     try {
       return await operation()
     } finally {
@@ -33494,51 +33497,25 @@ export class OrcaRuntimeService {
 
   private async acquireWorktreeTerminalMutation(
     worktreeId: string,
+    kind: WorktreeTerminalMutationKind,
     deadline?: number
   ): Promise<() => void> {
-    const key = runtimeWorktreeIdentityKey(worktreeId)
-    const previous = this.terminalMutationTailByWorktreeId.get(key) ?? Promise.resolve()
-    let releaseCurrent = (): void => {}
-    const current = new Promise<void>((resolve) => {
-      releaseCurrent = resolve
-    })
-    const tail = previous.catch(() => {}).then(() => current)
-    this.terminalMutationTailByWorktreeId.set(key, tail)
-    try {
-      await waitForWorktreeTerminalMutation(
-        previous.catch(() => {}),
-        deadline
-      )
-    } catch (error) {
-      // Why: resolve this abandoned queue node now so it can never acquire later and stop a terminal after the caller timed out.
-      releaseCurrent()
-      void tail.finally(() => {
-        if (this.terminalMutationTailByWorktreeId.get(key) === tail) {
-          this.terminalMutationTailByWorktreeId.delete(key)
-        }
-      })
-      throw error
-    }
-    let released = false
-    return () => {
-      if (released) {
-        return
-      }
-      released = true
-      releaseCurrent()
-      void tail.finally(() => {
-        if (this.terminalMutationTailByWorktreeId.get(key) === tail) {
-          this.terminalMutationTailByWorktreeId.delete(key)
-        }
-      })
-    }
+    return await this.terminalMutationLock.acquire(
+      runtimeWorktreeIdentityKey(worktreeId),
+      kind,
+      deadline
+    )
   }
 
   private async sleepResolvedWorktreeTerminals(
     worktree: ResolvedWorktree
   ): Promise<RuntimeWorktreeTerminalSleepResult> {
     const sleepDeadline = Date.now() + WORKTREE_TERMINAL_SLEEP_TIMEOUT_MS
-    const releaseMutation = await this.acquireWorktreeTerminalMutation(worktree.id, sleepDeadline)
+    const releaseMutation = await this.acquireWorktreeTerminalMutation(
+      worktree.id,
+      'exclusive',
+      sleepDeadline
+    )
     const key = runtimeWorktreeIdentityKey(worktree.id)
     const existingSleepState = this.terminalSleepStateByWorktreeId.get(key)
     if (existingSleepState?.phase === 'sleeping') {
@@ -42079,7 +42056,7 @@ const WORKTREE_STATUS_PRIORITY: Record<RuntimeWorktreeStatus, number> = {
   working: 3,
   permission: 4
 }
-const DEFAULT_REPO_SEARCH_REFS_LIMIT = 25
+const DEFAULT_REPO_SEARCH_REFS_LIMIT = REPO_SEARCH_REFS_DEFAULT_LIMIT
 const DEFAULT_TERMINAL_LIST_LIMIT = 200
 const DEFAULT_WORKTREE_LIST_LIMIT = 200
 const DEFAULT_WORKTREE_PS_LIMIT = 200
@@ -42119,36 +42096,6 @@ const PTY_CONTROLLER_LIST_TIMEOUT_MS = 3000
 const PTY_CONTROLLER_LIST_PROVIDER_MARGIN_MS = 500
 // Why: the renderer waits 15s; leave room for the verified failure response and release the spawn fence before its caller times out.
 const WORKTREE_TERMINAL_SLEEP_TIMEOUT_MS = 12_000
-
-async function waitForWorktreeTerminalMutation(
-  previous: Promise<void>,
-  deadline?: number
-): Promise<void> {
-  if (deadline === undefined) {
-    await previous
-    return
-  }
-  const remainingMs = deadline - Date.now()
-  if (remainingMs <= 0) {
-    throw new Error('terminal_worktree_sleep_timeout')
-  }
-  let timeout: ReturnType<typeof setTimeout> | undefined
-  try {
-    await Promise.race([
-      previous,
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error('terminal_worktree_sleep_timeout')),
-          remainingMs
-        )
-      })
-    ])
-  } finally {
-    if (timeout !== undefined) {
-      clearTimeout(timeout)
-    }
-  }
-}
 
 // Why: listener fan-out is best-effort delivery. One subscriber throwing synchronously — e.g. a
 // paired-client relay whose stream is closed — must never abort the emitting operation or leak

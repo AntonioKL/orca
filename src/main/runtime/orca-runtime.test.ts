@@ -31,6 +31,7 @@ import {
   reviewHeadRemoteRefComponent,
   REVIEW_HEAD_FETCH_TIMEOUT_MS
 } from '../../shared/review-head-tracking-ref'
+import { REPO_SEARCH_REFS_MAX_LIMIT } from '../../shared/repo-search-limits'
 
 // Why: durable review-head refs are scoped by remote identity (name + URL hash).
 const ORIGIN_REMOTE_URL = 'git@example.com:group/repo.git'
@@ -5320,6 +5321,8 @@ describe('OrcaRuntimeService', () => {
     const result = await runtime.createManagedWorktree({
       repoSelector: 'id:folder-repo',
       name: 'folder-session',
+      displayName: '\u0000\u202e',
+      displayNameKind: 'user',
       createdWithAgent: 'codex',
       startup: { command: 'codex', viewMode: 'chat' }
     })
@@ -5345,6 +5348,7 @@ describe('OrcaRuntimeService', () => {
       orcaCreationSource: 'runtime',
       createdWithAgent: 'codex'
     })
+    expect(metaById[result.worktree.id]).not.toHaveProperty('displayNameIsPinned')
     await expect(runtime.showManagedWorktree(`id:${result.worktree.id}`)).resolves.toMatchObject({
       id: result.worktree.id,
       repoId: 'folder-repo',
@@ -18074,7 +18078,7 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
-  it('chunks large agent prompt paste frames before delayed submit', async () => {
+  it('writes large agent prompt paste frames atomically before delayed submit', async () => {
     vi.useFakeTimers()
     try {
       const writes: string[] = []
@@ -18103,7 +18107,7 @@ describe('OrcaRuntimeService', () => {
         Buffer.byteLength(`${buildAgentPromptPasteBytes(prompt)}\r`, 'utf8')
       )
       expect(writes.at(-1)).toBe('\r')
-      expect(pasteWrites.length).toBeGreaterThan(1)
+      expect(pasteWrites).toHaveLength(1)
       expect(pasteWrites.join('')).toBe(buildAgentPromptPasteBytes(prompt))
       expect(pasteWrites[0]).toContain(AGENT_PROMPT_BRACKETED_PASTE_START)
       expect(pasteWrites.at(-1)).toContain(AGENT_PROMPT_BRACKETED_PASTE_END)
@@ -18112,18 +18116,16 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
-  it('closes an incomplete agent prompt paste when a later chunk write fails', async () => {
+  it('rejects an agent prompt when the atomic paste write fails', async () => {
     vi.useFakeTimers()
     try {
       const writes: string[] = []
-      let writeCount = 0
       const runtime = new OrcaRuntimeService(store)
       runtime.setPtyController({
         spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
         write: (_ptyId, data) => {
-          writeCount += 1
           writes.push(data)
-          return writeCount !== 2
+          return false
         },
         kill: () => true,
         getForegroundProcess: async () => null
@@ -18139,7 +18141,7 @@ describe('OrcaRuntimeService', () => {
 
       await sendRejection
       expect(writes[0]).toContain(AGENT_PROMPT_BRACKETED_PASTE_START)
-      expect(writes.at(-1)).toBe(AGENT_PROMPT_BRACKETED_PASTE_END)
+      expect(writes).toHaveLength(1)
       expect(writes).not.toContain('\r')
     } finally {
       vi.useRealTimers()
@@ -18169,6 +18171,33 @@ describe('OrcaRuntimeService', () => {
       bytesWritten: Buffer.byteLength(text, 'utf8')
     })
     expect(writes).toEqual(['x'.repeat(TERMINAL_INPUT_CHUNK_MAX_BYTES), 'tail'])
+  })
+
+  it('yields chunked terminal input through immediates between writes', async () => {
+    const immediate = vi.spyOn(globalThis, 'setImmediate')
+    try {
+      const writes: string[] = []
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+
+      const text = `${'x'.repeat(TERMINAL_INPUT_CHUNK_MAX_BYTES)}\nline two\nline three`
+      await runtime.sendTerminal(handle, { text, enter: true })
+
+      expect(writes.at(-1)).toBe('\r')
+      expect(writes.slice(0, -1).join('')).toBe(text)
+      expect(immediate).toHaveBeenCalled()
+    } finally {
+      immediate.mockRestore()
+    }
   })
 
   it('yields while validating accepted large terminal.send text before provider writes', async () => {
@@ -42022,6 +42051,9 @@ describe('OrcaRuntimeService', () => {
     await expect(runtime.getWorktreePs(-1)).rejects.toThrow('invalid_limit')
     await expect(runtime.listManagedWorktrees(undefined, 0)).rejects.toThrow('invalid_limit')
     await expect(runtime.searchRepoRefs('id:repo-1', 'main', -5)).rejects.toThrow('invalid_limit')
+    await expect(runtime.searchRepoRefs('id:repo-1', 'main', Number.MAX_VALUE)).rejects.toThrow(
+      'invalid_limit'
+    )
   })
 
   it('returns capped SSH refs for empty runtime repo searches', async () => {
@@ -42069,7 +42101,7 @@ describe('OrcaRuntimeService', () => {
     })
     expect(provider.exec).toHaveBeenCalledWith(
       expect.arrayContaining([
-        '--exclude=refs/remotes/**/HEAD',
+        '--exclude=refs/remotes/*/HEAD',
         '--count=12',
         'refs/heads/**/**',
         'refs/heads/**/**/**',
@@ -42079,6 +42111,51 @@ describe('OrcaRuntimeService', () => {
       '/home/user/repo'
     )
     expect(provider.exec).toHaveBeenCalledWith(['remote'], '/home/user/repo')
+  })
+
+  it('clamps oversized SSH ref-search limits and reports the execution cap', async () => {
+    const remoteRepo = {
+      id: 'remote-repo-large-limit',
+      path: '/home/user/repo',
+      displayName: 'remote',
+      badgeColor: 'blue',
+      addedAt: 1,
+      connectionId: 'ssh-large-limit'
+    }
+    const runtimeStore = {
+      ...store,
+      getRepos: () => [remoteRepo],
+      getRepo: () => remoteRepo
+    }
+    const provider = {
+      exec: vi.fn().mockImplementation((argv: string[]) => {
+        if (argv[0] === 'remote') {
+          return Promise.resolve({ stdout: 'origin\n', stderr: '' })
+        }
+        return Promise.resolve({
+          stdout: 'refs/remotes/origin/main\0origin/main',
+          stderr: ''
+        })
+      })
+    }
+    registerSshGitProvider('ssh-large-limit', provider as never)
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+
+    const result = await runtime.searchRepoRefs(
+      'id:remote-repo-large-limit',
+      '',
+      REPO_SEARCH_REFS_MAX_LIMIT + 1
+    )
+
+    expect(result).toEqual({
+      refs: ['origin/main'],
+      refDetails: [{ refName: 'origin/main', localBranchName: 'main' }],
+      truncated: true
+    })
+    const forEachRefCall = provider.exec.mock.calls.find(
+      (call) => (call[0] as string[])[0] === 'for-each-ref'
+    )
+    expect(forEachRefCall?.[0]).toContain('--count=4004')
   })
 
   it('retries runtime SSH ref searches without --exclude for older git hosts', async () => {
@@ -42100,7 +42177,7 @@ describe('OrcaRuntimeService', () => {
         if (argv[0] === 'remote') {
           return Promise.resolve({ stdout: 'origin\n', stderr: '' })
         }
-        if (argv.includes('--exclude=refs/remotes/**/HEAD')) {
+        if (argv.some((arg) => arg.startsWith('--exclude=refs/remotes/'))) {
           return Promise.reject(
             Object.assign(new Error("unknown option `exclude'"), {
               stderr: "error: unknown option `exclude'"
@@ -42133,10 +42210,16 @@ describe('OrcaRuntimeService', () => {
       (call) => (call[0] as string[])[0] === 'for-each-ref'
     )
     expect(forEachRefCalls).toHaveLength(3)
-    expect(forEachRefCalls[0][0]).toContain('--exclude=refs/remotes/**/HEAD')
-    expect(forEachRefCalls[1][0]).not.toContain('--exclude=refs/remotes/**/HEAD')
+    expect(
+      (forEachRefCalls[0][0] as string[]).some((arg) => arg.startsWith('--exclude=refs/remotes/'))
+    ).toBe(true)
+    expect(
+      (forEachRefCalls[1][0] as string[]).some((arg) => arg.startsWith('--exclude=refs/remotes/'))
+    ).toBe(false)
     expect(forEachRefCalls[1][0]).toContain('--count=108')
-    expect(forEachRefCalls[2][0]).not.toContain('--exclude=refs/remotes/**/HEAD')
+    expect(
+      (forEachRefCalls[2][0] as string[]).some((arg) => arg.startsWith('--exclude=refs/remotes/'))
+    ).toBe(false)
   })
 
   it('resolves SSH worktrees when manually updating lineage', async () => {
