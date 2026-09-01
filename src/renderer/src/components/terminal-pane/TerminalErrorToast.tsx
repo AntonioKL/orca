@@ -78,6 +78,11 @@ export function isExplainedTerminalError(error: string): boolean {
     )
 }
 
+export function isPaneOwnerUnverifiedError(error: string): boolean {
+  const lines = error.split('\n').filter((line) => line.length > 0)
+  return lines.length > 0 && lines.every((line) => line.includes(PANE_OWNER_UNVERIFIED_MARKER))
+}
+
 function humanizeUnreattachableSession(error: string): string {
   const explanation = translate(
     'auto.components.terminal.pane.TerminalErrorToast.sessionUnavailable',
@@ -94,13 +99,16 @@ function humanizeUnreattachableSession(error: string): string {
 export function humanizeTerminalError(error: string): string {
   let humanized = error
   if (humanized.includes(PANE_OWNER_UNVERIFIED_MARKER)) {
-    humanized = humanized.replace(
-      PANE_OWNER_UNVERIFIED_MARKER,
-      translate(
-        'auto.components.terminal.pane.TerminalErrorToast.7ee11bc0db',
-        "Orca couldn't confirm whether this terminal's previous session is still running, so it left the session untouched. Reopen this pane to retry."
-      )
-    )
+    const explanation = isPaneOwnerUnverifiedError(humanized)
+      ? translate(
+          'auto.components.terminal.pane.TerminalErrorToast.7ee11bc0db',
+          "Orca couldn't safely reconnect this terminal because the host couldn't verify its saved session. Your previous terminal session was not closed or deleted. Click Retry to try reconnecting now. If it still cannot reconnect, open a new terminal."
+        )
+      : translate(
+          'auto.components.terminal.pane.TerminalErrorToast.ownerUnknown',
+          "Orca couldn't verify this terminal's owner."
+        )
+    humanized = humanized.replace(PANE_OWNER_UNVERIFIED_MARKER, explanation)
   }
   humanized = humanizeUnreattachableSession(humanized)
   if (!isExplainedTerminalError(humanized)) {
@@ -127,17 +135,22 @@ export function humanizeTerminalError(error: string): string {
 export function TerminalErrorToast({
   error,
   onDismiss,
-  onRestartDaemon
+  onRestartDaemon,
+  onRetry
 }: {
   error: string
   onDismiss: () => void
   onRestartDaemon?: () => void
+  onRetry?: () => Promise<boolean>
 }): React.JSX.Element {
   const ssh = isSshError(error)
+  const paneOwnerUnverified = isPaneOwnerUnverifiedError(error)
   const showDaemonRestart = !ssh && onRestartDaemon && shouldOfferDaemonRestart(error)
   // Restart cannot recover a session after its owning daemon exits.
-  const showIssueLink = !ssh && !showDaemonRestart && !isExplainedTerminalError(error)
+  const showIssueLink =
+    !ssh && !paneOwnerUnverified && !showDaemonRestart && !isExplainedTerminalError(error)
   const displayError = humanizeTerminalError(error)
+  const [retrying, setRetrying] = useState(false)
   const [environmentFooter, setEnvironmentFooter] = useState<{
     error: string
     footer: string
@@ -160,10 +173,22 @@ export function TerminalErrorToast({
   }, [displayError, ssh])
 
   const footer = environmentFooter?.error === displayError ? environmentFooter.footer : ''
+  const handleRetry = async (): Promise<void> => {
+    if (!onRetry || retrying) {
+      return
+    }
+    setRetrying(true)
+    try {
+      await onRetry()
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   return (
     <div
       data-terminal-error-toast
+      data-terminal-error-kind={paneOwnerUnverified ? 'owner-unverified' : ssh ? 'ssh' : 'error'}
       style={{
         position: 'absolute',
         bottom: 12,
@@ -172,9 +197,13 @@ export function TerminalErrorToast({
         zIndex: 50,
         padding: '10px 14px',
         borderRadius: 6,
-        background: ssh ? 'rgba(234, 179, 8, 0.12)' : 'rgba(220, 38, 38, 0.15)',
-        border: ssh ? '1px solid rgba(234, 179, 8, 0.35)' : '1px solid rgba(220, 38, 38, 0.4)',
-        color: ssh ? '#fde68a' : '#fca5a5',
+        background:
+          ssh || paneOwnerUnverified ? 'rgba(234, 179, 8, 0.12)' : 'rgba(220, 38, 38, 0.15)',
+        border:
+          ssh || paneOwnerUnverified
+            ? '1px solid rgba(234, 179, 8, 0.35)'
+            : '1px solid rgba(220, 38, 38, 0.4)',
+        color: ssh || paneOwnerUnverified ? '#fde68a' : '#fca5a5',
         fontSize: 12,
         fontFamily: 'monospace',
         whiteSpace: 'pre-wrap',
@@ -235,12 +264,34 @@ export function TerminalErrorToast({
             )}
           </button>
         ) : null}
+        {paneOwnerUnverified && onRetry ? (
+          <button
+            onClick={() => void handleRetry()}
+            disabled={retrying}
+            style={{
+              marginLeft: 12,
+              border: '1px solid rgba(253, 230, 138, 0.45)',
+              borderRadius: 6,
+              background: 'rgba(113, 63, 18, 0.35)',
+              color: '#fef3c7',
+              cursor: retrying ? 'wait' : 'pointer',
+              fontSize: 12,
+              padding: '4px 8px',
+              whiteSpace: 'nowrap',
+              flexShrink: 0
+            }}
+          >
+            {retrying
+              ? translate('auto.components.terminal.pane.TerminalErrorToast.retrying', 'Retrying…')
+              : translate('auto.components.terminal.pane.TerminalErrorToast.retry', 'Retry')}
+          </button>
+        ) : null}
         <button
           onClick={onDismiss}
           style={{
             background: 'none',
             border: 'none',
-            color: ssh ? '#fde68a' : '#fca5a5',
+            color: ssh || paneOwnerUnverified ? '#fde68a' : '#fca5a5',
             cursor: 'pointer',
             fontSize: 14,
             padding: '0 0 0 8px',
