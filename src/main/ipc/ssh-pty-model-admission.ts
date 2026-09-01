@@ -1,3 +1,4 @@
+import { ClosedGenerationLedger } from './closed-generation-ledger'
 import type {
   SshPtyModelAdmissionKey,
   SshPtyModelAdmissionOptions,
@@ -27,7 +28,7 @@ export class SshPtyModelAdmission {
   private readonly usageByPty = new Map<string, PtyUsage>()
   private readonly pressure: SshPtyModelAdmissionPressure
   private readonly idleWaiters = new Map<string, Set<() => void>>()
-  private readonly closingGenerations = new Set<number>()
+  private readonly closingGenerations = new ClosedGenerationLedger()
   private readonly migratingPtys = new Set<string>()
   private globalSourceUnits = 0
   private globalBytes = 0
