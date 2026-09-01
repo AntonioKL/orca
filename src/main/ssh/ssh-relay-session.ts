@@ -6,6 +6,8 @@ import type { BrowserWindow } from 'electron'
 import { deployAndLaunchRelay } from './ssh-relay-deploy'
 import { execCommand } from './ssh-relay-deploy-helpers'
 import { isRelayVersionMismatchError } from './ssh-relay-version-mismatch-error'
+import { forgetRelayNodePtyRepairs, recoverRelayNodePtyForSpawn } from './ssh-relay-node-pty-repair'
+import type { TerminalUnavailableCause } from '../../shared/terminal-unavailable-cause'
 import { replayPendingSshPtyKills } from './ssh-pending-pty-kill-replay'
 import { SshChannelMultiplexer } from './ssh-channel-multiplexer'
 import { SshPtyProvider } from '../providers/ssh-pty-provider'
@@ -318,6 +320,8 @@ export class SshRelaySession {
   private _onReady: ((targetId: string) => void) | null = null
   private portScanner: PortScanner | null = null
   private currentConnection: SshConnection | null = null
+  // Why: a self-driven repair reconnect must not silently re-negotiate the target's grace window.
+  private lastGraceTimeSeconds: number | undefined = undefined
   private hostPlatform: RemoteHostPlatform | null = null
   private remoteCliBridgeEnv: RemoteCliBridgeEnv | null = null
   private aiVaultListMethodSupported: boolean | null = null
@@ -516,6 +520,7 @@ export class SshRelaySession {
     this.aiVaultListMethodSupported = null
     this.aiVaultTitleMethodSupported = null
     this.currentConnection = conn
+    this.lastGraceTimeSeconds = graceTimeSeconds
 
     try {
       const {
@@ -656,6 +661,7 @@ export class SshRelaySession {
     this.aiVaultListMethodSupported = null
     this.aiVaultTitleMethodSupported = null
     this.currentConnection = conn
+    this.lastGraceTimeSeconds = graceTimeSeconds
 
     // Why: stop scanning before teardownProviders so the poll timer can't fire against a disposed multiplexer.
     this.stopPortScanning()
@@ -849,6 +855,9 @@ export class SshRelaySession {
     this.teardownProviders('shutdown')
     this.currentConnection = null
     this._state = 'disposed'
+    // Why here and not on reconnect: an explicit disconnect is user action, so the host earns a
+    // fresh node-pty repair attempt. A reconnect must not, or the repair becomes a loop.
+    forgetRelayNodePtyRepairs(this.targetId)
     const recoveryRemoval = forgetSshPtyConsumerRecovery(
       this.targetId,
       this.ptyConsumerClientInstanceId,
@@ -982,6 +991,44 @@ export class SshRelaySession {
     })
   }
 
+  /**
+   * A spawn was refused because the relay cannot load node-pty. Reconnect once so the deploy
+   * path's `repairInstalledNativeDeps` rebuilds it under `tryAcquireRelayRepairLock`, then hand
+   * back the provider registered by that reconnect for a single retry.
+   *
+   * Nothing here mutates the remote directly — a lock-less rebuild could collide with a
+   * concurrent reconnect's repair, so the locked deploy path stays the only writer. If the lock
+   * is busy it launches degraded, the retry hits the same rejection, and the user sees the
+   * relay's message. The attempt is spent either way.
+   */
+  private async recoverRemoteTerminalRuntime(
+    requestingProvider: SshPtyProvider,
+    cause: TerminalUnavailableCause
+  ): Promise<SshPtyProvider | null> {
+    const { provider } = await recoverRelayNodePtyForSpawn<SshPtyProvider>({
+      targetId: this.targetId,
+      cause,
+      hasLivePtys: () => requestingProvider.hasLivePtys(),
+      reconnect: async () => {
+        const conn = this.currentConnection
+        if (!conn || this.isDisposed()) {
+          throw new Error('no_live_ssh_connection')
+        }
+        await this.reconnect(conn, this.lastGraceTimeSeconds)
+      },
+      resolveProvider: () => {
+        if (this._state !== 'ready' || this.isDisposed()) {
+          return null
+        }
+        const current = getSshPtyProvider(this.targetId) as SshPtyProvider | undefined
+        // Why identity-checked: a reconnect that fell back to the same provider would retry
+        // against the same unrepaired relay.
+        return current && current !== requestingProvider ? current : null
+      }
+    })
+    return provider
+  }
+
   // Why: shared by establish() and reconnect() so both use the exact same registration sequence.
   private async registerProviders(
     mux: SshChannelMultiplexer,
@@ -1020,6 +1067,10 @@ export class SshRelaySession {
       mux,
       this.remoteCliBridgeEnv ?? undefined,
       providerGeneration
+    )
+    // Why optional-call: session tests register partial provider stubs, same as the pause adapter below.
+    ptyProvider.setTerminalUnavailableRecovery?.((cause) =>
+      this.recoverRemoteTerminalRuntime(ptyProvider, cause)
     )
     const consumerOwnerState = this.activePtyConsumerOwner()
     if (consumerOwnerState) {
