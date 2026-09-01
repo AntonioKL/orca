@@ -652,6 +652,7 @@ import {
   resolveTuiAgentLaunchEnv
 } from '../../shared/tui-agent-launch-defaults'
 import { resolveStartupShell, tokenizeStartupCommand } from '../../shared/tui-agent-startup-shell'
+import { resolveAgentSessionResumeArgs } from './agent-session-resume-args'
 import { resolveCodexStructuredAppServerArgs } from '../codex/codex-structured-app-server-args'
 import { resolveLocalWindowsAgentStartupShell } from '../../shared/windows-terminal-shell'
 import {
@@ -11390,7 +11391,12 @@ export class OrcaRuntimeService {
             presentation: 'background'
           },
           {},
-          { spawnToken, providerRoot: record.accountHome.path, sessionId: record.sessionId }
+          {
+            spawnToken,
+            providerRoot: record.accountHome.path,
+            sessionId: record.sessionId,
+            ...(record.launchArgs !== undefined ? { launchArgs: record.launchArgs } : {})
+          }
         )
         const terminal = launched.terminal
         let spawnedOwner: StructuredTuiOwner | null = null
@@ -30088,7 +30094,12 @@ export class OrcaRuntimeService {
   async ensureAgentSession(
     request: RuntimeEnsureAgentSessionRequest,
     _caller: RuntimeAgentSessionRpcCaller = {},
-    handoffAuthority?: { spawnToken: string; providerRoot: string; sessionId: string }
+    handoffAuthority?: {
+      spawnToken: string
+      providerRoot: string
+      sessionId: string
+      launchArgs?: NonNullable<AgentSessionRecord['launchArgs']>
+    }
   ): Promise<RuntimeEnsureAgentSessionResult> {
     if (request.kind === 'automatic') {
       // Legacy renderer sleep records are migration evidence, not host authority.
@@ -30132,10 +30143,12 @@ export class OrcaRuntimeService {
       agent: request.agent,
       providerSession: identity.providerSession,
       cmdOverrides: settings.agentCmdOverrides ?? {},
-      agentArgs:
-        request.agentArgs !== undefined
-          ? request.agentArgs
-          : resolveTuiAgentLaunchArgs(request.agent, settings.agentDefaultArgs),
+      agentArgs: resolveAgentSessionResumeArgs({
+        requestArgs: request.agentArgs,
+        persistedArgs: handoffAuthority?.launchArgs,
+        defaultArgs: resolveTuiAgentLaunchArgs(request.agent, settings.agentDefaultArgs),
+        shell: resolveStartupShell(platform, shell)
+      }),
       agentEnv: {
         ...resolveTuiAgentLaunchEnv(request.agent, settings.agentDefaultEnv),
         ...(handoffAuthority && request.agent === 'codex'

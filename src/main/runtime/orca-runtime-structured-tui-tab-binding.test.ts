@@ -562,6 +562,7 @@ describe('structured TUI launch tab binding', () => {
         sessionId: 'session-1',
         location: { workspaceId: WORKTREE_ID, executionHostId: 'local' },
         accountHome: { variable: 'CODEX_HOME', path: '/tmp/codex-home' },
+        launchArgs: ['--search'],
         options: { model: 'gpt-5.6-terra', effort: 'medium' },
         providerHandleChain: [
           { handle: { provider: 'codex', threadId: 'thread-1' }, observedAt: 1 }
@@ -601,6 +602,7 @@ describe('structured TUI launch tab binding', () => {
     const launchCommand = spawn.mock.calls[0]?.[0]?.command
     expect(launchCommand).toContain("'-m' 'gpt-5.6-terra'")
     expect(launchCommand).toContain("'-c' 'model_reasoning_effort=medium'")
+    expect(launchCommand).toContain("'--search'")
     expect(launchCommand).not.toContain('gpt-5.6-sol')
     expect(launchCommand).not.toContain('model_reasoning_effort=high')
 
