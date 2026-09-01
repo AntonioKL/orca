@@ -42,6 +42,7 @@ import type { RpcSuccess } from '../../../src/transport/types'
 import { StatusDot } from '../../../src/components/StatusDot'
 import { NewWorktreeModalController } from '../../../src/components/NewWorktreeModalController'
 import { NewWorkspaceFab, FAB_SIZE } from '../../../src/components/NewWorkspaceFab'
+import { SearchWorkspacesFab } from '../../../src/components/SearchWorkspacesFab'
 import { MobileRepoIcon } from '../../../src/components/MobileRepoIcon'
 import { WorktreeListRow } from '../../../src/components/WorktreeListRow'
 import { useNow } from '../../../src/hooks/use-now'
@@ -57,7 +58,7 @@ import { useHostProtocolGates } from '../../../src/components/HostProtocolGate'
 import { AuthFailedBanner } from '../../../src/components/AuthFailedBanner'
 import { HostRouteNoticeBanner } from '../../../src/components/HostRouteNoticeBanner'
 import { visibleHostRouteNotice } from '../../../src/host-route-notice'
-import { MobileSearchField } from '../../../src/components/MobileSearchField'
+import { HostWorkspaceSearchBar } from '../../../src/components/HostWorkspaceSearchBar'
 import { WorkspaceDetailPlaceholder } from '../../../src/components/WorkspaceDetailPlaceholder'
 import { getCachedWorktrees, setCachedWorktrees } from '../../../src/cache/worktree-cache'
 import { setCachedRepos } from '../../../src/cache/repo-cache'
@@ -196,6 +197,7 @@ export function HostScreen({
   }, [router])
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set())
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const toggleSearch = useCallback(() => setShowSearch((visible) => !visible), [])
   // Why: ref so the ui.get merge and ui.set writes read the latest values without re-creating callbacks on every state change.
   const viewStateRef = useRef<MobileViewState>({
     groupMode: 'repo',
@@ -992,6 +994,19 @@ export function HostScreen({
               ) : null}
 
               <Pressable
+                style={styles.embeddedToolbarIconButton}
+                onPress={toggleSearch}
+                accessibilityRole="button"
+                accessibilityLabel={showSearch ? 'Close search' : 'Search workspaces'}
+              >
+                {showSearch ? (
+                  <X size={16} color={colors.textSecondary} />
+                ) : (
+                  <Search size={16} color={colors.textSecondary} />
+                )}
+              </Pressable>
+
+              <Pressable
                 style={[
                   styles.embeddedToolbarIconButton,
                   connState !== 'connected' && styles.toolbarIconDisabled
@@ -1005,19 +1020,6 @@ export function HostScreen({
                   size={16}
                   color={connState === 'connected' ? colors.textPrimary : colors.textMuted}
                 />
-              </Pressable>
-
-              <Pressable
-                style={styles.embeddedToolbarIconButton}
-                onPress={() => setShowSearch((s) => !s)}
-                accessibilityRole="button"
-                accessibilityLabel={showSearch ? 'Close search' : 'Search workspaces'}
-              >
-                {showSearch ? (
-                  <X size={16} color={colors.textSecondary} />
-                ) : (
-                  <Search size={16} color={colors.textSecondary} />
-                )}
               </Pressable>
             </View>
           </View>
@@ -1064,7 +1066,7 @@ export function HostScreen({
             <View style={styles.toolbarSpacer} />
 
             <Pressable
-              style={styles.searchToggle}
+              style={styles.toolbarIconButton}
               onPress={() => navigateFromHostList(`/h/${hostId}/accounts`)}
               disabled={connState !== 'connected'}
             >
@@ -1075,7 +1077,7 @@ export function HostScreen({
             </Pressable>
 
             <Pressable
-              style={styles.searchToggle}
+              style={styles.toolbarIconButton}
               onPress={() => navigateFromHostList(`/h/${hostId}/tasks`)}
               disabled={connState !== 'connected'}
             >
@@ -1083,14 +1085,6 @@ export function HostScreen({
                 size={16}
                 color={connState === 'connected' ? colors.textSecondary : colors.textMuted}
               />
-            </Pressable>
-
-            <Pressable style={styles.searchToggle} onPress={() => setShowSearch((s) => !s)}>
-              {showSearch ? (
-                <X size={16} color={colors.textSecondary} />
-              ) : (
-                <Search size={16} color={colors.textSecondary} />
-              )}
             </Pressable>
           </View>
         )}
@@ -1115,19 +1109,7 @@ export function HostScreen({
       )}
 
       {/* Search bar */}
-      {showSearch && (
-        <View style={styles.searchBar}>
-          <MobileSearchField
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search worktrees…"
-            autoFocus
-            // Why: new key per open remounts the focus effect across rapid toggles so the keyboard reappears.
-            focusKey={showSearch}
-            accessibilityLabel="Search worktrees"
-          />
-        </View>
-      )}
+      {showSearch && <HostWorkspaceSearchBar value={search} onChangeText={setSearch} />}
 
       <HostWorkspaceListStates
         connState={connState}
@@ -1152,7 +1134,7 @@ export function HostScreen({
           // Why: edge-to-edge under the system nav bar; insets.bottom keeps the last row above it.
           contentContainerStyle={[
             styles.list,
-            // Reserve room so the last row stays tappable above the phone's floating "+" (embedded uses the toolbar +).
+            // Reserve room so the last phone row stays tappable above the floating actions.
             { paddingBottom: (embedded ? spacing.lg : FAB_SIZE + spacing.xl) + insets.bottom },
             isWideLayout &&
               !embedded && { maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center' }
@@ -1218,9 +1200,12 @@ export function HostScreen({
         />
       )}
 
-      {/* Floating "new workspace" button — phone only; embedded sidebars keep the toolbar +. */}
+      {/* Phone actions float above the safe area; embedded layouts use the toolbar. */}
       {!embedded && (
-        <NewWorkspaceFab onPress={openNewWorktreeModal} disabled={connState !== 'connected'} />
+        <>
+          <SearchWorkspacesFab active={showSearch} onPress={toggleSearch} />
+          <NewWorkspaceFab onPress={openNewWorktreeModal} disabled={connState !== 'connected'} />
+        </>
       )}
 
       <PickerModal
@@ -1577,15 +1562,8 @@ const styles = StyleSheet.create({
   toolbarIconDisabled: {
     opacity: 0.6
   },
-  searchToggle: {
+  toolbarIconButton: {
     padding: spacing.xs
-  },
-  searchBar: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.borderSubtle,
-    backgroundColor: colors.bgPanel
   },
   centered: {
     flex: 1,
