@@ -81,6 +81,19 @@ and restoring rendered Tasks/accessibility parity tests while removing the
 remaining Tasks duplication. These remain tracked by the corresponding gates
 below and are not silently considered complete.
 
+## 2026-09-01 CI Coverage Note
+
+- The Swift and Kotlin native store suites now run in CI from
+  `.github/workflows/mobile-native-shell-tests.yml`, on a macOS runner and an
+  ubuntu runner with the Android SDK. This closes no gate above; the suites
+  compile and exercise store sources, not a store-signed release app.
+- `tests/e2e/hosted-mobile-webview-ssh.spec.ts` is explicitly excluded from the
+  ubuntu changed-spec e2e lane in `.github/workflows/e2e.yml`. It needs an iOS
+  simulator and a Docker daemon at once, which no GitHub-hosted runner offers,
+  and it skipped itself off darwin there. Reporting that green skip as coverage
+  hid the fact that CI never runs it. It runs from a macOS checkout through
+  `pnpm test:e2e:hosted-mobile-webview:ssh`.
+
 ## Packaged Desktop and Signed App Matrix
 
 - [ ] Build, install, and run package delivery from the final supported macOS

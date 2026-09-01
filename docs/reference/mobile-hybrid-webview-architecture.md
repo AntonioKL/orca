@@ -2,7 +2,7 @@
 
 - **Status:** Implemented as the sole workspace route in the dedicated release
   candidate; production promotion is not approved
-- **Last updated:** July 29, 2026
+- **Last updated:** September 1, 2026
 - **Migration design:**
   [`plans/2026-07-22-mobile-hybrid-webview-single-pr-migration.md`](./plans/2026-07-22-mobile-hybrid-webview-single-pr-migration.md)
 - **Active remaining work:**
@@ -69,8 +69,9 @@ routes remain outside the hosted route graph.
 
 ## Build and Delivery Flow
 
-1. `mobile/scripts/export-host-mobile-web.mjs` exports
-   `mobile/host-web-app/` for the web platform.
+1. `pnpm --dir mobile export:host-web` runs
+   `mobile/scripts/export-host-mobile-web.mjs`, which exports the
+   `mobile/host-web-app/` route root for the web platform.
 2. The hosted route graph imports the existing screens under `mobile/app/` and
    their components under `mobile/src/`.
 3. `config/scripts/package-mobile-web-rnw.mjs` removes runtime code generation,
@@ -79,7 +80,9 @@ routes remain outside the hosted route graph.
    supported bridge range.
 4. `config/scripts/verify-mobile-web-rnw-build.mjs` verifies the manifest,
    assets, CSP, source boundaries, and size budgets. Desktop packaging copies
-   the exact output to `Resources/mobile-web`.
+   the exact output to `Resources/mobile-web`. Steps 1, 3, and 4 run together
+   as `pnpm build:mobile-web-rnw`, which `pnpm build:mobile-web` aliases and
+   the Desktop release builds invoke.
 5. A paired shell requests `mobileWeb.package.manifest` and bounded
    `mobileWeb.package.asset` chunks over the existing authenticated,
    end-to-end-encrypted mobile RPC connection.
@@ -141,8 +144,11 @@ external-link authority.
   arbitrary windows, and direct network loads are disabled.
 - CSP uses `default-src 'none'`, `connect-src 'none'`, and explicit
   content-addressed script, style, image, font, and frame rules.
-- iOS also installs content rules and network API blockers. Android blocks
-  network loads and intercepts exact private-origin asset requests.
+- iOS installs content rules and a document-start network API blocker. Android
+  now installs the matching document-start script, denying `fetch`,
+  `XMLHttpRequest`, `WebSocket`, and `serviceWorker` on the private origin, and
+  also blocks network loads and intercepts exact private-origin asset
+  requests.
 - Top-level navigation is restricted to the active document. External
   navigation, popups, downloads, workers, and arbitrary bridge origins fail
   closed.
@@ -152,6 +158,11 @@ external-link authority.
 - The first production protocol is exact version 2.
 - Every message is schema checked and bound to the active shell session and
   package build.
+- On Android, the private origin host derived from the native `activeSessionId`
+  is the authority for accepting a bridge message; the URL fragment check is a
+  secondary assertion (`MobileWebBridgeDocumentUrl.kt`, and
+  `mobile/src/mobile-web/mobile-web-history-session-fragment.ts`, which keeps
+  page history writes on that fragment).
 - The shell grants named operation/capability pairs with request, response,
   concurrency, subscription, rate, and message limits.
 - The page cannot invoke a generic RPC passthrough. Desktop still authorizes
@@ -187,6 +198,11 @@ The shell first tries the active compatible verified generation, then refreshes
 from Desktop when connected. A healthy cached package remains available while a
 refresh fails or Desktop is offline. Page readiness and an interactive health
 message form the activation boundary.
+
+A WebView process restart below the crash-loop threshold retains the shell
+session id but retires and rebuilds the capability broker, so every page-scoped
+subscription, stream, and pending request from the lost process is discarded
+rather than reused.
 
 Repeated WebView process loss or a health timeout can promote the compatible
 verified previous generation. The recovery UI exposes:
