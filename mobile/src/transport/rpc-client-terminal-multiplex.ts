@@ -1,9 +1,4 @@
-import { encryptBytes } from './e2ee'
-import {
-  decodeTerminalStreamFrame,
-  encodeTerminalStreamFrame,
-  type TerminalStreamFrame
-} from './terminal-stream-protocol'
+import { decodeTerminalStreamFrame, type TerminalStreamFrame } from './terminal-stream-protocol'
 
 type MultiplexStream = {
   method: string
@@ -29,11 +24,4 @@ export function routeTerminalMultiplexFrame(
     }
   }
   return false
-}
-
-export function encryptedTerminalMultiplexFrame(
-  frame: TerminalStreamFrame,
-  sharedKey: Uint8Array
-): Uint8Array {
-  return encryptBytes(encodeTerminalStreamFrame(frame), sharedKey)
 }

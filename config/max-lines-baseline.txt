@@ -14,4 +14,3 @@ mobile-config app/h/*/source-control/*.tsx
 mobile-config app/h/*/tasks.tsx
 mobile-config app/index.tsx
 mobile-config scripts/mock-server.ts
-mobile-config src/transport/rpc-client.ts
