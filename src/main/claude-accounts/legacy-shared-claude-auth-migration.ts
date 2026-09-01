@@ -41,6 +41,17 @@ export async function migrateLegacySharedClaudeAuth(
     }
   }
 
+  // Prove the active destination before touching the shared credential store.
+  // An untrusted path must never cause reads of (or writes to) real credentials.
+  if (options.activeAccountId) {
+    const activeAccount = options.accounts.find(({ id }) => id === options.activeAccountId)
+    if (
+      !activeAccount ||
+      !resolveOwnedClaudeManagedAuthPath(activeAccount.id, activeAccount.managedAuthPath)
+    ) {
+      return 'unavailable'
+    }
+  }
   let shared: string | null = null
   try {
     shared = options.readLegacyKeychain
