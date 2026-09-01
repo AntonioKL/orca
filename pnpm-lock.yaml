@@ -506,7 +506,7 @@ importers:
     optionalDependencies:
       '@vscode/windows-process-tree':
         specifier: 0.8.0
-        version: 0.8.0(patch_hash=9217ef36c01ed74127fef5512b0c92089cdbf820fd6c109dd671137eebdc7585)
+        version: 0.8.0(patch_hash=322965470c05f63d8527f7d8e892ee26ee444136b66b57fd64c362a9f2ff05d1)
       sherpa-onnx-darwin-arm64:
         specifier: 1.12.37
         version: 1.12.37
@@ -9737,7 +9737,7 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
 
-  '@vscode/windows-process-tree@0.8.0(patch_hash=9217ef36c01ed74127fef5512b0c92089cdbf820fd6c109dd671137eebdc7585)':
+  '@vscode/windows-process-tree@0.8.0(patch_hash=322965470c05f63d8527f7d8e892ee26ee444136b66b57fd64c362a9f2ff05d1)':
     dependencies:
       node-addon-api: 7.1.0
     optional: true
