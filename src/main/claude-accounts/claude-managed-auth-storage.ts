@@ -11,6 +11,7 @@ import {
 } from './managed-auth-path'
 import {
   deleteManagedClaudeKeychainCredentials,
+  deleteActiveClaudeKeychainCredentialsStrict,
   readManagedClaudeKeychainCredentials,
   writeManagedClaudeKeychainCredentials
 } from './keychain'
@@ -146,6 +147,14 @@ export class ClaudeManagedAuthStorage {
       console.warn('[claude-accounts] Refusing to remove untrusted managed auth:', error)
     }
     await deleteManagedClaudeKeychainCredentials(accountId)
+    if (process.platform === 'darwin') {
+      try {
+        await deleteActiveClaudeKeychainCredentialsStrict(candidatePath)
+      } catch (error) {
+        // Why: account removal must not be blocked by a stale or inaccessible scoped Keychain item.
+        console.warn('[claude-accounts] Failed to remove scoped Claude Keychain credentials', error)
+      }
+    }
   }
 
   async assertOwned(candidatePath: string, expectedAccountId?: string): Promise<string> {
