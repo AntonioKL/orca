@@ -243,6 +243,37 @@ describe('Windows NSIS uninstaller signing', () => {
     expect(build.env[EXPORT_ENV]).toContain('orca-uninstaller.exe')
   })
 
+  // Why this is a test and not a comment: `files` in the electron-builder config
+  // is all-negation, so app-builder packs whatever is left in the checkout root.
+  // These steps retry, and a retried attempt would pack an unsigned .exe into
+  // app.asar — the very defect this chain removes. Every relay path must live
+  // outside the checkout.
+  it('keeps every relay path out of the packed checkout', () => {
+    const relayEnvValues = [
+      ...releaseSteps(),
+      ...readWorkflow('.github/workflows/windows-signing-rehearsal.yml').jobs.rehearse.steps
+    ].flatMap((step) => [step.env?.[EXPORT_ENV], step.env?.[SIGNED_ENV]].filter(Boolean))
+
+    expect(relayEnvValues.length).toBe(4)
+    for (const value of relayEnvValues) {
+      expect(value).toContain('runner.temp')
+      expect(value).not.toContain('github.workspace')
+    }
+
+    const relayScripts = [
+      ...releaseSteps(),
+      ...readWorkflow('.github/workflows/windows-signing-rehearsal.yml').jobs.rehearse.steps
+    ]
+      .map((step) => step.run ?? '')
+      .filter((run) => run.includes('uninstaller-signing'))
+
+    expect(relayScripts.length).toBeGreaterThan(0)
+    for (const run of relayScripts) {
+      expect(run).toContain('$env:RUNNER_TEMP')
+      expect(run).not.toContain('$env:GITHUB_WORKSPACE')
+    }
+  })
+
   it('stages the uninstaller into the same request as the inner binaries', () => {
     const stage = stepNamed(releaseSteps(), 'Stage unsigned inner PE files for signing')
 
@@ -267,6 +298,23 @@ describe('Windows NSIS uninstaller signing', () => {
 
     expect(stage.run).not.toMatch(/\$list\.Add\(['"]uninstaller/)
     expect(restoreInner.run).not.toContain('orca-uninstaller.exe')
+  })
+
+  // This step's outcome gates the upload of every inner binary, so a filesystem
+  // error while staging the uninstaller must not escape — otherwise one
+  // uninstaller-specific failure costs every inner-binary signature, which is
+  // strictly worse than the behaviour before this chain existed.
+  it('cannot let an uninstaller staging failure cost the inner-binary signatures', () => {
+    const stage = stepNamed(releaseSteps(), 'Stage unsigned inner PE files for signing')
+    const uninstallerBlock = stage.run.slice(stage.run.indexOf('$exportedUninstaller'))
+
+    expect(stage.run).toMatch(/try \{[\s\S]*\$exportedUninstaller[\s\S]*\} catch \{/)
+    expect(uninstallerBlock).toContain('::warning::Could not stage the NSIS uninstaller')
+    expect(uninstallerBlock).not.toContain('throw')
+    // The upload it gates still keys off this step, so the catch is load-bearing.
+    expect(stepNamed(releaseSteps(), 'Upload unsigned inner binaries for SignPath').if).toContain(
+      "steps.stage-inner.outcome == 'success'"
+    )
   })
 
   it('re-injects the signed uninstaller into the rebuilt installer', () => {
@@ -317,7 +365,12 @@ describe('Windows NSIS uninstaller signing', () => {
     expect(names).toContain('Restore signed uninstaller for the installer rebuild')
     expect(rebuild.env[SIGNED_ENV]).toContain('orca-uninstaller.exe')
     expect(verify.run).toContain('.embedded-sha256')
-    expect(verify.run).toContain('embedded: Uninstall Orca.exe')
+    // The receipt only proves the import leg ran. The rehearsal is where the
+    // shipped uninstaller itself gets checked — the release job cannot install
+    // onto the runner it publishes from.
+    expect(verify.run).toContain('shipped: Uninstall Orca.exe')
+    expect(verify.run).toContain('-tnsis')
+    expect(verify.run).toContain("-ArgumentList '/S'")
   })
 
   it('wires the electron-builder sign hook that the relay depends on', () => {

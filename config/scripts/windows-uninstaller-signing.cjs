@@ -10,6 +10,18 @@
 // unsigned uninstaller so CI can put it in the existing inner-binaries SignPath
 // request, and the rebuild-from-signed-tree pass swaps the signed bytes back in
 // before makensis embeds them.
+//
+// Trap for whoever adds a real certificate to the Windows build: a custom sign
+// hook *replaces* signtool rather than running alongside it — windowsSignToolManager
+// does `const executor = customSign || (config => this.doSign(config))`. Inert
+// today (no CSC_LINK/WIN_CSC_LINK anywhere in the Windows workflows), but setting
+// one would silently sign nothing until this hook learns to delegate.
+//
+// Trap for whoever adds a second NSIS target or arch: app-builder-lib names the
+// intermediate uninstaller per target *and* arch, while the relay is a single
+// pair of env vars. Two targets would race — last write wins on export, every
+// installer would embed the same uninstaller, and the receipt could not tell.
+// Release is x64-only `--win` with `win.target` unset (so `["nsis"]`) today.
 const { createHash } = require('node:crypto')
 const { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs')
 const { basename, dirname } = require('node:path')
