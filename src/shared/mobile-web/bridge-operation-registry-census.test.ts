@@ -9,7 +9,7 @@ const SHELL_DIR = join(REPO_ROOT, 'mobile', 'src', 'mobile-web')
 
 const registered = new Set(
   Object.entries(MOBILE_WEB_BRIDGE_OPERATIONS).flatMap(([capability, operations]) =>
-    operations.map((operation) => `${capability}.${operation}`)
+    Object.keys(operations).map((operation) => `${capability}.${operation}`)
   )
 )
 
@@ -60,6 +60,54 @@ describe('mobile web bridge operation registry census', () => {
     )
 
     expect(files.length).toBeGreaterThanOrEqual(100)
+    expect(undispatched).toEqual([])
+  })
+  // A page client that reaches one operation through two different schema pairs has an arm nobody
+  // reviews; a factory rewrite that swaps a schema shows up here as a second pair.
+  it('binds every directly named operation to exactly one payload and result schema', () => {
+    const pairs = new Map<string, Set<string>>()
+    for (const { text } of sources(PAGE_DIR, () => true)) {
+      for (const match of text.matchAll(
+        /\.request(?:<[^(]*>)?\(\s*'([A-Za-z]+)',\s*'([A-Za-z0-9]+)',([\s\S]{0,400}?)\n\s*\)/g
+      )) {
+        const schemas = [...match[3]!.matchAll(/\b([A-Za-z0-9_]*Schema)\b/g)].map((name) => name[1])
+        const key = `${match[1]}.${match[2]}`
+        pairs.set(key, (pairs.get(key) ?? new Set()).add(schemas.join('|')))
+      }
+    }
+
+    // The shell arm for this one discriminates two payload shapes with safeParse, so the page
+    // deliberately reaches it through two contracts. Nothing else may.
+    expect(pairs.size).toBeGreaterThanOrEqual(150)
+    expect([...pairs].filter(([, schemas]) => schemas.size !== 1).map(([key]) => key)).toEqual([
+      'session.capabilities'
+    ])
+    expect([...pairs.keys()].filter((key) => !registered.has(key))).toEqual([])
+    expect(
+      [...pairs]
+        .filter(([, schemas]) => [...schemas].some((pair) => pair.split('|').length !== 2))
+        .map(([key]) => key)
+    ).toEqual([])
+  })
+
+  // The old form of this only asked whether the name appeared anywhere in the shell tree, which a
+  // stray comment satisfied. A dispatch position is what actually routes the request.
+  it('routes every registered operation from a shell dispatch position', () => {
+    const shell = sources(SHELL_DIR, (name) => !name.startsWith('mobile-web-production-'))
+    const undispatched = [...registered].filter((pair) => {
+      const operation = pair.slice(pair.indexOf('.') + 1)
+      const patterns = [
+        new RegExp(`operation === '${operation}'`),
+        new RegExp(`case '${operation}':`),
+        new RegExp(`'${operation}'(?=[,\\]])`),
+        new RegExp(`^\\s*'${operation}',?$`, 'm'),
+        new RegExp(`\\bstartsWith\\('${operation}'\\)`),
+        new RegExp(`\\b${operation}:\\s`)
+      ]
+      return !shell.some(({ text }) => patterns.some((pattern) => pattern.test(text)))
+    })
+
+    expect(shell.length).toBeGreaterThanOrEqual(100)
     expect(undispatched).toEqual([])
   })
 })

@@ -77,7 +77,7 @@ describe('mobile web terminal request contract', () => {
       requests.every((request) => MobileWebTerminalRequestSchema.safeParse(request).success)
     ).toBe(true)
     expect(requests.map((request) => request.operation)).toEqual(
-      MOBILE_WEB_BRIDGE_OPERATIONS.terminal
+      Object.keys(MOBILE_WEB_BRIDGE_OPERATIONS.terminal)
     )
   })
 

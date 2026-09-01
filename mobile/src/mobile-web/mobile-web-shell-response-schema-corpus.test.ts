@@ -47,7 +47,9 @@ describe('mobile web shell response schema corpus', () => {
   const eventSchemas = namedSchemas('EventSchema')
 
   it('keeps the result and event schema corpus aligned with production grant kinds', () => {
-    const registeredOperations = Object.values(MOBILE_WEB_BRIDGE_OPERATIONS).flat()
+    const registeredOperations = Object.values(MOBILE_WEB_BRIDGE_OPERATIONS).flatMap((operations) =>
+      Object.keys(operations)
+    )
     const oneShotGrants = MOBILE_WEB_PRODUCTION_GRANTS.filter(
       (grant) => grant.operation !== 'subscribe'
     )
