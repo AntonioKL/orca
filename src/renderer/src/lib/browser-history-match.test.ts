@@ -124,6 +124,17 @@ describe('browser history match', () => {
     expect(match(tied.toReversed(), 'acme')).toEqual(first)
   })
 
+  it('breaks a full tie on the url so a reordered snapshot keeps the same order', () => {
+    const tied = [
+      entry({ url: 'https://acme.dev/b', visitCount: 3, lastVisitedAt: NOW - 5 * HOUR }),
+      entry({ url: 'https://acme.dev/a', visitCount: 3, lastVisitedAt: NOW - 5 * HOUR })
+    ]
+
+    const expected = ['https://acme.dev/a', 'https://acme.dev/b']
+    expect(match(tied, 'acme').map((row) => row.url)).toEqual(expected)
+    expect(match(tied.toReversed(), 'acme').map((row) => row.url)).toEqual(expected)
+  })
+
   it('honours the limit and returns the shared empty array when nothing matches', () => {
     expect(match(GIT_CORPUS, 'git', { limit: 2 })).toHaveLength(2)
     const prepared = prepareBrowserHistoryEntries(GIT_CORPUS)

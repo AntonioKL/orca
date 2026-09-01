@@ -130,12 +130,14 @@ export function matchBrowserHistory({
   if (matches.length === 0) {
     return NO_MATCHES
   }
-  // Why lastVisitedAt last: ordering must not wobble between renders on a tie.
+  // Why the url last: ordering must not wobble between renders when a snapshot
+  // reorders two entries that also tie on tier, score and recency.
   matches.sort(
     (a, b) =>
       TIER_RANK[a.tier] - TIER_RANK[b.tier] ||
       b.score - a.score ||
-      b.entry.lastVisitedAt - a.entry.lastVisitedAt
+      b.entry.lastVisitedAt - a.entry.lastVisitedAt ||
+      a.entry.normalizedUrl.localeCompare(b.entry.normalizedUrl)
   )
   return matches.slice(0, limit)
 }

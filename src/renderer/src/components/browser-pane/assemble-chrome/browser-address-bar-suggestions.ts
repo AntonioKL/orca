@@ -76,28 +76,30 @@ export function buildBrowserAddressBarSuggestions({
       .sort((a, b) => b.lastVisitedAt - a.lastVisitedAt)
       .slice(0, MAX_BROWSER_ADDRESS_BAR_SUGGESTIONS)
   }
-  const documentSuggestions = workspaceDocHistory.map(toWorkspaceDocSuggestion)
-  const historyRows: { entry: BrowserHistoryEntry; row: BrowserAddressBarSuggestion }[] = [
-    ...browserUrlHistory.map((entry) => ({
-      entry,
-      row: { ...entry, subtitle: entry.url, isSearch: false }
-    })),
-    ...documentSuggestions.map((row) => ({
-      entry: {
-        url: row.url,
-        normalizedUrl: row.url,
-        title: row.title,
-        lastVisitedAt: row.lastVisitedAt,
-        visitCount: row.visitCount
-      },
-      row
-    }))
-  ]
-  const rowByEntry = new Map(historyRows.map(({ entry, row }) => [entry, row]))
+  const documentRows = workspaceDocHistory.map(toWorkspaceDocSuggestion)
+  const documentEntries: BrowserHistoryEntry[] = documentRows.map((row) => ({
+    url: row.url,
+    normalizedUrl: row.url,
+    title: row.title,
+    lastVisitedAt: row.lastVisitedAt,
+    visitCount: row.visitCount
+  }))
+  const rowByEntry = new Map<BrowserHistoryEntry, BrowserAddressBarSuggestion>()
+  for (const entry of browserUrlHistory) {
+    rowByEntry.set(entry, { ...entry, subtitle: entry.url, isSearch: false })
+  }
+  documentEntries.forEach((entry, index) => rowByEntry.set(entry, documentRows[index]))
+  // Why prepare the caller's array as-is: it is the stable `browserUrlHistory`
+  // identity, so the prepare cache hits instead of re-lowercasing every keystroke.
+  const preparedHistory = prepareBrowserHistoryEntries(browserUrlHistory)
+  const prepared =
+    documentEntries.length === 0
+      ? preparedHistory
+      : [...preparedHistory, ...prepareBrowserHistoryEntries(documentEntries)]
   // Why url-tail is kept here: the address bar is a navigation surface, so a
   // path-only recall is still a destination — it just never outranks a real one.
   const historySuggestions: BrowserAddressBarSuggestion[] = matchBrowserHistory({
-    prepared: prepareBrowserHistoryEntries(historyRows.map(({ entry }) => entry)),
+    prepared,
     query: trimmed,
     limit: MAX_BROWSER_ADDRESS_BAR_SUGGESTIONS - 1
   })
