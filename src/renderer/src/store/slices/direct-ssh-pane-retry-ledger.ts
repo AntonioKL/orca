@@ -76,9 +76,14 @@ export function retryDirectSshTerminalPanes(
       }
       if (
         liveBindingMatches(tab, working.directSshLivePtyBindingByTabId[tab.id], authority) ||
+        // Why `working` and not `state`: invalidateStaleDirectSshTerminalBindings has already
+        // dropped the bindings it judged stale for this authority, so a retry is not blocked by a
+        // record that step just retired.
         !shouldRetryPaneSpawnOnSshReconnect({
           targetId: authority.targetId,
           tabPtyId: tab.ptyId,
+          tabPtyIds: working.ptyIdsByTabId?.[tab.id],
+          leafPtyIds: Object.values(working.terminalLayoutsByTabId?.[tab.id]?.ptyIdsByLeafId ?? {}),
           deferredSessionId: state.deferredSshSessionIdsByTabId[tab.id]
         })
       ) {

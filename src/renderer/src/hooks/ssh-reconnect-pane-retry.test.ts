@@ -43,4 +43,59 @@ describe('shouldRetryPaneSpawnOnSshReconnect', () => {
       })
     ).toBe(false)
   })
+
+  it('leaves a split tab alone whose leaf PTYs are live but whose tab.ptyId is null', () => {
+    // workspace-terminal-reconnect fills ptyIdsByTabId from the leaf map but writes tab.ptyId only
+    // when a tab-level id survives, so a split SSH tab reaches this gate with live leaf PTYs and a
+    // null fallback field. Respawning there puts a second agent on the running one's transcript.
+    expect(
+      shouldRetryPaneSpawnOnSshReconnect({
+        targetId: 'conn-1',
+        tabPtyId: null,
+        tabPtyIds: ['ssh:conn-1@@pty-4', 'ssh:conn-1@@pty-5'],
+        leafPtyIds: ['ssh:conn-1@@pty-4', 'ssh:conn-1@@pty-5'],
+        deferredSessionId: undefined
+      })
+    ).toBe(false)
+  })
+
+  it('leaves a hydrated tab alone whose ptyId was nulled but whose layout still names its PTY', () => {
+    // clearTransientTerminalState nulls tab.ptyId on every hydrated row unconditionally, and
+    // finalizeHydratedTerminals runs this gate straight afterwards — while hydrating the host's
+    // own snapshot of the sessions it is still running.
+    expect(
+      shouldRetryPaneSpawnOnSshReconnect({
+        targetId: 'conn-1',
+        tabPtyId: null,
+        tabPtyIds: undefined,
+        leafPtyIds: ['ssh:conn-1@@pty-9'],
+        deferredSessionId: undefined
+      })
+    ).toBe(false)
+  })
+
+  it('still retries a tab with no PTY in any record', () => {
+    // The genuine "spawn failed outright" case the gate exists for must keep working.
+    expect(
+      shouldRetryPaneSpawnOnSshReconnect({
+        targetId: 'conn-1',
+        tabPtyId: null,
+        tabPtyIds: [],
+        leafPtyIds: [],
+        deferredSessionId: undefined
+      })
+    ).toBe(true)
+  })
+
+  it('still retries a stranded tab whose only records are empty slots', () => {
+    expect(
+      shouldRetryPaneSpawnOnSshReconnect({
+        targetId: 'conn-1',
+        tabPtyId: null,
+        tabPtyIds: [null],
+        leafPtyIds: [undefined],
+        deferredSessionId: undefined
+      })
+    ).toBe(true)
+  })
 })
