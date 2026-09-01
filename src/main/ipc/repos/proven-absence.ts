@@ -18,7 +18,12 @@ const ERRNO_NAME = /^E[A-Z0-9_]+$/
 
 /** Whether a failed probe proves the path is absent. Never throws. */
 export function isProvenAbsent(error: unknown): boolean {
-  const code = readErrnoCode(error)
+  const { code, failed } = readErrnoCode(error)
+  // An unreadable errno is not evidence that the path is absent. Do not let a
+  // canonical-looking message turn an error with a hostile shape into absence.
+  if (failed) {
+    return false
+  }
   if (code !== undefined && ERRNO_NAME.test(code)) {
     return code === 'ENOENT'
   }
@@ -30,7 +35,10 @@ export function isProvenAbsent(error: unknown): boolean {
  * not an indeterminate probe, so callers should say so rather than "could not check".
  */
 export function isNotADirectory(error: unknown): boolean {
-  const code = readErrnoCode(error)
+  const { code, failed } = readErrnoCode(error)
+  if (failed) {
+    return false
+  }
   if (code !== undefined && ERRNO_NAME.test(code)) {
     return code === 'ENOTDIR'
   }
@@ -39,15 +47,15 @@ export function isNotADirectory(error: unknown): boolean {
 
 // Why guarded: `?.` only protects a nullish base — it still invokes an accessor, so a throwing
 // `code` getter would escape a fail-closed path as an unhandled rejection.
-function readErrnoCode(error: unknown): string | undefined {
+function readErrnoCode(error: unknown): { code: string | undefined; failed: boolean } {
   if (typeof error !== 'object' || error === null) {
-    return undefined
+    return { code: undefined, failed: false }
   }
   try {
     const code = (error as { code?: unknown }).code
-    return typeof code === 'string' ? code : undefined
+    return { code: typeof code === 'string' ? code : undefined, failed: false }
   } catch {
-    return undefined
+    return { code: undefined, failed: true }
   }
 }
 

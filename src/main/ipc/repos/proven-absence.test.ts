@@ -57,6 +57,17 @@ describe('proven-absence', () => {
     expect(() => isNotADirectory(e)).not.toThrow()
   })
 
+  it('fails closed when a throwing code getter masks a canonical absence message', () => {
+    const e = new Error('ENOENT: no such file or directory, stat /missing')
+    Object.defineProperty(e, 'code', {
+      get() {
+        throw new Error('boom')
+      }
+    })
+    expect(isProvenAbsent(e)).toBe(false)
+    expect(isNotADirectory(e)).toBe(false)
+  })
+
   it('recognises the relay ENOTDIR shape, where the string errno did not survive', () => {
     expect(
       isNotADirectory(

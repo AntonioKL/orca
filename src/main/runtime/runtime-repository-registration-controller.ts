@@ -6,7 +6,7 @@ import { parseExecutionHostId, type ExecutionHostId } from '../../shared/executi
 import type { Repo } from '../../shared/repo-types'
 import { gitExecFileAsync, awaitWindowsHostGitEnvironmentReady } from '../git/runner'
 import { getRepoName, isGitRepo } from '../git/repo'
-import { invalidateAuthorizedRootsCache, isENOENT } from '../ipc/filesystem-auth'
+import { invalidateAuthorizedRootsCache } from '../ipc/filesystem-auth'
 import { detectRepoIconAndUpstream } from '../repo-icon-autodetect'
 import { prepareLocalWorktreeRootForRepo } from '../worktree-root-preparation'
 import {
@@ -112,7 +112,7 @@ export class RuntimeRepositoryRegistrationController {
     try {
       await mkdir(trimmedParentPath, { recursive: true })
       const existingStat = await stat(targetPath).catch((error: unknown) => {
-        if (isENOENT(error)) {
+        if (isProvenAbsent(error)) {
           return null
         }
         throw error
