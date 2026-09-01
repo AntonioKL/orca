@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { readMobileSessionRouteSourceFamily } from '../session/mobile-session-route-source-family.test-support'
 
 const nativeEditor = readFileSync(
   new URL('./MobileRichMarkdownEditor.tsx', import.meta.url),
@@ -17,10 +18,7 @@ const controller = readFileSync(
   new URL('./use-mobile-rich-markdown-editor-controller.ts', import.meta.url),
   'utf8'
 )
-const sessionRoute = readFileSync(
-  new URL('../../app/h/[hostId]/session/[worktreeId].tsx', import.meta.url),
-  'utf8'
-)
+const sessionRoute = readMobileSessionRouteSourceFamily()
 
 describe('mobile rich markdown editor web source', () => {
   it('shares the existing presentation instead of copying the toolbar', () => {

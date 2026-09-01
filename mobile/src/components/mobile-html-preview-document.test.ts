@@ -3,6 +3,7 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
+import { readMobileSessionRouteSourceFamily } from '../session/mobile-session-route-source-family.test-support'
 import {
   buildMobileHtmlPreviewDocument,
   MOBILE_HTML_PREVIEW_MESSAGE_CHANNEL,
@@ -160,7 +161,7 @@ describe('mobile HTML preview platform sources', () => {
   })
 
   it('routes HTML preview links through the session device capability', () => {
-    const sessionSource = readFileSync('app/h/[hostId]/session/[worktreeId].tsx', 'utf8')
+    const sessionSource = readMobileSessionRouteSourceFamily()
 
     expect(sessionSource).toContain('onOpenLink={onOpenExternalUrl}')
     expect(sessionSource).toContain('sessionDeviceOperations?.openExternalUrl(url)')

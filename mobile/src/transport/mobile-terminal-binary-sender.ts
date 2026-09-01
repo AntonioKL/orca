@@ -1,5 +1,5 @@
-import { encryptedTerminalMultiplexFrame } from './rpc-client-terminal-multiplex'
-import type { TerminalStreamFrame } from './terminal-stream-protocol'
+import { encryptBytes } from './e2ee'
+import { encodeTerminalStreamFrame, type TerminalStreamFrame } from './terminal-stream-protocol'
 
 export function sendMobileTerminalBinaryFrame(args: {
   frame: TerminalStreamFrame
@@ -12,7 +12,7 @@ export function sendMobileTerminalBinaryFrame(args: {
     return false
   }
   try {
-    args.socket.send(encryptedTerminalMultiplexFrame(args.frame, args.sharedKey))
+    args.socket.send(encryptBytes(encodeTerminalStreamFrame(args.frame), args.sharedKey))
     return true
   } catch {
     if (args.isConnected) {

@@ -1,6 +1,6 @@
-import type { RpcClient, RpcClientSendRequestOptions } from '../transport/rpc-client'
+import type { RpcClient, SendRequestOptions } from '../transport/rpc-client'
+import type { RpcStreamSubscribeOptions } from '../transport/rpc-client-stream-registry'
 import type { RpcResponse } from '../transport/types'
-import type { RpcClientSubscribeOptions } from '../transport/rpc-client-subscribe-options'
 import type { HostSessionBrowserOperations } from '../session/host-session-browser-operations'
 
 export type MobileBrowserRpcClient = Pick<RpcClient, 'sendRequest' | 'subscribe'>
@@ -46,7 +46,7 @@ export function createMobileBrowserRpcClient(
   async function sendRequest(
     method: string,
     rawParams: unknown = {},
-    _options?: RpcClientSendRequestOptions
+    _options?: SendRequestOptions
   ): Promise<RpcResponse> {
     const params = (rawParams ?? {}) as BrowserParams
     try {
@@ -113,7 +113,7 @@ export function createMobileBrowserRpcClient(
     method: string,
     rawParams: unknown,
     onData: (result: unknown) => void,
-    options?: RpcClientSubscribeOptions
+    options?: RpcStreamSubscribeOptions
   ): () => void {
     if (method !== 'browser.screencast') {
       onData({ type: 'error', message: `Unsupported browser subscription: ${method}` })

@@ -1,25 +1,21 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import {
+  readMobileSessionRouteSource,
+  readMobileSessionRouteSourceFamily
+} from './mobile-session-route-source-family.test-support'
 
-const source = readFileSync(
-  new URL('../../app/h/[hostId]/session/[worktreeId].tsx', import.meta.url),
-  'utf8'
+const source = readMobileSessionRouteSourceFamily()
+const reconciliationHookSource = readMobileSessionRouteSource(
+  './use-mobile-session-tabs-reconciliation.ts'
 )
-const reconciliationHookSource = readFileSync(
-  new URL('./use-mobile-session-tabs-reconciliation.ts', import.meta.url),
-  'utf8'
+const terminalInventoryRecoverySource = readMobileSessionRouteSource(
+  './use-mobile-terminal-inventory-recovery.ts'
 )
-const terminalInventoryRecoverySource = readFileSync(
-  new URL('./use-mobile-terminal-inventory-recovery.ts', import.meta.url),
-  'utf8'
+const terminalStreamPresentationSource = readMobileSessionRouteSource(
+  './host-session-terminal-stream-presentation.ts'
 )
-const terminalStreamPresentationSource = readFileSync(
-  new URL('./host-session-terminal-stream-presentation.ts', import.meta.url),
-  'utf8'
-)
-const autoCreateHookSource = readFileSync(
-  new URL('./use-initial-session-terminal-autocreate.ts', import.meta.url),
-  'utf8'
+const autoCreateHookSource = readMobileSessionRouteSource(
+  './use-initial-session-terminal-autocreate.ts'
 )
 
 function sliceBetween(startPattern: string, endPattern: string): string {
@@ -86,7 +82,7 @@ describe('mobile session startup', () => {
       'committedScope !== null && committedScope !== scopeKey'
     )
     expect(source).toContain('return terminalInventoryRequest.activate()')
-    expect(source).toContain('if (!isCurrent())')
+    expect(source).toContain('if (!isCurrent() || !response.ok)')
     expect(terminalInventoryRecoverySource).toContain(
       'TERMINAL_INVENTORY_CONFIRMATION_DELAY_MS = 750'
     )
@@ -200,7 +196,7 @@ describe('mobile session startup', () => {
     )
     const recoveryContext = sliceBetween(
       'const pendingTerminalRecoveryContextCache = useMemo(',
-      'const getSessionTabsApplicationRevision'
+      'const sessionTabsFetchReporting'
     )
 
     const tabsRefWrite = 'sessionTabsRef.current = nextTabs'
