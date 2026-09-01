@@ -2766,6 +2766,11 @@ export class SshRelaySession {
       if (bound === false) {
         // Topology absence alone is not authority to kill a process, but neither refusal may
         // publish or replay into a missing pane.
+        // We only got here because pty.attach succeeded, so the host just proved this PTY alive.
+        // Record that before the lease write: `expired` reads downstream as "reattach gave up",
+        // and terminal.recoverPane would otherwise treat this refusal as licence to spawn a
+        // replacement shell over a process the host attested is still running.
+        this.runtime?.markPtyLivenessLive(appPtyId)
         this.store.markSshRemotePtyLease(this.targetId, appPtyId, 'expired')
         return 'missing-surface'
       }
