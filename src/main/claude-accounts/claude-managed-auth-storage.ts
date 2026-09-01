@@ -1,14 +1,27 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
+import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import { toWindowsWslPath } from '../wsl'
 import { runWslProcess } from '../wsl/wsl-runner'
 import {
+  assertOwnedClaudeManagedAuthPath,
+  MISSING_MANAGED_AUTH_MESSAGE,
+  OUTSIDE_MANAGED_AUTH_ROOT_MESSAGE,
+  UNTRUSTED_MANAGED_AUTH_MESSAGE,
+  type ClaudeManagedAuthVerdict
+} from './claude-managed-auth-ownership'
+import {
   getClaudeManagedAccountsRoot,
+  MANAGED_AUTH_MARKER,
   readClaudeManagedAuthFile,
-  resolveOwnedClaudeManagedAuthPath,
+  resolveClaudeManagedAuthVerdict,
   writeClaudeManagedAuthFile
 } from './managed-auth-path'
+import {
+  buildWslManagedAuthProbeScript,
+  classifyWslManagedAuthProbe
+} from './wsl-managed-auth-probe'
 import {
   deleteManagedClaudeKeychainCredentials,
   readManagedClaudeKeychainCredentials,
@@ -32,10 +45,6 @@ export type ClaudeManagedAuthTarget = {
   wslDistro?: string | null
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`
-}
-
 export class ClaudeManagedAuthStorage {
   async create(
     accountId: string,
@@ -47,7 +56,7 @@ export class ClaudeManagedAuthStorage {
     }
     const managedAuthPath = join(this.getRoot(), accountId, 'auth')
     mkdirSync(managedAuthPath, { recursive: true, mode: 0o700 })
-    writeFileSync(join(managedAuthPath, '.orca-managed-claude-auth'), `${accountId}\n`, {
+    writeFileSync(join(managedAuthPath, MANAGED_AUTH_MARKER), `${accountId}\n`, {
       encoding: 'utf-8',
       mode: 0o600
     })
@@ -149,22 +158,30 @@ export class ClaudeManagedAuthStorage {
   }
 
   async assertOwned(candidatePath: string, expectedAccountId?: string): Promise<string> {
+    return assertOwnedClaudeManagedAuthPath(
+      await this.resolveVerdict(candidatePath, expectedAccountId)
+    )
+  }
+
+  /** Non-throwing view for callers that must branch on *why* the gate refused. */
+  async resolveVerdict(
+    candidatePath: string,
+    expectedAccountId?: string
+  ): Promise<ClaudeManagedAuthVerdict> {
     const wslInfo = parseWslUncPath(candidatePath)
     if (wslInfo) {
-      return this.assertOwnedWsl(candidatePath, wslInfo, expectedAccountId)
+      return this.resolveWslVerdict(candidatePath, wslInfo, expectedAccountId)
     }
-    this.getRoot()
+    try {
+      this.getRoot()
+    } catch (error) {
+      return { kind: 'indeterminate', error }
+    }
     const accountId = expectedAccountId ?? this.readAccountId(candidatePath)
     if (!accountId || (expectedAccountId && accountId !== expectedAccountId)) {
-      throw new Error('Managed Claude auth directory does not exist on disk.')
+      return { kind: 'untrusted', reason: MISSING_MANAGED_AUTH_MESSAGE }
     }
-    const trustedPath = resolveOwnedClaudeManagedAuthPath(accountId, candidatePath, {
-      adoptLegacyMarker: true
-    })
-    if (!trustedPath) {
-      throw new Error('Managed Claude auth storage is not owned by Orca.')
-    }
-    return trustedPath
+    return resolveClaudeManagedAuthVerdict(accountId, candidatePath, { adoptLegacyMarker: true })
   }
 
   private async tryCreateWsl(
@@ -215,56 +232,35 @@ export class ClaudeManagedAuthStorage {
     }
   }
 
-  private async assertOwnedWsl(
+  private async resolveWslVerdict(
     candidatePath: string,
     wslInfo: NonNullable<ReturnType<typeof parseWslUncPath>>,
     expectedAccountId?: string
-  ): Promise<string> {
+  ): Promise<ClaudeManagedAuthVerdict> {
     if (
       !wslInfo.linuxPath.includes('/.local/share/orca/claude-accounts/') ||
       !wslInfo.linuxPath.endsWith('/auth')
     ) {
-      throw new Error('Managed WSL Claude auth storage is outside Orca account storage.')
+      return { kind: 'untrusted', reason: OUTSIDE_MANAGED_AUTH_ROOT_MESSAGE }
     }
     if (process.platform !== 'win32') {
-      if (
-        !existsSync(candidatePath) ||
-        !existsSync(join(candidatePath, '.orca-managed-claude-auth'))
-      ) {
-        throw new Error('Managed Claude auth storage is not owned by Orca.')
-      }
-      return candidatePath
+      return resolveHostVisibleGuestVerdict(candidatePath)
     }
+    let probe: Awaited<ReturnType<typeof runWslProcess>>
     try {
-      const expected = expectedAccountId
-        ? `test "$(cat "$candidate_real/.orca-managed-claude-auth")" = ${shellQuote(expectedAccountId)}`
-        : 'test -n "$(cat "$candidate_real/.orca-managed-claude-auth")"'
-      const owned = await runWslProcess({
+      probe = await runWslProcess({
         distro: wslInfo.distro,
         loginPath: 'none',
         shell: 'bash',
-        script: [
-          'set -euo pipefail',
-          `candidate=${shellQuote(wslInfo.linuxPath)}`,
-          'managed_root="${HOME%/}/.local/share/orca/claude-accounts"',
-          'candidate_real=$(readlink -f -- "$candidate")',
-          'managed_root_real=$(readlink -f -- "$managed_root")',
-          'test -f "$candidate_real/.orca-managed-claude-auth"',
-          expected,
-          'case "$candidate_real" in "$managed_root_real"/*/auth) printf "%s\\n" "$candidate_real" ;; *) exit 35 ;; esac'
-        ].join('\n'),
+        script: buildWslManagedAuthProbeScript(wslInfo.linuxPath, expectedAccountId),
         timeoutMs: 5000
       })
-      const canonicalPath = owned.stdout.trim()
-      if (owned.code !== 0 || owned.timedOut || !canonicalPath) {
-        throw new Error('Managed Claude auth directory does not exist on disk.')
-      }
-      return toWindowsWslPath(canonicalPath, wslInfo.distro)
     } catch (error) {
-      throw new Error('Managed WSL Claude auth storage is outside Orca account storage.', {
-        cause: error
-      })
+      // A spawn failure says nothing about the directory; it says wsl.exe did
+      // not run.
+      return { kind: 'indeterminate', error }
     }
+    return classifyWslManagedAuthProbe(probe, wslInfo.distro)
   }
 
   private getRoot(): string {
@@ -278,4 +274,22 @@ export class ClaudeManagedAuthStorage {
     const parts = relativePath.split(sep)
     return parts.length === 2 && parts[1] === 'auth' ? parts[0] : null
   }
+}
+
+/**
+ * A guest path that the host can address directly (a non-win32 host reading a
+ * WSL-spelled record). Only a definitive absence is a verdict; an unreadable
+ * directory is not evidence that it is a stranger's.
+ */
+function resolveHostVisibleGuestVerdict(candidatePath: string): ClaudeManagedAuthVerdict {
+  for (const path of [candidatePath, join(candidatePath, MANAGED_AUTH_MARKER)]) {
+    try {
+      lstatSync(path)
+    } catch (error) {
+      return isDefinitiveAbsence(error)
+        ? { kind: 'untrusted', reason: UNTRUSTED_MANAGED_AUTH_MESSAGE }
+        : { kind: 'indeterminate', error }
+    }
+  }
+  return { kind: 'owned', authPath: candidatePath }
 }
