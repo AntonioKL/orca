@@ -9,10 +9,14 @@ const WINDOWS_DESCENDANT_POLL_MS = 100
  * A Windows descendant tree captured while its root was alive, with the
  * PID-reuse guard the POSIX snapshot gets from ps lstart: a row only counts as
  * the same process when its creation time still matches. Rows without a
- * creation time are omitted, because a bare pid cannot be re-identified.
+ * creation time are never signalled, because a bare pid cannot be re-identified,
+ * but they are counted: a descendant that was seen and denied identification
+ * is one no later read can prove gone.
  */
 export type WindowsDescendantSnapshot = {
   descendants: { pid: number; creationTimeMs: number }[]
+  /** Descendants seen in the walk that denied the creation-time query. */
+  unidentifiedCount: number
   capturedAtMs: number
 }
 
@@ -58,6 +62,7 @@ export async function captureWindowsDescendantSnapshot(
         ? [{ pid: row.pid, creationTimeMs: row.creationTimeMs }]
         : []
     ),
+    unidentifiedCount: descendants.filter((row) => typeof row.creationTimeMs !== 'number').length,
     capturedAtMs
   }
 }
@@ -74,8 +79,11 @@ export async function verifyWindowsDescendantSnapshotExit(
   snapshot: WindowsDescendantSnapshot,
   deps: WindowsDescendantVerificationDeps = {}
 ): Promise<DescendantTreeVerdict> {
+  // The most a read can prove: a descendant that denied identification was seen
+  // and can never be matched gone, so "could not look" caps the verdict.
+  const proven: DescendantTreeVerdict = snapshot.unidentifiedCount > 0 ? 'unverifiable' : 'exited'
   if (snapshot.descendants.length === 0) {
-    return 'exited'
+    return proven
   }
   const now = deps.now ?? Date.now
   const readTable = deps.readTable ?? readWindowsProcessTableFresh
@@ -89,8 +97,8 @@ export async function verifyWindowsDescendantSnapshotExit(
       const live = new Map(table.map((row) => [row.pid, row.creationTimeMs]))
       verdict = snapshot.descendants.some((row) => live.get(row.pid) === row.creationTimeMs)
         ? 'live'
-        : 'exited'
-      if (verdict === 'exited') {
+        : proven
+      if (verdict === proven) {
         return verdict
       }
     }

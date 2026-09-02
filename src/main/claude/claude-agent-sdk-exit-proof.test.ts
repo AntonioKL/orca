@@ -156,6 +156,7 @@ function mockTree(verdicts: DescendantTreeVerdict[]): ClaudeChildTreeReaper & {
 function windowsSnapshotOf(descendantPid: number): WindowsDescendantSnapshot {
   return {
     descendants: [{ pid: descendantPid, creationTimeMs: 1_700_000_000_000 }],
+    unidentifiedCount: 0,
     capturedAtMs: 1
   }
 }

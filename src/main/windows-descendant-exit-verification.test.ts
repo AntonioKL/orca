@@ -6,9 +6,10 @@ import {
 } from './windows-descendant-exit-verification'
 
 function snapshot(
-  descendants: { pid: number; creationTimeMs: number }[]
+  descendants: { pid: number; creationTimeMs: number }[],
+  unidentifiedCount = 0
 ): WindowsDescendantSnapshot {
-  return { descendants, capturedAtMs: 1_700_000_000_000 }
+  return { descendants, unidentifiedCount, capturedAtMs: 1_700_000_000_000 }
 }
 
 describe('captureWindowsDescendantSnapshot', () => {
@@ -31,6 +32,8 @@ describe('captureWindowsDescendantSnapshot', () => {
         { pid: 400, creationTimeMs: 9 },
         { pid: 200, creationTimeMs: 7 }
       ],
+      // Seen but not re-identifiable: counted, so no later read can prove it gone.
+      unidentifiedCount: 1,
       capturedAtMs: 42
     })
   })
@@ -66,6 +69,25 @@ describe('verifyWindowsDescendantSnapshotExit', () => {
       'exited'
     )
     expect(readTable).not.toHaveBeenCalled()
+  })
+
+  it('never proves a tree that held a descendant it could not identify', async () => {
+    // A descendant that denied the creation-time query was seen in the table;
+    // being unable to re-identify it is "could not look", never "it is gone".
+    const readTable = vi.fn()
+    await expect(verifyWindowsDescendantSnapshotExit(snapshot([], 1), { readTable })).resolves.toBe(
+      'unverifiable'
+    )
+    expect(readTable).not.toHaveBeenCalled()
+
+    // The identified sibling leaving proves nothing about the unidentified one.
+    await expect(
+      verifyWindowsDescendantSnapshotExit(snapshot([{ pid: 200, creationTimeMs: 7 }], 1), {
+        readTable: vi.fn(async () => []),
+        wait: async () => {},
+        now: vi.fn().mockReturnValueOnce(0).mockReturnValue(1)
+      })
+    ).resolves.toBe('unverifiable')
   })
 
   it('reports exited once no identity-matched row remains', async () => {
