@@ -52,6 +52,9 @@ export async function restoreSshConnectionsForStartup(args: {
     setDeferredSshReconnectTargets(deferredTargetIds)
   }
 
+  // Why tracked: the timed-out branch below rewrites the whole deferred list, and a
+  // background target that already connected must not be pushed back into it.
+  const connectedBackgroundTargetIds = new Set<string>()
   // Why fired before the awaited group: a background target that lands before terminal
   // reconnect reads as an ordinary connected target, exactly as it does today.
   for (const { targetId } of backgroundTargets) {
@@ -63,6 +66,7 @@ export async function restoreSshConnectionsForStartup(args: {
         if (state.status === 'connected') {
           // Why: a still-deferred connected target sends fresh panes down the deferred
           // spawn path instead of the normal one. Clear it as soon as it is reachable.
+          connectedBackgroundTargetIds.add(id)
           removeDeferredSshReconnectTarget(id)
         }
       },
@@ -100,7 +104,10 @@ export async function restoreSshConnectionsForStartup(args: {
     }
   )
   if (timedOutTargets.length > 0) {
-    setDeferredSshReconnectTargets([...deferredTargetIds, ...timedOutTargets])
+    setDeferredSshReconnectTargets([
+      ...deferredTargetIds.filter((id) => !connectedBackgroundTargetIds.has(id)),
+      ...timedOutTargets
+    ])
   }
 
   // Why: older/wrapped providers may return no state from connect; poll main once as a compatibility fallback before terminal restoration.
