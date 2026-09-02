@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module'
 import { createProcessTableSnapshotReader } from '../../shared/process-table-snapshot'
+import { reportWindowsCommandLineRecoveryHealth } from './windows-command-line-recovery-health'
 import { readWindowsProcessRowsWithCim } from './windows-process-table-cim-scan'
 
 /**
@@ -147,7 +148,7 @@ function loadWindowsProcessTree(): WindowsProcessTreeModule | null {
  * `requestInProgress` and clears it only after draining its callback queue,
  * with no try/catch. One throw or one worker that never calls back leaves it
  * latched, every later call enqueues a callback that never fires, and the
- * single-flight cache above then holds a promise that never settles — the
+ * single-flight cache above then holds a promise that never settles â€” the
  * process table is dead for the life of the app. The PowerShell reader this
  * replaced self-healed in 3s because execFile owned a timeout; keep that.
  */
@@ -174,7 +175,7 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
       // Why only when the module is absent: a binding that loads is the fast
       // path even when a read fails or wedges, so a failing native reader must
       // never silently start forking shells at the caller's poll rate. Absence
-      // is the one condition that can never resolve itself — see
+      // is the one condition that can never resolve itself â€” see
       // docs/reference/windows-process-enumeration.md.
       return readCimRows()
     }
@@ -235,6 +236,10 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
           reject(new Error('windows process table is unreadable'))
           return
         }
+        // Only meaningful when a command line was actually asked for.
+        if ((flags & native.ProcessDataFlag.CommandLine) !== 0) {
+          reportWindowsCommandLineRecoveryHealth(processes)
+        }
         resolve(
           processes.map((row) => ({
             pid: row.pid,
@@ -286,7 +291,7 @@ export function readWindowsProcessTable(): Promise<WindowsProcessRow[]> {
 /**
  * A snapshot taken after this call returns.
  *
- * Identity checks during teardown must not reuse a cached row — it can predate
+ * Identity checks during teardown must not reuse a cached row â€” it can predate
  * the very process exit it is being asked about.
  */
 export function readWindowsProcessTableFresh(): Promise<WindowsProcessRow[]> {

@@ -9,13 +9,16 @@ import {
   readWindowsProcessTableFresh,
   resetWindowsProcessTableForTests
 } from './windows-process-table'
+import { resetWindowsCommandLineRecoveryHealthForTests } from './windows-command-line-recovery-health'
 
 const getAllProcesses = vi.fn()
 
 // A real snapshot always contains the querying process; the reader rejects a
 // table without it, because that is what a blocked CreateToolhelp32Snapshot
-// returns -- an empty list rather than an error.
-const SELF = { pid: process.pid, ppid: 0, name: 'vitest.exe' }
+// returns -- an empty list rather than an error. It also always carries our own
+// command line, since a process can always open itself -- an empty one there is
+// the host-wide-refusal signal, not a fixture detail.
+const SELF = { pid: process.pid, ppid: 0, name: 'vitest.exe', commandLine: 'vitest.exe --run' }
 const NATIVE = [
   SELF,
   {
@@ -52,7 +55,13 @@ describe('windows process table', () => {
   it('maps native rows, defaulting an unreadable command line to empty', async () => {
     const rows = await readWindowsProcessTableFresh()
     expect(rows).toEqual([
-      { pid: process.pid, ppid: 0, name: 'vitest.exe', command: '', memoryBytes: undefined },
+      {
+        pid: process.pid,
+        ppid: 0,
+        name: 'vitest.exe',
+        command: 'vitest.exe --run',
+        memoryBytes: undefined
+      },
       {
         pid: 100,
         ppid: 4,
@@ -400,7 +409,13 @@ describe('resolving the native reader', () => {
     })
     const rows = await readWindowsProcessTableFresh()
     expect(rows).toEqual([
-      { pid: process.pid, ppid: 0, name: 'vitest.exe', command: '', memoryBytes: undefined },
+      {
+        pid: process.pid,
+        ppid: 0,
+        name: 'vitest.exe',
+        command: 'vitest.exe --run',
+        memoryBytes: undefined
+      },
       {
         pid: 100,
         ppid: 4,
@@ -467,5 +482,58 @@ describe('resolving the native reader', () => {
     __setWindowsProcessTreeRequireForTests(resolve)
     await expect(readWindowsProcessTableFresh()).rejects.toThrow(/unavailable/)
     expect(resolve).not.toHaveBeenCalled()
+  })
+})
+
+// The cliff the removed PEB fallback leaves behind: a hooked ntdll that refuses
+// class 60 empties every command line, and the addon still loads and still
+// enumerates, so every health check the app has stays green.
+describe('warning when command-line recovery is refused host-wide', () => {
+  let platform: PropertyDescriptor | undefined
+  let warn: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    resetWindowsCommandLineRecoveryHealthForTests()
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    __setWindowsProcessTreeLoaderForTests()
+    warn.mockRestore()
+    if (platform) {
+      Object.defineProperty(process, 'platform', platform)
+    }
+  })
+
+  type NativeRow = { pid: number; ppid: number; name: string; commandLine?: string }
+
+  function loaderReturning(rows: NativeRow[], commandLineFlag: number): void {
+    __setWindowsProcessTreeLoaderForTests(() => ({
+      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: commandLineFlag, CreationTime: 4 },
+      getAllProcesses: (cb: (r: NativeRow[] | undefined) => void) => cb(rows)
+    }))
+  }
+
+  it('warns once when our own row comes back with no command line', async () => {
+    loaderReturning([{ pid: process.pid, ppid: 0, name: 'vitest.exe' }], 2)
+    await readWindowsProcessTableFresh()
+    await readWindowsProcessTableFresh()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toContain('ProcessCommandLineInformation')
+  })
+
+  it('stays quiet when our own command line came back', async () => {
+    loaderReturning(NATIVE, 2)
+    await readWindowsProcessTableFresh()
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('stays quiet when the read never asked for a command line', async () => {
+    // A reader that requests identity fields only must not read as a refusal.
+    loaderReturning([{ pid: process.pid, ppid: 0, name: 'vitest.exe' }], 0)
+    await readWindowsProcessTableFresh()
+    expect(warn).not.toHaveBeenCalled()
   })
 })
