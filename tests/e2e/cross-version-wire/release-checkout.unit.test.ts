@@ -306,7 +306,8 @@ describe('release checkout materialization', () => {
 
     await expect(loading).resolves.toMatchObject({ loaded: 'first-release' })
     expect(first.root).not.toBe(second.root)
-  })
+    // Why: extracts both parents of HEAD's latest merge; under full-suite load that exceeded 30s.
+  }, 120_000)
 
   it('causally single-flights a rival process before publishing an in-use checkout', async () => {
     const cacheRoot = temporaryCacheRoot()
