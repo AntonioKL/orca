@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { UpdateStatus } from '../shared/update-status-types'
 import type * as UpdaterModule from './updater'
+import { loadUpdaterModule, warmUpdaterModule } from './updater-test-module-loader'
 
 const {
   appMock,
@@ -109,6 +110,8 @@ const MANUAL_INSTALL_STATUS = {
   }
 } as const satisfies UpdateStatus
 
+warmUpdaterModule()
+
 describe('linux package recovery actions', () => {
   afterEach(() => {
     vi.useRealTimers()
@@ -141,7 +144,7 @@ describe('linux package recovery actions', () => {
     updater: typeof UpdaterModule
   }> => {
     const send = vi.fn()
-    const updater = await import('./updater')
+    const updater = await loadUpdaterModule()
     updater.setupAutoUpdater({ webContents: { send } } as never, {
       getLastUpdateCheckAt: () => Date.now()
     })

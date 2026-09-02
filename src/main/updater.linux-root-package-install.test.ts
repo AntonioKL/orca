@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type * as UpdaterModule from './updater'
 import type { LinuxRootPackageType, UpdateStatus } from '../shared/update-status-types'
+import { loadUpdaterModule, warmUpdaterModule } from './updater-test-module-loader'
 
 const {
   browserWindowMock,
@@ -43,6 +44,8 @@ function downloadedEvent(packageType: LinuxRootPackageType): Record<string, unkn
   }
 }
 
+warmUpdaterModule()
+
 describe('updater Linux root packages', () => {
   beforeEach(() => {
     resetUpdaterMocks()
@@ -61,7 +64,7 @@ describe('updater Linux root packages', () => {
       return Promise.resolve(undefined)
     })
     const send = vi.fn()
-    const updater = await import('./updater')
+    const updater = await loadUpdaterModule()
     updater.setupAutoUpdater({ webContents: { send } } as never, {
       getLastUpdateCheckAt: () => Date.now(),
       installMode

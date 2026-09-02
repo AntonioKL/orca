@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { loadUpdaterModule, warmUpdaterModule } from './updater-test-module-loader'
 
 const {
   appMock,
@@ -109,6 +110,8 @@ vi.mock('./serve-update-handoff', () => ({
   requestServeUpdateHandoff: requestServeUpdateHandoffMock
 }))
 
+warmUpdaterModule()
+
 describe('headless serve update install handoff', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -157,7 +160,7 @@ describe('headless serve update install handoff', () => {
     })
     killAllPtyMock.mockImplementation(beginSessionCleanup)
 
-    const { checkForUpdatesFromMenu, quitAndInstall, setupAutoUpdater } = await import('./updater')
+    const { checkForUpdatesFromMenu, quitAndInstall, setupAutoUpdater } = await loadUpdaterModule()
     setupAutoUpdater(
       { webContents: { send } } as never,
       {
@@ -232,7 +235,7 @@ describe('headless serve update install handoff', () => {
       return Promise.resolve(null)
     })
 
-    const { checkForUpdatesFromMenu, downloadUpdate, setupAutoUpdater } = await import('./updater')
+    const { checkForUpdatesFromMenu, downloadUpdate, setupAutoUpdater } = await loadUpdaterModule()
     setupAutoUpdater({ webContents: { send } } as never, {
       getLastUpdateCheckAt: () => Date.now(),
       installMode: 'unsupported-headless-serve'
@@ -289,7 +292,7 @@ describe('headless serve update install handoff', () => {
     killAllPtyMock.mockImplementation(() => lifecycle.push('in-process-pty-cleanup'))
 
     const { checkForUpdatesFromMenu, downloadUpdate, quitAndInstall, setupAutoUpdater } =
-      await import('./updater')
+      await loadUpdaterModule()
     setupAutoUpdater({ webContents: { send } } as never, {
       getLastUpdateCheckAt: () => Date.now(),
       installMode: 'supervised-headless-serve',
@@ -336,7 +339,7 @@ describe('headless serve update install handoff', () => {
       return Promise.resolve(null)
     })
 
-    const { checkForUpdatesFromMenu, quitAndInstall, setupAutoUpdater } = await import('./updater')
+    const { checkForUpdatesFromMenu, quitAndInstall, setupAutoUpdater } = await loadUpdaterModule()
     setupAutoUpdater({ webContents: { send } } as never, {
       getLastUpdateCheckAt: () => Date.now(),
       installMode: 'supervised-headless-serve'
@@ -374,7 +377,7 @@ describe('headless serve update install handoff', () => {
         return Promise.resolve(null)
       })
 
-      const { checkForUpdatesFromMenu, setupAutoUpdater } = await import('./updater')
+      const { checkForUpdatesFromMenu, setupAutoUpdater } = await loadUpdaterModule()
       setupAutoUpdater({ webContents: { send } } as never, {
         getLastUpdateCheckAt: () => Date.now(),
         installMode: 'unsupported-headless-serve'
@@ -422,7 +425,7 @@ describe('headless serve update install handoff', () => {
         return Promise.resolve(null)
       })
 
-      const { checkForUpdatesFromMenu, setupAutoUpdater } = await import('./updater')
+      const { checkForUpdatesFromMenu, setupAutoUpdater } = await loadUpdaterModule()
       setupAutoUpdater({ webContents: { send } } as never, {
         getLastUpdateCheckAt: () => Date.now(),
         installMode: 'unsupported-headless-serve'
@@ -452,7 +455,7 @@ describe('headless serve update install handoff', () => {
       })
 
       const { checkForUpdatesFromMenu, quitAndInstall, setupAutoUpdater } =
-        await import('./updater')
+        await loadUpdaterModule()
       setupAutoUpdater({ webContents: { send } } as never, {
         getLastUpdateCheckAt: () => Date.now(),
         installMode: 'unsupported-headless-serve'
@@ -487,7 +490,7 @@ describe('headless serve update install handoff', () => {
       downloadUpdate,
       getRemoteServerUpdateSupport,
       setupAutoUpdater
-    } = await import('./updater')
+    } = await loadUpdaterModule()
     setupAutoUpdater({ webContents: { send } } as never, {
       getLastUpdateCheckAt: () => Date.now(),
       installMode: 'interactive'
@@ -513,7 +516,7 @@ describe('headless serve update install handoff', () => {
 
   it('advertises remote update control only for safely restartable installs', async () => {
     const { checkForRemoteServerUpdate, getRemoteServerUpdateSupport, setupAutoUpdater } =
-      await import('./updater')
+      await loadUpdaterModule()
     setupAutoUpdater({ webContents: { send: vi.fn() } } as never, {
       getLastUpdateCheckAt: () => Date.now(),
       installMode: 'unsupported-headless-serve'

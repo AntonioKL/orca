@@ -31,10 +31,13 @@ afterAll(() => {
 
 /** Read the `app.*` termination statement from a pre-ready gate in the shipped entrypoint. */
 function readPreReadyTermination(gate: string): string {
-  const source = readFileSync(join(process.cwd(), 'src/main/index.ts'), 'utf8')
+  const source = readFileSync(
+    join(process.cwd(), 'src/main/startup/main-process-preflight.ts'),
+    'utf8'
+  )
   const start = source.indexOf(gate)
   expect(start).toBeGreaterThanOrEqual(0)
-  const end = source.indexOf('\n}', start)
+  const end = source.indexOf('\n  }', start)
   expect(end).toBeGreaterThan(start)
 
   return source
@@ -92,7 +95,7 @@ function runPreReadyGate(termination: string): FixtureRun {
 
 describe('pre-ready termination under real Electron', () => {
   it('stops the duplicate launch before any further startup runs, with the already-running code', () => {
-    const termination = readPreReadyTermination('if (!hasSingleInstanceLock) {')
+    const termination = readPreReadyTermination('if (!hasLock) {')
     // Why: an empty slice would let the fixture fall through to its own exit and pass vacuously.
     expect(termination).not.toBe('')
 
@@ -104,7 +107,7 @@ describe('pre-ready termination under real Electron', () => {
 
   it('#17615 stops serve when display setup fails instead of entering Chromium startup', () => {
     const termination = readPreReadyTermination(
-      'if (isServeMode && !headlessBrowserDisplayAvailable) {'
+      'if (state.isServeMode && !state.headlessBrowserDisplayAvailable) {'
     )
 
     const run = runPreReadyGate(termination)

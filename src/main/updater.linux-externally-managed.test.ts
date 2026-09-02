@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as UpdaterModule from './updater'
+import { loadUpdaterModule, warmUpdaterModule } from './updater-test-module-loader'
 import type { LinuxRootPackageType, UpdateStatus } from '../shared/update-status-types'
 
 const {
@@ -31,6 +32,8 @@ const EXTERNALLY_MANAGED_MESSAGE =
 
 /** #17702: a repackaged install (AUR, Nix, container rebuild) inherits the .deb `package-type`
  *  marker but has no package manager that can apply an Orca-downloaded package. */
+warmUpdaterModule()
+
 describe('updater externally managed Linux installs', () => {
   beforeEach(() => {
     resetUpdaterMocks()
@@ -50,7 +53,7 @@ describe('updater externally managed Linux installs', () => {
       return Promise.resolve(undefined)
     })
     const send = vi.fn()
-    const updater = await import('./updater')
+    const updater = await loadUpdaterModule()
     updater.setupAutoUpdater({ webContents: { send } } as never, {
       getLastUpdateCheckAt: () => Date.now(),
       installMode: 'interactive'
