@@ -52,15 +52,21 @@ export function hasExplicitTuiLaunchCustomization(
       Object.entries(configuredEnv).some(([key, value]) => defaultEnv[key] !== value))
   return (
     Boolean(settings?.agentCmdOverrides?.[agent]?.trim()) ||
-    (configuredArgs !== undefined &&
-      configuredArgs.trim().length > 0 &&
-      configuredArgs.trim() !== getTuiAgentDefaultArgs(agent).trim()) ||
+    hasExplicitTuiAgentArgs(agent, configuredArgs) ||
     envIsCustomized
   )
 }
 
 export function hasSemanticallyNonEmptyAgentArgs(value: string | null | undefined): boolean {
   return Boolean(value?.trim())
+}
+
+export function hasExplicitTuiAgentArgs(
+  agent: TuiAgent,
+  value: string | null | undefined
+): boolean {
+  const trimmed = value?.trim() ?? ''
+  return trimmed.length > 0 && trimmed !== getTuiAgentDefaultArgs(agent).trim()
 }
 
 export function resolveAgentLaunchRoute(input: AgentLaunchRoutingInput): AgentLaunchRoute {

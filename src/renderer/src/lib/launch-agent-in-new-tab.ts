@@ -35,7 +35,7 @@ import { seedNativeChatAppliedSessionOptions } from '@/components/native-chat/na
 import { startStructuredCodexLaunch } from '@/lib/structured-agent-session-launch'
 import {
   hasExplicitTuiLaunchCustomization,
-  hasSemanticallyNonEmptyAgentArgs,
+  hasExplicitTuiAgentArgs,
   resolveAgentLaunchRoute
 } from '@/lib/agent-launch-routing'
 import { readLocalRuntimeCapabilities } from '@/runtime/local-runtime-capabilities'
@@ -217,7 +217,7 @@ function launchAgentInNewTabInternal(
           initialViewModeOptions.nativeChatTranscriptIsLocalReadable,
         requiresTuiLaunchCustomization:
           Boolean(initialCwd?.trim()) ||
-          hasSemanticallyNonEmptyAgentArgs(agentArgs) ||
+          hasExplicitTuiAgentArgs(agent, agentArgs) ||
           hasExplicitTuiLaunchCustomization(store.settings, agent),
         initialSessionOptions: startupPlan.sessionOptions
       })

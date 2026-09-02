@@ -35,7 +35,7 @@ import {
 import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
 import {
   hasExplicitTuiLaunchCustomization,
-  hasSemanticallyNonEmptyAgentArgs,
+  hasExplicitTuiAgentArgs,
   resolveAgentLaunchRoute
 } from '@/lib/agent-launch-routing'
 import { readLocalRuntimeCapabilities } from '@/runtime/local-runtime-capabilities'
@@ -268,7 +268,7 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
           nativeChatTranscriptIsLocalReadable:
             isNativeChatTranscriptLocalReadable(launchConnectionId),
           requiresTuiLaunchCustomization:
-            hasSemanticallyNonEmptyAgentArgs(agentArgs) ||
+            hasExplicitTuiAgentArgs(effectiveAgent, agentArgs) ||
             hasExplicitTuiLaunchCustomization(settings, effectiveAgent),
           initialSessionOptions: startupPlan?.sessionOptions
         })

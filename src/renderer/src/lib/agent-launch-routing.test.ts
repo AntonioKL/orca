@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import {
+  hasExplicitTuiAgentArgs,
   hasExplicitTuiLaunchCustomization,
   hasSemanticallyNonEmptyAgentArgs,
   resolveAgentLaunchRoute
@@ -112,5 +113,15 @@ describe('resolveAgentLaunchRoute', () => {
         'codex'
       )
     ).toBe(false)
+  })
+
+  it('does not classify the resolved default TUI args as customization', () => {
+    expect(hasExplicitTuiAgentArgs('codex', '--dangerously-bypass-approvals-and-sandbox')).toBe(
+      false
+    )
+    expect(hasExplicitTuiAgentArgs('codex', '--model gpt-5.6-sol')).toBe(true)
+    expect(route({ agentArgs: '--dangerously-bypass-approvals-and-sandbox' })).toBe(
+      'structured-native-chat'
+    )
   })
 })

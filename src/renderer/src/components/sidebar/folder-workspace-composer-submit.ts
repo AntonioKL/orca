@@ -24,7 +24,7 @@ import {
 } from './folder-workspace-composer-helpers'
 import {
   hasExplicitTuiLaunchCustomization,
-  hasSemanticallyNonEmptyAgentArgs,
+  hasExplicitTuiAgentArgs,
   resolveAgentLaunchRoute
 } from '@/lib/agent-launch-routing'
 import { readLocalRuntimeCapabilities } from '@/runtime/local-runtime-capabilities'
@@ -157,7 +157,7 @@ export async function submitFolderWorkspaceCreate({
         launchText: launchDraftPrompt ?? note,
         nativeChatTranscriptIsLocalReadable: !launchIsRemote,
         requiresTuiLaunchCustomization:
-          hasSemanticallyNonEmptyAgentArgs(agentArgs) ||
+          hasExplicitTuiAgentArgs(quickAgent, agentArgs) ||
           hasExplicitTuiLaunchCustomization(settings, quickAgent),
         initialSessionOptions: startupPlan?.sessionOptions
       })
