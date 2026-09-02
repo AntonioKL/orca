@@ -1,5 +1,13 @@
 import { vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getDefaultSettings } from '../../shared/constants'
@@ -205,6 +213,15 @@ export function createManagedClaudeAuth(
   writeFileSync(join(managedAuthPath, 'oauth-account.json'), oauthAccountJson, 'utf-8')
   testState.managedKeychainCredentials.set(accountId, credentialsJson)
   return managedAuthPath
+}
+
+// Why: the scoped Keychain mock keys managed config dirs by path, so setting the shared field
+// leaves the bridge reading whatever the previous launch wrote.
+export function setScopedKeychainCredentialsForManagedPath(
+  managedAuthPath: string,
+  credentialsJson: string
+): void {
+  testState.scopedKeychainCredentialsByConfigDir.set(realpathSync(managedAuthPath), credentialsJson)
 }
 
 export function createClaudeAccount(
