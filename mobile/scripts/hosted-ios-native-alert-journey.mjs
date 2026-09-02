@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import {
   tapHostedIosAccessibilityControl,
-  tapHostedIosPoint,
   waitForHostedIosAccessibilityLabel,
   waitForHostedIosAccessibilityLabelToDisappear
 } from './hosted-ios-emulator-accessibility.mjs'
@@ -14,8 +13,6 @@ import { activateHostedWorkspaceRow } from './hosted-webview-workspace-activatio
 
 const ALERT_PROBE_PROPERTY = '__orcaE2eNativeAlertProbe'
 const ALERT_TITLE = 'Hosted native Alert probe'
-// Normalized viewport coordinates inside the session body, away from chrome and controls.
-const ALERT_GESTURE_POINT = { x: 0.5, y: 0.6 }
 
 export async function verifyHostedIosNativeAlertJourney(
   { discoveryUrl, emulator, expectedWorkspace, timeoutMs, workspaceDocument },
@@ -29,7 +26,6 @@ export async function verifyHostedIosNativeAlertJourney(
   const tapControl = operations.tapControl ?? tapHostedIosAccessibilityControl
   const waitForLabelToDisappear =
     operations.waitForLabelToDisappear ?? waitForHostedIosAccessibilityLabelToDisappear
-  const tapPoint = operations.tapPoint ?? tapHostedIosPoint
 
   await installNativeAlertProbe(workspaceDocument, evaluate)
   await activateWorkspace(workspaceDocument, expectedWorkspace, activateControl, timeoutMs, () =>
@@ -42,8 +38,6 @@ export async function verifyHostedIosNativeAlertJourney(
     timeoutMs
   })
   const requestId = randomBytes(16).toString('base64url')
-  // native.alert is gesture-gated; a native tap on the page arms the shell's gesture window.
-  await tapPoint(emulator, ALERT_GESTURE_POINT)
   await postNativeAlertProbe(sessionDocument, requestId, evaluate)
   const title = await waitForLabel(emulator, ALERT_TITLE, timeoutMs)
   const button = await tapControl(emulator, 'Keep editing', timeoutMs)

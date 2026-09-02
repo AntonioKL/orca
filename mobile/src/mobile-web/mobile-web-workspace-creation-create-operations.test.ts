@@ -5,26 +5,6 @@ import { executeMobileWebWorkspaceCreationCreateOperation } from './mobile-web-w
 import { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 
 describe('mobile web workspace creation writes', () => {
-  it('requires a native-observed gesture before any host operation', async () => {
-    const authority = workspaceAuthority()
-    authority.synchronizeCreationRepositories([{ id: 'host-repo-secret' }])
-    const sendRequest = vi.fn()
-    const consumeRecentUserGesture = vi.fn(() => false)
-
-    await expect(
-      executeMobileWebWorkspaceCreationCreateOperation({
-        operation: 'creationCreateBlank',
-        payload: blankPayload(authority.pageRepoId('host-repo-secret')),
-        client: { sendRequest } as unknown as RpcClient,
-        authority,
-        consumeRecentUserGesture
-      })
-    ).rejects.toMatchObject({ code: 'permission_required' })
-
-    expect(consumeRecentUserGesture).toHaveBeenCalledOnce()
-    expect(sendRequest).not.toHaveBeenCalled()
-  })
-
   it('revalidates a PR and its fork base natively before creating', async () => {
     const authority = workspaceAuthority()
     authority.synchronizeCreationRepositories([{ id: 'host-repo-secret' }])
@@ -113,8 +93,7 @@ describe('mobile web workspace creation writes', () => {
         }
       },
       client: { sendRequest } as unknown as RpcClient,
-      authority,
-      consumeRecentUserGesture: vi.fn(() => true)
+      authority
     })
 
     expect(sendRequest).toHaveBeenCalledWith('github.workItem', {
@@ -171,8 +150,7 @@ describe('mobile web workspace creation writes', () => {
         client: {
           sendRequest: vi.fn().mockResolvedValue({ ok: true, result: { capabilities: [] } })
         } as unknown as RpcClient,
-        authority,
-        consumeRecentUserGesture: vi.fn(() => true)
+        authority
       })
     ).rejects.toMatchObject({ code: 'not_found' })
   })

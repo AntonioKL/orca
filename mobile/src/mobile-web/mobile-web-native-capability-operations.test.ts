@@ -5,26 +5,23 @@ import { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
 import { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 
 describe('mobile web native capability operations', () => {
-  it('reads bounded shell-owned terminal preferences without a gesture', async () => {
+  it('reads bounded shell-owned terminal preferences', async () => {
     const harness = createHarness()
 
     await expect(
       executeMobileWebNativeCapabilityOperation({
         operation: 'terminalPreferences',
         payload: {},
-        authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture,
-        hasRecentUserGesture: harness.hasRecentUserGesture
+        authority: harness.authority
       })
     ).resolves.toEqual({
       textScale: 1.25,
       autocompleteEnabled: true,
       linkOpenMode: 'phone-browser'
     })
-    expect(harness.consumeRecentUserGesture).not.toHaveBeenCalled()
   })
 
-  it('reads and gesture-gates bounded shell-owned terminal shortcuts', async () => {
+  it('reads and updates bounded shell-owned terminal shortcuts', async () => {
     const harness = createHarness()
     const customKeys = [{ id: 'custom-1', label: 'Build', bytes: 'pnpm build\r', enter: false }]
 
@@ -32,83 +29,58 @@ describe('mobile web native capability operations', () => {
       executeMobileWebNativeCapabilityOperation({
         operation: 'terminalAccessoryPreferences',
         payload: {},
-        authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture,
-        hasRecentUserGesture: harness.hasRecentUserGesture
+        authority: harness.authority
       })
     ).resolves.toEqual({
       customKeys,
       orderedBuiltInIds: ['escape', 'tab'],
       visibleBuiltInIds: ['escape']
     })
-    expect(harness.consumeRecentUserGesture).not.toHaveBeenCalled()
 
     await expect(
       executeMobileWebNativeCapabilityOperation({
         operation: 'terminalCustomKeysUpdate',
         payload: { customKeys },
-        authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture,
-        hasRecentUserGesture: harness.hasRecentUserGesture
+        authority: harness.authority
       })
     ).resolves.toBeNull()
     expect(harness.terminalCustomKeysUpdate).toHaveBeenCalledWith(customKeys)
-    expect(harness.consumeRecentUserGesture).toHaveBeenCalledOnce()
   })
 
-  it('probes clipboard types without reading content or consuming a gesture', async () => {
-    const harness = createHarness(false)
+  it('probes clipboard types without reading content', async () => {
+    const harness = createHarness()
 
     await expect(
       executeMobileWebNativeCapabilityOperation({
         operation: 'clipboardAvailability',
         payload: {},
-        authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture,
-        hasRecentUserGesture: harness.hasRecentUserGesture
+        authority: harness.authority
       })
     ).resolves.toEqual({ hasText: true, hasImage: false })
     expect(harness.clipboardAvailability).toHaveBeenCalledOnce()
-    expect(harness.consumeRecentUserGesture).not.toHaveBeenCalled()
   })
 
-  it('requires and consumes a recent native gesture for clipboard writes', async () => {
-    const harness = createHarness(false)
+  it('writes only the bounded text the clipboard payload carries', async () => {
+    const harness = createHarness()
 
     await expect(
       executeMobileWebNativeCapabilityOperation({
         operation: 'clipboardWrite',
         payload: { text: 'selected text' },
-        authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture,
-        hasRecentUserGesture: harness.hasRecentUserGesture
-      })
-    ).rejects.toMatchObject({ code: 'permission_required' })
-    expect(harness.clipboardWrite).not.toHaveBeenCalled()
-
-    harness.consumeRecentUserGesture.mockReturnValue(true)
-    await expect(
-      executeMobileWebNativeCapabilityOperation({
-        operation: 'clipboardWrite',
-        payload: { text: 'selected text' },
-        authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture,
-        hasRecentUserGesture: harness.hasRecentUserGesture
+        authority: harness.authority
       })
     ).resolves.toEqual({ confirmation: 'in-app' })
     expect(harness.clipboardWrite).toHaveBeenCalledWith('selected text')
   })
 
-  it('allows only validated web URLs and gesture-bound text-scale updates', async () => {
+  it('allows only validated web URLs, and bounded text-scale updates', async () => {
     const harness = createHarness()
 
     await expect(
       executeMobileWebNativeCapabilityOperation({
         operation: 'openExternal',
         payload: { url: 'javascript:alert(1)' },
-        authority: harness.authority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture,
-        hasRecentUserGesture: harness.hasRecentUserGesture
+        authority: harness.authority
       })
     ).rejects.toThrow()
     expect(harness.openExternal).not.toHaveBeenCalled()
@@ -116,39 +88,32 @@ describe('mobile web native capability operations', () => {
     await executeMobileWebNativeCapabilityOperation({
       operation: 'openExternal',
       payload: { url: 'https://example.com/path' },
-      authority: harness.authority,
-      consumeRecentUserGesture: harness.consumeRecentUserGesture,
-      hasRecentUserGesture: harness.hasRecentUserGesture
+      authority: harness.authority
     })
     await executeMobileWebNativeCapabilityOperation({
       operation: 'terminalTextScaleUpdate',
       payload: { textScale: 1.5 },
-      authority: harness.authority,
-      consumeRecentUserGesture: harness.consumeRecentUserGesture,
-      hasRecentUserGesture: harness.hasRecentUserGesture
+      authority: harness.authority
     })
 
     expect(harness.openExternal).toHaveBeenCalledWith('https://example.com/path')
     expect(harness.terminalTextScaleUpdate).toHaveBeenCalledWith(1.5)
   })
 
-  it('keeps bounded haptics independent from privileged gesture consumption', async () => {
-    const harness = createHarness(false)
+  it('runs bounded haptics through the shell authority', async () => {
+    const harness = createHarness()
 
     await executeMobileWebNativeCapabilityOperation({
       operation: 'hapticFeedback',
       payload: { kind: 'edge-bump' },
-      authority: harness.authority,
-      consumeRecentUserGesture: harness.consumeRecentUserGesture,
-      hasRecentUserGesture: harness.hasRecentUserGesture
+      authority: harness.authority
     })
 
     expect(harness.hapticFeedback).toHaveBeenCalledWith('edge-bump')
-    expect(harness.consumeRecentUserGesture).not.toHaveBeenCalled()
   })
 
   it('resolves opaque workspace authority before reading or writing a shell draft', async () => {
-    const harness = createHarness(false)
+    const harness = createHarness()
     const workspaceAuthority = new MobileWebWorkspaceAuthority((length) => new Uint8Array(length))
     const browserAuthority = new MobileWebBrowserAuthority((length) => new Uint8Array(length))
     const workspaceId = workspaceAuthority.registerWorkspace('host-workspace', 'host-repo')
@@ -163,9 +128,7 @@ describe('mobile web native capability operations', () => {
         payload: { workspaceId, tabId: 'host-tab' },
         authority: harness.authority,
         browserAuthority,
-        workspaceAuthority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture,
-        hasRecentUserGesture: harness.hasRecentUserGesture
+        workspaceAuthority
       })
     ).resolves.toEqual({ text: 'saved draft' })
     await expect(
@@ -174,19 +137,16 @@ describe('mobile web native capability operations', () => {
         payload: { workspaceId, tabId: 'host-tab', text: 'next draft' },
         authority: harness.authority,
         browserAuthority,
-        workspaceAuthority,
-        consumeRecentUserGesture: harness.consumeRecentUserGesture,
-        hasRecentUserGesture: harness.hasRecentUserGesture
+        workspaceAuthority
       })
     ).resolves.toBeNull()
 
     expect(sessionChatDraftRead).toHaveBeenCalledWith('host-workspace', 'host-tab')
     expect(sessionChatDraftWrite).toHaveBeenCalledWith('host-workspace', 'host-tab', 'next draft')
-    expect(harness.consumeRecentUserGesture).not.toHaveBeenCalled()
   })
 })
 
-function createHarness(hasRecentGesture = true) {
+function createHarness() {
   const hapticFeedback = vi.fn()
   const clipboardAvailability = vi.fn().mockResolvedValue({ hasText: true, hasImage: false })
   const clipboardWrite = vi.fn().mockResolvedValue({ confirmation: 'in-app' as const })
@@ -203,8 +163,6 @@ function createHarness(hasRecentGesture = true) {
   })
   const terminalCustomKeysUpdate = vi.fn().mockResolvedValue(undefined)
   const terminalTextScaleUpdate = vi.fn().mockResolvedValue(undefined)
-  const consumeRecentUserGesture = vi.fn(() => hasRecentGesture)
-  const hasRecentUserGesture = vi.fn(() => hasRecentGesture)
   const authority: MobileWebNativeCapabilityAuthority = {
     hapticFeedback,
     clipboardAvailability,
@@ -219,8 +177,6 @@ function createHarness(hasRecentGesture = true) {
     authority,
     clipboardAvailability,
     clipboardWrite,
-    consumeRecentUserGesture,
-    hasRecentUserGesture,
     hapticFeedback,
     openExternal,
     terminalCustomKeysUpdate,

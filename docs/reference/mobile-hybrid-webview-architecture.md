@@ -2,7 +2,7 @@
 
 - **Status:** Implemented as the sole workspace route in the dedicated release
   candidate; production promotion is not approved
-- **Last updated:** September 1, 2026
+- **Last updated:** September 2, 2026
 - **Migration design:**
   [`plans/2026-07-22-mobile-hybrid-webview-single-pr-migration.md`](./plans/2026-07-22-mobile-hybrid-webview-single-pr-migration.md)
 - **Active remaining work:**
@@ -61,7 +61,7 @@ acceptance.
 | Native mobile shell                         | Pairing and host selection; secure credential storage; authenticated encrypted transport; QR scanning; notifications and deep links; package verification, cache, private origin, and recovery; clipboard, haptics, audio, camera and file/photo pickers; native settings, onboarding, privacy, About, and diagnostics |
 | Desktop-served React Native Web application | Workspace list and creation; sessions and terminal presentation; files, previews, diffs, source control, reviews, tasks, accounts, browser presentation, Agent History, and native-chat presentation                                                                                                                   |
 | Desktop runtime                             | Builds and ships the matching web package; serves its manifest and chunks through authenticated RPC; reauthorizes every workspace mutation; enforces host, workspace, provider, path, and resource limits                                                                                                              |
-| Typed native bridge                         | Connects the unprivileged page to explicitly granted Desktop operations and gesture-gated native capabilities; carries connection and route state without exposing transport credentials                                                                                                                               |
+| Typed native bridge                         | Connects the unprivileged page to explicitly granted Desktop operations and native capabilities; carries connection and route state without exposing transport credentials                                                                                                                               |
 
 The page never receives the raw RPC client, pairing credential, host endpoint,
 private key, cache path, or unrestricted native module access. Native-owned
@@ -169,7 +169,10 @@ external-link authority.
   every operation against the current connection and opaque workspace scope.
 - Clipboard reads, pickers, external links, haptics, dictation, and related
   native actions require the relevant grant; privacy-sensitive actions also
-  require a recent native-observed user gesture or system permission.
+  require the system permission the platform asks for. The shell's own
+  recent-user-gesture window was removed on 2026-09-02: a scroll armed it, so it
+  gated nothing on a first-party page, and peer hybrid frameworks do not gate
+  bridge calls on gestures.
 - Host switch, reconnect, process loss, cancellation, and package replacement
   invalidate stale authority.
 

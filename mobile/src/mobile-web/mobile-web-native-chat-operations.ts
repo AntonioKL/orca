@@ -44,7 +44,6 @@ export async function executeMobileWebNativeChatOperation(args: {
     MobileWebNativeCapabilityAuthority,
     'sessionChatPendingRead' | 'sessionChatPendingWrite'
   >
-  consumeRecentUserGesture: () => boolean
 }): Promise<unknown> {
   if (isMobileWebNativeChatImageOperation(args.operation)) {
     return executeMobileWebNativeChatImageOperation(args)

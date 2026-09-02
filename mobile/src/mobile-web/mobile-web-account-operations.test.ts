@@ -7,7 +7,7 @@ import {
 } from './mobile-web-bridge-roundtrip-fixture'
 
 describe('mobile web account operations', () => {
-  it('sanitizes snapshots and requires a native-observed gesture to switch accounts', async () => {
+  it('sanitizes snapshots and switches accounts through the host', async () => {
     const harness = createHarness()
 
     await harness.broker.handle(request('A', 'snapshot', {}))
@@ -22,13 +22,6 @@ describe('mobile web account operations', () => {
       accountId: 'claude-1'
     })
     expect(successPayload(harness.messages, 'B')).toBeNull()
-
-    harness.consumeRecentUserGesture.mockReturnValue(false)
-    await harness.broker.handle(request('C', 'select', { provider: 'codex', accountId: 'codex-1' }))
-    expect(errorCode(harness.messages, 'C')).toBe('permission_required')
-    expect(harness.sendRequest).not.toHaveBeenCalledWith('accounts.selectCodex', {
-      accountId: 'codex-1'
-    })
   })
 
   it('forwards bounded snapshot events and retires the host stream on client replacement', async () => {
@@ -49,7 +42,7 @@ describe('mobile web account operations', () => {
     expect(harness.hostUnsubscribe).toHaveBeenCalledOnce()
   })
 
-  it('keeps reset identity and idempotency in the native shell behind a recent gesture', async () => {
+  it('keeps reset identity and idempotency in the native shell', async () => {
     const harness = createHarness()
     const expectedScope = {
       target: { runtime: 'host' as const, wslDistro: null },
@@ -61,12 +54,6 @@ describe('mobile web account operations', () => {
     await harness.broker.handle(request('F', 'resetCreditCapability', {}))
     expect(successPayload(harness.messages, 'F')).toBe(true)
 
-    harness.consumeRecentUserGesture.mockReturnValue(false)
-    await harness.broker.handle(request('G', 'consumeResetCredit', { expectedScope }))
-    expect(errorCode(harness.messages, 'G')).toBe('permission_required')
-    expect(harness.codexResetCreditConsume).not.toHaveBeenCalled()
-
-    harness.consumeRecentUserGesture.mockReturnValue(true)
     await harness.broker.handle(request('H', 'consumeResetCredit', { expectedScope }))
     expect(harness.codexResetCreditConsume).toHaveBeenCalledWith(expect.anything(), expectedScope)
     expect(successPayload(harness.messages, 'H')).toMatchObject({
@@ -81,7 +68,6 @@ describe('mobile web account operations', () => {
 function createHarness() {
   let subscriptionListener: ((event: unknown) => void) | null = null
   const hostUnsubscribe = vi.fn()
-  const consumeRecentUserGesture = vi.fn(() => true)
   const codexResetCreditCapability = vi.fn(async () => true)
   const codexResetCreditConsume = vi.fn(async (_client, expectedScope) => ({
     outcome: 'reset' as const,
@@ -108,9 +94,7 @@ function createHarness() {
     navigationAuthority: {
       route: vi.fn(),
       reconnect: vi.fn(),
-      removeHost: vi.fn(),
-      consumeRecentUserGesture,
-      hasRecentUserGesture: () => true
+      removeHost: vi.fn()
     }
   })
   return {
@@ -118,7 +102,6 @@ function createHarness() {
     messages,
     sendRequest,
     hostUnsubscribe,
-    consumeRecentUserGesture,
     codexResetCreditConsume,
     get subscriptionListener() {
       return subscriptionListener
@@ -255,16 +238,4 @@ function successPayload(messages: readonly MobileWebBridgeShellMessage[], id: st
   return message && message.type === 'response' && message.status === 'success'
     ? message.payload
     : undefined
-}
-
-function errorCode(messages: readonly MobileWebBridgeShellMessage[], id: string): string | null {
-  const message = messages.find(
-    (candidate) =>
-      candidate.type === 'response' &&
-      candidate.requestId === id.repeat(22) &&
-      candidate.status === 'error'
-  )
-  return message && message.type === 'response' && message.status === 'error'
-    ? message.error.code
-    : null
 }

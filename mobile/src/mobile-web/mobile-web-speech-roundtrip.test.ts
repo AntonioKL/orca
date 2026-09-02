@@ -44,19 +44,12 @@ describe('mobile web speech broker', () => {
     })
   })
 
-  it('rejects speech configuration without a recent native-observed gesture', async () => {
+  it('rejects a speech payload the operation contract does not accept', async () => {
     const harness = createHarness()
 
-    await harness.broker.handle(
-      request('A', 'once', 'configure', {
-        dictationMode: 'hold'
-      })
-    )
+    await harness.broker.handle(request('A', 'once', 'configure', { dictationMode: 'shout' }))
 
-    expect(harness.messages.at(-1)).toMatchObject({
-      status: 'error',
-      error: { code: 'permission_required' }
-    })
+    expect(harness.messages.at(-1)).toMatchObject({ status: 'error' })
     expect(harness.sendRequest).not.toHaveBeenCalled()
   })
 })
@@ -69,9 +62,7 @@ function createHarness() {
     navigationAuthority: {
       route: vi.fn(),
       reconnect: vi.fn(),
-      removeHost: vi.fn(),
-      consumeRecentUserGesture: vi.fn(() => false),
-      hasRecentUserGesture: () => true
+      removeHost: vi.fn()
     },
     now: () => 1000
   })

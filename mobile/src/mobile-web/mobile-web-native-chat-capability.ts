@@ -1,4 +1,3 @@
-import { mobileWebUserGestureConsumer } from './mobile-web-user-gesture-requirement'
 import type { MobileWebBridgePageMessage } from '../../../src/shared/mobile-web/bridge-contract'
 import type { MobileWebCapabilityExecutionDependencies } from './mobile-web-capability-execution-dependencies'
 import { executeMobileWebNativeChatOperation } from './mobile-web-native-chat-operations'
@@ -17,8 +16,7 @@ export async function executeMobileWebNativeChatCapability(
       terminalClientId: args.terminalClientId,
       workspaceAuthority: args.workspaceAuthority,
       nativeChatAuthority: args.nativeChatAuthority,
-      nativeAuthority: args.nativeAuthority,
-      consumeRecentUserGesture: mobileWebUserGestureConsumer(args.navigationAuthority)
+      nativeAuthority: args.nativeAuthority
     })
   }
   if (request.operation === 'subscribe') {

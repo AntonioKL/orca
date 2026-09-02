@@ -10,6 +10,12 @@
   [completed-work evidence](2026-07-22-mobile-hybrid-webview-implementation-checklist.md),
   [open gates](2026-07-27-mobile-hybrid-webview-remaining-work.md)
 
+> **2026-09-02 — the recent-user-gesture window described below was removed.** The
+> shell no longer requires a recent native touch before a bridge capability runs: a
+> scroll armed the window, so it gated nothing on a first-party page, and peer hybrid
+> frameworks do not gate bridge calls this way. Gesture statements here describe the
+> plan as written, not the shipped shell.
+
 ## Context
 
 The original mobile application duplicated fast-changing Desktop workspace

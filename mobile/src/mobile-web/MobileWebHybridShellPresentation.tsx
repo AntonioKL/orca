@@ -33,7 +33,6 @@ type MobileWebHybridShellPresentationProps = {
   onUsePrevious: () => void | Promise<void>
   onClearCache: () => void | Promise<void>
   onRecoveryFailure: () => void
-  onTouch: () => void
   onBridgeMessage: (message: string) => void
   onPageLoaded: () => void
   onNavigationBlocked: () => void
@@ -55,7 +54,6 @@ export function MobileWebHybridShellPresentation({
   onUsePrevious,
   onClearCache,
   onRecoveryFailure,
-  onTouch,
   onBridgeMessage,
   onPageLoaded,
   onNavigationBlocked,
@@ -102,7 +100,7 @@ export function MobileWebHybridShellPresentation({
       ) : null}
 
       {presentationState === 'hosted-interface' && session ? (
-        <View style={styles.webContainer} onTouchStart={onTouch}>
+        <View style={styles.webContainer}>
           {packageLoading && packageProgress ? (
             <MobileWebPackageProgress progress={packageProgress} />
           ) : null}

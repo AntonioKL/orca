@@ -29,7 +29,6 @@ export async function executeMobileWebWorkspaceOperation(args: {
   client: RpcClient
   authority: MobileWebWorkspaceAuthority
   snapshots: MobileWebWorkspaceSnapshotPager
-  consumeRecentUserGesture?: () => boolean
 }): Promise<unknown> {
   if (args.capability === 'settings') {
     return executeSettingsOperation(args)

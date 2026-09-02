@@ -7,7 +7,6 @@ describe('mobile web navigation round trip', () => {
     const route = vi.fn()
     const reconnect = vi.fn()
     const removeHost = vi.fn()
-    const consumeRecentUserGesture = vi.fn(() => true)
     let requestIndex = 0
     const { client } = createMobileWebBridgeRoundtripFixture({
       grants: [...MOBILE_WEB_PRODUCTION_NAVIGATION_GRANTS],
@@ -16,9 +15,7 @@ describe('mobile web navigation round trip', () => {
       navigationAuthority: {
         route,
         reconnect,
-        removeHost,
-        consumeRecentUserGesture,
-        hasRecentUserGesture: () => true
+        removeHost
       }
     })
 
@@ -33,6 +30,5 @@ describe('mobile web navigation round trip', () => {
     expect(route).toHaveBeenCalledWith('terminalSettings', 'S'.repeat(22))
     expect(reconnect).toHaveBeenCalledWith()
     expect(removeHost).toHaveBeenCalledWith()
-    expect(consumeRecentUserGesture).toHaveBeenCalledTimes(3)
   })
 })

@@ -1,49 +1,30 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
 import type { RpcResponse } from '../transport/types'
-import type { MobileWebBrokerError } from './mobile-web-broker-error'
 import type { MobileWebSpeechAuthority } from './mobile-web-speech-authority'
 import { executeMobileWebSpeechOperation } from './mobile-web-speech-operations'
 
 describe('executeMobileWebSpeechOperation', () => {
-  it('parses bounded setup metadata without requiring a user gesture', async () => {
+  it('parses bounded setup metadata', async () => {
     const harness = createHarness()
     harness.sendRequest.mockResolvedValue(success(setup()))
 
-    await expect(harness.execute('setup', {}, () => false)).resolves.toEqual(setup())
+    await expect(harness.execute('setup', {})).resolves.toEqual(setup())
     expect(harness.sendRequest).toHaveBeenCalledWith('speech.models.list', null)
   })
 
-  it.each(['downloadModel', 'deleteModel', 'configure', 'start'])(
-    'requires a recent native-observed gesture for %s',
-    async (operation) => {
-      const harness = createHarness()
+  it('rejects a payload the operation contract does not accept', async () => {
+    const harness = createHarness()
 
-      await expect(
-        harness.execute(
-          operation,
-          operation === 'configure'
-            ? { enabled: true }
-            : operation === 'start'
-              ? {}
-              : { modelId: 'model-1' },
-          () => false
-        )
-      ).rejects.toMatchObject<Partial<MobileWebBrokerError>>({
-        code: 'permission_required'
-      })
-      expect(harness.sendRequest).not.toHaveBeenCalled()
-      expect(harness.authority.start).not.toHaveBeenCalled()
-    }
-  )
+    await expect(harness.execute('configure', { dictationMode: 'shout' })).rejects.toBeTruthy()
+    expect(harness.sendRequest).not.toHaveBeenCalled()
+  })
 
   it('returns only parsed setup state after deleting a model', async () => {
     const harness = createHarness()
     harness.sendRequest.mockResolvedValue(success(setup()))
 
-    await expect(
-      harness.execute('deleteModel', { modelId: 'model-1' }, () => true)
-    ).resolves.toEqual(setup())
+    await expect(harness.execute('deleteModel', { modelId: 'model-1' })).resolves.toEqual(setup())
     expect(harness.sendRequest).toHaveBeenCalledWith('speech.models.delete', {
       modelId: 'model-1'
     })
@@ -61,13 +42,12 @@ function createHarness() {
   return {
     sendRequest,
     authority,
-    execute: (operation: string, payload: unknown, consumeRecentUserGesture: () => boolean) =>
+    execute: (operation: string, payload: unknown) =>
       executeMobileWebSpeechOperation({
         operation,
         payload,
         client,
-        authority,
-        consumeRecentUserGesture
+        authority
       })
   }
 }

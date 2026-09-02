@@ -25,8 +25,8 @@ describe('mobile web navigation operations', () => {
     ).rejects.toBeTruthy()
   })
 
-  it('requires a recent native-observed gesture for reconnect and removal', async () => {
-    const authority = navigationAuthority(false)
+  it('reconnects and removes the host through the native authority', async () => {
+    const authority = navigationAuthority()
 
     await expect(
       executeMobileWebNavigationOperation({
@@ -35,42 +35,22 @@ describe('mobile web navigation operations', () => {
         payload: {},
         authority
       })
-    ).rejects.toMatchObject({ code: 'permission_required' })
-    await expect(
-      executeMobileWebNavigationOperation({
-        requestId: 'D'.repeat(22),
-        operation: 'removeHost',
-        payload: { confirmation: 'remove-paired-host' },
-        authority
-      })
-    ).rejects.toMatchObject({ code: 'permission_required' })
-    expect(authority.reconnect).not.toHaveBeenCalled()
-    expect(authority.removeHost).not.toHaveBeenCalled()
+    ).resolves.toBeNull()
+    expect(authority.reconnect).toHaveBeenCalledWith()
   })
 
-  it('requires a recent native-observed gesture before opening native settings', async () => {
-    const deniedAuthority = navigationAuthority(false)
+  it('routes to native settings through the shell authority', async () => {
+    const authority = navigationAuthority()
 
-    await expect(
-      executeMobileWebNavigationOperation({
-        requestId: 'E'.repeat(22),
-        operation: 'route',
-        payload: { destination: 'terminalSettings' },
-        authority: deniedAuthority
-      })
-    ).rejects.toMatchObject({ code: 'permission_required' })
-    expect(deniedAuthority.route).not.toHaveBeenCalled()
-
-    const allowedAuthority = navigationAuthority()
     await expect(
       executeMobileWebNavigationOperation({
         requestId: 'F'.repeat(22),
         operation: 'route',
         payload: { destination: 'terminalSettings' },
-        authority: allowedAuthority
+        authority
       })
     ).resolves.toBeNull()
-    expect(allowedAuthority.route).toHaveBeenCalledWith('terminalSettings', 'F'.repeat(22))
+    expect(authority.route).toHaveBeenCalledWith('terminalSettings', 'F'.repeat(22))
   })
 
   it('removes the native-selected host without accepting page identity', async () => {
@@ -97,11 +77,10 @@ describe('mobile web navigation operations', () => {
   })
 })
 
-function navigationAuthority(hasRecentUserGesture = true) {
+function navigationAuthority() {
   return {
     route: vi.fn(),
     reconnect: vi.fn(),
-    removeHost: vi.fn(),
-    consumeRecentUserGesture: vi.fn(() => hasRecentUserGesture)
+    removeHost: vi.fn()
   }
 }

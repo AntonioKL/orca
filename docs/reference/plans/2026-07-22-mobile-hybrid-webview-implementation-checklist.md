@@ -7,6 +7,12 @@
 - **Ownership:** [parity inventory](2026-07-22-mobile-hybrid-webview-parity-inventory.md)
 - **Operations:** [rollback runbook](../mobile-hybrid-webview-rollback.md)
 
+> **2026-09-02 — the recent-user-gesture window described below was removed.** The
+> shell no longer requires a recent native touch before a bridge capability runs: a
+> scroll armed the window, so it gated nothing on a first-party page, and peer hybrid
+> frameworks do not gate bridge calls this way. Gesture statements here describe the
+> plan as written, not the shipped shell.
+
 This index replaces the execution-era checklist. Completed rows mean the named
 implementation and recorded candidate evidence exist. They do not close
 physical-device, store, signed-release, production cloud Relay, cross-version,

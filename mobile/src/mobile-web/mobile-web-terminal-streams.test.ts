@@ -297,7 +297,7 @@ describe('MobileWebTerminalStreams', () => {
     expect(decodeTerminalStreamText(harness.sentFrames.at(-1)!.payload)).toBe('\x1b[0n')
   })
 
-  it('gesture-gates shell-owned device input and returns status without native paths', async () => {
+  it('keeps shell-owned device input native and returns status without native paths', async () => {
     const harness = createHarness()
     await harness.streams.start({
       requestId: 'request-device-input',
@@ -316,19 +316,6 @@ describe('MobileWebTerminalStreams', () => {
       payload: '\u001b[200~/native/secret/image.png\u001b[201~'
     })
 
-    expect(() =>
-      harness.streams.handle(
-        {
-          operation: 'clipboardPaste',
-          streamId: SUBSCRIPTION_ID,
-          sequence: 0,
-          bracketedPaste: true
-        },
-        harness.client,
-        () => false
-      )
-    ).toThrow('permission_required')
-
     await expect(
       harness.streams.handle(
         {
@@ -337,8 +324,7 @@ describe('MobileWebTerminalStreams', () => {
           sequence: 0,
           bracketedPaste: true
         },
-        harness.client,
-        () => true
+        harness.client
       )
     ).resolves.toEqual({ status: 'accepted' })
     expect(decodeTerminalStreamText(harness.sentFrames.at(-1)!.payload)).toContain(

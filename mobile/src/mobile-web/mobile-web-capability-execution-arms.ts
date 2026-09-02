@@ -8,10 +8,6 @@ import { MobileWebSourceControlSubscribePayloadSchema } from '../../../src/share
 import { MobileWebSpeechSubscribePayloadSchema } from '../../../src/shared/mobile-web/speech-operation-contract'
 import { executeMobileWebAccountCapability } from './mobile-web-account-capability'
 import { executeMobileWebAgentHistoryOperation } from './mobile-web-agent-history-operations'
-import {
-  mobileWebUserGestureConsumer,
-  mobileWebUserGestureWitness
-} from './mobile-web-user-gesture-requirement'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 import { executeMobileWebBrowserOperation } from './mobile-web-browser-operations'
 import type { MobileWebCapabilityExecutionDependencies } from './mobile-web-capability-execution-dependencies'
@@ -50,9 +46,7 @@ async function executeNative(args: Deps, request: OnceRequest): Promise<unknown>
     payload: request.payload,
     authority: args.nativeAuthority,
     browserAuthority: args.browserAuthority,
-    workspaceAuthority: args.workspaceAuthority,
-    consumeRecentUserGesture: mobileWebUserGestureConsumer(args.navigationAuthority),
-    hasRecentUserGesture: mobileWebUserGestureWitness(args.navigationAuthority)
+    workspaceAuthority: args.workspaceAuthority
   })
 }
 
@@ -85,8 +79,7 @@ async function executeWorkspace(args: Deps, request: OnceRequest): Promise<unkno
     payload: request.payload,
     client: args.connectedClient(),
     authority: args.workspaceAuthority,
-    snapshots: args.workspaceSnapshots,
-    consumeRecentUserGesture: mobileWebUserGestureConsumer(args.navigationAuthority)
+    snapshots: args.workspaceSnapshots
   })
   if (request.capability === 'workspace' && request.operation === 'activate') {
     args.terminalArtifactAuthority.clear()
@@ -118,11 +111,7 @@ async function executeSession(args: Deps, request: OnceRequest): Promise<unknown
 }
 
 async function executeTerminal(args: Deps, request: OnceRequest): Promise<unknown> {
-  return args.terminalStreams.handle(
-    request.payload,
-    args.connectedClient(),
-    mobileWebUserGestureConsumer(args.navigationAuthority)
-  )
+  return args.terminalStreams.handle(request.payload, args.connectedClient())
 }
 
 async function executeFile(args: Deps, request: OnceRequest): Promise<unknown> {
@@ -195,8 +184,7 @@ async function executeSpeech(args: Deps, request: OnceRequest): Promise<unknown>
     operation: request.operation,
     payload: request.payload,
     client: args.connectedClient(),
-    authority: args.speechAuthority,
-    consumeRecentUserGesture: mobileWebUserGestureConsumer(args.navigationAuthority)
+    authority: args.speechAuthority
   })
 }
 
