@@ -50,8 +50,9 @@ vi.mock('../native-chat/session-file-resolver', () => ({
   resolveSessionFilePath
 }))
 
-type FakeClaudeConnection = Omit<ClaudeStreamJsonConnection, 'closed'> & {
+type FakeClaudeConnection = Omit<ClaudeStreamJsonConnection, 'closed' | 'exitVerdict'> & {
   closed: boolean
+  exitVerdict: ClaudeStreamJsonConnection['exitVerdict']
   launch: ClaudeStreamJsonLaunch
   handlers: ClaudeStreamJsonConnectionHandlers
   calls: { subtype: string; params?: Record<string, unknown> }[]
@@ -61,6 +62,9 @@ type FakeClaudeConnection = Omit<ClaudeStreamJsonConnection, 'closed'> & {
 function fakeClaude() {
   const connections: FakeClaudeConnection[] = []
   let initializeAccount: unknown
+  /** A child that dies during start, with the close verdict its ladder observed. */
+  let selfExit: { message: string; exitVerdict: ClaudeStreamJsonConnection['exitVerdict'] } | null =
+    null
   const openConnection = (async (launch, handlers = {}) => {
     const connection: FakeClaudeConnection = {
       launch,
@@ -71,6 +75,10 @@ function fakeClaude() {
       closed: false,
       initializationResult: async () => {
         connection.calls.push({ subtype: 'initialize' })
+        if (selfExit) {
+          handlers.onExit?.(new Error(selfExit.message))
+          return { models: [] }
+        }
         handlers.onMessage?.({
           type: 'system',
           subtype: 'init',
@@ -112,9 +120,10 @@ function fakeClaude() {
           handlers.onMessage?.({ ...message, uuid: 'user-1' })
         }
       },
+      exitVerdict: selfExit?.exitVerdict ?? { root: 'live', tree: 'unverifiable' },
       close: async () => {
         connection.closed = true
-        return true
+        return selfExit === null
       }
     }
     connections.push(connection)
@@ -133,6 +142,9 @@ function fakeClaude() {
     live,
     setInitializeAccount: (account: unknown) => {
       initializeAccount = account
+    },
+    setSelfExit: (exit: typeof selfExit) => {
+      selfExit = exit
     }
   }
 }
@@ -200,6 +212,18 @@ function ensureParams(fence: number) {
       })
     }
   }
+}
+
+function leaseOf(sessionId: string): {
+  claimStatus: string
+  runtimeFence: number
+  handoffStage: string | null
+  deathEvidence: { kind: string; detail: string } | null
+} {
+  const host = getStructuredAgentSessionHost() as unknown as {
+    deps: { store: { getRecord: (id: string) => { lease: ReturnType<typeof leaseOf> } } }
+  }
+  return host.deps.store.getRecord(sessionId).lease
 }
 
 function handoffParams(direction: 'to-native' | 'to-tui', fence: number) {
@@ -403,6 +427,47 @@ describe('a structured Claude session over agentSession.*', () => {
     })
     expect((retry as { result: unknown }).result).toEqual((first as { result: unknown }).result)
     expect(claude.connections).toHaveLength(1)
+  })
+
+  it('releases a session whose CLI self-exited during create, with its diagnostic intact', async () => {
+    claude.setSelfExit({
+      message: 'claude stream-json exited (code 1): claude: not signed in',
+      // The root's death is first-hand; its descendants were never snapshottable.
+      exitVerdict: { root: 'exited', tree: 'unverifiable' }
+    })
+
+    const failed = await call('agentSession.create', createIntentParams())
+
+    expect(JSON.stringify(failed)).toContain('claude: not signed in')
+    const lease = leaseOf(SESSION)
+    // Latching here would refuse every later attach with agent_session_ownership_unknown,
+    // wedging a user who only needs to sign in.
+    expect(lease).toMatchObject({ claimStatus: 'released', handoffStage: null })
+    expect(lease.deathEvidence).toMatchObject({
+      kind: 'exit-observed',
+      detail: 'the provider process exited; its descendants were not verifiable'
+    })
+
+    claude.setSelfExit(null)
+    // Signing in and reopening the chat works: the reservation was not latched.
+    await ok<{ fence: number }>('agentSession.ensure', ensureParams(lease.runtimeFence))
+  })
+
+  it('keeps a session reserved when a descendant of the failed start was seen alive', async () => {
+    claude.setSelfExit({
+      message: 'claude stream-json exited (code 1): claude: not signed in',
+      exitVerdict: { root: 'exited', tree: 'live' }
+    })
+
+    await call('agentSession.create', createIntentParams())
+
+    // A live descendant still holds the provider session: releasing would hand a
+    // second writer to it.
+    expect(leaseOf(SESSION)).toMatchObject({
+      claimStatus: 'reserved',
+      handoffStage: 'manual-recovery'
+    })
+    claude.setSelfExit(null)
   })
 
   it('creates, sends, streams, approves, interrupts, and resumes from the chain head', async () => {

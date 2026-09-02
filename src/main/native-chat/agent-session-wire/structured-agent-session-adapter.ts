@@ -32,6 +32,20 @@ export class AgentSessionAcquisitionRefusal extends Error {
   }
 }
 
+/**
+ * The provider's own root process was observed to exit, but its descendant tree
+ * could not be verified. The lease keys on the root's pid and start time, so its
+ * observed death releases the reservation; nothing is claimed about descendants.
+ * Never thrown when a descendant was observed still alive — that stays unproven.
+ */
+export class AgentSessionAcquisitionRootExitObservedError extends Error {
+  constructor(cause: unknown) {
+    // The provider's own diagnostic is the only thing the user can act on.
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.name = 'AgentSessionAcquisitionRootExitObservedError'
+  }
+}
+
 export class AgentSessionAcquisitionExitUnprovenError extends Error {
   constructor(cause: unknown) {
     super('agent_session_acquisition_exit_unproven', { cause })

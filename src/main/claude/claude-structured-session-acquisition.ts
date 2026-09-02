@@ -1,10 +1,16 @@
-import { AgentSessionAcquisitionExitUnprovenError } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
+import {
+  AgentSessionAcquisitionExitUnprovenError,
+  AgentSessionAcquisitionRootExitObservedError
+} from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type {
   AgentSessionAcquisition,
   StructuredAgentSessionAcquireInput
 } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
-import { openClaudeStreamJsonConnection } from './claude-stream-json-connection'
+import {
+  openClaudeStreamJsonConnection,
+  type ClaudeStreamJsonConnection
+} from './claude-stream-json-connection'
 import { buildClaudePermissionCallbacks } from './claude-structured-inbound-control'
 import { resolveClaudeReplayWaiter } from './claude-structured-dispatch'
 import {
@@ -47,6 +53,24 @@ type AcquireCallbacks = {
     event: ClaudeStructuredSessionEvent
   ) => void
   handleExit: (sessionId: string, attempt: ClaudeAcquisitionAttempt, error: Error) => void
+}
+
+/**
+ * Which failure a Claude child that would not close cleanly actually is.
+ *
+ * The lease is keyed on the root's pid and start time, so a first-hand root exit
+ * releases it and the CLI's own diagnostic reaches the user. A descendant seen
+ * still alive, or a root Orca never saw leave, stays unproven and keeps the
+ * reservation — releasing there is the orphaning this proof exists to prevent.
+ */
+function claudeAcquisitionCleanupError(
+  connection: ClaudeStreamJsonConnection | null | undefined,
+  cause: unknown
+): Error {
+  const verdict = connection?.exitVerdict
+  return verdict?.root === 'exited' && verdict.tree === 'unverifiable'
+    ? new AgentSessionAcquisitionRootExitObservedError(cause)
+    : new AgentSessionAcquisitionExitUnprovenError(cause)
 }
 
 export async function acquireClaudeSession({
@@ -213,7 +237,7 @@ export async function acquireClaudeSession({
       }
       const closed = (await attempt.connection?.close()) ?? true
       if (!closed) {
-        throw new AgentSessionAcquisitionExitUnprovenError(error)
+        throw claudeAcquisitionCleanupError(attempt.connection, error)
       }
     }
     acquisitions.deleteIfCurrent(sessionId, attempt)

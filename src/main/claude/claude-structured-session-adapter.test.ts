@@ -5,7 +5,11 @@ import type {
   AgentJournalMessageItem,
   AgentSessionJournalIdentity
 } from '../../shared/agent-session-journal-types'
-import { AgentSessionAcquisitionRefusal } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
+import {
+  AgentSessionAcquisitionExitUnprovenError,
+  AgentSessionAcquisitionRefusal,
+  AgentSessionAcquisitionRootExitObservedError
+} from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type {
   ClaudeStreamJsonConnection,
   ClaudeStreamJsonConnectionHandlers,
@@ -42,8 +46,9 @@ function identityFor(sessionId = 'session-1'): AgentSessionJournalIdentity {
 
 type Route = (params: Record<string, unknown> | undefined) => unknown
 
-type FakeConnection = Omit<ClaudeStreamJsonConnection, 'closed'> & {
+type FakeConnection = Omit<ClaudeStreamJsonConnection, 'closed' | 'exitVerdict'> & {
   closed: boolean
+  exitVerdict: ClaudeStreamJsonConnection['exitVerdict']
   launch: ClaudeStreamJsonLaunch
   handlers: ClaudeStreamJsonConnectionHandlers
   calls: { subtype: string; params?: Record<string, unknown> }[]
@@ -63,6 +68,8 @@ function fakeClaude(
     settings?: unknown
     replayUuid?: string | null
     capabilities?: string[]
+    /** Scripts a close that cannot prove the tree, with the verdict it observed. */
+    unprovenCloseVerdict?: ClaudeStreamJsonConnection['exitVerdict']
     routes?: Record<string, Route>
   } = {}
 ): {
@@ -158,10 +165,11 @@ function fakeClaude(
           })
         }
       },
+      exitVerdict: options.unprovenCloseVerdict ?? { root: 'live', tree: 'unverifiable' },
       close: async () => {
         connection.closeCount += 1
         connection.closed = true
-        return true
+        return options.unprovenCloseVerdict === undefined
       }
     }
     connections.push(connection)
@@ -621,6 +629,42 @@ describe('ClaudeStructuredSessionAdapter turns and controls', () => {
 })
 
 describe('ClaudeStructuredSessionAdapter acquisition cleanup', () => {
+  /** A start that fails after the child self-exited, with its close verdict scripted. */
+  function failedStart(
+    unprovenCloseVerdict: ClaudeStreamJsonConnection['exitVerdict']
+  ): Promise<unknown> {
+    const claude = fakeClaude({
+      exitBeforeInit: 'claude stream-json exited (code 1): not logged in',
+      unprovenCloseVerdict
+    })
+    return adapterFor(claude)
+      .acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+      .catch((error: unknown) => error)
+  }
+
+  it('releases on a first-hand root exit while still carrying the CLI diagnostic', async () => {
+    // The root's pid and start time are the lease's identity, and they are
+    // provably dead: latching the session would strand a signed-out user.
+    const error = await failedStart({ root: 'exited', tree: 'unverifiable' })
+
+    expect(error).toBeInstanceOf(AgentSessionAcquisitionRootExitObservedError)
+    expect((error as Error).message).toBe('claude stream-json exited (code 1): not logged in')
+  })
+
+  it('never releases while a descendant was observed alive', async () => {
+    const error = await failedStart({ root: 'exited', tree: 'live' })
+
+    expect(error).toBeInstanceOf(AgentSessionAcquisitionExitUnprovenError)
+    expect(error).not.toBeInstanceOf(AgentSessionAcquisitionRootExitObservedError)
+  })
+
+  it('never releases for a root Orca never saw leave', async () => {
+    const error = await failedStart({ root: 'live', tree: 'unverifiable' })
+
+    expect(error).toBeInstanceOf(AgentSessionAcquisitionExitUnprovenError)
+    expect(error).not.toBeInstanceOf(AgentSessionAcquisitionRootExitObservedError)
+  })
+
   it('reports unproven published-session cleanup so callers can retry safely', async () => {
     const claude = fakeClaude()
     const adapter = await acquired(claude)
