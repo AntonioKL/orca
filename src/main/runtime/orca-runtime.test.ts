@@ -56,6 +56,7 @@ await import('./orca-runtime-tests/terminal-output-and-worker-recovery-part-06.s
 await import('./orca-runtime-tests/terminal-output-and-worker-recovery-part-07.spec')
 await import('./orca-runtime-tests/terminal-handles-and-agent-status.spec')
 await import('./orca-runtime-tests/terminal-handles-and-agent-status-part-02.spec')
+await import('./orca-runtime-tests/terminal-settled-prompt-foreground-confirmation.spec')
 await import('./orca-runtime-tests/terminal-handles-and-agent-status-part-03.spec')
 await import('./orca-runtime-tests/terminal-handles-and-agent-status-part-04.spec')
 await import('./orca-runtime-tests/terminal-handles-and-agent-status-part-05.spec')
