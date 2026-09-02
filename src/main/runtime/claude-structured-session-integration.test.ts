@@ -520,6 +520,18 @@ describe('a structured Claude session over agentSession.*', () => {
       parent_tool_use_id: null,
       message: { role: 'assistant', content: [{ type: 'text', text: 'Two files.' }] }
     })
+    claude.live().handlers.onMessage?.({
+      type: 'result',
+      subtype: 'success',
+      session_id: PROVIDER_SESSION,
+      uuid: 'result-frame-uuid'
+    })
+    claude.live().handlers.onMessage?.({
+      type: 'stream_event',
+      session_id: PROVIDER_SESSION,
+      uuid: 'stream-event-frame-uuid',
+      event: { type: 'message_stop' }
+    })
     await getStructuredAgentSessionHost()?.flushStreamedEvents(SESSION)
     expect(itemsOf(stream).find((item) => textOf(item) === 'Two files.')?.itemId).toBe(
       `claude:${PROVIDER_SESSION}:assistant-leaf`

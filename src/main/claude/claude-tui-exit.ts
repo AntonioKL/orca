@@ -18,6 +18,10 @@ function validLeafUuid(value: unknown): string | null {
   return value === value.trim() && !hasControlCharacter ? value : null
 }
 
+export function readClaudeTranscriptEntryUuid(value: Record<string, unknown>): string | null {
+  return value.type === 'user' || value.type === 'assistant' ? validLeafUuid(value.uuid) : null
+}
+
 function readLeafCandidate(line: string): TranscriptLeafCandidate | null {
   try {
     const value = JSON.parse(line) as Record<string, unknown>
@@ -25,8 +29,7 @@ function readLeafCandidate(line: string): TranscriptLeafCandidate | null {
     if (lastPromptLeaf) {
       return { leafUuid: lastPromptLeaf, authoritative: true }
     }
-    const messageLeaf =
-      value.type === 'user' || value.type === 'assistant' ? validLeafUuid(value.uuid) : null
+    const messageLeaf = readClaudeTranscriptEntryUuid(value)
     return messageLeaf ? { leafUuid: messageLeaf, authoritative: false } : null
   } catch {
     return null

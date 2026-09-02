@@ -254,7 +254,7 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     expect(CLAUDE_STRUCTURED_INIT_TIMEOUT_MS).toBeLessThan(30_000)
   })
 
-  it('pins the account, proves init, and reports the process and chain leaf', async () => {
+  it('pins the account and proves init without treating the system-frame uuid as a chain leaf', async () => {
     const claude = fakeClaude()
     const events: ClaudeStructuredSessionEvent[] = []
     const adapter = adapterFor(claude, {}, events)
@@ -284,8 +284,8 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
       spawnToken: 'spawn-9'
     })
     expect(acquisition.link).toEqual({
-      linkId: `claude-7-${PROVIDER_SESSION_ID}-init-uuid`,
-      handle: { provider: 'claude', sessionId: PROVIDER_SESSION_ID, leafUuid: 'init-uuid' },
+      linkId: `claude-7-${PROVIDER_SESSION_ID}-empty`,
+      handle: { provider: 'claude', sessionId: PROVIDER_SESSION_ID, leafUuid: null },
       origin: 'created',
       mintedAtFence: 7,
       observedAt: 1_700_000_000_500
@@ -360,7 +360,7 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     })
   })
 
-  it('accepts SessionStart as the pre-turn session proof from the real CLI protocol', async () => {
+  it('accepts SessionStart as pre-turn proof without treating its system uuid as a leaf', async () => {
     const claude = fakeClaude({ initProof: 'session-start', initUuid: 'session-start-uuid' })
     const events: ClaudeStructuredSessionEvent[] = []
     const adapter = adapterFor(claude, {}, events)
@@ -374,7 +374,7 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     expect(acquisition.link.handle).toEqual({
       provider: 'claude',
       sessionId: PROVIDER_SESSION_ID,
-      leafUuid: 'session-start-uuid'
+      leafUuid: null
     })
     expect(events[0]).toMatchObject({
       type: 'message',
@@ -425,7 +425,7 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     expect(acquisition.link.handle).toEqual({
       provider: 'claude',
       sessionId: PROVIDER_SESSION_ID,
-      leafUuid: 'init-uuid'
+      leafUuid: 'leaf-before'
     })
 
     const wrongClaude = fakeClaude({ initSessionId: 'different-session' })
@@ -851,16 +851,26 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
     await expect(answered.promise).resolves.toBeNull()
   })
 
-  it('persists the last observed leaf before graceful close', async () => {
+  it('persists only the last transcript-entry uuid before graceful close', async () => {
     const claude = fakeClaude()
     const events: ClaudeStructuredSessionEvent[] = []
     const persistedHandles: unknown[] = []
     const adapter = adapterFor(claude, {}, events, persistedHandles)
     await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
     claude.connections[0].handlers.onMessage?.({
+      type: 'assistant',
+      session_id: PROVIDER_SESSION_ID,
+      uuid: 'assistant-leaf'
+    })
+    claude.connections[0].handlers.onMessage?.({
       type: 'result',
       session_id: PROVIDER_SESSION_ID,
-      uuid: 'final-leaf'
+      uuid: 'result-frame-uuid'
+    })
+    claude.connections[0].handlers.onMessage?.({
+      type: 'stream_event',
+      session_id: PROVIDER_SESSION_ID,
+      uuid: 'stream-event-frame-uuid'
     })
 
     await adapter.closeSession('session-1')
@@ -869,7 +879,7 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       {
         sessionId: 'session-1',
         providerSessionId: PROVIDER_SESSION_ID,
-        leafUuid: 'final-leaf',
+        leafUuid: 'assistant-leaf',
         fence: 7
       }
     ])
@@ -877,7 +887,7 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       type: 'handle',
       sessionId: 'session-1',
       providerSessionId: PROVIDER_SESSION_ID,
-      leafUuid: 'final-leaf',
+      leafUuid: 'assistant-leaf',
       fence: 7
     })
     expect(claude.connections[0].closeCount).toBe(1)

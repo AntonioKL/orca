@@ -36,7 +36,15 @@ describe('Claude TUI exit', () => {
     const transcriptPath = join(root, 'session.jsonl')
     await writeFile(
       transcriptPath,
-      `${JSON.stringify({ type: 'user', uuid: 'user-one' })}\n${JSON.stringify({ type: 'assistant', uuid: 'assistant-one' })}\n`
+      [
+        { type: 'user', uuid: 'user-one' },
+        { type: 'assistant', uuid: 'assistant-one' },
+        { type: 'system', subtype: 'init', uuid: 'init-frame' },
+        { type: 'result', uuid: 'result-frame' },
+        { type: 'stream_event', uuid: 'stream-event-frame' }
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')
     )
 
     await expect(readClaudeTranscriptLeafUuid(transcriptPath)).resolves.toBe('assistant-one')

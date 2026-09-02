@@ -17,7 +17,6 @@ import { resolveClaudeReplayWaiter } from './claude-structured-dispatch'
 import {
   claudeAuthDiagnostic,
   readClaudeCapabilities,
-  readClaudeFrameString,
   readClaudeInit,
   readClaudeModels
 } from './claude-structured-init-proof'
@@ -47,6 +46,7 @@ import {
   closeClaudePublishedSessionForDeps,
   closeClaudeSession
 } from './claude-structured-session-close'
+import { readClaudeTranscriptEntryUuid } from './claude-tui-exit'
 
 export const CLAUDE_STRUCTURED_INIT_TIMEOUT_MS = 10_000
 
@@ -114,7 +114,7 @@ export async function acquireClaudeSession({
     if (init) {
       initDeadline.resolve(init)
     }
-    observedLeafUuid = readClaudeFrameString(message, 'uuid') ?? observedLeafUuid
+    observedLeafUuid = readClaudeTranscriptEntryUuid(message) ?? observedLeafUuid
     if (liveSession) {
       liveSession.leafUuid = observedLeafUuid
     }
@@ -232,7 +232,6 @@ export async function acquireClaudeSession({
         diagnostic: claudeAuthDiagnostic(init, settings)
       })
     )
-    observedLeafUuid = init.uuid ?? observedLeafUuid
     const process = await claudeProcessIdentity(
       { ...input, pid: connection.pid },
       deps.readProcessStartTime
