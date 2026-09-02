@@ -1,130 +1,151 @@
 import { toast } from 'sonner'
-import {
-  createStructuredCodexSessionLaunchIntent,
-  launchStructuredCodexSession,
-  StructuredAgentSessionCreateRefusalError,
-  type StructuredAgentSessionLaunchIntent
-} from '@/lib/launch-structured-codex-session'
-import { refreshLocalStructuredSessionTabs } from '@/runtime/local-structured-session-tabs-sync'
 import { translate } from '@/i18n/i18n'
+import {
+  abandonStructuredAgentSessionLaunchIntent,
+  createStructuredCodexSessionLaunchIntent,
+  StructuredAgentSessionCreateRefusalError
+} from '@/lib/launch-structured-codex-session'
+import {
+  enqueueStructuredAgentSessionLaunchPrompt,
+  mutateStructuredAgentSessionLaunchPrompt
+} from '@/components/native-chat/structured-agent-session-outbox-storage'
+import {
+  launchAndReconcile,
+  reconcileUnknownLaunch,
+  StructuredAgentSessionLaunchCancelledError,
+  type StructuredCodexLaunchReceipt,
+  type StructuredLaunchRecoveryState
+} from '@/lib/structured-agent-session-launch-recovery'
+import {
+  settleStructuredCodexLaunchPrompt,
+  type StructuredPromptDeliveryResult
+} from '@/lib/structured-agent-session-launch-prompt'
 
-type StructuredLaunchState = {
-  intent: StructuredAgentSessionLaunchIntent
-  promise: Promise<string>
-  visibilityUnknown: boolean
+export type { StructuredCodexLaunchReceipt }
+
+type StructuredRefusalFallback = () =>
+  | void
+  | StructuredPromptDeliveryResult
+  | Promise<void | StructuredPromptDeliveryResult>
+
+type StructuredLaunchState = StructuredLaunchRecoveryState & {
+  identity: string
+  stagedPromptId: string | null
+  promptDeliveryResult?: Promise<StructuredPromptDeliveryResult>
+  refusalFallback: {
+    callback: StructuredRefusalFallback | null
+    promise: Promise<boolean>
+    resolve: (ran: boolean) => void
+    reject: (error: unknown) => void
+    promptDeliveryPromise: Promise<StructuredPromptDeliveryResult | null>
+    resolvePromptDelivery: (result: StructuredPromptDeliveryResult | null) => void
+    started: boolean
+  }
 }
 
-const pendingStructuredLaunchesByWorktree = new Map<string, StructuredLaunchState>()
+export type StructuredCodexLaunchOptions = {
+  prompt?: string
+  promptDelivery?: 'auto-submit' | 'submit-after-ready'
+  onPromptDelivered?: () => void
+}
+
+export type StructuredCodexLaunchResult = {
+  sessionId: string
+  launchResult: Promise<StructuredCodexLaunchReceipt>
+  promptDeliveryResult?: Promise<StructuredPromptDeliveryResult>
+  claimDefinitiveRefusalFallback: (fallback: StructuredRefusalFallback) => Promise<boolean>
+}
+
+const pendingStructuredLaunchesByIdentity = new Map<string, StructuredLaunchState>()
+
+function launchIdentity(worktreeId: string): string {
+  return worktreeId
+}
+
+function discardStagedPrompt(state: StructuredLaunchState): void {
+  if (!state.stagedPromptId) {
+    return
+  }
+  mutateStructuredAgentSessionLaunchPrompt(state.intent.sessionId, state.stagedPromptId, () => null)
+  state.stagedPromptId = null
+}
+
+function cleanupLaunchState(state: StructuredLaunchState): void {
+  if (pendingStructuredLaunchesByIdentity.get(state.identity) === state) {
+    pendingStructuredLaunchesByIdentity.delete(state.identity)
+  }
+}
+
+function settleDefinitiveRefusalFallback(state: StructuredLaunchState): void {
+  if (state.refusalFallback.started) {
+    return
+  }
+  state.refusalFallback.started = true
+  abandonStructuredAgentSessionLaunchIntent(state.intent)
+  discardStagedPrompt(state)
+  const fallback = state.refusalFallback.callback
+  if (!fallback) {
+    state.refusalFallback.resolve(false)
+    state.refusalFallback.resolvePromptDelivery(null)
+    cleanupLaunchState(state)
+    return
+  }
+  void Promise.resolve()
+    .then(fallback)
+    .then(
+      (result) => {
+        state.refusalFallback.resolve(true)
+        state.refusalFallback.resolvePromptDelivery(result ?? null)
+      },
+      (error) => {
+        state.refusalFallback.reject(error)
+        state.refusalFallback.resolvePromptDelivery(null)
+      }
+    )
+    .finally(() => cleanupLaunchState(state))
+}
 
 function trackLaunchSettlement(
-  worktreeId: string,
   state: StructuredLaunchState,
-  promise: Promise<string>
+  promise: Promise<StructuredCodexLaunchReceipt>
 ): void {
   void promise.then(
     () => {
-      if (
-        state.promise === promise &&
-        pendingStructuredLaunchesByWorktree.get(worktreeId) === state
-      ) {
-        pendingStructuredLaunchesByWorktree.delete(worktreeId)
+      if (state.promise !== promise) {
+        return
+      }
+      state.refusalFallback.resolve(false)
+      if (state.promptDeliveryResult) {
+        void state.promptDeliveryResult.finally(() => cleanupLaunchState(state))
+      } else {
+        cleanupLaunchState(state)
       }
     },
-    () => {
-      if (
-        state.promise === promise &&
-        !state.visibilityUnknown &&
-        pendingStructuredLaunchesByWorktree.get(worktreeId) === state
-      ) {
-        pendingStructuredLaunchesByWorktree.delete(worktreeId)
+    (error) => {
+      if (state.promise !== promise || state.cancelled) {
+        return
+      }
+      if (error instanceof StructuredAgentSessionCreateRefusalError) {
+        settleDefinitiveRefusalFallback(state)
+      } else if (!state.visibilityUnknown) {
+        state.refusalFallback.resolve(false)
+        cleanupLaunchState(state)
       }
     }
   )
 }
 
-async function verifyPublishedSession(intent: StructuredAgentSessionLaunchIntent): Promise<string> {
-  const snapshots = await refreshLocalStructuredSessionTabs()
-  const published = snapshots.some(
-    (snapshot) =>
-      snapshot.worktree === intent.worktreeId &&
-      snapshot.tabs.some(
-        (tab) => tab.type === 'agent-session' && tab.sessionId === intent.sessionId
-      )
-  )
-  if (!published) {
-    throw new Error('structured session tab publication unavailable')
-  }
-  return intent.sessionId
-}
-
-async function retrySameIntent(state: StructuredLaunchState, priorError: unknown): Promise<string> {
-  try {
-    await launchStructuredCodexSession(state.intent)
-    return await verifyPublishedSession(state.intent)
-  } catch (error) {
-    if (error instanceof StructuredAgentSessionCreateRefusalError) {
-      throw error
+function trackLaunchFailureToast(state: StructuredLaunchState): void {
+  void state.promise.catch(async (error) => {
+    if (error instanceof StructuredAgentSessionLaunchCancelledError) {
+      return
     }
-    try {
-      return await verifyPublishedSession(state.intent)
-    } catch {
-      state.visibilityUnknown = true
-      throw error ?? priorError
+    if (
+      error instanceof StructuredAgentSessionCreateRefusalError &&
+      (await state.refusalFallback.promise.catch(() => false))
+    ) {
+      return
     }
-  }
-}
-
-async function launchAndReconcile(state: StructuredLaunchState): Promise<string> {
-  try {
-    await launchStructuredCodexSession(state.intent)
-  } catch (error) {
-    if (error instanceof StructuredAgentSessionCreateRefusalError) {
-      throw error
-    }
-    try {
-      return await verifyPublishedSession(state.intent)
-    } catch {
-      return retrySameIntent(state, error)
-    }
-  }
-  try {
-    return await verifyPublishedSession(state.intent)
-  } catch (error) {
-    return retrySameIntent(state, error)
-  }
-}
-
-async function reconcileUnknownLaunch(state: StructuredLaunchState): Promise<string> {
-  state.visibilityUnknown = false
-  try {
-    return await verifyPublishedSession(state.intent)
-  } catch (error) {
-    return retrySameIntent(state, error)
-  }
-}
-
-function launchStructuredCodexSessionOnce(worktreeId: string): Promise<string> {
-  const existing = pendingStructuredLaunchesByWorktree.get(worktreeId)
-  if (existing) {
-    if (existing.visibilityUnknown) {
-      existing.promise = reconcileUnknownLaunch(existing)
-      trackLaunchSettlement(worktreeId, existing, existing.promise)
-    }
-    return existing.promise
-  }
-  const state: StructuredLaunchState = {
-    intent: createStructuredCodexSessionLaunchIntent(worktreeId),
-    promise: Promise.resolve(''),
-    visibilityUnknown: false
-  }
-  state.promise = launchAndReconcile(state)
-  pendingStructuredLaunchesByWorktree.set(worktreeId, state)
-  trackLaunchSettlement(worktreeId, state, state.promise)
-  return state.promise
-}
-
-export function startStructuredCodexLaunch(worktreeId: string): void {
-  void launchStructuredCodexSessionOnce(worktreeId).catch((error) => {
     toast.error(
       translate(
         'components.native-chat.structuredSessionLaunchFailed',
@@ -133,4 +154,104 @@ export function startStructuredCodexLaunch(worktreeId: string): void {
       { description: error instanceof Error ? error.message : String(error) }
     )
   })
+}
+
+function structuredCodexLaunchState(
+  worktreeId: string,
+  options: StructuredCodexLaunchOptions
+): StructuredLaunchState {
+  const identity = launchIdentity(worktreeId)
+  const existing = pendingStructuredLaunchesByIdentity.get(identity)
+  if (existing) {
+    if (existing.visibilityUnknown) {
+      existing.promise = reconcileUnknownLaunch(existing)
+      trackLaunchSettlement(existing, existing.promise)
+      trackLaunchFailureToast(existing)
+    }
+    return existing
+  }
+
+  const fallback = Promise.withResolvers<boolean>()
+  const fallbackPromptDelivery = Promise.withResolvers<StructuredPromptDeliveryResult | null>()
+  const intent = createStructuredCodexSessionLaunchIntent(worktreeId)
+  const text = options.prompt?.trim() ?? ''
+  const stagedPrompt = text
+    ? enqueueStructuredAgentSessionLaunchPrompt(intent.sessionId, text)
+    : null
+  const state: StructuredLaunchState = {
+    identity,
+    intent,
+    promise: Promise.resolve({ sessionId: '', fence: 0 }),
+    visibilityUnknown: false,
+    cancelled: false,
+    stagedPromptId: stagedPrompt?.clientMessageId ?? null,
+    refusalFallback: {
+      callback: null,
+      promise: fallback.promise,
+      resolve: fallback.resolve,
+      reject: fallback.reject,
+      promptDeliveryPromise: fallbackPromptDelivery.promise,
+      resolvePromptDelivery: fallbackPromptDelivery.resolve,
+      started: false
+    }
+  }
+  state.promise =
+    text && !stagedPrompt
+      ? Promise.reject(
+          new StructuredAgentSessionCreateRefusalError(
+            'Could not durably stage the Codex launch prompt.'
+          )
+        )
+      : launchAndReconcile(state)
+  const promptDeliveryResult = settleStructuredCodexLaunchPrompt({
+    launchResult: state.promise,
+    options,
+    stagedEntry: stagedPrompt
+  })
+  state.promptDeliveryResult = promptDeliveryResult?.catch(async (error) => {
+    if (error instanceof StructuredAgentSessionCreateRefusalError) {
+      return (
+        (await state.refusalFallback.promptDeliveryPromise) ?? {
+          delivered: false,
+          failureNotified: true
+        }
+      )
+    }
+    return { delivered: false, failureNotified: true }
+  })
+  pendingStructuredLaunchesByIdentity.set(identity, state)
+  trackLaunchSettlement(state, state.promise)
+  trackLaunchFailureToast(state)
+  return state
+}
+
+export function cancelStructuredCodexLaunch(worktreeId: string, sessionId: string): boolean {
+  const state = [...pendingStructuredLaunchesByIdentity.values()].find(
+    (candidate) =>
+      candidate.intent.worktreeId === worktreeId && candidate.intent.sessionId === sessionId
+  )
+  if (!state) {
+    return false
+  }
+  state.cancelled = true
+  cleanupLaunchState(state)
+  discardStagedPrompt(state)
+  abandonStructuredAgentSessionLaunchIntent(state.intent)
+  return true
+}
+
+export function startStructuredCodexLaunch(
+  worktreeId: string,
+  options: StructuredCodexLaunchOptions = {}
+): StructuredCodexLaunchResult {
+  const state = structuredCodexLaunchState(worktreeId, options)
+  return {
+    sessionId: state.intent.sessionId,
+    launchResult: state.promise,
+    ...(state.promptDeliveryResult ? { promptDeliveryResult: state.promptDeliveryResult } : {}),
+    claimDefinitiveRefusalFallback: (fallback) => {
+      state.refusalFallback.callback ??= fallback
+      return state.refusalFallback.promise
+    }
+  }
 }

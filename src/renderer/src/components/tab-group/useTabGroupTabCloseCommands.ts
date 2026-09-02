@@ -10,6 +10,7 @@ import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner
 import { closeBrowserWorkspaceTabOnHosts } from '@/runtime/browser-workspace-tab-close'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { closeStructuredAgentSession } from '@/runtime/structured-agent-session-close'
+import { cancelStructuredCodexLaunch } from '@/lib/structured-agent-session-launch'
 import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
 import { translate } from '@/i18n/i18n'
 
@@ -120,6 +121,7 @@ export function useTabGroupTabCloseCommands({
         worktreeId
       )
       if (item.contentType === 'agent-session') {
+        cancelStructuredCodexLaunch(worktreeId, item.entityId)
         // Why: the structured session lives on the host, so the local tab close must also
         // retire the host's canonical row or it reappears on the next sync.
         const target = getActiveRuntimeTarget({
@@ -193,6 +195,7 @@ export function useTabGroupTabCloseCommands({
           worktreeId
         )
         if (item.contentType === 'agent-session') {
+          cancelStructuredCodexLaunch(worktreeId, item.entityId)
           const target = getActiveRuntimeTarget({
             activeRuntimeEnvironmentId: runtimeEnvironmentId
           })

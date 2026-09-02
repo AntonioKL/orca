@@ -10,6 +10,7 @@ import {
   decideWebSessionTabsSnapshot
 } from './web-session-tabs-sync'
 import type { WebSessionTabsSyncState } from './web-session-tabs-sync'
+import { refreshLocalRuntimeCapabilities } from './local-runtime-capabilities'
 
 export const LOCAL_STRUCTURED_SESSION_OWNER = 'local-structured-session'
 let localStructuredSessionTabsRestorePromise: Promise<void> | null = null
@@ -99,7 +100,8 @@ export function applyLocalStructuredSessionTabSnapshots<
 }
 
 export function restoreLocalStructuredSessionTabsOnce(): Promise<void> {
-  localStructuredSessionTabsRestorePromise ??= refreshLocalStructuredSessionTabs()
+  localStructuredSessionTabsRestorePromise ??= refreshLocalRuntimeCapabilities()
+    .then(() => refreshLocalStructuredSessionTabs())
     .then(() => undefined)
     .catch((error) => {
       localStructuredSessionTabsRestorePromise = null
@@ -127,11 +129,11 @@ async function startLocalStructuredSessionTabsSync(args: {
   isDisposed: () => boolean
   setUnsubscribe: (unsubscribe: () => void) => void
 }): Promise<void> {
-  const status = await window.api.runtime.getStatus()
+  const capabilities = await refreshLocalRuntimeCapabilities()
   if (args.isDisposed()) {
     return
   }
-  const supported = status.capabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
+  const supported = capabilities.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
   await restoreLocalStructuredSessionTabsOnce()
   if (args.isDisposed()) {
     return

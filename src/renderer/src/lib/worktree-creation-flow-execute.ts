@@ -21,6 +21,7 @@ import { createBrowserUuid } from '@/lib/browser-uuid'
 import { seedAgentTabStateAfterWorktreeCreate } from '@/lib/worktree-creation-agent-seeds'
 import { resolveBackendDraftStartup } from '@/lib/worktree-draft-startup-view-mode'
 import { buildWorktreeCreationStartupOpt } from '@/lib/worktree-creation-flow-startup'
+import { launchStructuredWorktreeSession } from '@/lib/worktree-creation-structured-session'
 
 // Why: activePendingCreationId can outlive the terminal route when the user
 // switches app views; only the terminal route renders the creation panel.
@@ -68,7 +69,9 @@ export async function executeWorktreeCreation(
   let result: CreateWorktreeResult
   try {
     const provisionedRoot = getProvisionedRootCreateOptions(preparedRequest)
-    const backendStartup = provisionedRoot ? undefined : resolveBackendDraftStartup(preparedRequest)
+    const structuredLaunch = preparedRequest.agentLaunchRoute === 'structured-native-chat'
+    const backendStartup =
+      provisionedRoot || structuredLaunch ? undefined : resolveBackendDraftStartup(preparedRequest)
     result = await useAppStore
       .getState()
       .createWorktree(
@@ -89,7 +92,7 @@ export async function executeWorktreeCreation(
         preparedRequest.linkedGitLabMR,
         preparedRequest.linkedGitLabIssue,
         backendStartup,
-        preparedRequest.pendingFirstAgentMessageRename,
+        structuredLaunch ? false : preparedRequest.pendingFirstAgentMessageRename,
         creationId,
         preparedRequest.linkedLinearIssueWorkspaceId,
         preparedRequest.linkedLinearIssueOrganizationUrlKey,
@@ -109,7 +112,10 @@ export async function executeWorktreeCreation(
             ? { linkedTaskSourceContext: preparedRequest.linkedTaskSourceContext }
             : {}),
           // Why: the remote host must own task-draft startup so its initial terminal is the agent, not an idle fallback shell.
-          ...(!backendStartup && preparedRequest.agent && preparedRequest.launchDraftPrompt
+          ...(!structuredLaunch &&
+          !backendStartup &&
+          preparedRequest.agent &&
+          preparedRequest.launchDraftPrompt
             ? { startupDraft: preparedRequest.launchDraftPrompt }
             : {}),
           ...(provisionedRoot ? { provisionedRoot } : {}),
@@ -144,6 +150,7 @@ export async function executeWorktreeCreation(
   }
 
   const worktree = result.worktree
+  const structuredLaunch = preparedRequest.agentLaunchRoute === 'structured-native-chat'
   // Why: cancellation can race a successful backend adoption; clean up again after it settles so an adopted workspace cannot outlive its destroyed VM.
   if (!useAppStore.getState().pendingWorktreeCreations[creationId]) {
     if (preparedRequest.ephemeralVmRuntimeId) {
@@ -159,9 +166,10 @@ export async function executeWorktreeCreation(
     // startup, so both halves of the handoff share one renderer-session token.
     preparedRequest.startupPlan.launchToken = createBrowserUuid()
   }
-  const startupOpt = buildWorktreeCreationStartupOpt(preparedRequest, backendSpawned)
+  const fallbackStartupOpt = buildWorktreeCreationStartupOpt(preparedRequest, backendSpawned)
+  const startupOpt = structuredLaunch ? undefined : fallbackStartupOpt
 
-  if (worktree.path) {
+  if (worktree.path && !structuredLaunch) {
     const repoConnectionId =
       useAppStore.getState().repos.find((repo) => repo.id === worktree.repoId)?.connectionId ?? null
     await preflightAgentTrust(preparedRequest, worktree.path, repoConnectionId)
@@ -187,45 +195,73 @@ export async function executeWorktreeCreation(
       ...(result.defaultTabs ? { defaultTabs: result.defaultTabs } : {}),
       ...(startupOpt ? { startup: startupOpt } : {}),
       ...(preparedRequest.issueCommand ? { issueCommand: preparedRequest.issueCommand } : {}),
-      ...(backendSpawned ? { backendStartupTerminalSpawned: true } : {})
+      ...(backendSpawned ? { backendStartupTerminalSpawned: true } : {}),
+      ...(structuredLaunch ? { providesInitialSurface: true } : {})
     })
     primaryTabId = activation === false ? null : activation.primaryTabId
   } else {
     // The user moved on. Seed the worktree's terminal + setup in the background
     // (setActiveTab only writes global focus for the active worktree, so this is
     // safe) without yanking them back to it.
-    primaryTabId = ensureWorktreeHasInitialTerminal(
-      useAppStore.getState(),
-      worktree.id,
-      startupOpt,
-      result.setup,
-      preparedRequest.issueCommand,
-      result.defaultTabs,
-      {
-        activateCreatedTabs: false,
-        ...(backendSpawned ? { backendStartupTerminalSpawned: true } : {})
-      }
+    const hasExplicitTerminalWork = Boolean(
+      startupOpt || result.setup || preparedRequest.issueCommand || result.defaultTabs
     )
+    primaryTabId =
+      structuredLaunch && !hasExplicitTerminalWork
+        ? null
+        : ensureWorktreeHasInitialTerminal(
+            useAppStore.getState(),
+            worktree.id,
+            startupOpt,
+            result.setup,
+            preparedRequest.issueCommand,
+            result.defaultTabs,
+            {
+              activateCreatedTabs: false,
+              ...(backendSpawned ? { backendStartupTerminalSpawned: true } : {})
+            }
+          )
+  }
+
+  let structuredLaunchAccepted = structuredLaunch
+  if (structuredLaunch && preparedRequest.agent === 'codex') {
+    const structuredSession = await launchStructuredWorktreeSession({
+      request: preparedRequest,
+      worktreeId: worktree.id,
+      shouldActivateOnCompletion,
+      fallbackStartupOpt,
+      activation,
+      primaryTabId
+    })
+    structuredLaunchAccepted = structuredSession.accepted
+    activation = structuredSession.activation
+    primaryTabId = structuredSession.primaryTabId
   }
 
   // Why: clearing synchronously right after activation lets React commit the
   // panel→terminal swap in one frame — no two-row flicker, no empty-terminal flash.
   useAppStore.getState().removePendingWorktreeCreation(creationId, { cleanupVm: false })
-  seedAgentTabStateAfterWorktreeCreate({
-    request: preparedRequest,
-    worktreeId: worktree.id,
-    primaryTabId,
-    startupTerminalTabId: result.startupTerminal?.tabId,
-    backendSpawned
-  })
-  if (preparedRequest.startupPlan && !backendSpawned) {
+  if (!structuredLaunchAccepted) {
+    seedAgentTabStateAfterWorktreeCreate({
+      request: preparedRequest,
+      worktreeId: worktree.id,
+      primaryTabId,
+      startupTerminalTabId: result.startupTerminal?.tabId,
+      backendSpawned
+    })
+  }
+  if (!structuredLaunchAccepted && preparedRequest.startupPlan && !backendSpawned) {
     void ensureAgentStartupInTerminal({
       worktreeId: worktree.id,
       primaryTabId,
       startup: preparedRequest.startupPlan
     })
   }
-  if (shouldActivateOnCompletion && !preparedRequest.suppressTerminalFocusOnCompletion) {
+  if (
+    !structuredLaunchAccepted &&
+    shouldActivateOnCompletion &&
+    !preparedRequest.suppressTerminalFocusOnCompletion
+  ) {
     queueWorkspaceActivationTerminalFocus(worktree.id, activation)
   }
 

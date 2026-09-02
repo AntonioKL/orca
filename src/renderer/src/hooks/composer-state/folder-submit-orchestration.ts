@@ -146,6 +146,7 @@ export function useFolderSubmitOrchestration(input: FolderSubmitOrchestrationInp
           isRemote: folderTargetIsRemote,
           launchSource: telemetrySource === 'onboarding' ? 'onboarding' : 'new_workspace_composer',
           runtimeEnvironmentId: folderTargetRuntimeEnvironmentId,
+          settings,
           createFolderWorkspace: (input) =>
             createFolderWorkspace(input, {
               runtimeEnvironmentId: folderTargetRuntimeEnvironmentId
