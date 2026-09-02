@@ -242,7 +242,7 @@ describe('OrcaRuntimeService terminal retirement host partitioning (STA-3463)', 
     expect(sessions.get(staleHostId)?.tabsByWorktree[SSH_WORKTREE_ID]).toEqual([])
   })
 
-  it('does not throw when a folder host is absent from the persisted host index', () => {
+  it('hydrates the persisted owner when a folder host is absent from the host index', () => {
     const folderWorktreeId = 'folder:folder-1'
     const localSession = {
       ...getDefaultWorkspaceSession(),
@@ -279,7 +279,9 @@ describe('OrcaRuntimeService terminal retirement host partitioning (STA-3463)', 
       hasRuntimeOwnedPtyCandidate: () => false
     })
 
-    expect(() => controller.getHydrationTargets(true)).not.toThrow()
+    const targets = controller.getHydrationTargets(true)
+
+    expect(targets.get(folderWorktreeId)).toBe(localSession)
   })
 
   it('waits for provider retirement on a direct worktree stop', async () => {
