@@ -1,8 +1,17 @@
 // Why: closing a remote tab prunes the local mirror immediately for responsiveness, so stale pre-close snapshots must not rematerialize it.
 
 import { webSessionIntentOwnerKey, type WebSessionIntentOwner } from './web-session-intent-owner'
+import { WEB_SESSION_TAB_RPC_TIMEOUT_MS } from './web-session-tab-rpc-timeout'
 
-const CLOSE_INTENT_TTL_MS = 10_000
+/**
+ * Why derived rather than a literal: `makeWebSessionCloseIntentDurable` can only flip an entry that
+ * still exists, and the close RPC may answer `tab_not_found` at any point up to its own timeout. A
+ * TTL shorter than that timeout lets a republishing host's pending-check delete the entry mid-call,
+ * the durable flip then no-ops, and the pane the user closed comes back (#9194).
+ */
+const CLOSE_INTENT_ANSWER_GRACE_MS = 5_000
+export const WEB_SESSION_CLOSE_INTENT_TTL_MS =
+  WEB_SESSION_TAB_RPC_TIMEOUT_MS + CLOSE_INTENT_ANSWER_GRACE_MS
 
 type CloseIntent = { recordedAt: number; durable: boolean }
 
@@ -63,7 +72,7 @@ export function isWebSessionCloseIntentPending(
   if (!intent) {
     return false
   }
-  if (!intent.durable && now - intent.recordedAt > CLOSE_INTENT_TTL_MS) {
+  if (!intent.durable && now - intent.recordedAt > WEB_SESSION_CLOSE_INTENT_TTL_MS) {
     byTab!.delete(hostTabId)
     if (byTab!.size === 0) {
       pendingCloseByOwnerAndWorktree.delete(partitionKey)

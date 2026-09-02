@@ -98,6 +98,8 @@ const describeOnLinux = process.platform === 'linux' ? describe : describe.skip
 
 const O_CLOEXEC = 0o2000000
 
+const LISTING_READY = '__fd_listing_ready__'
+
 function ptyMasterFd(term: pty.IPty): number {
   return (term as unknown as { fd: number }).fd
 }
@@ -159,22 +161,32 @@ describeOnLinux('node-pty Linux forkpty fd handling', () => {
       env: { ...process.env }
     })
     try {
-      const second = pty.spawn('/bin/sh', ['-c', 'ls -l /proc/self/fd; exit 0'], {
-        name: 'xterm-256color',
-        cols: 200,
-        rows: 24,
-        cwd: process.cwd(),
-        env: { ...process.env }
-      })
+      // Why the read: the child must not be able to run its listing before onData is armed, or an
+      // empty capture would satisfy the negative assertion without inspecting a single fd.
+      const second = pty.spawn(
+        '/bin/sh',
+        ['-c', `IFS= read -r _; printf '${LISTING_READY}\\n'; ls -l /proc/self/fd; exit 0`],
+        {
+          name: 'xterm-256color',
+          cols: 200,
+          rows: 24,
+          cwd: process.cwd(),
+          env: { ...process.env }
+        }
+      )
       let output = ''
       second.onData((data) => {
         output += data
       })
+      second.write('go\n')
       await new Promise<void>((resolve) => {
         second.onExit(() => resolve())
       })
       await delay(100)
 
+      // The listing is the evidence; assert it arrived before reading anything into its absence.
+      expect(output).toContain(LISTING_READY)
+      expect(output).toMatch(/\d+ -> \/dev\/pts\//)
       expect(output).not.toMatch(/ptmx/)
     } finally {
       first.kill()
