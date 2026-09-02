@@ -5,10 +5,156 @@ import {
   runtimeWorktreeIdsEqual
 } from './runtime-worktree-path-identity'
 import { teardownRpcDeadline } from './worktree-teardown'
-import type { RuntimeWorktreeTerminalSleepResult } from '../../shared/runtime-types'
+import type {
+  RuntimeWorktreeTerminalCloseResult,
+  RuntimeWorktreeTerminalSleepResult
+} from '../../shared/runtime-types'
 import type { WorktreeTerminalMutationKind } from './worktree-terminal-mutation-lock'
+import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
+import { rollbackWorkspaceSessionAfterFailedAsyncWrite } from './workspace-session-failed-write-rollback'
+import { parseExecutionHostId } from '../../shared/execution-host'
+import { worktreePtyBelongsToHost, type WorktreePtyHostFence } from './worktree-pty-host-fence'
+import { summarizeWorktreePtyStopVerdict } from './worktree-pty-stop-verdict'
 
 export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithResolveTerminalSplitSourceAuthority {
+  private collectConnectedWorktreePtyIds(
+    worktreeId: string,
+    hostFence: WorktreePtyHostFence
+  ): Set<string> {
+    const ptyIds = new Set<string>()
+    for (const leaf of this.leaves.values()) {
+      if (
+        runtimeWorktreeIdsEqual(leaf.worktreeId, worktreeId) &&
+        leaf.ptyId &&
+        worktreePtyBelongsToHost(leaf.ptyId, this.ptysById.get(leaf.ptyId)?.connectionId, hostFence)
+      ) {
+        ptyIds.add(leaf.ptyId)
+      }
+    }
+    for (const pty of this.ptysById.values()) {
+      if (
+        runtimeWorktreeIdsEqual(pty.worktreeId, worktreeId) &&
+        pty.connected &&
+        worktreePtyBelongsToHost(pty.ptyId, pty.connectionId, hostFence)
+      ) {
+        ptyIds.add(pty.ptyId)
+      }
+    }
+    return ptyIds
+  }
+
+  async closeTerminalsForWorktree(
+    worktreeSelector: string
+  ): Promise<RuntimeWorktreeTerminalCloseResult> {
+    const graphEpoch = this.captureReadyGraphEpoch()
+    const worktree = await this.resolveWorktreeSelector(worktreeSelector)
+    this.assertStableReadyGraph(graphEpoch)
+    const repo = this.store?.getRepo?.(worktree.repoId)
+    const parsedHost = parseExecutionHostId(worktree.hostId)
+    const hostFence =
+      parsedHost?.kind === 'runtime'
+        ? { resolvedRuntimeEnvironmentId: parsedHost.environmentId }
+        : {
+            resolvedConnectionId:
+              repo?.connectionId ?? (parsedHost?.kind === 'ssh' ? parsedHost.targetId : null)
+          }
+
+    return await this.runWorktreeTerminalMutation(worktree.id, async () => {
+      const snapshot = await this.listMobileSessionTabs(`id:${worktree.id}`)
+      const targetPtyIds = this.collectConnectedWorktreePtyIds(worktree.id, hostFence)
+      const parentTabIds = [
+        ...new Set(
+          snapshot.tabs.flatMap((tab) => (tab.type === 'terminal' ? [tab.parentTabId] : []))
+        )
+      ]
+      let closed = 0
+      for (const parentTabId of parentTabIds) {
+        const result = await this.closeMobileSessionTab(`id:${worktree.id}`, parentTabId, {
+          reason: 'user',
+          force: true,
+          localPtyTeardownOwnedExternally: true
+        })
+        if (result.refused) {
+          throw new Error(result.refusalReason ?? 'terminal_close_refused')
+        }
+        closed += 1
+      }
+      this.clearWorktreeTerminalResumeRecords(worktree.id, parentTabIds)
+      const { stopped } = await this.stopTerminalsForWorktree(`id:${worktree.id}`, {
+        resolvedWorktreeId: worktree.id,
+        ...hostFence
+      })
+      const ptyStop = summarizeWorktreePtyStopVerdict(
+        targetPtyIds,
+        (ptyId) => this.getPtyLivenessVerdict(ptyId),
+        (ptyId) => this.ptysById.get(ptyId)?.connected === true
+      )
+      return {
+        closed,
+        stopped,
+        retiredSurfaces: true,
+        ...ptyStop
+      }
+    })
+  }
+
+  private clearWorktreeTerminalResumeRecords(
+    worktreeId: string,
+    closedTabIds: readonly string[]
+  ): void {
+    const session = this.getWorkspaceSessionForWorktree(worktreeId)
+    if (!session) {
+      return
+    }
+    const sleepingAgentSessionsByPaneKey = Object.fromEntries(
+      Object.entries(session.sleepingAgentSessionsByPaneKey ?? {}).filter(
+        ([, record]) => record.worktreeId !== worktreeId
+      )
+    )
+    const terminalPtyIncarnationsByPaneKey = Object.fromEntries(
+      Object.entries(session.terminalPtyIncarnationsByPaneKey ?? {}).filter(
+        ([paneKey]) => !closedTabIds.some((tabId) => paneKey.startsWith(`${tabId}:`))
+      )
+    )
+    const remainingTerminalRows = session.tabsByWorktree[worktreeId] ?? []
+    const remainingUnifiedTerminalTabs = (session.unifiedTabs?.[worktreeId] ?? []).filter(
+      (tab) => tab.contentType === 'terminal'
+    )
+    if (remainingTerminalRows.length > 0 || remainingUnifiedTerminalTabs.length > 0) {
+      throw new Error('terminal_close_incomplete')
+    }
+    const hasChanges =
+      Object.keys(sleepingAgentSessionsByPaneKey).length !==
+        Object.keys(session.sleepingAgentSessionsByPaneKey ?? {}).length ||
+      Object.keys(terminalPtyIncarnationsByPaneKey).length !==
+        Object.keys(session.terminalPtyIncarnationsByPaneKey ?? {}).length
+    if (!hasChanges) {
+      return
+    }
+    if (!this.store?.setWorkspaceSession || !this.store.flushOrThrow) {
+      throw new Error('workspace_session_unavailable')
+    }
+    const next: WorkspaceSessionState = {
+      ...session,
+      sleepingAgentSessionsByPaneKey,
+      terminalPtyIncarnationsByPaneKey
+    }
+    this.setWorkspaceSessionForWorktree(worktreeId, next)
+    const staged = this.getWorkspaceSessionForWorktree(worktreeId)
+    try {
+      this.store.flushOrThrow()
+    } catch (error) {
+      const current = this.getWorkspaceSessionForWorktree(worktreeId)
+      if (staged && current) {
+        const rolledBack = rollbackWorkspaceSessionAfterFailedAsyncWrite(session, staged, current)
+        if (rolledBack !== current) {
+          this.setWorkspaceSessionForWorktree(worktreeId, rolledBack)
+        }
+      }
+      throw error
+    }
+  }
+
   async stopTerminalsForWorktree(
     worktreeSelector: string,
     options: {
@@ -19,7 +165,7 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
       ) => Promise<{ stopped: boolean; owner: boolean }>
       /** Authoritative id for an orphan whose selector no longer resolves. */
       resolvedWorktreeId?: string
-      resolvedConnectionId?: string
+      resolvedConnectionId?: string | null
       resolvedRuntimeEnvironmentId?: string
     } = {}
   ): Promise<{ stopped: number }> {
@@ -33,35 +179,7 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
       return { stopped: 0 }
     }
     // Preserve folder-instance suffixes while normalizing cross-platform path spelling.
-    const ownsWorktree = options.resolvedWorktreeId
-      ? (candidate: string | undefined): boolean =>
-          candidate ? runtimeWorktreeIdsEqual(candidate, worktree.id) : false
-      : (candidate: string | undefined): boolean => candidate === worktree.id
-    const ownsHost = (ptyId: string, connectionId?: string | null): boolean => {
-      if (options.resolvedRuntimeEnvironmentId !== undefined) {
-        return ptyId.startsWith(
-          `remote:${encodeURIComponent(options.resolvedRuntimeEnvironmentId)}@@`
-        )
-      }
-      return (
-        options.resolvedConnectionId === undefined || connectionId === options.resolvedConnectionId
-      )
-    }
-    const ptyIds = new Set<string>()
-    for (const leaf of this.leaves.values()) {
-      if (
-        ownsWorktree(leaf.worktreeId) &&
-        leaf.ptyId &&
-        ownsHost(leaf.ptyId, this.ptysById.get(leaf.ptyId)?.connectionId)
-      ) {
-        ptyIds.add(leaf.ptyId)
-      }
-    }
-    for (const pty of this.ptysById.values()) {
-      if (ownsWorktree(pty.worktreeId) && pty.connected && ownsHost(pty.ptyId, pty.connectionId)) {
-        ptyIds.add(pty.ptyId)
-      }
-    }
+    const ptyIds = this.collectConnectedWorktreePtyIds(worktree.id, options)
 
     let stopped = 0
     for (const ptyId of ptyIds) {
