@@ -29,9 +29,10 @@ import { readWindowsProcessRowsWithCim } from './windows-process-table-cim-scan'
  *   (retired) +memory +commandLine 13.1 / 14.1 ms   2 OpenProcess/process
  *   PowerShell CIM                  706 / 723  ms
  *
- * Dropping Memory halves the per-process handle opens but not the PEB reads:
- * Memory took an OpenProcess(...|VM_READ) it never read through, while
- * CommandLine's three ReadProcessMemory calls per process are untouched here.
+ * Dropping Memory removed the second per-process handle: it took an
+ * OpenProcess(...|VM_READ) it never read through. CommandLine's own read is no
+ * longer a PEB walk either -- the patched addon asks the kernel, so identity is
+ * now the only flag set that opens nothing at all.
  */
 
 /** Everything a Toolhelp32 walk alone can answer. */
@@ -43,7 +44,7 @@ export type WindowsProcessIdentityRow = {
   creationTimeMs?: number
 }
 
-/** Adds the PEB-derived command line. Only ask for this if you read it. */
+/** Adds the kernel-supplied command line. Only ask for this if you read it. */
 export type WindowsProcessRow = WindowsProcessIdentityRow & {
   /** Full command line. Empty when the process denied a query handle. */
   command: string
@@ -255,13 +256,12 @@ const IDENTITY_PROJECTION: ProcessRowProjection<WindowsProcessIdentityRow> = {
 }
 
 /**
- * Adds, per process, one `OpenProcess(PROCESS_QUERY_INFORMATION |
- * PROCESS_VM_READ)`, an `NtQueryInformationProcess` for the PEB address, and
- * three chained `ReadProcessMemory` calls -- which is what agent recognition and
- * port attribution match on. `Memory` is deliberately absent: it took a second
- * handle with that same access mask and then never read through it, and no
- * caller reads a working set off this table (the Resource Manager runs its own
- * sweep, and the native field wraps above 4 GB anyway).
+ * Adds, per process, one `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` and an
+ * `NtQueryInformationProcess(ProcessCommandLineInformation)` -- which is what
+ * agent recognition and port attribution match on. `Memory` is deliberately
+ * absent: it took a second handle carrying `PROCESS_VM_READ` and then never read
+ * through it, and no caller reads a working set off this table (the Resource
+ * Manager runs its own sweep, and the native field wraps above 4 GB anyway).
  */
 const DETAILED_PROJECTION: ProcessRowProjection<WindowsProcessRow> = {
   flags: (native) => IDENTITY_PROJECTION.flags(native) | native.ProcessDataFlag.CommandLine,

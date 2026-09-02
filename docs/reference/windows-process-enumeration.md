@@ -41,25 +41,25 @@ per-process syscall sequence, and they are not equally expensive to the EDR
 watching:
 
 - `CommandLine` (`process_commandline.cc`) —
-  `OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)`, then
-  `NtQueryInformationProcess` for the PEB address, then **three chained
-  `ReadProcessMemory` calls** to pull the command line out of the target's
-  address space. On a repeating cadence this is the primitive a credential
-  dumper uses, and it is the heavily weighted half of the signal.
-- `Memory` (`process.cc`) — `OpenProcess` with the **same** access mask, then
-  `GetProcessMemoryInfo`. **Zero `ReadProcessMemory`.** It acquires `VM_READ`
-  and never uses it.
+  `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`, then
+  `NtQueryInformationProcess(ProcessCommandLineInformation)` twice: once to size
+  the buffer, once to fill it. The kernel builds the string, so no address space
+  is opened or read. It used to walk the target's PEB with three chained
+  `ReadProcessMemory` calls; the patched addon no longer contains that primitive.
+- `Memory` (`process.cc`) — retired. It took a **second** `OpenProcess`, and that
+  one carried `PROCESS_VM_READ`, which it acquired and never used.
 
 Measured here (541 processes, 405 openable), per detailed scan, before → after
-dropping `Memory`: `OpenProcess(… | VM_READ)` 1082 → 541,
-`NtQueryInformationProcess` 541 → 541, `ReadProcessMemory` **1215 → 1215,
-unchanged**.
+dropping `Memory`: `OpenProcess` 1082 → 541. That halving is all the `Memory`
+drop bought on its own — both handles carried `PROCESS_VM_READ` at the time, so
+it moved the PEB traffic not at all. Replacing the PEB walk with the kernel
+query is what took `PROCESS_VM_READ` and `ReadProcessMemory` out of the addon
+altogether; the two changes compose, and neither substitutes for the other.
 
-So be precise about what these two flag sets buy. Dropping `Memory` halves the
-handle-open count and halves the rate of `PROCESS_VM_READ` opens against
-protected processes (which is itself scored), but it moves the PEB/RPM telemetry
-not at all — a detailed scan still opens `lsass.exe` with `PROCESS_VM_READ`
-every 750 ms. Removing the PEB read itself is separate work.
+So be precise about what these two flag sets buy now. A detailed scan is one
+`OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` per process and no memory
+access at all. What the split buys on top of that is the handle itself: an
+identity scan opens nothing.
 
 So the module exposes two snapshots, and the row types differ so a cheap caller
 cannot read what its flag set did not pay for:
@@ -174,11 +174,20 @@ through `toIdentityRow`, so an identity row carries no command line on any host.
 | `structured-tui-process-identity.ts`          | `command` (child match)       | detailed |
 | `windows-pty-root-identity.ts`                | `pid` / `ppid` only           | identity |
 | `agent-session-process-identity-probe.ts`     | `creationTimeMs` only         | identity |
+| `relay/windows-port-scan.ts`                  | `name` (port owner label)     | detailed |
+
+`windows-port-scan.ts` is the one mismatch in the table: it reads only `pid` and
+`name`, which the identity set answers, but it calls the detailed reader. On a
+host with a live pane that costs nothing extra — the detailed snapshot is
+already cached — and on a headless relay it pays for a command line no caller
+reads. Left as-is deliberately, because moving it to identity would trade that
+for a second scan whenever a pane is polling; revisit if the relay ever scans
+ports without one.
 
 The per-pane foreground tracker is the hot one (750 ms / 2 s cadence) and it
-genuinely needs the command line, so the repeating PEB read is not something the
-split removes. What the split removes is the PEB read from teardown identity and
-from the owner probe.
+genuinely needs the command line, so the repeating per-process `OpenProcess` is
+not something the split removes. What the split removes is that handle from
+teardown identity and from the owner probe, which now open nothing.
 
 ### `creationTimeMs` does not exist on any shipped build
 

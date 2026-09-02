@@ -42,7 +42,7 @@ export async function queryWindowsProcessRowsFresh(): Promise<WindowsProcessRow[
  * The same fresh scan for an ancestry walk, which reads only pid/ppid.
  *
  * Returns identity rows so the command line is not merely unused but absent:
- * asking for it costs an `OpenProcess` and a PEB read per process on the box.
+ * asking for it costs an `OpenProcess` per process on the box.
  */
 export async function queryWindowsProcessLinksFresh(): Promise<WindowsProcessIdentityRow[]> {
   return readWindowsProcessIdentityTableFresh()

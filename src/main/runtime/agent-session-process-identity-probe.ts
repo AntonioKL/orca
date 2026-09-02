@@ -121,7 +121,7 @@ async function readWindowsProcessStartTimeMs(pid: number): Promise<number | null
   }
   try {
     // Identity flag set: only the creation time is read, so no command line is
-    // worth a PEB read per process here.
+    // worth an `OpenProcess` per process here.
     const row = (await readWindowsProcessIdentityTableFresh()).find(
       (candidate) => candidate.pid === pid
     )
