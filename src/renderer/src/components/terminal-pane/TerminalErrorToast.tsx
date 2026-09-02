@@ -206,8 +206,8 @@ export function TerminalErrorToast({
         background: paneOwnerUnverified
           ? 'var(--popover)'
           : ssh
-            ? 'rgba(234, 179, 8, 0.12)'
-            : 'rgba(220, 38, 38, 0.15)',
+            ? 'color-mix(in srgb, var(--color-amber-500) 20%, var(--popover))'
+            : 'color-mix(in srgb, var(--destructive) 20%, var(--popover))',
         border: paneOwnerUnverified
           ? '1px solid var(--color-amber-500)'
           : ssh
