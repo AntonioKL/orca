@@ -16,8 +16,14 @@ import { parse } from 'yaml'
 import {
   findCachedElevatePaths,
   replaceCachedElevateHelpers,
-  resolveElectronBuilderCacheDir
+  resolveElectronBuilderCacheDir,
+  summarizeSwap
 } from './replace-cached-nsis-elevate.mjs'
+
+// The probe is app-builder-lib asking itself where the packed elevate.exe lives; injected
+// here so no test needs the network or a warm toolset cache.
+const probeFound = (path) => async () => ({ path, error: null })
+const probeUnavailable = async () => ({ path: null, error: 'app-builder-lib not loadable' })
 
 const projectRoot = resolve(import.meta.dirname, '../..')
 const scriptPath = join(projectRoot, 'config/scripts/replace-cached-nsis-elevate.mjs')
@@ -46,13 +52,12 @@ function makeCache(...relativeFiles) {
 describe('cached elevate.exe swap covers the real electron-builder layouts', () => {
   // Why these exact shapes: `downloadBuilderToolset` unpacks to
   // `<cache>/<releaseName>/<archive basename>-<url hash>/`, and `releaseName` is
-  // `nsis-3.0.4.1` on the legacy bundle (`getBinFromUrl`), `nsis@<toolset>` on the
-  // unified bundle, and `nsis-<version>` for `customNsisBinary`. The release
-  // workflow searched `<cache>/nsis`, which matches none of them.
+  // `nsis-3.0.4.1` on the legacy bundle (`getBinFromUrl`) and `nsis@<toolset>` on the
+  // unified bundle. The release workflow searched `<cache>/nsis`, which matches none of
+  // them. `customNsisBinary` is deliberately absent — see the probe suite below.
   it.each([
     ['legacy bundle', 'nsis-3.0.4.1/nsis-3.0.4.1-1mx3n/elevate.exe'],
     ['unified bundle', 'nsis@1.2.1/nsis-bundle-3.12-k4d9x/elevate.exe'],
-    ['custom nsis binary', 'nsis-9f3a1c2b/nsis-custom-3.11-0zqp2/elevate.exe'],
     ['bare nsis release dir', 'nsis/nsis-3.0.4.1/elevate.exe']
   ])('finds the cached helper in the %s layout', (_label, relative) => {
     const cacheDir = makeCache(relative)
@@ -61,13 +66,30 @@ describe('cached elevate.exe swap covers the real electron-builder layouts', () 
     ])
   })
 
-  it('ignores cache siblings that are not NSIS toolset bundles', () => {
+  it('leaves other toolsets and the raw download dir alone', () => {
     const cacheDir = makeCache(
       'winCodeSign/winCodeSign-2.6.0-abc12/elevate.exe',
-      'downloads/nsis/elevate.exe',
-      'nsis-resources-3.4.1/nsis-resources-3.4.1-p8w1z/plugins/x86-unicode/nsProcess.dll'
+      'downloads/nsis/elevate.exe'
     )
     expect(findCachedElevatePaths(cacheDir, { env: {} })).toEqual([])
+  })
+
+  // `nsis-resources-3.4.1` matches the release-dir pattern and is scanned. Documented
+  // rather than excluded: `getLegacyNsisResourcesBin` ships plugins, never an elevate.exe,
+  // so the over-match costs one cheap directory read and nothing else. Narrowing the
+  // pattern to exclude it would be a guess about a name app-builder-lib owns.
+  it('scans the resources bundle too, which ships no helper to find', () => {
+    expect(
+      findCachedElevatePaths(makeCache('nsis-resources-3.4.1/plugins/x86-unicode/nsProcess.dll'), {
+        env: {}
+      })
+    ).toEqual([])
+
+    const planted = 'nsis-resources-3.4.1/nsis-resources-3.4.1-p8w1z/elevate.exe'
+    const cacheDir = makeCache(planted)
+    expect(findCachedElevatePaths(cacheDir, { env: {} })).toEqual([
+      join(cacheDir, ...planted.split('/'))
+    ])
   })
 
   // The rebuild picks one bundle, and nothing outside app-builder-lib knows which.
@@ -84,7 +106,7 @@ describe('cached elevate.exe swap covers the real electron-builder layouts', () 
       signedPath: signed,
       cacheDir,
       env: {},
-      probeToolset: false
+      probe: probeUnavailable
     })
 
     expect(replaced).toHaveLength(2)
@@ -123,9 +145,13 @@ describe('cached elevate.exe swap covers the real electron-builder layouts', () 
   // against an independent unbounded walk so a search that scopes itself wrongly
   // cannot pass by finding nothing — which is exactly how the inline path passed.
   // Skipped only where no NSIS bundle has been downloaded into the cache yet.
-  it('finds every elevate.exe the real electron-builder cache holds', () => {
+  it('finds every elevate.exe the real electron-builder cache holds', (ctx) => {
     const cacheDir = resolveElectronBuilderCacheDir()
     if (!existsSync(cacheDir)) {
+      // Reported as skipped, never as passed: this is the one test that checks the scan
+      // against a layout nobody wrote down, and a silent no-op here is the suite
+      // confirming itself. The Linux unit-test job has no electron-builder cache.
+      ctx.skip()
       return
     }
     const walk = (dir) =>
@@ -138,9 +164,94 @@ describe('cached elevate.exe swap covers the real electron-builder layouts', () 
       })
     const onDisk = walk(cacheDir)
     if (onDisk.length === 0) {
+      ctx.skip()
       return
     }
     expect(findCachedElevatePaths(cacheDir, { env: {} }).sort()).toEqual(onDisk.sort())
+  })
+})
+
+describe('the probe, not the scan, decides whether the swap worked', () => {
+  // Why the probe is load-bearing: `getBinFromCustomLoc` passes `nsis-<version>` to `getBin`
+  // as its in-process promise key only — the extract dir is named for the custom URL's parent
+  // segment, so a customNsisBinary bundle can sit outside `nsis*` entirely.
+  it('covers a custom bundle the directory scan cannot match', async () => {
+    const relative = 'orca-nsis-mirror/nsis-custom-3.11-0zqp2/elevate.exe'
+    const cacheDir = makeCache(relative)
+    const packed = join(cacheDir, ...relative.split('/'))
+    const signed = join(scratch, 'signed-elevate.exe')
+    writeFileSync(signed, 'signpath-signed-elevate')
+
+    expect(findCachedElevatePaths(cacheDir, { env: {} })).toEqual([])
+
+    const result = await replaceCachedElevateHelpers({
+      signedPath: signed,
+      cacheDir,
+      env: {},
+      probe: probeFound(packed)
+    })
+
+    expect(result.toolsetReplaced).toBe(true)
+    expect(readFileSync(packed, 'utf8')).toBe('signpath-signed-elevate')
+    expect(summarizeSwap(result)).toEqual({ annotations: [], exitCode: 0 })
+  })
+
+  // The shape that reproduced the hole: release-cut.yml restores the toolset cache with
+  // `restore-keys: electron-builder-win-`, so a stale release directory survives a lockfile
+  // change. Replacing that stale copy satisfies `replaced.length > 0` on its own while the
+  // bundle the rebuild packs sits in a directory the scan never matches.
+  it('does not call a stale directory a success when the packed bundle is unmatched', async () => {
+    const stale = 'nsis-3.0.4.1/nsis-3.0.4.1-1mx3n/elevate.exe'
+    const packed = 'builder-nsis@4.0.0/nsis-bundle-4.0-k4d9x/elevate.exe'
+    const cacheDir = makeCache(stale, packed)
+    const signed = join(scratch, 'signed-elevate.exe')
+    writeFileSync(signed, 'signpath-signed-elevate')
+
+    const result = await replaceCachedElevateHelpers({
+      signedPath: signed,
+      cacheDir,
+      env: {},
+      probe: probeUnavailable
+    })
+
+    // The scan rewrote only the stale copy; the one that would be packed is untouched.
+    expect(result.replaced).toEqual([join(cacheDir, ...stale.split('/'))])
+    expect(readFileSync(join(cacheDir, ...packed.split('/')), 'utf8')).toBe('unsigned-elevate')
+
+    // So the run must not look clean.
+    const { annotations, exitCode } = summarizeSwap(result)
+    expect(exitCode).toBe(0)
+    expect(annotations).toHaveLength(1)
+    expect(annotations[0].level).toBe('warning')
+    expect(annotations[0].message).toContain('Could not ask app-builder-lib')
+  })
+
+  it('fails when the probe names a copy that could not be replaced', () => {
+    const summary = summarizeSwap({
+      replaced: ['C:/cache/nsis-3.0.4.1/nsis-3.0.4.1-1mx3n/elevate.exe'],
+      cacheDir: 'C:/cache',
+      toolsetPath: 'C:/cache/nsis@2.0.0/nsis-bundle-4.0-k4d9x/elevate.exe',
+      toolsetError: null,
+      toolsetReplaced: false
+    })
+
+    expect(summary.exitCode).toBe(1)
+    expect(summary.annotations[0].level).toBe('error')
+    expect(summary.annotations[0].message).toContain('will pack')
+  })
+
+  it('fails when nothing at all was replaced', () => {
+    const summary = summarizeSwap({
+      replaced: [],
+      cacheDir: 'C:/cache',
+      toolsetPath: null,
+      toolsetError: 'app-builder-lib not loadable',
+      toolsetReplaced: false
+    })
+
+    expect(summary.exitCode).toBe(1)
+    expect(summary.annotations[0].level).toBe('error')
+    expect(summary.annotations[0].message).toContain('No cached elevate.exe found')
   })
 })
 
@@ -172,7 +283,7 @@ describe('a cached elevate.exe miss is not silent', () => {
     expect(result.stdout).toContain('::error::No cached elevate.exe found')
   })
 
-  it('exits zero and rewrites the cached copy when one is found', () => {
+  it('warns on the scan-only path so green never means the probe was skipped', () => {
     const cacheDir = makeCache('nsis-3.0.4.1/nsis-3.0.4.1-1mx3n/elevate.exe')
     const emptyNsisDir = join(scratch, 'empty-nsis')
     mkdirSync(emptyNsisDir, { recursive: true })
@@ -183,9 +294,29 @@ describe('a cached elevate.exe miss is not silent', () => {
 
     expect(result.status).toBe(0)
     expect(result.stdout).not.toContain('::error::')
+    expect(result.stdout).toContain('::warning::Could not ask app-builder-lib')
     expect(
       readFileSync(join(cacheDir, 'nsis-3.0.4.1', 'nsis-3.0.4.1-1mx3n', 'elevate.exe'), 'utf8')
     ).toBe('signpath-signed-elevate')
+  })
+
+  // The healthy release-job path: app-builder-lib answers, so the copy it will pack is the
+  // one that gets replaced and there is nothing to warn about.
+  it('exits clean when the probe resolves the copy the rebuild will pack', () => {
+    const cacheDir = makeCache()
+    const nsisDir = join(scratch, 'nsis-bundle')
+    mkdirSync(nsisDir, { recursive: true })
+    writeFileSync(join(nsisDir, 'elevate.exe'), 'unsigned-elevate')
+    const signed = join(scratch, 'signed-elevate.exe')
+    writeFileSync(signed, 'signpath-signed-elevate')
+
+    const result = runScript(cacheDir, nsisDir, signed)
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).not.toContain('::error::')
+    expect(result.stdout).not.toContain('::warning::')
+    expect(result.stdout).toContain('the copy app-builder-lib will pack')
+    expect(readFileSync(join(nsisDir, 'elevate.exe'), 'utf8')).toBe('signpath-signed-elevate')
   })
 })
 

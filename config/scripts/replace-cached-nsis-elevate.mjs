@@ -17,8 +17,12 @@ const require = createRequire(import.meta.url)
 
 const ELEVATE_EXE = 'elevate.exe'
 
-// `nsis` (the layout the old hardcoded path assumed), `nsis-3.0.4.1` (legacy bundle,
-// and `getBinFromCustomLoc('nsis', version)`), `nsis@1.2.1` (unified bundle).
+// `nsis` (the layout the old hardcoded path assumed), `nsis-3.0.4.1` (legacy bundle via
+// `getBinFromUrl`), `nsis@1.2.1` (unified bundle). Not `customNsisBinary`: the
+// `nsis-<version>` key `getBinFromCustomLoc` builds is only `getBin`'s in-process promise
+// key, and the extract dir is named for the custom URL's parent segment, which need not
+// start with `nsis` at all. Only the app-builder-lib probe covers that layout — which is
+// why the probe, not this scan, is what decides whether the swap succeeded.
 const NSIS_RELEASE_DIR = /^nsis(?:[-@].*)?$/i
 
 // elevate.exe lives at the bundle root, one level under the release dir. The legacy
@@ -114,22 +118,19 @@ export function findCachedElevatePaths(cacheDir, { env = process.env } = {}) {
 }
 
 /**
- * The exact path `CopyElevateHelper` will pack, asked of app-builder-lib itself. Best-effort:
- * the internal module path moves between majors, and a cold cache would need the network,
- * so a failure here degrades to the directory scan rather than failing the swap.
+ * The exact path `CopyElevateHelper` will pack, asked of app-builder-lib itself. Returns the
+ * failure instead of logging it: an unavailable probe leaves the directory scan as the only
+ * signal, and the caller has to say that out loud rather than quietly passing.
  */
 export async function resolveToolsetElevatePath(projectDir = process.cwd()) {
   try {
     const configPath = require.resolve(resolve(projectDir, 'config/electron-builder.config.cjs'))
     const config = require(configPath)
     const { getNsisElevatePath } = require('app-builder-lib/out/toolsets/windows.js')
-    return await getNsisElevatePath(config.toolsets?.nsis, config.nsis?.customNsisBinary)
+    const path = await getNsisElevatePath(config.toolsets?.nsis, config.nsis?.customNsisBinary)
+    return { path, error: null }
   } catch (error) {
-    process.stderr.write(
-      `Could not resolve elevate.exe through app-builder-lib (${error.message}); ` +
-        'falling back to the toolset cache scan.\n'
-    )
-    return null
+    return { path: null, error: error.message }
   }
 }
 
@@ -138,19 +139,23 @@ export async function resolveToolsetElevatePath(projectDir = process.cwd()) {
  * depends on the toolset version resolved at pack time, and each cached copy is an
  * unsigned `elevate.exe` that a later pack could reach for; the helper is a standalone
  * UAC shim, not coupled to the NSIS version around it, so overwriting all of them is safe.
+ *
+ * `toolsetReplaced` is the signal that matters. A non-empty `replaced` only says that some
+ * cached copy was rewritten, which a stale release directory carried in by the
+ * `electron-builder-win-` prefix restore can satisfy on its own.
  */
 export async function replaceCachedElevateHelpers({
   signedPath,
   cacheDir = resolveElectronBuilderCacheDir(),
   projectDir = process.cwd(),
   env = process.env,
-  probeToolset = true
+  probe = resolveToolsetElevatePath
 } = {}) {
   if (!isFile(signedPath)) {
     throw new Error(`Signed elevate.exe not found: ${signedPath}`)
   }
   const targets = new Set(findCachedElevatePaths(cacheDir, { env }))
-  const toolsetPath = probeToolset ? await resolveToolsetElevatePath(projectDir) : null
+  const { path: toolsetPath, error: toolsetError } = await probe(projectDir)
   if (toolsetPath != null && isFile(toolsetPath)) {
     targets.add(toolsetPath)
   }
@@ -160,14 +165,75 @@ export async function replaceCachedElevateHelpers({
     copyFileSync(signedPath, target)
     replaced.push(target)
   }
-  return { replaced, cacheDir, toolsetPath }
+  return {
+    replaced,
+    cacheDir,
+    toolsetPath,
+    toolsetError,
+    toolsetReplaced: toolsetPath != null && replaced.includes(toolsetPath)
+  }
 }
 
-// Why an exit code and not a warning: a swap that finds nothing exits before the NSIS
-// rebuild restores the unsigned helper, so a silent success here is indistinguishable
-// from a release that shipped a signed one — which is how this went unnoticed for two
-// releases. The workflow step is `continue-on-error`, so this annotates loudly without
-// making a release unbuildable.
+/**
+ * The annotations and exit code a swap result earns. Split out so every branch is testable
+ * without a subprocess — including the one that made this defect class possible, where the
+ * step passes because *a* cached copy was replaced while the copy the rebuild packs was not.
+ */
+export function summarizeSwap({ replaced, cacheDir, toolsetPath, toolsetError, toolsetReplaced }) {
+  if (toolsetPath != null && !toolsetReplaced) {
+    return {
+      annotations: [
+        {
+          level: 'error',
+          message:
+            `app-builder-lib resolves the elevate.exe the NSIS rebuild will pack to ${toolsetPath}, ` +
+            'but that path could not be replaced, so the installer will ship an unsigned UAC ' +
+            'elevation helper.'
+        }
+      ],
+      exitCode: 1
+    }
+  }
+  if (replaced.length === 0) {
+    return {
+      annotations: [
+        {
+          level: 'error',
+          message:
+            `No cached elevate.exe found under ${cacheDir}; the NSIS rebuild will pack the unsigned ` +
+            'helper and ship an unsigned UAC elevation binary. The electron-builder toolset cache ' +
+            'layout has changed — update config/scripts/replace-cached-nsis-elevate.mjs.'
+        }
+      ],
+      exitCode: 1
+    }
+  }
+  if (toolsetPath == null) {
+    // A green step must never quietly mean "the authoritative check did not run". The scan
+    // alone is satisfiable by a stale release directory that the `electron-builder-win-`
+    // prefix restore carried across a lockfile change, while the bundle the rebuild actually
+    // packs sits in a directory this scan does not match.
+    return {
+      annotations: [
+        {
+          level: 'warning',
+          message:
+            'Could not ask app-builder-lib which elevate.exe the NSIS rebuild will pack ' +
+            `(${toolsetError}); replaced ${replaced.length} copies found by scanning ${cacheDir} ` +
+            'alone, which a stale release directory can satisfy while the packed copy stays unsigned.'
+        }
+      ],
+      exitCode: 0
+    }
+  }
+  return { annotations: [], exitCode: 0 }
+}
+
+// Why an exit code and not a warning: a swap that misses the copy the rebuild packs exits
+// before that rebuild restores the unsigned helper, so a silent success here is
+// indistinguishable from a release that shipped a signed one — which is how this went
+// unnoticed for two releases. The workflow step is `continue-on-error`, so this annotates
+// loudly without making a release unbuildable.
 if (import.meta.filename === process.argv[1]) {
   const signedPath = process.argv[2]
   if (!signedPath) {
@@ -175,23 +241,18 @@ if (import.meta.filename === process.argv[1]) {
     process.exit(2)
   }
   try {
-    const { replaced, cacheDir } = await replaceCachedElevateHelpers({ signedPath })
-    if (replaced.length === 0) {
-      process.stdout.write(
-        `::error::No cached elevate.exe found under ${cacheDir}; the NSIS rebuild will pack the ` +
-          'unsigned helper and ship an unsigned UAC elevation binary. The electron-builder ' +
-          'toolset cache layout has changed — update config/scripts/replace-cached-nsis-elevate.mjs.\n'
-      )
-      process.exit(1)
+    const result = await replaceCachedElevateHelpers({ signedPath })
+    const { annotations, exitCode } = summarizeSwap(result)
+    for (const { level, message } of annotations) {
+      process.stdout.write(`::${level}::${message}\n`)
     }
-    if (replaced.length > 1) {
-      process.stdout.write(
-        `Note: ${replaced.length} cached NSIS bundles were present; replaced the helper in all of them.\n`
-      )
+    if (exitCode === 0) {
+      for (const path of result.replaced) {
+        const role = path === result.toolsetPath ? ' (the copy app-builder-lib will pack)' : ''
+        process.stdout.write(`Replaced ${path} with the SignPath-signed copy.${role}\n`)
+      }
     }
-    for (const path of replaced) {
-      process.stdout.write(`Replaced ${path} with the SignPath-signed copy.\n`)
-    }
+    process.exit(exitCode)
   } catch (error) {
     process.stdout.write(`::error::Could not replace the cached elevate.exe: ${error.message}\n`)
     process.exit(1)
