@@ -27,6 +27,14 @@ type HardeningFailureRecord = { at: number; attempts: number }
 const HARDENING_RETRY_FLOOR_MS = 60_000
 const HARDENING_RETRY_CEILING_MS = 30 * 60_000
 
+/**
+ * Why not `Date.now`: an NTP correction, a VM snapshot restore or a user changing the clock steps
+ * the wall clock backwards, which made the elapsed time negative and held every path below its
+ * delay until the clock caught up — a year, for a year-long step. That is the permanent latch this
+ * backoff exists to remove. Elapsed monotonic time cannot go backwards.
+ */
+const monotonicNowMs = (): number => performance.now()
+
 /** Consecutive failures before the degraded state is announced. */
 const HARDENING_THROTTLE_ANNOUNCE_AFTER = 3
 
@@ -54,7 +62,7 @@ export function mayAttemptHardening(targetPath: string): boolean {
     return true
   }
   // No cap: once the backoff elapses the path is re-probed, however long it has been failing.
-  return Date.now() - failure.at >= hardeningRetryDelayMs(failure.attempts)
+  return monotonicNowMs() - failure.at >= hardeningRetryDelayMs(failure.attempts)
 }
 
 export function recordHardeningOutcome(targetPath: string, restricted: boolean): void {
@@ -71,7 +79,7 @@ export function recordHardeningOutcome(targetPath: string, restricted: boolean):
     return
   }
   const attempts = (previous?.attempts ?? 0) + 1
-  failures().set(targetPath, { at: Date.now(), attempts })
+  failures().set(targetPath, { at: monotonicNowMs(), attempts })
   // Fires exactly once: attempts only rises, and a success clears the record entirely.
   if (attempts === HARDENING_THROTTLE_ANNOUNCE_AFTER) {
     reportSecurePathHardening(

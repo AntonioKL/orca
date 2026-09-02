@@ -15,12 +15,17 @@ const OTHER = 'C:\\Users\\me\\.orca\\other.json'
 const MINUTE = 60_000
 
 describe('secure path hardening retry budget', () => {
+  /** Elapsed monotonic time, which is what the budget measures. */
   let clock = 0
+  /** The wall clock, which it must not measure: it steps backwards on real machines. */
+  let wallClock = 0
   let reports: SecurePathHardeningReport[] = []
 
   beforeEach(() => {
     clock = 1_000_000
-    vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    wallClock = Date.parse('2026-01-01T00:00:00Z')
+    vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    vi.spyOn(Date, 'now').mockImplementation(() => wallClock)
     reports = []
     setSecurePathHardeningReporter((entry) => reports.push(entry))
     configureHardeningRetryBudget({
@@ -45,6 +50,7 @@ describe('secure path hardening retry budget', () => {
         recordHardeningOutcome(PATH, restricted)
       }
       clock += stepMs
+      wallClock += stepMs
     }
     return attemptedAt
   }
@@ -78,7 +84,9 @@ describe('secure path hardening retry budget', () => {
 
     // 0, +1, +2, +4, +8, +16, then every 30 minutes forever.
     expect(attemptedAt.slice(0, 6).map((ms) => ms / MINUTE)).toEqual([0, 1, 3, 7, 15, 31])
-    const trailingGaps = attemptedAt.slice(-4).map((ms, index, all) => (all[index + 1]! - ms) / MINUTE)
+    const trailingGaps = attemptedAt
+      .slice(-4)
+      .map((ms, index, all) => (all[index + 1]! - ms) / MINUTE)
     expect(trailingGaps.slice(0, -1)).toEqual([30, 30, 30])
   })
 
@@ -88,6 +96,21 @@ describe('secure path hardening retry budget', () => {
 
     // A month of failures later, the very next elapsed ceiling still re-probes.
     clock += 31 * MINUTE
+    expect(mayAttemptHardening(PATH)).toBe(true)
+  })
+
+  /**
+   * The same latch by another route. NTP corrections, VM snapshot restores and a user changing the
+   * clock all step `Date.now()` backwards; measured against the wall clock that makes the elapsed
+   * time negative, so the path stayed below its delay for the whole length of the step — a year,
+   * here — which is exactly the permanent abandonment the backoff exists to remove.
+   */
+  it('re-probes after a backwards clock step rather than waiting for the wall clock', () => {
+    pollUntil(6 * 60 * MINUTE, 30_000)
+
+    wallClock -= 365 * 24 * 60 * MINUTE
+    clock += 31 * MINUTE
+
     expect(mayAttemptHardening(PATH)).toBe(true)
   })
 

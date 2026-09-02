@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runProcess, runProcessSync } from './child-process/run-process'
+import { mayAttemptHardening } from './secure-path-hardening-retry-budget'
 import {
   __getSecureFileHardeningCacheStateForTests,
   __resetSecureFileHardenedPathsForTests,
@@ -169,7 +170,11 @@ describe('hardenSecurePath', () => {
     ['full control to Everyone', 'D:PAI(A;;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;WD)', 'S-1-1-0'],
     ['a deny rule', `D:PAI(D;;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;${USER_SID})`, 'unexpected D rule'],
     ['an unprotected DACL', `D:AI(A;;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;${USER_SID})`, 'not protected'],
-    ['a surviving inherited rule', `D:PAI(A;ID;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;${USER_SID})`, 'inherited'],
+    [
+      'a surviving inherited rule',
+      `D:PAI(A;ID;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;${USER_SID})`,
+      'inherited'
+    ],
     ['read-only rights', `D:PAI(A;;FR;;;BA)(A;;FA;;;SY)(A;;FA;;;${USER_SID})`, 'not full control']
   ])('rejects a verified DACL granting %s', async (_label, sddl, expected) => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -221,8 +226,8 @@ describe('hardenSecurePath', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     const targetPath = writeFailingHardenTarget()
-    let clock = Date.now()
-    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    let clock = performance.now()
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => clock)
 
     // A day of failing, well past any fixed cap, stepping by more than the 30-minute ceiling.
     for (let step = 0; step < 48; step++) {
@@ -241,8 +246,8 @@ describe('hardenSecurePath', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {})
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     const targetPath = writeFailingHardenTarget()
-    let clock = Date.now()
-    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    let clock = performance.now()
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => clock)
 
     // Three failures to reach the announced degraded state, each past its own backoff.
     for (const wait of [0, 61_000, 121_000]) {
@@ -264,6 +269,79 @@ describe('hardenSecurePath', () => {
     )
     now.mockRestore()
     info.mockRestore()
+    warn.mockRestore()
+  })
+
+  /**
+   * The write path is exempt from the budget, but it was also invisible to it: a successful write
+   * left the failure record standing, so the read path went on backing off for up to 30 minutes
+   * after the host had demonstrably recovered, and no `recovered` transition came from this lane.
+   */
+  it('clears the read-path backoff when the exempt write path succeeds', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    const targetPath = writeFailingHardenTarget()
+    let clock = performance.now()
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => clock)
+
+    // Three read-path failures: the path is throttled and its next re-probe is minutes away.
+    for (const wait of [0, 61_000, 121_000]) {
+      clock += wait
+      hardenExistingSecureFile(targetPath)
+      await flushAsyncAcl()
+    }
+    expect(mayAttemptHardening(targetPath)).toBe(false)
+
+    // The host recovers and a credential is written. The synchronous apply succeeds (runProcessSync
+    // was never made to fail), so the read path must stop backing off.
+    writeSecureFile(targetPath, 'contents')
+
+    expect(mayAttemptHardening(targetPath)).toBe(true)
+    expect(info).toHaveBeenCalledWith(
+      '[secure-path.windows-acl] path hardening recovered',
+      expect.objectContaining({ targetPath, stage: 'recovered' })
+    )
+    now.mockRestore()
+    info.mockRestore()
+    warn.mockRestore()
+  })
+
+  /**
+   * The SID lookup's own one-minute latch, which is the read-path budget's twin and strictly
+   * worse: a failed lookup makes the plan null, disabling the *synchronous write* path too — so
+   * the write-path exemption that recovers the budget cannot recover this. Measured against the
+   * wall clock, a backwards step held it shut for the whole length of the step.
+   */
+  it('re-probes the user SID after a backwards clock step', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    let clock = performance.now()
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    let wallClock = Date.parse('2026-01-01T00:00:00Z')
+    const wallNow = vi.spyOn(Date, 'now').mockImplementation(() => wallClock)
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-secure-file-'))
+    tempDirs.push(userDataPath)
+    const targetPath = join(userDataPath, 'secret.json')
+    let sidLookupFails = true
+    vi.mocked(runProcessSync).mockImplementation((spec) => {
+      if (spec.program === 'C:\\Windows\\System32\\whoami.exe') {
+        return sidLookupFails ? { ...OK, code: 1 } : { ...OK, stdout: `"USER","${USER_SID}"` }
+      }
+      return fakeIcacls(spec)
+    })
+
+    // No SID, so no plan, so hardening is off entirely — not merely throttled.
+    expect(writeSecureFile(targetPath, 'first')).toBe(false)
+
+    // A minute of real time passes while the wall clock steps back a year.
+    clock += 61_000
+    wallClock -= 365 * 24 * 60 * 60_000
+    sidLookupFails = false
+
+    expect(writeSecureFile(targetPath, 'second')).toBe(true)
+    wallNow.mockRestore()
+    now.mockRestore()
     warn.mockRestore()
   })
 
@@ -478,11 +556,7 @@ describe('hardenSecurePath', () => {
 
     // call 1: dir + file. call 2: dir skipped (path-cached), file re-hardened (new mtime)
     expect(getHardenAclCalls()).toHaveLength(3)
-    expect(getHardenAclCalls().map(getAclTarget)).toEqual([
-      userDataPath,
-      targetPath,
-      targetPath
-    ])
+    expect(getHardenAclCalls().map(getAclTarget)).toEqual([userDataPath, targetPath, targetPath])
   })
 
   it('keeps post-rename target hardening on every write while caching the directory', () => {
@@ -527,9 +601,7 @@ describe('hardenSecurePath', () => {
     hardenExistingSecureFile(targetPath)
 
     // The parent directory must be hardened exactly ONCE despite its mtime changing
-    const dirCalls = getHardenAclCalls().filter(
-      (call) => getAclTarget(call) === userDataPath
-    )
+    const dirCalls = getHardenAclCalls().filter((call) => getAclTarget(call) === userDataPath)
     expect(dirCalls).toHaveLength(1)
   })
 
@@ -544,9 +616,7 @@ describe('hardenSecurePath', () => {
     hardenExistingSecureFile(targetPath)
     hardenExistingSecureFile(targetPath)
 
-    const fileCalls = getHardenAclCalls().filter(
-      (call) => getAclTarget(call) === targetPath
-    )
+    const fileCalls = getHardenAclCalls().filter((call) => getAclTarget(call) === targetPath)
     expect(fileCalls).toHaveLength(1)
   })
 
@@ -633,9 +703,7 @@ describe('hardenSecurePath', () => {
       writeSecureFile(join(userDataPath, `secret-${i}.json`), `contents-${i}`)
     }
 
-    const dirCalls = getHardenAclCalls().filter(
-      (call) => getAclTarget(call) === userDataPath
-    )
+    const dirCalls = getHardenAclCalls().filter((call) => getAclTarget(call) === userDataPath)
     expect(dirCalls).toHaveLength(1)
   })
 

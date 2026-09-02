@@ -322,8 +322,16 @@ function planFor(targetPath: string, isDirectory: boolean): AclPlan | null {
 }
 
 let cachedWindowsUserSid: string | null = null
-let sidLookupFailedAt = 0
+let sidLookupFailedAt: number | null = null
 const SID_LOOKUP_RETRY_MS = 60_000
+
+/**
+ * Why monotonic and not `Date.now`: a backwards wall-clock step held this window open until the
+ * clock caught up, and this latch is worse than the read-path budget's — a failed lookup makes
+ * `planFor` return null, which disables the synchronous *write* path too, so the write-path
+ * exemption that recovers from that one cannot recover from this.
+ */
+const monotonicNowMs = (): number => performance.now()
 
 /**
  * Only a well-formed SID is cached for the process lifetime. A failure is cached for a minute:
@@ -333,7 +341,7 @@ function getCurrentWindowsUserSid(): string | null {
   if (cachedWindowsUserSid) {
     return cachedWindowsUserSid
   }
-  if (sidLookupFailedAt && Date.now() - sidLookupFailedAt < SID_LOOKUP_RETRY_MS) {
+  if (sidLookupFailedAt !== null && monotonicNowMs() - sidLookupFailedAt < SID_LOOKUP_RETRY_MS) {
     return null
   }
   try {
@@ -345,13 +353,13 @@ function getCurrentWindowsUserSid(): string | null {
     const candidate = result.code === 0 ? parseCsvLine(result.stdout.trim())[1] : undefined
     if (candidate && WINDOWS_SID_PATTERN.test(candidate)) {
       cachedWindowsUserSid = candidate
-      sidLookupFailedAt = 0
+      sidLookupFailedAt = null
       return candidate
     }
   } catch {
     // Fall through to the failure record below.
   }
-  sidLookupFailedAt = Date.now()
+  sidLookupFailedAt = monotonicNowMs()
   return null
 }
 
@@ -361,5 +369,5 @@ function parseCsvLine(line: string): string[] {
 
 export function resetSecureFileWindowsUserSidForTests(): void {
   cachedWindowsUserSid = null
-  sidLookupFailedAt = 0
+  sidLookupFailedAt = null
 }

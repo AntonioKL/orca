@@ -127,6 +127,10 @@ export function writeDurableSecureJsonFile(targetPath: string, value: unknown): 
  * Returns whether the restriction actually took. Hardening stays best-effort — it fails
  * legitimately on FAT32, network paths and restricted tokens, and must not break a write — but
  * the outcome is now reported rather than assumed, so a caller storing a credential can react.
+ *
+ * The return value covers the *file* only. The parent directory is hardened fire-and-forget — on
+ * Windows that lane is async and answers `pending` regardless — so a `true` here says nothing
+ * about the directory's ACL.
  */
 export function writeSecureFile(
   targetPath: string,
@@ -245,7 +249,13 @@ function applySecurePathRestriction(
       // Why no retry floor here: the write path is user-driven, not polled, and a failed apply
       // must still be retried on the next write of the same credential.
       // Why: apply the ACL synchronously so the credential file isn't briefly readable under inherited ACLs (writeFileSync mode is a no-op on Windows).
-      return restrictWindowsPathSync(targetPath, isDirectory) ? 'applied' : 'failed'
+      const restricted = restrictWindowsPathSync(targetPath, isDirectory)
+      if (restricted) {
+        // Success only: this is how a recovered host clears the read path's backoff (and reports
+        // `recovered`). Recording a failure here would put the exempt lane back under the budget.
+        recordHardeningOutcome(targetPath, true)
+      }
+      return restricted ? 'applied' : 'failed'
     }
     // Why the floor: this is the read path, polled at ~2/s (#4901). Retrying every failure there
     // is the same storm the cache exists to prevent.
