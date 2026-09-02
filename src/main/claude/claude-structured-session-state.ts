@@ -74,6 +74,16 @@ export type ClaudeSession = {
   events: StructuredAgentSessionEventSink | undefined
 }
 
+/**
+ * The first-hand exit that removed a published session. Kept until the session
+ * is acquired again so acquisition cleanup that arrives after the exit finds
+ * what the ladder observed, not an absence it would otherwise report as proven.
+ */
+export type ClaudeSessionExit = {
+  connection: ClaudeStreamJsonConnection
+  error: Error
+}
+
 export type ClaudeAcquisitionAttempt = {
   connection: ClaudeStreamJsonConnection | null
   prompts: ClaudePromptRegistry

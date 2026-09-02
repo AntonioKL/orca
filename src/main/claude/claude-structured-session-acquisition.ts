@@ -38,10 +38,14 @@ import {
   type ClaudeAcquisitionRegistry,
   type ClaudeAcquisitionAttempt,
   type ClaudeSession,
+  type ClaudeSessionExit,
   type ClaudeStructuredSessionAdapterDeps,
   type ClaudeStructuredSessionEvent
 } from './claude-structured-session-state'
-import { closeClaudePublishedSessionForDeps } from './claude-structured-session-close'
+import {
+  closeClaudePublishedSessionForDeps,
+  closeClaudeSession
+} from './claude-structured-session-close'
 
 export const CLAUDE_STRUCTURED_INIT_TIMEOUT_MS = 10_000
 
@@ -78,12 +82,14 @@ export async function acquireClaudeSession({
   deps,
   sessions,
   acquisitions,
+  exits,
   callbacks
 }: {
   input: StructuredAgentSessionAcquireInput
   deps: ClaudeStructuredSessionAdapterDeps
   sessions: Map<string, ClaudeSession>
   acquisitions: ClaudeAcquisitionRegistry
+  exits: Map<string, ClaudeSessionExit>
   callbacks: AcquireCallbacks
 }): Promise<AgentSessionAcquisition> {
   const sessionId = input.identity.sessionId
@@ -133,6 +139,8 @@ export async function acquireClaudeSession({
         new Error(`claude session ${sessionId} could not be stopped`)
       )
     }
+    // Any earlier session is closed or already gone: its exit says nothing about this start.
+    exits.delete(sessionId)
     acquisitions.assertCurrent(sessionId, attempt)
     const launch = await deps.resolveLaunch({ identity: input.identity })
     observedLeafUuid = launch.resumeLeafUuid
@@ -245,4 +253,29 @@ export async function acquireClaudeSession({
   } finally {
     attempt.finish()
   }
+}
+
+/**
+ * Cleanup for an acquisition the host could not commit or prove. A session that
+ * a first-hand exit already removed is not an absence to report as proven: the
+ * ladder on its connection still answers, and that answer is classified exactly
+ * as a start-time failure would be.
+ */
+export async function releaseClaudeAcquisition(input: {
+  sessionId: string
+  sessions: Map<string, ClaudeSession>
+  acquisitions: ClaudeAcquisitionRegistry
+  exits: Map<string, ClaudeSessionExit>
+  persistHandle?: ClaudeStructuredSessionAdapterDeps['persistHandle']
+  onEvent?: ClaudeStructuredSessionAdapterDeps['onEvent']
+}): Promise<boolean> {
+  const exit = input.exits.get(input.sessionId)
+  if (!exit || input.sessions.has(input.sessionId) || input.acquisitions.get(input.sessionId)) {
+    return closeClaudeSession(input)
+  }
+  input.exits.delete(input.sessionId)
+  if (await exit.connection.close()) {
+    return true
+  }
+  throw claudeAcquisitionCleanupError(exit.connection, exit.error)
 }

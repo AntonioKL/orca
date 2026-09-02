@@ -6,7 +6,10 @@ import type {
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import { answerClaudePrompt, cancelClaudeTurn } from './claude-structured-control-actions'
 import { dispatchClaudeTurn } from './claude-structured-dispatch'
-import { acquireClaudeSession } from './claude-structured-session-acquisition'
+import {
+  acquireClaudeSession,
+  releaseClaudeAcquisition
+} from './claude-structured-session-acquisition'
 export { CLAUDE_STRUCTURED_INIT_TIMEOUT_MS } from './claude-structured-session-acquisition'
 import { supportsClaudeStructuredLocation } from './claude-structured-location-support'
 import { setClaudeStructuredOption } from './claude-structured-options'
@@ -15,6 +18,7 @@ import {
   ClaudeAcquisitionRegistry,
   type ClaudeAcquisitionAttempt,
   type ClaudeSession,
+  type ClaudeSessionExit,
   type ClaudeStructuredSessionAdapterDeps,
   type ClaudeStructuredSessionEvent
 } from './claude-structured-session-state'
@@ -36,6 +40,7 @@ const DISPATCH_ACK_TIMEOUT_MS = 10_000
 export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAdapter {
   private readonly sessions = new Map<string, ClaudeSession>()
   private readonly acquisitions = new ClaudeAcquisitionRegistry()
+  private readonly exits = new Map<string, ClaudeSessionExit>()
 
   constructor(private readonly deps: ClaudeStructuredSessionAdapterDeps) {}
 
@@ -47,6 +52,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       deps: this.deps,
       sessions: this.sessions,
       acquisitions: this.acquisitions,
+      exits: this.exits,
       callbacks: {
         deliver: (attempt, sessionId, event) => this.deliver(attempt, sessionId, event),
         emit: (session, events, event) => this.emit(session, events, event),
@@ -70,6 +76,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       return
     }
     this.sessions.delete(sessionId)
+    this.exits.set(sessionId, { connection: session.connection, error })
     this.emit(session, session.events, { type: 'ended', sessionId, reason: error.message })
     settleClaudeExitedSession(session)
   }
@@ -109,7 +116,14 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     readClaudeStructuredSessionOptions(this.session(input.sessionId), this.deps.requestTimeoutMs)
 
   releaseAcquisition = (input: { sessionId: string }): Promise<boolean> =>
-    this.closeSession(input.sessionId)
+    releaseClaudeAcquisition({
+      sessionId: input.sessionId,
+      sessions: this.sessions,
+      acquisitions: this.acquisitions,
+      exits: this.exits,
+      ...(this.deps.persistHandle ? { persistHandle: this.deps.persistHandle } : {}),
+      ...(this.deps.onEvent ? { onEvent: this.deps.onEvent } : {})
+    })
 
   closeSession = (sessionId: string): Promise<boolean> =>
     closeClaudeSession({

@@ -119,7 +119,9 @@ export type StructuredAgentSessionAdapter = {
    *  at — the store rejects a link minted at any other fence. */
   acquire(input: StructuredAgentSessionAcquireInput): Promise<AgentSessionAcquisition>
   /** Reaps an acquired provider when the host cannot commit or prove its lease.
-   *  Returns true only after provider child exit is proven. */
+   *  Returns true only after provider child exit is proven. Throws
+   *  `AgentSessionAcquisitionRootExitObservedError` when the provider root's own
+   *  exit was observed first-hand but its descendants could not be verified. */
   releaseAcquisition?(input: { sessionId: string }): Promise<boolean>
   dispatch(input: {
     sessionId: string
@@ -168,9 +170,15 @@ export async function rethrowAfterAgentSessionAcquisitionCleanup(
   try {
     released = (await adapter.releaseAcquisition?.({ sessionId })) === true
   } catch (cleanupError) {
-    throw new AgentSessionAcquisitionExitUnprovenError(
-      new AggregateError([cause, cleanupError], 'agent session acquisition cleanup failed')
-    )
+    // A root exit the cleanup observed first-hand keeps its classification and its
+    // provider diagnostic; the failure that triggered cleanup rides along as cause.
+    throw cleanupError instanceof AgentSessionAcquisitionRootExitObservedError
+      ? new AgentSessionAcquisitionRootExitObservedError(
+          new AggregateError([cause, cleanupError], cleanupError.message)
+        )
+      : new AgentSessionAcquisitionExitUnprovenError(
+          new AggregateError([cause, cleanupError], 'agent session acquisition cleanup failed')
+        )
   }
   if (released) {
     throw cause

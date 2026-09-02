@@ -665,6 +665,57 @@ describe('ClaudeStructuredSessionAdapter acquisition cleanup', () => {
     expect(error).not.toBeInstanceOf(AgentSessionAcquisitionRootExitObservedError)
   })
 
+  /** A published session whose CLI then exits first-hand, with the verdict its ladder holds. */
+  async function exitedAfterPublish(
+    exitVerdict: ClaudeStreamJsonConnection['exitVerdict']
+  ): Promise<{ adapter: ClaudeStructuredSessionAdapter; connection: FakeConnection }> {
+    const claude = fakeClaude({ unprovenCloseVerdict: exitVerdict })
+    const adapter = await acquired(claude)
+    const connection = claude.connections[0]
+    connection.handlers.onExit?.(new Error('claude stream-json exited (code 1): crashed'))
+    return { adapter, connection }
+  }
+
+  it('classifies cleanup after a first-hand exit removed the session as a root exit, never as proven', async () => {
+    // The host may still be committing or proving the lease when the child dies;
+    // its cleanup must find the exit the ladder observed, not an absence.
+    const { adapter, connection } = await exitedAfterPublish({
+      root: 'exited',
+      tree: 'unverifiable'
+    })
+    const error = await adapter.releaseAcquisition({ sessionId: 'session-1' }).catch((e) => e)
+
+    expect(error).toBeInstanceOf(AgentSessionAcquisitionRootExitObservedError)
+    expect((error as Error).message).toBe('claude stream-json exited (code 1): crashed')
+    expect(connection.closeCount).toBe(1)
+  })
+
+  it('never releases after an exit that left a descendant observed alive', async () => {
+    const { adapter } = await exitedAfterPublish({ root: 'exited', tree: 'live' })
+    const error = await adapter.releaseAcquisition({ sessionId: 'session-1' }).catch((e) => e)
+
+    expect(error).toBeInstanceOf(AgentSessionAcquisitionExitUnprovenError)
+    expect(error).not.toBeInstanceOf(AgentSessionAcquisitionRootExitObservedError)
+  })
+
+  it('forgets a retained exit once the session is acquired again', async () => {
+    const options: Parameters<typeof fakeClaude>[0] = {}
+    const claude = fakeClaude(options)
+    const adapter = await acquired(claude)
+    const first = claude.connections[0]
+    first.handlers.onExit?.(new Error('claude stream-json exited (code 1): crashed'))
+    first.exitVerdict = { root: 'exited', tree: 'unverifiable' }
+    first.close = async () => false
+    options.exitBeforeInit = 'claude stream-json exited (code 1): not logged in'
+
+    await expect(
+      adapter.acquire({ identity: identityFor(), fence: 8, spawnToken: 'spawn-10' })
+    ).rejects.toThrow('not logged in')
+    // The second start's own proven close is the answer; the first exit is stale.
+    await expect(adapter.releaseAcquisition({ sessionId: 'session-1' })).resolves.toBe(true)
+    expect(first.closeCount).toBe(0)
+  })
+
   it('reports unproven published-session cleanup so callers can retry safely', async () => {
     const claude = fakeClaude()
     const adapter = await acquired(claude)
