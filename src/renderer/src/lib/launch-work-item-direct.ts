@@ -11,8 +11,6 @@ import {
   workspaceActivationErrorMessage
 } from '@/lib/launch-work-item-direct-messages'
 import { ensureHooksConfirmed } from '@/lib/ensure-hooks-confirmed'
-import { getConnectionId } from '@/lib/connection-context'
-import { isNativeChatTranscriptLocalReadable } from '@/lib/native-chat-transcript-readability'
 import type { TuiAgent } from '../../../shared/tui-agent'
 import type { SetupDecision } from '../../../shared/worktree/create-types'
 import type { GitPushTarget } from '../../../shared/worktree/types'
@@ -28,24 +26,15 @@ import {
 import type { LaunchWorkItemDirectArgs } from '@/lib/launch-work-item-direct-types'
 import { resolveSourceControlLaunchPlatform } from '@/lib/source-control-launch-platform'
 import { getSettingsForRepoRuntimeOwner } from '@/lib/repo-runtime-owner'
-import {
-  getLocalProjectExecutionRuntimeContext,
-  getLocalRepoProjectExecutionRuntimeContext
-} from '@/lib/local-preflight-context'
-import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
-import {
-  hasExplicitTuiLaunchCustomization,
-  hasExplicitTuiAgentArgs,
-  resolveAgentLaunchRoute
-} from '@/lib/agent-launch-routing'
-import { readLocalRuntimeCapabilities } from '@/runtime/local-runtime-capabilities'
-import {
-  buildDirectWorkItemStartup,
-  resolveDirectWorkItemAgent,
-  markDirectWorkItemAgentTrusted,
-  settleDirectWorkItemStructuredLaunch
-} from '@/lib/launch-work-item-direct-agent-routing'
+import { getLocalRepoProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
+import { settleDirectWorkItemStructuredLaunch } from '@/lib/launch-work-item-direct-agent-routing'
 import { deliverDirectWorkItemPrompt } from '@/lib/launch-work-item-direct-prompt-delivery'
+import { prepareDirectWorkItemAgentLaunch } from '@/lib/launch-work-item-direct-route-preparation'
+import { resolveAgentLaunchRoute, type AgentLaunchRoutingInput } from '@/lib/agent-launch-routing'
+
+function resolveDirectWorkItemRoute(input: AgentLaunchRoutingInput) {
+  return resolveAgentLaunchRoute(input)
+}
 
 /**
  * "Use" flow: create the workspace, activate it, launch the default agent,
@@ -204,19 +193,23 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     worktreeId = result.worktree.id
     worktreePath = result.worktree.path
 
-    const createdConnectionId = getConnectionId(worktreeId)
-    // Why: newly-created SSH worktrees can be activated before the store
-    // rehydrates their repo link; preserve the source repo connection.
-    const launchConnectionId = createdConnectionId ?? repoConnectionId
     const latestStore = useAppStore.getState()
-    const agentSelection = await resolveDirectWorkItemAgent({
+    const launchPreparation = await prepareDirectWorkItemAgentLaunch({
+      worktreeId,
+      worktreePath,
       agentOverride,
-      launchConnectionId,
+      agentArgs,
       repoConnectionId,
       detectedAgentsPromise,
-      latestStore
+      latestStore,
+      settings,
+      draftContent,
+      promptDelivery,
+      launchPlatform: args.launchPlatform,
+      repoProjectRuntime,
+      routeResolver: resolveDirectWorkItemRoute
     })
-    if (agentSelection.unavailable) {
+    if (launchPreparation.unavailable) {
       activateAndRevealWorktree(worktreeId, {
         sidebarRevealBehavior: 'auto',
         setup: result.setup
@@ -224,64 +217,11 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
       toast.error(unavailableAgentErrorMessage())
       return false
     }
-    effectiveAgent = agentSelection.agent
-    if (effectiveAgent) {
-      // Why: direct task launch creates and starts the workspace in separate
-      // steps so agent detection can overlap git worktree creation. Persist the
-      // chosen agent once known so removal safety and ownership see it — reopen
-      // no longer relaunches from this field.
-      void store.updateWorktreeMeta(worktreeId, { createdWithAgent: effectiveAgent }).catch(() => {
-        // Non-critical: activation still has the explicit startup below.
-      })
-    }
-    ;({ startupPlan, draftLaunchedNatively, startupPlanFailed } = buildDirectWorkItemStartup({
-      agent: effectiveAgent,
-      agentArgs,
-      draftContent,
-      promptDelivery,
-      settings,
-      launchPlatform: args.launchPlatform,
-      launchConnectionId,
-      worktreePath,
-      repoProjectRuntime:
-        launchConnectionId === null
-          ? (getLocalProjectExecutionRuntimeContext(latestStore, worktreeId, CLIENT_PLATFORM) ??
-            repoProjectRuntime)
-          : undefined
-    }))
-
-    const route = effectiveAgent
-      ? resolveAgentLaunchRoute({
-          agent: effectiveAgent,
-          settings,
-          executionHostId: getExecutionHostIdForWorktree(latestStore, worktreeId),
-          platform: CLIENT_PLATFORM,
-          hostCapabilities: readLocalRuntimeCapabilities(),
-          workspaceKind: 'git-worktree',
-          projectRuntime: getLocalProjectExecutionRuntimeContext(
-            latestStore,
-            worktreeId,
-            CLIENT_PLATFORM
-          ),
-          promptDelivery,
-          launchText: draftContent,
-          nativeChatTranscriptIsLocalReadable:
-            isNativeChatTranscriptLocalReadable(launchConnectionId),
-          requiresTuiLaunchCustomization:
-            hasExplicitTuiAgentArgs(effectiveAgent, agentArgs) ||
-            hasExplicitTuiLaunchCustomization(settings, effectiveAgent),
-          initialSessionOptions: startupPlan?.sessionOptions
-        })
-      : 'terminal-tui'
-    structuredLaunch = route === 'structured-native-chat'
-
-    // Why: first-launch trust menus consume bracketed draft text as menu input.
-    await markDirectWorkItemAgentTrusted({
-      structuredLaunch,
-      agent: effectiveAgent,
-      workspacePath: worktreePath,
-      connectionId: repoConnectionId
-    })
+    effectiveAgent = launchPreparation.effectiveAgent
+    startupPlan = launchPreparation.startupPlan
+    draftLaunchedNatively = launchPreparation.draftLaunchedNatively
+    startupPlanFailed = launchPreparation.startupPlanFailed
+    structuredLaunch = launchPreparation.structuredLaunch
 
     const activation = activateAndRevealWorktree(worktreeId, {
       sidebarRevealBehavior: 'auto',
