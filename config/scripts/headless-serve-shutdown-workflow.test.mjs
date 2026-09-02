@@ -50,9 +50,10 @@ describe('headless serve shutdown PR gate', () => {
     ).toThrow('Missing closing code fence for orca-serve.service')
   })
 
-  it('packages an x64 AppImage before running the Docker signal oracle', () => {
+  it('packages Linux artifacts before running the Docker signal oracle', () => {
     const steps = workflow.jobs.package.steps
     const packageStep = steps.find((step) => step.name === 'Package unpacked app')
+    const markerStep = steps.find((step) => step.name === 'Verify root-package marker payloads')
     const shutdownStep = steps.find((step) => step.name === 'Verify headless serve signal shutdown')
     const launcherShutdownStep = steps.find(
       (step) => step.name === 'Verify extracted launcher serve signal shutdown'
@@ -62,7 +63,10 @@ describe('headless serve shutdown PR gate', () => {
     )
 
     expect(workflow.jobs.package['timeout-minutes']).toBe(90)
-    expect(packageStep.run).toContain('--linux AppImage --x64 --publish never')
+    expect(packageStep.run).toContain('--linux AppImage deb rpm --x64 --publish never')
+    expect(markerStep.run).toContain('dpkg-deb --fsys-tarfile')
+    expect(markerStep.run).toContain('rpm2cpio')
+    expect(steps.indexOf(markerStep)).toBeGreaterThan(steps.indexOf(packageStep))
     expect(shutdownStep.run).toBe(
       'node config/scripts/run-headless-serve-shutdown-docker.mjs --appimage dist/orca-linux.AppImage'
     )
@@ -74,6 +78,7 @@ describe('headless serve shutdown PR gate', () => {
     expect(appImageShutdownStep.run).toContain('--signal-target serving-electron')
     expect(appImageShutdownStep.run).toContain('--int-delivery pid')
     expect(steps.indexOf(shutdownStep)).toBeGreaterThan(steps.indexOf(packageStep))
+    expect(steps.indexOf(shutdownStep)).toBeGreaterThan(steps.indexOf(markerStep))
     expect(steps.indexOf(launcherShutdownStep)).toBeGreaterThan(steps.indexOf(shutdownStep))
     expect(steps.indexOf(appImageShutdownStep)).toBeGreaterThan(steps.indexOf(launcherShutdownStep))
   })
