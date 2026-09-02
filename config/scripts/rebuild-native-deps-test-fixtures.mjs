@@ -212,17 +212,46 @@ if (${JSON.stringify(createExecutable)}) {
   )
 }
 
-export function writeFakeElectronRebuild(projectDir, { logPathEnv = null } = {}) {
+/** Bytes that stand in for a compiled addon's import table. */
+const FAKE_ADDON_BYTES = {
+  clean: 'MZ\0ntdll.dll\0NtQueryInformationProcess\0',
+  unpatched: 'MZ\0KERNEL32.dll\0ReadProcessMemory\0'
+}
+
+/**
+ * A rebuild that produces nothing leaves no addon to inspect, and the script now
+ * asserts the binary it just built is a patched one. Emit a stand-in so the
+ * fixture models a rebuild that actually succeeded. `addon` picks which kind,
+ * because "produced the upstream reader" and "produced nothing" are both real
+ * outcomes that assertion has to tell apart.
+ */
+export function writeFakeElectronRebuild(projectDir, { logPathEnv = null, addon = 'clean' } = {}) {
   const rebuildDir = join(projectDir, 'node_modules', '@electron', 'rebuild')
   mkdirSync(rebuildDir, { recursive: true })
   writeFileSync(join(rebuildDir, 'package.json'), JSON.stringify({ type: 'module' }))
+  const emitAddon =
+    addon === 'none'
+      ? ''
+      : `
+  const packageDir = join('node_modules', '@vscode', 'windows-process-tree')
+  if (existsSync(join(packageDir, 'package.json'))) {
+    mkdirSync(join(packageDir, 'build', 'Release'), { recursive: true })
+    writeFileSync(
+      join(packageDir, 'build', 'Release', 'windows_process_tree.node'),
+      ${JSON.stringify(FAKE_ADDON_BYTES[addon])}
+    )
+  }`
+  const emitImports =
+    addon === 'none'
+      ? ''
+      : "import { existsSync, mkdirSync, writeFileSync } from 'node:fs'\nimport { join } from 'node:path'\n"
   writeFileSync(
     join(rebuildDir, 'index.js'),
     logPathEnv
       ? `
 import { appendFileSync } from 'node:fs'
-
-export async function rebuild(options) {
+${emitImports}
+export async function rebuild(options) {${emitAddon}
   const logPath = process.env[${JSON.stringify(logPathEnv)}]
   if (!logPath) {
     return
@@ -240,7 +269,10 @@ export async function rebuild(options) {
   )
 }
 `
-      : 'export async function rebuild() {}\n'
+      : `${emitImports}
+export async function rebuild() {${emitAddon}
+}
+`
   )
 }
 

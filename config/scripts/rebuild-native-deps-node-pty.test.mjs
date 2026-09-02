@@ -344,4 +344,37 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
       }
     }
   )
+
+  // The binary this step produces is the one copied into the packaged app. The
+  // relay build checks its own artifact and ensure-native-runtime checks what it
+  // loads; nothing checked this one, so a rebuild that quietly emitted the
+  // upstream reader shipped. Both non-clean states have to fail, which is the
+  // caller the tri-state was missing: after a rebuild that reported success, an
+  // absent binary is a broken build, not an absence to shrug at.
+  for (const [addon, expected] of [
+    ['unpatched', 'still imports ReadProcessMemory'],
+    ['none', 'is not there']
+  ]) {
+    it(`fails a Windows rebuild that leaves ${addon} windows-process-tree bytes`, () => {
+      const projectDir = mkTempProject()
+
+      try {
+        writeFakeUsableElectronPackage(projectDir, { platform: 'win32' })
+        writeFakeElectronRebuild(projectDir, { addon })
+        writeFakeNodePtyConptyPayload(projectDir, 'x64')
+        writeFakeWindowsProcessTreeWithNodeAddonApi(projectDir)
+
+        const result = runRebuildScript(
+          projectDir,
+          { npm_config_platform: 'win32', npm_config_arch: 'x64' },
+          ['--platform=win32', '--arch=x64', '--force']
+        )
+
+        expect(result.status).not.toBe(0)
+        expect(result.stderr).toContain(expected)
+      } finally {
+        removeTreeSync(projectDir)
+      }
+    })
+  }
 })
