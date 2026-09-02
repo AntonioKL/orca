@@ -40,9 +40,10 @@ export type AgentCompletionCoordinatorOptions = {
   shouldSuppressConfirmedProcessExitCompletion?: (exited: RecognizedAgentProcess) => boolean
   isLive: () => boolean
   shouldPollProcessCadence?: () => boolean
-  // Why: returning false disarms the idle no-evidence timer so the pane arms
-  // inspections only from pane activity (output/replay/title/hook). Remote
-  // panes use this — see shouldPollNoEvidenceProcessCadenceForPty.
+  // Why: returning false disarms the perpetual no-evidence timer so the pane
+  // inspects only inside the bounded window after pane activity
+  // (output/replay/title/hook). Remote panes use this — see
+  // shouldPollNoEvidenceProcessCadenceForPty.
   shouldPollNoEvidenceProcessCadence?: () => boolean
   // Why: where one inspection is a whole-process-table scan (local Windows
   // PowerShell/CIM) or a host round trip plus a host-side scan (remote/SSH),

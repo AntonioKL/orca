@@ -22,16 +22,17 @@ export function isAgentProcessInspectionCostly(userAgent: string, ptyId: string 
 }
 
 /**
- * Whether a pane with no agent evidence should keep a slow idle inspection
- * timer at all, or rely purely on pane activity (output/replay/title/hook) to
- * arm the hot cadence.
+ * Whether a pane with no agent evidence should keep a perpetual idle inspection
+ * timer, or rely on pane activity (output/replay/title/hook) to arm a bounded
+ * inspection schedule (2/4/6/8s, then 10/25/40s — see
+ * NO_EVIDENCE_ACTIVITY_ARMED_WINDOW_MS) and go quiet after it.
  *
- * Why remote is push-driven: an idle no-evidence timer can only discover an
- * agent that started without printing a byte, changing the title, or firing a
- * hook — and every one of those signals already re-arms the 2s cadence. On a
- * remote pane that timer buys nothing and costs a host round trip plus two host
- * forks per tick, so it is disarmed outright. Local hosts keep the timer: local
- * inspection is cheap enough that the floor is worth its price.
+ * Why remote is activity-driven: a perpetual timer can only discover an agent
+ * that started without printing a byte, changing the title, or firing a hook —
+ * and every one of those signals already arms the schedule. On a remote pane
+ * that timer costs a host round trip plus two host forks per tick, forever, so
+ * it is disarmed. Local hosts keep the timer: local inspection is cheap enough
+ * that the floor is worth its price.
  */
 export function shouldPollNoEvidenceProcessCadenceForPty(ptyId: string | null): boolean {
   return ptyId === null || !isRemoteExecutionHostPtyId(ptyId)

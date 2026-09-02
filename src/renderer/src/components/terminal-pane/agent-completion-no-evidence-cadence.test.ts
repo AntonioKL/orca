@@ -145,22 +145,43 @@ describe('agent completion no-evidence inspection cadence', () => {
       }
     })
 
-    it('runs a bounded 2s hot window after a reattach paint, then disarms again', async () => {
-      // Why: a reattach paint routes through writeReplayData, which now records
-      // pane activity exactly like a live byte — so a restart onto a running
-      // remote agent gets the same 4 inspections (2s/4s/6s/8s inside the strict
-      // 10s window) a fresh output burst would.
+    it('runs the exact 2/4/6/8/10/25/40s schedule after activity, then disarms at 45s', async () => {
+      // Why: a reattach paint routes through writeReplayData, which records
+      // pane activity exactly like a live byte. The 2s hot burst catches the
+      // common case; three more looks 15s apart give a slow host up to 45s to
+      // show a foreground agent before the pane goes fully quiet.
       const ptyId = toAppSshPtyId('target-1', 'pty-1')
+      const inspectedAt: number[] = []
+      const inspectProcess = vi.fn(async () => {
+        inspectedAt.push(vi.getMockedSystemTime()?.getTime() ?? Date.now())
+        return processResult(null, false)
+      })
+      const { coordinator } = createRemoteCoordinator(ptyId, inspectProcess)
+      const start = Date.now()
+
+      coordinator.startProcessTracking()
+      coordinator.observeOutputActivity()
+      await vi.advanceTimersByTimeAsync(120_000)
+
+      expect(inspectedAt.map((at) => (at - start) / 1000)).toEqual([2, 4, 6, 8, 10, 25, 40])
+      // Nothing after 45s: the next tick (55s) finds the armed window closed.
+      expect(inspectProcess).toHaveBeenCalledTimes(7)
+    })
+
+    it('re-arms the full schedule from activity late in the armed window', async () => {
+      const ptyId = toRemoteRuntimePtyId('term_1', 'env-a')
       const inspectProcess = vi.fn(async () => processResult(null, false))
       const { coordinator } = createRemoteCoordinator(ptyId, inspectProcess)
 
       coordinator.startProcessTracking()
       coordinator.observeOutputActivity()
-      await vi.advanceTimersByTimeAsync(10_000)
-      expect(inspectProcess).toHaveBeenCalledTimes(4)
+      await vi.advanceTimersByTimeAsync(41_000)
+      expect(inspectProcess).toHaveBeenCalledTimes(7)
 
-      await vi.advanceTimersByTimeAsync(60_000)
-      expect(inspectProcess).toHaveBeenCalledTimes(4)
+      // A byte at 41s (a slow agent's first output) restarts the 2s hot burst.
+      coordinator.observeOutputActivity()
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(inspectProcess).toHaveBeenCalledTimes(8)
     })
 
     it('escalates a running agent found in the hot window to the active cadence', async () => {
@@ -201,6 +222,26 @@ describe('agent completion no-evidence inspection cadence', () => {
       coordinator.observeTitle('vim')
       await vi.advanceTimersByTimeAsync(2_000)
       expect(inspectProcess).toHaveBeenCalledTimes(1)
+    })
+
+    it('finds an agent that only appears on the third slow look', async () => {
+      // Why: the whole point of the 45s armed window — a box that is slow to
+      // exec the agent still gets caught before the pane disarms.
+      const ptyId = toAppSshPtyId('target-1', 'pty-1')
+      let foreground: string | null = null
+      const inspectProcess = vi.fn(async () => processResult(foreground, foreground !== null))
+      const { coordinator } = createRemoteCoordinator(ptyId, inspectProcess)
+
+      coordinator.startProcessTracking()
+      coordinator.observeOutputActivity()
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(inspectProcess).toHaveBeenCalledTimes(6)
+
+      foreground = 'codex'
+      await vi.advanceTimersByTimeAsync(15_000)
+      // The 40s look saw codex: the pane is on the 750ms active tier, well past
+      // the 45s point where a still-empty pane would have disarmed.
+      expect(inspectProcess.mock.calls.length).toBeGreaterThan(10)
     })
   })
 
@@ -272,11 +313,12 @@ describe('agent completion no-evidence inspection cadence', () => {
     coordinator.observeOutputActivity()
     await vi.advanceTimersByTimeAsync(12_000)
 
-    // Output arms 2s polls only for the 10s activity window; silence then
-    // disarms the host reads again instead of falling back to a slow timer.
-    expect(inspectProcess).toHaveBeenCalledTimes(4)
+    // Output arms 2s polls for the 10s hot window (2/4/6/8s, and the 10s tick
+    // armed at 8s still runs), then the no-evidence tier keeps three slower
+    // looks alive (10/25/40s) until the 45s armed window closes.
+    expect(inspectProcess).toHaveBeenCalledTimes(5)
     await vi.advanceTimersByTimeAsync(60_000)
-    expect(inspectProcess).toHaveBeenCalledTimes(4)
+    expect(inspectProcess).toHaveBeenCalledTimes(7)
   })
 
   it('does not re-arm no-evidence scans for output from hidden panes', async () => {
