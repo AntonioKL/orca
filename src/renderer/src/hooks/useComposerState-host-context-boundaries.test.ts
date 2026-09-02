@@ -20,6 +20,7 @@ const COMPOSER_SOURCE = {
   derived: readComposerModule('derived-composer-state.ts'),
   folderSubmit: readComposerModule('folder-submit-orchestration.ts'),
   fullCreation: readComposerModule('full-creation-execution.ts'),
+  fullCreationStartup: readComposerModule('full-creation-startup.ts'),
   fullSubmitOrchestration: readComposerModule('full-submit-orchestration.ts'),
   fullSubmitPreparation: readComposerModule('full-submit-preparation.ts'),
   fullSubmitSourcePreparation: readComposerModule('full-submit-source-preparation.ts'),
@@ -672,12 +673,12 @@ describe('useComposerState host-context boundaries', () => {
   // Why: activation no longer rebuilds a startup from `createdWithAgent`, so this
   // caller's own `startup` is the only thing that launches the agent it planned.
   it('passes its own startup to activation when submit planned an agent', () => {
-    const activation = COMPOSER_SOURCE.fullCreation
+    const activation = COMPOSER_SOURCE.fullCreation + COMPOSER_SOURCE.fullCreationStartup
 
-    expect(activation).toContain('...(startupPlan && !backendSpawnedStartup')
+    expect(activation).toContain('...(!structuredLaunch && startup ? { startup } : {})')
     expect(activation).toContain('backendStartupTerminalSpawned: true')
-    expect(activation).toContain('command: startupPlan.launchCommand')
-    expect(activation).toContain('launchAgent: tuiAgent')
+    expect(activation).toContain('command: args.startupPlan.launchCommand')
+    expect(activation).toContain('launchAgent: args.agent')
     // The removed activation-time fallback must not come back through this caller.
     expect(COMPOSER_SOURCE.fullCreation).not.toContain('buildCreatedAgentReopenStartup')
   })
@@ -717,7 +718,8 @@ describe('useComposerState host-context boundaries', () => {
     const fullSubmit =
       COMPOSER_SOURCE.fullSubmitSourcePreparation +
       COMPOSER_SOURCE.fullSubmitPreparation +
-      COMPOSER_SOURCE.fullCreation
+      COMPOSER_SOURCE.fullCreation +
+      COMPOSER_SOURCE.fullCreationStartup
     expect(fullSubmit).toContain(
       'canUseIssueCommandForLinkedItemProvider(submitLinkedWorkItemProvider)'
     )
@@ -726,7 +728,7 @@ describe('useComposerState host-context boundaries', () => {
     )
     expect(fullSubmit).toContain('prompt: submitStartupPrompt')
     expect(fullSubmit).toContain('const shouldSeedInitialAgentStatus =')
-    expect(fullSubmit).toContain('...(shouldSeedInitialAgentStatus')
+    expect(fullSubmit).toContain('...(args.shouldSeedInitialAgentStatus')
 
     const quickSubmit =
       COMPOSER_SOURCE.quickSubmitPreparation +
