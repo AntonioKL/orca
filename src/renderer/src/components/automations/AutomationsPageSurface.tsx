@@ -2,7 +2,6 @@ import React, { useMemo } from 'react'
 import { translate } from '@/i18n/i18n'
 import { AutomationEditorDialog } from './AutomationEditorDialog'
 import { AutomationsDetailPane } from './AutomationsDetailPane'
-import { AutomationsListPanel } from './AutomationsListPanel'
 import { AutomationsPageSkeleton } from './AutomationsPageSkeleton'
 import { getAutomationAuthorityTarget } from './automation-host-client'
 import type { AutomationListRow } from './automation-list-row-identity'
@@ -12,6 +11,7 @@ import type { AutomationsPageController } from './use-automations-page-controlle
 import { AutomationRunsDashboardSurface } from './AutomationRunsDashboardSurface'
 import { AutomationRunDetailsPage } from './AutomationRunDetailsPage'
 import { AutomationsPageDeleteDialogs } from './AutomationsPageDeleteDialogs'
+import { AutomationsPageListPanel } from './AutomationsPageListPanel'
 export function AutomationsPageSurface({
   controller
 }: {
@@ -26,7 +26,6 @@ export function AutomationsPageSurface({
     destinationForm,
     setup,
     runPage,
-    sourceAvailability,
     presentation,
     pageRefresh,
     draftEffects,
@@ -42,8 +41,6 @@ export function AutomationsPageSurface({
     repoMap,
     worktreeMap,
     settings,
-    sshConnectionStates,
-    runtimeStatusByEnvironmentId,
     repoForRow,
     worktreeForRow,
     setPendingAutomationRunNavigation
@@ -65,10 +62,6 @@ export function AutomationsPageSurface({
     externalDeleteTarget,
     externalDeleteConfirmButtonRef,
     setExternalDeleteTarget,
-    listSearchQuery,
-    setListSearchQuery,
-    listFilter,
-    setListFilter,
     relativeNow,
     externalActionKey,
     activePaneTab,
@@ -92,18 +85,7 @@ export function AutomationsPageSurface({
     runPageOrigin,
     setRunPageOrigin
   } = local
-  const {
-    hostCatalog,
-    hasListItems,
-    hasFilteredListItems,
-    isListSearchQueryTooLarge,
-    filteredRows,
-    filteredExternalAutomationEntries,
-    selected,
-    selectedRow,
-    selectedExternal,
-    searchCounts
-  } = list
+  const { hostCatalog, hasListItems, selected, selectedRow, selectedExternal } = list
   const selectedAutomationRunPage = setup.selectedAutomationRunPage
   const selectedRunWorktreeMap = useMemo(() => {
     if (!selectedRow) {
@@ -130,12 +112,6 @@ export function AutomationsPageSurface({
     hostCatalog.recover(action, host)
     if (action === 'retry') {
       void pageRefresh.refresh()
-    }
-  }
-  const onListFilterChange = (next: typeof listFilter): void => {
-    setListFilter(next)
-    if ((next.hostStableKeys?.length ?? 0) > 0 && hostCatalog.resolution.effective.kind !== 'all') {
-      hostCatalog.selectHost({ kind: 'all' })
     }
   }
   const openAutomationRunPage = (run: (typeof setup.selectedRuns)[number]): void => {
@@ -340,68 +316,9 @@ export function AutomationsPageSurface({
           }}
         />
       ) : (
-        <AutomationsListPanel
-          hasListItems={hasListItems}
-          hasFilteredListItems={hasFilteredListItems}
-          listSearchQuery={listSearchQuery}
-          isListSearchQueryTooLarge={isListSearchQueryTooLarge}
-          onListSearchQueryChange={setListSearchQuery}
-          listFilter={listFilter}
-          onListFilterChange={onListFilterChange}
-          searchCounts={{
-            ...searchCounts,
-            hostRowCount: list.visibleRows.length + list.externalAutomationEntries.length
-          }}
-          hostCatalog={hostCatalog}
-          externalManagersUncheckedNotice={list.externalManagersUncheckedNotice}
-          onSelectHost={hostCatalog.selectHost}
-          onRecoverHost={(action, entry) => {
-            hostCatalog.recover(action, entry)
-            if (action === 'retry') {
-              void pageRefresh.refresh()
-            }
-          }}
-          filteredRows={filteredRows}
-          filteredExternalAutomationEntries={filteredExternalAutomationEntries}
-          selectedRowKey={selectedRow?.key ?? null}
-          selectedExternalKey={local.selectedExternalKey}
-          selectedExternal={selectedExternal}
-          relativeNow={relativeNow}
-          repoMap={repoMap}
-          worktreeMap={worktreeMap}
-          repoForRow={repoForRow}
-          worktreeForRow={worktreeForRow}
-          projectHostSetups={projectHostSetups}
-          sshConnectionStates={sshConnectionStates}
-          runtimeStatusByEnvironmentId={runtimeStatusByEnvironmentId}
-          hostTargetFor={destination.automationHostTargetFor}
-          automationSourceHostAvailabilityByRowKey={
-            sourceAvailability.automationSourceHostAvailabilityByRowKey
-          }
-          hostLabelById={presentation.hostLabelById}
-          isActionEnabled={destination.isAutomationRowActionEnabled}
-          externalActionKey={externalActionKey}
-          selectAutomationRow={list.selectAutomationRow}
-          selectExternalKey={local.selectExternalKey}
-          setActivePaneTab={setActivePaneTab}
-          runNow={(row) => void runActions.runNow(row)}
-          openEditDialog={(row) => void editorActions.openEditDialog(row)}
-          toggleAutomation={(row) => void managementActions.toggleAutomation(row)}
-          requestDeleteAutomation={managementActions.requestDeleteAutomation}
-          requestExternalAction={externalActions.requestExternalAction}
-          openEditExternalDialog={editorActions.openEditExternalDialog}
-          openCreateDialog={editorActions.openCreateDialog}
-          canCreateAutomation={destination.canCreateAutomation}
+        <AutomationsPageListPanel
+          controller={controller}
           onOpenDetail={() => setIsDetailOpen(true)}
-          onRefresh={() => {
-            hostCatalog.refreshHosts()
-            void pageRefresh.refresh()
-          }}
-          isRefreshing={isLoading}
-          onOpenRuns={() => {
-            hostCatalog.selectHost({ kind: 'all' })
-            setPageView('runs')
-          }}
         />
       )}
     </main>
