@@ -112,6 +112,22 @@ describe('worktree jump navigation', () => {
     expect(mocks.warning).toHaveBeenCalledOnce()
   })
 
+  it('does not let a hostless legacy target vouch for a host-scoped one', () => {
+    // Legacy rows publish without executionHostId; treating that as a match would clear the
+    // user's filters instead of preserving them and warning.
+    mocks.getVisibleWorktreeShortcutTargets.mockReturnValue([{ id: 'repo::/target' }])
+    mocks.worktreePassesSidebarFilters.mockReturnValue(false)
+
+    expect(jumpToWorktreeFromSidebar('repo::/target', { executionHostId: 'ssh:beta' })).toBe(true)
+
+    expect(mocks.activateAndRevealWorkspace).toHaveBeenCalledWith('repo::/target', {
+      revealInSidebar: false,
+      clearSidebarFilters: false,
+      executionHostId: 'ssh:beta'
+    })
+    expect(mocks.warning).toHaveBeenCalledOnce()
+  })
+
   it('routes folder workspaces through the workspace dispatcher without a filter check', () => {
     const state = mocks.getState()
 

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { getDefaultSettings } from '../../../../shared/constants'
 import { ExperimentalPane } from './ExperimentalPane'
-import { getExperimentalPaneSearchEntries } from './experimental-search'
+import { getExperimentalPaneSearchEntries, getExperimentalSearchEntry } from './experimental-search'
 
 vi.mock('../../store', () => ({
   useAppStore: (selector: (state: { settingsSearchQuery: string }) => unknown) =>
@@ -140,7 +140,9 @@ describe('ExperimentalPane', () => {
 
     expect(settings.experimentalAgentDashboardPopout).toBeUndefined()
     expect(markup).toContain('Show Agents Button')
-    expect(markup).toContain('Controls whether the Agents tab appears in the left sidebar')
+    // The visible copy is the search entry's own description, so settings search can't
+    // advertise text the page doesn't show.
+    expect(markup).toContain(getExperimentalSearchEntry().agentsSidebar.description)
     expect(markup).not.toContain('Window &amp; Sidebar')
     expect(getExperimentalPaneSearchEntries().map((entry) => entry.title)).toContain(
       'Show Agents Button'

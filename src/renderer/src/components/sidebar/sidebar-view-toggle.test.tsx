@@ -76,6 +76,40 @@ describe('SidebarViewToggle', () => {
     expect(onSelect).toHaveBeenCalledWith('workspaces')
   })
 
+  it('moves focus to the radio an arrow key selects', () => {
+    // Without the focus move, every later arrow press steps from the old index and
+    // keeps re-selecting the same neighbour.
+    const onSelect = vi.fn()
+    act(() => {
+      root.render(
+        <SidebarViewToggle
+          ariaLabel="Sidebar view"
+          value="workspaces"
+          onSelect={onSelect}
+          options={[
+            { value: 'workspaces', label: 'Spaces', sectionTitle: 'projects' },
+            { value: 'agents', label: 'Agents', sectionTitle: 'agents' }
+          ]}
+        />
+      )
+    })
+
+    const projects = container.querySelector<HTMLButtonElement>(
+      '[data-sidebar-section-title="projects"]'
+    )
+    act(() => {
+      projects?.focus()
+      projects?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })
+      )
+    })
+
+    expect(onSelect).toHaveBeenCalledWith('agents')
+    expect(document.activeElement).toBe(
+      container.querySelector('[data-sidebar-section-title="agents"]')
+    )
+  })
+
   it('keeps the visible label on one line', () => {
     act(() => {
       root.render(

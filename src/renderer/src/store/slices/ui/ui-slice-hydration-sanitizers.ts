@@ -182,7 +182,9 @@ export function sanitizeHydratedActiveView(
     return 'terminal'
   }
   // Why: activity is hidden when its entry points are, so gate only it (mobile/automations stay functional when hidden).
-  if (value === 'activity' && !shouldShowAgentsSidebar(settings)) {
+  // Why the null check: a failed settings fetch is not an opt-out. Downgrading on absent settings
+  // would let the persisted-UI writer overwrite the user's saved `activity` with `terminal`.
+  if (value === 'activity' && settings && !shouldShowAgentsSidebar(settings)) {
     return 'terminal'
   }
   return value
