@@ -92,6 +92,7 @@ export function useMobileNativeChatController(args: {
   const structuredNativeChat = useMobileStructuredAgentSession({
     client,
     sessionId: activeChatStructured ? activeChatSessionId : null,
+    sourceIdentity,
     enabled: showNativeChat,
     // Holds are connection-scoped; dropping this on transport loss lets the hook
     // reacquire the provider when the client authenticates again. Deliberately
@@ -159,8 +160,6 @@ export function useMobileNativeChatController(args: {
   const nativeChatTranscriptSettled =
     nativeChatSession.status === 'ready' ||
     (nativeChatSession.status === 'error' && nativeChatSession.messages.length > 0)
-  const nativeChatAskObservable =
-    showNativeChat && (nativeChatDetectedAsk != null || nativeChatTranscriptSettled)
   const {
     askKey: nativeChatAskKey,
     showAsk: showNativeChatAsk,
@@ -170,7 +169,7 @@ export function useMobileNativeChatController(args: {
     detectedAsk: nativeChatDetectedAsk,
     scopeKey: activeSessionTabId,
     sessionKey: activeChatSessionId,
-    observing: nativeChatAskObservable
+    observing: showNativeChat && (nativeChatDetectedAsk != null || nativeChatTranscriptSettled)
   })
 
   // Every chat write gates on both: the lease proves the input floor is ours, and

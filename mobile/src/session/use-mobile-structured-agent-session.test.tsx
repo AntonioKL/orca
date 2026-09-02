@@ -231,15 +231,18 @@ describe('useMobileStructuredAgentSession', () => {
   function Harness({
     sessionId = 'session-1',
     agent = 'codex',
-    connected = true
+    connected = true,
+    sourceIdentity = 'host-a\u0000workspace-a'
   }: {
     sessionId?: string | null
     agent?: string | null
     connected?: boolean
+    sourceIdentity?: string
   }): null {
     hook = useMobileStructuredAgentSession({
       client,
       sessionId,
+      sourceIdentity,
       enabled: true,
       connected,
       agent,
@@ -820,5 +823,53 @@ describe('useMobileStructuredAgentSession', () => {
     })
 
     expect(hook?.session.messages).toHaveLength(1)
+  })
+
+  it('does not show session A under session B when switching tabs offline', async () => {
+    await act(async () => {
+      renderer = create(createElement(Harness, { connected: true, sessionId: 'session-1' }))
+    })
+    await vi.waitFor(() => expect(listener).toEqual(expect.any(Function)))
+    act(() => listener?.(snapshotWithMessage()))
+    expect(hook?.session.messages).toHaveLength(1)
+
+    await act(async () => {
+      renderer?.update(createElement(Harness, { connected: false, sessionId: 'session-2' }))
+    })
+
+    expect(hook?.session.messages).toEqual([])
+    expect(hook?.session.status).toBe('idle')
+
+    await act(async () => {
+      renderer?.update(createElement(Harness, { connected: false, sessionId: 'session-1' }))
+    })
+    expect(hook?.session.messages).toHaveLength(1)
+  })
+
+  it('keeps same provider ids isolated across host/workspace sources', async () => {
+    await act(async () => {
+      renderer = create(
+        createElement(Harness, {
+          connected: true,
+          sessionId: 'session-1',
+          sourceIdentity: 'host-a\u0000workspace-a'
+        })
+      )
+    })
+    await vi.waitFor(() => expect(listener).toEqual(expect.any(Function)))
+    act(() => listener?.(snapshotWithMessage()))
+    expect(hook?.session.messages).toHaveLength(1)
+
+    await act(async () => {
+      renderer?.update(
+        createElement(Harness, {
+          connected: false,
+          sessionId: 'session-1',
+          sourceIdentity: 'host-b\u0000workspace-b'
+        })
+      )
+    })
+
+    expect(hook?.session.messages).toEqual([])
   })
 })

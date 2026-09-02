@@ -15,6 +15,8 @@ import {
 import type { RpcClient } from '../transport/rpc-client'
 import { callAgentSession } from './mobile-structured-agent-session-rpc'
 
+const MAX_RETAINED_SESSION_STATES = 32
+
 function isSubscribeEvent(value: unknown): value is AgentSessionSubscribeEvent {
   if (typeof value !== 'object' || value === null) {
     return false
@@ -26,6 +28,7 @@ function isSubscribeEvent(value: unknown): value is AgentSessionSubscribeEvent {
 export function useMobileStructuredAgentState(args: {
   client: RpcClient | null
   sessionId: string | null
+  sessionKey: string | null
   enabled: boolean
   /** Live transport only. The hold dies with the connection and has to be retaken,
    *  but the transcript must survive the outage rather than blank out with it. */
@@ -36,39 +39,63 @@ export function useMobileStructuredAgentState(args: {
   loadingOlder: boolean
   loadEarlier: () => void
 } {
-  const { client, connected, enabled, sessionId } = args
-  const [state, setState] = useState<StructuredAgentSessionState>(EMPTY_STRUCTURED_AGENT_SESSION)
+  const { client, connected, enabled, sessionId, sessionKey } = args
+  // Keep a bounded cache so offline tab switches select the right transcript
+  // synchronously without growing for the lifetime of the app.
+  const [sessionStates, setSessionStates] = useState<Map<string, StructuredAgentSessionState>>(
+    () => new Map()
+  )
+  const state =
+    enabled && sessionKey
+      ? (sessionStates.get(sessionKey) ?? EMPTY_STRUCTURED_AGENT_SESSION)
+      : EMPTY_STRUCTURED_AGENT_SESSION
   const [loadingOlder, setLoadingOlder] = useState(false)
   const stateRef = useRef(state)
-  const sessionIdentityRef = useRef<{ client: RpcClient; sessionId: string } | null>(null)
+  const sessionKeyRef = useRef(sessionKey)
+  const streamGenerationRef = useRef(0)
   useLayoutEffect(() => {
     stateRef.current = state
-  }, [state])
+    sessionKeyRef.current = sessionKey
+  }, [sessionKey, state])
 
-  const apply = useCallback((action: StructuredAgentSessionAction) => {
-    setState((current) => reduceStructuredAgentSession(current, action))
-  }, [])
+  const apply = useCallback(
+    (action: StructuredAgentSessionAction) => {
+      if (!sessionKey) {
+        return
+      }
+      setSessionStates((current) => {
+        const previous = current.get(sessionKey) ?? EMPTY_STRUCTURED_AGENT_SESSION
+        const next = reduceStructuredAgentSession(previous, action)
+        if (next === previous) {
+          return current
+        }
+        const updated = new Map(current)
+        updated.delete(sessionKey)
+        updated.set(sessionKey, next)
+        while (updated.size > MAX_RETAINED_SESSION_STATES) {
+          const oldest = updated.keys().next().value
+          if (oldest === undefined) {
+            break
+          }
+          updated.delete(oldest)
+        }
+        return updated
+      })
+    },
+    [sessionKey]
+  )
 
   useEffect(() => {
+    streamGenerationRef.current += 1
+    sessionKeyRef.current = sessionKey
+    setLoadingOlder(false)
     if (!client || !sessionId || !enabled) {
-      sessionIdentityRef.current = null
-      setState(EMPTY_STRUCTURED_AGENT_SESSION)
-      setLoadingOlder(false)
       return
     }
     if (!connected) {
-      // The cleanup above already dropped the dead hold and stream. Hold the last
-      // transcript on screen for the outage: clearing it renders neither spinner
-      // nor empty-state copy, so the chat reads as gone rather than offline.
+      // The cleanup above drops the dead hold and stream; keyed state keeps this
+      // session's transcript visible while another tab can be selected.
       return
-    }
-    const sessionChanged =
-      sessionIdentityRef.current?.client !== client ||
-      sessionIdentityRef.current?.sessionId !== sessionId
-    sessionIdentityRef.current = { client, sessionId }
-    if (sessionChanged) {
-      // Do not leak the previous tab's transcript while the new session loads.
-      setState(EMPTY_STRUCTURED_AGENT_SESSION)
     }
     apply({ type: 'loading' })
     const holderId = structuredAgentSessionHolderId('mobile-chat')
@@ -120,17 +147,19 @@ export function useMobileStructuredAgentState(args: {
         )
         .catch(() => undefined)
     }
-  }, [apply, client, connected, enabled, sessionId])
+  }, [apply, client, connected, enabled, sessionId, sessionKey])
 
   const loadEarlier = useCallback(() => {
     const current = stateRef.current
-    if (!client || !sessionId || loadingOlder || !current.hasOlder) {
+    if (!client || !sessionId || !sessionKey || loadingOlder || !current.hasOlder) {
       return
     }
     const cursor = oldestStructuredAgentSessionCursor(current)
     if (!cursor) {
       return
     }
+    const requestSessionKey = sessionKey
+    const requestGeneration = streamGenerationRef.current
     setLoadingOlder(true)
     void callAgentSession<AgentSessionHistoryResult>(client, 'agentSession.history', {
       sessionId,
@@ -139,15 +168,31 @@ export function useMobileStructuredAgentState(args: {
       limit: AGENT_SESSION_HISTORY_MAX_LIMIT
     })
       .then((result) => {
-        if (result.ok) {
+        if (
+          result.ok &&
+          sessionKeyRef.current === requestSessionKey &&
+          streamGenerationRef.current === requestGeneration
+        ) {
           apply({ type: 'older-page', requestedEpoch: cursor.epoch, page: result.page })
         }
       })
       .catch((error: unknown) => {
-        apply({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+        if (
+          sessionKeyRef.current === requestSessionKey &&
+          streamGenerationRef.current === requestGeneration
+        ) {
+          apply({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+        }
       })
-      .finally(() => setLoadingOlder(false))
-  }, [apply, client, loadingOlder, sessionId])
+      .finally(() => {
+        if (
+          sessionKeyRef.current === requestSessionKey &&
+          streamGenerationRef.current === requestGeneration
+        ) {
+          setLoadingOlder(false)
+        }
+      })
+  }, [apply, client, loadingOlder, sessionId, sessionKey])
 
   return { state, stateRef, loadingOlder, loadEarlier }
 }
