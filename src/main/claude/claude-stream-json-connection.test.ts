@@ -523,8 +523,8 @@ describe('Claude stream-json connection', () => {
     )
   })
 
-  it('reports an exit only after the child is gone and surfaces its stderr tail', async () => {
-    const scenario = scriptScenario([{ stderr: 'claude: not signed in\n' }, { delayMs: 50 }])
+  it('reports a self-exit with its status and stderr, and leaves its tree unverifiable', async () => {
+    const scenario = scriptScenario([{ stderr: 'claude: not signed in\n' }, { exit: 1 }])
     let exit: Error | null = null
     const connection = await open(launchFor(scenario), {
       onExit: (error) => {
@@ -533,9 +533,13 @@ describe('Claude stream-json connection', () => {
     })
 
     await until(() => exit, 'the exit error')
-    expect((exit as unknown as Error).message).toContain('claude: not signed in')
+    // The status and stderr are the only diagnostic a refused start leaves behind.
+    expect((exit as unknown as Error).message).toMatch(/exited \(code 1\): claude: not signed in/)
     expect(connection.closed).toBe(true)
-    await expect(connection.close()).resolves.toBe(true)
+    // The root's exit is first-hand, but it left before a descendant snapshot
+    // could be armed, so close() has no tree proof to offer and says so.
+    await expect(connection.close()).resolves.toBe(false)
+    expect(connection.exitVerdict).toEqual({ root: 'exited', tree: 'unverifiable' })
   })
 
   it('proves the exit of a child that ignores a graceful shutdown', async () => {

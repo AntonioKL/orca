@@ -34,11 +34,26 @@ type VerificationDeps = TerminateDeps & {
   verifyMs?: number
 }
 
+/**
+ * Orca's verdict vocabulary for a snapshotted tree, with no synonyms: `live` is
+ * an identity-matched descendant still observed at the deadline; `unverifiable`
+ * is a table that could not be read, which is never evidence either way.
+ */
+export type DescendantTreeVerdict = 'exited' | 'live' | 'unverifiable'
+
 /** An unreadable process table is never proof that a stopped descendant exited. */
 export async function terminateDescendantSnapshotAndWait(
   snapshot: DescendantSnapshot,
   deps: VerificationDeps = {}
 ): Promise<boolean> {
+  return (await terminateDescendantSnapshotWithVerdict(snapshot, deps)) === 'exited'
+}
+
+/** Signals the snapshot, then reports what the last table read observed. */
+export async function terminateDescendantSnapshotWithVerdict(
+  snapshot: DescendantSnapshot,
+  deps: VerificationDeps = {}
+): Promise<DescendantTreeVerdict> {
   const sendSignal = deps.sendSignal ?? sendDescendantSignal
   const readTable = deps.readTable ?? readProcessTable
   const graceMs = deps.graceMs ?? DESCENDANT_KILL_GRACE_MS
@@ -54,11 +69,11 @@ export async function terminateDescendantSnapshotAndWait(
       deps.timeoutMs ?? DESCENDANT_SNAPSHOT_TIMEOUT_MS
     )
     if (!capture) {
-      return false
+      return 'unverifiable'
     }
     const live = matchingSnapshotRows(snapshot, capture.rows)
     if (live.length === 0) {
-      return true
+      return 'exited'
     }
     if (!forced && Date.now() >= deadline - verifyMs + graceMs) {
       forced = true
@@ -74,5 +89,8 @@ export async function terminateDescendantSnapshotAndWait(
     readTable,
     deps.timeoutMs ?? DESCENDANT_SNAPSHOT_TIMEOUT_MS
   )
-  return finalCapture !== null && matchingSnapshotRows(snapshot, finalCapture.rows).length === 0
+  if (!finalCapture) {
+    return 'unverifiable'
+  }
+  return matchingSnapshotRows(snapshot, finalCapture.rows).length === 0 ? 'exited' : 'live'
 }

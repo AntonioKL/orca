@@ -8,6 +8,7 @@ import {
   type ClaudeControlSurface
 } from './claude-agent-sdk-control-requests'
 import { createClaudeChildTreeReaper, proveClaudeChildExit } from './claude-agent-sdk-exit-proof'
+import type { DescendantTreeVerdict } from '../pty-descendant-exit-verification'
 import { createClaudeCodeProcessSpawn } from './claude-agent-sdk-process-spawn'
 import { createClaudeUserMessageQueue } from './claude-agent-sdk-user-message-queue'
 import type { ClaudeStructuredSdkOptions } from './claude-structured-launch-resolution'
@@ -51,17 +52,39 @@ export type ClaudeStreamJsonConnectionHandlers = {
   onExit?: (error: Error) => void
 }
 
+/**
+ * Two questions with their own evidence. The root's verdict is first-hand: Orca's
+ * own child handle reported exit. The tree's comes from the bounded descendant
+ * verification, and `unverifiable` is never collapsed into either neighbour.
+ */
+export type ClaudeChildExitVerdict = {
+  root: 'exited' | 'live'
+  tree: DescendantTreeVerdict
+}
+
 export type ClaudeStreamJsonConnection = ClaudeControlSurface & {
   readonly pid: number | undefined
   readonly closed: boolean
+  /** What the ladder has observed so far; read after a `close()` that returned false. */
+  readonly exitVerdict: ClaudeChildExitVerdict
   send: (message: Record<string, unknown>) => Promise<void>
-  /** Resolves true only after the child emitted exit/close; false is unproven. */
+  /** Resolves true only after the child emitted exit AND its descendant tree was observed gone. */
   close: () => Promise<boolean>
 }
 
-function exitError(stderrTail: string, cause?: Error): Error {
+type ExitStatus = { code: number | null; signal: NodeJS.Signals | null }
+
+function exitError(stderrTail: string, status: ExitStatus | null, cause?: Error): Error {
   const detail = stderrTail.trim()
-  const message = detail ? `claude stream-json exited: ${detail}` : 'claude stream-json exited'
+  // The status is the diagnostic a signed-out or refused start leaves behind;
+  // it has to survive every wrapper between here and the user.
+  const how =
+    status?.signal !== null && status?.signal !== undefined
+      ? ` (signal ${status.signal})`
+      : status?.code !== null && status?.code !== undefined
+        ? ` (code ${status.code})`
+        : ''
+  const message = `claude stream-json exited${how}${detail ? `: ${detail}` : ''}`
   return cause ? new Error(message, { cause }) : new Error(message)
 }
 
@@ -91,13 +114,13 @@ export async function openClaudeStreamJsonConnection(
   if (!child) {
     throw new Error('the claude agent SDK returned without spawning a child')
   }
-  // One reaper per child: every close attempt and error-path reap shares its proof.
-  const tree = createClaudeChildTreeReaper(child)
-
   let exited = false
+  let exitStatus: ExitStatus | null = null
   let closing = false
   let terminalError: Error | null = null
   let closePromise: Promise<boolean> | null = null
+  // One reaper per child: every close attempt and error-path reap shares its proof.
+  const tree = createClaudeChildTreeReaper(child, { exited: () => exited })
 
   let settleExit = (): void => {}
   const exitPromise = new Promise<void>((resolve) => {
@@ -107,13 +130,16 @@ export async function openClaudeStreamJsonConnection(
     exited = true
     settleExit()
   }
-  child.on('exit', markExited)
+  child.on('exit', (code, signal) => {
+    exitStatus = { code, signal }
+    markExited()
+  })
 
   const handleUnexpectedEnd = (cause?: Error): void => {
     if (terminalError) {
       return
     }
-    terminalError = exitError(spawner.stderrTail, cause)
+    terminalError = exitError(spawner.stderrTail, exitStatus, cause)
     inbox.fail(terminalError)
     if (!closing) {
       handlers.onExit?.(terminalError)
@@ -181,6 +207,9 @@ export async function openClaudeStreamJsonConnection(
     },
     get closed() {
       return closing || exited || terminalError !== null
+    },
+    get exitVerdict() {
+      return { root: exited ? 'exited' : 'live', tree: tree.treeVerdict } as const
     },
     send,
     close

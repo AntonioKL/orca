@@ -15,7 +15,10 @@ import {
   type ProcessTableCapture,
   type ProcessTableRow
 } from './pty-descendant-termination'
-import { terminateDescendantSnapshotAndWait } from './pty-descendant-exit-verification'
+import {
+  terminateDescendantSnapshotAndWait,
+  terminateDescendantSnapshotWithVerdict
+} from './pty-descendant-exit-verification'
 
 const CAPTURED_AT_MS = Date.parse('Tue Jul 14 12:00:00 2026')
 
@@ -340,6 +343,28 @@ describe('terminateDescendantSnapshotAndWait', () => {
 
     expect(result).toBe(false)
     expect(sendSignal).toHaveBeenCalledWith(20, 'SIGTERM')
+  })
+
+  it('names a survivor seen at the deadline live, never unverifiable', async () => {
+    const survivor = row(20, 10, 20)
+    const pending = terminateDescendantSnapshotWithVerdict(snapshot([survivor]), {
+      sendSignal: vi.fn(),
+      readTable: vi.fn().mockResolvedValue(tableCapture([survivor])),
+      graceMs: 0,
+      verifyMs: 100
+    })
+    await vi.advanceTimersByTimeAsync(200)
+
+    await expect(pending).resolves.toBe('live')
+  })
+
+  it('names an unreadable verification table unverifiable', async () => {
+    await expect(
+      terminateDescendantSnapshotWithVerdict(snapshot([row(20, 10, 20)]), {
+        sendSignal: vi.fn(),
+        readTable: vi.fn().mockRejectedValue(new Error('ps exploded'))
+      })
+    ).resolves.toBe('unverifiable')
   })
 })
 

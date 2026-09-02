@@ -7,7 +7,7 @@
 //   ORCA_SDK_CONTRACT_SCENARIO_PATH — JSON file
 //     { steps: Step[], controlResponses?: { [subtype]: <response> } } where a Step is
 //     { emit: <frame> } | { awaitUserMessage: true } | { stderr: <text> } |
-//     { awaitControlResponse: <request_id> } | { delayMs: <n> }
+//     { awaitControlResponse: <request_id> } | { delayMs: <n> } | { exit: <code> }
 //   ORCA_SDK_CONTRACT_REPORT_PATH — where argv/env observations are written
 //   ORCA_SDK_CONTRACT_IGNORE_SIGTERM — trap SIGTERM/SIGINT and outlive stdin close
 //   ORCA_SDK_CONTRACT_IGNORE_CONTROL_REQUESTS — record control requests but never answer
@@ -134,6 +134,10 @@ for (const step of scenario.steps) {
     await waitFor('control_response', step.awaitControlResponse)
   } else if (step.delayMs) {
     await new Promise((resolve) => setTimeout(resolve, step.delayMs))
+  } else if (step.exit !== undefined) {
+    // A CLI that refuses to start: leave with its own status, stderr already written.
+    writeReport()
+    process.exit(step.exit)
   }
 }
 writeReport()
