@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RelayDispatcher } from './dispatcher'
-import { encodeJsonRpcFrame, encodeKeepAliveFrame, KEEPALIVE_SEND_MS, TIMEOUT_MS } from './protocol'
+import {
+  encodeJsonRpcFrame,
+  encodeKeepAliveFrame,
+  FRAME_DECODER_MAX_FRAMES_PER_TURN,
+  KEEPALIVE_SEND_MS,
+  TIMEOUT_MS
+} from './protocol'
 
 // The relay had no inbound-liveness signal at all: its writer parks forever on a half-open link, so
 // an abandoned viewer kept its owner lease and left the PTYs it held paused until the process died.
@@ -159,5 +165,78 @@ describe('RelayDispatcher silent-client reaper', () => {
     // Client id 1 is the primary sink; closing it would tear down the relay's own stdin/stdout and
     // nothing in production calls setWrite() to bring it back.
     expect(detachListener).not.toHaveBeenCalled()
+  })
+
+  // Real backpressure, not a private-state poke: a chunk carrying more frames than the decoder
+  // will deliver in one turn makes it pause the source and schedule a continuation. setImmediate
+  // is left unfaked here so that continuation cannot run inside advanceTimersByTime -- which is
+  // what keeps the pause held across the whole silence window.
+  function pauseClientReadsForReal(clientId: number, frames: number): void {
+    dispatcher.feedClient(
+      clientId,
+      Buffer.concat(
+        Array.from({ length: frames }, (_, index) => encodeKeepAliveFrame(index + 1, 0))
+      )
+    )
+  }
+
+  function useRealImmediates(): void {
+    // Everything but setImmediate: the decoder's continuation must not run inside
+    // advanceTimersByTime, or the pause it is holding would be released mid-assertion.
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']
+    })
+    vi.setSystemTime(0)
+  }
+
+  it('never reaps a client whose reads the relay itself paused', () => {
+    // The decoder pauses reads for backpressure, and while paused no frame decodes, so
+    // lastReceivedAt freezes. Counting that as silence would reap a client the relay stopped
+    // listening to — self-inflicted. The client-side multiplexer guards the mirror case with
+    // decoderReadPaused; this is the relay half.
+    useRealImmediates()
+    const detachListener = vi.fn()
+    const pauseReads = vi.fn()
+    const resumeReads = vi.fn()
+    dispatcher = new RelayDispatcher(() => true)
+    dispatcher.onClientDetached(detachListener)
+    const clientId = dispatcher.attachClient(() => true, undefined, undefined, {
+      pauseReads,
+      resumeReads
+    })
+
+    pauseClientReadsForReal(clientId, FRAME_DECODER_MAX_FRAMES_PER_TURN + 1)
+
+    // Asserted, because the reaper's guard is only reached if createClient still forwards the
+    // decoder's pause to the socket rather than swallowing it in its own wrapper.
+    expect(pauseReads).toHaveBeenCalledTimes(1)
+    expect(resumeReads).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(TIMEOUT_MS * 5)
+
+    expect(detachListener).not.toHaveBeenCalledWith(clientId, expect.anything())
+  })
+
+  it('lets the silence clock resume from the frames the paused turn finally decoded', async () => {
+    // The pause is only ever acquired with a whole frame still buffered, so the resuming turn
+    // decodes one and refreshes lastReceivedAt on its way out. That is what makes a plain
+    // readsPaused skip safe: no separate rebase is needed, and the client is judged again from the
+    // moment it was actually last heard.
+    useRealImmediates()
+    const detachListener = vi.fn()
+    const resumeReads = vi.fn()
+    dispatcher = new RelayDispatcher(() => true)
+    dispatcher.onClientDetached(detachListener)
+    const clientId = dispatcher.attachClient(() => true, undefined, undefined, { resumeReads })
+
+    pauseClientReadsForReal(clientId, FRAME_DECODER_MAX_FRAMES_PER_TURN + 1)
+    vi.advanceTimersByTime(TIMEOUT_MS * 5)
+
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(resumeReads).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(KEEPALIVE_SEND_MS)
+
+    expect(detachListener).not.toHaveBeenCalledWith(clientId, expect.anything())
   })
 })

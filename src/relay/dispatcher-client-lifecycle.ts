@@ -129,8 +129,9 @@ export abstract class RelayDispatcherClientLifecycle extends RelayDispatcherClie
       nextOutgoingSeq: 1,
       highestReceivedSeq: 0,
       attachedAt: Date.now(),
-      lastReceivedAt: null,
-      keepaliveObserved: false,
+      lastReceivedAt: null as number | null,
+      keepaliveObserved: false as boolean,
+      readsPaused: false as boolean,
       generation: 0,
       closed: false,
       droppedNotificationLog: null,
@@ -144,7 +145,20 @@ export abstract class RelayDispatcherClientLifecycle extends RelayDispatcherClie
     client.decoder = new FrameDecoder(
       (frame) => this.handleFrame(client, frame),
       (error) => this.closeClient(client, error, client !== this.primaryClient),
-      { pause: sourceOptions?.pauseReads, resume: sourceOptions?.resumeReads }
+      {
+        // Why the flag is set here rather than inside the reaper: the decoder owns the pause, and
+        // the reaper must not count silence it caused itself.
+        pause: () => {
+          client.readsPaused = true
+          sourceOptions?.pauseReads?.()
+        },
+        // Why no clock rebase here: the decoder only pauses when it has a whole frame left to
+        // deliver, so every resume trails a turn that decoded one and refreshed lastReceivedAt.
+        resume: () => {
+          client.readsPaused = false
+          sourceOptions?.resumeReads?.()
+        }
+      }
     )
     client.writer = this.createWriter(client, write, sinkOptions)
     return client
@@ -156,6 +170,7 @@ export abstract class RelayDispatcherClientLifecycle extends RelayDispatcherClie
     client.attachedAt = Date.now()
     client.lastReceivedAt = null
     client.keepaliveObserved = false
+    client.readsPaused = false
     client.decoder.reset()
     client.generation++
     client.closed = false
@@ -231,7 +246,10 @@ export abstract class RelayDispatcherClientLifecycle extends RelayDispatcherClie
       if (client === this.primaryClient) {
         continue
       }
-      if (client.closed) {
+      // Why readsPaused short-circuits everything below: while the decoder holds reads paused for
+      // backpressure no frame can decode, so both clocks freeze. Judging either one then reaps a
+      // client the relay itself stopped listening to.
+      if (client.closed || client.readsPaused) {
         continue
       }
       // Why a client that has never spoken gets its own, much wider bound: a relay is launched

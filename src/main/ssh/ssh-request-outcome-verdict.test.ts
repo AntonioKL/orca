@@ -23,6 +23,14 @@ describe('SSH request outcome verdict', () => {
     expect(isSshRequestOutcomeUnverifiable(createSshDisposalError('connection_lost'))).toBe(true)
   })
 
+  it('does not claim unverifiable for a request that never reached the wire', () => {
+    // A disposed mux rejects before framing anything, so the peer provably never saw it.
+    const undispatched = Object.assign(createSshDisposalError('connection_lost'), {
+      sshRequestUndispatched: true
+    })
+    expect(isSshRequestOutcomeUnverifiable(undispatched)).toBe(false)
+  })
+
   it('does not claim unverifiable for a deliberate shutdown', () => {
     expect(isSshRequestOutcomeUnverifiable(createSshDisposalError('shutdown'))).toBe(false)
   })
