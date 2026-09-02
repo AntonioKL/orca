@@ -1,4 +1,5 @@
 import { activateTabAndFocusPane } from '@/lib/activate-tab-and-focus-pane'
+import { activateStructuredAgentSessionTab } from '@/lib/structured-agent-session-tab-activation'
 import { jumpToWorktreeFromSidebar } from '@/lib/worktree-jump-navigation'
 import { useAppStore } from '@/store'
 import { getWorktreeExecutionHostId } from '../../../../shared/execution-host'
@@ -54,17 +55,21 @@ export function createActivityThreadActions({
     unacknowledgeAgents([thread.paneKey])
   }
 
-  const activateThreadTerminal = (thread: AgentPaneThread): void => {
+  const activateThreadTarget = (thread: AgentPaneThread): void => {
     const state = useAppStore.getState()
     const executionHostId = getActivityThreadExecutionHostId(thread)
     const worktree = state.getKnownWorktreeById(thread.worktree.id, executionHostId)
     if (!worktree) {
       return
     }
-    // Why: retained-agent threads can outlive their tab; without a live tab, reorienting the workspace and focusing a dead tab id would just confuse the user.
     const liveTabs = state.tabsByWorktree[worktree.id] ?? []
-    const hasLiveTab = liveTabs.some((t) => t.id === thread.tab.id)
-    if (!hasLiveTab) {
+    const hasLiveTerminal = liveTabs.some((tab) => tab.id === thread.tab.id)
+    const hasLiveAgentSession = (state.unifiedTabsByWorktree?.[worktree.id] ?? []).some(
+      (tab) => tab.id === thread.tab.id && tab.contentType === 'agent-session'
+    )
+    // Why: retained threads can outlive their target; reorienting the workspace for a
+    // dead terminal or structured session would just confuse the user.
+    if (!hasLiveTerminal && !hasLiveAgentSession) {
       return
     }
     if (state.activeRepoId !== worktree.repoId) {
@@ -75,6 +80,9 @@ export function createActivityThreadActions({
       state.activeWorkspaceExecutionHostId !== executionHostId
     ) {
       state.setActiveWorktree(worktree.id, executionHostId)
+    }
+    if (activateStructuredAgentSessionTab({ worktreeId: worktree.id, tabId: thread.tab.id })) {
+      return
     }
     state.setActiveTabType('terminal')
     const parsed = parsePaneKey(thread.paneKey)
@@ -87,7 +95,7 @@ export function createActivityThreadActions({
 
   const selectThread = (thread: AgentPaneThread): void => {
     setSelectedPaneKey(thread.paneKey)
-    activateThreadTerminal(thread)
+    activateThreadTarget(thread)
   }
 
   const jumpToWorkspace = (thread: AgentPaneThread): void => {

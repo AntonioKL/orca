@@ -21,6 +21,10 @@ import { parsePaneKey } from '../../../../shared/stable-pane-id'
 import type { Tab } from '../../../../shared/tab-types'
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import type { Worktree } from '../../../../shared/worktree/types'
+import {
+  effectiveWorktreeAgentRowStartedAt,
+  tabFromWorktreeAttributedStatusEntry
+} from '../sidebar/worktree-agent-row-fallback-tab'
 import type {
   ActivityEvent,
   ActivityHookLiveAgentState,
@@ -81,11 +85,51 @@ type ActivityTabContext = { worktreeId: string; tab: TerminalTab }
 type ActivityEventOwner = { worktree: Worktree; repo: Repo | null; knownWorktree: boolean }
 type ActivityTabHostIndex = Map<string, Map<string, ExecutionHostId | null>>
 
+function terminalTabFromAgentSessionTab(tab: Tab): TerminalTab {
+  return {
+    id: tab.id,
+    ptyId: null,
+    worktreeId: tab.worktreeId,
+    title: tab.customLabel ?? tab.generatedLabel ?? tab.label,
+    customTitle: tab.customLabel,
+    color: tab.color,
+    isPinned: tab.isPinned,
+    sortOrder: tab.sortOrder,
+    createdAt: tab.createdAt
+  }
+}
+
+function buildActivityTabContext(args: BuildActivityEventsArgs): Map<string, ActivityTabContext> {
+  const contexts = new Map<string, ActivityTabContext>()
+  for (const [worktreeId, tabs] of Object.entries(args.tabsByWorktree)) {
+    for (const tab of tabs) {
+      contexts.set(tab.id, { worktreeId, tab })
+    }
+  }
+  for (const [worktreeId, tabs] of Object.entries(args.unifiedTabsByWorktree ?? {})) {
+    for (const tab of tabs) {
+      if (tab.contentType !== 'agent-session' || contexts.has(tab.id)) {
+        continue
+      }
+      contexts.set(tab.id, { worktreeId, tab: terminalTabFromAgentSessionTab(tab) })
+    }
+  }
+  return contexts
+}
+
+function attributedActivityTabContext(entry: AgentStatusEntry): ActivityTabContext | null {
+  const tab = tabFromWorktreeAttributedStatusEntry(entry, effectiveWorktreeAgentRowStartedAt(entry))
+  return tab ? { worktreeId: tab.worktreeId, tab } : null
+}
+
 function buildActivityTabHostIndex(args: BuildActivityEventsArgs): ActivityTabHostIndex {
   const index: ActivityTabHostIndex = new Map()
   for (const [worktreeId, tabs] of Object.entries(args.unifiedTabsByWorktree ?? {})) {
     for (const tab of tabs) {
-      if (tab.contentType !== 'terminal' || !tab.executionHostId) {
+      if (
+        (tab.contentType !== 'terminal' && tab.contentType !== 'agent-session') ||
+        !tab.executionHostId
+      ) {
         continue
       }
       let byTabId = index.get(worktreeId)
@@ -93,9 +137,10 @@ function buildActivityTabHostIndex(args: BuildActivityEventsArgs): ActivityTabHo
         byTabId = new Map()
         index.set(worktreeId, byTabId)
       }
-      const existing = byTabId.get(tab.entityId)
+      const contextTabId = tab.contentType === 'terminal' ? tab.entityId : tab.id
+      const existing = byTabId.get(contextTabId)
       byTabId.set(
-        tab.entityId,
+        contextTabId,
         existing === undefined || existing === tab.executionHostId ? tab.executionHostId : null
       )
     }
@@ -184,7 +229,7 @@ export function buildActivityEvents(
 } {
   const events: ActivityEvent[] = []
   const seenEventIds = new Set<string>()
-  const tabContext = new Map<string, ActivityTabContext>()
+  const tabContext = buildActivityTabContext(args)
   const tabHostIndex = buildActivityTabHostIndex(args)
   const ownerCache = new Map<string, ActivityEventOwner>()
   const liveAgentByPaneKey: Record<string, ActivityLiveAgentSnapshot> = {}
@@ -202,18 +247,12 @@ export function buildActivityEvents(
     }
   }
 
-  for (const [worktreeId, tabs] of Object.entries(args.tabsByWorktree)) {
-    for (const tab of tabs) {
-      tabContext.set(tab.id, { worktreeId, tab })
-    }
-  }
-
   for (const [paneKey, entry] of Object.entries(args.agentStatusByPaneKey)) {
     const parsed = parsePaneKey(paneKey)
     if (!parsed) {
       continue
     }
-    const context = tabContext.get(parsed.tabId)
+    const context = tabContext.get(parsed.tabId) ?? attributedActivityTabContext(entry)
     if (!context) {
       continue
     }

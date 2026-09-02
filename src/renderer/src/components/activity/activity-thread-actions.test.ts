@@ -5,12 +5,16 @@ import type { AgentPaneThread } from './activity-thread-types'
 const mocks = vi.hoisted(() => ({
   getState: vi.fn(),
   activateTabAndFocusPane: vi.fn(),
+  activateStructuredAgentSessionTab: vi.fn(),
   activateAndRevealWorkspace: vi.fn()
 }))
 
 vi.mock('@/store', () => ({ useAppStore: { getState: mocks.getState } }))
 vi.mock('@/lib/activate-tab-and-focus-pane', () => ({
   activateTabAndFocusPane: mocks.activateTabAndFocusPane
+}))
+vi.mock('@/lib/structured-agent-session-tab-activation', () => ({
+  activateStructuredAgentSessionTab: mocks.activateStructuredAgentSessionTab
 }))
 vi.mock('@/lib/worktree-activation', () => ({
   activateAndRevealWorkspace: mocks.activateAndRevealWorkspace
@@ -48,6 +52,7 @@ describe('activity thread host routing', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.activateStructuredAgentSessionTab.mockReturnValue(false)
     getKnownWorktreeById.mockReturnValue(thread.worktree)
     mocks.getState.mockReturnValue({
       getKnownWorktreeById,
@@ -65,6 +70,7 @@ describe('activity thread host routing', () => {
       visibleWorkspaceHostIds: null,
       workspaceHostScope: 'all',
       tabsByWorktree: { [thread.worktree.id]: [thread.tab] },
+      unifiedTabsByWorktree: {},
       activeRepoId: thread.worktree.repoId,
       activeWorktreeId: thread.worktree.id,
       activeWorkspaceExecutionHostId: 'local',
@@ -91,6 +97,31 @@ describe('activity thread host routing', () => {
       '11111111-1111-4111-8111-111111111111',
       { flashFocusedPane: true, scrollToBottomIfOutputSinceLastView: true }
     )
+  })
+
+  it('activates a structured agent session instead of looking for a terminal pane', () => {
+    mocks.activateStructuredAgentSessionTab.mockReturnValue(true)
+    mocks.getState.mockReturnValue({
+      ...mocks.getState(),
+      tabsByWorktree: { [thread.worktree.id]: [] },
+      unifiedTabsByWorktree: {
+        [thread.worktree.id]: [{ id: thread.tab.id, contentType: 'agent-session' }]
+      }
+    })
+    const actions = createActivityThreadActions({
+      getMarkAllReadThreads: () => [thread],
+      acknowledgeAgents,
+      unacknowledgeAgents: vi.fn(),
+      setSelectedPaneKey
+    })
+
+    actions.selectThread(thread)
+
+    expect(mocks.activateStructuredAgentSessionTab).toHaveBeenCalledWith({
+      worktreeId: thread.worktree.id,
+      tabId: thread.tab.id
+    })
+    expect(mocks.activateTabAndFocusPane).not.toHaveBeenCalled()
   })
 
   it('jumps to and probes the matching host-qualified workspace', () => {
