@@ -51,6 +51,9 @@ export type RelayClient = {
   bulkChain: Promise<void>
   nextOutgoingSeq: number
   highestReceivedSeq: number
+  // Why: a client that never frames anything has no staleness to measure, so the silence window
+  // cannot see it. Its attach time is the only clock it has.
+  attachedAt: number
   // Why: the relay had no inbound-liveness signal at all, so a half-open client was never reaped
   // and kept its owner lease and paused PTYs indefinitely.
   lastReceivedAt: number | null

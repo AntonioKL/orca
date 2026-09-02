@@ -61,7 +61,7 @@ describe('RelayDispatcher silent-client reaper', () => {
     expect(detachListener).not.toHaveBeenCalled()
   })
 
-  it('never reaps a client that has not spoken yet', () => {
+  it('does not judge a client that has not spoken yet by the silence window', () => {
     // A relay is launched before its client finishes handshaking, and on a slow link that can
     // outlast the window. Reaping there would break the connect the client is still completing.
     const detachListener = vi.fn()
@@ -70,6 +70,32 @@ describe('RelayDispatcher silent-client reaper', () => {
     const clientId = dispatcher.attachClient(() => true)
 
     vi.advanceTimersByTime(TIMEOUT_MS * 5)
+
+    expect(detachListener).not.toHaveBeenCalledWith(clientId, expect.anything())
+  })
+
+  it('still bounds a client that never speaks at all', () => {
+    // Otherwise it is invisible to the silence window forever -- no lastReceivedAt to go stale --
+    // and its socket, writer and client entry are held for the life of the relay.
+    const detachListener = vi.fn()
+    dispatcher = new RelayDispatcher(() => true)
+    dispatcher.onClientDetached(detachListener)
+    const clientId = dispatcher.attachClient(() => true)
+
+    vi.advanceTimersByTime(TIMEOUT_MS * 7)
+
+    expect(detachListener).toHaveBeenCalledWith(clientId, 'local')
+  })
+
+  it("does not spend a mute client's connect budget while the host was suspended", () => {
+    // Same rebase the silence window gets: a paused process is not a peer that went away.
+    const detachListener = vi.fn()
+    dispatcher = new RelayDispatcher(() => true)
+    dispatcher.onClientDetached(detachListener)
+    const clientId = dispatcher.attachClient(() => true)
+
+    vi.setSystemTime(60 * 60_000)
+    vi.advanceTimersByTime(KEEPALIVE_SEND_MS)
 
     expect(detachListener).not.toHaveBeenCalledWith(clientId, expect.anything())
   })

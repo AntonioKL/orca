@@ -12,6 +12,12 @@ import type {
 } from './dispatcher-contract'
 import { RelayDispatcherClientState } from './dispatcher-client-state'
 
+// Why: a client that clears the endpoint handshake and then never frames anything is invisible to
+// the silence window -- it has no lastReceivedAt to go stale -- so its socket, writer and client
+// entry are held for the life of the relay. The bound is deliberately several windows wide: a real
+// client frames immediately after the handshake, so only a peer that is already gone reaches it.
+const SILENT_CONNECT_TIMEOUT_MS = TIMEOUT_MS * 6
+
 export abstract class RelayDispatcherClientLifecycle extends RelayDispatcherClientState {
   // Why: redirect outgoing frames to the reconnected socket without rebuilding the dispatcher + handler tree.
   // Why: a new multiplexer restarts at seq=1; reset state to avoid stalled acknowledgements.
@@ -122,6 +128,7 @@ export abstract class RelayDispatcherClientLifecycle extends RelayDispatcherClie
       bulkChain: Promise.resolve(),
       nextOutgoingSeq: 1,
       highestReceivedSeq: 0,
+      attachedAt: Date.now(),
       lastReceivedAt: null,
       keepaliveObserved: false,
       generation: 0,
@@ -146,6 +153,7 @@ export abstract class RelayDispatcherClientLifecycle extends RelayDispatcherClie
   protected resetClient(client: RelayClient): void {
     client.nextOutgoingSeq = 1
     client.highestReceivedSeq = 0
+    client.attachedAt = Date.now()
     client.lastReceivedAt = null
     client.keepaliveObserved = false
     client.decoder.reset()
@@ -185,8 +193,11 @@ export abstract class RelayDispatcherClientLifecycle extends RelayDispatcherClie
         if (client.closed) {
           continue
         }
-        if (resumedAfterPause && client.lastReceivedAt !== null) {
-          client.lastReceivedAt = now
+        if (resumedAfterPause) {
+          client.attachedAt = now
+          if (client.lastReceivedAt !== null) {
+            client.lastReceivedAt = now
+          }
         }
         client.writer.enqueue(
           'liveness',
@@ -220,20 +231,24 @@ export abstract class RelayDispatcherClientLifecycle extends RelayDispatcherClie
       if (client === this.primaryClient) {
         continue
       }
-      // Why the null check is not just defensive: a relay is launched before its client finishes
-      // handshaking, and on a slow link that can exceed the window. Reaping a client that has never
-      // spoken would break the connect it is still completing, so silence only counts against a
-      // client that has already proven it can talk.
+      if (client.closed) {
+        continue
+      }
+      // Why a client that has never spoken gets its own, much wider bound: a relay is launched
+      // before its client finishes handshaking, and on a slow link that can exceed the silence
+      // window, so judging it there would break the connect it is still completing. Leaving it
+      // unbounded instead held its socket and client entry forever.
+      if (client.lastReceivedAt === null) {
+        if (now - client.attachedAt > SILENT_CONNECT_TIMEOUT_MS) {
+          this.closeClient(client, new Error('Relay client never spoke'), true)
+        }
+        continue
+      }
       // Why keepaliveObserved gates this: not every client speaks the keepalive protocol. The
       // remote `orca` CLI sends one `orca.cli` request and waits for a result budgeted in minutes
       // (src/relay/remote-cli-timeout.ts), so judging it on inbound silence would kill
       // `terminal wait`, `--wait` and `orchestration ask` after 20s.
-      if (
-        client.closed ||
-        !client.keepaliveObserved ||
-        client.lastReceivedAt === null ||
-        now - client.lastReceivedAt <= TIMEOUT_MS
-      ) {
+      if (!client.keepaliveObserved || now - client.lastReceivedAt <= TIMEOUT_MS) {
         continue
       }
       this.closeClient(client, new Error('Relay client stopped answering'), true)
