@@ -1,4 +1,5 @@
-import { query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type * as ClaudeAgentSdk from '@anthropic-ai/claude-agent-sdk'
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { spawnProcess } from '../../shared/child-process/run-process'
 import { killCodexAppServerProcessTree } from '../codex/codex-app-server-session'
 import { buildClaudeChildProcessEnv } from './claude-child-process-environment'
@@ -14,6 +15,21 @@ import { createClaudeUserMessageQueue } from './claude-agent-sdk-user-message-qu
 import type { ClaudeStructuredSdkOptions } from './claude-structured-launch-resolution'
 
 export { ClaudeControlRequestError }
+
+/**
+ * The SDK is loaded at the structured-Claude boundary rather than by this module's
+ * import. The ordinary runtime's class graph statically reaches this file, and the
+ * SDK sets `process.env.NoDefaultCurrentDirectoryInExePath` at import time — a
+ * Windows executable-search change that a user who never leaves the terminal/TUI
+ * path never opted into, and a missing SDK would fail runtime startup. Memoized,
+ * so a session pays the import once per process rather than once per connection.
+ */
+let claudeAgentSdk: Promise<typeof ClaudeAgentSdk> | null = null
+
+function loadClaudeAgentSdk(): Promise<typeof ClaudeAgentSdk> {
+  claudeAgentSdk ??= import('@anthropic-ai/claude-agent-sdk')
+  return claudeAgentSdk
+}
 
 export type ClaudeStreamJsonLaunch = {
   /** Orca's resolved user CLI; the SDK falls back to a bundled binary that is not installed. */
@@ -72,6 +88,7 @@ export async function openClaudeStreamJsonConnection(
   handlers: ClaudeStreamJsonConnectionHandlers = {},
   spawnImpl: typeof spawnProcess = spawnProcess
 ): Promise<ClaudeStreamJsonConnection> {
+  const { query } = await loadClaudeAgentSdk()
   const spawner = createClaudeCodeProcessSpawn(spawnImpl)
   const bridge = createClaudeAgentSdkControlBridge(handlers)
   const inbox = createClaudeUserMessageQueue()
