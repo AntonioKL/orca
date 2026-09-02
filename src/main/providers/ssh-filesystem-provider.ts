@@ -39,8 +39,6 @@ import {
   readSshFileChunk,
   readSshTerminalArtifactChunk
 } from './ssh-filesystem-bounded-file-reader'
-import { SshFilesystemDirectoryReader } from './ssh-filesystem-directory-reader'
-import { requestSshMarkdownDocumentPaths } from './ssh-markdown-document-listing'
 import { writeSshFileBase64Chunk } from './ssh-filesystem-binary-write'
 import { readSshDocPreviewFile } from './ssh-filesystem-doc-preview'
 import { SshFilesystemFileReader } from './ssh-filesystem-file-reader'
@@ -52,7 +50,6 @@ export class SshFilesystemProvider implements IFilesystemProvider {
   private unsubscribeNotifications: (() => void) | null = null
   private tempDirPromise: Promise<string> | null = null
   private disposed = false
-  private readonly directoryReader: SshFilesystemDirectoryReader
   private readonly fileReader: SshFilesystemFileReader
   readonly downloadFolder?: IFilesystemProvider['downloadFolder']
 
@@ -65,7 +62,6 @@ export class SshFilesystemProvider implements IFilesystemProvider {
   ) {
     this.connectionId = connectionId
     this.mux = mux
-    this.directoryReader = new SshFilesystemDirectoryReader(mux)
     this.fileReader = new SshFilesystemFileReader(mux)
 
     if (createSftp) {
@@ -104,11 +100,8 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     return this.connectionId
   }
 
-  async readDir(
-    dirPath: string,
-    options?: { maxEntries?: number; maxRetainedBytes?: number }
-  ): Promise<DirEntry[]> {
-    return this.directoryReader.readDir(dirPath, options)
+  async readDir(dirPath: string): Promise<DirEntry[]> {
+    return (await this.mux.request('fs.readDir', { dirPath })) as DirEntry[]
   }
 
   readFile(...args: Parameters<IFilesystemProvider['readFile']>): Promise<FileReadResult> {
@@ -313,8 +306,6 @@ export class SshFilesystemProvider implements IFilesystemProvider {
       signal: options?.signal
     })) as string[]
   }
-
-  listMarkdownDocuments = (rootPath: string) => requestSshMarkdownDocumentPaths(this.mux, rootPath)
 
   supportsQuickOpenSearch = (options: { signal?: AbortSignal } = {}): Promise<boolean> =>
     probeSshQuickOpenSearchCapability(this.mux, options.signal)

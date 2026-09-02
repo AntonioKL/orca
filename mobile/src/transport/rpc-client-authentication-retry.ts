@@ -1,4 +1,4 @@
-import { redactedWebSocketEndpoint } from './redacted-websocket-endpoint'
+import { redactedWebSocketEndpoint } from './socket-event-debug'
 
 const AUTH_RETRY_BUDGET = 3
 

@@ -194,7 +194,6 @@ export class DirectRpcClient implements RpcClient {
     this.intentionallyClosed = true
     this.reconnect.cancel()
     const session = this.socketSession
-    session?.dispose()
     session?.clearTimers()
     this.liveness.stop()
     session?.close()
@@ -206,17 +205,6 @@ export class DirectRpcClient implements RpcClient {
 
   private openConnection(): void {
     if (this.intentionallyClosed) {
-      return
-    }
-    // Why: retired socket buffers still hold process memory; dialing again would stack another.
-    if (!this.socketFactory.canOpen()) {
-      this.connectionLog.emit(
-        'error',
-        'WebSocket reconnect deferred',
-        'Retired socket buffers are still draining'
-      )
-      this.connectionState.publish('reconnecting')
-      this.reconnect.schedule()
       return
     }
     this.connectionState.publish('connecting')
@@ -251,7 +239,6 @@ export class DirectRpcClient implements RpcClient {
 
   private retryAuthentication(reason: string): void {
     const closing = this.socketSession
-    closing?.dispose()
     this.socketSession = null
     closing?.clearKey()
     this.streams.markForReplay()
@@ -263,7 +250,6 @@ export class DirectRpcClient implements RpcClient {
 
   private latchAuthenticationFailure(reason: string): void {
     this.intentionallyClosed = true
-    this.socketSession?.dispose()
     this.socketSession?.close()
     this.socketSession = null
     this.connectionState.publish('auth-failed')

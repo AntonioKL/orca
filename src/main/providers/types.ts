@@ -19,7 +19,6 @@ export type {
 
 export type {
   FileChunkReadResult,
-  FilesystemDirectoryReadOptions,
   FileRangeReadResult,
   FileReadLimits,
   FileReadResult,

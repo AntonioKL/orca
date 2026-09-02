@@ -6,32 +6,7 @@ import type {
 
 const FILE_SEARCH_DEBOUNCE_MS = 120
 const FILE_SEARCH_QUERY_CACHE_LIMIT = 20
-export const MOBILE_NATIVE_CHAT_LEGACY_FILE_MAX_PATHS = 50_000
-export const MOBILE_NATIVE_CHAT_LEGACY_FILE_MAX_RETAINED_BYTES = 8 * 1024 * 1024
-const FILE_SEARCH_RESULT_MAX_RETAINED_BYTES = 256 * 1024
-
-export function retainMobileNativeChatFilePaths(
-  result: unknown,
-  maxPaths: number,
-  maxRetainedBytes: number
-): string[] {
-  const files = (result as { files?: Array<{ relativePath?: string }> }).files ?? []
-  const paths: string[] = []
-  let retainedBytes = 0
-  for (const file of files) {
-    const path = file.relativePath
-    if (typeof path !== 'string' || path.length === 0) {
-      continue
-    }
-    const nextBytes = retainedBytes + path.length * 2 + 64
-    if (paths.length >= maxPaths || nextBytes > maxRetainedBytes) {
-      break
-    }
-    paths.push(path)
-    retainedBytes = nextBytes
-  }
-  return paths
-}
+const FILE_SEARCH_RESULT_LIMIT = 16
 
 /** Debounces current-host path searches, bounds the mobile result/cache, and
  *  falls back to the legacy one-time full list when paired to an older host. */
@@ -98,15 +73,7 @@ export function useMobileNativeChatFileSearch(args: {
         }
         void operations
           .searchFiles(target, normalizedQuery)
-          .then((paths) =>
-            applyPaths(
-              retainMobileNativeChatFilePaths(
-                { files: paths.map((relativePath) => ({ relativePath })) },
-                16,
-                FILE_SEARCH_RESULT_MAX_RETAINED_BYTES
-              )
-            )
-          )
+          .then((paths) => applyPaths(paths.slice(0, FILE_SEARCH_RESULT_LIMIT)))
           .catch(() => {})
       }, FILE_SEARCH_DEBOUNCE_MS)
     },

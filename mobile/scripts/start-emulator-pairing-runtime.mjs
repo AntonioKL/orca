@@ -3,10 +3,7 @@ import { mkdirSync, mkdtempSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import {
-  appendProcessOutputTail,
-  attachBoundedProcessLineReader
-} from './bounded-process-line-reader.mjs'
+import readline from 'node:readline'
 import { createEmulatorPairingChildEnvironment } from './emulator-pairing-child-environment.mjs'
 import { linkEmulatorMacKeychain } from './emulator-macos-keychain-home.mjs'
 import { seedEmulatorAgentHistoryFixture } from './emulator-agent-history-fixture.mjs'
@@ -213,17 +210,17 @@ async function waitForPairingRuntime({
       reject(error)
     }
 
-    closeStdout = attachBoundedProcessLineReader(child.stdout, (line) => {
-      if (!resolved) {
-        output = appendProcessOutputTail(output, line)
-      }
+    const rl = readline.createInterface({ input: child.stdout })
+    closeStdout = () => rl.close()
+    rl.on('line', (line) => {
+      output += line + '\n'
       handleRuntimeLine(line, finishResolve)
     })
 
-    closeStderr = attachBoundedProcessLineReader(child.stderr, (line) => {
-      if (!resolved) {
-        stderr = appendProcessOutputTail(stderr, line)
-      }
+    const rlErr = readline.createInterface({ input: child.stderr })
+    closeStderr = () => rlErr.close()
+    rlErr.on('line', (line) => {
+      stderr += line + '\n'
     })
 
     child.on('error', (error) => {

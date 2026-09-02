@@ -5,42 +5,40 @@ import {
   type NativeChatLineDecoder
 } from './transcript-tail-reader'
 import type { TranscriptFileSource } from './transcript-file-source'
-import {
-  estimateTranscriptMessageRetainedBytes,
-  TranscriptMessageRetention
-} from './transcript-message-retention'
-import { TranscriptRecordBuffer } from './transcript-record-buffer'
 import { openTranscriptReadStream, wslGatedStat } from './wsl-transcript-fs-access'
 
-export const APPEND_BATCH_MESSAGE_LIMIT = 40
-export const APPEND_BATCH_RETAINED_BYTE_LIMIT = 8 * 1024 * 1024
-export const INCREMENTAL_DRAIN_RETAINED_BYTE_LIMIT = 32 * 1024 * 1024
+const APPEND_BATCH_MESSAGE_LIMIT = 40
 const INCREMENTAL_READ_CHUNK_BYTES = 64 * 1024
 
 export type IncrementalTranscriptState = {
   offset: number
-  pendingRecord: TranscriptRecordBuffer
+  pendingChunks: Buffer[]
   pendingStart: number
+  pendingBytes: number
+  droppingOversizedRecord: boolean
 }
 
 type IncrementalTranscriptReadOptions = {
   fileSource?: TranscriptFileSource
-  maxDrainRetainedBytes?: number
   signal?: AbortSignal
 }
 
 export function createIncrementalTranscriptState(): IncrementalTranscriptState {
   return {
     offset: 0,
-    pendingRecord: new TranscriptRecordBuffer(MAX_NATIVE_CHAT_TRANSCRIPT_RECORD_BYTES),
-    pendingStart: 0
+    pendingChunks: [],
+    pendingStart: 0,
+    pendingBytes: 0,
+    droppingOversizedRecord: false
   }
 }
 
 export function resetIncrementalTranscriptState(state: IncrementalTranscriptState): void {
   state.offset = 0
-  state.pendingRecord.clear()
+  state.pendingChunks.length = 0
   state.pendingStart = 0
+  state.pendingBytes = 0
+  state.droppingOversizedRecord = false
 }
 
 export async function readIncrementalTranscriptMessages(
@@ -62,17 +60,9 @@ export async function readIncrementalTranscriptMessages(
     return []
   }
   const messages: NativeChatMessage[] = []
-  let messageBatchBytes = 0
-  let drainRetainedBytes = 0
-  const requestedDrainLimit = options.maxDrainRetainedBytes
-  const maxDrainRetainedBytes =
-    Number.isSafeInteger(requestedDrainLimit) && (requestedDrainLimit ?? 0) > 0
-      ? Math.min(INCREMENTAL_DRAIN_RETAINED_BYTE_LIMIT, requestedDrainLimit ?? 0)
-      : INCREMENTAL_DRAIN_RETAINED_BYTE_LIMIT
-  const retainedSnapshot = onBatch ? null : new TranscriptMessageRetention()
   if (fileSource) {
     await readProviderChunks(fileSource)
-    return retainedSnapshot?.values() ?? messages
+    return messages
   }
   const stream = openTranscriptReadStream(
     filePath,
@@ -84,13 +74,11 @@ export async function readIncrementalTranscriptMessages(
     let absoluteOffset = state.offset
     for await (const rawChunk of stream) {
       const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk)
-      if (!processChunk(chunk, absoluteOffset)) {
-        break
-      }
+      processChunk(chunk, absoluteOffset)
       absoluteOffset += chunk.length
       state.offset = absoluteOffset
     }
-    return retainedSnapshot?.values() ?? messages
+    return messages
   } finally {
     // Early exits (throw/oversized-record bail) must not leak the fd or, on
     // UNC, the gated handle the generator's finally closes.
@@ -109,9 +97,7 @@ export async function readIncrementalTranscriptMessages(
         if (chunk.length === 0 || chunk.length > requestedBytes) {
           throw new Error('Transcript changed during read')
         }
-        if (!processChunk(chunk, absoluteOffset)) {
-          return
-        }
+        processChunk(chunk, absoluteOffset)
         absoluteOffset += chunk.length
         state.offset = absoluteOffset
       }
@@ -120,80 +106,64 @@ export async function readIncrementalTranscriptMessages(
     }
   }
 
-  function processChunk(chunk: Buffer, absoluteOffset: number): boolean {
+  function processChunk(chunk: Buffer, absoluteOffset: number): void {
     let segmentStart = 0
     let newline = chunk.indexOf(0x0a)
     while (newline >= 0) {
-      state.pendingRecord.append(chunk.subarray(segmentStart, newline))
-      if (!state.pendingRecord.isOversized && !decodeLine()) {
-        const retryOffset = state.pendingStart
-        resetPendingLine(retryOffset)
-        state.offset = retryOffset
-        return false
+      retainPart(chunk.subarray(segmentStart, newline))
+      if (!state.droppingOversizedRecord) {
+        decodeLine()
       }
       resetPendingLine(absoluteOffset + newline + 1)
       segmentStart = newline + 1
       newline = chunk.indexOf(0x0a, segmentStart)
     }
     if (segmentStart < chunk.length) {
-      state.pendingRecord.append(chunk.subarray(segmentStart))
+      retainPart(chunk.subarray(segmentStart))
     }
-    return true
+  }
+
+  function retainPart(part: Buffer): void {
+    if (state.droppingOversizedRecord) {
+      return
+    }
+    state.pendingBytes += part.length
+    if (state.pendingBytes > MAX_NATIVE_CHAT_TRANSCRIPT_RECORD_BYTES) {
+      state.pendingChunks.length = 0
+      state.droppingOversizedRecord = true
+      return
+    }
+    state.pendingChunks.push(part)
   }
 
   function resetPendingLine(nextStart: number): void {
-    state.pendingRecord.clear()
+    state.pendingChunks.length = 0
+    state.pendingBytes = 0
+    state.droppingOversizedRecord = false
     state.pendingStart = nextStart
   }
 
-  function decodeLine(): boolean {
-    let line = state.pendingRecord.toString()
+  function decodeLine(): void {
+    let line = Buffer.concat(state.pendingChunks).toString('utf8')
     if (line.endsWith('\r')) {
       line = line.slice(0, -1)
     }
     if (!line) {
-      return true
+      return
     }
     const fallbackId = transcriptFallbackId(filePath, state.pendingStart)
-    const message = decode(line, fallbackId)
-    const estimatedBytes = message
-      ? estimateTranscriptMessageRetainedBytes(state.pendingRecord.byteLength)
-      : 0
-    if (
-      message &&
-      onBatch &&
-      drainRetainedBytes > 0 &&
-      estimatedBytes > maxDrainRetainedBytes - drainRetainedBytes
-    ) {
-      return false
-    }
     const lifecycle = decodeLifecycle?.(line, fallbackId)
     if (lifecycle) {
       onLifecycle?.(lifecycle)
     }
+    const message = decode(line, fallbackId)
     if (!message) {
-      return true
-    }
-    if (retainedSnapshot) {
-      retainedSnapshot.add(message, state.pendingRecord.byteLength)
-      return true
-    }
-    drainRetainedBytes += estimatedBytes
-    if (
-      onBatch &&
-      messages.length > 0 &&
-      estimatedBytes > APPEND_BATCH_RETAINED_BYTE_LIMIT - messageBatchBytes
-    ) {
-      onBatch(messages.splice(0))
-      messageBatchBytes = 0
+      return
     }
     messages.push(message)
-    messageBatchBytes += estimatedBytes
     if (onBatch && messages.length >= APPEND_BATCH_MESSAGE_LIMIT) {
       onBatch(messages.splice(0))
-      messageBatchBytes = 0
     }
-    return true
   }
 }
 
