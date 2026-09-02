@@ -24,16 +24,52 @@ describe('resolveWorktreeLaunchHost', () => {
     ).toEqual({ kind: 'resolved', repo: localRow, connectionId: null })
   })
 
-  it('never hands a runtime-owned worktree a client SSH connection', () => {
+  // The settled rule: the execution host is authoritative, and a row on some *other* host is never
+  // evidence about this one — not for the connection, and not for the metadata row either. This is
+  // the question `getRepoSshConnectionId` and `getSshTargetIdForExecutionHost` once answered two
+  // ways; they now compose, and `execution-host.test.ts` pins the composition.
+  it('never hands a worktree a connection belonging to a different host', () => {
     const clientOwnedRow = { id: 'r', path: '/p', connectionId: 'ssh-client' }
     expect(
       resolveWorktreeLaunchHost([clientOwnedRow], { repoId: 'r', hostId: 'runtime:env-a' })
-    ).toEqual({ kind: 'resolved', repo: clientOwnedRow, connectionId: null })
-    // Two rows and no match: nothing names the owner, so the row is not evidence either.
+    ).toEqual({ kind: 'resolved', repo: null, connectionId: null })
+    // Even the runtime host's *own* row contributes no PTY route: its nested target lives in that
+    // machine's namespace, so spawning against it here would dial the wrong box. The renderer
+    // reads the same resolution and does want that id — see execution-host.test.ts.
+    const nestedRow = {
+      id: 'r',
+      path: '/p',
+      connectionId: 'ssh-nested',
+      executionHostId: 'runtime:env-a' as const
+    }
     expect(
-      resolveWorktreeLaunchHost([clientOwnedRow, { id: 'r', path: '/q' }], {
+      resolveWorktreeLaunchHost([nestedRow], { repoId: 'r', hostId: 'runtime:env-a' })
+    ).toEqual({ kind: 'resolved', repo: nestedRow, connectionId: null })
+    // Two SSH hosts, one shared repo id: the worktree's own host wins outright.
+    expect(
+      resolveWorktreeLaunchHost([{ id: 'r', path: '/p', connectionId: 'openclaw' }], {
         repoId: 'r',
-        hostId: 'runtime:env-a'
+        hostId: 'ssh:m4air'
+      })
+    ).toEqual({ kind: 'resolved', repo: null, connectionId: 'm4air' })
+    expect(
+      resolveWorktreeLaunchHost(
+        [
+          { id: 'r', path: '/p', connectionId: 'openclaw' },
+          { id: 'r', path: '/q', connectionId: 'm4air' }
+        ],
+        { repoId: 'r', hostId: 'ssh:m4air' }
+      )
+    ).toEqual({
+      kind: 'resolved',
+      repo: { id: 'r', path: '/q', connectionId: 'm4air' },
+      connectionId: 'm4air'
+    })
+    // A row declaring itself local hands out no SSH connection, whatever `connectionId` says.
+    expect(
+      resolveWorktreeLaunchHost([{ id: 'r', path: '/p', connectionId: 'openclaw' }], {
+        repoId: 'r',
+        hostId: 'local'
       })
     ).toEqual({ kind: 'resolved', repo: null, connectionId: null })
   })

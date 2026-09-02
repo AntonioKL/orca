@@ -4,7 +4,7 @@ import {
   resolveIndexedRepoOwner,
   resolveIndexedWorktreeOwner
 } from './worktree-runtime-owner-index'
-import { getRepoSshConnectionId, normalizeExecutionHostId } from '../../../shared/execution-host'
+import { resolveWorktreeExecutionHost } from '../../../shared/worktree-execution-host-resolution'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import { getRepoIdFromWorktreeId } from '../../../shared/worktree/id'
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
@@ -74,23 +74,16 @@ export function getConnectionIdFromState(
   }
   const worktree = worktreeResolution.kind === 'resolved' ? worktreeResolution.owner : undefined
   const repoId = worktree?.repoId ?? getRepoIdFromWorktreeId(worktreeId)
-  // Why (#17799): take the connection off the same host record the rest of owner
-  // resolution used. A host-blind, last-wins repo lookup can pair a runtime owner
-  // with a client-owned SSH connection the runtime has never heard of.
-  const worktreeHostId = normalizeExecutionHostId(worktree?.hostId)
-  const hostScopedRepo = worktreeHostId
-    ? findIndexedRepoOwnerForHost(state.repos, repoId, worktreeHostId)
-    : null
-  if (hostScopedRepo) {
-    return getRepoSshConnectionId(hostScopedRepo)
-  }
-  const repoResolution = resolveIndexedRepoOwner(state.repos, repoId)
-  if (repoResolution.kind === 'ambiguous') {
-    return undefined
-  }
-  return repoResolution.kind === 'resolved'
-    ? getRepoSshConnectionId(repoResolution.owner)
-    : undefined
+  // Why (#17799, #11163): one rule, shared with main's launch scope. The renderer's contribution is
+  // only the memoized index — unrelated store writes must not rescan every repository.
+  const resolution = resolveWorktreeExecutionHost(
+    {
+      byId: (id) => resolveIndexedRepoOwner(state.repos, id),
+      byHost: (id, hostId) => findIndexedRepoOwnerForHost(state.repos, id, hostId)
+    },
+    { repoId, hostId: worktree?.hostId ?? null }
+  )
+  return resolution.kind === 'resolved' ? resolution.connectionId : undefined
 }
 
 export function getConnectionIdForFileFromState(
