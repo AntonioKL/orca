@@ -563,14 +563,27 @@ describe('a structured Claude session over agentSession.*', () => {
     ).resolves.toMatchObject({ turnId: 'user-1', cancelled: true })
     expect(claude.live().calls.at(-1)).toMatchObject({ subtype: 'interrupt' })
 
+    const host = getStructuredAgentSessionHost() as unknown as {
+      deps: {
+        store: {
+          getRecord: (sessionId: string) => {
+            providerHandleChain: { handle: { provider: string; leafUuid?: string | null } }[]
+          }
+        }
+      }
+    }
+    expect(host.deps.store.getRecord(SESSION).providerHandleChain.at(-1)?.handle).toMatchObject({
+      provider: 'claude',
+      leafUuid: null
+    })
     const old = claude.live()
     const resumed = await ok<{ fence: number }>('agentSession.ensure', ensureParams(created.fence))
     expect(resumed.fence).toBe(created.fence + 1)
     expect(old.closed).toBe(true)
-    expect(claude.live().launch.options).toMatchObject({ resume: PROVIDER_SESSION })
-    const host = getStructuredAgentSessionHost() as unknown as {
-      deps: { store: { getRecord: (sessionId: string) => { providerHandleChain: unknown[] } } }
-    }
+    expect(claude.live().launch.options).toMatchObject({
+      resume: PROVIDER_SESSION,
+      resumeSessionAt: 'assistant-leaf'
+    })
     expect(host.deps.store.getRecord(SESSION).providerHandleChain.at(-1)).toMatchObject({
       handle: {
         provider: 'claude',

@@ -143,6 +143,7 @@ export async function acquireClaudeSession({
       )
     }
     acquisitions.assertCurrent(sessionId, attempt)
+    const priorSession = sessions.get(sessionId)
     if (!(await closeClaudePublishedSessionForDeps(sessions, sessionId, deps))) {
       throw new AgentSessionAcquisitionExitUnprovenError(
         new Error(`claude session ${sessionId} could not be stopped`)
@@ -151,8 +152,19 @@ export async function acquireClaudeSession({
     // Any earlier session is closed or already gone: its exit says nothing about this start.
     exits.delete(sessionId)
     acquisitions.assertCurrent(sessionId, attempt)
+    // Closing persists the prior connection's final leaf, so launch validates that durable head.
+    const launchIdentity = priorSession
+      ? {
+          ...input.identity,
+          providerHandle: {
+            kind: 'claude' as const,
+            sessionId: priorSession.providerSessionId,
+            leafUuid: priorSession.leafUuid
+          }
+        }
+      : input.identity
     const launch = await deps
-      .resolveLaunch({ identity: input.identity })
+      .resolveLaunch({ identity: launchIdentity })
       .catch((error: unknown) => {
         throw error instanceof AgentSessionPreSpawnError
           ? error
