@@ -7,24 +7,29 @@ import { store, syncSinglePty } from '../orca-runtime-test-fixtures.spec'
 // `terminal.send --enter` from the atomic bracketed-paste route to unframed 16 KiB chunks,
 // which Claude's composer truncates for large prompts (STA-4577).
 describe('isTerminalRunningSettledPromptAgent foreground confirmation', () => {
-  it('confirms an unrecognized foreground name before refusing the settled route', async () => {
-    const getForegroundProcess = vi.fn(async () => '2.1.258')
-    const confirmForegroundProcess = vi.fn(async () => 'claude')
-    const runtime = new OrcaRuntimeService(store)
-    runtime.setPtyController({
-      write: () => true,
-      kill: () => true,
-      getForegroundProcess,
-      confirmForegroundProcess
-    })
-    syncSinglePty(runtime, 'pty-1', { paneTitle: 'bash' })
-    const [terminal] = (await runtime.listTerminals()).terminals
+  // `2.1.258`: macOS p_comm for the native Claude install. `bash.exe`: the Windows daemon
+  // tracker answers with the shell fallback until its async scan lands.
+  it.each(['2.1.258', 'bash.exe'])(
+    'confirms an unrecognized foreground (%s) before refusing the settled route',
+    async (cachedForeground) => {
+      const getForegroundProcess = vi.fn(async () => cachedForeground)
+      const confirmForegroundProcess = vi.fn(async () => 'claude')
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess,
+        confirmForegroundProcess
+      })
+      syncSinglePty(runtime, 'pty-1', { paneTitle: 'bash' })
+      const [terminal] = (await runtime.listTerminals()).terminals
 
-    await expect(runtime.isTerminalRunningSettledPromptAgent(terminal.handle)).resolves.toBe(true)
-    expect(confirmForegroundProcess).toHaveBeenCalledWith('pty-1')
-    // The confirmed identity is reused; the cached read must not be re-consulted and win.
-    expect(getForegroundProcess).toHaveBeenCalledTimes(1)
-  })
+      await expect(runtime.isTerminalRunningSettledPromptAgent(terminal.handle)).resolves.toBe(true)
+      expect(confirmForegroundProcess).toHaveBeenCalledWith('pty-1')
+      // The confirmed identity is reused; the cached read must not be re-consulted and win.
+      expect(getForegroundProcess).toHaveBeenCalledTimes(1)
+    }
+  )
 
   it('keeps legacy delivery when confirmation also finds no target agent', async () => {
     const confirmForegroundProcess = vi.fn(async () => 'vim')
