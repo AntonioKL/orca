@@ -104,8 +104,9 @@ export const RELAY_PTY_SWEEP_MAX_PER_PASS = 8
 export const RELAY_PTY_SWEEP_MAX_EVIDENCE_AGE_MS = 5_000
 
 /** The host's own answer to "is anything running in this pane?". Only a positive "no" clears the
- *  sweep; every other shape — an older host, an unreadable process table, a named foreground
- *  process, a busy foreground group — is a reason to leave the process alone. */
+ *  sweep; every other shape — an older host, an unreadable process table, an observation too old to
+ *  describe now, a named foreground process, any other process group on the pane's terminal — is a
+ *  reason to leave the process alone. */
 function foregroundSkipReason(
   evidence: ForegroundProcessEvidence | undefined,
   context: RelayPtySweepContext
