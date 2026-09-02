@@ -111,7 +111,19 @@ export function bindReplayDataDrain(session: ConnectPanePtySession): void {
       if (!isCurrentPayload()) {
         continue
       }
-      // Why before the clear: the payload's wraps and cursor moves are relative
+      // Relay replay buffers may overlap with content already rendered in
+      // xterm. Local eager replay decides this earlier so metadata-only frames
+      // can keep restored scrollback while still using the replay guard.
+      // Why ahead of the source-grid resize: the clear is grid-independent, so
+      // dropping the scrollback first spares a reflow of history the very next
+      // sequence discards (see use-terminal-container-fit-sync.ts on its cost).
+      if (clearBeforeReplay) {
+        await session.writeReplayDataAsync('\x1b[2J\x1b[3J\x1b[H')
+        if (!isCurrentPayload()) {
+          continue
+        }
+      }
+      // Why before the frame: the payload's wraps and cursor moves are relative
       // to the grid the host serialized it at. Parsing it at the pane's own grid
       // clips or re-wraps the image, and an idle TUI never repaints to correct
       // it — the pane stays blank until the next byte arrives.
@@ -130,15 +142,6 @@ export function bindReplayDataDrain(session: ConnectPanePtySession): void {
           session.suppressStructuralReplayPtyResize = false
         }
         replayedAtSourceGrid = true
-      }
-      // Relay replay buffers may overlap with content already rendered in
-      // xterm. Local eager replay decides this earlier so metadata-only frames
-      // can keep restored scrollback while still using the replay guard.
-      if (clearBeforeReplay) {
-        await session.writeReplayDataAsync('\x1b[2J\x1b[3J\x1b[H')
-        if (!isCurrentPayload()) {
-          continue
-        }
       }
       if (clearBeforeReplay || data.length > 0) {
         // Why: an empty clearing frame is still an authoritative repaint and
