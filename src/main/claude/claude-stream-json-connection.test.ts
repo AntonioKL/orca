@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { spawnProcess } from '../../shared/child-process/run-process'
+import { spawnProcess, type SpawnedProcess } from '../../shared/child-process/run-process'
 import type { ProcessSpec } from '../../shared/child-process/process-spec'
 import {
   openClaudeStreamJsonConnection,
@@ -37,6 +37,7 @@ afterEach(async () => {
     rmSync(dir, { recursive: true, force: true })
   }
   spawned.splice(0)
+  spawnedChildren.splice(0)
   vi.unstubAllEnvs()
 })
 
@@ -74,6 +75,8 @@ function launchFor(
 
 /** The derived child environment, captured where Orca actually hands it to the OS. */
 const spawned: ProcessSpec[] = []
+/** The retained child, so a test can end it the way a crashing CLI would. */
+const spawnedChildren: SpawnedProcess[] = []
 
 async function open(
   launch: ClaudeStreamJsonLaunch,
@@ -81,7 +84,9 @@ async function open(
 ): Promise<ClaudeStreamJsonConnection> {
   const connection = await openClaudeStreamJsonConnection(launch, handlers, (spec) => {
     spawned.push(spec)
-    return spawnProcess(spec)
+    const child = spawnProcess(spec)
+    spawnedChildren.push(child)
+    return child
   })
   openConnections.push(connection)
   return connection
@@ -186,6 +191,26 @@ describe('Claude stream-json connection', () => {
     await until(() => messages.find((message) => message.uuid === 'uuid-replay-1'), 'the replay')
     // The replay is delivered verbatim, so the dispatch acknowledgement still binds on it.
     expect(messages.find((message) => message.uuid === 'uuid-replay-1')).toEqual(replay)
+  })
+
+  it('rejects a send the SDK pulled but could not write to a terminated child', async () => {
+    const scenario = scriptScenario([{ awaitUserMessage: true }, HOLD_OPEN])
+    const connection = await open(launchFor(scenario))
+    const child = spawnedChildren.at(-1)
+
+    // Same tick as the send, so the liveness guard still passes and the frame
+    // reaches the SDK's input pump: its `transport.write` is what fails, which is
+    // the window a child crashing mid-send actually opens.
+    child?.kill('SIGKILL')
+    const sent = connection.send({
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+      parent_tool_use_id: null,
+      session_id: SESSION_ID
+    })
+
+    await expect(sent).rejects.toThrow()
+    expect(readReportSafely(scenario)?.userMessages ?? []).toHaveLength(0)
   })
 
   it('delivers an unmodeled frame verbatim so the provider-fallback row survives', async () => {
