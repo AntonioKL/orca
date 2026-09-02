@@ -22,7 +22,7 @@ describe('batched foreground process correlation', () => {
       resolveAgentForegroundProcessesFromIndex(buildProcessTableIndex(rows), [
         { rootPid: 100, fallbackProcess: 'zsh' }
       ])
-    ).toEqual([{ available: true, processName: 'codex', shellIsForeground: false }])
+    ).toEqual([{ available: true, processName: 'codex', shellOwnsEveryTtyProcessGroup: false }])
   })
 
   it('reports whether the shell itself owns the terminal, named process or not', () => {
@@ -41,8 +41,8 @@ describe('batched foreground process correlation', () => {
         { rootPid: 300, fallbackProcess: 'zsh' }
       ])
     ).toEqual([
-      { available: true, processName: null, shellIsForeground: true },
-      { available: true, processName: null, shellIsForeground: false }
+      { available: true, processName: null, shellOwnsEveryTtyProcessGroup: true },
+      { available: true, processName: null, shellOwnsEveryTtyProcessGroup: false }
     ])
   })
 

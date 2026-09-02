@@ -3,6 +3,7 @@ import type { IPtyProvider } from '../providers/types'
 import { toAppSshPtyId, toRelaySshPtyId } from '../providers/ssh-pty-id'
 import {
   planRelayPtySweep,
+  RELAY_PTY_SWEEP_MAX_EVIDENCE_AGE_MS,
   RELAY_PTY_SWEEP_MIN_AGE_MS,
   type RelayPtyOwnershipEvidence
 } from '../../shared/ssh-relay-pty-ownership-proof'
@@ -22,6 +23,7 @@ export type SshOrphanRelayPtySweepArgs = {
   minimumHostAgeMs?: number
   /** Absolute budget for the whole pass, in ms from its start. */
   passBudgetMs?: number
+  maximumEvidenceAgeMs?: number
 }
 
 /** The two client-side claims the plan needs, read in one pass over the leases.
@@ -29,9 +31,15 @@ export type SshOrphanRelayPtySweepArgs = {
  *  `routed` is every relay PTY id this client still has a route to: a live lease, an id this
  *  connect reattached, or a stop it recorded and has not delivered.
  *
- *  `expired` is separate on purpose. `expired` is written by four paths — a pane re-leasing under a
- *  new relay id, a reattach that failed on the transport, a pane surface missing from the layout,
- *  and a retired reattach — and every one of them deliberately leaves the remote process running.
+ *  `expired` is separate on purpose. It is written by four paths, and every one of them
+ *  deliberately leaves the remote process running: a pane re-leasing under a new relay id, a pane
+ *  surface missing from the layout, a retired reattach, and a reattach the HOST answered "not
+ *  found" for. Only the second of those is reached with the process provably alive — the layout
+ *  refusal runs after `pty.attach` already succeeded (`restoreReattachedPtyRuntime`), which is
+ *  precisely why its own comment reads "topology absence alone is not authority to kill a
+ *  process". A reattach that failed on the transport writes nothing at all: it early-returns as
+ *  `reattachAttemptsExhausted` and the lease stays `attached`, hence routed.
+ *
  *  Folding it into `routed` would work, but it would also lose the reason in the skip log, and this
  *  is the distinction the sweep most needs to be able to explain. */
 function clientClaims(args: SshOrphanRelayPtySweepArgs): {
@@ -95,6 +103,9 @@ export async function sweepOrphanedRelayPtys(args: SshOrphanRelayPtySweepArgs): 
   const deadlineMs = now() + (args.passBudgetMs ?? RELAY_PTY_SWEEP_PASS_BUDGET_MS)
   try {
     const processes = await args.provider.listProcesses({ deadlineMs })
+    // The instant the host's observations reached this client. Every later step — reading the
+    // leases, planning, issuing the stops — ages them, and the plan has to see that age.
+    const listedAtMs = now()
     if (!args.shouldContinue() || now() >= deadlineMs) {
       return
     }
@@ -106,7 +117,9 @@ export async function sweepOrphanedRelayPtys(args: SshOrphanRelayPtySweepArgs): 
         isSessionOwner: args.isSessionOwner,
         routedPtyIds: claims.routed,
         expiredLeasePtyIds: claims.expired,
-        minimumHostAgeMs: args.minimumHostAgeMs ?? RELAY_PTY_SWEEP_MIN_AGE_MS
+        minimumHostAgeMs: args.minimumHostAgeMs ?? RELAY_PTY_SWEEP_MIN_AGE_MS,
+        evidenceAgeSinceListingMs: Math.max(0, now() - listedAtMs),
+        maximumEvidenceAgeMs: args.maximumEvidenceAgeMs ?? RELAY_PTY_SWEEP_MAX_EVIDENCE_AGE_MS
       }
     )
     if (plan.sweep.length === 0) {
@@ -118,12 +131,15 @@ export async function sweepOrphanedRelayPtys(args: SshOrphanRelayPtySweepArgs): 
           return
         }
         try {
-          // Fenced on the incarnation the same listing published, so a relay that renumbered its
-          // ids between the read and this call refuses the stop instead of hitting a stranger.
+          // Two fences, both enforced by the host that owns the process. The incarnation stops a
+          // relay that renumbered its ids between the read and this call from hitting a stranger;
+          // the owner id makes the host re-check the ownership rule itself, so the one irreversible
+          // call in this flow is not authorized by the client alone.
           await args.provider.shutdown(toAppSshPtyId(args.targetId, target.ptyId), {
             immediate: true,
             deadlineMs,
-            expectedIncarnationId: target.incarnationId
+            expectedIncarnationId: target.incarnationId,
+            expectedOwnerClientInstanceId: args.clientInstanceId
           })
           console.log(
             `[ssh-orphan-sweep] stopped orphaned relay PTY ${args.targetId}/${target.ptyId}`

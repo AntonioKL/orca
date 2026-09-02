@@ -132,7 +132,7 @@ function hostEntry(
       ...OBSERVATION,
       verdict: 'live',
       processName: null,
-      shellIsForeground: true
+      shellOwnsEveryTtyProcessGroup: true
     },
     ...overrides
   }
@@ -246,7 +246,7 @@ describe('SshRelaySession orphaned relay PTY sweep', () => {
           ...OBSERVATION,
           verdict: 'live',
           processName: 'claude',
-          shellIsForeground: false
+          shellOwnsEveryTtyProcessGroup: false
         }
       })
     ])

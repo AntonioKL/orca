@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { ForegroundProcessEvidence } from './foreground-process-evidence'
 import {
   planRelayPtySweep,
+  RELAY_PTY_SWEEP_MAX_EVIDENCE_AGE_MS,
   RELAY_PTY_SWEEP_MAX_PER_PASS,
   RELAY_PTY_SWEEP_MIN_AGE_MS,
   type RelayPtyOwnershipEvidence,
@@ -16,7 +17,7 @@ const OBSERVATION = { authorityGeneration: 'gen-1', observationEpoch: 1, capture
 
 /** The host looked at the pane and saw its own shell owning the terminal: nothing is running. */
 function idleShell(): ForegroundProcessEvidence {
-  return { ...OBSERVATION, verdict: 'live', processName: null, shellIsForeground: true }
+  return { ...OBSERVATION, verdict: 'live', processName: null, shellOwnsEveryTtyProcessGroup: true }
 }
 
 function orphan(overrides: Partial<RelayPtyOwnershipEvidence> = {}): RelayPtyOwnershipEvidence {
@@ -38,6 +39,8 @@ function context(overrides: Partial<RelayPtySweepContext> = {}): RelayPtySweepCo
     routedPtyIds: new Set<string>(),
     expiredLeasePtyIds: new Set<string>(),
     minimumHostAgeMs: RELAY_PTY_SWEEP_MIN_AGE_MS,
+    evidenceAgeSinceListingMs: 0,
+    maximumEvidenceAgeMs: RELAY_PTY_SWEEP_MAX_EVIDENCE_AGE_MS,
     ...overrides
   }
 }
@@ -80,7 +83,7 @@ describe('planRelayPtySweep', () => {
             ...OBSERVATION,
             verdict: 'live',
             processName: 'claude',
-            shellIsForeground: false
+            shellOwnsEveryTtyProcessGroup: false
           }
         })
       ],
@@ -101,7 +104,7 @@ describe('planRelayPtySweep', () => {
             ...OBSERVATION,
             verdict: 'live',
             processName: null,
-            shellIsForeground: false
+            shellOwnsEveryTtyProcessGroup: false
           }
         })
       ],

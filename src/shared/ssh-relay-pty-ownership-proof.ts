@@ -51,14 +51,25 @@ export type RelayPtySweepContext = {
    *
    *  Separate from {@link routedPtyIds} because it is a different fact with the same verdict: an
    *  expired lease records that THIS CLIENT lost its handle — a pane re-leased under a new relay
-   *  id, a reattach that failed on the transport, a pane surface that is no longer in the layout.
-   *  Every one of those writers deliberately declines to stop the remote process, and client-side
-   *  absence is `unverifiable` by construction (`docs/reference/ssh-execution-boundary.md`). So an
-   *  expired lease is the record of a process left running on purpose, never a licence to kill it. */
+   *  id, a pane surface that is no longer in the layout, a retired reattach. The layout case is the
+   *  one that matters most, because it is reached only AFTER `pty.attach` succeeded: the process is
+   *  not merely unproven, it is known to be alive. Every one of those writers deliberately declines
+   *  to stop it, and client-side absence is `unverifiable` by construction
+   *  (`docs/reference/ssh-execution-boundary.md`). So an expired lease is the record of a process
+   *  left running on purpose, never a licence to kill it. */
   expiredLeasePtyIds: ReadonlySet<string>
   /** Host-measured age a PTY must exceed. Guards a spawn that is in flight from another window of
    *  this same client and has not written its lease yet. */
   minimumHostAgeMs: number
+  /** How long ago, on THIS client's clock, the listing that carried the evidence arrived. Added to
+   *  each entry's host-stamped `capturedAgeMs` so {@link maximumEvidenceAgeMs} bounds staleness at
+   *  the moment of the decision rather than at the moment of serialization. The transit itself is
+   *  unmeasured — the two clocks are not synchronized — but it is bounded by the listing's own RPC
+   *  deadline, and both halves that ARE measurable are counted. */
+  evidenceAgeSinceListingMs: number
+  /** Oldest foreground observation that may authorize a stop. Stale evidence degrades to "do not
+   *  sweep", never to "sweep". */
+  maximumEvidenceAgeMs: number
 }
 
 export type RelayPtySweepTarget = { ptyId: string; incarnationId: string }
@@ -79,14 +90,35 @@ export const RELAY_PTY_SWEEP_MIN_AGE_MS = 30_000
  *  not reclaiming a leak — it is a disagreement about ownership, and stopping is the wrong move. */
 export const RELAY_PTY_SWEEP_MAX_PER_PASS = 8
 
+/** The oldest foreground observation this sweep will treat as authorization to SIGKILL.
+ *
+ *  Sized to the pass budget rather than to the 30s spawn floor: those answer different questions.
+ *  The floor guards a concurrent spawn this client has not recorded yet; this one guards the pane
+ *  the user started working in AFTER the host looked. An observation older than the whole pass it
+ *  is meant to authorize cannot have been taken for this pass, so it is not evidence about now.
+ *
+ *  It does not remove the race — nothing can, the host cannot re-check between the answer and the
+ *  signal — it bounds it. The display consumer of the same measurement deliberately keeps NO age
+ *  budget: a stale pane title costs a redraw and self-corrects on the next poll, so one truthful
+ *  number carries two explicit budgets rather than one implicit one. */
+export const RELAY_PTY_SWEEP_MAX_EVIDENCE_AGE_MS = 5_000
+
 /** The host's own answer to "is anything running in this pane?". Only a positive "no" clears the
  *  sweep; every other shape — an older host, an unreadable process table, a named foreground
  *  process, a busy foreground group — is a reason to leave the process alone. */
-function foregroundSkipReason(evidence: ForegroundProcessEvidence | undefined): string | null {
+function foregroundSkipReason(
+  evidence: ForegroundProcessEvidence | undefined,
+  context: RelayPtySweepContext
+): string | null {
   if (evidence === undefined) {
     // A host that never published it, or a Windows host where it is not collected. Absence of the
     // observation is not the observation of absence.
     return 'host published no foreground-process observation'
+  }
+  // Before anything is read out of it: an observation is only a claim about the instant it was
+  // taken. Age is checked on both verdicts because a stale `unverifiable` is no better.
+  if (evidence.capturedAgeMs + context.evidenceAgeSinceListingMs > context.maximumEvidenceAgeMs) {
+    return 'host foreground observation is too old to authorize a stop'
   }
   if (evidence.verdict !== 'live') {
     return 'host could not observe the pane foreground process'
@@ -96,9 +128,10 @@ function foregroundSkipReason(evidence: ForegroundProcessEvidence | undefined): 
     // exactly the hand-launched `claude`/`codex` case agentSessionOwners cannot see.
     return 'host observes a named foreground process'
   }
-  if (evidence.shellIsForeground !== true) {
-    // Either the terminal's foreground group is not the shell's (something unrecognized is
-    // running - a build, an editor, a test run), or this host predates the field.
+  if (evidence.shellOwnsEveryTtyProcessGroup !== true) {
+    // Something other than the shell's own process group is attached to the pane's terminal — a
+    // foreground command, a job backgrounded with `&`, a Ctrl-Z'd editor — or this host predates
+    // the field. The stop would SIGKILL that group, so none of those is a pane to reclaim.
     return 'host does not attest an idle shell'
   }
   return null
@@ -129,7 +162,7 @@ function skipReason(
     // agent. Reaping it converts a recoverable session into a destroyed one.
     return 'host still advertises an adoptable agent session'
   }
-  const foregroundSkip = foregroundSkipReason(entry.foregroundProcessEvidence)
+  const foregroundSkip = foregroundSkipReason(entry.foregroundProcessEvidence, context)
   if (foregroundSkip !== null) {
     return foregroundSkip
   }

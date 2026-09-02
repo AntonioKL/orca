@@ -2,7 +2,14 @@
 export type ForegroundEvidenceObservation = {
   authorityGeneration: string
   observationEpoch: number
-  /** Age at serialization; receivers rebase this onto their monotonic clock. */
+  /** How old the underlying process-table capture was when this record was serialized, measured on
+   *  the OBSERVING host's clock so no clock skew enters it. Receivers rebase it onto their own
+   *  monotonic clock by adding the time since the carrying response arrived.
+   *
+   *  It is an upper bound, not an estimate: the capture is TTL-shared, so a reader may be served
+   *  one up to `PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS` older than its own await, and the
+   *  producer stamps for that worst case. Erring old is the safe direction for every consumer —
+   *  the only one that acts destructively refuses stale evidence. */
   capturedAgeMs: number
 }
 
@@ -10,11 +17,19 @@ export type ForegroundProcessEvidence =
   | ({
       verdict: 'live'
       processName: string | null
-      /** True only when the host observed the PTY's own shell owning the terminal's foreground
-       *  process group — i.e. nothing is running in the pane. False means something IS running,
-       *  named or not. Absent from a host that predates the field, which is neither: a reader
-       *  deciding whether the pane is idle must require `true` and defer on anything else. */
-      shellIsForeground?: boolean
+      /** True only when the host observed every process group attached to this PTY's terminal to be
+       *  the shell's own, with none of them stopped — i.e. nothing is running in the pane, in the
+       *  foreground OR the background, and nothing sits suspended.
+       *
+       *  Deliberately not `tpgid === pgid`: a job the user backgrounded with `&` and a job the user
+       *  suspended with Ctrl-Z both hand the terminal back to the shell, so a foreground-only
+       *  predicate reads them as idle. This one is measured against the same set of process groups
+       *  a forced stop would SIGKILL.
+       *
+       *  False means something IS running, named or not. Absent from a host that predates the
+       *  field, which is neither: a reader deciding whether the pane is idle must require `true`
+       *  and defer on anything else. */
+      shellOwnsEveryTtyProcessGroup?: boolean
     } & ForegroundEvidenceObservation)
   | ({ verdict: 'unverifiable'; reason: string } & ForegroundEvidenceObservation)
 
@@ -38,7 +53,10 @@ export function isForegroundProcessEvidence(value: unknown): value is Foreground
     return false
   }
   if (input.verdict === 'live') {
-    if (input.shellIsForeground !== undefined && typeof input.shellIsForeground !== 'boolean') {
+    if (
+      input.shellOwnsEveryTtyProcessGroup !== undefined &&
+      typeof input.shellOwnsEveryTtyProcessGroup !== 'boolean'
+    ) {
       return false
     }
     return input.processName === null || typeof input.processName === 'string'

@@ -26,7 +26,7 @@ const OBSERVATION = { authorityGeneration: 'gen-1', observationEpoch: 1, capture
 
 /** The host looked and saw its own shell owning the terminal: nothing is running in the pane. */
 function idleShell(): ForegroundProcessEvidence {
-  return { ...OBSERVATION, verdict: 'live', processName: null, shellIsForeground: true }
+  return { ...OBSERVATION, verdict: 'live', processName: null, shellOwnsEveryTtyProcessGroup: true }
 }
 
 function hostEntry(overrides: Partial<PtyProcessInfo> = {}): PtyProcessInfo {
@@ -88,6 +88,49 @@ describe('sweepOrphanedRelayPtys', () => {
       `ssh:${TARGET}@@pty-1`,
       expect.objectContaining({ immediate: true, expectedIncarnationId: 'inc-1' })
     )
+  })
+
+  it('asks the host to re-check ownership on the one call that cannot be undone', async () => {
+    // The stop is the only irreversible step in this flow, and until now the whole nine-condition
+    // rule was enforced only here, on the client that decided to make it. Naming the owner makes
+    // the host re-decide where the processes actually live.
+    const harness = createHarness([hostEntry()])
+
+    await run(harness)
+
+    expect(harness.shutdown).toHaveBeenCalledWith(
+      `ssh:${TARGET}@@pty-1`,
+      expect.objectContaining({ expectedOwnerClientInstanceId: OURS })
+    )
+  })
+
+  it('does not act on an observation that aged out between the listing and the plan', async () => {
+    // The listing answered inside the budget, but this pass then spent longer than the evidence is
+    // good for. Staleness has to degrade to "leave it running".
+    let clock = 1_000_000
+    const harness = createHarness([hostEntry()])
+    harness.provider.listProcesses = vi.fn().mockImplementation(async () => {
+      clock += 1
+      return [hostEntry()]
+    })
+
+    const pass = (maximumEvidenceAgeMs: number): Promise<void> =>
+      run(harness, {
+        now: () => clock,
+        maximumEvidenceAgeMs,
+        passBudgetMs: 60_000,
+        shouldContinue: () => {
+          clock += 20
+          return true
+        }
+      })
+
+    await pass(10)
+    expect(harness.shutdown).not.toHaveBeenCalled()
+
+    // Positive control: the same entry, the same elapsed time, a budget that covers it.
+    await pass(10_000)
+    expect(harness.shutdown).toHaveBeenCalledTimes(1)
   })
 
   it('leaves a PTY the caller just reattached alone', async () => {
@@ -185,7 +228,7 @@ describe('sweepOrphanedRelayPtys', () => {
           ...OBSERVATION,
           verdict: 'live',
           processName: 'claude',
-          shellIsForeground: false
+          shellOwnsEveryTtyProcessGroup: false
         }
       })
     ])

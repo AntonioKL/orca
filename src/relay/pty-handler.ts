@@ -70,6 +70,7 @@ import {
 } from '../main/providers/agent-foreground-process'
 import {
   getStrictProcessTableSnapshot,
+  PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS,
   type ProcessTableRow
 } from '../shared/process-table-snapshot'
 import type { ForegroundProcessEvidence } from '../shared/foreground-process-evidence'
@@ -1013,7 +1014,7 @@ export class PtyHandler {
   private registerHandlers(): void {
     this.dispatcher.onRequest('pty.spawn', (p, context) => this.spawn(p, context))
     this.dispatcher.onRequest('pty.attach', (p, context) => this.attach(p, context))
-    this.dispatcher.onRequest('pty.shutdown', (p) => this.shutdown(p))
+    this.dispatcher.onRequest('pty.shutdown', (p, context) => this.shutdown(p, context))
     this.dispatcher.onRequest('pty.sendSignal', (p) => this.sendSignal(p))
     this.dispatcher.onRequest('pty.getCwd', (p) => this.getCwd(p))
     this.dispatcher.onRequest('pty.getInitialCwd', (p) => this.getInitialCwd(p))
@@ -2123,7 +2124,7 @@ export class PtyHandler {
     return { cols: managed.pty.cols, rows: managed.pty.rows }
   }
 
-  private async shutdown(params: Record<string, unknown>): Promise<void> {
+  private async shutdown(params: Record<string, unknown>, context?: RequestContext): Promise<void> {
     const id = params.id as string
     const immediate = params.immediate as boolean
     const expectedIncarnationId = params.expectedIncarnationId
@@ -2133,12 +2134,23 @@ export class PtyHandler {
     ) {
       throw new Error('Invalid expectedIncarnationId')
     }
+    const expectedOwnerClientInstanceId = params.expectedOwnerClientInstanceId
+    if (
+      expectedOwnerClientInstanceId !== undefined &&
+      (typeof expectedOwnerClientInstanceId !== 'string' ||
+        expectedOwnerClientInstanceId.length === 0)
+    ) {
+      throw new Error('Invalid expectedOwnerClientInstanceId')
+    }
     const managed = this.ptys.get(id)
     if (!managed) {
       return
     }
     if (expectedIncarnationId !== undefined && expectedIncarnationId !== managed.incarnationId) {
       throw new Error(`PTY incarnation mismatch for ${id}`)
+    }
+    if (expectedOwnerClientInstanceId !== undefined) {
+      this.assertShutdownOwnership(id, managed, expectedOwnerClientInstanceId, context)
     }
     // Why: `pty.shutdown` is the only authoritative statement this host ever gets that a tab is
     // gone. Record it before the kill request, because the kill is the part that can fail: an agent
@@ -2161,6 +2173,34 @@ export class PtyHandler {
     } else {
       this.releaseStartupCommand(managed)
       this.requestGracefulKill(managed, 'force-kill')
+    }
+  }
+
+  /** Re-decide, on the host, whether the caller may destroy this PTY.
+   *
+   *  `pty.shutdown` is irreversible and its siblings `pty.spawn`/`pty.attach` already take a
+   *  request context; without this the whole ownership rule lived on the client, on the one call
+   *  that cannot be taken back. Both halves are checked here because either alone is an echo: the
+   *  connection must still authenticate as that consumer identity (so a claim cannot be asserted),
+   *  and this host must have recorded that same identity as the PTY's creator at spawn (so the
+   *  caller cannot reach a PTY it never made).
+   *
+   *  Only callers that opt in are checked. An ordinary pane teardown does not pass the field, and
+   *  must not: a revived PTY carries no attested owner at all, and a host predating the attestation
+   *  would refuse stops it is obliged to honour. */
+  private assertShutdownOwnership(
+    id: string,
+    managed: ManagedPty,
+    expectedOwnerClientInstanceId: string,
+    context: RequestContext | undefined
+  ): void {
+    const requester =
+      context === undefined ? null : (this.consumerIdentityResolver?.(context.clientId) ?? null)
+    if (requester !== expectedOwnerClientInstanceId) {
+      throw new Error(`PTY "${id}" stop refused: requester is not the attested owner`)
+    }
+    if (managed.ownerClientInstanceId !== expectedOwnerClientInstanceId) {
+      throw new Error(`PTY "${id}" stop refused: this host attested no such owner`)
     }
   }
 
@@ -2432,9 +2472,15 @@ export class PtyHandler {
     let evidenceRows: readonly ProcessTableRow[] | null = null
     let evidenceResults: BatchedForegroundProcessResult[] = []
     const evidenceEpoch = ++this.foregroundEvidenceEpoch
+    // Worst-case capture time for the snapshot below, not the instant its await settled: the
+    // reader may serve a TTL-cached table, so the observation can already be one window old. The
+    // loop that follows can await per entry, so each record is stamped against this rather than
+    // carrying a shared constant.
+    let evidenceCapturedAtMs = Date.now()
     if (process.platform !== 'win32' && managedEntries.length > 0) {
       try {
         evidenceRows = await getStrictProcessTableSnapshot()
+        evidenceCapturedAtMs = Date.now() - PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS
         evidenceResults = await resolveAgentForegroundProcessesBatch(
           managedEntries.map(([, managed]) => ({
             rootPid: managed.pty.pid,
@@ -2468,7 +2514,7 @@ export class PtyHandler {
               {
                 authorityGeneration: this.ptyIdMintEpoch,
                 observationEpoch: evidenceEpoch,
-                capturedAgeMs: 0
+                capturedAgeMs: Math.max(0, Date.now() - evidenceCapturedAtMs)
               }
             )
           : undefined
