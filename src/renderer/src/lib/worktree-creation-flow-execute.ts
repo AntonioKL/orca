@@ -211,6 +211,7 @@ export async function executeWorktreeCreation(
   let structuredLaunchAccepted = structuredLaunch
   if (structuredLaunch && preparedRequest.agent === 'codex') {
     const structuredSession = await launchStructuredWorktreeSession({
+      creationId,
       request: preparedRequest,
       worktreeId: worktree.id,
       shouldActivateOnCompletion,
@@ -221,6 +222,9 @@ export async function executeWorktreeCreation(
     structuredLaunchAccepted = structuredSession.accepted
     activation = structuredSession.activation
     primaryTabId = structuredSession.primaryTabId
+    if (structuredSession.cancelled) {
+      return
+    }
   }
 
   // Why: clearing synchronously right after activation lets React commit the
