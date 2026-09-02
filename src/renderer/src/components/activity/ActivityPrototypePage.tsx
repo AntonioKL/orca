@@ -81,7 +81,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     : null
   const selectedTabId = selectedThread?.tab.id ?? null
   const selectedWorktreeAvailable = selectedThread
-    ? hasActivityThreadWorkspace(selectedThread)
+    ? hasActivityThreadWorkspace(selectedThread, storeData)
     : false
   // Why: repo-less terminal buckets can produce Activity rows, but the workspace Terminal tree only portals real worktrees.
   const selectedHasLiveTab =
@@ -95,7 +95,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     : null
   const displayedTabId = displayedThread?.tab.id ?? null
   const displayedWorktreeAvailable = displayedThread
-    ? hasActivityThreadWorkspace(displayedThread)
+    ? hasActivityThreadWorkspace(displayedThread, storeData)
     : false
   const displayedHasLiveTab =
     displayedThread && displayedTabId && displayedWorktreeAvailable
@@ -260,7 +260,15 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     setSelectedPaneKey
   })
 
-  const canJumpToWorkspace = hasActivityThreadWorkspace
+  const canJumpToWorkspace = useCallback(
+    (thread: Parameters<typeof hasActivityThreadWorkspace>[0]) =>
+      hasActivityThreadWorkspace(thread, {
+        worktreesByRepo: storeData.worktreesByRepo,
+        detectedWorktreesByRepo: storeData.detectedWorktreesByRepo,
+        folderWorkspaces: storeData.folderWorkspaces
+      }),
+    [storeData.worktreesByRepo, storeData.detectedWorktreesByRepo, storeData.folderWorkspaces]
+  )
 
   useEffect(() => {
     if (

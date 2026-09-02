@@ -14853,7 +14853,8 @@
       "title": "Conoce tu pestaña de Agentes",
       "description": "Ve en qué están trabajando tus agentes, qué está terminado y dónde necesitas intervenir.",
       "dismiss": "Quizás más tarde",
-      "action": "Probar Agentes"
+      "action": "Probar Agentes",
+      "hiddenToast": "La pestaña Agentes está oculta. Vuelve a activarla en Configuración → Experimental."
     }
   }
 }

@@ -265,8 +265,12 @@ describe('Sidebar', () => {
     expect(agentsList.getAttribute('data-query')).toBe('')
   })
 
-  it('closes the dashboard drawer when the Agents sidebar is disabled', async () => {
-    setSidebarState({ ...getDefaultSettings(tmpdir()), showAgentsSidebar: false })
+  it('closes the dashboard drawer when the dashboard experiment is disabled', async () => {
+    setSidebarState({
+      ...getDefaultSettings(tmpdir()),
+      showAgentsSidebar: true,
+      experimentalAgentDashboardPopout: false
+    })
     const setAgentDashboardDrawerOpen = vi.fn()
     mocks.state = {
       ...mocks.state,

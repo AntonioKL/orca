@@ -35,7 +35,6 @@ import {
 import { mapWithConcurrency } from '../../../shared/map-with-concurrency'
 import type { OnboardingState } from '../../../shared/onboarding-state-types'
 import { restoreLocalStructuredSessionTabsOnce } from '../runtime/local-structured-session-tabs-sync'
-import { seedDevActivityFixture } from '../components/activity/dev-activity-fixture'
 
 async function listRuntimeSessionHostIdsForStartup(): Promise<ExecutionHostId[]> {
   try {
@@ -276,6 +275,8 @@ export function useAppStartupHydration(onOnboardingLoaded: (state: OnboardingSta
             import.meta.env.DEV &&
             String(import.meta.env.VITE_ACTIVITY_DEV_FIXTURE).toLowerCase() === 'true'
           ) {
+            const { seedDevActivityFixture } =
+              await import('../components/activity/dev-activity-fixture')
             seedDevActivityFixture()
           }
           logRendererStartupDiagnostic('startup-hydration-done', {

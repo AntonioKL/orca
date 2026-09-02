@@ -20,11 +20,17 @@ describe('acknowledgedAgentsByPaneKey cleanup on teardown', () => {
       .getState()
       .setAgentStatus('tab-1:0', { state: 'working', prompt: 'p', agentType: 'claude' })
     store.getState().acknowledgeAgents(['tab-1:0'])
+    store.setState({
+      activityClearedAtByPaneKey: { 'tab-1:0': 100 },
+      manuallyUnreadTurnsByPaneKey: { 'tab-1:0': 200 }
+    })
     expect(store.getState().acknowledgedAgentsByPaneKey['tab-1:0']).toBeGreaterThan(0)
 
     store.getState().removeAgentStatus('tab-1:0')
 
     expect(store.getState().acknowledgedAgentsByPaneKey['tab-1:0']).toBeUndefined()
+    expect(store.getState().activityClearedAtByPaneKey['tab-1:0']).toBeUndefined()
+    expect(store.getState().manuallyUnreadTurnsByPaneKey['tab-1:0']).toBeUndefined()
   })
 
   it('removeAgentStatusByTabPrefix drops every ack entry whose paneKey starts with the tab prefix', () => {
@@ -40,6 +46,10 @@ describe('acknowledgedAgentsByPaneKey cleanup on teardown', () => {
       .getState()
       .setAgentStatus('tab-10:0', { state: 'working', prompt: 'p', agentType: 'claude' })
     store.getState().acknowledgeAgents(['tab-1:0', 'tab-1:1', 'tab-10:0'])
+    store.setState({
+      activityClearedAtByPaneKey: { 'tab-1:0': 100, 'tab-10:0': 300 },
+      manuallyUnreadTurnsByPaneKey: { 'tab-1:1': 200, 'tab-10:0': 400 }
+    })
 
     store.getState().removeAgentStatusByTabPrefix('tab-1')
 
@@ -49,6 +59,8 @@ describe('acknowledgedAgentsByPaneKey cleanup on teardown', () => {
     // Why: the ":" delimiter on the prefix guards against false-prefix matches
     // across tab ids that share a leading substring (tab-1 vs tab-10).
     expect(ack['tab-10:0']).toBeGreaterThan(0)
+    expect(store.getState().activityClearedAtByPaneKey).toEqual({ 'tab-10:0': 300 })
+    expect(store.getState().manuallyUnreadTurnsByPaneKey).toEqual({ 'tab-10:0': 400 })
   })
 
   it('dropAgentStatus drops the ack entry even when the pane had no live entry', () => {

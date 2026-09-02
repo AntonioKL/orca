@@ -4,21 +4,18 @@ import { translate } from '@/i18n/i18n'
 
 type DashboardAgentRowMessageProps = {
   expanded: boolean
-  isWorking: boolean
   isInterrupted: boolean
   lastAssistantMessage: string
 }
 
 export function DashboardAgentRowMessage({
   expanded,
-  isWorking,
   isInterrupted,
   lastAssistantMessage
 }: DashboardAgentRowMessageProps): React.JSX.Element | null {
-  const visibleMessage = isWorking ? '' : lastAssistantMessage
   // Why: message slot is always reserved in collapsed view so the row height
   // stays fixed as assistant text arrives or clears.
-  if (!isInterrupted && !visibleMessage) {
+  if (!isInterrupted && !lastAssistantMessage) {
     return expanded ? null : (
       <div className="mt-0.5 pl-5 text-[10px] leading-snug text-muted-foreground/70"> </div>
     )
@@ -40,9 +37,9 @@ export function DashboardAgentRowMessage({
           )}
         </span>
       ) : null}
-      {visibleMessage ? (
+      {lastAssistantMessage ? (
         <CommentMarkdown
-          content={visibleMessage}
+          content={lastAssistantMessage}
           // Why: animate between a clipped preview and natural height without
           // measuring markdown content in JS.
           className={cn(
@@ -52,7 +49,7 @@ export function DashboardAgentRowMessage({
             !expanded &&
               'truncate whitespace-nowrap [&_*]:inline [&_*]:!whitespace-nowrap [&_*]:!m-0 [&_*]:!p-0 [&_ul]:list-none [&_ol]:list-none [&_br]:hidden'
           )}
-          title={!expanded ? visibleMessage : undefined}
+          title={!expanded ? lastAssistantMessage : undefined}
         />
       ) : null}
     </div>

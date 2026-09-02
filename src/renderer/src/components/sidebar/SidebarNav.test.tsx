@@ -218,24 +218,25 @@ describe('SidebarNav', () => {
     setSidebarState()
   })
 
-  it('mounts the Agent Dashboard row by default', async () => {
-    const container = await renderSidebarNav()
-
-    await waitFor(() => expect(queryButtonByText(container, 'Agent Dashboard')).not.toBeNull())
-    expect(mocks.getAgentBucketCounts).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps the Agent Dashboard row unmounted after an explicit opt-out', async () => {
-    setSidebarState({
-      settings: {
-        ...getDefaultSettings('/tmp'),
-        showAgentsSidebar: false
-      }
-    })
+  it('keeps the Agent Dashboard row unmounted while its experiment is off', async () => {
     const container = await renderSidebarNav()
 
     expect(queryButtonByText(container, 'Agent Dashboard')).toBeNull()
     expect(mocks.getAgentBucketCounts).not.toHaveBeenCalled()
+  })
+
+  it('mounts the Agent Dashboard row only when its experiment is enabled', async () => {
+    setSidebarState({
+      settings: {
+        ...getDefaultSettings('/tmp'),
+        showAgentsSidebar: false,
+        experimentalAgentDashboardPopout: true
+      }
+    })
+    const container = await renderSidebarNav()
+
+    await waitFor(() => expect(queryButtonByText(container, 'Agent Dashboard')).not.toBeNull())
+    expect(mocks.getAgentBucketCounts).toHaveBeenCalledTimes(1)
   })
 
   it('uses a question glyph only for the Needs You count', async () => {

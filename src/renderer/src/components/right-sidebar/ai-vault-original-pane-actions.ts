@@ -2,7 +2,7 @@ import { useCallback, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { toast } from 'sonner'
 import { activateTabAndFocusPane } from '@/lib/activate-tab-and-focus-pane'
-import { jumpToWorktreeFromSidebar } from '@/lib/worktree-jump-navigation'
+import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { useAppStore } from '@/store'
 import type { AgentStatusState } from '../../../../shared/agent-status-types'
 import type { AiVaultSession } from '../../../../shared/ai-vault-types'
@@ -62,7 +62,7 @@ export function useAiVaultOriginalPaneActions(): {
       return
     }
 
-    if (!jumpToWorktreeFromSidebar(target.worktreeId)) {
+    if (!activateAndRevealWorktree(target.worktreeId)) {
       toast.error(
         translate(
           'auto.components.right.sidebar.AiVaultPanel.worktreeUnavailable',
@@ -80,7 +80,7 @@ export function useAiVaultOriginalPaneActions(): {
   }, [])
 
   const jumpToWorktree = useCallback((worktreeId: string): void => {
-    if (!jumpToWorktreeFromSidebar(worktreeId)) {
+    if (!activateAndRevealWorktree(worktreeId)) {
       toast.error(
         translate(
           'auto.components.right.sidebar.AiVaultPanel.worktreeUnavailable',

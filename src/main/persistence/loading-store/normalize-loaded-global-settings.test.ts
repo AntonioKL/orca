@@ -7,7 +7,7 @@ import { prepareLoadedProfileSettings } from './prepare-loaded-profile-settings'
 import type { GlobalSettings } from '../../../shared/global-settings-types'
 import type { PersistedState } from '../../../shared/persisted-state-types'
 
-// Simulates a pre-graduation profile: showAgentsSidebar was never persisted.
+// Simulates a profile created before the dedicated Experimental switch was persisted.
 function normalizeLegacyProfile(overrides: Partial<GlobalSettings>): PersistedState['settings'] {
   const defaults = getDefaultPersistedState(homedir())
   const settings: Partial<GlobalSettings> = { ...defaults.settings }
@@ -22,8 +22,8 @@ function normalizeLegacyProfile(overrides: Partial<GlobalSettings>): PersistedSt
   return normalizeLoadedGlobalSettings(parsed, terminal, profile)
 }
 
-describe('showAgentsSidebar graduation migration', () => {
-  it('keeps the sidebar for Agents-view opt-ins regardless of the popout experiment', () => {
+describe('showAgentsSidebar experimental-setting migration', () => {
+  it('keeps the sidebar for Agents-view opt-ins regardless of the dashboard experiment', () => {
     const normalized = normalizeLegacyProfile({
       experimentalActivity: true,
       experimentalAgentDashboardPopout: false
@@ -32,18 +32,15 @@ describe('showAgentsSidebar graduation migration', () => {
     expect(normalized.agentsSidebarMigratedFromExperimental).toBe(true)
   })
 
-  it('graduates either legacy opt-in to the sidebar', () => {
+  it('carries the legacy Agents-view opt-in into the sidebar', () => {
     expect(normalizeLegacyProfile({ experimentalActivity: true }).showAgentsSidebar).toBe(true)
-    expect(
-      normalizeLegacyProfile({ experimentalAgentDashboardPopout: true }).showAgentsSidebar
-    ).toBe(true)
   })
 
-  it('uses migration copy for legacy Agent Dashboard opt-ins', () => {
+  it('does not show Agents migration copy for a dashboard-only opt-in', () => {
     expect(
       normalizeLegacyProfile({ experimentalAgentDashboardPopout: true })
         .agentsSidebarMigratedFromExperimental
-    ).toBe(true)
+    ).toBe(false)
   })
 
   it('defaults profiles with no legacy signal to the sidebar', () => {
@@ -52,16 +49,10 @@ describe('showAgentsSidebar graduation migration', () => {
     expect(normalized.agentsSidebarMigratedFromExperimental).toBe(false)
   })
 
-  it('keeps an explicit popout opt-out hidden when the Agents view was never used', () => {
+  it('does not treat a dashboard opt-out as an Agents-tab opt-out', () => {
     expect(
       normalizeLegacyProfile({ experimentalAgentDashboardPopout: false }).showAgentsSidebar
-    ).toBe(false)
-    expect(
-      normalizeLegacyProfile({
-        experimentalActivity: false,
-        experimentalAgentDashboardPopout: false
-      }).showAgentsSidebar
-    ).toBe(false)
+    ).toBe(true)
   })
 
   it('ignores a pre-stamp forced-default experimentalActivity true (not an opt-in)', () => {

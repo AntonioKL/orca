@@ -14,7 +14,6 @@ import { SidebarTaskNavButton } from './SidebarTaskNavButton'
 import { HideSidebarMenu } from './sidebar-nav-controls'
 import { translate } from '@/i18n/i18n'
 import { lazyWithRetry } from '@/lib/lazy-with-retry'
-import { shouldShowAgentDashboardSidebarButton } from './agent-dashboard-sidebar-visibility'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 
 export { getSetupGuideSidebarEntryReady, shouldShowSetupGuideEntry } from './SetupGuideSidebarEntry'
@@ -43,6 +42,12 @@ export function shouldShowSkillsButton(
   return settings?.showSkillsButton === true
 }
 
+export function shouldShowAgentDashboardButton(
+  settings: Partial<Pick<GlobalSettings, 'experimentalAgentDashboardPopout'>> | null | undefined
+): boolean {
+  return settings?.experimentalAgentDashboardPopout === true
+}
+
 const AgentDashboardSidebarEntry = lazyWithRetry(() => import('./AgentDashboardSidebarEntry'))
 
 const SidebarNav = React.memo(function SidebarNav() {
@@ -57,9 +62,7 @@ const SidebarNav = React.memo(function SidebarNav() {
   const openModal = useAppStore((s) => s.openModal)
   const updateSettings = useAppStore((s) => s.updateSettings)
   const activeView = useAppStore((s) => s.activeView)
-  const showAgentDashboardButton = useAppStore((s) =>
-    shouldShowAgentDashboardSidebarButton(s.settings)
-  )
+  const showAgentDashboardButton = useAppStore((s) => shouldShowAgentDashboardButton(s.settings))
   const showAutomationsButton = useAppStore((s) => shouldShowAutomationsButton(s.settings))
   const showMobileButton = useAppStore((s) => shouldShowMobileButton(s.settings))
   const showArtifactsButton = useAppStore((s) => shouldShowArtifactsButton(s.settings))

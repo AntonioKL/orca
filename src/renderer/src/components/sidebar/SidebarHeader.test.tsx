@@ -9,7 +9,6 @@ import SidebarHeader from './SidebarHeader'
 
 const mocks = vi.hoisted(() => ({
   openWorkspaceCreationComposerWithTourHandoff: vi.fn(),
-  unreadCount: { value: 0 },
   popoverContentProps: { current: null as Record<string, unknown> | null },
   toast: vi.fn()
 }))
@@ -66,10 +65,6 @@ vi.mock('../contextual-tours/workspace-creation-tour-handoff', () => ({
   openWorkspaceCreationComposerWithTourHandoff: mocks.openWorkspaceCreationComposerWithTourHandoff
 }))
 
-vi.mock('@/components/activity/useActivityUnreadCount', () => ({
-  useActivityUnreadCount: (enabled: boolean) => (enabled ? mocks.unreadCount.value : 0)
-}))
-
 vi.mock('sonner', () => ({ toast: mocks.toast }))
 
 // Deterministic popover: expose the open flag instead of relying on radix portals.
@@ -122,7 +117,6 @@ beforeEach(() => {
     // Hydrated settings: the Agents tab is hidden until settings load.
     settings: { showAgentsSidebar: true }
   }
-  mocks.unreadCount.value = 0
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -280,18 +274,6 @@ describe('SidebarHeader', () => {
       newWorkspaceButton().click()
     })
     expect(mocks.openWorkspaceCreationComposerWithTourHandoff).toHaveBeenCalledTimes(1)
-  })
-
-  it('shows the unread count badge on the Agents tab', () => {
-    mocks.unreadCount.value = 3
-    act(() => {
-      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
-    })
-
-    const agentTab = container.querySelector<HTMLButtonElement>(
-      'button[data-sidebar-section-title="agents"]'
-    )
-    expect(agentTab?.textContent).toContain('3')
   })
 
   it('keeps the intro closed and unstamped before settings hydrate', () => {

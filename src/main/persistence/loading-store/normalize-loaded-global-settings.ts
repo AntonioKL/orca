@@ -86,22 +86,16 @@ export function normalizeLoadedGlobalSettings(
     ...migratedTerminalTuiScrollSensitivity.settings,
     experimentalActivity: migratedExperimentalActivity,
     experimentalActivityDefaultedOffForAllUsers: true,
-    // The dashboard graduated from Experimental; default every profile to the new
-    // left-sidebar tab. An Agents-view opt-in always graduates; only an explicit
-    // popout opt-out (without that opt-in) stays hidden.
-    // Why migrated, not raw: a pre-stamp profile's stored true is the old forced default,
-    // not an opt-in (see prepareLoadedProfileSettings).
+    // Keep the experimental Agents tab's rollout default for older profiles while
+    // preserving any choice made through its dedicated Experimental setting.
     showAgentsSidebar: resolveAgentsSidebarVisible({
-      showAgentsSidebar: parsed.settings?.showAgentsSidebar,
-      experimentalActivity: migratedExperimentalActivity,
-      experimentalAgentDashboardPopout: parsed.settings?.experimentalAgentDashboardPopout
+      showAgentsSidebar: parsed.settings?.showAgentsSidebar
     }),
     // Preserve the legacy opt-in before the experimental setting is normalized away. This
     // drives the migration-specific introduction copy without changing runtime behavior.
     agentsSidebarMigratedFromExperimental:
       parsed.settings?.agentsSidebarMigratedFromExperimental === true ||
-      migratedExperimentalActivity ||
-      parsed.settings?.experimentalAgentDashboardPopout === true,
+      migratedExperimentalActivity,
     // Why: compact worktree cards graduated from Experimental; preserve the old opt-in for rollout-era profiles.
     compactWorktreeCards: loadedCompactWorktreeCards,
     experimentalCompactWorktreeCards: undefined,

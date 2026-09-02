@@ -3,7 +3,8 @@ import type { DropAgentStatusByTabPrefixOptions } from './agent-status-contract'
 import { pruneMigrationUnsupportedEntries } from './agent-status-migration-unsupported-entries'
 import {
   boundRecentlyClosedAgentStatusTabIds,
-  boundRecentlyRetiredAgentStatusPaneKeys
+  boundRecentlyRetiredAgentStatusPaneKeys,
+  removePaneKeysByTabPrefix
 } from './agent-status-pane-keyed-records'
 import { findCompletedOrphanPaneKeysForTabClose } from './agent-status-pane-key-tab-binding'
 
@@ -39,24 +40,6 @@ export type AgentStatusTabPrefixDropState = Pick<
   | 'sortEpoch'
   | 'tabsByWorktree'
 >
-
-function removePaneKeyRecords<T>(
-  record: Record<string, T>,
-  prefix: string,
-  extraKeys: ReadonlySet<string>
-): Record<string, T> {
-  const matchingKeys = Object.keys(record).filter(
-    (key) => key.startsWith(prefix) || extraKeys.has(key)
-  )
-  if (matchingKeys.length === 0) {
-    return record
-  }
-  const next = { ...record }
-  for (const key of matchingKeys) {
-    delete next[key]
-  }
-  return next
-}
 
 /** Pure form of the dropAgentStatusByTabPrefix reducer: the paired snapshot
  *  apply folds the same sweep into a patch it assembles itself, so the two
@@ -108,10 +91,14 @@ export function buildAgentStatusTabPrefixDropPatch(
     )
     const nextClearedAt = opts?.preserveActivityClearedState
       ? s.activityClearedAtByPaneKey
-      : removePaneKeyRecords(s.activityClearedAtByPaneKey, prefix, completedOrphanKeySet)
+      : removePaneKeysByTabPrefix(s.activityClearedAtByPaneKey, tabIdPrefix, completedOrphanKeySet)
     const nextManualUnread = opts?.preserveActivityClearedState
       ? s.manuallyUnreadTurnsByPaneKey
-      : removePaneKeyRecords(s.manuallyUnreadTurnsByPaneKey, prefix, completedOrphanKeySet)
+      : removePaneKeysByTabPrefix(
+          s.manuallyUnreadTurnsByPaneKey,
+          tabIdPrefix,
+          completedOrphanKeySet
+        )
 
     if (
       liveKeys.length === 0 &&

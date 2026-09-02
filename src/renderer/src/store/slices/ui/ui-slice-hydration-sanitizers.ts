@@ -16,7 +16,7 @@ import {
 } from '../../../../../shared/execution-host'
 import { persistedUIValuesEqual } from '../../../../../shared/persisted-ui-equality'
 // Pure predicate over GlobalSettings; safe to share with the store layer.
-import { shouldShowAgentDashboardSidebarButton } from '@/components/sidebar/agent-dashboard-sidebar-visibility'
+import { shouldShowAgentsSidebar } from '@/components/sidebar/agents-sidebar-visibility'
 import { DEFAULT_STATUS_BAR_ITEMS } from '../../../../../shared/constants'
 import type { UISlice } from './ui-slice-contract'
 
@@ -175,14 +175,14 @@ export function sanitizeWorkspaceCleanupDismissals(
 
 export function sanitizeHydratedActiveView(
   value: PersistedUIState['activeView'],
-  settings: Parameters<typeof shouldShowAgentDashboardSidebarButton>[0]
+  settings: Parameters<typeof shouldShowAgentsSidebar>[0]
 ): TopLevelView {
   // Why: older data (pre-activeView) or a view a different build doesn't have falls back to terminal rather than rendering nothing.
   if (!isTopLevelView(value)) {
     return 'terminal'
   }
   // Why: activity is hidden when its entry points are, so gate only it (mobile/automations stay functional when hidden).
-  if (value === 'activity' && !shouldShowAgentDashboardSidebarButton(settings)) {
+  if (value === 'activity' && !shouldShowAgentsSidebar(settings)) {
     return 'terminal'
   }
   return value

@@ -51,6 +51,50 @@ export const getExperimentalPaneSearchEntries = createLocalizedCatalog(
     getAgentsSidebarEntry(),
     {
       title: translate(
+        'auto.components.settings.experimental.search.agentDashboard.title',
+        'Agent Dashboard'
+      ),
+      description: translate(
+        'auto.components.settings.experimental.search.agentDashboard.description',
+        'Kanban board for monitoring agents across worktrees, in-window or as a pop-out.'
+      ),
+      keywords: [
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.0d24759f14',
+          'experimental'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.agentDashboard.agent',
+          'agent'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.agentDashboard.dashboard',
+          'dashboard'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.agentDashboard.kanban',
+          'kanban'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.agentDashboard.popout',
+          'pop-out'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.agentDashboard.board',
+          'board'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.agentDashboard.inWindow',
+          'in-window'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.agentDashboard.worktrees',
+          'worktrees'
+        )
+      ]
+    },
+    {
+      title: translate(
         'auto.components.settings.experimental.search.9e4ddf776d',
         'Terminal attention'
       ),
@@ -160,6 +204,12 @@ export function getExperimentalSearchEntry() {
       translate('auto.components.settings.experimental.search.nativeChat.title', 'Chat UI')
     ),
     agentsSidebar: getAgentsSidebarEntry(),
+    agentDashboard: findEntry(
+      translate(
+        'auto.components.settings.experimental.search.agentDashboard.title',
+        'Agent Dashboard'
+      )
+    ),
     terminalAttention: findEntry(
       translate('auto.components.settings.experimental.search.9e4ddf776d', 'Terminal attention')
     ),

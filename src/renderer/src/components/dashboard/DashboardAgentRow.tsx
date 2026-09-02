@@ -304,7 +304,6 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
       />
       <DashboardAgentRowMessage
         expanded={expanded}
-        isWorking={isWorking}
         isInterrupted={isInterrupted}
         lastAssistantMessage={lastAssistantMessage}
       />

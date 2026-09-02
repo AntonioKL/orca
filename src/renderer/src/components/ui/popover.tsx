@@ -191,12 +191,14 @@ function PopoverContent({
 
 function PopoverArrow({
   className,
+  style,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Arrow>) {
   return (
     <PopoverPrimitive.Arrow
       data-slot="popover-arrow"
-      className={cn('fill-popover', className)}
+      className={cn('fill-popover !visible block overflow-visible', className)}
+      style={{ visibility: 'visible', ...style }}
       {...props}
     />
   )

@@ -31,6 +31,7 @@ export type AgentPaneThreadsStoreData = Pick<
   | 'tabsByWorktree'
   | 'unifiedTabsByWorktree'
   | 'repos'
+  | 'worktreesByRepo'
   | 'folderWorkspaces'
   | 'detectedWorktreesByRepo'
   | 'getKnownWorktreeById'
@@ -79,6 +80,7 @@ export function useAgentPaneThreads(args: {
       tabsByWorktree: s.tabsByWorktree,
       unifiedTabsByWorktree: s.unifiedTabsByWorktree,
       repos: s.repos,
+      worktreesByRepo: s.worktreesByRepo,
       folderWorkspaces: s.folderWorkspaces,
       detectedWorktreesByRepo: s.detectedWorktreesByRepo,
       getKnownWorktreeById: s.getKnownWorktreeById,

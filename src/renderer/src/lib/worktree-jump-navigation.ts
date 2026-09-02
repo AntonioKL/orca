@@ -44,13 +44,13 @@ export function jumpToWorktreeFromSidebar(
   const state = useAppStore.getState()
 
   // Folder workspaces aren't in the worktree filter pipeline; only git worktrees can be filter-hidden.
-  const hiddenByFilters =
+  const hiddenBeforeActivation =
     parseWorkspaceKey(worktreeId)?.type !== 'folder' &&
     wasHiddenBySidebarFilters(worktreeId, options?.executionHostId)
 
   // Why the workspace dispatcher: it owns the folder-vs-worktree split and the folder path-status gate.
   const activated = activateAndRevealWorkspace(worktreeId, {
-    ...(hiddenByFilters ? { revealInSidebar: false, clearSidebarFilters: false } : {}),
+    ...(hiddenBeforeActivation ? { revealInSidebar: false, clearSidebarFilters: false } : {}),
     ...(options?.executionHostId ? { executionHostId: options.executionHostId } : {})
   })
   if (activated === false) {
@@ -60,7 +60,20 @@ export function jumpToWorktreeFromSidebar(
   // The worktree list is the Spaces/Projects sidebar body; jump actions should always expose it.
   state.setSidebarBody?.('workspaces')
 
-  if (hiddenByFilters) {
+  const hiddenAfterActivation =
+    hiddenBeforeActivation && wasHiddenBySidebarFilters(worktreeId, options?.executionHostId)
+  if (hiddenBeforeActivation && !hiddenAfterActivation) {
+    // Activation can seed a terminal, making a workspace excluded only by Hide sleeping visible.
+    // Queue the reveal after that state transition instead of reporting a filter conflict.
+    useAppStore
+      .getState()
+      .revealWorktreeInSidebar(
+        worktreeId,
+        options?.executionHostId ? { executionHostId: options.executionHostId } : {}
+      )
+  }
+
+  if (hiddenAfterActivation) {
     toast.warning(
       translate(
         'auto.lib.worktreeJumpNavigation.filteredNotice',

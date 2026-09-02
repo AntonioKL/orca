@@ -4,8 +4,7 @@ import { useAppStore } from '@/store'
 import { translate } from '@/i18n/i18n'
 import { SidebarViewToggle } from './sidebar-view-toggle'
 import { SidebarHeaderActions } from './sidebar-header-actions'
-import { shouldShowAgentDashboardSidebarButton } from './agent-dashboard-sidebar-visibility'
-import { useActivityUnreadCount } from '@/components/activity/useActivityUnreadCount'
+import { shouldShowAgentsSidebar } from './agents-sidebar-visibility'
 import { Popover, PopoverAnchor, PopoverArrow, PopoverContent } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { Sparkles } from 'lucide-react'
@@ -29,9 +28,7 @@ const SidebarHeader = React.memo(function SidebarHeader({
   const sidebarBody = useAppStore((s) => s.sidebarBody ?? 'workspaces')
   // Why the derived boolean, not s.settings: the settings object gets a new identity on
   // every write, which would re-render this memoized header subtree each time.
-  const showAgentsSidebarFromStore = useAppStore((s) =>
-    shouldShowAgentDashboardSidebarButton(s.settings)
-  )
+  const showAgentsSidebarFromStore = useAppStore((s) => shouldShowAgentsSidebar(s.settings))
   const showAgentsSidebar = showAgentsSidebarProp ?? showAgentsSidebarFromStore
   const groupBy = useAppStore((s) => s.groupBy)
   const setSidebarBody = useAppStore((s) => s.setSidebarBody)
@@ -44,7 +41,6 @@ const SidebarHeader = React.memo(function SidebarHeader({
   // null default would flash the popover open (and stamp it shown) every launch.
   const settingsHydrated = useAppStore((s) => s.settings != null)
   const agentsViewActive = showAgentsSidebar && sidebarBody === 'agents'
-  const agentsUnreadCount = useActivityUnreadCount(showAgentsSidebar, 'sidebar-badge')
   const introOpen = settingsHydrated && showAgentsSidebar && !agentsSidebarIntroShown
   const acknowledgeIntro = React.useCallback(() => {
     void updateSettings?.({ agentsSidebarIntroShown: true })
@@ -106,7 +102,6 @@ const SidebarHeader = React.memo(function SidebarHeader({
                         value: 'agents' as const,
                         label: translate('dashboard.sidebar.label', 'Agents'),
                         sectionTitle: 'agents' as const,
-                        badgeCount: agentsUnreadCount,
                         renderWrapper: (button: React.ReactNode) => (
                           <PopoverAnchor asChild>{button}</PopoverAnchor>
                         )
@@ -119,22 +114,42 @@ const SidebarHeader = React.memo(function SidebarHeader({
           {/* Why: prevent startup terminal/editor auto-focus from dismissing the intro popover. */}
           <PopoverContent
             side="bottom"
-            align="start"
-            sideOffset={10}
-            className="w-72 overflow-visible rounded-xl border border-[color-mix(in_srgb,var(--ai-action-accent)_28%,var(--border))] bg-[color-mix(in_srgb,var(--ai-action-accent)_7%,var(--card))] p-3.5 text-card-foreground shadow-[0_12px_28px_-4px_rgba(139,92,246,0.18),0_4px_12px_rgba(0,0,0,0.08)] backdrop-blur-xl dark:border-[color-mix(in_srgb,var(--ai-action-accent)_36%,var(--border))] dark:bg-[color-mix(in_srgb,var(--ai-action-accent)_14%,var(--card))] dark:shadow-[0_16px_36px_-4px_rgba(0,0,0,0.5),0_0_24px_rgba(167,139,250,0.12)]"
+            align="center"
+            sideOffset={8}
+            className="w-72 overflow-visible rounded-xl border border-border bg-popover p-3.5 text-popover-foreground shadow-floating"
             onOpenAutoFocus={(event) => event.preventDefault()}
             onFocusOutside={(event) => event.preventDefault()}
           >
-            <PopoverArrow
-              width={14}
-              height={7}
-              className="fill-[color-mix(in_srgb,var(--ai-action-accent)_7%,var(--card))] dark:fill-[color-mix(in_srgb,var(--ai-action-accent)_14%,var(--card))]"
-            />
+            <PopoverArrow asChild width={14} height={7} className="overflow-visible">
+              <svg
+                viewBox="0 0 30 10"
+                preserveAspectRatio="none"
+                className="block overflow-visible"
+              >
+                <polygon points="0,0 30,0 15,10" className="fill-popover" />
+                <path d="M0 0 L15 10 L30 0" fill="none" className="stroke-border stroke-[1.5]" />
+              </svg>
+            </PopoverArrow>
             <div className="space-y-2.5">
+              <svg width="0" height="0" className="absolute pointer-events-none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="agents-intro-aquatic" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#10b981" />
+                    <stop offset="45%" stopColor="#06b6d4" />
+                    <stop offset="100%" stopColor="#2563eb" />
+                  </linearGradient>
+                </defs>
+              </svg>
               <div className="space-y-1">
                 <div className="flex items-center gap-1.5">
-                  <Sparkles className="size-3.5 shrink-0 text-[var(--ai-action-accent)]" />
-                  <h3 className="text-sm font-semibold tracking-tight text-foreground">
+                  <Sparkles
+                    className="size-4 shrink-0"
+                    stroke="url(#agents-intro-aquatic)"
+                    fill="url(#agents-intro-aquatic)"
+                    fillOpacity={0.15}
+                    strokeWidth={2}
+                  />
+                  <h3 className="text-sm font-semibold text-foreground">
                     {migratedFromExperimental
                       ? translate('agentsSidebarIntro.migrated.title', 'Agents are easier to find')
                       : translate('agentsSidebarIntro.new.title', 'Meet your Agents tab')}
@@ -152,7 +167,7 @@ const SidebarHeader = React.memo(function SidebarHeader({
                       )}
                 </p>
               </div>
-              <div className="flex justify-end gap-2 pt-1">
+              <div className="flex justify-end items-center gap-2 pt-0.5">
                 {!migratedFromExperimental ? (
                   <Button variant="ghost" size="sm" onClick={deferAgentsIntro}>
                     {translate('agentsSidebarIntro.new.dismiss', 'Maybe later')}
@@ -160,7 +175,7 @@ const SidebarHeader = React.memo(function SidebarHeader({
                 ) : null}
                 <Button
                   size="sm"
-                  className="bg-[var(--ai-action-accent)] text-white hover:bg-[color-mix(in_srgb,var(--ai-action-accent)_85%,black)] dark:hover:bg-[color-mix(in_srgb,var(--ai-action-accent)_85%,white)]"
+                  className="border-0 bg-[linear-gradient(135deg,#10b981_0%,#06b6d4_45%,#2563eb_100%)] text-white font-medium shadow-xs hover:brightness-105 active:scale-[0.98] transition-all"
                   onClick={() => {
                     acknowledgeIntro()
                     setSidebarBody?.('agents')

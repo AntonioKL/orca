@@ -3,16 +3,25 @@ import { jumpToWorktreeFromSidebar } from '@/lib/worktree-jump-navigation'
 import { useAppStore } from '@/store'
 import { getWorktreeExecutionHostId } from '../../../../shared/execution-host'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
+import { findKnownWorktreeById } from '@/store/slices/worktrees/listing/detected-worktree-meta'
+import type { AppState } from '@/store/types'
 import type { AgentPaneThread } from './activity-thread-types'
 
 function getActivityThreadExecutionHostId(thread: AgentPaneThread) {
   return getWorktreeExecutionHostId(thread.worktree, thread.repo ?? undefined)
 }
 
-export function hasActivityThreadWorkspace(thread: AgentPaneThread): boolean {
-  const state = useAppStore.getState()
+type ActivityThreadWorkspaceCatalog = Pick<
+  AppState,
+  'worktreesByRepo' | 'detectedWorktreesByRepo' | 'folderWorkspaces'
+>
+
+export function hasActivityThreadWorkspace(
+  thread: AgentPaneThread,
+  catalog: ActivityThreadWorkspaceCatalog = useAppStore.getState()
+): boolean {
   return Boolean(
-    state.getKnownWorktreeById(thread.worktree.id, getActivityThreadExecutionHostId(thread))
+    findKnownWorktreeById(catalog, thread.worktree.id, getActivityThreadExecutionHostId(thread))
   )
 }
 

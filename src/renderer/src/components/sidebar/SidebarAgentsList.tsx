@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useAppStore } from '@/store'
 import { ActivityScopeFilterChips } from '@/components/activity/activity-scope-filter-controls'
@@ -76,7 +76,15 @@ export default function SidebarAgentsList({
     setSelectedPaneKey
   })
 
-  const canJumpToWorkspace = hasActivityThreadWorkspace
+  const canJumpToWorkspace = useCallback(
+    (thread: Parameters<typeof hasActivityThreadWorkspace>[0]) =>
+      hasActivityThreadWorkspace(thread, {
+        worktreesByRepo: storeData.worktreesByRepo,
+        detectedWorktreesByRepo: storeData.detectedWorktreesByRepo,
+        folderWorkspaces: storeData.folderWorkspaces
+      }),
+    [storeData.worktreesByRepo, storeData.detectedWorktreesByRepo, storeData.folderWorkspaces]
+  )
 
   return (
     <>

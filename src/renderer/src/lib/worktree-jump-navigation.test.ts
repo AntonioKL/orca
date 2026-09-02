@@ -41,7 +41,8 @@ describe('worktree jump navigation', () => {
       hideWorkspacesFromOtherDevices: false,
       alwaysShowDefaultBranchWorkspace: true,
       visibleWorkspaceHostIds: null,
-      workspaceHostScope: 'all'
+      workspaceHostScope: 'all',
+      revealWorktreeInSidebar: vi.fn()
     })
   })
 
@@ -63,6 +64,16 @@ describe('worktree jump navigation', () => {
 
     jumpToWorktreeFromSidebar('wt-1')
 
+    expect(mocks.warning).not.toHaveBeenCalled()
+  })
+
+  it('reveals without warning when activation wakes a target hidden only by Hide sleeping', () => {
+    const state = mocks.getState()
+    mocks.worktreePassesSidebarFilters.mockReturnValueOnce(false).mockReturnValueOnce(true)
+
+    expect(jumpToWorktreeFromSidebar('wt-sleeping')).toBe(true)
+
+    expect(state.revealWorktreeInSidebar).toHaveBeenCalledWith('wt-sleeping', {})
     expect(mocks.warning).not.toHaveBeenCalled()
   })
 

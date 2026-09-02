@@ -4,7 +4,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useSidebarResize } from '@/hooks/useSidebarResize'
 import SidebarHeader from './SidebarHeader'
 import SidebarNav from './SidebarNav'
-import { shouldShowAgentDashboardSidebarButton } from './agent-dashboard-sidebar-visibility'
+import { shouldShowAgentsSidebar } from './agents-sidebar-visibility'
 import SetupScriptPromptCard from './SetupScriptPromptCard'
 import WorktreeList from './WorktreeList'
 import SidebarToolbar from './SidebarToolbar'
@@ -59,7 +59,8 @@ function Sidebar({
   const startupWorktreeRefreshCompleted = useAppStore((s) => s.startupWorktreeRefreshCompleted)
   const settings = useAppStore((s) => s.settings)
   const sidebarBody = useAppStore((s) => s.sidebarBody ?? 'workspaces')
-  const showAgentsSidebar = shouldShowAgentDashboardSidebarButton(settings)
+  const showAgentsSidebar = shouldShowAgentsSidebar(settings)
+  const showAgentDashboard = settings?.experimentalAgentDashboardPopout === true
   const agentDashboardDrawerOpen = useAppStore((s) => s.agentDashboardDrawerOpen)
   const setAgentDashboardDrawerOpen = useAppStore((s) => s.setAgentDashboardDrawerOpen)
   const [agentReadFilter, setAgentReadFilter] = React.useState<ThreadReadFilter>('all')
@@ -139,10 +140,10 @@ function Sidebar({
   }, [closeWorkspaceBoard, sidebarOpen, workspaceBoardRenderedOpen])
 
   useEffect(() => {
-    if (!showAgentsSidebar && agentDashboardDrawerOpen) {
+    if (!showAgentDashboard && agentDashboardDrawerOpen) {
       setAgentDashboardDrawerOpen(false)
     }
-  }, [agentDashboardDrawerOpen, setAgentDashboardDrawerOpen, showAgentsSidebar])
+  }, [agentDashboardDrawerOpen, setAgentDashboardDrawerOpen, showAgentDashboard])
 
   const { containerRef, onResizeStart, isResizing } = useSidebarResize<HTMLDivElement>({
     isOpen: sidebarOpen,
@@ -357,7 +358,7 @@ function Sidebar({
           onMenuOpenChange={setWorkspaceBoardMenuOpen}
         />
       ) : null}
-      {showAgentsSidebar ? (
+      {showAgentDashboard ? (
         <React.Suspense fallback={null}>
           <AgentDashboardSidebarHost
             sidebarOpen={sidebarOpen}

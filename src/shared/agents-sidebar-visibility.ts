@@ -1,7 +1,5 @@
 export type AgentsSidebarVisibilitySettings = {
   showAgentsSidebar?: boolean
-  experimentalActivity?: boolean
-  experimentalAgentDashboardPopout?: boolean
 }
 
 export function resolveAgentsSidebarVisible(
@@ -10,14 +8,5 @@ export function resolveAgentsSidebarVisible(
   if (!settings) {
     return true
   }
-  if (typeof settings.showAgentsSidebar === 'boolean') {
-    return settings.showAgentsSidebar
-  }
-  if (settings.experimentalActivity === true) {
-    return true
-  }
-  if (typeof settings.experimentalAgentDashboardPopout === 'boolean') {
-    return settings.experimentalAgentDashboardPopout
-  }
-  return true
+  return settings.showAgentsSidebar !== false
 }
