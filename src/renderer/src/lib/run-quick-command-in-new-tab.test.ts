@@ -181,6 +181,34 @@ describe('runQuickCommandInNewTab', () => {
     )
   })
 
+  it('records history while a structured agent quick command publishes asynchronously', () => {
+    mocks.launchAgentInNewTab.mockReturnValue({
+      tabId: null,
+      startupPlan: {} as never,
+      pasteDraftAfterLaunch: false,
+      focusAfterMenuClose: 'structured-session'
+    })
+
+    const result = runQuickCommandInNewTab({
+      command: {
+        id: 'agent-review',
+        label: 'Review',
+        action: 'agent-prompt',
+        agent: 'codex',
+        prompt: 'Review this diff'
+      },
+      worktreeId: 'repo::worktree',
+      groupId: 'group-1',
+      historyId: 'runtime:local\u0000agent-review'
+    })
+
+    expect(result).toBeNull()
+    expect(mockState.setRecentQuickCommandForGroup).toHaveBeenCalledWith(
+      'group-1',
+      'runtime:local\u0000agent-review'
+    )
+  })
+
   it('does not launch post-start-only agent quick commands', () => {
     const result = runQuickCommandInNewTab({
       command: {
