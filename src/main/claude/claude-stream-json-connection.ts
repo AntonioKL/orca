@@ -1,7 +1,6 @@
 import type * as ClaudeAgentSdk from '@anthropic-ai/claude-agent-sdk'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { spawnProcess } from '../../shared/child-process/run-process'
-import { killCodexAppServerProcessTree } from '../codex/codex-app-server-session'
 import { buildClaudeChildProcessEnv } from './claude-child-process-environment'
 import { createClaudeAgentSdkControlBridge } from './claude-agent-sdk-control-bridge'
 import {
@@ -9,7 +8,7 @@ import {
   ClaudeControlRequestError,
   requestClaudeControl
 } from './claude-agent-sdk-control-requests'
-import { proveClaudeChildExit } from './claude-agent-sdk-exit-proof'
+import { proveClaudeChildExit, reapClaudeChildTree } from './claude-agent-sdk-exit-proof'
 import { createClaudeCodeProcessSpawn } from './claude-agent-sdk-process-spawn'
 import { createClaudeUserMessageQueue } from './claude-agent-sdk-user-message-queue'
 import type { ClaudeStructuredSdkOptions } from './claude-structured-launch-resolution'
@@ -145,7 +144,7 @@ export async function openClaudeStreamJsonConnection(
     // The SDK ends its generator in error when the child dies or the transport
     // fails; a transport failure with a live child still has to reap the tree.
     if (!closing && !exited) {
-      killCodexAppServerProcessTree(child)
+      void reapClaudeChildTree(child)
     }
     handleUnexpectedEnd(error instanceof Error ? error : new Error(String(error)))
   })
@@ -160,7 +159,7 @@ export async function openClaudeStreamJsonConnection(
   })
   child.stdin.on('error', (error) => {
     if (!closing) {
-      killCodexAppServerProcessTree(child)
+      void reapClaudeChildTree(child)
       handleUnexpectedEnd(error)
     }
   })

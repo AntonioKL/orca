@@ -26,6 +26,15 @@ function alive(pid: number): boolean {
   }
 }
 
+/** Signals are delivered asynchronously, so death is polled rather than sampled once. */
+async function until(settled: () => boolean, timeoutMs = 5_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (!settled() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return settled()
+}
+
 describe('claude child exit proof', () => {
   it.runIf(process.platform !== 'win32')(
     'bounded-tree-kills a stubborn child with a descendant and reports only an observed exit',
@@ -57,11 +66,12 @@ describe('claude child exit proof', () => {
         // True is only ever returned after the exit event actually fired: the child
         // traps SIGTERM, so this only settles once the forced ladder step lands.
         expect(exited).toBe(true)
+        // The descendant is signalled from a snapshot taken while its parent link
+        // still exists. Killing the parent first would reparent it out of reach.
+        await expect(until(() => !alive(descendantPid))).resolves.toBe(true)
       } finally {
-        // Not asserted: killCodexAppServerProcessTree SIGKILLs the parent in the same
-        // tick it spawns `pkill -P`, so on POSIX the descendant is usually reparented
-        // before the reap runs. Pre-existing and Codex-owned; reaped here so the
-        // suite leaks nothing.
+        // Failure-safe only: the assertion above owns the requirement, this just
+        // stops a failing run from leaking a process.
         try {
           process.kill(descendantPid, 'SIGKILL')
         } catch {
