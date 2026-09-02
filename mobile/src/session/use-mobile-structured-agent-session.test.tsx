@@ -201,15 +201,18 @@ describe('useMobileStructuredAgentSession', () => {
 
   function Harness({
     sessionId = 'session-1',
-    agent = 'codex'
+    agent = 'codex',
+    connected = true
   }: {
     sessionId?: string | null
     agent?: string | null
+    connected?: boolean
   }): null {
     hook = useMobileStructuredAgentSession({
       client,
       sessionId,
       enabled: true,
+      connected,
       agent,
       onSendError
     } as never)
@@ -252,6 +255,47 @@ describe('useMobileStructuredAgentSession', () => {
       expect.anything(),
       expect.anything()
     )
+  })
+
+  it('re-holds after a reconnect that outlives the host release grace', async () => {
+    act(() => {
+      renderer = create(createElement(Harness, { connected: true }))
+    })
+    await vi.waitFor(() =>
+      expect(
+        sendRequest.mock.calls.filter(([method]) => method === 'agentSession.hold')
+      ).toHaveLength(1)
+    )
+    await vi.waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1))
+
+    // A transport loss retires the connection-scoped hold; after the host's 15s grace
+    // it may evict the provider child. Reconnect must acquire before replaying the stream.
+    await act(async () => {
+      renderer?.update(createElement(Harness, { connected: false }))
+    })
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      renderer?.update(createElement(Harness, { connected: true }))
+    })
+
+    await vi.waitFor(() =>
+      expect(
+        sendRequest.mock.calls.filter(([method]) => method === 'agentSession.hold')
+      ).toHaveLength(2)
+    )
+    await vi.waitFor(() => expect(subscribe).toHaveBeenCalledTimes(2))
+    const holdOrders = sendRequest.mock.calls
+      .map((call, index) =>
+        call[0] === 'agentSession.hold' ? sendRequest.mock.invocationCallOrder[index] : null
+      )
+      .filter((order): order is number => order !== null)
+    const subscribeOrders = subscribe.mock.invocationCallOrder
+    const secondHoldOrder = holdOrders[1]
+    const secondSubscribeOrder = subscribeOrders[1]
+    if (secondHoldOrder === undefined || secondSubscribeOrder === undefined) {
+      throw new Error('reconnect calls were not recorded')
+    }
+    expect(secondHoldOrder).toBeLessThan(secondSubscribeOrder)
   })
 
   it('sends with the shared structured mutation envelope after the stream fence lands', async () => {

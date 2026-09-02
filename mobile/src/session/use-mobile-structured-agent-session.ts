@@ -65,15 +65,18 @@ export function useMobileStructuredAgentSession(args: {
   client: RpcClient | null
   sessionId: string | null
   enabled: boolean
+  /** Live transport only; gates the connection-scoped hold, nothing else. */
+  connected: boolean
   agent: string | null
   onSendError: (message: string) => void
 }): StructuredMobileSession {
-  const { agent, client, sessionId, enabled, onSendError } = args
+  const { agent, client, connected, sessionId, enabled, onSendError } = args
   const operationIdsRef = useRef(new Map<string, string>())
   const { state, stateRef, loadingOlder, loadEarlier } = useMobileStructuredAgentState({
     client,
     sessionId,
-    enabled
+    enabled,
+    connected
   })
 
   const mutate = useCallback(

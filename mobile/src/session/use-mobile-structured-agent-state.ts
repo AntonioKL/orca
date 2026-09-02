@@ -27,16 +27,19 @@ export function useMobileStructuredAgentState(args: {
   client: RpcClient | null
   sessionId: string | null
   enabled: boolean
+  /** Live transport only; gates the connection-scoped hold, nothing else. */
+  connected: boolean
 }): {
   state: StructuredAgentSessionState
   stateRef: { readonly current: StructuredAgentSessionState }
   loadingOlder: boolean
   loadEarlier: () => void
 } {
-  const { client, enabled, sessionId } = args
+  const { client, connected, enabled, sessionId } = args
   const [state, setState] = useState<StructuredAgentSessionState>(EMPTY_STRUCTURED_AGENT_SESSION)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const stateRef = useRef(state)
+  const sessionIdentityRef = useRef<{ client: RpcClient; sessionId: string } | null>(null)
   useLayoutEffect(() => {
     stateRef.current = state
   }, [state])
@@ -46,42 +49,80 @@ export function useMobileStructuredAgentState(args: {
   }, [])
 
   useEffect(() => {
-    if (!client || !sessionId || !enabled) {
-      return
+    const sessionChanged =
+      client !== null &&
+      sessionId !== null &&
+      (sessionIdentityRef.current?.client !== client ||
+        sessionIdentityRef.current?.sessionId !== sessionId)
+    if (client && sessionId) {
+      sessionIdentityRef.current = { client, sessionId }
     }
-    const holderId = structuredAgentSessionHolderId('mobile-chat')
-    const held = callAgentSession(client, 'agentSession.hold', {
-      sessionId,
-      holderId
-    }).catch(() => undefined)
-    return () => {
-      void held.then(() =>
-        callAgentSession(client, 'agentSession.release', {
-          sessionId,
-          holderId
-        }).catch(() => undefined)
-      )
-    }
-  }, [client, enabled, sessionId])
-
-  useEffect(() => {
     if (!client || !sessionId || !enabled) {
+      sessionIdentityRef.current = null
       setState(EMPTY_STRUCTURED_AGENT_SESSION)
       setLoadingOlder(false)
       return
     }
+    if (sessionChanged) {
+      // Never show one structured tab's transcript under another tab.
+      setState(EMPTY_STRUCTURED_AGENT_SESSION)
+    }
+    if (!connected) {
+      // The connection-scoped hold and stream are retired in the prior cleanup;
+      // retain the last transcript until the transport comes back.
+      return
+    }
     apply({ type: 'loading' })
-    const unsubscribe = client.subscribe('agentSession.subscribe', { sessionId }, (raw) => {
-      if (typeof raw === 'object' && raw !== null && (raw as { type?: unknown }).type === 'error') {
-        apply({ type: 'error', message: String((raw as { message?: unknown }).message ?? '') })
-        return
-      }
-      if (isSubscribeEvent(raw)) {
-        apply({ type: 'event', event: raw })
-      }
+    const holderId = structuredAgentSessionHolderId('mobile-chat')
+    let cancelled = false
+    let unsubscribe = (): void => {}
+    const held = callAgentSession(client, 'agentSession.hold', {
+      sessionId,
+      holderId
     })
-    return unsubscribe
-  }, [apply, client, enabled, sessionId])
+    void held
+      .then(() => {
+        if (cancelled) {
+          return
+        }
+        unsubscribe = client.subscribe('agentSession.subscribe', { sessionId }, (raw) => {
+          if (
+            typeof raw === 'object' &&
+            raw !== null &&
+            (raw as { type?: unknown }).type === 'error'
+          ) {
+            apply({ type: 'error', message: String((raw as { message?: unknown }).message ?? '') })
+            return
+          }
+          if (isSubscribeEvent(raw)) {
+            apply({ type: 'event', event: raw })
+          }
+        })
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          apply({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+        }
+      })
+    return () => {
+      cancelled = true
+      unsubscribe()
+      void held
+        .then(() =>
+          callAgentSession(
+            client,
+            'agentSession.release',
+            {
+              sessionId,
+              holderId
+            },
+            undefined,
+            { failWhenDisconnected: true }
+          ).catch(() => undefined)
+        )
+        .catch(() => undefined)
+    }
+  }, [apply, client, connected, enabled, sessionId])
 
   const loadEarlier = useCallback(() => {
     const current = stateRef.current
