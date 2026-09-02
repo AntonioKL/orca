@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { EffortLevel, Options as ClaudeAgentSdkOptions } from '@anthropic-ai/claude-agent-sdk'
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
 import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-provider-handle'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
@@ -6,24 +7,37 @@ import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
 import { applyClaudeEnvPatch } from '../claude-accounts/environment'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
-import { getSpawnArgsForWindows } from '../win32-utils'
 
 export const CLAUDE_DEFAULT_SETTING_SOURCES = ['user', 'project', 'local'] as const
 
-export const CLAUDE_STRUCTURED_BASE_ARGS = [
-  '-p',
-  '--input-format',
-  'stream-json',
-  '--output-format',
-  'stream-json',
-  '--include-partial-messages',
-  '--verbose',
-  '--replay-user-messages',
-  '--permission-prompt-tool',
-  'stdio',
-  '--setting-sources',
-  CLAUDE_DEFAULT_SETTING_SOURCES.join(',')
-]
+export type ClaudeStructuredSdkOptions = Pick<
+  ClaudeAgentSdkOptions,
+  | 'includePartialMessages'
+  | 'settingSources'
+  | 'supportedDialogKinds'
+  | 'extraArgs'
+  | 'model'
+  | 'effort'
+  | 'sessionId'
+  | 'resume'
+>
+
+/**
+ * The options translation of the flags this transport used to build by hand.
+ *
+ * `-p`, `--input-format`, `--output-format` and `--verbose` are implied by
+ * `query()`; `--permission-prompt-tool stdio` is emitted because a `canUseTool`
+ * callback is supplied. `--replay-user-messages` has no option — the SDK never
+ * emits it — and Orca's send acknowledgement depends on the replay.
+ */
+export const CLAUDE_STRUCTURED_BASE_OPTIONS: ClaudeStructuredSdkOptions = {
+  includePartialMessages: true,
+  settingSources: [...CLAUDE_DEFAULT_SETTING_SOURCES],
+  supportedDialogKinds: [],
+  extraArgs: { 'replay-user-messages': null }
+}
+
+const EFFORT_LEVELS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
 function cloneDefinedEnv(env: NodeJS.ProcessEnv | Record<string, string>): Record<string, string> {
   const next: Record<string, string> = {}
@@ -35,9 +49,55 @@ function cloneDefinedEnv(env: NodeJS.ProcessEnv | Record<string, string>): Recor
   return next
 }
 
+/**
+ * Translate the record's durable launch arguments into SDK options.
+ *
+ * Typed option first so a flag is never emitted twice; `extraArgs` carries
+ * anything without one. A token expressible neither way is refused rather than
+ * dropped — a silent drop is how this lane loses launch flags.
+ */
+export function claudeSdkOptionsForLaunchArgs(
+  args: readonly string[]
+): Pick<ClaudeStructuredSdkOptions, 'model' | 'effort' | 'extraArgs'> {
+  let model: string | undefined
+  let effort: EffortLevel | undefined
+  const extraArgs: Record<string, string | null> = {}
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index] ?? ''
+    if (!token.startsWith('--') || token.length <= 2) {
+      throw new Error(
+        `claude launch argument ${token} has no SDK option; refusing rather than dropping it`
+      )
+    }
+    const equals = token.indexOf('=')
+    const flag = equals === -1 ? token : token.slice(0, equals)
+    let value = equals === -1 ? null : token.slice(equals + 1)
+    if (value === null) {
+      const next = args[index + 1]
+      if (next !== undefined && !next.startsWith('-')) {
+        value = next
+        index += 1
+      }
+    }
+    if (flag === '--model' && value !== null) {
+      model = value
+    } else if (flag === '--effort' && value !== null && EFFORT_LEVELS.includes(value)) {
+      effort = value as EffortLevel
+    } else {
+      extraArgs[flag.slice(2)] = value
+    }
+  }
+  return {
+    ...(model === undefined ? {} : { model }),
+    ...(effort === undefined ? {} : { effort }),
+    ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {})
+  }
+}
+
 export type ClaudeStructuredLaunch = {
-  command: string
-  args: string[]
+  /** Always Orca's resolved user CLI: the SDK's bundled binaries are excluded from the install. */
+  pathToClaudeCodeExecutable: string
+  options: ClaudeStructuredSdkOptions
   cwd: string
   env?: Record<string, string>
   claudeConfigDir: string
@@ -91,16 +151,8 @@ export function createClaudeStructuredLaunchResolver(
       head?.handle.provider === 'claude'
         ? head.handle.sessionId
         : claudeSessionIdForOrcaSession(identity.sessionId)
-    const providerArgs =
-      head?.handle.provider === 'claude'
-        ? ['--resume', providerSessionId]
-        : ['--session-id', providerSessionId]
+    const durable = claudeSdkOptionsForLaunchArgs(record.launchArgs ?? [])
     const command = (deps.resolveCommand ?? resolveClaudeCommand)()
-    const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(command, [
-      ...(record.launchArgs ?? []),
-      ...CLAUDE_STRUCTURED_BASE_ARGS,
-      ...providerArgs
-    ])
     const overlay = await deps.resolveEnv?.()
     // Why the overlay merges onto the inherited env rather than replacing it: the child
     // still needs PATH and the rest of the shell environment, and withCliRuntimeOnPath
@@ -122,8 +174,15 @@ export function createClaudeStructuredLaunchResolver(
       { platform: process.platform }
     )
     return {
-      command: spawnCmd,
-      args: spawnArgs,
+      pathToClaudeCodeExecutable: command,
+      options: {
+        ...durable,
+        ...CLAUDE_STRUCTURED_BASE_OPTIONS,
+        extraArgs: { ...durable.extraArgs, ...CLAUDE_STRUCTURED_BASE_OPTIONS.extraArgs },
+        ...(head?.handle.provider === 'claude'
+          ? { resume: providerSessionId }
+          : { sessionId: providerSessionId })
+      },
       cwd: await deps.resolveWorkspacePath(record.location.workspaceId),
       env,
       claudeConfigDir: record.accountHome.path,

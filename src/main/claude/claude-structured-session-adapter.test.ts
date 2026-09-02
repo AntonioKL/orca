@@ -155,8 +155,8 @@ function adapterFor(
 ): ClaudeStructuredSessionAdapter {
   return new ClaudeStructuredSessionAdapter({
     resolveLaunch: async () => ({
-      command: 'claude',
-      args: ['-p'],
+      pathToClaudeCodeExecutable: 'claude',
+      options: {},
       cwd: '/work/repo',
       claudeConfigDir: '/accounts/claude',
       providerSessionId: PROVIDER_SESSION_ID,

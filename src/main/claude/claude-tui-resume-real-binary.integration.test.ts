@@ -10,7 +10,7 @@ import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import { readStructuredTuiProcessIdentity } from '../runtime/structured-tui-process-identity'
 import { getSpawnArgsForWindows } from '../win32-utils'
-import { CLAUDE_STRUCTURED_BASE_ARGS } from './claude-structured-launch-resolution'
+import { CLAUDE_STRUCTURED_BASE_OPTIONS } from './claude-structured-launch-resolution'
 import {
   ClaudeStructuredSessionAdapter,
   type ClaudeStructuredSessionEvent
@@ -176,17 +176,14 @@ describe.skipIf(!claudeAuthenticated)('real Claude TUI resume proof', () => {
     const providerSessionId = randomUUID()
     const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
     const events: ClaudeStructuredSessionEvent[] = []
-    const structuredLaunch = getSpawnArgsForWindows(command, [
-      ...CLAUDE_STRUCTURED_BASE_ARGS,
-      '--settings',
-      settingsPath,
-      '--session-id',
-      providerSessionId
-    ])
     const adapter = new ClaudeStructuredSessionAdapter({
       resolveLaunch: async () => ({
-        command: structuredLaunch.spawnCmd,
-        args: structuredLaunch.spawnArgs,
+        pathToClaudeCodeExecutable: command,
+        options: {
+          ...CLAUDE_STRUCTURED_BASE_OPTIONS,
+          extraArgs: { ...CLAUDE_STRUCTURED_BASE_OPTIONS.extraArgs, settings: settingsPath },
+          sessionId: providerSessionId
+        },
         cwd: process.cwd(),
         claudeConfigDir,
         providerSessionId,

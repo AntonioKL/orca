@@ -395,8 +395,8 @@ describe('a structured Claude session over agentSession.*', () => {
   it('creates, sends, streams, approves, interrupts, and resumes from the chain head', async () => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-SHELL-LEAK')
     const created = await ok<{ fence: number }>('agentSession.create', createIntentParams())
-    expect(claude.live().launch.args).toContain('--session-id')
-    expect(claude.live().launch.args).toContain(PROVIDER_SESSION)
+    expect(claude.live().launch.options).toMatchObject({ sessionId: PROVIDER_SESSION })
+    expect(claude.live().launch.options.resume).toBeUndefined()
     expect(claude.live().launch.env).toMatchObject({
       ANTHROPIC_AUTH_TOKEN: 'configured-token',
       ANTHROPIC_BASE_URL: 'https://gateway.example.test',
@@ -491,7 +491,7 @@ describe('a structured Claude session over agentSession.*', () => {
     const resumed = await ok<{ fence: number }>('agentSession.ensure', ensureParams(created.fence))
     expect(resumed.fence).toBe(created.fence + 1)
     expect(old.closed).toBe(true)
-    expect(claude.live().launch.args.slice(-2)).toEqual(['--resume', PROVIDER_SESSION])
+    expect(claude.live().launch.options).toMatchObject({ resume: PROVIDER_SESSION })
     const host = getStructuredAgentSessionHost() as unknown as {
       deps: { store: { getRecord: (sessionId: string) => { providerHandleChain: unknown[] } } }
     }
@@ -561,7 +561,7 @@ describe('a structured Claude session over agentSession.*', () => {
     )
     expect(new Set(texts).size).toBe(texts.length)
     expect(claude.connections).toHaveLength(2)
-    expect(claude.live().launch.args.slice(-2)).toEqual(['--resume', PROVIDER_SESSION])
+    expect(claude.live().launch.options).toMatchObject({ resume: PROVIDER_SESSION })
     const record = (
       host as unknown as {
         deps: {

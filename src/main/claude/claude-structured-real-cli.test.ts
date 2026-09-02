@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import { getSpawnArgsForWindows } from '../win32-utils'
-import { CLAUDE_STRUCTURED_BASE_ARGS } from './claude-structured-launch-resolution'
+import { CLAUDE_STRUCTURED_BASE_OPTIONS } from './claude-structured-launch-resolution'
 import {
   ClaudeStructuredSessionAdapter,
   type ClaudeStructuredSessionEvent
@@ -39,15 +39,10 @@ function realAdapter(
   claudeConfigDir: string,
   events: ClaudeStructuredSessionEvent[] = []
 ): ClaudeStructuredSessionAdapter {
-  const launch = getSpawnArgsForWindows(command, [
-    ...CLAUDE_STRUCTURED_BASE_ARGS,
-    '--session-id',
-    providerSessionId
-  ])
   return new ClaudeStructuredSessionAdapter({
     resolveLaunch: async () => ({
-      command: launch.spawnCmd,
-      args: launch.spawnArgs,
+      pathToClaudeCodeExecutable: command,
+      options: { ...CLAUDE_STRUCTURED_BASE_OPTIONS, sessionId: providerSessionId },
       cwd: process.cwd(),
       claudeConfigDir,
       providerSessionId,

@@ -131,8 +131,8 @@ export async function acquireClaudeSession({
     const open = deps.openConnection ?? openClaudeStreamJsonConnection
     const connection = await open(
       {
-        command: launch.command,
-        args: launch.args,
+        pathToClaudeCodeExecutable: launch.pathToClaudeCodeExecutable,
+        options: launch.options,
         cwd: launch.cwd,
         env: {
           ...launch.env,

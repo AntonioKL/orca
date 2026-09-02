@@ -7,7 +7,8 @@ import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import {
   CLAUDE_DEFAULT_SETTING_SOURCES,
-  CLAUDE_STRUCTURED_BASE_ARGS,
+  CLAUDE_STRUCTURED_BASE_OPTIONS,
+  claudeSdkOptionsForLaunchArgs,
   claudeSessionIdForOrcaSession,
   createClaudeStructuredLaunchResolver
 } from './claude-structured-launch-resolution'
@@ -58,19 +59,21 @@ describe('claude structured launch resolution', () => {
     expect(first.providerSessionId).toBe(claudeSessionIdForOrcaSession(SESSION_ID))
     expect(second.providerSessionId).toBe(first.providerSessionId)
     expect(first).toMatchObject({
-      command: '/usr/local/bin/claude',
+      pathToClaudeCodeExecutable: '/usr/local/bin/claude',
       cwd: '/repos/workspace-1',
       claudeConfigDir: '/home/work/.claude',
       resumeLeafUuid: null,
       resumed: false
     })
-    expect(first.args).toContain('--session-id')
-    expect(first.args).toContain(first.providerSessionId)
-    expect(first.args).toContain('--permission-prompt-tool')
-    expect(first.args).toContain('stdio')
-    expect(first.args).toContain('--setting-sources')
-    expect(first.args).toContain(CLAUDE_DEFAULT_SETTING_SOURCES.join(','))
-    expect(CLAUDE_STRUCTURED_BASE_ARGS).toContain('--verbose')
+    expect(first.options).toEqual({
+      includePartialMessages: true,
+      settingSources: [...CLAUDE_DEFAULT_SETTING_SOURCES],
+      supportedDialogKinds: [],
+      extraArgs: { 'replay-user-messages': null },
+      sessionId: first.providerSessionId
+    })
+    expect(first.options.resume).toBeUndefined()
+    expect(CLAUDE_STRUCTURED_BASE_OPTIONS.includePartialMessages).toBe(true)
   })
 
   it('resumes the session and leaf at the durable chain head', async () => {
@@ -94,20 +97,46 @@ describe('claude structured launch resolution', () => {
       resumeLeafUuid: 'leaf-current',
       resumed: true
     })
-    expect(launch.args.slice(-2)).toEqual(['--resume', 'provider-current'])
+    expect(launch.options.resume).toBe('provider-current')
+    expect(launch.options.sessionId).toBeUndefined()
   })
 
-  it('preserves durable Claude launch arguments before structured defaults', async () => {
+  it('preserves durable Claude launch arguments as typed options and extraArgs', async () => {
     const launch = await resolverFor(
-      record({ launchArgs: ['--model', 'claude-sonnet-4-5', '--dangerously-skip-permissions'] })
+      record({
+        launchArgs: [
+          '--model',
+          'claude-sonnet-4-5',
+          '--effort',
+          'high',
+          '--dangerously-skip-permissions'
+        ]
+      })
     )({ identity: IDENTITY })
 
-    expect(launch.args.slice(0, 4)).toEqual([
-      '--model',
-      'claude-sonnet-4-5',
-      '--dangerously-skip-permissions',
-      '-p'
-    ])
+    expect(launch.options.model).toBe('claude-sonnet-4-5')
+    expect(launch.options.effort).toBe('high')
+    expect(launch.options.extraArgs).toEqual({
+      'dangerously-skip-permissions': null,
+      'replay-user-messages': null
+    })
+  })
+
+  it('routes durable launch arguments to a typed option first and refuses what neither can carry', () => {
+    // The catalog's own output: each flag lands in exactly one place, so the SDK
+    // cannot emit it twice with two different values.
+    expect(claudeSdkOptionsForLaunchArgs(['--model', 'opus', '--effort', 'xhigh'])).toEqual({
+      model: 'opus',
+      effort: 'xhigh'
+    })
+    // An effort the SDK's union does not name still reaches the CLI, unchanged.
+    expect(claudeSdkOptionsForLaunchArgs(['--effort', 'ultra'])).toEqual({
+      extraArgs: { effort: 'ultra' }
+    })
+    expect(claudeSdkOptionsForLaunchArgs(['--settings=/tmp/s.json'])).toEqual({
+      extraArgs: { settings: '/tmp/s.json' }
+    })
+    expect(() => claudeSdkOptionsForLaunchArgs(['-m', 'opus'])).toThrow(/no SDK option/)
   })
 
   it('keeps the session launch environment pinned after account settings change', async () => {

@@ -1,12 +1,24 @@
+import { query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { spawnProcess } from '../../shared/child-process/run-process'
-import { waitForProcessExitUntil } from '../codex/codex-process-exit-deadline'
 import { killCodexAppServerProcessTree } from '../codex/codex-app-server-session'
 import { buildClaudeChildProcessEnv } from './claude-child-process-environment'
-import { attachClaudeStreamJsonStdout } from './claude-stream-json-stdout'
+import { createClaudeAgentSdkControlBridge } from './claude-agent-sdk-control-bridge'
+import {
+  CLAUDE_DEFAULT_REQUEST_TIMEOUT_MS,
+  ClaudeControlRequestError,
+  requestClaudeControl
+} from './claude-agent-sdk-control-requests'
+import { proveClaudeChildExit } from './claude-agent-sdk-exit-proof'
+import { createClaudeCodeProcessSpawn } from './claude-agent-sdk-process-spawn'
+import { createClaudeUserMessageQueue } from './claude-agent-sdk-user-message-queue'
+import type { ClaudeStructuredSdkOptions } from './claude-structured-launch-resolution'
+
+export { ClaudeControlRequestError }
 
 export type ClaudeStreamJsonLaunch = {
-  command: string
-  args: string[]
+  /** Orca's resolved user CLI; the SDK falls back to a bundled binary that is not installed. */
+  pathToClaudeCodeExecutable: string
+  options: ClaudeStructuredSdkOptions
   cwd: string
   env?: Record<string, string>
 }
@@ -49,55 +61,42 @@ export type ClaudeStreamJsonConnection = {
   close: () => Promise<boolean>
 }
 
-export class ClaudeControlRequestError extends Error {
-  constructor(
-    readonly subtype: string,
-    message: string
-  ) {
-    super(message)
-    this.name = 'ClaudeControlRequestError'
-  }
-}
-
-const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
-const GRACEFUL_EXIT_MS = 1_500
-const FORCED_EXIT_MS = 1_000
-const STDERR_TAIL_MAX_BYTES = 8192
-const STDOUT_LINE_MAX_BYTES = 8 * 1024 * 1024
-
-type PendingRequest = {
-  subtype: string
-  resolve: (result: unknown) => void
-  reject: (error: Error) => void
-  timer: ReturnType<typeof setTimeout>
-}
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 function exitError(stderrTail: string, cause?: Error): Error {
   const detail = stderrTail.trim()
   const message = detail ? `claude stream-json exited: ${detail}` : 'claude stream-json exited'
   return cause ? new Error(message, { cause }) : new Error(message)
 }
+
 export async function openClaudeStreamJsonConnection(
   launch: ClaudeStreamJsonLaunch,
   handlers: ClaudeStreamJsonConnectionHandlers = {},
   spawnImpl: typeof spawnProcess = spawnProcess
 ): Promise<ClaudeStreamJsonConnection> {
-  const child = spawnImpl({
-    program: launch.command,
-    args: launch.args,
-    cwd: launch.cwd,
-    env: buildClaudeChildProcessEnv(launch.env),
-    stdio: ['pipe', 'pipe', 'pipe']
+  const spawner = createClaudeCodeProcessSpawn(spawnImpl)
+  const bridge = createClaudeAgentSdkControlBridge(handlers)
+  const inbox = createClaudeUserMessageQueue()
+  const session = query({
+    prompt: inbox.messages,
+    options: {
+      ...launch.options,
+      cwd: launch.cwd,
+      // Why env is never omitted: the SDK inherits process.env when it is, which is
+      // exactly the ambient ANTHROPIC_* auth leak this lane already shipped once.
+      env: buildClaudeChildProcessEnv(launch.env),
+      pathToClaudeCodeExecutable: launch.pathToClaudeCodeExecutable,
+      spawnClaudeCodeProcess: spawner.spawn,
+      canUseTool: bridge.canUseTool,
+      onUserDialog: bridge.onUserDialog
+    }
   })
-  const pending = new Map<string, PendingRequest>()
-  let nextRequestId = 1
-  let stderrTail = ''
+  const child = spawner.child
+  if (!child) {
+    throw new Error('the claude agent SDK returned without spawning a child')
+  }
+
   let exited = false
   let closing = false
   let terminalError: Error | null = null
-  let writeChain: Promise<void> = Promise.resolve()
   let closePromise: Promise<boolean> | null = null
 
   let settleExit = (): void => {}
@@ -110,111 +109,36 @@ export async function openClaudeStreamJsonConnection(
   }
   child.on('exit', markExited)
 
-  const failPending = (error: Error): void => {
-    for (const waiter of pending.values()) {
-      clearTimeout(waiter.timer)
-      waiter.reject(error)
-    }
-    pending.clear()
-  }
-
   const handleUnexpectedEnd = (cause?: Error): void => {
     if (terminalError) {
       return
     }
-    terminalError = exitError(stderrTail, cause)
-    failPending(terminalError)
+    terminalError = exitError(spawner.stderrTail, cause)
+    inbox.fail(terminalError)
     if (!closing) {
       handlers.onExit?.(terminalError)
     }
   }
 
-  const writeLine = (payload: Record<string, unknown>): Promise<void> => {
-    const write = async (): Promise<void> => {
-      if (closing || exited || terminalError || child.stdin.destroyed || !child.stdin.writable) {
-        throw terminalError ?? new Error('claude stream-json connection is closed')
-      }
-      const line = `${JSON.stringify(payload)}\n`
-      await new Promise<void>((resolve, reject) => {
-        child.stdin.write(line, (error) => (error ? reject(error) : resolve()))
-      })
+  void (async () => {
+    for await (const message of session) {
+      handlers.onMessage?.(message as unknown as Record<string, unknown>)
     }
-    const queued = writeChain.then(write)
-    writeChain = queued.catch(() => {})
-    return queued
-  }
-
-  const respond = (requestId: string, response: unknown): Promise<void> =>
-    writeLine({
-      type: 'control_response',
-      response: { subtype: 'success', request_id: requestId, response }
-    })
-
-  const respondWithError = (requestId: string, error: string): Promise<void> =>
-    writeLine({
-      type: 'control_response',
-      response: { subtype: 'error', request_id: requestId, error }
-    })
-
-  const dispatchMessage = (message: Record<string, unknown>): void => {
-    if (message.type === 'control_response') {
-      const response = isRecord(message.response) ? message.response : null
-      const requestId = typeof response?.request_id === 'string' ? response.request_id : null
-      const waiter = requestId ? pending.get(requestId) : undefined
-      if (!waiter || !requestId || !response) {
-        handlers.onMessage?.(message)
-        return
-      }
-      pending.delete(requestId)
-      clearTimeout(waiter.timer)
-      if (response.subtype === 'success') {
-        waiter.resolve(response.response)
-      } else {
-        waiter.reject(
-          new ClaudeControlRequestError(
-            waiter.subtype,
-            typeof response.error === 'string'
-              ? response.error
-              : `claude ${waiter.subtype} request failed`
-          )
-        )
-      }
-      return
-    }
-    if (
-      message.type === 'control_request' &&
-      typeof message.request_id === 'string' &&
-      isRecord(message.request) &&
-      typeof message.request.subtype === 'string'
-    ) {
-      handlers.onControlRequest?.(message as ClaudeControlRequest, { respond, respondWithError })
-      return
-    }
-    if (message.type === 'control_cancel_request' && typeof message.request_id === 'string') {
-      handlers.onControlCancelRequest?.(message as ClaudeControlCancelRequest)
-      return
-    }
-    handlers.onMessage?.(message)
-  }
-  const stdout = attachClaudeStreamJsonStdout({
-    stdout: child.stdout,
-    maxLineBytes: STDOUT_LINE_MAX_BYTES,
-    onMessage: dispatchMessage,
-    onFailure: (error) => {
+  })().catch((error: unknown) => {
+    // The SDK ends its generator in error when the child dies or the transport
+    // fails; a transport failure with a live child still has to reap the tree.
+    if (!closing && !exited) {
       killCodexAppServerProcessTree(child)
-      handleUnexpectedEnd(error)
     }
+    handleUnexpectedEnd(error instanceof Error ? error : new Error(String(error)))
   })
-  child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
-    stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX_BYTES)
-  })
+
   child.on('error', (error) => {
     markExited()
     handleUnexpectedEnd(error)
   })
   child.on('close', () => {
     markExited()
-    stdout.flush()
     handleUnexpectedEnd()
   })
   child.stdin.on('error', (error) => {
@@ -224,52 +148,24 @@ export async function openClaudeStreamJsonConnection(
     }
   })
 
-  const request = (
-    subtype: string,
-    params: Record<string, unknown> = {},
-    options: { timeoutMs?: number } = {}
-  ): Promise<unknown> => {
-    const requestId = `orca-${nextRequestId++}`
-    const promise = new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(requestId)
-        reject(new Error(`claude ${subtype} request timed out`))
-      }, options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS)
-      timer.unref?.()
-      pending.set(requestId, { subtype, resolve, reject, timer })
-    })
-    void writeLine({
-      type: 'control_request',
-      request_id: requestId,
-      request: { subtype, ...params }
-    }).catch((error) => {
-      const waiter = pending.get(requestId)
-      if (waiter) {
-        pending.delete(requestId)
-        clearTimeout(waiter.timer)
-        waiter.reject(error as Error)
-      }
-    })
-    return promise
+  const send = (message: Record<string, unknown>): Promise<void> => {
+    if (closing || exited || terminalError || child.stdin.destroyed || !child.stdin.writable) {
+      return Promise.reject(terminalError ?? new Error('claude stream-json connection is closed'))
+    }
+    return inbox.push(message as unknown as SDKUserMessage)
   }
 
   const close = (): Promise<boolean> => {
     closePromise ??= (async () => {
       closing = true
-      try {
-        child.stdin.end()
-      } catch {
-        // The reap below still owns the process.
-      }
-      if (!exited) {
-        await waitForProcessExitUntil(exitPromise, GRACEFUL_EXIT_MS)
-        if (!exited) {
-          killCodexAppServerProcessTree(child)
-          await waitForProcessExitUntil(exitPromise, FORCED_EXIT_MS)
-        }
-      }
-      failPending(new Error('claude stream-json connection closed'))
-      const proven = exited
+      bridge.stopCancelling()
+      inbox.end()
+      const proven = await proveClaudeChildExit({
+        child,
+        exitPromise,
+        exited: () => exited
+      })
+      inbox.fail(new Error('claude stream-json connection closed'))
       if (!proven) {
         closePromise = null
       }
@@ -280,15 +176,21 @@ export async function openClaudeStreamJsonConnection(
 
   return {
     get pid() {
-      return child.pid
+      return spawner.pid
     },
     get closed() {
       return closing || exited || terminalError !== null
     },
-    send: writeLine,
-    request,
-    respond,
-    respondWithError,
+    send,
+    request: (subtype, params = {}, options = {}) =>
+      requestClaudeControl(
+        session,
+        subtype,
+        params,
+        options.timeoutMs ?? CLAUDE_DEFAULT_REQUEST_TIMEOUT_MS
+      ),
+    respond: bridge.respond,
+    respondWithError: bridge.respondWithError,
     close
   }
 }

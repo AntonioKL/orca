@@ -12,15 +12,16 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawnProcess } from '../../shared/child-process/run-process'
-import {
-  CLAUDE_DEFAULT_SETTING_SOURCES,
-  CLAUDE_STRUCTURED_BASE_ARGS
-} from './claude-structured-launch-resolution'
+import type { AgentSessionRecord } from '../../shared/agent-session-record'
+import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
+import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
+import { claudeQuerySettingsReader } from './claude-agent-sdk-control-requests'
+import { createClaudeStructuredLaunchResolver } from './claude-structured-launch-resolution'
 
 // Contract pins for @anthropic-ai/claude-agent-sdk, run against the real SDK
 // driving a scripted fake CLI (never the real Claude binary). These tests exist
 // to catch a future SDK version drifting under Orca: unknown-frame pass-through,
-// spawner env fidelity, argument parity with CLAUDE_STRUCTURED_BASE_ARGS,
+// spawner env fidelity, argument parity with the pre-SDK argv,
 // permission-callback semantics, and executable-path override.
 
 const FAKE_CLI = join(__dirname, '__fixtures__', 'claude-agent-sdk-scripted-cli.mjs')
@@ -36,6 +37,25 @@ const SDK_PLATFORM_PACKAGE_BASENAMES = [
   'claude-agent-sdk-linux-x64-musl',
   'claude-agent-sdk-win32-arm64',
   'claude-agent-sdk-win32-x64'
+]
+
+/**
+ * The exact argv the hand-rolled transport built before the SDK swap. Frozen here
+ * as the parity oracle: CLAUDE_STRUCTURED_BASE_OPTIONS has to keep producing it.
+ */
+const PRE_SDK_ARGV = [
+  '-p',
+  '--input-format',
+  'stream-json',
+  '--output-format',
+  'stream-json',
+  '--include-partial-messages',
+  '--verbose',
+  '--replay-user-messages',
+  '--permission-prompt-tool',
+  'stdio',
+  '--setting-sources',
+  'user,project,local'
 ]
 
 const RESULT_FRAME = {
@@ -75,7 +95,10 @@ afterEach(() => {
   }
 })
 
-function scriptScenario(steps: ScenarioStep[]): {
+function scriptScenario(
+  steps: ScenarioStep[],
+  controlResponses: Record<string, unknown> = {}
+): {
   scenarioPath: string
   reportPath: string
   cwd: string
@@ -85,7 +108,7 @@ function scriptScenario(steps: ScenarioStep[]): {
   scratchDirs.push(dir)
   const scenarioPath = join(dir, 'scenario.json')
   const reportPath = join(dir, 'report.json')
-  writeFileSync(scenarioPath, JSON.stringify({ steps }))
+  writeFileSync(scenarioPath, JSON.stringify({ steps, controlResponses }))
   return {
     scenarioPath,
     reportPath,
@@ -118,6 +141,27 @@ function recordingSpawner(spawns: SpawnSeen[]) {
       signal: opts.signal
     }) as unknown as SdkSpawnedProcess
   }
+}
+
+function resolvedLaunch(launchArgs: string[]) {
+  const record = {
+    sessionId: 'contract-pin-session',
+    provider: 'claude',
+    location: {
+      executionHostId: LOCAL_EXECUTION_HOST_ID,
+      wslDistro: null,
+      workspaceId: 'workspace-1',
+      workspaceKind: 'folder'
+    },
+    accountHome: { variable: 'CLAUDE_CONFIG_DIR', path: '/home/work/.claude' },
+    providerHandleChain: [],
+    launchArgs
+  } as unknown as AgentSessionRecord
+  return createClaudeStructuredLaunchResolver({
+    store: { getRecord: () => record } as unknown as AgentSessionRecordStore,
+    resolveWorkspacePath: async () => '/repos/workspace-1',
+    resolveCommand: () => FAKE_CLI
+  })({ identity: { sessionId: record.sessionId } as never })
 }
 
 function singleUserTurn(): AsyncIterable<SDKUserMessage> {
@@ -153,7 +197,7 @@ function normalizeArgv(args: string[]): string[] {
   })
 }
 
-/** Group CLAUDE_STRUCTURED_BASE_ARGS into flag/value pairs. */
+/** Group the pre-SDK argv into flag/value pairs. */
 function flagTable(args: readonly string[]): { flag: string; value: string | null }[] {
   const table: { flag: string; value: string | null }[] = []
   for (let i = 0; i < args.length; i++) {
@@ -290,27 +334,36 @@ describe('Claude Agent SDK contract pins', () => {
     expect(replayArgs.filter((arg) => arg === '--replay-user-messages')).toHaveLength(1)
   })
 
-  it('produces a matching CLI flag for every CLAUDE_STRUCTURED_BASE_ARGS entry', async () => {
+  it('produces a matching CLI flag for every pre-SDK argv entry', async () => {
     const scenario = scriptScenario([{ awaitUserMessage: true }, { emit: RESULT_FRAME }])
     const spawns: SpawnSeen[] = []
+    // Driven by the real resolver, so the argv walk covers the durable-launchArgs
+    // translation and its merge order, not a hand-written options literal.
+    const launch = await resolvedLaunch(['--model', 'claude-sonnet-4-5', '--effort', 'high'])
     await drainQuery({
+      ...launch.options,
       pathToClaudeCodeExecutable: FAKE_CLI,
       cwd: scenario.cwd,
       env: scenarioEnv(scenario),
-      includePartialMessages: true,
       canUseTool: (async () => ({ behavior: 'deny', message: 'unused' })) as CanUseTool,
-      settingSources: [...CLAUDE_DEFAULT_SETTING_SOURCES],
-      extraArgs: { 'replay-user-messages': null },
-      sessionId: SESSION_ID,
       spawnClaudeCodeProcess: recordingSpawner(spawns)
     })
 
     expect(spawns).toHaveLength(1)
     const argv = normalizeArgv(spawns[0]!.args)
+    // Typed-first translation must not also spell the flag through extraArgs.
+    for (const flag of ['--model', '--effort']) {
+      expect(
+        argv.filter((arg) => arg === flag),
+        `${flag} occurrences`
+      ).toHaveLength(1)
+    }
+    expect(argv[argv.indexOf('--model') + 1]).toBe('claude-sonnet-4-5')
+    expect(argv[argv.indexOf('--effort') + 1]).toBe('high')
     // Headless print mode is the SDK's only mode; `query()` never passes `-p`,
     // and if the SDK ever started passing it this pin would notice.
     const impliedByHeadlessQuery = new Set(['-p'])
-    for (const entry of flagTable(CLAUDE_STRUCTURED_BASE_ARGS)) {
+    for (const entry of flagTable(PRE_SDK_ARGV)) {
       if (impliedByHeadlessQuery.has(entry.flag)) {
         expect(argv, `${entry.flag} is implied, never spelled`).not.toContain(entry.flag)
         continue
@@ -321,10 +374,33 @@ describe('Claude Agent SDK contract pins', () => {
         expect(argv[at + 1], `value of ${entry.flag}`).toBe(entry.value)
       }
     }
-    // The launch resolver always appends one of --session-id / --resume.
+    // The launch resolver always carries one of --session-id / --resume.
     const sessionAt = argv.indexOf('--session-id')
     expect(sessionAt).toBeGreaterThanOrEqual(0)
-    expect(argv[sessionAt + 1]).toBe(SESSION_ID)
+    expect(argv[sessionAt + 1]).toBe(launch.providerSessionId)
+  })
+
+  it('still exposes the runtime get_settings reader the auth diagnostic depends on', async () => {
+    // 0.3.251 ships getSettings() but redacts it from the Query declaration. This pin
+    // is the drift alarm: if a bump drops or reshapes it, the diagnostic degrades and
+    // this test says so instead of the degradation shipping silently.
+    const settings = { env: { ANTHROPIC_BASE_URL: 'https://settings.example.test' } }
+    const scenario = scriptScenario([{ delayMs: 3_000 }], { get_settings: settings })
+    const session = query({
+      prompt: singleUserTurn(),
+      options: {
+        pathToClaudeCodeExecutable: FAKE_CLI,
+        cwd: scenario.cwd,
+        env: scenarioEnv(scenario)
+      }
+    })
+    try {
+      const read = claudeQuerySettingsReader(session)
+      expect(read, 'the SDK no longer exposes get_settings at runtime').not.toBeNull()
+      await expect(read?.()).resolves.toEqual(settings)
+    } finally {
+      await session.return(undefined)
+    }
   })
 
   it('maps resume identity to --resume and --resume-session-at', async () => {
