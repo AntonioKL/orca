@@ -16,6 +16,7 @@ import {
   normalizeWorkspaceSessionPaneIdentities,
   remapAcknowledgedAgentPaneKeys,
   remapActivityClearedAtPaneKeys,
+  remapManuallyUnreadTurnPaneKeys,
   remapSshRemotePtyLeaseLeafIds,
   type WorkspaceSessionPaneIdentityRemap
 } from '../restoring-sessions/workspace-pane-normalization'
@@ -55,7 +56,15 @@ export function setLocalWorkspaceSession(
     context.runtime.state.ui?.activityClearedAtByPaneKey,
     normalized.leafIdByInputLeafIdByTabId
   )
-  if (remappedAcknowledgements.changed || remappedActivityCutoffs.changed) {
+  const remappedManualUnread = remapManuallyUnreadTurnPaneKeys(
+    context.runtime.state.ui?.manuallyUnreadTurnsByPaneKey,
+    normalized.leafIdByInputLeafIdByTabId
+  )
+  if (
+    remappedAcknowledgements.changed ||
+    remappedActivityCutoffs.changed ||
+    remappedManualUnread.changed
+  ) {
     context.runtime.state.ui = {
       ...context.runtime.state.ui,
       ...(remappedAcknowledgements.changed
@@ -63,6 +72,9 @@ export function setLocalWorkspaceSession(
         : {}),
       ...(remappedActivityCutoffs.changed
         ? { activityClearedAtByPaneKey: remappedActivityCutoffs.cutoffs }
+        : {}),
+      ...(remappedManualUnread.changed
+        ? { manuallyUnreadTurnsByPaneKey: remappedManualUnread.turns }
         : {})
     }
   }

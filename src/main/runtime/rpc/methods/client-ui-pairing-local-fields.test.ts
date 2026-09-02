@@ -49,7 +49,8 @@ describe('client UI RPC pairing-local field seams', () => {
     agentsFilterRepoIds: ['repo-a'],
     agentsShowChildAgents: true,
     agentsCompactMode: false,
-    activityClearedAtByPaneKey: { 'tab-1:leaf-1': 123 }
+    activityClearedAtByPaneKey: { 'tab-1:leaf-1': 123 },
+    manuallyUnreadTurnsByPaneKey: { 'tab-1:leaf-1': 321 }
   }
 
   it.each(PAIRING_LOCAL_UI_FIELDS.map((field) => [field] as const))(

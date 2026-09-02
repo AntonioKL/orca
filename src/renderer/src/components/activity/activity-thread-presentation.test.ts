@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentPaneThread } from './activity-thread-types'
-import { activityThreadRowCopy, formatCompactRelativeTime } from './activity-thread-presentation'
+import { activityThreadRowCopy } from './activity-thread-presentation'
+import { formatShortTimeAgo } from '@/lib/short-time-ago'
 import {
   makeRepo,
   makeTabWithIds,
@@ -28,13 +29,13 @@ function makeThread(overrides: Partial<AgentPaneThread> = {}): AgentPaneThread {
   }
 }
 
-describe('formatCompactRelativeTime', () => {
+describe('formatShortTimeAgo', () => {
   it('uses short units', () => {
     const now = 1_000_000
-    expect(formatCompactRelativeTime(now - 10_000, now)).toBe('now')
-    expect(formatCompactRelativeTime(now - 5 * 60_000, now)).toBe('5m')
-    expect(formatCompactRelativeTime(now - 20 * 60 * 60_000, now)).toBe('20h')
-    expect(formatCompactRelativeTime(now - 2 * 24 * 60 * 60_000, now)).toBe('2d')
+    expect(formatShortTimeAgo(now - 10_000, now)).toBe('now')
+    expect(formatShortTimeAgo(now - 5 * 60_000, now)).toBe('5m')
+    expect(formatShortTimeAgo(now - 20 * 60 * 60_000, now)).toBe('20h')
+    expect(formatShortTimeAgo(now - 2 * 24 * 60 * 60_000, now)).toBe('2d')
   })
 })
 

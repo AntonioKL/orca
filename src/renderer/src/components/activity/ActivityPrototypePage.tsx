@@ -69,8 +69,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     effectiveSelectedPaneKey,
     visibleThreads,
     markAllReadThreads,
-    visibleThreadGroups,
-    scopeHiddenThreadCount
+    visibleThreadGroups
   } = useAgentPaneThreads({ query, readFilter, groupBy, selectedPaneKey, showChildAgents })
   if (!selectedPaneKeyIsLive) {
     // Why: rows disappear when agent retention or tab state changes; clear stale selection before detail/portal rendering targets it.
@@ -330,7 +329,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
           canJumpToWorkspace={canJumpToWorkspace}
           isThreadListResizing={isThreadListResizing}
           onResizeStart={onResizeStart}
-          scopeFilterRow={<ActivityScopeFilterChips hiddenThreadCount={scopeHiddenThreadCount} />}
+          scopeFilterRow={<ActivityScopeFilterChips />}
         />
         <ActivityThreadDetailPane
           selectedThread={selectedThread}

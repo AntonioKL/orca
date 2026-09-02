@@ -226,8 +226,13 @@ export function ActivityThreadListPane({
     useFlushSync: false
   })
 
-  // Row heights differ between densities; drop stale measurements on toggle.
+  // Row heights differ between densities; drop stale measurements on toggle (not on mount).
+  const measuredCompactModeRef = useRef(compactMode)
   useEffect(() => {
+    if (measuredCompactModeRef.current === compactMode) {
+      return
+    }
+    measuredCompactModeRef.current = compactMode
     virtualizer.measure()
   }, [virtualizer, compactMode])
 

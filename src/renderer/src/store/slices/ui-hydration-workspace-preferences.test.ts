@@ -781,3 +781,33 @@ describe('createUISlice hydratePersistedUI', () => {
     expect(store.getState().agentActivityDisplayMode).toBe('compact')
   })
 })
+
+describe('createUISlice hydratePersistedUI manual unread turns', () => {
+  it('restores manual unread stamps and prunes malformed or stale ones', () => {
+    const store = createUIStore()
+    const fresh = Date.now() - 60_000
+    const stale = Date.now() - 8 * 24 * 60 * 60 * 1000
+
+    store.getState().hydratePersistedUI(
+      makePersistedUI({
+        manuallyUnreadTurnsByPaneKey: {
+          'tab-a:1': fresh,
+          'tab-b:1': stale,
+          'tab-c:1': 'bogus' as unknown as number
+        }
+      })
+    )
+
+    expect(store.getState().manuallyUnreadTurnsByPaneKey).toEqual({ 'tab-a:1': fresh })
+  })
+
+  it('hydrates to an empty record when the field is absent from an older profile', () => {
+    const store = createUIStore()
+
+    store
+      .getState()
+      .hydratePersistedUI(makePersistedUI({ manuallyUnreadTurnsByPaneKey: undefined }))
+
+    expect(store.getState().manuallyUnreadTurnsByPaneKey).toEqual({})
+  })
+})

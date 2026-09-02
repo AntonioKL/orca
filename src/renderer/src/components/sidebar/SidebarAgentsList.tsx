@@ -50,8 +50,7 @@ export default function SidebarAgentsList({
     effectiveSelectedPaneKey,
     visibleThreads,
     markAllReadThreads,
-    visibleThreadGroups,
-    scopeHiddenThreadCount
+    visibleThreadGroups
   } = useAgentPaneThreads({ query, readFilter, groupBy, selectedPaneKey, showChildAgents })
 
   useEffect(() => {
@@ -106,7 +105,7 @@ export default function SidebarAgentsList({
         showJumpAction={false}
         showFilterControls={false}
         showOptionsMenu={false}
-        scopeFilterRow={<ActivityScopeFilterChips hiddenThreadCount={scopeHiddenThreadCount} />}
+        scopeFilterRow={<ActivityScopeFilterChips />}
         scrollTopRef={scrollTopRef}
       />
       {optionsTarget

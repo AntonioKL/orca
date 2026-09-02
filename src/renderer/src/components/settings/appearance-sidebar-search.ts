@@ -127,7 +127,7 @@ export const getAgentsSidebarEntry = createLocalizedCatalog((): SettingsSearchEn
   title: translate('settings.appearance.agentsSidebar.title', 'Show Agents Button'),
   description: translate(
     'settings.appearance.agentsSidebar.description',
-    'Show the Agents tab in the left sidebar.'
+    'Control whether the Agents tab appears in the left sidebar so you can monitor agent activity.'
   ),
   keywords: [
     ...translateSearchKeyword('auto.components.settings.general.search.baa263d6d8', 'agents'),

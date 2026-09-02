@@ -5,7 +5,7 @@ import type { AgentPaneThread } from './activity-thread-types'
 const mocks = vi.hoisted(() => ({
   getState: vi.fn(),
   activateTabAndFocusPane: vi.fn(),
-  activateAndRevealWorktree: vi.fn()
+  activateAndRevealWorkspace: vi.fn()
 }))
 
 vi.mock('@/store', () => ({ useAppStore: { getState: mocks.getState } }))
@@ -13,7 +13,7 @@ vi.mock('@/lib/activate-tab-and-focus-pane', () => ({
   activateTabAndFocusPane: mocks.activateTabAndFocusPane
 }))
 vi.mock('@/lib/worktree-activation', () => ({
-  activateAndRevealWorktree: mocks.activateAndRevealWorktree
+  activateAndRevealWorkspace: mocks.activateAndRevealWorkspace
 }))
 
 import { createActivityThreadActions, hasActivityThreadWorkspace } from './activity-thread-actions'
@@ -92,7 +92,7 @@ describe('activity thread host routing', () => {
     actions.jumpToWorkspace(thread)
 
     expect(acknowledgeAgents).toHaveBeenCalledWith([thread.paneKey])
-    expect(mocks.activateAndRevealWorktree).toHaveBeenCalledWith(thread.worktree.id, {
+    expect(mocks.activateAndRevealWorkspace).toHaveBeenCalledWith(thread.worktree.id, {
       executionHostId: REMOTE_HOST
     })
   })

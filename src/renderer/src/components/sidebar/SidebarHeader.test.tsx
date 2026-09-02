@@ -9,7 +9,9 @@ import SidebarHeader from './SidebarHeader'
 
 const mocks = vi.hoisted(() => ({
   openWorkspaceCreationComposerWithTourHandoff: vi.fn(),
-  unreadCount: { value: 0 }
+  unreadCount: { value: 0 },
+  popoverContentProps: { current: null as Record<string, unknown> | null },
+  toast: vi.fn()
 }))
 
 type MockState = {
@@ -68,13 +70,19 @@ vi.mock('@/components/activity/useActivityUnreadCount', () => ({
   useActivityUnreadCount: (enabled: boolean) => (enabled ? mocks.unreadCount.value : 0)
 }))
 
+vi.mock('sonner', () => ({ toast: mocks.toast }))
+
 // Deterministic popover: expose the open flag instead of relying on radix portals.
 vi.mock('@/components/ui/popover', () => ({
   Popover: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
     <div data-intro-open={open ? '' : undefined}>{children}</div>
   ),
   PopoverAnchor: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  PopoverContent: ({ children }: { children: React.ReactNode }) => <>{children}</>
+  PopoverArrow: () => <div data-testid="popover-arrow" />,
+  PopoverContent: ({ children, ...props }: { children: React.ReactNode }) => {
+    mocks.popoverContentProps.current = props
+    return <>{children}</>
+  }
 }))
 
 let container: HTMLDivElement
@@ -101,6 +109,7 @@ function workspaceViewLabel(): string {
 
 beforeEach(() => {
   mocks.openWorkspaceCreationComposerWithTourHandoff.mockClear()
+  mocks.toast.mockClear()
   mockState = {
     repos: [],
     groupBy: 'repo',
@@ -326,6 +335,67 @@ describe('SidebarHeader', () => {
       agentTab?.click()
     })
     expect(mockState.updateSettings).toHaveBeenCalledWith({ agentsSidebarIntroShown: true })
+  })
+
+  it('hides the Agents tab when a new user chooses Maybe later', () => {
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    const deferButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Maybe later'
+    )
+    expect(deferButton).toBeTruthy()
+    act(() => {
+      deferButton?.click()
+    })
+
+    expect(mockState.updateSettings).toHaveBeenCalledWith({
+      agentsSidebarIntroShown: true,
+      showAgentsSidebar: false
+    })
+    expect(mocks.toast).toHaveBeenCalledWith(
+      'Agents tab hidden. Re-enable it in Settings → Experimental.'
+    )
+  })
+
+  it('shows only Open Agents for migrated users', () => {
+    mockState.settings = {
+      showAgentsSidebar: true,
+      agentsSidebarMigratedFromExperimental: true
+    }
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    const introButtons = Array.from(container.querySelectorAll('button')).filter((button) =>
+      ['Open Agents', 'Maybe later'].includes(button.textContent?.trim() ?? '')
+    )
+    expect(introButtons).toHaveLength(1)
+    expect(introButtons[0]?.textContent?.trim()).toBe('Open Agents')
+  })
+
+  it('prevents auto-focus and outside focus transfers from dismissing the intro popover', () => {
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    const props = mocks.popoverContentProps.current as {
+      onOpenAutoFocus?: (event: Event) => void
+      onFocusOutside?: (event: Event) => void
+    } | null
+
+    expect(props).toBeTruthy()
+
+    const openEvent = new Event('openAutoFocus')
+    const openPreventDefault = vi.spyOn(openEvent, 'preventDefault')
+    props?.onOpenAutoFocus?.(openEvent)
+    expect(openPreventDefault).toHaveBeenCalled()
+
+    const focusOutsideEvent = new Event('focusOutside')
+    const focusOutsidePreventDefault = vi.spyOn(focusOutsideEvent, 'preventDefault')
+    props?.onFocusOutside?.(focusOutsideEvent)
+    expect(focusOutsidePreventDefault).toHaveBeenCalled()
   })
 
   it('never re-stamps the intro after it was acknowledged', () => {

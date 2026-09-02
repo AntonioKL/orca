@@ -140,7 +140,7 @@
       },
       "agentsSidebar": {
         "title": "Show Agents Button",
-        "description": "Show the Agents tab and Agent Dashboard button in the left sidebar."
+        "description": "Control whether the Agents tab appears in the left sidebar so you can monitor agent activity."
       }
     },
     "browser": {
@@ -6924,7 +6924,7 @@
           "a05bcdaf57": "Agents View",
           "f63ea281e3": "Threaded left-sidebar feed for agent completions and blocking states.",
           "agentsSidebar": {
-            "copy": "Show the Agents tab in the left sidebar. This setting is also available in Appearance → Window & Sidebar."
+            "copy": "Controls whether the Agents tab appears in the left sidebar. Turn it on to monitor agent activity from the sidebar; turn it off to hide the tab."
           },
           "agentHibernation": {
             "copy": "Stops idle background agent terminals after the configured idle window and resumes supported sessions when you open them again. Agent sleep preserves launch options for agents started by Orca. Manually started agents may resume with your current Orca defaults. Experimental while we tune the safety model.",
@@ -17286,7 +17286,8 @@
       "title": "Meet your Agents tab",
       "description": "See what your agents are working on, what is done, and where you need to step in.",
       "dismiss": "Maybe later",
-      "action": "Try Agents"
+      "action": "Try Agents",
+      "hiddenToast": "Agents tab hidden. Re-enable it in Settings → Experimental."
     }
   }
 }

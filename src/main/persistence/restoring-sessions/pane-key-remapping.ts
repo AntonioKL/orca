@@ -58,6 +58,14 @@ export function remapAcknowledgedAgentPaneKeys(
   return { acknowledgements: result.values, changed: result.changed }
 }
 
+export function remapManuallyUnreadTurnPaneKeys(
+  turns: PersistedState['ui']['manuallyUnreadTurnsByPaneKey'],
+  leafIdByInputLeafIdByTabId: PaneLeafRemap
+): { turns: PersistedState['ui']['manuallyUnreadTurnsByPaneKey']; changed: boolean } {
+  const result = remapPaneKeys(turns, leafIdByInputLeafIdByTabId)
+  return { turns: result.values, changed: result.changed }
+}
+
 export function remapActivityClearedAtPaneKeys(
   cutoffs: PersistedState['ui']['activityClearedAtByPaneKey'],
   leafIdByInputLeafIdByTabId: PaneLeafRemap

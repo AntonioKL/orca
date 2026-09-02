@@ -60,6 +60,35 @@ export function ExperimentalPane({
 
   return (
     <div className="space-y-4">
+      {showAgentsSidebar ? (
+        <SearchableSetting
+          title={getExperimentalSearchEntry().agentsSidebar.title}
+          description={getExperimentalSearchEntry().agentsSidebar.description}
+          keywords={getExperimentalSearchEntry().agentsSidebar.keywords}
+          className="space-y-3 py-2"
+          id="experimental-agents-sidebar"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 shrink space-y-0.5">
+              <Label>{getExperimentalSearchEntry().agentsSidebar.title}</Label>
+              <p className="text-xs text-muted-foreground">
+                {translate(
+                  'auto.components.settings.ExperimentalPane.agentsSidebar.copy',
+                  'Controls whether the Agents tab appears in the left sidebar. Turn it on to monitor agent activity from the sidebar; turn it off to hide the tab.'
+                )}
+              </p>
+            </div>
+            <SettingsSwitch
+              checked={settings.showAgentsSidebar !== false}
+              ariaLabel={getExperimentalSearchEntry().agentsSidebar.title}
+              onChange={() =>
+                updateSettings({ showAgentsSidebar: settings.showAgentsSidebar === false })
+              }
+            />
+          </div>
+        </SearchableSetting>
+      ) : null}
+
       {showPet ? (
         <SearchableSetting
           title={translate('auto.components.settings.ExperimentalPane.dd6f0a1d45', 'Pet')}
@@ -96,35 +125,6 @@ export function ExperimentalPane({
 
       {showNativeChat ? (
         <NativeChatExperimentalSetting settings={settings} updateSettings={updateSettings} />
-      ) : null}
-
-      {showAgentsSidebar ? (
-        <SearchableSetting
-          title={getExperimentalSearchEntry().agentsSidebar.title}
-          description={getExperimentalSearchEntry().agentsSidebar.description}
-          keywords={getExperimentalSearchEntry().agentsSidebar.keywords}
-          className="space-y-3 py-2"
-          id="experimental-agents-sidebar"
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 shrink space-y-0.5">
-              <Label>{getExperimentalSearchEntry().agentsSidebar.title}</Label>
-              <p className="text-xs text-muted-foreground">
-                {translate(
-                  'auto.components.settings.ExperimentalPane.agentsSidebar.copy',
-                  'Show the Agents tab in the left sidebar. This setting is also available in Appearance → Window & Sidebar.'
-                )}
-              </p>
-            </div>
-            <SettingsSwitch
-              checked={settings.showAgentsSidebar !== false}
-              ariaLabel={getExperimentalSearchEntry().agentsSidebar.title}
-              onChange={() =>
-                updateSettings({ showAgentsSidebar: settings.showAgentsSidebar === false })
-              }
-            />
-          </div>
-        </SearchableSetting>
       ) : null}
 
       {showTerminalAttention ? (

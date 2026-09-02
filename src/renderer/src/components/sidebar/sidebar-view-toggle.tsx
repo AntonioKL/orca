@@ -11,6 +11,7 @@ type SidebarViewToggleOption = {
   /** Unread count shown as a corner overlay (9+ clamp); hidden at 0. Absolute so
    *  the frozen-width contract holds as the count appears and changes. */
   badgeCount?: number
+  renderWrapper?: (button: React.ReactNode) => React.ReactNode
 }
 
 type SidebarViewToggleProps = {
@@ -38,16 +39,36 @@ export function SidebarViewToggle({
         className
       )}
     >
-      {options.map((option) => {
+      {options.map((option, index) => {
         const active = option.value === value
-        return (
+        const button = (
           <button
             key={option.value}
             type="button"
             role="radio"
+            tabIndex={active ? 0 : -1}
             aria-checked={active}
             data-sidebar-section-title={option.sectionTitle}
-            onClick={() => onSelect(option.value)}
+            onClick={() => {
+              if (!active) {
+                onSelect(option.value)
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                e.preventDefault()
+                const next = options[(index + 1) % options.length]
+                if (next) {
+                  onSelect(next.value)
+                }
+              } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault()
+                const prev = options[(index - 1 + options.length) % options.length]
+                if (prev) {
+                  onSelect(prev.value)
+                }
+              }
+            }}
             className={cn(
               'relative grid grid-cols-1 rounded-md border px-1.5 py-0.5 text-center text-xs outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring/50 motion-reduce:transition-none',
               active
@@ -67,6 +88,12 @@ export function SidebarViewToggle({
             <span className="col-start-1 row-start-1 whitespace-nowrap">{option.label}</span>
             {option.badgeCount ? <SidebarCountBadge count={option.badgeCount} /> : null}
           </button>
+        )
+
+        return option.renderWrapper ? (
+          <React.Fragment key={option.value}>{option.renderWrapper(button)}</React.Fragment>
+        ) : (
+          button
         )
       })}
     </div>

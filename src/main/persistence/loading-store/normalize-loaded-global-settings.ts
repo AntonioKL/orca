@@ -1,4 +1,5 @@
 import { getDefaultVoiceSettings } from '../../../shared/constants'
+import { resolveAgentsSidebarVisible } from '../../../shared/agents-sidebar-visibility'
 import { normalizePRBotAuthorOverrides } from '../../../shared/pr-bot-author-overrides'
 import { normalizeTerminalQuickCommands } from '../../../shared/terminal-quick-commands'
 import { normalizeOpenInApplications } from '../../../shared/open-in-applications'
@@ -90,14 +91,17 @@ export function normalizeLoadedGlobalSettings(
     // popout opt-out (without that opt-in) stays hidden.
     // Why migrated, not raw: a pre-stamp profile's stored true is the old forced default,
     // not an opt-in (see prepareLoadedProfileSettings).
-    showAgentsSidebar:
-      parsed.settings?.showAgentsSidebar ??
-      (migratedExperimentalActivity || parsed.settings?.experimentalAgentDashboardPopout !== false),
+    showAgentsSidebar: resolveAgentsSidebarVisible({
+      showAgentsSidebar: parsed.settings?.showAgentsSidebar,
+      experimentalActivity: migratedExperimentalActivity,
+      experimentalAgentDashboardPopout: parsed.settings?.experimentalAgentDashboardPopout
+    }),
     // Preserve the legacy opt-in before the experimental setting is normalized away. This
     // drives the migration-specific introduction copy without changing runtime behavior.
     agentsSidebarMigratedFromExperimental:
       parsed.settings?.agentsSidebarMigratedFromExperimental === true ||
-      migratedExperimentalActivity,
+      migratedExperimentalActivity ||
+      parsed.settings?.experimentalAgentDashboardPopout === true,
     // Why: compact worktree cards graduated from Experimental; preserve the old opt-in for rollout-era profiles.
     compactWorktreeCards: loadedCompactWorktreeCards,
     experimentalCompactWorktreeCards: undefined,

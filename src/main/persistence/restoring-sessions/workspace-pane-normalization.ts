@@ -24,12 +24,14 @@ import {
 } from './pane-alias-normalization'
 import {
   remapAcknowledgedAgentPaneKeys,
-  remapActivityClearedAtPaneKeys
+  remapActivityClearedAtPaneKeys,
+  remapManuallyUnreadTurnPaneKeys
 } from './pane-key-remapping'
 
 export {
   remapAcknowledgedAgentPaneKeys,
-  remapActivityClearedAtPaneKeys
+  remapActivityClearedAtPaneKeys,
+  remapManuallyUnreadTurnPaneKeys
 } from './pane-key-remapping'
 
 export function normalizeWorkspaceSessionPaneIdentities(
@@ -233,6 +235,10 @@ export function normalizePersistedPaneIdentityState(state: PersistedState): {
     state.ui?.activityClearedAtByPaneKey,
     withoutPaneTabIds(acknowledgementLeafIdByInputLeafIdByTabId, crossHostTabIds)
   )
+  const remappedManualUnread = remapManuallyUnreadTurnPaneKeys(
+    state.ui?.manuallyUnreadTurnsByPaneKey,
+    withoutPaneTabIds(acknowledgementLeafIdByInputLeafIdByTabId, crossHostTabIds)
+  )
   const migrationUnsupportedChanged = !migrationUnsupportedEntriesEqual(
     state.migrationUnsupportedPtyEntries ?? [],
     mergedMigrationUnsupportedEntries
@@ -248,7 +254,8 @@ export function normalizePersistedPaneIdentityState(state: PersistedState): {
     !migrationUnsupportedChanged &&
     !legacyAliasesChanged &&
     !remappedAcknowledgements.changed &&
-    !remappedActivityCutoffs.changed
+    !remappedActivityCutoffs.changed &&
+    !remappedManualUnread.changed
   ) {
     return {
       state,
@@ -265,7 +272,9 @@ export function normalizePersistedPaneIdentityState(state: PersistedState): {
       sshRemotePtyLeases: remappedLeases.leases,
       migrationUnsupportedPtyEntries: mergedMigrationUnsupportedEntries,
       legacyPaneKeyAliasEntries: mergedLegacyPaneKeyAliasEntries,
-      ...(remappedAcknowledgements.changed || remappedActivityCutoffs.changed
+      ...(remappedAcknowledgements.changed ||
+      remappedActivityCutoffs.changed ||
+      remappedManualUnread.changed
         ? {
             ui: {
               ...state.ui,
@@ -274,6 +283,9 @@ export function normalizePersistedPaneIdentityState(state: PersistedState): {
                 : {}),
               ...(remappedActivityCutoffs.changed
                 ? { activityClearedAtByPaneKey: remappedActivityCutoffs.cutoffs }
+                : {}),
+              ...(remappedManualUnread.changed
+                ? { manuallyUnreadTurnsByPaneKey: remappedManualUnread.turns }
                 : {})
             }
           }

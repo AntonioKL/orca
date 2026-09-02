@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useRef } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { AgentStateDot, agentStateLabel } from '@/components/AgentStateDot'
 import type { DashboardAgentRow as DashboardAgentRowData } from '@/components/dashboard/useDashboardData'
@@ -119,22 +119,24 @@ export const CompactAgentRow = React.memo(function CompactAgentRow({
   const primary = getCompactAgentPrimary(agent, conversationName)
   const isLineageChild = agent.lineage?.depth === 1
   // Keep a live row's last assistant line stable while status/tool payloads
-  // briefly omit the hook-only field between updates. State (not a ref) so a
-  // discarded concurrent render can't pin an uncommitted message; a zero
-  // stateStartedAt has no per-turn identity, so those rows never cache.
-  const [heldMessage, setHeldMessage] = useState<{ turn: number; message: string } | null>(null)
+  // briefly omit the hook-only field between updates. Committed in an effect so a
+  // discarded concurrent render can't pin an uncommitted message and no extra render
+  // pass runs per streaming ping; a zero stateStartedAt has no per-turn identity, so
+  // those rows never cache.
   const turn = agent.entry.stateStartedAt
   const currentMessage = agent.entry.lastAssistantMessage?.trim() ?? ''
   const turnHoldable = agent.state === 'working' && turn > 0
-  if (turnHoldable && currentMessage) {
-    if (heldMessage?.turn !== turn || heldMessage.message !== currentMessage) {
-      setHeldMessage({ turn, message: currentMessage })
+  const heldMessageRef = useRef<{ turn: number; message: string } | null>(null)
+  useEffect(() => {
+    if (turnHoldable && currentMessage) {
+      heldMessageRef.current = { turn, message: currentMessage }
+    } else if (!turnHoldable) {
+      heldMessageRef.current = null
     }
-  } else if (heldMessage !== null && (!turnHoldable || heldMessage.turn !== turn)) {
-    setHeldMessage(null)
-  }
+  }, [turnHoldable, turn, currentMessage])
+  const held = heldMessageRef.current
   const stableMessage =
-    turnHoldable && !currentMessage && heldMessage?.turn === turn ? heldMessage.message : undefined
+    turnHoldable && !currentMessage && held?.turn === turn ? held.message : undefined
   const secondary = getCompactAgentSecondary(agent, now, stableMessage)
   // Why: sidebar truncation must preserve the passive-vs-active distinction.
   const leadingText = dotState === 'monitoring' ? secondary : primary

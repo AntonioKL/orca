@@ -98,7 +98,7 @@ function ScopeFilterChip({
 }
 
 /**
- * Dismissible chips naming the active persisted scope, with a hidden count.
+ * Dismissible chips naming the active persisted scope.
  * Why always shown while a scope is active: the filter survives restarts, so an
  * invisible one would silently hide running agents from a monitoring surface.
  *
@@ -107,24 +107,16 @@ function ScopeFilterChip({
  * host-registry derivation (settings, SSH/runtime status churn) lives in the
  * inner row and mounts only for an active filter.
  */
-export function ActivityScopeFilterChips({
-  hiddenThreadCount
-}: {
-  hiddenThreadCount: number
-}): React.JSX.Element | null {
+export function ActivityScopeFilterChips(): React.JSX.Element | null {
   const agentsVisibleHostIds = useAppStore((s) => s.agentsVisibleHostIds)
   const agentsFilterRepoIds = useAppStore((s) => s.agentsFilterRepoIds)
   if (agentsVisibleHostIds === null && agentsFilterRepoIds.length === 0) {
     return null
   }
-  return <ActiveScopeFilterChipsRow hiddenThreadCount={hiddenThreadCount} />
+  return <ActiveScopeFilterChipsRow />
 }
 
-function ActiveScopeFilterChipsRow({
-  hiddenThreadCount
-}: {
-  hiddenThreadCount: number
-}): React.JSX.Element | null {
+function ActiveScopeFilterChipsRow(): React.JSX.Element | null {
   const repos = useAppStore((s) => s.repos)
   const agentsVisibleHostIds = useAppStore((s) => s.agentsVisibleHostIds)
   const setAgentsVisibleHostIds = useAppStore((s) => s.setAgentsVisibleHostIds)
@@ -172,15 +164,6 @@ function ActiveScopeFilterChipsRow({
           )}
           onClear={() => setAgentsFilterRepoIds([])}
         />
-      ) : null}
-      {hiddenThreadCount > 0 ? (
-        <span className="text-[11px] tabular-nums text-muted-foreground">
-          {translate(
-            'auto.components.activity.ActivityScopeFilterControls.hiddenCount',
-            '{{value0}} hidden',
-            { value0: hiddenThreadCount }
-          )}
-        </span>
       ) : null}
     </div>
   )

@@ -1,10 +1,7 @@
 import { toast } from 'sonner'
 import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
-import {
-  activateAndRevealFolderWorkspace,
-  activateAndRevealWorktree
-} from '@/lib/worktree-activation'
+import { activateAndRevealWorkspace } from '@/lib/worktree-activation'
 import { getVisibleWorktreeShortcutTargets } from '@/components/sidebar/visible-worktrees'
 import { worktreePassesSidebarFilters } from '@/components/sidebar/worktree-filter-visibility'
 import { sidebarHasActiveFilters } from '@/components/sidebar/sidebar-filter-actions'
@@ -46,23 +43,13 @@ export function jumpToWorktreeFromSidebar(
 ): boolean {
   const state = useAppStore.getState()
 
-  // Folder workspaces must go through the folder branch so its path-status gate runs.
-  const workspaceScope = parseWorkspaceKey(worktreeId)
-  if (workspaceScope?.type === 'folder') {
-    const activated = activateAndRevealFolderWorkspace(
-      workspaceScope.folderWorkspaceId,
-      options?.executionHostId ? { executionHostId: options.executionHostId } : undefined
-    )
-    if (activated === false) {
-      return false
-    }
-    state.setSidebarBody?.('workspaces')
-    return true
-  }
+  // Folder workspaces aren't in the worktree filter pipeline; only git worktrees can be filter-hidden.
+  const hiddenByFilters =
+    parseWorkspaceKey(worktreeId)?.type !== 'folder' &&
+    wasHiddenBySidebarFilters(worktreeId, options?.executionHostId)
 
-  const hiddenByFilters = wasHiddenBySidebarFilters(worktreeId, options?.executionHostId)
-
-  const activated = activateAndRevealWorktree(worktreeId, {
+  // Why the workspace dispatcher: it owns the folder-vs-worktree split and the folder path-status gate.
+  const activated = activateAndRevealWorkspace(worktreeId, {
     ...(hiddenByFilters ? { revealInSidebar: false, clearSidebarFilters: false } : {}),
     ...(options?.executionHostId ? { executionHostId: options.executionHostId } : {})
   })

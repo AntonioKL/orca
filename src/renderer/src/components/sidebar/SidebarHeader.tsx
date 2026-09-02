@@ -6,8 +6,10 @@ import { SidebarViewToggle } from './sidebar-view-toggle'
 import { SidebarHeaderActions } from './sidebar-header-actions'
 import { shouldShowAgentDashboardSidebarButton } from './agent-dashboard-sidebar-visibility'
 import { useActivityUnreadCount } from '@/components/activity/useActivityUnreadCount'
-import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
+import { Popover, PopoverAnchor, PopoverArrow, PopoverContent } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
+import { Sparkles } from 'lucide-react'
+import { toast } from 'sonner'
 
 type SidebarHeaderProps = {
   onWorkspaceBoardMenuOpenChange: (open: boolean) => void
@@ -47,6 +49,16 @@ const SidebarHeader = React.memo(function SidebarHeader({
   const acknowledgeIntro = React.useCallback(() => {
     void updateSettings?.({ agentsSidebarIntroShown: true })
   }, [updateSettings])
+  const deferAgentsIntro = React.useCallback(() => {
+    // “Maybe later” means hide the new tab; users can re-enable it in Settings.
+    void updateSettings?.({ agentsSidebarIntroShown: true, showAgentsSidebar: false })
+    toast(
+      translate(
+        'agentsSidebarIntro.new.hiddenToast',
+        'Agents tab hidden. Re-enable it in Settings → Experimental.'
+      )
+    )
+  }, [updateSettings])
   const spacesLabel = translate('auto.components.sidebar.SidebarHeader.spaces', 'Spaces')
   const projectsLabel = translate('auto.components.sidebar.SidebarHeader.projects', 'Projects')
   // Keep the view name tied to the workspace grouping, not the selected sidebar body.
@@ -70,47 +82,64 @@ const SidebarHeader = React.memo(function SidebarHeader({
             }
           }}
         >
-          <PopoverAnchor asChild>
-            <div className="flex h-9 items-center">
-              <SidebarViewToggle
-                ariaLabel={translate('auto.components.sidebar.SidebarHeader.views', 'Sidebar view')}
-                value={agentsViewActive ? 'agents' : 'workspaces'}
-                onSelect={(value) => {
-                  // Only stamp the intro as seen when it is actually on screen.
-                  if (introOpen) {
-                    acknowledgeIntro()
-                  }
-                  setSidebarBody?.(value as 'workspaces' | 'agents')
-                }}
-                options={[
-                  {
-                    value: 'workspaces',
-                    label: workspaceTabLabel,
-                    widthLabels: [spacesLabel, projectsLabel],
-                    sectionTitle: 'projects'
-                  },
-                  ...(showAgentsSidebar
-                    ? [
-                        {
-                          value: 'agents' as const,
-                          label: translate('dashboard.sidebar.label', 'Agents'),
-                          sectionTitle: 'agents' as const,
-                          badgeCount: agentsUnreadCount
-                        }
-                      ]
-                    : [])
-                ]}
-              />
-            </div>
-          </PopoverAnchor>
-          <PopoverContent side="bottom" align="start" sideOffset={8} className="w-72 p-3">
-            <div className="space-y-2">
+          <div className="flex h-9 items-center">
+            <SidebarViewToggle
+              ariaLabel={translate('auto.components.sidebar.SidebarHeader.views', 'Sidebar view')}
+              value={agentsViewActive ? 'agents' : 'workspaces'}
+              onSelect={(value) => {
+                // Only stamp the intro as seen when it is actually on screen.
+                if (introOpen) {
+                  acknowledgeIntro()
+                }
+                setSidebarBody?.(value as 'workspaces' | 'agents')
+              }}
+              options={[
+                {
+                  value: 'workspaces',
+                  label: workspaceTabLabel,
+                  widthLabels: [spacesLabel, projectsLabel],
+                  sectionTitle: 'projects'
+                },
+                ...(showAgentsSidebar
+                  ? [
+                      {
+                        value: 'agents' as const,
+                        label: translate('dashboard.sidebar.label', 'Agents'),
+                        sectionTitle: 'agents' as const,
+                        badgeCount: agentsUnreadCount,
+                        renderWrapper: (button: React.ReactNode) => (
+                          <PopoverAnchor asChild>{button}</PopoverAnchor>
+                        )
+                      }
+                    ]
+                  : [])
+              ]}
+            />
+          </div>
+          {/* Why: prevent startup terminal/editor auto-focus from dismissing the intro popover. */}
+          <PopoverContent
+            side="bottom"
+            align="start"
+            sideOffset={10}
+            className="w-72 overflow-visible rounded-xl border border-[color-mix(in_srgb,var(--ai-action-accent)_28%,var(--border))] bg-[color-mix(in_srgb,var(--ai-action-accent)_7%,var(--card))] p-3.5 text-card-foreground shadow-[0_12px_28px_-4px_rgba(139,92,246,0.18),0_4px_12px_rgba(0,0,0,0.08)] backdrop-blur-xl dark:border-[color-mix(in_srgb,var(--ai-action-accent)_36%,var(--border))] dark:bg-[color-mix(in_srgb,var(--ai-action-accent)_14%,var(--card))] dark:shadow-[0_16px_36px_-4px_rgba(0,0,0,0.5),0_0_24px_rgba(167,139,250,0.12)]"
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            onFocusOutside={(event) => event.preventDefault()}
+          >
+            <PopoverArrow
+              width={14}
+              height={7}
+              className="fill-[color-mix(in_srgb,var(--ai-action-accent)_7%,var(--card))] dark:fill-[color-mix(in_srgb,var(--ai-action-accent)_14%,var(--card))]"
+            />
+            <div className="space-y-2.5">
               <div className="space-y-1">
-                <h3 className="text-sm font-semibold">
-                  {migratedFromExperimental
-                    ? translate('agentsSidebarIntro.migrated.title', 'Agents are easier to find')
-                    : translate('agentsSidebarIntro.new.title', 'Meet your Agents tab')}
-                </h3>
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="size-3.5 shrink-0 text-[var(--ai-action-accent)]" />
+                  <h3 className="text-sm font-semibold tracking-tight text-foreground">
+                    {migratedFromExperimental
+                      ? translate('agentsSidebarIntro.migrated.title', 'Agents are easier to find')
+                      : translate('agentsSidebarIntro.new.title', 'Meet your Agents tab')}
+                  </h3>
+                </div>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   {migratedFromExperimental
                     ? translate(
@@ -124,13 +153,14 @@ const SidebarHeader = React.memo(function SidebarHeader({
                 </p>
               </div>
               <div className="flex justify-end gap-2 pt-1">
-                <Button variant="ghost" size="sm" onClick={acknowledgeIntro}>
-                  {migratedFromExperimental
-                    ? translate('agentsSidebarIntro.migrated.dismiss', 'Got it')
-                    : translate('agentsSidebarIntro.new.dismiss', 'Maybe later')}
-                </Button>
+                {!migratedFromExperimental ? (
+                  <Button variant="ghost" size="sm" onClick={deferAgentsIntro}>
+                    {translate('agentsSidebarIntro.new.dismiss', 'Maybe later')}
+                  </Button>
+                ) : null}
                 <Button
                   size="sm"
+                  className="bg-[var(--ai-action-accent)] text-white hover:bg-[color-mix(in_srgb,var(--ai-action-accent)_85%,black)] dark:hover:bg-[color-mix(in_srgb,var(--ai-action-accent)_85%,white)]"
                   onClick={() => {
                     acknowledgeIntro()
                     setSidebarBody?.('agents')

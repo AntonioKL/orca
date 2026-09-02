@@ -148,10 +148,10 @@ describe('createUISlice hydratePersistedUI', () => {
     expect(store.getState().activeView).toBe('terminal')
   })
 
-  it('drops a persisted activity view when experimental activity is disabled', () => {
+  it('drops a persisted activity view when the Agents sidebar is hidden', () => {
     const store = createUIStore()
     store.setState({
-      settings: { experimentalActivity: false } as AppState['settings']
+      settings: { showAgentsSidebar: false } as AppState['settings']
     })
 
     store.getState().hydratePersistedUI(makePersistedUI({ activeView: 'activity' }), 'startup')
@@ -159,10 +159,10 @@ describe('createUISlice hydratePersistedUI', () => {
     expect(store.getState().activeView).toBe('terminal')
   })
 
-  it('restores a persisted activity view when experimental activity is enabled', () => {
+  it('restores a persisted activity view when the Agents sidebar is shown', () => {
     const store = createUIStore()
     store.setState({
-      settings: { experimentalActivity: true } as AppState['settings']
+      settings: { showAgentsSidebar: true } as AppState['settings']
     })
 
     store.getState().hydratePersistedUI(makePersistedUI({ activeView: 'activity' }), 'startup')

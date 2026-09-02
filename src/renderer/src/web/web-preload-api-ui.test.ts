@@ -469,7 +469,8 @@ describe('web UI preload API', () => {
     agentsFilterRepoIds: ['repo-b'],
     agentsShowChildAgents: true,
     agentsCompactMode: false,
-    activityClearedAtByPaneKey: { 'tab-1:leaf-1': 123 }
+    activityClearedAtByPaneKey: { 'tab-1:leaf-1': 123 },
+    manuallyUnreadTurnsByPaneKey: { 'tab-1:leaf-1': 321 }
   }
   const hostUiSamples: Record<PairingLocalUiField, unknown> = {
     automationHostFilter: { kind: 'all' },
@@ -480,7 +481,8 @@ describe('web UI preload API', () => {
     agentsFilterRepoIds: ['repo-a'],
     agentsShowChildAgents: false,
     agentsCompactMode: true,
-    activityClearedAtByPaneKey: { 'tab-2:leaf-2': 456 }
+    activityClearedAtByPaneKey: { 'tab-2:leaf-2': 456 },
+    manuallyUnreadTurnsByPaneKey: { 'tab-2:leaf-2': 654 }
   }
 
   it.each(PAIRING_LOCAL_UI_FIELDS.map((field) => [field] as const))(

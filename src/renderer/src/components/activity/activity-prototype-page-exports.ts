@@ -16,4 +16,3 @@ export {
 } from './activity-filter-focus-shortcut'
 export { ActivityThreadOptionsMenu, ThreadAgentStateIndicator } from './activity-thread-controls'
 export { useActivityTerminalPortalStatus } from './activity-terminal-portal-status'
-export { collectChildAgentPaneKeys } from './activity-thread-child-agent'

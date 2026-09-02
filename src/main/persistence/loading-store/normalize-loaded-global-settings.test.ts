@@ -39,6 +39,13 @@ describe('showAgentsSidebar graduation migration', () => {
     ).toBe(true)
   })
 
+  it('uses migration copy for legacy Agent Dashboard opt-ins', () => {
+    expect(
+      normalizeLegacyProfile({ experimentalAgentDashboardPopout: true })
+        .agentsSidebarMigratedFromExperimental
+    ).toBe(true)
+  })
+
   it('defaults profiles with no legacy signal to the sidebar', () => {
     const normalized = normalizeLegacyProfile({})
     expect(normalized.showAgentsSidebar).toBe(true)

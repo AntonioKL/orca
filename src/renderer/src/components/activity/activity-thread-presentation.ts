@@ -124,8 +124,6 @@ export type ActivityThreadRowCopy = {
   workspaceLabel: string
 }
 
-export { formatShortTimeAgo as formatCompactRelativeTime } from '@/lib/short-time-ago'
-
 function normalizeScanLabel(value: string): string {
   return value.trim().toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ')
 }

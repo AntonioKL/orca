@@ -7,6 +7,8 @@ import { getSettingsFocusedExecutionHostId } from '../../../../shared/execution-
 import { buildActivityEvents, createActivityEventBuildCache } from './activity-event-builder'
 import { buildAgentPaneThreads, createAgentPaneThreadReuseCache } from './activity-thread-builder'
 import { collectChildAgentPaneKeys } from './activity-thread-child-agent'
+
+const EMPTY_PANE_KEYS: ReadonlySet<string> = new Set()
 import { filterThreadsByActivityScope, resolveActivityScopeRepoIds } from './activity-scope-filter'
 import {
   activityThreadMatchesSearchQuery,
@@ -63,8 +65,6 @@ export function useAgentPaneThreads(args: {
    *  is ignored so the badge is always clearable. */
   markAllReadThreads: AgentPaneThread[]
   visibleThreadGroups: ActivityThreadGroup[]
-  /** Threads excluded by the persisted host/project scope — the chips row shows this so scope filtering is never silent. */
-  scopeHiddenThreadCount: number
 } {
   const { query, readFilter, groupBy, selectedPaneKey, showChildAgents = false } = args
   const agentsVisibleHostIds = useAppStore((s) => s.agentsVisibleHostIds)
@@ -143,9 +143,9 @@ export function useAgentPaneThreads(args: {
     selectedPaneKey === null || allThreads.some((thread) => thread.paneKey === selectedPaneKey)
   const effectiveSelectedPaneKey = selectedPaneKeyIsLive ? selectedPaneKey : null
 
-  // Why scope runs before the per-view filters: its hidden count must mean "hidden by
-  // the persisted host/project scope alone", not folded into unread/search misses.
-  const { threads: scopeVisibleThreads, hiddenCount: scopeHiddenThreadCount } = useMemo(
+  // Why scope runs before the per-view filters: host/project scope must stay separate
+  // from unread/search narrowing.
+  const { threads: scopeVisibleThreads } = useMemo(
     () =>
       filterThreadsByActivityScope({
         threads: allThreads,
@@ -169,7 +169,11 @@ export function useAgentPaneThreads(args: {
   // Why over allThreads (not the scoped list): child classification asks whether the
   // parent pane still exists at all, and a scope filter hiding the parent must not
   // reclassify its workers as orphans.
-  const childAgentPaneKeys = useMemo(() => collectChildAgentPaneKeys(allThreads), [allThreads])
+  // Skipped entirely when children are shown: nothing reads the set then.
+  const childAgentPaneKeys = useMemo(
+    () => (showChildAgents ? EMPTY_PANE_KEYS : collectChildAgentPaneKeys(allThreads)),
+    [allThreads, showChildAgents]
+  )
 
   // Why deferred: filtering hundreds of threads is interruptible background work; the input
   // echoes the keystroke at full priority while the list catches up on the deferred value.
@@ -232,7 +236,6 @@ export function useAgentPaneThreads(args: {
     effectiveSelectedPaneKey,
     visibleThreads,
     markAllReadThreads,
-    visibleThreadGroups,
-    scopeHiddenThreadCount
+    visibleThreadGroups
   }
 }

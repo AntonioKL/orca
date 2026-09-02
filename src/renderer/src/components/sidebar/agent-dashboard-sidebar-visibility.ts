@@ -1,14 +1,14 @@
-import type { GlobalSettings } from '../../../../shared/global-settings-types'
+import {
+  resolveAgentsSidebarVisible,
+  type AgentsSidebarVisibilitySettings
+} from '../../../../shared/agents-sidebar-visibility'
 
 export function shouldShowAgentDashboardSidebarButton(
-  settings:
-    | Pick<GlobalSettings, 'showAgentsSidebar' | 'experimentalAgentDashboardPopout'>
-    | null
-    | undefined
+  settings: Partial<AgentsSidebarVisibilitySettings> | null | undefined
 ): boolean {
   // Null means settings not yet hydrated; hide so opted-out profiles don't flash Agents UI at startup.
   if (!settings) {
     return false
   }
-  return settings.showAgentsSidebar ?? settings.experimentalAgentDashboardPopout ?? true
+  return resolveAgentsSidebarVisible(settings)
 }

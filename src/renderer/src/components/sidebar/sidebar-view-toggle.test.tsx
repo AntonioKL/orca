@@ -2,7 +2,7 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SidebarViewToggle } from './sidebar-view-toggle'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -22,6 +22,60 @@ afterEach(() => {
 })
 
 describe('SidebarViewToggle', () => {
+  it('exposes radio semantics with a roving tabindex so arrow keys move between tabs', () => {
+    act(() => {
+      root.render(
+        <SidebarViewToggle
+          ariaLabel="Sidebar view"
+          value="agents"
+          onSelect={() => undefined}
+          options={[
+            { value: 'workspaces', label: 'Projects', sectionTitle: 'projects' },
+            { value: 'agents', label: 'Agents', sectionTitle: 'agents' }
+          ]}
+        />
+      )
+    })
+
+    const items = [...container.querySelectorAll('[role="radio"]')]
+    expect(items).toHaveLength(2)
+    const agents = container.querySelector('[data-sidebar-section-title="agents"]')
+    const projects = container.querySelector('[data-sidebar-section-title="projects"]')
+    expect(agents?.getAttribute('aria-checked')).toBe('true')
+    expect(projects?.getAttribute('aria-checked')).toBe('false')
+    // Only one tab is in the tab order (roving tabindex); arrow keys reach the other.
+    const tabStops = items.map((item) => item.getAttribute('tabindex'))
+    expect(tabStops.filter((stop) => stop === '0')).toHaveLength(1)
+    expect(tabStops.filter((stop) => stop === '-1')).toHaveLength(1)
+  })
+
+  it('never deselects when the active tab is clicked again', () => {
+    const onSelect = vi.fn()
+    act(() => {
+      root.render(
+        <SidebarViewToggle
+          ariaLabel="Sidebar view"
+          value="agents"
+          onSelect={onSelect}
+          options={[
+            { value: 'workspaces', label: 'Projects', sectionTitle: 'projects' },
+            { value: 'agents', label: 'Agents', sectionTitle: 'agents' }
+          ]}
+        />
+      )
+    })
+    const agents = container.querySelector<HTMLButtonElement>(
+      '[data-sidebar-section-title="agents"]'
+    )
+    act(() => agents?.click())
+    expect(onSelect).not.toHaveBeenCalled()
+    const projects = container.querySelector<HTMLButtonElement>(
+      '[data-sidebar-section-title="projects"]'
+    )
+    act(() => projects?.click())
+    expect(onSelect).toHaveBeenCalledWith('workspaces')
+  })
+
   it('sizes the track to its labels so they stay fully visible', () => {
     act(() => {
       root.render(

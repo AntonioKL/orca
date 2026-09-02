@@ -27,4 +27,14 @@ describe('shouldShowAgentDashboardSidebarButton', () => {
     )
     expect(shouldShowAgentDashboardSidebarButton({})).toBe(true)
   })
+
+  it('graduates an Agents-view opt-in even when the popout experiment was opted out', () => {
+    // Matches main's migration formula so an un-migrated profile never flickers between the two.
+    expect(
+      shouldShowAgentDashboardSidebarButton({
+        experimentalActivity: true,
+        experimentalAgentDashboardPopout: false
+      })
+    ).toBe(true)
+  })
 })

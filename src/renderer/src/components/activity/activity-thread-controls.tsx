@@ -5,11 +5,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { translate } from '@/i18n/i18n'
 import { useNow } from '@/hooks/use-now'
 import { cn } from '@/lib/utils'
+import { formatShortTimeAgo } from '@/lib/short-time-ago'
 import { RepoBadgeMark } from '@/components/repo/RepoBadgeLabel'
 import type { Repo } from '../../../../shared/repo-types'
 import {
   formatAbsoluteDate,
-  formatCompactRelativeTime,
   formatRelativeTime,
   threadAgentState,
   threadAgentStateLabel
@@ -42,7 +42,7 @@ export function EventTime({
           aria-label={absolute}
           onClick={(event) => event.stopPropagation()}
         >
-          {compact ? formatCompactRelativeTime(timestamp, now) : formatRelativeTime(timestamp, now)}
+          {compact ? formatShortTimeAgo(timestamp, now) : formatRelativeTime(timestamp, now)}
         </button>
       </TooltipTrigger>
       <TooltipContent side="right" sideOffset={6}>

@@ -50,8 +50,6 @@ import {
   hydrateTrustedOrcaHooks,
   normalizeHydratedVisibleWorkspaceHostIds,
   preserveStringArrayIdentity,
-  sanitizeAcknowledgedAgentsByPaneKey,
-  sanitizeActivityClearedAtByPaneKey,
   sanitizeHydratedActiveView,
   sanitizePersistedRepoIds,
   sanitizeShowDotfilesByWorktree,
@@ -61,7 +59,7 @@ import {
   migrateStatusBarItems,
   clampPetSize
 } from './ui-slice-hydration-sanitizers'
-import { sanitizeTaskResumeState } from './ui-slice-hydration-values'
+import { hydrateAgentReadState, sanitizeTaskResumeState } from './ui-slice-hydration-values'
 
 const MAX_LEFT_SIDEBAR_WIDTH = 500
 const MAX_RIGHT_SIDEBAR_WIDTH = 4000
@@ -263,13 +261,7 @@ export function createUiHydrationActions(set: UISliceSet, _get: UISliceGet): Par
             ui.usagePercentageDisplayChangeNoticeDismissed === true,
           // Why: default false so existing users still see the CTA; only explicit dismissal persists true.
           usageEmptyStateDismissed: ui.usageEmptyStateDismissed === true,
-          // Why: stale acks are inert (paneKey reuse beats them via stateStartedAt); sanitizer bounds growth past HYDRATE_MAX_AGE_MS.
-          acknowledgedAgentsByPaneKey: sanitizeAcknowledgedAgentsByPaneKey(
-            ui.acknowledgedAgentsByPaneKey
-          ),
-          activityClearedAtByPaneKey: sanitizeActivityClearedAtByPaneKey(
-            ui.activityClearedAtByPaneKey
-          ),
+          ...hydrateAgentReadState(ui),
           workspaceCleanupDismissals: sanitizeWorkspaceCleanupDismissals(
             ui.workspaceCleanup?.dismissals
           ),
