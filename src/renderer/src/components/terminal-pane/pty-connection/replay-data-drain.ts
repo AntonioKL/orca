@@ -1,5 +1,5 @@
 import { waitForTerminalOutputParsed } from '@/lib/pane-manager/pane-terminal-output-scheduler'
-import { safeFitAndThen } from '@/lib/pane-manager/pane-tree-ops'
+import { safeFit, safeFitAndThen } from '@/lib/pane-manager/pane-tree-ops'
 import { getFitOverrideForPty } from '@/lib/pane-manager/mobile-fit-overrides'
 
 import { resolvePositiveTerminalDimensions } from '../terminal-snapshot-replay-paint'
@@ -197,9 +197,14 @@ export function bindReplayDataDrain(session: ConnectPanePtySession): void {
       session.disposed ||
       !scheduledPtyId ||
       session.transport.getPtyId() !== scheduledPtyId ||
-      session.transportStreamGeneration !== scheduledStreamGeneration ||
-      getFitOverrideForPty(scheduledPtyId)
+      session.transportStreamGeneration !== scheduledStreamGeneration
     ) {
+      return
+    }
+    if (getFitOverrideForPty(scheduledPtyId)) {
+      // Why fit without the grid push: a mobile driver owns the PTY geometry,
+      // but the pane must still leave the host's replay grid.
+      safeFit(session.pane)
       return
     }
     const gridPush = session.createReattachGridPush(scheduledStreamGeneration, scheduledPtyId)
@@ -226,6 +231,10 @@ export function bindReplayDataDrain(session: ConnectPanePtySession): void {
     }
     const scheduledPtyId = session.pendingReplayData?.ptyId ?? null
     replayDrainQueued = true
+    // Why reset here: a transaction whose restore was skipped never ran its
+    // afterRestore, and a stale flag would fit a later drain that never left
+    // the pane's own grid.
+    replayedAtSourceGrid = false
     // Why: live bytes are newer than the authoritative replay frame. Hold
     // them until clear + replay + reset have all parsed, or replay can erase them.
     const scheduledStreamGeneration =
