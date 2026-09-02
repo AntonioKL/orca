@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { restorePlatform, setPlatform } from './claude-account-service-test-harness'
@@ -66,12 +75,18 @@ vi.mock('../wsl/wsl-runner', () => ({
 // function's return value: a transient lock is an errno, and it is the
 // classifier under test that has to decide what an EBUSY means. A mock that
 // hands back a pre-decided `null` would be asserting the answer.
-const fsFaults = vi.hoisted(() => ({ realpathLocked: false, rmLocked: false }))
+const fsFaults = vi.hoisted(() => ({
+  realpathLocked: false,
+  realpathHits: 0,
+  rmLocked: false,
+  rmHits: 0
+}))
 
 vi.mock('node:fs', async (importOriginal) => {
   const original = await importOriginal<typeof NodeFsModule>()
   const realpathSync = ((path: Parameters<typeof original.realpathSync>[0], options?: never) => {
     if (fsFaults.realpathLocked) {
+      fsFaults.realpathHits += 1
       const error = new Error(
         `EBUSY: resource busy or locked, realpath '${String(path)}'`
       ) as NodeJS.ErrnoException
@@ -85,6 +100,7 @@ vi.mock('node:fs', async (importOriginal) => {
   realpathSync.native = original.realpathSync.native
   const rmSync = ((path: never, options: never) => {
     if (fsFaults.rmLocked) {
+      fsFaults.rmHits += 1
       const error = new Error(
         `EBUSY: resource busy or locked, rm '${String(path)}'`
       ) as NodeJS.ErrnoException
@@ -100,6 +116,7 @@ vi.mock('node:fs', async (importOriginal) => {
 const authPathMocks = vi.hoisted(() => ({
   failOwnershipOnCall: 0,
   ownershipCalls: 0,
+  faultsFired: 0,
   credentialsAtFault: null as string | null
 }))
 
@@ -110,6 +127,7 @@ vi.mock('./managed-auth-path', async (importOriginal) => {
     if (authPathMocks.ownershipCalls !== authPathMocks.failOwnershipOnCall) {
       return run()
     }
+    authPathMocks.faultsFired += 1
     authPathMocks.credentialsAtFault = readIfPresent(`${candidatePath}/.credentials.json`)
     fsFaults.realpathLocked = true
     try {
@@ -242,15 +260,20 @@ async function buildService(
 
 describe('STA-5674: fail-once ownership probe during Claude managed-account add', () => {
   let guestHome: string | null = null
+  const extraTempDirs: string[] = []
 
   beforeEach(() => {
     vi.resetModules()
     wslMocks.runWslProcess.mockReset()
     authPathMocks.failOwnershipOnCall = 0
     authPathMocks.ownershipCalls = 0
+    authPathMocks.faultsFired = 0
     authPathMocks.credentialsAtFault = null
     fsFaults.realpathLocked = false
+    fsFaults.realpathHits = 0
     fsFaults.rmLocked = false
+    fsFaults.rmHits = 0
+    extraTempDirs.length = 0
     guestHome = mkdtempSync(join(tmpdir(), 'sta5674-guest-'))
     paths.userDataRoot = mkdtempSync(join(tmpdir(), 'sta5674-userdata-'))
   })
@@ -259,6 +282,9 @@ describe('STA-5674: fail-once ownership probe during Claude managed-account add'
     restorePlatform()
     fsFaults.realpathLocked = false
     fsFaults.rmLocked = false
+    for (const dir of extraTempDirs) {
+      rmSync(dir, { recursive: true, force: true })
+    }
     if (guestHome) {
       rmSync(guestHome, { recursive: true, force: true })
     }
@@ -346,6 +372,7 @@ describe('STA-5674: fail-once ownership probe during Claude managed-account add'
     expect(failure).toBeInstanceOf(temporarilyUnavailable)
     const accountsRoot = join(paths.userDataRoot, 'claude-accounts')
     // The fault landed after real credential bytes existed.
+    expect(authPathMocks.faultsFired).toBe(1)
     expect(authPathMocks.credentialsAtFault).toBe(CREDENTIALS)
     const accountId = (settings().claudeManagedAccounts[0] as { id?: string } | undefined)?.id
     expect(accountId).toBeUndefined()
@@ -381,8 +408,9 @@ describe('STA-5674: fail-once ownership probe during Claude managed-account add'
     const { service } = await buildService()
     await expect(service.addAccount({ runtime: 'host' })).rejects.toThrow(/temporarily locked/)
 
-    // The directory is left in place either way, but there were never any
-    // credentials to lose — an "assert credentials survived" test here is vacuous.
+    // `credentialsAtFault` is null both when the gate saw no credentials and
+    // when the fault never fired, so assert the fault first.
+    expect(authPathMocks.faultsFired).toBe(1)
     expect(authPathMocks.credentialsAtFault).toBeNull()
     const { readdirSync } = await import('node:fs')
     const accountsRoot = join(paths.userDataRoot, 'claude-accounts')
@@ -422,6 +450,7 @@ describe('STA-5674: fail-once ownership probe during Claude managed-account add'
 
     await expect(service.addAccount({ runtime: 'host' })).rejects.toThrow(/login was cancelled/)
 
+    expect(authPathMocks.faultsFired).toBe(1)
     const { readdirSync } = await import('node:fs')
     expect(readdirSync(join(paths.userDataRoot, 'claude-accounts'))).toHaveLength(1)
   })
@@ -472,6 +501,8 @@ describe('STA-5674: fail-once ownership probe during Claude managed-account add'
 
     await expect(service.removeAccount(accountId)).rejects.toThrow(/EBUSY/)
 
+    expect(fsFaults.rmHits).toBeGreaterThan(0)
+
     // Telling the user it is gone while the credentials are still on disk is the
     // same silent retention as refusing to delete; the account must come back so
     // they can retry.
@@ -482,17 +513,35 @@ describe('STA-5674: fail-once ownership probe during Claude managed-account add'
 
   it('a user-requested removal that cannot resolve the accounts root refuses rather than reporting success', async () => {
     setPlatform('linux')
+    // Build the two-spelling situation rather than inheriting it: userData is a
+    // symlink, so the persisted path (canonical, from the ownership gate) cannot
+    // equal the literal root and canonicalising the root is genuinely required.
+    // Relying on the OS for this passed on macOS, where /var is a symlink, and
+    // silently tested nothing on Linux CI, where it is not.
+    const realRoot = mkdtempSync(join(tmpdir(), 'sta5674-realroot-'))
+    const linkHome = mkdtempSync(join(tmpdir(), 'sta5674-linkhome-'))
+    extraTempDirs.push(realRoot, linkHome)
+    const linkedRoot = join(linkHome, 'userdata')
+    symlinkSync(realRoot, linkedRoot, 'dir')
+    paths.userDataRoot = linkedRoot
+
     const { service, settings, keychainDelete } = await buildService()
     await service.addAccount({ runtime: 'host' })
-    const accountId = (settings().claudeManagedAccounts[0] as { id: string }).id
-    const accountsRoot = join(paths.userDataRoot, 'claude-accounts')
-    // Without the canonical spelling a non-match proves nothing: the persisted
-    // path is canonical while the root is not.
+    const account = settings().claudeManagedAccounts[0] as { id: string; managedAuthPath: string }
+    // Precondition, so this cannot silently decay back into a one-spelling test:
+    // the persisted path is the canonical spelling and the literal root is not a
+    // prefix of it.
+    expect(account.managedAuthPath.startsWith(realpathSync(realRoot))).toBe(true)
+    expect(account.managedAuthPath.startsWith(linkedRoot)).toBe(false)
+
     fsFaults.realpathLocked = true
+    await expect(service.removeAccount(account.id)).rejects.toThrow(/could not locate/i)
 
-    await expect(service.removeAccount(accountId)).rejects.toThrow(/could not locate/i)
-
-    expect(existsSync(join(accountsRoot, accountId, 'auth', '.credentials.json'))).toBe(true)
+    // The refusal came from the locked canonicalisation, not from never looking.
+    expect(fsFaults.realpathHits).toBeGreaterThan(0)
+    expect(
+      existsSync(join(realRoot, 'claude-accounts', account.id, 'auth', '.credentials.json'))
+    ).toBe(true)
     expect(settings().claudeManagedAccounts).toHaveLength(1)
     expect(keychainDelete).not.toHaveBeenCalled()
   })
