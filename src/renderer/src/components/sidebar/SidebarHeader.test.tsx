@@ -224,7 +224,7 @@ describe('SidebarHeader', () => {
 
     expect(container.querySelector('[aria-label="Turn off activity view"]')).toBeTruthy()
     expect(container.querySelector('[aria-label="New workspace"]')).toBeTruthy()
-    expect(container.querySelector('[aria-label="Workspace options"]')).toBeTruthy()
+    expect(container.querySelector('[aria-label="Workspace options"]')).toBeNull()
     expect(container.querySelector('[aria-label="Add Project"]')).toBeNull()
   })
 
@@ -238,7 +238,7 @@ describe('SidebarHeader', () => {
     expect(headerClasses.has('flex-wrap')).toBe(false)
     expect(headerClasses.has('h-8')).toBe(true)
     expect(container.querySelector('[aria-label="View activity"]')).toBeTruthy()
-    expect(container.querySelector('[aria-label="Add Project"]')).toBeTruthy()
+    expect(container.querySelector('[aria-label="Add Project"]')).toBeNull()
     expect(container.querySelector('[aria-label="New workspace"]')).toBeTruthy()
   })
 
@@ -291,6 +291,6 @@ describe('SidebarHeader', () => {
       root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
     })
     expect(container.querySelector('[aria-label="More workspace actions"]')).toBeNull()
-    expect(container.querySelector('[aria-label="Add Project"]')).toBeTruthy()
+    expect(container.querySelector('[aria-label="Add Project"]')).toBeNull()
   })
 })

@@ -35,9 +35,7 @@ export function ActivityThreadListToolbar({
   resizable,
   showFilterControls,
   showOptionsMenu,
-  showInlineActions = true,
-  onSearch,
-  onToggleUnread
+  showInlineActions = true
 }: {
   activityFilterInputRef: React.RefObject<HTMLInputElement | null>
   query: string
@@ -58,8 +56,6 @@ export function ActivityThreadListToolbar({
   showFilterControls: boolean
   showOptionsMenu: boolean
   showInlineActions?: boolean
-  onSearch?: () => void
-  onToggleUnread?: () => void
 }): React.JSX.Element | null {
   const showToolbar = showFilterControls || showOptionsMenu
   if (!showToolbar) {
@@ -184,9 +180,6 @@ export function ActivityThreadListToolbar({
               onShowChildAgentsChange={onShowChildAgentsChange}
               onMarkAllThreadsRead={onMarkAllThreadsRead}
               onClearCompleted={onClearCompleted}
-              onSearch={onSearch}
-              unreadOnly={readFilter === 'unread'}
-              onToggleUnread={onToggleUnread}
             />
           ) : null}
         </div>

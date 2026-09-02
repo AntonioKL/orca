@@ -22,29 +22,6 @@ import {
 
 export const SIDEBAR_HEADER_WIDE_MIN_WIDTH = 235
 
-function AddProjectButton(): React.JSX.Element {
-  const openModal = useAppStore((s) => s.openModal)
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          type="button"
-          className="text-muted-foreground"
-          aria-label={translate('auto.components.sidebar.SidebarHeader.25a95899c9', 'Add Project')}
-          onClick={() => openModal('add-repo')}
-        >
-          <FolderPlus className="size-3.5" strokeWidth={2.25} />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" sideOffset={6}>
-        {translate('auto.components.sidebar.SidebarHeader.25a95899c9', 'Add Project')}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
 function CompactWorkspaceOverflow({
   preserveWorkspaceBoardOpen,
   onMenuOpenChange
@@ -110,10 +87,10 @@ function CompactWorkspaceOverflow({
 
 export function SidebarHeaderActions({
   onWorkspaceBoardMenuOpenChange,
-  hideAddProject = false
+  hideWorkspaceOptions = false
 }: {
   onWorkspaceBoardMenuOpenChange: (open: boolean) => void
-  hideAddProject?: boolean
+  hideWorkspaceOptions?: boolean
 }): React.JSX.Element {
   const sidebarWidth = useAppStore((s) => s.sidebarWidth)
   const newWorktreeShortcutLabel = useShortcutLabel('workspace.create')
@@ -147,22 +124,24 @@ export function SidebarHeaderActions({
             )}
           </TooltipContent>
         </Tooltip>
-        <CompactWorkspaceOverflow
-          preserveWorkspaceBoardOpen
-          onMenuOpenChange={onWorkspaceBoardMenuOpenChange}
-        />
+        {hideWorkspaceOptions ? null : (
+          <CompactWorkspaceOverflow
+            preserveWorkspaceBoardOpen
+            onMenuOpenChange={onWorkspaceBoardMenuOpenChange}
+          />
+        )}
       </div>
     )
   }
 
   return (
     <div className="flex shrink-0 items-center gap-1">
-      <SidebarWorkspaceOptionsMenu
-        preserveWorkspaceBoardOpen
-        onMenuOpenChange={onWorkspaceBoardMenuOpenChange}
-      />
-
-      {hideAddProject ? null : <AddProjectButton />}
+      {hideWorkspaceOptions ? null : (
+        <SidebarWorkspaceOptionsMenu
+          preserveWorkspaceBoardOpen
+          onMenuOpenChange={onWorkspaceBoardMenuOpenChange}
+        />
+      )}
 
       <Tooltip>
         <TooltipTrigger asChild>

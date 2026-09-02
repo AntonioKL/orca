@@ -8,7 +8,7 @@ import type { GlobalSettings } from '../../../shared/global-settings-types'
 import type { PersistedState } from '../../../shared/persisted-state-types'
 
 // Simulates a profile created before the dedicated Experimental switch was persisted.
-function normalizeLegacyProfile(overrides: Partial<GlobalSettings>): PersistedState['settings'] {
+function normalizeLegacyProfile(overrides: Record<string, unknown>): PersistedState['settings'] {
   const defaults = getDefaultPersistedState(homedir())
   const settings: Partial<GlobalSettings> = { ...defaults.settings }
   delete settings.experimentalActivity
@@ -22,11 +22,15 @@ function normalizeLegacyProfile(overrides: Partial<GlobalSettings>): PersistedSt
 }
 
 describe('retired Agents sidebar setting', () => {
+  it('does not mark new profiles as migrated', () => {
+    expect(normalizeLegacyProfile({}).agentsSidebarMigratedFromExperimental).toBe(false)
+  })
+
   it('drops the old visibility setting while preserving migration metadata', () => {
     const normalized = normalizeLegacyProfile({
       experimentalActivity: true,
-      showAgentsSidebar: false as never
-    } as unknown as Partial<GlobalSettings>)
+      showAgentsSidebar: false
+    })
     expect('showAgentsSidebar' in normalized).toBe(false)
     expect(normalized.agentsSidebarMigratedFromExperimental).toBe(true)
   })

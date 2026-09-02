@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import { Input } from '@/components/ui/input'
 import { useAppStore } from '@/store'
+import { translate } from '@/i18n/i18n'
 import { ActivityScopeFilterChips } from '@/components/activity/activity-scope-filter-controls'
 import { hasActivityThreadWorkspace } from '@/components/activity/activity-thread-actions'
 import { useActivityThreadActionBindings } from '@/components/activity/use-activity-thread-action-bindings'
@@ -37,6 +39,8 @@ export default function SidebarAgentsList({
   optionsTarget,
   scrollTopRef
 }: SidebarAgentsListProps): React.JSX.Element {
+  // The search row is owned here and mounts conditionally, so subscribe this host to locale changes.
+  useTranslation()
   // Why store-backed: these are persisted preferences (agents* UI fields), unlike the momentary read filter/search.
   const compactMode = useAppStore((s) => s.agentsCompactMode)
   const setCompactMode = useAppStore((s) => s.setAgentsCompactMode)
@@ -45,6 +49,16 @@ export default function SidebarAgentsList({
   const [selectedPaneKey, setSelectedPaneKey] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const activityFilterInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (!searchOpen) {
+      return
+    }
+    // Radix restores focus to the menu trigger after selection; focus on the
+    // next frame so the newly mounted search field wins that race.
+    const frame = requestAnimationFrame(() => activityFilterInputRef.current?.focus())
+    return () => cancelAnimationFrame(frame)
+  }, [searchOpen])
 
   const {
     storeData,
@@ -109,9 +123,15 @@ export default function SidebarAgentsList({
                 setQuery('')
               }
             }}
-            placeholder="Filter..."
+            placeholder={translate(
+              'auto.components.activity.ActivityPrototypePage.795cbf26e2',
+              'Filter...'
+            )}
             className="h-7 w-full text-[11px]"
-            aria-label="Search"
+            aria-label={translate(
+              'auto.components.activity.ActivityPrototypePage.search',
+              'Search'
+            )}
           />
         </div>
       ) : null}
@@ -144,8 +164,6 @@ export default function SidebarAgentsList({
         showFilterControls={false}
         showOptionsMenu={false}
         showInlineActions={false}
-        onSearch={() => setSearchOpen(true)}
-        onToggleUnread={() => setReadFilter(readFilter === 'unread' ? 'all' : 'unread')}
         scopeFilterRow={<ActivityScopeFilterChips />}
         scrollTopRef={scrollTopRef}
       />

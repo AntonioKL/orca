@@ -5,6 +5,7 @@ import { translate } from '@/i18n/i18n'
 import { SidebarHeaderActions } from './sidebar-header-actions'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverAnchor, PopoverArrow, PopoverContent } from '@/components/ui/popover'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Sparkles, Bell } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -36,6 +37,10 @@ const SidebarHeader = React.memo(function SidebarHeader({
     void updateSettings?.({ agentsSidebarIntroShown: true })
   }, [updateSettings])
   const sidebarTitle = groupBy === 'repo' ? 'Projects' : 'Workspaces'
+  const activityLabel = translate(
+    agentsViewActive ? 'dashboard.sidebar.closeActivity' : 'dashboard.sidebar.openActivity',
+    agentsViewActive ? 'Turn off activity view' : 'View activity'
+  )
 
   return (
     <div className="mt-2 flex h-8 min-w-0 items-center justify-between gap-1.5 px-2">
@@ -48,9 +53,6 @@ const SidebarHeader = React.memo(function SidebarHeader({
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        {agentsViewActive ? (
-          <div ref={activityOptionsTarget} className="flex items-center" />
-        ) : null}
         <Popover
           open={introOpen}
           onOpenChange={(open) => {
@@ -59,27 +61,31 @@ const SidebarHeader = React.memo(function SidebarHeader({
             }
           }}
         >
-          <PopoverAnchor asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className={cn(
-                'text-muted-foreground',
-                agentsViewActive && 'bg-primary/15 text-primary hover:bg-primary/20'
-              )}
-              aria-label={translate(
-                agentsViewActive
-                  ? 'dashboard.sidebar.closeActivity'
-                  : 'dashboard.sidebar.openActivity',
-                agentsViewActive ? 'Turn off activity view' : 'View activity'
-              )}
-              aria-pressed={agentsViewActive}
-              onClick={() => setSidebarBody?.(agentsViewActive ? 'workspaces' : 'agents')}
-            >
-              <Bell className="size-3.5" strokeWidth={2.25} />
-            </Button>
-          </PopoverAnchor>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex shrink-0">
+                <PopoverAnchor asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className={cn(
+                      'text-muted-foreground',
+                      agentsViewActive && 'bg-primary/15 text-primary hover:bg-primary/20'
+                    )}
+                    aria-label={activityLabel}
+                    aria-pressed={agentsViewActive}
+                    onClick={() => setSidebarBody?.(agentsViewActive ? 'workspaces' : 'agents')}
+                  >
+                    <Bell className="size-3.5" strokeWidth={2.25} />
+                  </Button>
+                </PopoverAnchor>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>
+              {activityLabel}
+            </TooltipContent>
+          </Tooltip>
           <PopoverContent
             side="bottom"
             align="center"
@@ -111,9 +117,12 @@ const SidebarHeader = React.memo(function SidebarHeader({
             </div>
           </PopoverContent>
         </Popover>
+        {agentsViewActive ? (
+          <div ref={activityOptionsTarget} className="flex items-center" />
+        ) : null}
         <SidebarHeaderActions
           onWorkspaceBoardMenuOpenChange={onWorkspaceBoardMenuOpenChange}
-          hideAddProject={agentsViewActive}
+          hideWorkspaceOptions={agentsViewActive}
         />
       </div>
     </div>
