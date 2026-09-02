@@ -36,7 +36,8 @@ export class SkillUploadStagingOwnership {
   }
 
   async remove(): Promise<void> {
-    await rm(this.directory, { recursive: true, force: true })
+    // Windows can briefly retain a just-closed handle; keep cleanup bounded and retryable.
+    await rm(this.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }
 
   private async cleanupAbandonedOwners(): Promise<void> {
