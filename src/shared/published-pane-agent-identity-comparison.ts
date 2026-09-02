@@ -65,15 +65,21 @@ function recordCanonicalDivergence(
   }
   // No host process PROOF exists yet, so the canonical lane sees the foreground name as a weak
   // hint only. Where that alone flips the answer is precisely what this window measures.
+  const titleAgent = args.title ? collectAgentTitleEvidence(args.title).agent : null
   const canonical = resolveCanonicalPaneAgentIdentity({
     hookAgent: args.hookAgent,
     hookIsLive: args.hookIsLive,
     launchAgent: args.launchAgent,
     foregroundAgent: args.foregroundAgent,
     title: args.title,
-    uncoveredFallback: { agent: published, titleOnly: published !== null }
+    uncoveredFallback: {
+      agent: published,
+      // A bare foreground name is an uncovered compatibility answer, but it is not title proof.
+      // Mark title-only only when no foreground signal exists and the frozen answer matches title
+      // evidence exactly.
+      titleOnly: args.foregroundAgent == null && published !== null && published === titleAgent
+    }
   })
-  const titleAgent = args.title ? collectAgentTitleEvidence(args.title).agent : null
   recorder.record({
     surface: args.surface,
     paneId: args.paneId,
