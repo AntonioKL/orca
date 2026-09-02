@@ -73,6 +73,9 @@ export function ActivityThreadListPane({
   onResizeStart,
   showFilterControls = true,
   showOptionsMenu = true,
+  showInlineActions = true,
+  onSearch,
+  onToggleUnread,
   scopeFilterRow,
   collapsedGroupKeys,
   onToggleGroupCollapse,
@@ -109,6 +112,9 @@ export function ActivityThreadListPane({
   onResizeStart?: React.MouseEventHandler<HTMLDivElement>
   showFilterControls?: boolean
   showOptionsMenu?: boolean
+  showInlineActions?: boolean
+  onSearch?: () => void
+  onToggleUnread?: () => void
   /** Rendered between the toolbar and the list; carries the active-scope chips row. */
   scopeFilterRow?: React.ReactNode
   collapsedGroupKeys?: ReadonlySet<string>
@@ -314,6 +320,9 @@ export function ActivityThreadListPane({
         resizable={resizable}
         showFilterControls={showFilterControls}
         showOptionsMenu={showOptionsMenu}
+        showInlineActions={showInlineActions}
+        onSearch={onSearch}
+        onToggleUnread={onToggleUnread}
       />
       {scopeFilterRow}
       <div className="relative min-h-0 flex-1">

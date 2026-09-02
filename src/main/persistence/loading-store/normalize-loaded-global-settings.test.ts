@@ -11,7 +11,6 @@ import type { PersistedState } from '../../../shared/persisted-state-types'
 function normalizeLegacyProfile(overrides: Partial<GlobalSettings>): PersistedState['settings'] {
   const defaults = getDefaultPersistedState(homedir())
   const settings: Partial<GlobalSettings> = { ...defaults.settings }
-  delete settings.showAgentsSidebar
   delete settings.experimentalActivity
   delete settings.experimentalAgentDashboardPopout
   Object.assign(settings, overrides)
@@ -22,59 +21,13 @@ function normalizeLegacyProfile(overrides: Partial<GlobalSettings>): PersistedSt
   return normalizeLoadedGlobalSettings(parsed, terminal, profile)
 }
 
-describe('showAgentsSidebar experimental-setting migration', () => {
-  it('keeps the sidebar for Agents-view opt-ins regardless of the dashboard experiment', () => {
+describe('retired Agents sidebar setting', () => {
+  it('drops the old visibility setting while preserving migration metadata', () => {
     const normalized = normalizeLegacyProfile({
       experimentalActivity: true,
-      experimentalAgentDashboardPopout: false
-    })
-    expect(normalized.showAgentsSidebar).toBe(true)
+      showAgentsSidebar: false as never
+    } as unknown as Partial<GlobalSettings>)
+    expect('showAgentsSidebar' in normalized).toBe(false)
     expect(normalized.agentsSidebarMigratedFromExperimental).toBe(true)
-  })
-
-  it('carries the legacy Agents-view opt-in into the sidebar', () => {
-    expect(normalizeLegacyProfile({ experimentalActivity: true }).showAgentsSidebar).toBe(true)
-  })
-
-  it('does not show Agents migration copy for a dashboard-only opt-in', () => {
-    expect(
-      normalizeLegacyProfile({ experimentalAgentDashboardPopout: true })
-        .agentsSidebarMigratedFromExperimental
-    ).toBe(false)
-  })
-
-  it('defaults profiles with no legacy signal to the sidebar', () => {
-    const normalized = normalizeLegacyProfile({})
-    expect(normalized.showAgentsSidebar).toBe(true)
-    expect(normalized.agentsSidebarMigratedFromExperimental).toBe(false)
-  })
-
-  it('does not treat a dashboard opt-out as an Agents-tab opt-out', () => {
-    expect(
-      normalizeLegacyProfile({ experimentalAgentDashboardPopout: false }).showAgentsSidebar
-    ).toBe(true)
-  })
-
-  it('ignores a pre-stamp forced-default experimentalActivity true (not an opt-in)', () => {
-    const normalized = normalizeLegacyProfile({
-      experimentalActivity: true,
-      experimentalActivityDefaultedOffForAllUsers: undefined
-    })
-    expect(normalized.experimentalActivity).toBe(false)
-    expect(normalized.showAgentsSidebar).toBe(true)
-    expect(normalized.agentsSidebarMigratedFromExperimental).toBe(false)
-  })
-
-  it('preserves a stored showAgentsSidebar choice over legacy flags', () => {
-    expect(
-      normalizeLegacyProfile({ showAgentsSidebar: false, experimentalActivity: true })
-        .showAgentsSidebar
-    ).toBe(false)
-    expect(
-      normalizeLegacyProfile({
-        showAgentsSidebar: true,
-        experimentalAgentDashboardPopout: false
-      }).showAgentsSidebar
-    ).toBe(true)
   })
 })

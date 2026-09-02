@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Input } from '@/components/ui/input'
 import { useAppStore } from '@/store'
 import { ActivityScopeFilterChips } from '@/components/activity/activity-scope-filter-controls'
 import { hasActivityThreadWorkspace } from '@/components/activity/activity-thread-actions'
 import { useActivityThreadActionBindings } from '@/components/activity/use-activity-thread-action-bindings'
 import { ActivityThreadListPane } from '@/components/activity/activity-thread-list-pane'
-import { ActivityThreadOptionsMenu } from '@/components/activity/activity-thread-controls'
 import { useAgentPaneThreads } from '@/components/activity/use-agent-pane-threads'
+import { ActivityThreadOptionsMenu } from '@/components/activity/activity-thread-controls'
 import type { ActivityGroupBy, ThreadReadFilter } from '@/components/activity/activity-thread-types'
 
 /**
@@ -42,6 +43,7 @@ export default function SidebarAgentsList({
   const showChildAgents = useAppStore((s) => s.agentsShowChildAgents)
   const setShowChildAgents = useAppStore((s) => s.setAgentsShowChildAgents)
   const [selectedPaneKey, setSelectedPaneKey] = useState<string | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
   const activityFilterInputRef = useRef<HTMLInputElement | null>(null)
 
   const {
@@ -93,7 +95,26 @@ export default function SidebarAgentsList({
   )
 
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
+      {searchOpen ? (
+        <div className="shrink-0 border-b border-border px-2 py-1.5">
+          <Input
+            ref={activityFilterInputRef}
+            autoFocus
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                setSearchOpen(false)
+                setQuery('')
+              }
+            }}
+            placeholder="Filter..."
+            className="h-7 w-full text-[11px]"
+            aria-label="Search"
+          />
+        </div>
+      ) : null}
       <ActivityThreadListPane
         activityFilterInputRef={activityFilterInputRef}
         query={query}
@@ -107,6 +128,9 @@ export default function SidebarAgentsList({
         hasUnreadThreads={hasUnreadThreads}
         onCompactModeChange={setCompactMode}
         onShowChildAgentsChange={setShowChildAgents}
+        onMarkAllThreadsRead={markAllThreadsRead}
+        hasCompletedThreads={hasCompletedThreads}
+        onClearCompleted={handleClearCompleted}
         visibleThreadGroups={visibleThreadGroups}
         visibleThreadCount={visibleThreads.length}
         selectedPaneKey={effectiveSelectedPaneKey}
@@ -119,6 +143,9 @@ export default function SidebarAgentsList({
         showJumpAction={false}
         showFilterControls={false}
         showOptionsMenu={false}
+        showInlineActions={false}
+        onSearch={() => setSearchOpen(true)}
+        onToggleUnread={() => setReadFilter(readFilter === 'unread' ? 'all' : 'unread')}
         scopeFilterRow={<ActivityScopeFilterChips />}
         scrollTopRef={scrollTopRef}
       />
@@ -135,10 +162,13 @@ export default function SidebarAgentsList({
               onShowChildAgentsChange={setShowChildAgents}
               onMarkAllThreadsRead={markAllThreadsRead}
               onClearCompleted={handleClearCompleted}
+              onSearch={() => setSearchOpen(true)}
+              unreadOnly={readFilter === 'unread'}
+              onToggleUnread={() => setReadFilter(readFilter === 'unread' ? 'all' : 'unread')}
             />,
             optionsTarget
           )
         : null}
-    </>
+    </div>
   )
 }

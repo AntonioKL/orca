@@ -109,9 +109,11 @@ function CompactWorkspaceOverflow({
 }
 
 export function SidebarHeaderActions({
-  onWorkspaceBoardMenuOpenChange
+  onWorkspaceBoardMenuOpenChange,
+  hideAddProject = false
 }: {
   onWorkspaceBoardMenuOpenChange: (open: boolean) => void
+  hideAddProject?: boolean
 }): React.JSX.Element {
   const sidebarWidth = useAppStore((s) => s.sidebarWidth)
   const newWorktreeShortcutLabel = useShortcutLabel('workspace.create')
@@ -160,7 +162,7 @@ export function SidebarHeaderActions({
         onMenuOpenChange={onWorkspaceBoardMenuOpenChange}
       />
 
-      <AddProjectButton />
+      {hideAddProject ? null : <AddProjectButton />}
 
       <Tooltip>
         <TooltipTrigger asChild>

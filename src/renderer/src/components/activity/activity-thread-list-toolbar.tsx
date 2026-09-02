@@ -1,5 +1,5 @@
 import React from 'react'
-import { BellDot, CheckCheck, Search, Trash2, X } from 'lucide-react'
+import { CheckCheck, ListChecks, Search, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -34,7 +34,10 @@ export function ActivityThreadListToolbar({
   onClearCompleted,
   resizable,
   showFilterControls,
-  showOptionsMenu
+  showOptionsMenu,
+  showInlineActions = true,
+  onSearch,
+  onToggleUnread
 }: {
   activityFilterInputRef: React.RefObject<HTMLInputElement | null>
   query: string
@@ -54,6 +57,9 @@ export function ActivityThreadListToolbar({
   resizable: boolean
   showFilterControls: boolean
   showOptionsMenu: boolean
+  showInlineActions?: boolean
+  onSearch?: () => void
+  onToggleUnread?: () => void
 }): React.JSX.Element | null {
   const showToolbar = showFilterControls || showOptionsMenu
   if (!showToolbar) {
@@ -63,7 +69,7 @@ export function ActivityThreadListToolbar({
   return (
     <>
       <div className="shrink-0 border-b border-border px-2 py-1.5">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center justify-end gap-1">
           {showFilterControls ? (
             <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
@@ -147,7 +153,7 @@ export function ActivityThreadListToolbar({
                   className={cn(
                     'size-7 shrink-0 p-0 rounded-md transition-all',
                     readFilter === 'unread'
-                      ? '!border border-primary/50 !bg-primary/20 !text-primary shadow-xs hover:!bg-primary/30'
+                      ? '!border border-primary/30 !bg-primary/10 !text-primary/90 shadow-xs hover:!bg-primary/15 hover:!text-primary'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                   )}
                   aria-label={translate(
@@ -155,7 +161,7 @@ export function ActivityThreadListToolbar({
                     'Show unread threads only'
                   )}
                 >
-                  <BellDot className="size-3.5" strokeWidth={2.25} />
+                  <ListChecks className="size-3.5" strokeWidth={2.25} />
                 </Toggle>
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={6}>
@@ -178,11 +184,14 @@ export function ActivityThreadListToolbar({
               onShowChildAgentsChange={onShowChildAgentsChange}
               onMarkAllThreadsRead={onMarkAllThreadsRead}
               onClearCompleted={onClearCompleted}
+              onSearch={onSearch}
+              unreadOnly={readFilter === 'unread'}
+              onToggleUnread={onToggleUnread}
             />
           ) : null}
         </div>
       </div>
-      {onMarkAllThreadsRead || onClearCompleted ? (
+      {showInlineActions && (onMarkAllThreadsRead || onClearCompleted) ? (
         <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
           {onMarkAllThreadsRead ? (
             <Button
