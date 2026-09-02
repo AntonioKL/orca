@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ClaudeStructuredSessionEvent } from './claude-structured-session-adapter'
+import { ClaudeTranscriptPreviousCursorMissingError } from './claude-transcript-branch-proof'
 import {
   adapterFor,
   fakeClaude,
@@ -72,12 +73,12 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
     expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'durable-tail' })
   })
 
-  it('re-proves from the transcript root when the observed cursor rejects a stale branch', async () => {
+  it('re-proves from the transcript root when the observed cursor is missing', async () => {
     const claude = fakeClaude()
     const persistedHandles: unknown[] = []
     const readTranscriptLeaf = vi
       .fn()
-      .mockRejectedValueOnce(new Error('sibling branch'))
+      .mockRejectedValueOnce(new ClaudeTranscriptPreviousCursorMissingError())
       .mockResolvedValueOnce('reproved-main-leaf')
     const adapter = adapterFor(claude, {}, [], persistedHandles, undefined, readTranscriptLeaf)
     await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
@@ -98,6 +99,26 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
       previousLeafUuid: null
     })
     expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'reproved-main-leaf' })
+  })
+
+  it('keeps the observed leaf when transcript validation proves a sibling branch', async () => {
+    const claude = fakeClaude()
+    const persistedHandles: unknown[] = []
+    const readTranscriptLeaf = vi
+      .fn()
+      .mockRejectedValue(new Error('latest marker is on a sibling branch'))
+    const adapter = adapterFor(claude, {}, [], persistedHandles, undefined, readTranscriptLeaf)
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+    claude.connections[0].handlers.onMessage?.({
+      type: 'assistant',
+      session_id: PROVIDER_SESSION_ID,
+      uuid: 'observed-tail'
+    })
+
+    await adapter.closeSession('session-1')
+
+    expect(readTranscriptLeaf).toHaveBeenCalledTimes(1)
+    expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'observed-tail' })
   })
 
   it('persists the last transcript leaf before an unexpected first-hand exit', async () => {
@@ -161,7 +182,7 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
     const persistedHandles: unknown[] = []
     const readTranscriptLeaf = vi
       .fn()
-      .mockRejectedValueOnce(new Error('stale cursor'))
+      .mockRejectedValueOnce(new ClaudeTranscriptPreviousCursorMissingError())
       .mockResolvedValueOnce('reproved-crash-leaf')
     const adapter = adapterFor(claude, {}, [], persistedHandles, undefined, readTranscriptLeaf)
     await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
@@ -182,6 +203,26 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
       previousLeafUuid: null
     })
     expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'reproved-crash-leaf' })
+  })
+
+  it('keeps the observed crash leaf when transcript validation proves a sibling branch', async () => {
+    const claude = fakeClaude()
+    const persistedHandles: unknown[] = []
+    const readTranscriptLeaf = vi
+      .fn()
+      .mockRejectedValue(new Error('latest marker is on a sibling branch'))
+    const adapter = adapterFor(claude, {}, [], persistedHandles, undefined, readTranscriptLeaf)
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+    claude.connections[0].handlers.onMessage?.({
+      type: 'assistant',
+      session_id: PROVIDER_SESSION_ID,
+      uuid: 'observed-crash-tail'
+    })
+    claude.connections[0].handlers.onExit?.(new Error('crashed'))
+    await tick()
+
+    expect(readTranscriptLeaf).toHaveBeenCalledTimes(1)
+    expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'observed-crash-tail' })
   })
 
   it('publishes lifecycle recovery even when crash-cursor persistence fails', async () => {

@@ -29,6 +29,42 @@ export class ClaudeTranscriptTailIncompleteError extends Error {
   }
 }
 
+/** The sampled cursor is no longer present, so a root proof may still recover safely. */
+export class ClaudeTranscriptPreviousCursorMissingError extends Error {
+  constructor() {
+    super(
+      'Claude transcript branch proof failed: previous cursor is missing from the session graph'
+    )
+    this.name = 'ClaudeTranscriptPreviousCursorMissingError'
+  }
+}
+
+function proveMainLineAncestry(
+  nodes: Map<string, TranscriptNode>,
+  startUuid: string,
+  providerSessionId: string
+): void {
+  const visited = new Set<string>()
+  let cursor: string | null = startUuid
+  for (let depth = 0; cursor !== null && depth < MAX_CLAUDE_TRANSCRIPT_ANCESTRY; depth += 1) {
+    if (visited.has(cursor)) {
+      throw transcriptError('cycle in parentUuid ancestry')
+    }
+    visited.add(cursor)
+    const node = nodes.get(cursor)
+    if (!node || node.sessionId !== providerSessionId) {
+      throw transcriptError(`missing ancestor ${cursor}`)
+    }
+    if (node.disallowedLeaf) {
+      throw transcriptError(`ancestor ${cursor} is not on the main transcript`)
+    }
+    cursor = node.parentUuid
+  }
+  if (cursor !== null) {
+    throw transcriptError('ancestry exceeds the bounded proof limit')
+  }
+}
+
 export function proveClaudeTranscriptBranchFromJsonl(input: {
   contents: string
   providerSessionId: string
@@ -97,31 +133,21 @@ export function proveClaudeTranscriptBranchFromJsonl(input: {
   }
   const previousLeafUuid = input.previousLeafUuid
   if (!previousLeafUuid) {
-    const visited = new Set<string>()
-    let cursor: string | null = leafUuid
-    for (let depth = 0; cursor !== null && depth < MAX_CLAUDE_TRANSCRIPT_ANCESTRY; depth += 1) {
-      if (visited.has(cursor)) {
-        throw transcriptError('cycle in parentUuid ancestry')
-      }
-      visited.add(cursor)
-      const node = nodes.get(cursor)
-      if (!node || node.sessionId !== input.providerSessionId) {
-        throw transcriptError(`missing ancestor ${cursor}`)
-      }
-      if (node.disallowedLeaf) {
-        throw transcriptError(`ancestor ${cursor} is not on the main transcript`)
-      }
-      cursor = node.parentUuid
-    }
-    if (cursor !== null) {
-      throw transcriptError('ancestry exceeds the bounded proof limit')
-    }
+    proveMainLineAncestry(nodes, leafUuid, input.providerSessionId)
     return { leafUuid, relation: 'initial' }
   }
   const previous = nodes.get(previousLeafUuid)
-  if (!previous || previous.sessionId !== input.providerSessionId || previous.disallowedLeaf) {
-    throw transcriptError('previous cursor is missing from the session graph')
+  if (!previous) {
+    throw new ClaudeTranscriptPreviousCursorMissingError()
   }
+  if (previous.sessionId !== input.providerSessionId || previous.disallowedLeaf) {
+    throw transcriptError('previous cursor is not on the main transcript')
+  }
+  // The latest marker can be equal to, or descend from, a sampled cursor. In
+  // either case prove the sampled cursor's own ancestry before accepting it;
+  // otherwise a cursor that descended through a parent-tool-use sidechain
+  // could be persisted and resumed as if it were on the main transcript.
+  proveMainLineAncestry(nodes, previousLeafUuid, input.providerSessionId)
   if (leafUuid === previousLeafUuid) {
     return { leafUuid, relation: 'same' }
   }
@@ -177,7 +203,11 @@ export async function readClaudeTranscriptLeafWithReproof(input: {
       previousLeafUuid: input.previousLeafUuid
     })
   } catch (error) {
-    if (input.previousLeafUuid === null) {
+    if (
+      input.previousLeafUuid === null ||
+      (!(error instanceof ClaudeTranscriptTailIncompleteError) &&
+        !(error instanceof ClaudeTranscriptPreviousCursorMissingError))
+    ) {
       throw error
     }
     return input.readTranscriptLeaf({

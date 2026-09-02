@@ -3,7 +3,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { ClaudeTranscriptTailIncompleteError } from '../claude/claude-transcript-branch-proof'
+import {
+  ClaudeTranscriptTailIncompleteError,
+  readClaudeTranscriptLeafWithReproof
+} from '../claude/claude-transcript-branch-proof'
 import { readClaudeTranscriptLeafUuid, resolveSessionFilePath } from './session-file-resolver'
 
 let tempRoots: string[] = []
@@ -236,6 +239,115 @@ describe('resolveSessionFilePath', () => {
     await expect(readClaudeTranscriptLeafUuid(transcript, 'session-1')).rejects.toThrow(
       'not on the main transcript'
     )
+  })
+
+  it('rejects a previous cursor descended from a parent-tool-use sidechain', async () => {
+    const root = await makeRoot('orca-native-chat-resolve-claude-parent-tool-cursor-')
+    const transcript = join(root, 'transcript.jsonl')
+    await writeFile(
+      transcript,
+      [
+        { type: 'user', uuid: 'main-user', parentUuid: null, sessionId: 'session-1' },
+        {
+          type: 'assistant',
+          uuid: 'subagent-assistant',
+          parentUuid: 'main-user',
+          sessionId: 'session-1',
+          parent_tool_use_id: 'tool-use-1'
+        },
+        {
+          type: 'assistant',
+          uuid: 'main-after-sidechain',
+          parentUuid: 'subagent-assistant',
+          sessionId: 'session-1'
+        },
+        { type: 'last-prompt', leafUuid: 'main-after-sidechain', sessionId: 'session-1' }
+      ]
+        .map((record) => JSON.stringify(record))
+        .join('\n'),
+      'utf8'
+    )
+
+    await expect(
+      readClaudeTranscriptLeafUuid(transcript, 'session-1', 'main-after-sidechain')
+    ).rejects.toThrow('not on the main transcript')
+  })
+
+  it('rejects a latest marker descended from a parent-tool-use cursor sidechain', async () => {
+    const root = await makeRoot('orca-native-chat-resolve-claude-parent-tool-cursor-descendant-')
+    const transcript = join(root, 'transcript.jsonl')
+    await writeFile(
+      transcript,
+      [
+        { type: 'user', uuid: 'main-user', parentUuid: null, sessionId: 'session-1' },
+        {
+          type: 'assistant',
+          uuid: 'subagent-assistant',
+          parentUuid: 'main-user',
+          sessionId: 'session-1',
+          parent_tool_use_id: 'tool-use-1'
+        },
+        {
+          type: 'assistant',
+          uuid: 'main-after-sidechain',
+          parentUuid: 'subagent-assistant',
+          sessionId: 'session-1'
+        },
+        {
+          type: 'assistant',
+          uuid: 'latest-after-sidechain',
+          parentUuid: 'main-after-sidechain',
+          sessionId: 'session-1'
+        },
+        { type: 'last-prompt', leafUuid: 'latest-after-sidechain', sessionId: 'session-1' }
+      ]
+        .map((record) => JSON.stringify(record))
+        .join('\n'),
+      'utf8'
+    )
+
+    await expect(
+      readClaudeTranscriptLeafUuid(transcript, 'session-1', 'main-after-sidechain')
+    ).rejects.toThrow('not on the main transcript')
+  })
+
+  it('does not re-prove a divergent sibling after the sampled cursor rejects', async () => {
+    const root = await makeRoot('orca-native-chat-resolve-claude-sibling-reproof-')
+    const transcript = join(root, 'transcript.jsonl')
+    await writeFile(
+      transcript,
+      [
+        { type: 'user', uuid: 'root', parentUuid: null, sessionId: 'session-1' },
+        { type: 'assistant', uuid: 'old', parentUuid: 'root', sessionId: 'session-1' },
+        { type: 'assistant', uuid: 'new', parentUuid: 'root', sessionId: 'session-1' },
+        { type: 'last-prompt', leafUuid: 'new', sessionId: 'session-1' }
+      ]
+        .map((record) => JSON.stringify(record))
+        .join('\n'),
+      'utf8'
+    )
+    const calls: (string | null)[] = []
+    const readTranscriptLeaf = async ({
+      previousLeafUuid
+    }: {
+      previousLeafUuid: string | null
+    }) => {
+      calls.push(previousLeafUuid)
+      return readClaudeTranscriptLeafUuid(transcript, 'session-1', previousLeafUuid)
+    }
+
+    await expect(readClaudeTranscriptLeafUuid(transcript, 'session-1', 'old')).rejects.toThrow(
+      'sibling branch'
+    )
+
+    await expect(
+      readClaudeTranscriptLeafWithReproof({
+        readTranscriptLeaf,
+        providerSessionId: 'session-1',
+        previousLeafUuid: 'old'
+      })
+    ).rejects.toThrow('sibling branch')
+    expect(calls).toEqual(['old'])
   })
 
   it('globs Claude project subdirs for <sessionId>.jsonl', async () => {
