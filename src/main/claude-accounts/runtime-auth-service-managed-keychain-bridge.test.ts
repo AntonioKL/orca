@@ -295,6 +295,57 @@ describe('ClaudeRuntimeAuthService', () => {
     expect(preparation.envPatch.CLAUDE_CONFIG_DIR).toBeUndefined()
   })
 
+  // Why: during a Keychain outage the CLI persists rotations to the home's credentials file, so
+  // recovery must adopt that rotation instead of re-imposing the token it has already spent.
+  it('adopts a rotation the CLI wrote to the managed credentials file during an outage', async () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+    const staleCredentials = createClaudeCredentialsWithoutEmail('stale', null, {
+      expiresAt: 2_000,
+      refreshToken: 'stale-refresh'
+    })
+    const rotatedCredentials = createClaudeCredentialsWithoutEmail('rotated', null, {
+      expiresAt: 3_000,
+      refreshToken: 'rotated-refresh'
+    })
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      staleCredentials
+    )
+    writeFileSync(
+      join(managedAuthPath, '.claude.json'),
+      JSON.stringify({
+        oauthAccount: { accountUuid: 'account-1', emailAddress: 'user@example.com' }
+      }),
+      'utf-8'
+    )
+    const store = createStore(
+      createSettings({
+        claudeManagedAccounts: [
+          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
+        ],
+        activeClaudeManagedAccountId: 'account-1'
+      })
+    )
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+
+    await service.prepareForClaudeLaunch()
+    // The Keychain was unusable, so the CLI rotated into the home's credentials file.
+    writeFileSync(join(managedAuthPath, '.credentials.json'), rotatedCredentials, 'utf-8')
+
+    await service.prepareForClaudeLaunch()
+
+    expect(testState.managedKeychainCredentials.get('account-1')).toBe(rotatedCredentials)
+    expect(testState.scopedKeychainCredentialsByConfigDir.get(realpathSync(managedAuthPath))).toBe(
+      rotatedCredentials
+    )
+    // Keychain is authoritative again; the fallback file must not linger.
+    expect(existsSync(join(managedAuthPath, '.credentials.json'))).toBe(false)
+  })
+
   // Why: a torn .claude.json makes identity unprovable; the CLI's newer rotation must still not be
   // overwritten with an already-consumed refresh token.
   it('does not overwrite a fresher scoped credential when identity cannot be proven', async () => {

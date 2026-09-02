@@ -88,20 +88,36 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
           // below repair any stale Keychain item left by the previous login.
           this.skipNextReadBackForAccountId = null
         }
-        if (!skipScopedReadBack && scoped && this.isValidCredentialsJsonObject(scoped)) {
-          const managed = await this.readManagedCredentials(selected)
-          const match = await this.findManagedAccountForRuntimeCredentials(
-            scoped,
-            this.readRuntimeOauthAccount(preparation.configDir)
-          )
-          if (
-            managed &&
-            scoped !== managed &&
-            match.kind === 'matched' &&
-            match.account.id === selected.id &&
-            this.runtimeCredentialsCanReplaceManagedCredentials(scoped, managed)
-          ) {
-            await this.writeManagedCredentials(selected, scoped)
+        if (!skipScopedReadBack) {
+          // Both stores in the managed home are real credential sources: the CLI reads the
+          // Keychain first and falls back to the file, and persists rotations to whichever it
+          // can write. Adopt the freshest that proves it belongs to this account.
+          const runtimeOauthAccount = this.readRuntimeOauthAccount(preparation.configDir)
+          const fileCandidate = await this.readManagedCredentialsFileCandidate(selected)
+          for (const candidate of [scoped, fileCandidate]) {
+            if (!candidate || !this.isValidCredentialsJsonObject(candidate)) {
+              continue
+            }
+            const current = await this.readManagedCredentials(selected)
+            if (!current || candidate === current) {
+              continue
+            }
+            const match = await this.findManagedAccountForRuntimeCredentials(
+              candidate,
+              runtimeOauthAccount
+            )
+            if (
+              match.kind === 'matched' &&
+              match.account.id === selected.id &&
+              this.runtimeCredentialsCanReplaceManagedCredentials(candidate, current)
+            ) {
+              await this.writeManagedCredentials(selected, candidate)
+              if (candidate === fileCandidate) {
+                // Consumed: the managed store now holds this rotation, so drop the outage
+                // copy rather than leave a second source that can go stale.
+                await this.clearManagedCredentialsFile(selected)
+              }
+            }
           }
         }
         const managed = await this.readManagedCredentials(selected)

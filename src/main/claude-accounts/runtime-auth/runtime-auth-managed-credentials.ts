@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ClaudeManagedAccount } from '../../../shared/managed-account-types'
 import { parseWslUncPath } from '../../../shared/wsl-paths'
 import { toWindowsWslPath } from '../../wsl'
@@ -33,6 +34,28 @@ export class ClaudeRuntimeAuthManagedCredentials extends ClaudeRuntimeAuthCreden
       return readManagedClaudeKeychainCredentials(account.id)
     }
     return readClaudeManagedAuthFile(managedAuthPath, '.credentials.json')
+  }
+
+  // Why: the CLI persists rotations to this file whenever the Keychain write fails durably, so it
+  // is a real credential source and must be read back, not just written.
+  protected async readManagedCredentialsFileCandidate(
+    account: ClaudeManagedAccount
+  ): Promise<string | null> {
+    const managedAuthPath = await this.getOwnedManagedAuthPath(account)
+    if (!managedAuthPath) {
+      return null
+    }
+    return readClaudeManagedAuthFile(managedAuthPath, '.credentials.json')
+  }
+
+  // Why: the CLI keeps one live store — once the Keychain write succeeds it drops the fallback
+  // file, so leaving ours behind would resurrect a consumed token on a later read.
+  protected async clearManagedCredentialsFile(account: ClaudeManagedAccount): Promise<void> {
+    const managedAuthPath = await this.getOwnedManagedAuthPath(account)
+    if (!managedAuthPath) {
+      return
+    }
+    rmSync(join(managedAuthPath, '.credentials.json'), { force: true })
   }
 
   // Why: mirrors the CLI's own keychain-primary/file-fallback contract — when the scoped Keychain
