@@ -5,7 +5,6 @@ import { translate } from '@/i18n/i18n'
 import { SidebarViewToggle } from './sidebar-view-toggle'
 import { SidebarHeaderActions } from './sidebar-header-actions'
 import { shouldShowAgentsSidebar } from './agents-sidebar-visibility'
-import { useActivityUnreadCount } from '@/components/activity/useActivityUnreadCount'
 import { Popover, PopoverAnchor, PopoverArrow, PopoverContent } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { Sparkles } from 'lucide-react'
@@ -43,8 +42,6 @@ const SidebarHeader = React.memo(function SidebarHeader({
   // null default would flash the popover open (and stamp it shown) every launch.
   const settingsHydrated = useAppStore((s) => s.settings != null)
   const agentsViewActive = showAgentsSidebar && sidebarBody === 'agents'
-  // Why only while inactive: the open list already shows unread rows, so the pill would be noise.
-  const agentsUnreadCount = useActivityUnreadCount(showAgentsSidebar && !agentsViewActive)
   const introOpen = settingsHydrated && showAgentsSidebar && !agentsSidebarIntroShown
   const acknowledgeIntro = React.useCallback(() => {
     void updateSettings?.({ agentsSidebarIntroShown: true })
@@ -101,7 +98,6 @@ const SidebarHeader = React.memo(function SidebarHeader({
                         value: 'agents' as const,
                         label: translate('dashboard.sidebar.label', 'Agents'),
                         sectionTitle: 'agents' as const,
-                        badgeCount: agentsUnreadCount,
                         renderWrapper: (button: React.ReactNode) => (
                           <PopoverAnchor asChild>{button}</PopoverAnchor>
                         )

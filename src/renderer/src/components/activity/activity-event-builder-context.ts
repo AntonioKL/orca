@@ -16,6 +16,7 @@ import {
   effectiveWorktreeAgentRowStartedAt,
   tabFromWorktreeAttributedStatusEntry
 } from '../sidebar/worktree-agent-row-fallback-tab'
+import type { BuildActivityEventsArgs } from './activity-event-builder'
 import { standaloneActivityWorktree } from './activity-standalone-worktree'
 
 export type ActivityTabContext = { worktreeId: string; tab: TerminalTab }

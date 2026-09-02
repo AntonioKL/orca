@@ -10,15 +10,7 @@ import SidebarHeader from './SidebarHeader'
 const mocks = vi.hoisted(() => ({
   openWorkspaceCreationComposerWithTourHandoff: vi.fn(),
   popoverContentProps: { current: null as Record<string, unknown> | null },
-  toast: vi.fn(),
-  unreadCount: { value: 0, lastEnabled: null as boolean | null }
-}))
-
-vi.mock('@/components/activity/useActivityUnreadCount', () => ({
-  useActivityUnreadCount: (enabled: boolean) => {
-    mocks.unreadCount.lastEnabled = enabled
-    return enabled ? mocks.unreadCount.value : 0
-  }
+  toast: vi.fn()
 }))
 
 type MockState = {
@@ -113,8 +105,6 @@ function workspaceViewLabel(): string {
 beforeEach(() => {
   mocks.openWorkspaceCreationComposerWithTourHandoff.mockClear()
   mocks.toast.mockClear()
-  mocks.unreadCount.value = 0
-  mocks.unreadCount.lastEnabled = null
   mockState = {
     repos: [],
     groupBy: 'repo',
@@ -200,34 +190,6 @@ describe('SidebarHeader', () => {
     })
 
     expect(mockState.setSidebarBody).toHaveBeenCalledWith('workspaces')
-  })
-
-  it('shows the unread count on the Agents tab while Spaces is showing', () => {
-    mocks.unreadCount.value = 3
-    act(() => {
-      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
-    })
-
-    const agentTab = container.querySelector<HTMLButtonElement>(
-      'button[data-sidebar-section-title="agents"]'
-    )
-    expect(mocks.unreadCount.lastEnabled).toBe(true)
-    expect(agentTab?.getAttribute('aria-label')).toBe('Agents 3')
-    expect(agentTab?.textContent).toContain('3')
-  })
-
-  it('does not subscribe to the unread count while the Agents body is already showing', () => {
-    mocks.unreadCount.value = 3
-    mockState.sidebarBody = 'agents'
-    act(() => {
-      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
-    })
-
-    const agentTab = container.querySelector<HTMLButtonElement>(
-      'button[data-sidebar-section-title="agents"]'
-    )
-    expect(mocks.unreadCount.lastEnabled).toBe(false)
-    expect(agentTab?.getAttribute('aria-label')).toBeNull()
   })
 
   it('always labels the workspace view as Spaces', () => {
