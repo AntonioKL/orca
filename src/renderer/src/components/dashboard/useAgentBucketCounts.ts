@@ -95,7 +95,8 @@ export function useAgentBucketCounts(): AgentBucketCounts {
   const state = useAppStore(selectAgentBucketCountState)
   // Why a per-hook cache: unrelated status/title writes change one worktree's inputs;
   // the cache keeps every other worktree's rows without rerunning its row pipeline.
-  const cacheRef = useRef(createDashboardBucketCountsCache())
+  const cacheRef = useRef<ReturnType<typeof createDashboardBucketCountsCache>>(undefined!)
+  cacheRef.current ??= createDashboardBucketCountsCache()
   return useMemo(() => {
     // Why Date.now() is read here and not a dep: idle-decay tracks agentStatusEpoch
     // ticks (carried in `state`), matching useDashboardData. That epoch doubles as the

@@ -10,17 +10,16 @@ import {
 } from '../shared/agent-process-recognition'
 import { getFirstCommandToken } from '../shared/command-token-scanner'
 import {
-  getProcessTableIndex,
   getProcessTableSnapshot,
   type ProcessTableIndex,
   type ProcessTableRow
 } from '../shared/process-table-snapshot'
+import { getProcessTableIndex } from '../shared/process-table-index'
 import { selectForegroundProcessCandidate } from '../shared/foreground-process-selection'
 import {
   resolveOuterWrapperForegroundProcess,
   shouldInspectOuterWrapperForegroundProcess
 } from '../shared/foreground-wrapper-agent'
-import { isShellProcess } from '../shared/shell-process-detection'
 import {
   resolveWindowsAgentForegroundProcess,
   shouldInspectWindowsAgentForeground
@@ -305,10 +304,11 @@ export async function getForegroundProcessName(
         (await resolveWindowsAgentForegroundProcess(pid, fallbackProcess, {})) ?? fallbackProcess
       )
     }
-    if (!isShellProcess(fallbackProcess) && !isAgentForegroundWrapperProcess(fallbackProcess)) {
-      return fallbackProcess
-    }
   }
+  // Why: an unrecognized name is not proof of a non-agent foreground -- macOS p_comm truncates
+  // to the executable basename, which for the native Claude install is its version directory
+  // (`2.1.258`). The TTL-cached table read resolves the real command line; a foreground that
+  // is genuinely not an agent still answers with its own name below.
   const recognized = await getRecognizedForegroundDescendant(pid, fallbackProcess)
   if (recognized) {
     return recognized
