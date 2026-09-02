@@ -33,7 +33,7 @@ import {
   endPtyHandlerTest,
   type MockDispatcher
 } from './pty-handler-test-harness'
-import { PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS } from '../shared/process-table-snapshot'
+import { PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS } from '../shared/process-table-snapshot-reader'
 
 const PANE_KEY = 'tab-agent:22222222-2222-4222-8222-222222222222'
 

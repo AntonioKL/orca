@@ -169,6 +169,12 @@ export class SshPtyProvider implements IPtyProvider {
     return await this.agentSessionCapabilities.supportsCreateOperations(options)
   }
 
+  async supportsForegroundProcessEvidence(
+    options: { signal?: AbortSignal } = {}
+  ): Promise<boolean> {
+    return await this.agentSessionCapabilities.supportsForegroundProcessEvidence(options)
+  }
+
   async attach(id: string): Promise<void> {
     const relayPtyId = this.toRelayPtyId(id)
     await requestSshPtyAttach({
@@ -281,9 +287,15 @@ export class SshPtyProvider implements IPtyProvider {
     return result as string | null
   }
 
-  async inspectProcess(id: string): Promise<PtyProcessInspection> {
+  async inspectProcess(
+    id: string,
+    options?: { expectedIncarnationId?: string }
+  ): Promise<PtyProcessInspection> {
     return (await this.mux.request('pty.inspectProcess', {
-      id: this.toRelayPtyId(id)
+      id: this.toRelayPtyId(id),
+      ...(options?.expectedIncarnationId
+        ? { expectedIncarnationId: options.expectedIncarnationId }
+        : {})
     })) as PtyProcessInspection
   }
 
@@ -298,10 +310,15 @@ export class SshPtyProvider implements IPtyProvider {
     await this.mux.request('pty.revive', { state })
   }
 
-  async listProcesses(opts?: { deadlineMs?: number }): Promise<PtyProcessInfo[]> {
+  async listProcesses(opts?: {
+    deadlineMs?: number
+    includeForegroundProcessEvidence?: boolean
+  }): Promise<PtyProcessInfo[]> {
     const result = await this.mux.request(
       'pty.listProcesses',
-      undefined,
+      opts?.includeForegroundProcessEvidence === undefined
+        ? undefined
+        : { includeForegroundProcessEvidence: opts.includeForegroundProcessEvidence },
       relayTimeoutOptions(opts?.deadlineMs)
     )
     const processes = mapSshPtyProcessList(result as PtyProcessInfo[], (id) => this.toAppPtyId(id))

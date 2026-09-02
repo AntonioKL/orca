@@ -9,6 +9,7 @@ import type {
   SshTargetCreateInput,
   SshTarget,
   SshTargetUpdateInput,
+  SshTerminateSessionsResult,
   PortForwardEntry,
   EnrichedDetectedPort,
   SshTerminateSessionsResult

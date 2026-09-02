@@ -9,13 +9,12 @@ import {
   recognizeAgentProcess
 } from '../shared/agent-process-recognition'
 import { getFirstCommandToken } from '../shared/command-token-scanner'
+import { getProcessTableIndex, type ProcessTableIndex } from '../shared/process-table-index'
 import {
   getFreshProcessTableSnapshot,
   getProcessTableSnapshot,
-  type ProcessTableIndex,
   type ProcessTableRow
 } from '../shared/process-table-snapshot'
-import { getProcessTableIndex } from '../shared/process-table-index'
 import { selectForegroundProcessCandidate } from '../shared/foreground-process-selection'
 import {
   resolveOuterWrapperForegroundProcess,
