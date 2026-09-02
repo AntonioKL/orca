@@ -108,6 +108,11 @@ describeOnPosix('node-pty master fd retirement', () => {
 // Linux frees the master synchronously enough that the very next pty is handed the
 // same descriptor number every time, which makes the reuse hazard directly
 // observable rather than a race to reproduce.
+//
+// Which is also the constraint on writing a case here: the kernel hands out the
+// lowest free number, so a case that returns while its live pty is still open
+// leaks that descriptor into the next case's premise as an off-by-one. Await the
+// exit, never a fixed sleep.
 const describeOnLinux = process.platform === 'linux' ? describe : describe.skip
 
 describeOnLinux('node-pty master fd reuse', () => {
@@ -141,7 +146,7 @@ describeOnLinux('node-pty master fd reuse', () => {
   it('cannot write into a live pty handed the retired descriptor number', async () => {
     const { term: retired, spawnFd } = await retiredPty('exit 0', { destroy: false })
 
-    const live = spawnPty('read -r line; printf "got:%s" "$line"')
+    const live = spawnPty('sleep 1')
     let output = ''
     live.onData((data) => {
       output += data
@@ -149,11 +154,19 @@ describeOnLinux('node-pty master fd reuse', () => {
     try {
       expect(masterFd(live)).toBe(spawnFd)
 
-      // Pre-patch this fs.write reached `live`'s master and the tty echoed it
-      // back: a retired pane's bytes landing in an unrelated terminal.
+      // Pre-patch this fs.write reached `live`'s master, and the line discipline
+      // echoed it straight back: a retired pane's bytes landing in an unrelated
+      // terminal. Nothing has to read them for the leak to be observable.
       writeStream(retired).write('leak\r')
-      await new Promise<void>((resolve) => setTimeout(resolve, 300))
 
+      // Await the exit rather than sleeping: a fixed wait leaves this descriptor
+      // open into the next case, whose `expect(masterFd(live)).toBe(spawnFd)`
+      // premise then sees the kernel hand out the lower number this pty was still
+      // holding. That is what broke `node 24 1/8` on Linux, where alone among the
+      // platforms these cases actually run.
+      await new Promise<void>((resolve) => {
+        live.onExit(() => resolve())
+      })
       expect(output).not.toContain('leak')
     } finally {
       live.kill()
