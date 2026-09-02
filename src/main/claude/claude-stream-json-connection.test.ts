@@ -187,7 +187,13 @@ describe('Claude stream-json connection', () => {
       parent_tool_use_id: null,
       session_id: SESSION_ID
     })
-    const report = await until(() => readReportSafely(scenario), 'the scripted CLI report')
+    // The report exists from the child's first line of work, so poll for the frame
+    // itself: `send` settles on the SDK's completed write, and the child still has
+    // to read that line before it can record it.
+    const report = await until(
+      () => (readReportSafely(scenario)?.userMessages.length ? readReportSafely(scenario) : null),
+      'the user frame recorded by the child'
+    )
     expect(report.userMessages).toHaveLength(1)
 
     await until(() => messages.find((message) => message.uuid === 'uuid-replay-1'), 'the replay')
