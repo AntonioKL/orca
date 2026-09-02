@@ -1,28 +1,63 @@
 import type { DashboardBucket } from '../../../../shared/dashboard-snapshot'
-import { migrationUnsupportedToAgentStatusEntry } from '@/lib/migration-unsupported-agent-entry'
-import { applyAgentRowLineage } from './agent-row-lineage'
 import type { DashboardSnapshotState } from './build-dashboard-snapshot'
-import { collectActiveDashboardWorkspaces } from './dashboard-snapshot-workspaces'
+import {
+  collectActiveDashboardWorkspaces,
+  type ActiveDashboardWorkspace
+} from './dashboard-snapshot-workspaces'
 import { selectDashboardOrchestration } from './dashboard-orchestration-selection'
-import { dashboardRowBucketProjection } from './dashboard-row-bucket'
-import { buildWorktreeAgentRows } from '../sidebar/worktree-agent-rows'
 import {
-  selectLiveAgentStatusEntriesForWorktree,
-  selectMigrationUnsupportedEntriesForWorktree,
-  selectRetainedAgentEntriesForWorktree,
-  selectTerminalLayoutsForWorktree
-} from '../sidebar/worktree-agent-row-selectors'
+  endWorktreeBucketCountPass,
+  selectWorktreeBucketCounts
+} from './dashboard-worktree-bucket-counts'
 import { EMPTY_WORKTREE_AGENT_ORCHESTRATION } from '../sidebar/worktree-agent-orchestration-batch'
-import {
-  selectLivePtyIdsForWorktree,
-  selectRuntimePaneTitlesForWorktree
-} from '../sidebar/worktree-card-status-inputs'
 
 const EMPTY_COUNTS: Record<DashboardBucket, number> = {
   attention: 0,
   working: 0,
   done: 0,
   idle: 0
+}
+
+type ActiveWorkspacesCache = {
+  repos: unknown
+  worktreesByRepo: unknown
+  folderWorkspaces: unknown
+  projectGroups: unknown
+  workspaces: ActiveDashboardWorkspace[]
+}
+
+let activeWorkspacesCache: ActiveWorkspacesCache | null = null
+
+/**
+ * `collectActiveDashboardWorkspaces` with `includeMapMetadata: false` reads only
+ * these four slices, so the 400+ workspace descriptors it allocates can be
+ * reused until one of them changes identity.
+ */
+function selectActiveDashboardWorkspaces(
+  state: DashboardSnapshotState
+): ActiveDashboardWorkspace[] {
+  if (
+    activeWorkspacesCache &&
+    activeWorkspacesCache.repos === state.repos &&
+    activeWorkspacesCache.worktreesByRepo === state.worktreesByRepo &&
+    activeWorkspacesCache.folderWorkspaces === state.folderWorkspaces &&
+    activeWorkspacesCache.projectGroups === state.projectGroups
+  ) {
+    return activeWorkspacesCache.workspaces
+  }
+  const workspaces = collectActiveDashboardWorkspaces(state, false)
+  activeWorkspacesCache = {
+    repos: state.repos,
+    worktreesByRepo: state.worktreesByRepo,
+    folderWorkspaces: state.folderWorkspaces,
+    projectGroups: state.projectGroups,
+    workspaces
+  }
+  return workspaces
+}
+
+export function resetDashboardBucketCountCachesForTests(): void {
+  activeWorkspacesCache = null
 }
 
 /** Derive sidebar counts without allocating dashboard cards or metadata. */
@@ -36,51 +71,27 @@ export function buildDashboardBucketCounts(
     done: 0,
     idle: 0
   } satisfies Record<DashboardBucket, number>
-  const activeWorktrees = collectActiveDashboardWorkspaces(state, false)
+  const activeWorktrees = selectActiveDashboardWorkspaces(state)
   const { singletonOrchestration, orchestrationByWorktree } = selectDashboardOrchestration(
     state,
     activeWorktrees
   )
 
   for (const { worktree } of activeWorktrees) {
-    const worktreeId = worktree.id
-    const liveEntries = selectLiveAgentStatusEntriesForWorktree(state, worktreeId)
-    const migrationUnsupported = selectMigrationUnsupportedEntriesForWorktree(state, worktreeId)
-    const entries =
-      migrationUnsupported.length > 0
-        ? [
-            ...liveEntries,
-            ...migrationUnsupported.flatMap((unsupported) => {
-              const entry = migrationUnsupportedToAgentStatusEntry(unsupported)
-              return entry ? [entry] : []
-            })
-          ]
-        : liveEntries
-    const terminalLayoutsByTabId = selectTerminalLayoutsForWorktree(state, worktreeId)
-    const paneTitlesByTabId = selectRuntimePaneTitlesForWorktree(state, worktreeId)
-    const rows = applyAgentRowLineage(
-      buildWorktreeAgentRows({
-        tabs: state.tabsByWorktree[worktreeId] ?? [],
-        entries,
-        retained: selectRetainedAgentEntriesForWorktree(state, worktreeId),
-        runtimePaneTitlesByTabId: paneTitlesByTabId,
-        ptyIdsByTabId: selectLivePtyIdsForWorktree(state, worktreeId),
-        terminalLayoutsByTabId,
-        runtimeAgentOrchestrationByPaneKey:
-          singletonOrchestration ??
-          orchestrationByWorktree?.get(worktreeId) ??
-          EMPTY_WORKTREE_AGENT_ORCHESTRATION,
-        now
-      })
+    const contribution = selectWorktreeBucketCounts(
+      state,
+      worktree.id,
+      singletonOrchestration ??
+        orchestrationByWorktree?.get(worktree.id) ??
+        EMPTY_WORKTREE_AGENT_ORCHESTRATION,
+      now
     )
-
-    for (const row of rows) {
-      if (row.rowSource === 'subagent') {
-        continue
-      }
-      counts[dashboardRowBucketProjection(row, state.acknowledgedAgentsByPaneKey).bucket] += 1
-    }
+    counts.attention += contribution.attention
+    counts.working += contribution.working
+    counts.done += contribution.done
+    counts.idle += contribution.idle
   }
+  endWorktreeBucketCountPass()
 
   return counts.attention === 0 && counts.working === 0 && counts.done === 0 && counts.idle === 0
     ? EMPTY_COUNTS

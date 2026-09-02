@@ -32,11 +32,12 @@ vi.mock('./build-dashboard-bucket-counts', () => ({
   buildDashboardBucketCounts: mocks.buildDashboardBucketCounts
 }))
 
-import { useAgentBucketCounts } from './useAgentBucketCounts'
+import { resetAgentBucketCountGateForTests, useAgentBucketCounts } from './useAgentBucketCounts'
 
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  resetAgentBucketCountGateForTests()
   mocks.state.acknowledgedAgentsByPaneKey = {}
   mocks.state.unrelatedEpoch = 0
 })
@@ -86,5 +87,22 @@ describe('useAgentBucketCounts', () => {
     rerender()
     expect(result.current).toEqual({ attention: 0, working: 0, done: 0, idle: 1 })
     expect(mocks.buildDashboardBucketCounts).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps one counts object across agent traffic that leaves the totals alone', () => {
+    mocks.buildDashboardBucketCounts.mockImplementation(() => ({
+      attention: 0,
+      working: 1,
+      done: 0,
+      idle: 0
+    }))
+    const { result, rerender } = renderHook(() => useAgentBucketCounts())
+    const first = result.current
+
+    mocks.state.agentStatusEpoch += 1
+    rerender()
+
+    expect(mocks.buildDashboardBucketCounts).toHaveBeenCalledTimes(2)
+    expect(result.current).toBe(first)
   })
 })
