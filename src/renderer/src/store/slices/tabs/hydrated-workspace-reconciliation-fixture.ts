@@ -158,7 +158,7 @@ function buildWorkspace(
       return buildLegacyWorkspace(draft, worktreeId)
     case 'orphan':
       return buildOrphanWorkspace(draft, worktreeId)
-    default:
+    case 'editor':
       return buildEditorWorkspace(draft, worktreeId, groupId)
   }
 }
