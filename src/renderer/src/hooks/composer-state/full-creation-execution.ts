@@ -33,7 +33,7 @@ import type { PendingSmartGitHubSubmitResolution } from './source-selection-deci
 import { translate } from '@/i18n/i18n'
 import { settleComposerSubmit } from '@/lib/composer-submit-cancellation'
 import { toFolderWorkspaceLinkedTask } from '@/components/sidebar/folder-workspace-composer-helpers'
-import { ensureAgentStartupInTerminal } from '@/lib/new-workspace'
+import { CLIENT_PLATFORM, ensureAgentStartupInTerminal } from '@/lib/new-workspace'
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { seedNativeChatAppliedSessionOptions } from '@/components/native-chat/native-chat-session-option-cache'
@@ -43,7 +43,6 @@ import {
   resolveAgentLaunchRoute
 } from '@/lib/agent-launch-routing'
 import { readLocalRuntimeCapabilities } from '@/runtime/local-runtime-capabilities'
-import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 import { settleFullCreationStructuredLaunch } from './full-creation-structured-launch'
 import { finalizeFullCreation } from './full-creation-finalization'
 import { buildFullCreationIssueCommand } from './full-creation-issue-command'
