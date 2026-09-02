@@ -3,12 +3,12 @@ import type { LayoutChangeEvent } from 'react-native'
 import { Bot } from 'lucide-react-native'
 import {
   type ActivePanel,
+  panelRouteHref,
   resolvePanelAction,
   shouldShowSessionHeaderChecksAction
 } from './session-panel-host'
 import { MobileAgentIcon } from '../components/MobileAgentIcon'
 import type { MobileSessionPresentationModel } from './use-mobile-session-presentation'
-import { panelRouteHref } from './session-panel-host'
 
 export function useMobileSessionPanelRouteActions(scope: MobileSessionPresentationModel) {
   const {
