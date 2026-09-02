@@ -18,6 +18,7 @@ export function AutomationRunsDashboardSurface({
   now,
   onRefresh,
   setPageView,
+  setRunPageOrigin,
   selectAutomationRow,
   setPendingAutomationRunNavigation,
   setIsDetailOpen
@@ -31,6 +32,7 @@ export function AutomationRunsDashboardSurface({
   now: number
   onRefresh: () => void
   setPageView: (view: AutomationsPageView) => void
+  setRunPageOrigin: (origin: 'runs' | 'automation') => void
   selectAutomationRow: (rowKey: string | null) => void
   setPendingAutomationRunNavigation: (navigation: {
     automationId: string
@@ -51,7 +53,8 @@ export function AutomationRunsDashboardSurface({
       onRefresh={onRefresh}
       onOpenRun={(entry) => {
         const authority = entry.row.catalogRef?.authority
-        setPageView('automations')
+        setRunPageOrigin('runs')
+        setPageView('run')
         selectAutomationRow(entry.row.key)
         setPendingAutomationRunNavigation({
           automationId: entry.row.automation.id,

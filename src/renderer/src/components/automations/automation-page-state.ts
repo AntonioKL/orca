@@ -8,7 +8,9 @@ import type {
 export type AutomationPaneTab = 'overview' | 'runs'
 
 /** Top-level surface within Automations. */
-export type AutomationsPageView = 'automations' | 'runs'
+export type AutomationsPageView = 'automations' | 'runs' | 'run'
+
+export type AutomationRunPageOrigin = 'runs' | 'automation'
 
 /** External run opened as a full page inside the detail pane. */
 export type SelectedExternalRunPage = {

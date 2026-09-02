@@ -15,6 +15,7 @@ import type { AutomationListRow } from './automation-list-row-identity'
 import { EMPTY_AUTOMATION_LIST_FILTER, type AutomationListFilter } from './automation-list-view'
 import type {
   AutomationPaneTab,
+  AutomationRunPageOrigin,
   AutomationsPageView,
   SelectedExternalRunPage
 } from './automation-page-state'
@@ -65,6 +66,7 @@ export function useAutomationsPageLocalState(store: AutomationsPageStoreState) {
   const moveCreationKeysRef = useRef(new Map<string, string>())
   const [relativeNow, setRelativeNow] = useState(() => Date.now())
   const [pageView, setPageView] = useState<AutomationsPageView>('automations')
+  const [runPageOrigin, setRunPageOrigin] = useState<AutomationRunPageOrigin>('runs')
   const [activePaneTab, setActivePaneTab] = useState<AutomationPaneTab>('overview')
   const [selectedAutomationRunPageId, setSelectedAutomationRunPageId] = useState<string | null>(
     null
@@ -193,6 +195,8 @@ export function useAutomationsPageLocalState(store: AutomationsPageStoreState) {
     setRelativeNow,
     pageView,
     setPageView,
+    runPageOrigin,
+    setRunPageOrigin,
     activePaneTab,
     setActivePaneTab,
     selectedAutomationRunPageId,

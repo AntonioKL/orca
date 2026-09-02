@@ -58,7 +58,9 @@ export function useAutomationRunsDashboard({
   reloadToken: number
 }): DashboardState {
   const inputRef = useRef({ rows, context, legacyTarget, authorityForRow })
-  inputRef.current = { rows, context, legacyTarget, authorityForRow }
+  useEffect(() => {
+    inputRef.current = { rows, context, legacyTarget, authorityForRow }
+  }, [authorityForRow, context, legacyTarget, rows])
   // Keys the effective request, not just the row: a re-pair bumps the authority's
   // pairing revision and an uncaptured row's fallback target can move, and either
   // makes the entries and cursors already on screen belong to a different host.
@@ -79,7 +81,9 @@ export function useAutomationRunsDashboard({
   )
   const [state, setState] = useState<DashboardState>(EMPTY_STATE)
   const stateRef = useRef(state)
-  stateRef.current = state
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
   const [loadMoreToken, setLoadMoreToken] = useState(0)
   const loadMore = useCallback(() => setLoadMoreToken((token) => token + 1), [])
   // Null while disabled: a fresh re-entry must never resume from the previous
