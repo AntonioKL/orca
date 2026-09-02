@@ -14,7 +14,7 @@ import {
   testState
 } from './runtime-auth-service-test-harness'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 vi.mock('electron', () => createElectronMock())
@@ -283,6 +283,8 @@ describe('ClaudeRuntimeAuthService', () => {
     )
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
+    // Setup seeds this file; drop it so the write below is observed, not assumed.
+    rmSync(join(managedAuthPath, '.credentials.json'), { force: true })
     testState.throwScopedKeychainWrite = true
 
     const preparation = await service.prepareForClaudeLaunch()
@@ -291,6 +293,33 @@ describe('ClaudeRuntimeAuthService', () => {
     expect(preparation.stripAuthEnv).toBe(true)
     expect(preparation.configDir).toBe(realpathSync(managedAuthPath))
     expect(readFileSync(join(managedAuthPath, '.credentials.json'), 'utf-8')).toBe(credentials)
+  })
+
+  // Why: a locked Keychain is recoverable, so it must never cause a plaintext credential spill.
+  it('does not write a credentials file when the Keychain failure is transient', async () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+    const credentials = createClaudeCredentialsJson('user@example.com', 'managed')
+    const managedAuthPath = createManagedClaudeAuth(testState.userDataDir, 'account-1', credentials)
+    const store = createStore(
+      createSettings({
+        claudeManagedAccounts: [
+          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
+        ],
+        activeClaudeManagedAccountId: 'account-1'
+      })
+    )
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    rmSync(join(managedAuthPath, '.credentials.json'), { force: true })
+    testState.throwScopedKeychainWrite = true
+    testState.scopedKeychainWriteErrorMessage = 'User interaction is not allowed.'
+
+    const preparation = await service.prepareForClaudeLaunch()
+
+    expect(preparation.provenance).toBe('system:managed-keychain-unavailable')
+    expect(existsSync(join(managedAuthPath, '.credentials.json'))).toBe(false)
   })
 
   it('retains a visible degraded provenance after scoped Keychain bridge failure', async () => {

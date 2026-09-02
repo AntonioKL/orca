@@ -186,6 +186,26 @@ function execSecurity(
   })
 }
 
+// Why: a locked or prompt-blocked Keychain is recoverable by the user, so it must not trigger a
+// plaintext credential fallback the way a structurally unavailable Keychain does.
+export function isTransientKeychainError(error: unknown): boolean {
+  const message =
+    error && typeof error === 'object'
+      ? `${String((error as { stderr?: unknown }).stderr ?? '')} ${String(
+          (error as { message?: unknown }).message ?? ''
+        )}`.toLowerCase()
+      : String(error).toLowerCase()
+  return (
+    message.includes('locked') ||
+    message.includes('interaction is not allowed') ||
+    message.includes('no user interaction') ||
+    message.includes('user canceled') ||
+    message.includes('user cancelled') ||
+    message.includes('name or passphrase') ||
+    message.includes('timed out')
+  )
+}
+
 function isKeychainNotFoundError(error: unknown): boolean {
   const code =
     error && typeof error === 'object' && 'code' in error

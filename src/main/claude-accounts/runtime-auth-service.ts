@@ -11,6 +11,7 @@ import {
 } from './runtime-auth/runtime-auth-types'
 import { migrateLegacySharedClaudeAuth } from './legacy-shared-claude-auth-migration'
 import {
+  isTransientKeychainError,
   readActiveClaudeKeychainCredentialsStrict,
   writeActiveClaudeKeychainCredentials
 } from './keychain'
@@ -107,12 +108,17 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
         if (this.managedKeychainUnavailable?.accountId === selected.id) {
           this.managedKeychainUnavailable = null
         }
-      } catch {
+      } catch (bridgeError) {
         console.warn('[claude-runtime-auth] Failed to bridge macOS managed Claude Keychain')
         // Degrade the medium before the identity: the CLI reads the config dir's own
         // credentials file when the Keychain is unusable, so keep the pane on its account.
+        // A locked or prompt-blocked Keychain is recoverable, so never spill a plaintext
+        // credential for it; report the degraded state and let the user unlock instead.
         try {
-          if (await this.materializeManagedCredentialsFile(selected)) {
+          if (
+            !isTransientKeychainError(bridgeError) &&
+            (await this.materializeManagedCredentialsFile(selected))
+          ) {
             return preparation
           }
         } catch {

@@ -28,6 +28,7 @@ export const testState = {
   throwLegacyRuntimeKeychainWrite: false,
   throwScopedKeychainWrite: false,
   throwManagedKeychainRead: false,
+  scopedKeychainWriteErrorMessage: 'scoped keychain write failed',
   runtimeWriteConfigDir: null as string | null,
   scopedKeychainCredentialsByConfigDir: new Map<string, string>(),
   managedKeychainCredentials: new Map<string, string>()
@@ -70,7 +71,7 @@ export function createKeychainMock() {
     writeActiveClaudeKeychainCredentials: vi.fn(async (contents: string, configDir?: string) => {
       if (configDir) {
         if (testState.throwScopedKeychainWrite) {
-          throw new Error('scoped keychain write failed')
+          throw new Error(testState.scopedKeychainWriteErrorMessage)
         }
         testState.scopedKeychainCredentials = contents
         testState.scopedKeychainCredentialsByConfigDir.set(configDir, contents)
@@ -131,6 +132,18 @@ export function createKeychainMock() {
         testState.activeKeychainCredentials = contents
       }
     ),
+    isTransientKeychainError: (error: unknown) => {
+      const message = String((error as { message?: unknown })?.message ?? error).toLowerCase()
+      return (
+        message.includes('locked') ||
+        message.includes('interaction is not allowed') ||
+        message.includes('no user interaction') ||
+        message.includes('user canceled') ||
+        message.includes('user cancelled') ||
+        message.includes('name or passphrase') ||
+        message.includes('timed out')
+      )
+    },
     readManagedClaudeKeychainCredentials: vi.fn(async (accountId: string) => {
       if (testState.throwManagedKeychainRead) {
         throw new Error('managed keychain read failed')
