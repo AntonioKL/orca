@@ -156,11 +156,6 @@ export { MOBILE_TUI_AGENT_AUTO_PICK_ORDER } from './mobile-tui-agents'
 export { resolveComposerBranchSelection } from './mobile-composer-branch-selection'
 export { clearMobileTaskCopyFeedbackTimer } from './mobile-task-copy-feedback-timer'
 export { useMobileTaskCopyFeedback } from './use-mobile-task-copy-feedback'
-export {
-  createMobileItemPrFileContentScope,
-  createMobileProjectPrFileContentScope,
-  useMobilePrFileContentCache
-} from './use-mobile-pr-file-content-cache'
 export type {
   GitHubOwnerRepo,
   ProviderCheckSummary

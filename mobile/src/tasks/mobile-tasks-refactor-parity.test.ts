@@ -27,19 +27,25 @@ const hash = (parts: string[] | string): string =>
  * differs from the monolith in one place: useMobileTaskCopyFeedback moved two
  * positions later (index 123 to 125) so its setters and ref exist before it
  * runs; nothing between those points reads its result.
+ *
+ * PR file contents are the monolith's plain useState pair again, after the
+ * bounded cache from #10179 was stripped. That trades three hook slots (two
+ * useState, two useCallback clears, minus the cache hook) but restores the
+ * monolith's load flow: cache-hit early return, loading path, try/catch/finally.
+ * The render tree, declarations, and styles are unchanged by that swap.
  */
-const SCREEN_HOOKS = '2e7b6ef35be986914ea8ee2bd23bca2b991f763e4417dbcc51e3d30483b318e5'
+const SCREEN_HOOKS = '8ba3974a4c4c26bd04aa22cb0e59757c98ebda4a91ab6b7081215c5e8710d0b3'
 const DIFF_HOOKS = '93c7189b32bed8456cc51814fffa8ce80cf62011ef968a9d53ddec2b9686f58f'
-const STATEMENTS = 'c55e439bb35a4596f24858ae8999bfc032991fbe08e6df3c1c4748cc451946ae'
+const STATEMENTS = '02ef31a6b6a30748c41e485dbac8fb4e4433e887ecdbd2db5442a81c31bdf244'
 const DECLARATIONS = 'c2937abd0fbb8aa40093a1cf3f1c8a4a7e1acc8a7fe66de390a8e5fb259dc61b'
-const SEMANTICS = 'f12d9e4f73f7fee67eafe986f3fcef20482e76707e11fd306a288e1e7bf90557'
+const SEMANTICS = '541a22531e77209f9c9fea32b49cb0539a8e1bd2e6b74ca7e5e1de0642f028c9'
 const STYLES = '1db6af69c791d9963928541ad5310942fcbda6d984b422c90b6eb92b6816579a'
 const RENDER_TREE = '92596eb283232607d8c2df3f09ba970232c7df496555c6f59e0c7160a00501af'
 
 describe('Mobile Tasks refactor parity', () => {
   it('preserves recursively flattened hook and dependency order', () => {
     const screenHooks = readFlattenedMobileTasksHookSignatures('MobileTasksScreen')
-    expect(screenHooks).toHaveLength(363)
+    expect(screenHooks).toHaveLength(366)
     expect(hash(screenHooks)).toBe(SCREEN_HOOKS)
 
     const diffHooks = readFlattenedMobileTasksHookSignatures('GitHubPrFileDiff')
@@ -61,7 +67,7 @@ describe('Mobile Tasks refactor parity', () => {
 
   it('preserves RPC calls, runtime strings, and JSX host signatures', () => {
     const semantics = readMobileTasksSemanticSource()
-    expect(semantics.split('\n')).toHaveLength(3_232)
+    expect(semantics.split('\n')).toHaveLength(3_236)
     expect(hash(semantics)).toBe(SEMANTICS)
   })
 

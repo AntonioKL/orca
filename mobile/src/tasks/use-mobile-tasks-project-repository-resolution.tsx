@@ -1,18 +1,10 @@
 import type { ProjectProjectionModel } from './use-mobile-tasks-project-projection'
-import {
-  createMobileItemPrFileContentScope,
-  createMobileProjectPrFileContentScope,
-  githubProjectKey,
-  useEffect,
-  useMemo,
-  useMobilePrFileContentCache
-} from './mobile-tasks-dependencies'
+import { githubProjectKey, useEffect, useMemo } from './mobile-tasks-dependencies'
 import {
   GITHUB_REPO_CONCURRENCY,
   getGitHubReviewerSeedUsers,
   mapWithConcurrency,
   mergeGitHubAssignableUsers,
-  projectRowGitHubRepository,
   projectRowType
 } from './mobile-tasks-legacy-foundation'
 
@@ -20,7 +12,6 @@ export function useMobileTasksProjectRepositoryResolution(model: ProjectProjecti
   const {
     actionItem,
     activeGitHubProject,
-    activeGitHubProjectHost,
     connState,
     detailPayload,
     findProjectRowRepo,
@@ -121,22 +112,6 @@ export function useMobileTasksProjectRepositoryResolution(model: ProjectProjecti
     () => (projectRowItem ? findProjectRowRepo(projectRowItem) : null),
     [findProjectRowRepo, projectRowItem]
   )
-  const itemPrFileContentScope = createMobileItemPrFileContentScope(actionItem, detailPayload)
-  const projectPrFileContentScope = createMobileProjectPrFileContentScope(
-    projectRowItem,
-    projectRowHostedRepo,
-    projectRowDetail,
-    projectRowItem ? projectRowGitHubRepository(projectRowItem, activeGitHubProjectHost) : null
-  )
-  const activePrFileContentScope = projectRowItem
-    ? projectPrFileContentScope
-    : itemPrFileContentScope
-  const {
-    clear: clearPrFileContents,
-    contents: prFileContents,
-    load: loadPrFileContent,
-    loadingPath: prFileLoadingPath
-  } = useMobilePrFileContentCache(activePrFileContentScope)
   const itemReviewerCandidates = useMemo(() => {
     if (!actionItem || actionItem.provider !== 'github' || actionItem.source.type !== 'pr') {
       return []
@@ -215,18 +190,11 @@ export function useMobileTasksProjectRepositoryResolution(model: ProjectProjecti
     activeGitHubProjectKey,
     activeGitHubProjectView,
     activeGitHubProjectViewId,
-    activePrFileContentScope,
-    clearPrFileContents,
-    itemPrFileContentScope,
     itemReviewerCandidates,
     itemSelectedReviewerLogins,
-    loadPrFileContent,
-    prFileContents,
-    prFileLoadingPath,
     projectIssueTypeRepository,
     projectMetadataRepository,
     projectMetadataSeedLogins,
-    projectPrFileContentScope,
     projectReviewerCandidates,
     projectRowHostedRepo,
     projectSelectedReviewerLogins

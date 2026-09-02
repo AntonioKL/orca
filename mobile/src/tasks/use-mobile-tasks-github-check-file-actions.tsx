@@ -12,16 +12,17 @@ export function useMobileTasksGithubCheckFileActions(model: HostedCommentReviewA
   const {
     detailPayload,
     expandedPrFilePath,
-    itemPrFileContentScope,
-    loadPrFileContent,
     mutatingStatus,
     prFileCommentDrafts,
+    prFileContents,
     setDetailPayload,
     setDetailRefreshSeq,
     setError,
     setExpandedPrFilePath,
     setMutatingStatus,
     setPrFileCommentDrafts,
+    setPrFileContents,
+    setPrFileLoadingPath,
     taskItemFileOperations,
     taskItemReviewOperations
   } = model
@@ -140,41 +141,40 @@ export function useMobileTasksGithubCheckFileActions(model: HostedCommentReviewA
         return
       }
       setExpandedPrFilePath(file.path)
+      if (prFileContents[file.path]) {
+        return
+      }
       if (
         !taskItemFileOperations ||
         item.source.type !== 'pr' ||
         detailPayload?.provider !== 'github' ||
         !detailPayload.headSha ||
-        !detailPayload.baseSha ||
-        !itemPrFileContentScope
+        !detailPayload.baseSha
       ) {
         setError('Unable to load file contents for this pull request.')
         return
       }
-      const headSha = detailPayload.headSha
-      const baseSha = detailPayload.baseSha
-      await loadPrFileContent(
-        itemPrFileContentScope,
-        file,
-        async () => {
-          return taskItemFileOperations.loadFileContents(taskItemMutationTarget(item), {
+      setPrFileLoadingPath(file.path)
+      setError('')
+      try {
+        const contents = await taskItemFileOperations.loadFileContents(
+          taskItemMutationTarget(item),
+          {
             path: file.path,
             oldPath: file.oldPath,
             status: file.status ?? 'modified',
-            headSha,
-            baseSha
-          })
-        },
-        setError
-      )
+            headSha: detailPayload.headSha,
+            baseSha: detailPayload.baseSha
+          }
+        )
+        setPrFileContents((current) => ({ ...current, [file.path]: contents }))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load file contents')
+      } finally {
+        setPrFileLoadingPath(null)
+      }
     },
-    [
-      detailPayload,
-      expandedPrFilePath,
-      itemPrFileContentScope,
-      loadPrFileContent,
-      taskItemFileOperations
-    ]
+    [detailPayload, expandedPrFilePath, prFileContents, taskItemFileOperations]
   )
   const addGitHubFileReviewComment = useCallback(
     async (
