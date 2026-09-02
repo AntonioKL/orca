@@ -23,6 +23,10 @@ import { readWindowsProcessRowsWithCim } from './windows-process-table-cim-scan'
  *   pid+ppid+name        15.9 / 17.5 ms
  *   +memory +commandLine 30.6 / 33.7 ms
  *   PowerShell CIM        706 / 723  ms
+ *
+ * Those are the module's published figures for both extra fields together; the
+ * only flag set this module asks for is `CommandLine` (+ `CreationTime`, free),
+ * which sits between the two rows and has not been separately measured.
  */
 
 export type WindowsProcessRow = {
@@ -31,8 +35,6 @@ export type WindowsProcessRow = {
   name: string
   /** Full command line. Empty when the process denied a query handle. */
   command: string
-  /** Working set in bytes, or undefined when not requested/queryable. */
-  memoryBytes?: number
   /** Process creation time in Unix milliseconds, when the native snapshot provides it. */
   creationTimeMs?: number
 }
@@ -41,7 +43,6 @@ type NativeProcessInfo = {
   pid: number
   ppid: number
   name: string
-  memory?: number
   commandLine?: string
   creationTimeMs?: number
 }
@@ -49,7 +50,6 @@ type NativeProcessInfo = {
 type WindowsProcessTreeModule = {
   ProcessDataFlag: {
     None: number
-    Memory: number
     CommandLine: number
     CreationTime?: number
   }
@@ -57,6 +57,24 @@ type WindowsProcessTreeModule = {
     callback: (processes: NativeProcessInfo[] | undefined) => void,
     flags?: number
   ) => void
+}
+
+function isWindowsProcessTreeModule(value: unknown): value is WindowsProcessTreeModule {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const candidate = value as {
+    ProcessDataFlag?: unknown
+    getAllProcesses?: unknown
+  }
+  if (typeof candidate.getAllProcesses !== 'function') {
+    return false
+  }
+  if (typeof candidate.ProcessDataFlag !== 'object' || candidate.ProcessDataFlag === null) {
+    return false
+  }
+  const flags = candidate.ProcessDataFlag as { None?: unknown; CommandLine?: unknown }
+  return typeof flags.None === 'number' && typeof flags.CommandLine === 'number'
 }
 
 const requireFromMain = createRequire(__filename)
@@ -82,7 +100,10 @@ type WindowsProcessTreeAddon = {
   ) => void
 }
 
-/** Mirrors the package's enum; the addon takes the raw bit field. */
+/**
+ * Mirrors the package's enum; the addon takes the raw bit field. `Memory` (1)
+ * is listed for completeness and is deliberately never set — see `flags` below.
+ */
 const PROCESS_DATA_FLAG = { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 } as const
 
 /** Staged beside the relay bundle by build-relay; see RELAY_ARTIFACTS. */
@@ -122,8 +143,14 @@ function loadWindowsProcessTree(): WindowsProcessTreeModule | null {
     return cachedModule
   }
   try {
-    cachedModule = requireNative('@vscode/windows-process-tree') as WindowsProcessTreeModule
-    return cachedModule
+    const candidate = requireNative('@vscode/windows-process-tree')
+    if (isWindowsProcessTreeModule(candidate)) {
+      cachedModule = candidate
+      return cachedModule
+    }
+    // Treat an importable but malformed package like a missing binding; the
+    // staged relay addon may still provide a usable reader.
+    throw new Error('invalid windows process tree module')
   } catch {
     // Not an error here: the relay never has the package. Try the staged addon.
   }
@@ -152,6 +179,8 @@ function loadWindowsProcessTree(): WindowsProcessTreeModule | null {
  * replaced self-healed in 3s because execFile owned a timeout; keep that.
  */
 const WINDOWS_PROCESS_QUERY_TIMEOUT_MS = 3_000
+/** Keep status reads from retrying a transient native probe on every poll. */
+const WINDOWS_PROCESS_START_TIME_PROBE_RETRY_DELAY_MS = 30_000
 
 /**
  * Reads that missed their deadline and have not called back yet.
@@ -163,12 +192,14 @@ let readSequence = 0
 let nativeReaderEpoch = 0
 let nativeProcessStartTimeCapability: boolean | undefined
 let nativeProcessStartTimeProbe: Promise<boolean> | null = null
+let nativeProcessStartTimeProbeRetryAt: number | null = null
 
 function resetNativeReaderState(): void {
   nativeReaderEpoch += 1
   unreturnedReads.clear()
   nativeProcessStartTimeCapability = undefined
   nativeProcessStartTimeProbe = null
+  nativeProcessStartTimeProbeRetryAt = null
 }
 
 function normalizeCreationTimeMs(value: unknown): number | undefined {
@@ -176,7 +207,11 @@ function normalizeCreationTimeMs(value: unknown): number | undefined {
 }
 
 function hasNativeCreationTimeFlag(native: WindowsProcessTreeModule): boolean {
-  return native.ProcessDataFlag.CreationTime === PROCESS_DATA_FLAG.CreationTime
+  return (
+    typeof native?.ProcessDataFlag === 'object' &&
+    native.ProcessDataFlag !== null &&
+    native.ProcessDataFlag.CreationTime === PROCESS_DATA_FLAG.CreationTime
+  )
 }
 
 function hasOwnProcessStartTime(processes: readonly NativeProcessInfo[]): boolean {
@@ -208,14 +243,16 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
   }
   const readId = ++readSequence
   const readerEpoch = nativeReaderEpoch
-  // Why always both flags: each adds an OpenProcess per process (Memory a
-  // GetProcessMemoryInfo, CommandLine a PEB read), so asking for less would be
-  // cheaper -- 15.9ms p50 versus 30.6ms at 1050 processes. But every read shares
-  // one snapshot so a 32-wide teardown collapses into a single scan, and that
-  // snapshot has to satisfy every caller. Splitting the cache per field set
-  // would restore exactly the fan-out it exists to prevent.
+  // Why CommandLine but not Memory: each flag costs one OpenProcess per process
+  // inside the addon (process.cc), and every caller of this table matches on
+  // `command`, while nothing reads a working set off it -- the Resource Manager
+  // runs its own CIM sweep because it needs commit and CPU time in one pass, and
+  // `process.cc` truncates the working set into a DWORD anyway. Dropping Memory
+  // halves the per-snapshot handle count; the remaining flags stay in ONE flag
+  // set because every read shares one snapshot, so a 32-wide teardown collapses
+  // into a single scan. Splitting the cache per field set would restore exactly
+  // the fan-out it exists to prevent.
   const flags =
-    native.ProcessDataFlag.Memory |
     native.ProcessDataFlag.CommandLine |
     (hasNativeCreationTimeFlag(native) ? PROCESS_DATA_FLAG.CreationTime : 0)
   return new Promise((resolve, reject) => {
@@ -239,9 +276,6 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
         // that actually wedged can be holding the gate shut.
         unreturnedReads.delete(readId)
         if (!processes) {
-          if (readerEpoch === nativeReaderEpoch) {
-            nativeProcessStartTimeCapability = false
-          }
           reject(new Error('windows process table returned no snapshot'))
           return
         }
@@ -253,9 +287,6 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
         // unfalsifiably present in any honest snapshot, so this one predicate
         // catches empty, truncated and permission-filtered tables alike.
         if (!processes.some((row) => row.pid === process.pid)) {
-          if (readerEpoch === nativeReaderEpoch) {
-            nativeProcessStartTimeCapability = false
-          }
           reject(new Error('windows process table is unreadable'))
           return
         }
@@ -274,7 +305,6 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
               ppid: row.ppid,
               name: row.name,
               command: row.commandLine ?? '',
-              memoryBytes: row.memory,
               ...(creationTimeMs === undefined ? {} : { creationTimeMs })
             }
           })
@@ -365,7 +395,14 @@ export function probeWindowsProcessStartTimeAvailability(): Promise<boolean> {
   if (nativeProcessStartTimeProbe) {
     return nativeProcessStartTimeProbe
   }
+  if (
+    nativeProcessStartTimeProbeRetryAt !== null &&
+    Date.now() < nativeProcessStartTimeProbeRetryAt
+  ) {
+    return Promise.resolve(false)
+  }
   const probeEpoch = nativeReaderEpoch
+  nativeProcessStartTimeProbeRetryAt = Date.now() + WINDOWS_PROCESS_START_TIME_PROBE_RETRY_DELAY_MS
   nativeProcessStartTimeProbe = readWindowsProcessTableFresh()
     .then((rows) => {
       const supported = rows.some(
@@ -378,14 +415,17 @@ export function probeWindowsProcessStartTimeAvailability(): Promise<boolean> {
       return probeEpoch === nativeReaderEpoch ? supported : false
     })
     .catch(() => {
-      if (probeEpoch === nativeReaderEpoch) {
-        nativeProcessStartTimeCapability = false
-      }
+      // Empty, truncated, and timed-out snapshots are transient evidence
+      // failures. Leave the capability unknown so the renderer's bounded
+      // re-probe can recover without restarting the runtime.
       return false
     })
     .finally(() => {
       if (probeEpoch === nativeReaderEpoch) {
         nativeProcessStartTimeProbe = null
+        if (nativeProcessStartTimeCapability !== undefined) {
+          nativeProcessStartTimeProbeRetryAt = null
+        }
       }
     })
   return nativeProcessStartTimeProbe

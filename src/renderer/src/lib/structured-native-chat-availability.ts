@@ -2,6 +2,7 @@ import type { AppState } from '@/store/types'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { getRendererAppPlatform } from '@/lib/renderer-app-platform'
+import { worktreeUsesWslPath } from '@/store/terminals/terminal-workspace-routing'
 import { getCachedWindowsTerminalCapabilities } from './windows-terminal-capabilities'
 
 export function canUseStructuredNativeChat(state: AppState, worktreeId: string): boolean {
@@ -15,6 +16,17 @@ export function canUseStructuredNativeChat(state: AppState, worktreeId: string):
     return false
   }
   if (getExecutionHostIdForWorktree(state, worktreeId) !== 'local') {
+    return false
+  }
+  // Folder workspaces are not present in worktreesByRepo. Reuse the terminal
+  // routing classifier so a WSL UNC folder keeps the legacy WSL terminal path.
+  if (
+    getRendererAppPlatform() === 'win32' &&
+    worktreeUsesWslPath(
+      { folderWorkspaces: state.folderWorkspaces ?? [], worktreesByRepo: state.worktreesByRepo },
+      worktreeId
+    )
+  ) {
     return false
   }
   // Structured ownership on Windows is safe only when the local runtime has

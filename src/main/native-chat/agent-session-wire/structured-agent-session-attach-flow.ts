@@ -5,7 +5,6 @@
 // the decisions that must not be client-supplied — the spawn token, the claim
 // key, the owner probe — and passes them in.
 
-import { isDeepStrictEqual } from 'node:util'
 import type {
   AgentSessionAttachResult,
   AgentSessionMutationResult
@@ -16,7 +15,6 @@ import {
   admitAttachOrRefuse,
   attachJournal,
   classifyStoreFailure,
-  journalIdentityFor,
   reserveRequestFor,
   type AgentSessionAttachAuthority,
   type AgentSessionAttachParams,
@@ -28,14 +26,13 @@ import { adapterSupportsCreateIfDeclared } from './structured-agent-session-prov
 import {
   AgentSessionAcquisitionExitUnprovenError,
   AgentSessionAcquisitionRefusal,
-  AgentSessionPreSpawnError,
   isAgentSessionPreSpawnError,
   rethrowAfterAgentSessionAcquisitionCleanup
 } from './structured-agent-session-adapter'
 import type { StructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
-import { readNativeSessionOptions } from './structured-agent-session-option-restoration'
 import { resolveAgentSessionReplayOutcome } from './structured-agent-session-replay-outcome'
 import { readAgentSessionHydrationPage } from './agent-session-history-page'
+import { acquireOwner } from './structured-agent-session-acquisition'
 
 export type AttachFlowInput = {
   store: AgentSessionRecordStore
@@ -87,6 +84,7 @@ export async function performAttach(
   let record: AgentSessionRecord
   let acquisitionGeneration: string | null = null
   let reservedRecord: AgentSessionRecord | null = null
+  let unsupportedReservationSettlementAttempted = false
   let replayed = false
   try {
     const reserved = await store.reserveOwner(
@@ -102,11 +100,18 @@ export async function performAttach(
     record = reserved.record
     replayed = reserved.disposition === 'replayed'
     // Capability can change while the durable reservation is in flight. Recheck
-    // a replay at its effect boundary so it cannot bypass the support gate.
-    if (
-      replayed &&
-      !adapterSupportsCreateIfDeclared(input.adapter, params.location, params.agent)
-    ) {
+    // every reservation at its effect boundary so it cannot bypass the support
+    // gate, and release a pending reservation that support drift invalidated.
+    reservedRecord = record
+    if (!adapterSupportsCreateIfDeclared(input.adapter, params.location, params.agent)) {
+      if (
+        record.lease.claimStatus === 'reserved' &&
+        record.lease.handoffStage === 'new-owner-proving' &&
+        record.lease.reservedSpawnToken
+      ) {
+        unsupportedReservationSettlementAttempted = true
+        await settleUnsupportedReservation(input, record)
+      }
       return unsupported()
     }
     if (
@@ -123,7 +128,6 @@ export async function performAttach(
         return { ok: false, refusal: replay.refusal }
       }
     }
-    reservedRecord = record
     if (!agentSessionLeaseAdmitsWriter(record.lease)) {
       const acquired = await acquireOwner(input, record)
       record = acquired.record
@@ -131,7 +135,7 @@ export async function performAttach(
     }
   } catch (error) {
     const spawnToken = reservedRecord?.lease.reservedSpawnToken
-    if (reservedRecord && spawnToken) {
+    if (reservedRecord && spawnToken && !unsupportedReservationSettlementAttempted) {
       // A pre-spawn failure is its own processless proof; the settlement records the
       // evidence and the failed operation in one durable transaction.
       const exitProof = isAgentSessionPreSpawnError(error)
@@ -222,6 +226,34 @@ export async function performAttach(
   }
 }
 
+async function settleUnsupportedReservation(
+  input: AttachFlowInput,
+  record: AgentSessionRecord
+): Promise<void> {
+  const spawnToken = record.lease.reservedSpawnToken
+  if (!spawnToken) {
+    return
+  }
+  try {
+    await input.store.settleFailedAcquisition({
+      sessionId: record.sessionId,
+      fence: record.lease.runtimeFence,
+      spawnToken,
+      callerKey: input.callerKey,
+      operationId: input.params.envelope.clientOperationId,
+      outcome: {
+        status: 'failed',
+        code: 'agent_session_operation_invalid',
+        message: 'Structured session support changed before the provider could start.'
+      },
+      exitProof: 'processless',
+      now: input.now()
+    })
+  } catch (error) {
+    throw new AggregateError([error], 'agent session unsupported reservation settlement failed')
+  }
+}
+
 async function settlePostAcquisitionAttachFailure(
   input: AttachFlowInput,
   record: AgentSessionRecord,
@@ -259,72 +291,4 @@ async function settlePostAcquisitionAttachFailure(
     )
   }
   throw cleanupError
-}
-
-/** A reservation with no process behind it is only a promise to spawn; the
- *  adapter makes it real and the store then grants the writer. */
-async function acquireOwner(
-  input: AttachFlowInput,
-  record: AgentSessionRecord
-): Promise<{ record: AgentSessionRecord; acquisitionGeneration: string | null }> {
-  const fence = record.lease.runtimeFence
-  const spawnToken = record.lease.reservedSpawnToken
-  if (!spawnToken) {
-    throw new Error('agent_session_ownership_unknown')
-  }
-  // Pre-spawn proof is single-use: this retry may create a child after the durable clear.
-  try {
-    try {
-      record = await input.store.setReservationProcesslessProof({
-        sessionId: record.sessionId,
-        fence,
-        spawnToken,
-        processlessAt: null,
-        now: input.now()
-      })
-      await input.onAcquiring?.()
-    } catch (error) {
-      throw new AgentSessionPreSpawnError(error)
-    }
-    const acquired = await input.adapter.acquire({
-      identity: journalIdentityFor(record, input.params),
-      fence,
-      // Retries must recover the original reservation, not mint a second child.
-      spawnToken,
-      ...(record.options ? { options: record.options } : {}),
-      ...(input.eventSink ? { events: input.eventSink } : {})
-    })
-    const options = await readNativeSessionOptions({
-      adapter: input.adapter,
-      sessionId: record.sessionId,
-      fence,
-      ...(record.options ? { priorOptions: record.options } : {})
-    })
-    if (record.lease.ownerProcess === null) {
-      await input.store.commitProcessIdentity({
-        sessionId: record.sessionId,
-        fence,
-        process: acquired.process,
-        now: input.now()
-      })
-    } else if (!isDeepStrictEqual(record.lease.ownerProcess, acquired.process)) {
-      throw new Error('agent_session_ownership_unknown')
-    }
-    const proved = await input.store.proveOwner({
-      sessionId: record.sessionId,
-      fence,
-      link: acquired.link,
-      now: input.now(),
-      ...(options ? { options } : {})
-    })
-    return {
-      record: proved,
-      acquisitionGeneration: acquired.acquisitionGeneration ?? null
-    }
-  } catch (error) {
-    if (isAgentSessionPreSpawnError(error)) {
-      throw error
-    }
-    return rethrowAfterAgentSessionAcquisitionCleanup(input.adapter, record.sessionId, error)
-  }
 }

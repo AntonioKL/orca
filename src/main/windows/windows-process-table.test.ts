@@ -38,12 +38,13 @@ describe('windows process table', () => {
     platform = Object.getOwnPropertyDescriptor(process, 'platform')
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
+      ProcessDataFlag: { None: 0, CommandLine: 2, CreationTime: 4 },
       getAllProcesses
     }))
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     __setWindowsProcessTreeLoaderForTests()
     if (platform) {
       Object.defineProperty(process, 'platform', platform)
@@ -53,21 +54,24 @@ describe('windows process table', () => {
   it('maps native rows, defaulting an unreadable command line to empty', async () => {
     const rows = await readWindowsProcessTableFresh()
     expect(rows).toEqual([
-      { pid: process.pid, ppid: 0, name: 'vitest.exe', command: '', memoryBytes: undefined },
+      { pid: process.pid, ppid: 0, name: 'vitest.exe', command: '' },
       {
         pid: 100,
         ppid: 4,
         name: 'orca.exe',
         command: '"C:/a b/orca.exe" --x',
-        memoryBytes: 4096,
         creationTimeMs: 1_700_000_000_000
       }
     ])
   })
 
-  it('requests memory, command line, and creation time together', async () => {
+  it('requests the command line and creation time, never memory', async () => {
     await readWindowsProcessTableFresh()
-    expect(getAllProcesses.mock.calls[0]?.[1]).toBe(7)
+    // CommandLine (2) | CreationTime (4). The Memory bit (1) stays clear: the
+    // addon opens a second PROCESS_VM_READ handle per process to serve it and
+    // nothing reads a working set off this table.
+    expect(getAllProcesses.mock.calls[0]?.[1]).toBe(6)
+    expect((getAllProcesses.mock.calls[0]?.[1] as number) & 1).toBe(0)
   })
 
   it('only advertises PID-safe ownership after measuring the querying process row', async () => {
@@ -80,7 +84,7 @@ describe('windows process table', () => {
     expect(isWindowsProcessStartTimeAvailable()).toBe(true)
 
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      ProcessDataFlag: { None: 0, CommandLine: 2 },
       getAllProcesses
     }))
     expect(isWindowsProcessStartTimeAvailable()).toBe(false)
@@ -89,7 +93,35 @@ describe('windows process table', () => {
   it('rejects a patched JS enum backed by a binary that omits creation time', async () => {
     await expect(probeWindowsProcessStartTimeAvailability()).resolves.toBe(false)
     expect(isWindowsProcessStartTimeAvailable()).toBe(false)
-    expect(getAllProcesses).toHaveBeenCalledWith(expect.any(Function), 7)
+    expect(getAllProcesses).toHaveBeenCalledWith(expect.any(Function), 6)
+    await expect(probeWindowsProcessStartTimeAvailability()).resolves.toBe(false)
+    expect(getAllProcesses).toHaveBeenCalledTimes(1)
+  })
+
+  it('reprobes after transient failed, empty, and truncated snapshots', async () => {
+    vi.useFakeTimers()
+    getAllProcesses
+      .mockImplementationOnce((cb: (rows: unknown) => void) => cb(undefined))
+      .mockImplementationOnce((cb: (rows: unknown) => void) => cb([]))
+      .mockImplementationOnce((cb: (rows: unknown) => void) => cb([{ pid: 999 }]))
+      .mockImplementationOnce((cb: (rows: unknown) => void) =>
+        cb([{ ...SELF, creationTimeMs: 1_700_000_000_001 }, NATIVE[1]])
+      )
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(probeWindowsProcessStartTimeAvailability()).resolves.toBe(false)
+      expect(isWindowsProcessStartTimeAvailable()).toBe(false)
+      // A transient failure is rate-limited, but a later renderer re-probe can
+      // retry the native reader in this same process.
+      await expect(probeWindowsProcessStartTimeAvailability()).resolves.toBe(false)
+      expect(getAllProcesses).toHaveBeenCalledTimes(attempt + 1)
+      await vi.advanceTimersByTimeAsync(30_000)
+    }
+
+    await expect(probeWindowsProcessStartTimeAvailability()).resolves.toBe(true)
+    expect(isWindowsProcessStartTimeAvailable()).toBe(true)
+    expect(getAllProcesses).toHaveBeenCalledTimes(4)
+    vi.useRealTimers()
   })
 
   it.each([0, -1, 1.5, Number.POSITIVE_INFINITY, Number.NaN, Number.MAX_SAFE_INTEGER + 1])(
@@ -110,7 +142,7 @@ describe('windows process table', () => {
 
   it('rejects a malformed creation-time enum value', async () => {
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 8 },
+      ProcessDataFlag: { None: 0, CommandLine: 2, CreationTime: 8 },
       getAllProcesses
     }))
 
@@ -209,7 +241,7 @@ describe('PowerShell fallback when the native binding is absent', () => {
     const getAllProcesses = vi.fn()
     getAllProcesses.mockImplementation((cb: (rows: unknown) => void) => cb(NATIVE))
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      ProcessDataFlag: { None: 0, CommandLine: 2 },
       getAllProcesses
     }))
     await readWindowsProcessTableFresh()
@@ -222,7 +254,7 @@ describe('PowerShell fallback when the native binding is absent', () => {
     const getAllProcesses = vi.fn()
     getAllProcesses.mockImplementation((cb: (rows: unknown) => void) => cb([]))
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      ProcessDataFlag: { None: 0, CommandLine: 2 },
       getAllProcesses
     }))
     await expect(readWindowsProcessTableFresh()).rejects.toThrow(/unreadable/)
@@ -267,7 +299,7 @@ describe('sticky wedge', () => {
     vi.useFakeTimers()
     const getAllProcesses = vi.fn(() => {})
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
+      ProcessDataFlag: { None: 0, CommandLine: 2, CreationTime: 4 },
       getAllProcesses
     }))
 
@@ -289,7 +321,7 @@ describe('sticky wedge', () => {
     vi.useFakeTimers()
     const getAllProcesses = vi.fn(() => {})
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
+      ProcessDataFlag: { None: 0, CommandLine: 2, CreationTime: 4 },
       getAllProcesses
     }))
 
@@ -332,7 +364,7 @@ describe('sticky wedge', () => {
       stuck = cb
     })
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      ProcessDataFlag: { None: 0, CommandLine: 2 },
       getAllProcesses
     }))
 
@@ -351,7 +383,7 @@ describe('sticky wedge', () => {
     vi.useFakeTimers()
     const getAllProcesses = vi.fn((_cb: (rows: typeof NATIVE | undefined) => void) => {})
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      ProcessDataFlag: { None: 0, CommandLine: 2 },
       getAllProcesses
     }))
 
@@ -375,7 +407,7 @@ describe('sticky wedge', () => {
       throw new Error('addon exploded')
     })
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
+      ProcessDataFlag: { None: 0, CommandLine: 2, CreationTime: 4 },
       getAllProcesses
     }))
 
@@ -384,7 +416,7 @@ describe('sticky wedge', () => {
 
     // The recovered reader must answer, not report a wedge left by a dead timer.
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
+      ProcessDataFlag: { None: 0, CommandLine: 2, CreationTime: 4 },
       getAllProcesses: (cb: (rows: typeof NATIVE | undefined) => void) => cb(NATIVE)
     }))
     await expect(readWindowsProcessTableFresh()).resolves.toHaveLength(NATIVE.length)
@@ -421,7 +453,7 @@ describe('resolving the native reader', () => {
   it('prefers the npm package where the desktop app installs it', async () => {
     const resolve = vi.fn((specifier: string) => {
       if (specifier === PACKAGE_SPECIFIER) {
-        return { ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 }, getAllProcesses }
+        return { ProcessDataFlag: { None: 0, CommandLine: 2 }, getAllProcesses }
       }
       throw new Error('should not reach the addon')
     })
@@ -441,20 +473,19 @@ describe('resolving the native reader', () => {
     })
     const rows = await readWindowsProcessTableFresh()
     expect(rows).toEqual([
-      { pid: process.pid, ppid: 0, name: 'vitest.exe', command: '', memoryBytes: undefined },
+      { pid: process.pid, ppid: 0, name: 'vitest.exe', command: '' },
       {
         pid: 100,
         ppid: 4,
         name: 'orca.exe',
         command: '"C:/a b/orca.exe" --x',
-        memoryBytes: 4096,
         creationTimeMs: 1_700_000_000_000
       }
     ])
     expect(isWindowsProcessTableAvailable()).toBe(true)
   })
 
-  it('asks the addon for every field, including creation time', async () => {
+  it('asks the addon for the command line but not memory, as the package path does', async () => {
     const addon = addonReturning(NATIVE)
     __setWindowsProcessTreeRequireForTests((specifier: string) => {
       if (specifier === ADDON_SPECIFIER) {
@@ -463,9 +494,10 @@ describe('resolving the native reader', () => {
       throw new Error('MODULE_NOT_FOUND')
     })
     await readWindowsProcessTableFresh()
-    // Memory | CommandLine | CreationTime. The bare addon does not have the
-    // package enum wrapper, so this mirror is its only source of the new bit.
-    expect(addon.getProcessList).toHaveBeenCalledWith(expect.any(Function), 7)
+    // CommandLine | CreationTime: a bare snapshot would silently drop the
+    // command line every agent-recognition caller matches on first, and the
+    // relay addon has to receive the creation-time bit explicitly.
+    expect(addon.getProcessList).toHaveBeenCalledWith(expect.any(Function), 6)
   })
 
   it('reaches the CIM scan when neither the package nor the addon is present', async () => {

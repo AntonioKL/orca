@@ -154,6 +154,52 @@ describe('processless structured session reservation', () => {
     expect(adapter.acquire).toHaveBeenCalledOnce()
   })
 
+  it('releases a new reservation when support drifts before acquisition', async () => {
+    root = await mkdtemp(join(tmpdir(), 'orca-support-drift-reservation-'))
+    const store = await AgentSessionRecordStore.open({
+      directory: join(root, 'store'),
+      hostId: 'local'
+    })
+    const supportsCreate = vi
+      .fn<NonNullable<StructuredAgentSessionAdapter['supportsCreate']>>()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false)
+    const acquire = vi.fn<StructuredAgentSessionAdapter['acquire']>()
+    const adapter = { supportsCreate, acquire } as unknown as StructuredAgentSessionAdapter
+
+    await expect(
+      performAttach({
+        store,
+        adapter,
+        journalRoot: root,
+        authority: {
+          spawnToken: 'spawn-drift',
+          claimKeyId: 'key-1',
+          handoffOperationId: OPERATION,
+          probe: { outcome: 'reservation-unused' }
+        },
+        callerKey: 'client-1',
+        params: attachParams(),
+        now: () => NOW,
+        onAttached: () => {}
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      refusal: { code: 'structured_agent_session_unsupported' }
+    })
+
+    expect(acquire).not.toHaveBeenCalled()
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      claimStatus: 'released',
+      handoffStage: null,
+      reservedSpawnToken: null,
+      processlessAt: null,
+      runtimeFence: 2,
+      deathEvidence: { kind: 'pid-absent', detail: 'reservation failed before spawn' }
+    })
+    expect(store.listOperationRows()[0]?.outcome).toMatchObject({ status: 'failed' })
+  })
+
   it('settles a pre-spawn failure and its processless evidence in one durable transaction', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-processless-reservation-'))
     const storeDir = join(root, 'store')

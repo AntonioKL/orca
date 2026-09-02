@@ -57,6 +57,7 @@ function stateFor(input: {
   connectionId?: string | null
   windowsRuntime?: 'windows-host' | 'wsl'
   worktreePath?: string
+  folderPath?: string
 }): AppState {
   return {
     activeRepoId: 'repo-1',
@@ -71,6 +72,7 @@ function stateFor(input: {
       }
     ],
     repos: [{ id: 'repo-1', connectionId: input.connectionId ?? null, path: 'C:\\repo' }],
+    folderWorkspaces: input.folderPath ? [{ id: 'folder-1', folderPath: input.folderPath }] : [],
     settings: { experimentalStructuredNativeChat: true, openAgentTabsInChatByDefault: true },
     worktreesByRepo: {
       'repo-1': [
@@ -216,6 +218,18 @@ describe('canUseStructuredNativeChat', () => {
     } as unknown as AppState
 
     expect(canUseStructuredNativeChat(state, 'folder:folder-1')).toBe(true)
+  })
+
+  it('keeps a WSL UNC folder workspace on the legacy terminal path', async () => {
+    await cacheWindowsProcessStartTimeCapability()
+    mockGetRendererAppPlatform.mockReturnValue('win32')
+    const state = {
+      ...stateFor({ folderPath: '\\\\wsl.localhost\\Ubuntu\\home\\alice\\repo' }),
+      activeRepoId: null,
+      activeWorktreeId: null
+    } as unknown as AppState
+
+    expect(canUseStructuredNativeChat(state, 'folder:folder-1')).toBe(false)
   })
 
   it.each(['ssh-a', 'runtime-ssh-a'])(
