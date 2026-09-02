@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawnProcess, type SpawnedProcess } from '../../shared/child-process/run-process'
 import type { ProcessSpec } from '../../shared/child-process/process-spec'
-import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk'
+import { query, type CanUseTool, type Options } from '@anthropic-ai/claude-agent-sdk'
 import {
   openClaudeStreamJsonConnection,
   type ClaudeStreamJsonConnection,
@@ -85,14 +85,20 @@ const spawnedChildren: SpawnedProcess[] = []
 
 async function open(
   launch: ClaudeStreamJsonLaunch,
-  handlers: Parameters<typeof openClaudeStreamJsonConnection>[1] = {}
+  handlers: Parameters<typeof openClaudeStreamJsonConnection>[1] = {},
+  queryImpl?: typeof query
 ): Promise<ClaudeStreamJsonConnection> {
-  const connection = await openClaudeStreamJsonConnection(launch, handlers, (spec) => {
-    spawned.push(spec)
-    const child = spawnProcess(spec)
-    spawnedChildren.push(child)
-    return child
-  })
+  const connection = await openClaudeStreamJsonConnection(
+    launch,
+    handlers,
+    (spec) => {
+      spawned.push(spec)
+      const child = spawnProcess(spec)
+      spawnedChildren.push(child)
+      return child
+    },
+    queryImpl
+  )
   openConnections.push(connection)
   return connection
 }
@@ -121,6 +127,17 @@ function readReportSafely(scenario: { readReport: () => ScriptedCliReport }) {
 }
 
 describe('Claude stream-json connection', () => {
+  it('passes the Claude Code system-prompt preset through to SDK query', async () => {
+    const scenario = scriptScenario([HOLD_OPEN])
+    let captured: Options | undefined
+    await open(launchFor(scenario), {}, (params) => {
+      captured = params.options
+      return query(params)
+    })
+
+    expect(captured?.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code' })
+  })
+
   it('hands the child a derived environment, the resolved CLI path, and keeps the pid', async () => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-SHELL-LEAK')
     vi.stubEnv('CLAUDE_CODE_CHILD_SESSION', '1')

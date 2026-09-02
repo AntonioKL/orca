@@ -27,6 +27,7 @@ import {
   closeClaudeSession,
   settleClaudeExitedSession
 } from './claude-structured-session-close'
+import { readClaudeTranscriptLeafWithReproof } from './claude-transcript-branch-proof'
 
 export type { ClaudeStructuredLaunch } from './claude-structured-launch-resolution'
 export type {
@@ -97,10 +98,13 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
 
   private async persistSessionHandle(sessionId: string, session: ClaudeSession): Promise<void> {
     try {
-      const transcriptLeaf = await this.deps.readTranscriptLeaf?.({
-        providerSessionId: session.providerSessionId,
-        previousLeafUuid: session.leafUuid
-      })
+      const transcriptLeaf = this.deps.readTranscriptLeaf
+        ? await readClaudeTranscriptLeafWithReproof({
+            readTranscriptLeaf: this.deps.readTranscriptLeaf,
+            providerSessionId: session.providerSessionId,
+            previousLeafUuid: session.leafUuid
+          })
+        : null
       if (transcriptLeaf) {
         session.leafUuid = transcriptLeaf
       }

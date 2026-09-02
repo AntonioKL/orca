@@ -13,6 +13,7 @@ export const CLAUDE_DEFAULT_SETTING_SOURCES = ['user', 'project', 'local'] as co
 export type ClaudeStructuredSdkOptions = Pick<
   ClaudeAgentSdkOptions,
   | 'includePartialMessages'
+  | 'systemPrompt'
   | 'settingSources'
   | 'supportedDialogKinds'
   | 'extraArgs'
@@ -33,6 +34,8 @@ export type ClaudeStructuredSdkOptions = Pick<
  */
 export const CLAUDE_STRUCTURED_BASE_OPTIONS: ClaudeStructuredSdkOptions = {
   includePartialMessages: true,
+  // Keep the SDK on Claude Code's own system-prompt contract.
+  systemPrompt: { type: 'preset', preset: 'claude_code' },
   settingSources: [...CLAUDE_DEFAULT_SETTING_SOURCES],
   supportedDialogKinds: [],
   extraArgs: { 'replay-user-messages': null }

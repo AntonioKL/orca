@@ -94,12 +94,13 @@ function exitError(stderrTail: string, status: ExitStatus | null, cause?: Error)
 export async function openClaudeStreamJsonConnection(
   launch: ClaudeStreamJsonLaunch,
   handlers: ClaudeStreamJsonConnectionHandlers = {},
-  spawnImpl: typeof spawnProcess = spawnProcess
+  spawnImpl: typeof spawnProcess = spawnProcess,
+  queryImpl?: typeof ClaudeAgentSdk.query
 ): Promise<ClaudeStreamJsonConnection> {
   const { query } = await loadClaudeAgentSdk()
   const spawner = createClaudeCodeProcessSpawn(spawnImpl)
   const inbox = createClaudeUserMessageQueue()
-  const session = query({
+  const session = (queryImpl ?? query)({
     prompt: inbox.messages,
     options: {
       ...launch.options,

@@ -2,7 +2,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { completeClaudeTuiExit, readClaudeTranscriptLeafUuid } from './claude-tui-exit'
+import {
+  completeClaudeTuiExit,
+  readClaudeTranscriptEntryUuid,
+  readClaudeTranscriptLeafUuid
+} from './claude-tui-exit'
 
 const roots: string[] = []
 
@@ -11,6 +15,23 @@ afterEach(async () => {
 })
 
 describe('Claude TUI exit', () => {
+  it('does not sample UUIDs from subagent stdout frames with a parent tool use', () => {
+    expect(
+      readClaudeTranscriptEntryUuid({
+        type: 'assistant',
+        uuid: 'subagent-assistant',
+        parent_tool_use_id: 'parent-tool'
+      })
+    ).toBeNull()
+    expect(
+      readClaudeTranscriptEntryUuid({
+        type: 'assistant',
+        uuid: 'main-assistant',
+        parent_tool_use_id: null
+      })
+    ).toBe('main-assistant')
+  })
+
   it('reads the authoritative last-prompt leaf from a transcript tail', async () => {
     const root = await mkdtemp(join(tmpdir(), 'orca-claude-tui-exit-'))
     roots.push(root)

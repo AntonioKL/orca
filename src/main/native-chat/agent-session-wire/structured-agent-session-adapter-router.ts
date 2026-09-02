@@ -72,8 +72,11 @@ export class StructuredAgentSessionAdapterRouter implements StructuredAgentSessi
       return false
     }
     const closed = await adapter.closeSession?.(sessionId)
-    this.owners.delete(sessionId)
-    return closed === true
+    if (closed === true) {
+      this.owners.delete(sessionId)
+      return true
+    }
+    return false
   }
 
   async closeAll(): Promise<void> {

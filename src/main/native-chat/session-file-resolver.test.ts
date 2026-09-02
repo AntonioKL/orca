@@ -206,6 +206,38 @@ describe('resolveSessionFilePath', () => {
     )
   })
 
+  it('rejects a main leaf whose ancestry crosses a parent-tool-use sidechain', async () => {
+    const root = await makeRoot('orca-native-chat-resolve-claude-parent-tool-ancestry-')
+    const transcript = join(root, 'transcript.jsonl')
+    await writeFile(
+      transcript,
+      [
+        { type: 'user', uuid: 'main-user', parentUuid: null, sessionId: 'session-1' },
+        {
+          type: 'assistant',
+          uuid: 'subagent-assistant',
+          parentUuid: 'main-user',
+          sessionId: 'session-1',
+          parent_tool_use_id: 'tool-use-1'
+        },
+        {
+          type: 'assistant',
+          uuid: 'main-after-sidechain',
+          parentUuid: 'subagent-assistant',
+          sessionId: 'session-1'
+        },
+        { type: 'last-prompt', leafUuid: 'main-after-sidechain', sessionId: 'session-1' }
+      ]
+        .map((record) => JSON.stringify(record))
+        .join('\n'),
+      'utf8'
+    )
+
+    await expect(readClaudeTranscriptLeafUuid(transcript, 'session-1')).rejects.toThrow(
+      'not on the main transcript'
+    )
+  })
+
   it('globs Claude project subdirs for <sessionId>.jsonl', async () => {
     const root = await makeRoot('orca-native-chat-resolve-claude-')
     const claudeProjectsDir = join(root, 'claude-projects')

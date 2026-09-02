@@ -5,6 +5,7 @@ import type {
 } from './claude-structured-session-state'
 import { cancelClaudeAcquisitionAttempt } from './claude-structured-session-state'
 import { closeProcessRegistry } from '../../shared/child-process/close-process-registry'
+import { readClaudeTranscriptLeafWithReproof } from './claude-transcript-branch-proof'
 
 export function settleClaudeDispatchWaiters(session: ClaudeSession): void {
   for (const waiter of session.dispatchWaiters.splice(0)) {
@@ -50,10 +51,13 @@ export async function closeClaudePublishedSession(input: {
     return false
   }
   try {
-    const transcriptLeaf = await input.readTranscriptLeaf?.({
-      providerSessionId: session.providerSessionId,
-      previousLeafUuid: session.leafUuid
-    })
+    const transcriptLeaf = input.readTranscriptLeaf
+      ? await readClaudeTranscriptLeafWithReproof({
+          readTranscriptLeaf: input.readTranscriptLeaf,
+          providerSessionId: session.providerSessionId,
+          previousLeafUuid: session.leafUuid
+        })
+      : null
     if (transcriptLeaf) {
       session.leafUuid = transcriptLeaf
     }

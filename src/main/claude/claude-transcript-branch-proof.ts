@@ -74,6 +74,7 @@ export function proveClaudeTranscriptBranchFromJsonl(input: {
     const existing = nodes.get(uuid)
     const disallowedLeaf =
       row.isSidechain === true ||
+      row.parent_tool_use_id != null ||
       row.type === 'result' ||
       row.type === 'stream_event' ||
       (row.type === 'system' && row.subtype === 'init')
@@ -159,4 +160,29 @@ export async function proveClaudeTranscriptBranch(input: {
     providerSessionId: input.providerSessionId,
     previousLeafUuid: input.previousLeafUuid
   })
+}
+
+/** Re-run a durable branch proof from the transcript root when a sampled cursor is stale. */
+export async function readClaudeTranscriptLeafWithReproof(input: {
+  readTranscriptLeaf: (input: {
+    providerSessionId: string
+    previousLeafUuid: string | null
+  }) => Promise<string | null>
+  providerSessionId: string
+  previousLeafUuid: string | null
+}): Promise<string | null> {
+  try {
+    return await input.readTranscriptLeaf({
+      providerSessionId: input.providerSessionId,
+      previousLeafUuid: input.previousLeafUuid
+    })
+  } catch (error) {
+    if (input.previousLeafUuid === null) {
+      throw error
+    }
+    return input.readTranscriptLeaf({
+      providerSessionId: input.providerSessionId,
+      previousLeafUuid: null
+    })
+  }
 }

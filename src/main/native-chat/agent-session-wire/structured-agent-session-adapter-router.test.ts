@@ -31,3 +31,30 @@ describe('StructuredAgentSessionAdapterRouter.releaseAcquisition', () => {
     expect(codex.releaseAcquisition).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('StructuredAgentSessionAdapterRouter.closeSession', () => {
+  it('retains the owner after an unproven close so a later retry reaches the same adapter', async () => {
+    const claude = adapterOf(vi.fn(async () => true))
+    const closeSession = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+    const dispatch = vi.fn().mockResolvedValue({ state: 'unknown', reason: 'test' })
+    claude.closeSession = closeSession
+    claude.dispatch = dispatch
+    const codex = adapterOf(vi.fn(async () => false))
+    const router = new StructuredAgentSessionAdapterRouter({ claude, codex }, async () => {})
+    const identity = { sessionId: 'session-1', agent: 'claude' } as never
+    await router.acquire({ identity, fence: 1, spawnToken: 'spawn-1' })
+
+    await expect(router.closeSession('session-1')).resolves.toBe(false)
+    await expect(
+      router.dispatch({
+        sessionId: 'session-1',
+        clientMessageId: 'client-1',
+        body: {} as never,
+        fence: 1
+      })
+    ).resolves.toMatchObject({ state: 'unknown' })
+    await expect(router.closeSession('session-1')).resolves.toBe(true)
+    expect(closeSession).toHaveBeenCalledTimes(2)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+  })
+})

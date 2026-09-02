@@ -72,17 +72,14 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
     expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'durable-tail' })
   })
 
-  it('keeps the observed leaf when transcript validation rejects a stale branch', async () => {
+  it('re-proves from the transcript root when the observed cursor rejects a stale branch', async () => {
     const claude = fakeClaude()
     const persistedHandles: unknown[] = []
-    const adapter = adapterFor(
-      claude,
-      {},
-      [],
-      persistedHandles,
-      undefined,
-      vi.fn().mockRejectedValue(new Error('sibling branch'))
-    )
+    const readTranscriptLeaf = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('sibling branch'))
+      .mockResolvedValueOnce('reproved-main-leaf')
+    const adapter = adapterFor(claude, {}, [], persistedHandles, undefined, readTranscriptLeaf)
     await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
     claude.connections[0].handlers.onMessage?.({
       type: 'assistant',
@@ -92,7 +89,15 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
 
     await adapter.closeSession('session-1')
 
-    expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'observed-tail' })
+    expect(readTranscriptLeaf).toHaveBeenNthCalledWith(1, {
+      providerSessionId: PROVIDER_SESSION_ID,
+      previousLeafUuid: 'observed-tail'
+    })
+    expect(readTranscriptLeaf).toHaveBeenNthCalledWith(2, {
+      providerSessionId: PROVIDER_SESSION_ID,
+      previousLeafUuid: null
+    })
+    expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'reproved-main-leaf' })
   })
 
   it('persists the last transcript leaf before an unexpected first-hand exit', async () => {
@@ -149,6 +154,34 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
     await tick()
 
     expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'durable-crash-leaf' })
+  })
+
+  it('re-proves a first-hand crash cursor from the transcript root after stale validation', async () => {
+    const claude = fakeClaude()
+    const persistedHandles: unknown[] = []
+    const readTranscriptLeaf = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('stale cursor'))
+      .mockResolvedValueOnce('reproved-crash-leaf')
+    const adapter = adapterFor(claude, {}, [], persistedHandles, undefined, readTranscriptLeaf)
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+    claude.connections[0].handlers.onMessage?.({
+      type: 'assistant',
+      session_id: PROVIDER_SESSION_ID,
+      uuid: 'stale-observed-tail'
+    })
+    claude.connections[0].handlers.onExit?.(new Error('crashed'))
+    await tick()
+
+    expect(readTranscriptLeaf).toHaveBeenNthCalledWith(1, {
+      providerSessionId: PROVIDER_SESSION_ID,
+      previousLeafUuid: 'stale-observed-tail'
+    })
+    expect(readTranscriptLeaf).toHaveBeenNthCalledWith(2, {
+      providerSessionId: PROVIDER_SESSION_ID,
+      previousLeafUuid: null
+    })
+    expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'reproved-crash-leaf' })
   })
 
   it('publishes lifecycle recovery even when crash-cursor persistence fails', async () => {

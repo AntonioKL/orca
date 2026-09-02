@@ -77,6 +77,7 @@ describe('claude structured launch resolution', () => {
       settingSources: [...CLAUDE_DEFAULT_SETTING_SOURCES],
       supportedDialogKinds: [],
       extraArgs: { 'replay-user-messages': null },
+      systemPrompt: { type: 'preset', preset: 'claude_code' },
       sessionId: first.providerSessionId
     })
     expect(first.options.resume).toBeUndefined()

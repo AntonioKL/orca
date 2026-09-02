@@ -19,7 +19,9 @@ function validLeafUuid(value: unknown): string | null {
 }
 
 export function readClaudeTranscriptEntryUuid(value: Record<string, unknown>): string | null {
-  return value.isSidechain === true || (value.type !== 'user' && value.type !== 'assistant')
+  return value.isSidechain === true ||
+    value.parent_tool_use_id != null ||
+    (value.type !== 'user' && value.type !== 'assistant')
     ? null
     : validLeafUuid(value.uuid)
 }
