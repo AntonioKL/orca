@@ -118,36 +118,26 @@ export class ClaudeRuntimeAuthCredentialMatching extends ClaudeRuntimeAuthRuntim
   }
 
   // Why: an unreadable identity record and one naming another account demand opposite responses —
-  // hold off when we cannot tell, revert when we can.
-  // Why: an unreadable identity record and one naming another account demand opposite responses —
-  // hold off when we cannot tell, revert when we can. Identity may be provable from the credential
-  // blob or from the home's own record, so consult both.
+  // hold off when we cannot tell, revert when we can. Only the home's record can prove this;
+  // credential blobs carry no identity fields.
   protected runtimeIdentityIsProvablyForeign(
     runtimeOauthAccount: unknown,
-    account: ClaudeManagedAccount,
-    credentialsJson: string | null = null
+    account: ClaudeManagedAccount
   ): boolean {
+    if (runtimeOauthAccount === RUNTIME_OAUTH_ACCOUNT_PARSE_ERROR || !runtimeOauthAccount) {
+      return false
+    }
+    const identity = this.readIdentityFromOauthAccount(runtimeOauthAccount)
     const accountEmail = this.normalizeField(account.email)
+    if (identity.email !== null && accountEmail !== null && identity.email !== accountEmail) {
+      return true
+    }
     const accountOrganizationUuid = this.normalizeField(account.organizationUuid)
-    const identities = [
-      credentialsJson === null ? null : this.readIdentityFromCredentials(credentialsJson),
-      runtimeOauthAccount === RUNTIME_OAUTH_ACCOUNT_PARSE_ERROR || !runtimeOauthAccount
-        ? null
-        : this.readIdentityFromOauthAccount(runtimeOauthAccount)
-    ]
-    return identities.some((identity) => {
-      if (identity === null) {
-        return false
-      }
-      if (identity.email !== null && accountEmail !== null && identity.email !== accountEmail) {
-        return true
-      }
-      return (
-        identity.organizationUuid !== null &&
-        accountOrganizationUuid !== null &&
-        identity.organizationUuid !== accountOrganizationUuid
-      )
-    })
+    return (
+      identity.organizationUuid !== null &&
+      accountOrganizationUuid !== null &&
+      identity.organizationUuid !== accountOrganizationUuid
+    )
   }
 
   protected liveRuntimeCredentialsCanUpdateActiveAccount(

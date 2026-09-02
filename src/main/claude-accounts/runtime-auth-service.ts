@@ -124,13 +124,7 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
         const managed = await this.readManagedCredentials(selected)
         // A login the home's own identity record proves belongs to someone else is not a rotation
         // to preserve: discarding it replays nothing, and the selected account must win.
-        const foreignLogin = [scoped, fileCandidate].some(
-          (candidate) =>
-            candidate !== null &&
-            this.isValidCredentialsJsonObject(candidate) &&
-            candidate !== managed &&
-            this.runtimeIdentityIsProvablyForeign(runtimeOauthAccount, selected, candidate)
-        )
+        const foreignLogin = this.runtimeIdentityIsProvablyForeign(runtimeOauthAccount, selected)
         // Otherwise an unadopted candidate may be the CLI's newer rotation, in either store.
         // Overwriting it would hand the next reader an already-consumed refresh token, and the
         // CLI reads the Keychain first, so seeding an empty item shadows a live file too.
@@ -151,6 +145,14 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
         const refuseManagedWrite = !foreignLogin && (unadoptedFresher || wouldShadowLiveFile)
         if (managed && !refuseManagedWrite && this.isValidCredentialsJsonObject(managed)) {
           await writeActiveClaudeKeychainCredentials(managed, preparation.configDir)
+          if (foreignLogin) {
+            // Restore the invariant the revert consumes, so this account's own next rotation is
+            // not mistaken for the foreign login we just undid.
+            this.repairRuntimeIdentityRecord(
+              preparation.configDir,
+              await this.readManagedOauthAccount(selected)
+            )
+          }
         } else if (refuseManagedWrite) {
           console.warn(
             '[claude-runtime-auth] Refusing to overwrite an unadopted Claude credential rotation'
