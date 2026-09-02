@@ -23,7 +23,7 @@ export async function verifyHostedHostOriginSourceControlJourney({
   const waitForDocument = operations.waitForDocument ?? waitForVisibleHostedWebView
   const readState = operations.readState ?? readHostedWebViewState
 
-  await longPress(emulator, workspaceName, timeoutMs)
+  await longPress(emulator, workspaceName, timeoutMs, undefined, 'Source Control')
   await tapNative(emulator, 'Source Control', timeoutMs)
   const sourceControl = await waitForDocument({
     discoveryUrl,

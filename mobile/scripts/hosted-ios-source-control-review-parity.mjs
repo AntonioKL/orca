@@ -24,7 +24,13 @@ export async function captureNativeSourceControlReviewBaselines({
   timeoutMs
 }) {
   await dismissEmulatorDeveloperMenuIfPresent(emulator)
-  await longPressHostedIosAccessibilityControlByLabelPrefix(emulator, expectedWorkspace, timeoutMs)
+  await longPressHostedIosAccessibilityControlByLabelPrefix(
+    emulator,
+    expectedWorkspace,
+    timeoutMs,
+    undefined,
+    'Source Control'
+  )
   await tapHostedIosAccessibilityControl(emulator, 'Source Control', timeoutMs)
   const changedFileControl = await waitForHostedIosAccessibilityControlMatching(
     emulator,
