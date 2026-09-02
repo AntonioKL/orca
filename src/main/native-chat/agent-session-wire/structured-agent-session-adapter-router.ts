@@ -70,7 +70,11 @@ export class StructuredAgentSessionAdapterRouter implements StructuredAgentSessi
       return false
     }
     const closed = await adapter.closeSession?.(sessionId)
-    this.owners.delete(sessionId)
+    // Keep routing ownership while the provider cannot prove its child exited;
+    // a retry must still reach the adapter that owns the live process.
+    if (closed === true) {
+      this.owners.delete(sessionId)
+    }
     return closed === true
   }
 

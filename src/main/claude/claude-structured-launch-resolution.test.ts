@@ -69,6 +69,7 @@ describe('claude structured launch resolution', () => {
       includePartialMessages: true,
       settingSources: [...CLAUDE_DEFAULT_SETTING_SOURCES],
       supportedDialogKinds: [],
+      systemPrompt: { type: 'preset', preset: 'claude_code' },
       extraArgs: { 'replay-user-messages': null },
       sessionId: first.providerSessionId
     })

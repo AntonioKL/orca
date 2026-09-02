@@ -16,6 +16,7 @@ export type ClaudeStructuredSdkOptions = Pick<
   | 'settingSources'
   | 'supportedDialogKinds'
   | 'extraArgs'
+  | 'systemPrompt'
   | 'model'
   | 'effort'
   | 'sessionId'
@@ -34,6 +35,9 @@ export const CLAUDE_STRUCTURED_BASE_OPTIONS: ClaudeStructuredSdkOptions = {
   includePartialMessages: true,
   settingSources: [...CLAUDE_DEFAULT_SETTING_SOURCES],
   supportedDialogKinds: [],
+  // Keep the SDK on Claude Code's own system-prompt contract. Without this
+  // preset, query() can run with a generic/empty prompt under SDK defaults.
+  systemPrompt: { type: 'preset', preset: 'claude_code' },
   extraArgs: { 'replay-user-messages': null }
 }
 
