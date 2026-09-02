@@ -5,13 +5,13 @@ import {
   type ExecutionHostId
 } from '../../../src/shared/execution-host'
 import { getMixedHostContextLabels as getSharedMixedHostContextLabels } from '../../../src/shared/worktree/host-context-labels'
+import { composeWorktreeHostIdentity } from '../../../src/shared/worktree/host-qualified-identity'
 export {
   buildHostLabelById,
   getHostContextLabel
 } from '../../../src/shared/worktree/host-context-labels'
 import type { RepoSummary } from './host-worktree-rpc-types'
 import type { Worktree } from './workspace-list-types'
-import { getWorktreeRowIdentity } from './worktree-host-row-identity'
 
 export type HostLabelSources = {
   /** Host id per repo id from repo.list; rows from hosts that predate `hostId` fall back to it. */
@@ -39,6 +39,16 @@ export function resolveWorktreeHostId(
   )
 }
 
+function getResolvedWorktreeRowIdentity(
+  worktree: Pick<Worktree, 'worktreeId' | 'hostId' | 'repoId'>,
+  repoHostIdByRepoId: ReadonlyMap<string, ExecutionHostId>
+): string {
+  return composeWorktreeHostIdentity(
+    resolveWorktreeHostId(worktree, repoHostIdByRepoId),
+    worktree.worktreeId
+  )
+}
+
 // Kept as a local adapter so existing mobile imports remain stable.
 
 /**
@@ -51,7 +61,9 @@ export function getWorktreeHostContextLabels(
 ): Map<string, string> | undefined {
   return getSharedMixedHostContextLabels(worktrees, {
     getHostId: (worktree) => resolveWorktreeHostId(worktree, sources.repoHostIdByRepoId),
-    getIdentity: getWorktreeRowIdentity,
+    // Legacy hosts omit row.hostId; key by the resolved repo owner so duplicate
+    // worktree ids from different hosts do not overwrite each other's label.
+    getIdentity: (worktree) => getResolvedWorktreeRowIdentity(worktree, sources.repoHostIdByRepoId),
     sources
   })
 }
@@ -65,7 +77,9 @@ export function applyWorktreeHostContextLabels(
     return worktrees
   }
   return worktrees.map((worktree) => {
-    const hostContextLabel = labels.get(getWorktreeRowIdentity(worktree))
+    const hostContextLabel = labels.get(
+      getResolvedWorktreeRowIdentity(worktree, sources.repoHostIdByRepoId)
+    )
     if (!hostContextLabel) {
       return worktree
     }

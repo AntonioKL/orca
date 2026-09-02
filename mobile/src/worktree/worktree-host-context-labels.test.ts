@@ -146,4 +146,19 @@ describe('getWorktreeHostContextLabels', () => {
     expect(labeled.map((row) => row.hostContextLabel)).toEqual(['Local Mac', 'openclaw'])
     expect(labeled.map((row) => row.hostContextHostId)).toEqual(['local', sshHostId])
   })
+
+  it('keeps labels distinct when legacy rows reuse an id across hosts', () => {
+    const rows = [
+      worktree({ repoId: 'repo-local', worktreeId: 'same' }),
+      worktree({ repoId: 'repo-ssh', worktreeId: 'same' })
+    ]
+    const labeled = applyWorktreeHostContextLabels(rows, {
+      ...sources,
+      repoHostIdByRepoId: buildRepoHostIdByRepoId([
+        { id: 'repo-local' },
+        { id: 'repo-ssh', connectionId: 'ssh-1785104650217-eduhep' }
+      ])
+    })
+    expect(labeled.map((row) => row.hostContextLabel)).toEqual(['Local Mac', 'openclaw'])
+  })
 })
