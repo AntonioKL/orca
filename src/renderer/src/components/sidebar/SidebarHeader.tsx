@@ -30,7 +30,6 @@ const SidebarHeader = React.memo(function SidebarHeader({
   // every write, which would re-render this memoized header subtree each time.
   const showAgentsSidebarFromStore = useAppStore((s) => shouldShowAgentsSidebar(s.settings))
   const showAgentsSidebar = showAgentsSidebarProp ?? showAgentsSidebarFromStore
-  const groupBy = useAppStore((s) => s.groupBy)
   const setSidebarBody = useAppStore((s) => s.setSidebarBody)
   const updateSettings = useAppStore((s) => s.updateSettings)
   const agentsSidebarIntroShown = useAppStore((s) => s.settings?.agentsSidebarIntroShown === true)
@@ -55,10 +54,6 @@ const SidebarHeader = React.memo(function SidebarHeader({
       )
     )
   }, [updateSettings])
-  const spacesLabel = translate('auto.components.sidebar.SidebarHeader.spaces', 'Spaces')
-  const projectsLabel = translate('auto.components.sidebar.SidebarHeader.projects', 'Projects')
-  // Keep the view name tied to the workspace grouping, not the selected sidebar body.
-  const workspaceTabLabel = groupBy === 'none' ? spacesLabel : projectsLabel
 
   useEffect(() => {
     // Wait for hydration: settings null must not clobber a persisted 'agents' body.
@@ -92,8 +87,7 @@ const SidebarHeader = React.memo(function SidebarHeader({
               options={[
                 {
                   value: 'workspaces',
-                  label: workspaceTabLabel,
-                  widthLabels: [spacesLabel, projectsLabel],
+                  label: 'Spaces',
                   sectionTitle: 'projects'
                 },
                 ...(showAgentsSidebar

@@ -30,7 +30,7 @@ describe('SidebarViewToggle', () => {
           value="agents"
           onSelect={() => undefined}
           options={[
-            { value: 'workspaces', label: 'Projects', sectionTitle: 'projects' },
+            { value: 'workspaces', label: 'Spaces', sectionTitle: 'projects' },
             { value: 'agents', label: 'Agents', sectionTitle: 'agents' }
           ]}
         />
@@ -58,7 +58,7 @@ describe('SidebarViewToggle', () => {
           value="agents"
           onSelect={onSelect}
           options={[
-            { value: 'workspaces', label: 'Projects', sectionTitle: 'projects' },
+            { value: 'workspaces', label: 'Spaces', sectionTitle: 'projects' },
             { value: 'agents', label: 'Agents', sectionTitle: 'agents' }
           ]}
         />
@@ -76,7 +76,7 @@ describe('SidebarViewToggle', () => {
     expect(onSelect).toHaveBeenCalledWith('workspaces')
   })
 
-  it('sizes the track to its labels so they stay fully visible', () => {
+  it('keeps the visible label on one line', () => {
     act(() => {
       root.render(
         <SidebarViewToggle
@@ -86,8 +86,7 @@ describe('SidebarViewToggle', () => {
           options={[
             {
               value: 'workspaces',
-              label: 'Projects',
-              widthLabels: ['Workspaces', 'Projects'],
+              label: 'Spaces',
               sectionTitle: 'projects'
             },
             { value: 'agents', label: 'Agents', sectionTitle: 'agents' }
@@ -102,9 +101,9 @@ describe('SidebarViewToggle', () => {
     expect(groupClasses.has('shrink-0')).toBe(true)
     expect(groupClasses.has('flex-1')).toBe(false)
 
-    const projectsTab = container.querySelector('[data-sidebar-section-title="projects"]')
-    const visibleLabel = [...(projectsTab?.querySelectorAll('span') ?? [])].find(
-      (span) => span.getAttribute('aria-hidden') == null && span.textContent === 'Projects'
+    const spacesTab = container.querySelector('[data-sidebar-section-title="projects"]')
+    const visibleLabel = [...(spacesTab?.querySelectorAll('span') ?? [])].find(
+      (span) => span.getAttribute('aria-hidden') == null && span.textContent === 'Spaces'
     )
     expect(visibleLabel?.className).toContain('whitespace-nowrap')
     expect(visibleLabel?.className.includes('truncate')).toBe(false)

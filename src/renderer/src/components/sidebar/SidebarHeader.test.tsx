@@ -192,24 +192,24 @@ describe('SidebarHeader', () => {
     expect(mockState.setSidebarBody).toHaveBeenCalledWith('workspaces')
   })
 
-  it('keeps the workspace view label stable across sidebar bodies and shortens ungrouped copy', () => {
+  it('always labels the workspace view as Spaces', () => {
     act(() => {
       root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
     })
 
-    expect(workspaceViewLabel()).toBe('Projects')
+    expect(workspaceViewLabel()).toBe('Spaces')
 
     mockState.groupBy = 'workspace-status'
     act(() => {
       root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
     })
-    expect(workspaceViewLabel()).toBe('Projects')
+    expect(workspaceViewLabel()).toBe('Spaces')
 
     mockState.sidebarBody = 'agents'
     act(() => {
       root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
     })
-    expect(workspaceViewLabel()).toBe('Projects')
+    expect(workspaceViewLabel()).toBe('Spaces')
 
     mockState.sidebarBody = 'workspaces'
     mockState.groupBy = 'none'
