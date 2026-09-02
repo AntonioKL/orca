@@ -32,7 +32,8 @@ import { Callout } from '@/components/docs/prose'
   <li>
     **Linux:**
     [AppImage](https://github.com/stablyai/orca/releases/latest/download/orca-linux.AppImage) ·
-    [.deb](https://github.com/stablyai/orca/releases)
+    [.deb](https://github.com/stablyai/orca/releases) ·
+    [.rpm](https://github.com/stablyai/orca/releases) — see [Linux](#linux) for which to pick
   </li>
   <li>Older versions: [GitHub Releases](https://github.com/stablyai/orca/releases).</li>
 </ul>
@@ -58,6 +59,8 @@ On first launch Orca will:
 ## Updates
 
 Orca auto-updates by default, tracking the **stable** channel. Stable releases are vetted; **RC (release candidate)** builds ship new features first, often daily.
+
+On Linux, whether Orca can apply an update itself depends on which package you installed. See [Linux](#linux) before you pick one.
 
 There is no permanent in-app opt-in for the RC channel. Modifier clicks on **Check for Updates** ([Settings → General → Updates](/docs/settings), or the app / Help menu):
 
@@ -87,4 +90,47 @@ The default shell can be set to PowerShell or CMD under [Settings → Terminal](
 
 ### Linux
 
-AppImage and `.deb` builds are available. See the Releases page for details.
+Every release publishes three Linux packages — an **AppImage**, a **`.deb`**, and an **`.rpm`**. They contain the same app. What differs is how updates reach you, so pick on that.
+
+| Package      | Pick it when                                              | Updates                                                           |
+| ------------ | --------------------------------------------------------- | ----------------------------------------------------------------- |
+| **AppImage** | You want Orca to update itself, like on macOS and Windows | Orca downloads and applies the update in place                    |
+| **`.deb`**   | You manage software with `apt` on Debian or Ubuntu        | Orca tells you a version is out and hands you the install command |
+| **`.rpm`**   | You manage software with `dnf`, `yum`, or `zypper`        | Same as `.deb`                                                    |
+
+The AppImage has a stable download link and needs `chmod +x` before its first run. The `.deb` and `.rpm` filenames carry the version and architecture (`orca-ide_<version>_<arch>.deb`, `orca-ide-<version>.<arch>.rpm`), so take them from the [Releases page](https://github.com/stablyai/orca/releases) rather than a fixed URL.
+
+#### How updating works
+
+**The AppImage self-updates.** Choose it if you want automatic updates. Orca checks for a new release, you click **Update**, and it replaces the AppImage in place — the same flow as macOS and Windows.
+
+**The `.deb` and `.rpm` do not self-update.** Orca still notices the new version and downloads the package, then gives you a **Copy Install Command** button. The command names the file it just downloaded:
+
+```
+sudo apt install -- /home/you/.cache/orca-updater/pending/orca-ide_1.4.194_amd64.deb
+```
+
+Run it in your own terminal, then quit and reopen Orca. Orca deliberately never escalates privileges to do this for you: installing a system package needs root, `orca serve` runs as an unprivileged user, and a headless machine has no authentication agent to prompt. VS Code and Signal make the same call on `.deb`.
+
+**A distro-managed build is left alone.** If you are running a repackaged Orca — an AUR build, a Nix derivation, a container image that unpacks the `.deb` — Orca sees that no matching package manager owns this install and stops offering a download it could never apply. It still reports that a new version exists, so you can update the way you normally would.
+
+<Callout title="Planned: a signed apt/yum repository">
+  [#18086](https://github.com/stablyai/orca/issues/18086) tracks publishing a signed repository so
+  your OS package manager owns Orca updates the way it owns everything else. It does not exist yet —
+  today, `.deb` and `.rpm` updates are the manual step described above.
+</Callout>
+
+#### The CLI command is `orca-ide`
+
+On Linux the [Orca CLI](/docs/cli/reference) installs as **`orca-ide`**, not `orca`. GNOME Orca — the screen reader that ships by default on Ubuntu and other GNOME desktops — already owns `/usr/bin/orca`, and Orca will not shadow it. The `.deb` and `.rpm` packages are named `orca-ide` for the same reason.
+
+- The `.deb` and `.rpm` put `orca-ide` on your `PATH` at install time, as `/usr/bin/orca-ide`.
+- With the AppImage, register the CLI from [Settings → General → Orca CLI](/docs/settings). That installs `~/.local/bin/orca-ide`.
+- Inside Orca's own terminals, bare `orca` works. Orca puts a shim on the `PATH` of the terminals it manages, so agents and scripts running there use the same command as on macOS and Windows.
+- On a headless [`orca serve`](/docs/remote-servers) host, Orca also installs a bare `orca` into `~/.local/bin`, unless a file it does not own already holds that name.
+
+So: `orca-ide` in your own shell, `orca` inside Orca. If you want the short name everywhere and you do not use the screen reader, link it yourself:
+
+```
+ln -s "$(command -v orca-ide)" ~/.local/bin/orca
+```

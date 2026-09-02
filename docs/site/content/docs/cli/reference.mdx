@@ -16,6 +16,13 @@ command -v orca
 orca status --json
 ```
 
+<Callout title="On Linux the command is orca-ide">
+  GNOME Orca, the screen reader that ships with most GNOME desktops, already owns `/usr/bin/orca`,
+  so Orca's Linux CLI installs as `orca-ide` instead. Use `orca-ide` in your own shell; bare `orca`
+  works inside Orca's own terminals, and on a headless `orca serve` host. This page writes `orca`
+  throughout — substitute `orca-ide` on Linux. See [Install → Linux](/docs/install#linux).
+</Callout>
+
 If Orca is not already running:
 
 ```bash

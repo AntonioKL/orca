@@ -341,6 +341,15 @@ the command:
 This disables a security boundary. Prefer a dedicated unprivileged service
 user, especially when the listener is reachable beyond localhost.
 
+The Linux CLI is named `orca-ide`, not `orca`, so it never shadows the GNOME
+Orca screen reader at `/usr/bin/orca`. The `.deb` and `.rpm` packages put
+`orca-ide` on `PATH` themselves at install time; with the AppImage it arrives
+as `~/.local/bin/orca-ide` when the CLI is registered. On top of that, a
+packaged `orca serve` start also writes a bare `orca` into `~/.local/bin` that
+execs the same launcher — that is why the skills commands below can be typed as
+`orca`. It is skipped when a file Orca does not own already holds that name, so
+a host that really does run the screen reader keeps its own `orca`.
+
 ## Pairing troubleshooting
 
 - A pairing offer is a capability containing a device credential and E2EE
