@@ -11,7 +11,10 @@ import { useAppStore } from '../../store'
  * floating workspace, which is the one editor surface that needs no project.
  */
 async function openOsRequestedMarkdownFiles(documents: MarkdownDocument[]): Promise<void> {
-  if (documents.length === 0) {
+  // Why the shape check: this payload crosses the preload boundary, so a stale or mismatched
+  // preload can hand back something that is not an array. Reading .length off that throws
+  // inside the promise chain rather than failing loudly at the boundary.
+  if (!Array.isArray(documents) || documents.length === 0) {
     return
   }
   const store = useAppStore.getState()

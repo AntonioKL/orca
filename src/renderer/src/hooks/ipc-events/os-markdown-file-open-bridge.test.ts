@@ -268,6 +268,24 @@ describe('registerOsMarkdownFileOpenBridge', () => {
     expect(unhandledRejections).toEqual([])
   })
 
+  it('ignores a non-array payload from a mismatched preload', async () => {
+    stubPreload({
+      onOpenMarkdownFiles: () => () => {},
+      // Why: the payload crosses the preload boundary, so a stale preload can resolve with
+      // something that is not an array. Reading .length off it would throw inside the chain.
+      consumePendingMarkdownFileOpens: () => Promise.resolve(null as unknown as MarkdownDocument[])
+    })
+
+    registerOsMarkdownFileOpenBridge([])
+    await settle()
+    runFrames()
+
+    expect(mocks.openFile).not.toHaveBeenCalled()
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+    expect(mocks.toastError).not.toHaveBeenCalled()
+    expect(unhandledRejections).toEqual([])
+  })
+
   it('tolerates a preload without the markdown open channel', async () => {
     stubPreload({})
 
