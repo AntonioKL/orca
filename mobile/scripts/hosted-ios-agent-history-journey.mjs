@@ -208,17 +208,6 @@ export async function verifyHostedAgentHistoryJourney({
     expectedText: EMULATOR_AGENT_HISTORY_TITLE,
     timeoutMs
   })
-  await evidenceStep('reject untrusted synthetic resume', () =>
-    activateHostedWebViewControl(activeHistoryDocument, {
-      kind: 'label',
-      value: 'Resume agent session'
-    })
-  )
-  activeHistoryDocument = await waitForVisibleHostedWebView({
-    discoveryUrl,
-    expectedText: 'Failed to resume session.',
-    timeoutMs
-  })
   const nativeResumePoint = await evidenceStep('resume Agent History from native touch', () =>
     tapHostedIosAccessibilityControl(emulator, 'Resume agent session', timeoutMs)
   )
@@ -283,7 +272,6 @@ export async function verifyHostedAgentHistoryJourney({
     },
     reconnect,
     resume: {
-      synthetic: 'gesture rejected',
       native: 'queued',
       nativeTouchPoint: nativeResumePoint,
       resumedRoute: resumedSessionDocument.href

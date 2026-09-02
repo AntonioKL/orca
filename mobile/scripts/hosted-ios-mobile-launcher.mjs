@@ -6,6 +6,7 @@ export function startHostedIosMobileLauncher({
   deviceUdid,
   emulatorControlUserDataPath,
   environment,
+  metroDirectory,
   orcaCli,
   runtimeDirectory,
   worktree
@@ -31,7 +32,10 @@ export function startHostedIosMobileLauncher({
         ORCA_E2E_MOBILE_AGENT_HISTORY_FIXTURE: '1',
         ORCA_E2E_MOBILE_RUN_DIRECTORY: path.join(runtimeDirectory, 'paired-host'),
         ORCA_E2E_MOBILE_RESTART_HOLD_MS: '2000',
-        ORCA_E2E_MOBILE_EMULATOR_CONTROL_USER_DATA_PATH: emulatorControlUserDataPath
+        ORCA_E2E_MOBILE_EMULATOR_CONTROL_USER_DATA_PATH: emulatorControlUserDataPath,
+        // Why: an old-client A/B serves Metro from another checkout while the paired
+        // desktop runtime and the registered workspace stay on this one.
+        ...(metroDirectory ? { ORCA_E2E_MOBILE_METRO_DIR: metroDirectory } : {})
       },
       stdio: ['ignore', 'pipe', 'pipe']
     }
