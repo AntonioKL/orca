@@ -10,7 +10,6 @@ import {
   getPiCompatibleSyntheticAgentLabel,
   isLegacyPiCompatibleTitle
 } from './pi-compatible-synthetic-title'
-import { memoizeTitleClassification } from './terminal-title-classification-memo'
 import { resolveCanonicalPaneAgentIdentity } from './pane-agent-identity-adapter'
 import type { TuiAgent } from './tui-agent'
 
