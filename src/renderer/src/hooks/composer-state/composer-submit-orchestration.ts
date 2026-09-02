@@ -77,7 +77,6 @@ export function useComposerSubmitOrchestration(
     repoId: target.initialTargetState.repoId,
     resolvedSetupDecision: target.derivedComposerState.resolvedSetupDecision,
     selectedRepo: target.runtimeTargetSelection.selectedRepo,
-    selectedRepoAgentLaunchPlatform: target.runtimeTargetSelection.selectedRepoAgentLaunchPlatform,
     selectedRepoExecutionHostId: target.runtimeTargetSelection.selectedRepoExecutionHostId,
     selectedRepoIsGit: target.runtimeTargetSelection.selectedRepoIsGit,
     selectedRepoIsRemote: target.runtimeTargetSelection.selectedRepoIsRemote,

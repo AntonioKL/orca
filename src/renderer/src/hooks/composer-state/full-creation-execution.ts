@@ -17,7 +17,6 @@ export type FullCreationExecutionInput = Pick<
   | 'persistSetupAgentStartupPolicy'
   | 'prepareFullSubmit'
   | 'resolvedInitialWorkspaceStatus'
-  | 'selectedRepoAgentLaunchPlatform'
   | 'selectedRepoExecutionHostId'
   | 'selectedRepoIsGit'
   | 'selectedRepoIsRemote'
@@ -34,7 +33,7 @@ import type { PendingSmartGitHubSubmitResolution } from './source-selection-deci
 import { translate } from '@/i18n/i18n'
 import { settleComposerSubmit } from '@/lib/composer-submit-cancellation'
 import { toFolderWorkspaceLinkedTask } from '@/components/sidebar/folder-workspace-composer-helpers'
-import { ensureAgentStartupInTerminal } from '@/lib/new-workspace'
+import { CLIENT_PLATFORM, ensureAgentStartupInTerminal } from '@/lib/new-workspace'
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { seedNativeChatAppliedSessionOptions } from '@/components/native-chat/native-chat-session-option-cache'
@@ -66,7 +65,6 @@ export function useFullCreationExecution(input: FullCreationExecutionInput) {
     persistSetupAgentStartupPolicy,
     prepareFullSubmit,
     resolvedInitialWorkspaceStatus,
-    selectedRepoAgentLaunchPlatform,
     selectedRepoExecutionHostId,
     selectedRepoIsGit,
     selectedRepoIsRemote,
@@ -142,7 +140,7 @@ export function useFullCreationExecution(input: FullCreationExecutionInput) {
         agent: tuiAgent,
         settings,
         executionHostId: selectedRepoExecutionHostId ?? 'local',
-        platform: selectedRepoAgentLaunchPlatform,
+        platform: CLIENT_PLATFORM,
         hostCapabilities: readLocalRuntimeCapabilities(),
         workspaceKind: selectedRepoIsGit ? 'git-worktree' : 'folder',
         promptDelivery: startupPlan?.draftPrompt ? 'draft' : 'auto-submit',
@@ -301,7 +299,6 @@ export function useFullCreationExecution(input: FullCreationExecutionInput) {
       persistSetupAgentStartupPolicy,
       prepareFullSubmit,
       resolvedInitialWorkspaceStatus,
-      selectedRepoAgentLaunchPlatform,
       selectedRepoExecutionHostId,
       selectedRepoIsGit,
       selectedRepoIsRemote,

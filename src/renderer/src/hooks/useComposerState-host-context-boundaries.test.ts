@@ -660,14 +660,22 @@ describe('useComposerState host-context boundaries', () => {
       'getAgentLaunchPlatformForRepo(selectedRepo, projectRuntime)'
     )
 
-    const fullSubmit = COMPOSER_SOURCE.fullSubmitPreparation + COMPOSER_SOURCE.fullCreation
-    expect(fullSubmit).toContain('platform: selectedRepoAgentLaunchPlatform')
-    expect(fullSubmit).toContain('startupDraft: startupPlan.draftPrompt')
-    expect(fullSubmit).not.toContain('platform: CLIENT_PLATFORM')
+    const fullStartupPlan = sourceBetween(
+      COMPOSER_SOURCE.fullSubmitPreparation,
+      'const startupPlan = buildAgentStartupPlan({',
+      'const shouldSeedInitialAgentStatus ='
+    )
+    expect(fullStartupPlan).toContain('platform: selectedRepoAgentLaunchPlatform')
+    expect(fullStartupPlan).not.toContain('platform: CLIENT_PLATFORM')
+    expect(COMPOSER_SOURCE.fullCreation).toContain('startupDraft: startupPlan.draftPrompt')
 
-    const quickSubmit = COMPOSER_SOURCE.quickCreation
-    expect(quickSubmit).toContain('platform: selectedRepoAgentLaunchPlatform')
-    expect(quickSubmit).not.toContain('platform: CLIENT_PLATFORM')
+    const quickStartupPlan = sourceBetween(
+      COMPOSER_SOURCE.quickCreation,
+      'buildQuickComposerStartup({',
+      'const startupPolicySettlement ='
+    )
+    expect(quickStartupPlan).toContain('platform: selectedRepoAgentLaunchPlatform')
+    expect(quickStartupPlan).not.toContain('platform: CLIENT_PLATFORM')
   })
 
   // Why: activation no longer rebuilds a startup from `createdWithAgent`, so this
