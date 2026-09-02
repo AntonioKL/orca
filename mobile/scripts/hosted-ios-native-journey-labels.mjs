@@ -28,6 +28,10 @@ const CHANGED_FILE_LABEL_PREFIX = 'Open changed file '
 const FILES_STABLE_LABEL = 'Open folder Casks'
 const PREVIEW_FILE_LABEL = 'Preview file orca.rb'
 const PREVIEW_STABLE_LABEL = 'File preview'
+const SETTLE_INTERVAL_MS = 900
+const SETTLE_TIMEOUT_MS = 20_000
+const VOLATILE_LABEL =
+  /^(\d{1,2}:\d{2}\s?(AM|PM)|Dynamic Island.*|Cellular|SSID.*|\d+% battery power|Not charging|Charging|No signal|\d of \d Wi-Fi bars)$/
 
 // Why: the six native journeys the hosted e2e baselines drive, captured as ordered
 // accessibility labels plus a screenshot so two client builds can be diffed.
@@ -191,11 +195,32 @@ async function walkAgentHistory(args, capture) {
 }
 
 async function captureStop(args, name) {
-  await delay(600)
-  const labels = await readHostedIosAccessibilityLabels(args.emulator)
+  const labels = await readSettledAccessibilityLabels(args)
   const screenshot = path.join(args.outputDirectory, `${name}.png`)
   await execFileAsync('xcrun', ['simctl', 'io', args.deviceUdid, 'screenshot', screenshot])
   return { labels, screenshot }
+}
+
+// Why: a screen still loading its rows, or a WebView still swapping its
+// accessibility subtree, reads as a client difference. Only a tree that repeats
+// itself is evidence.
+async function readSettledAccessibilityLabels(args) {
+  const deadline = Date.now() + Math.min(args.timeoutMs, SETTLE_TIMEOUT_MS)
+  let previous = null
+  while (Date.now() < deadline) {
+    await delay(SETTLE_INTERVAL_MS)
+    const labels = await readHostedIosAccessibilityLabels(args.emulator)
+    const comparable = volatileFreeLabels(labels).join('\u0000')
+    if (previous !== null && previous === comparable) {
+      return labels
+    }
+    previous = comparable
+  }
+  return readHostedIosAccessibilityLabels(args.emulator)
+}
+
+function volatileFreeLabels(labels) {
+  return labels.filter((label) => !VOLATILE_LABEL.test(label))
 }
 
 function delay(ms) {
