@@ -13,6 +13,7 @@ import {
 import { bucketDaemonLiveSessionCount } from '../../shared/daemon-lifecycle-telemetry'
 import type { EventProps } from '../../shared/telemetry-events'
 import { track } from '../telemetry/client'
+import { readDaemonPidRecord } from './daemon-endpoint-incarnation'
 import type { ParsedDaemonPid } from './daemon-pid-file-parse'
 import type { MacDaemonTccAttributionHealth } from './daemon-tcc-attribution'
 
@@ -61,16 +62,18 @@ export function trackDaemonAdopted(
 export function trackDaemonPtyCwdDeniedIfDiverged(
   cwd: string | undefined,
   cwdReadableByDaemon: boolean | undefined,
-  origin: DaemonAdoptionOrigin
+  pidPath: string | null
 ): void {
   try {
     if (process.platform !== 'darwin' || !cwd || cwdReadableByDaemon !== false) {
       return
     }
     accessSync(cwd, fsConstants.R_OK | fsConstants.X_OK)
+    // Why read now, not the adapter's startup snapshot: a respawn swaps the daemon under a
+    // long-lived adapter, and the denial must be attributed to the daemon that just spawned.
     track('daemon_pty_cwd_denied', {
       cwd_class: classifyDaemonPtyCwd(cwd, homedir()),
-      ...origin
+      ...classifyDaemonAdoptionOrigin(readDaemonPidRecord(pidPath))
     })
   } catch {
     // Either the app cannot read it (no divergence) or telemetry failed; neither may reach the caller.
