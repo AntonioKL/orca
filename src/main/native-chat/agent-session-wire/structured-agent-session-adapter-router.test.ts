@@ -58,3 +58,57 @@ describe('StructuredAgentSessionAdapterRouter.closeSession', () => {
     expect(dispatch).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('StructuredAgentSessionAdapterRouter optional lifecycle methods', () => {
+  it.each([
+    ['forceCloseSession', 'forceCloseSession'],
+    ['disposeSession', 'disposeSession']
+  ] as const)(
+    '%s forwards to the owner and retains it until proven stopped',
+    async (_label, method) => {
+      const claude = adapterOf(vi.fn(async () => true))
+      const stop = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+      claude[method] = stop
+      const dispatch = vi.fn().mockResolvedValue({ state: 'unknown', reason: 'test' })
+      claude.dispatch = dispatch
+      const codex = adapterOf(vi.fn(async () => false))
+      const router = new StructuredAgentSessionAdapterRouter({ claude, codex }, async () => {})
+      const identity = { sessionId: 'session-1', agent: 'claude' } as never
+      await router.acquire({ identity, fence: 1, spawnToken: 'spawn-1' })
+      const stopSession = router[method]
+
+      await expect(stopSession('session-1')).resolves.toBe(false)
+      await expect(
+        router.dispatch({
+          sessionId: 'session-1',
+          clientMessageId: 'client-1',
+          body: {} as never,
+          fence: 1
+        })
+      ).resolves.toMatchObject({ state: 'unknown' })
+      await expect(stopSession('session-1')).resolves.toBe(true)
+      expect(stop).toHaveBeenCalledTimes(2)
+      expect(dispatch).toHaveBeenCalledOnce()
+    }
+  )
+
+  it.each(['forceCloseSession', 'disposeSession'] as const)(
+    'falls back to closeSession when an owner lacks %s',
+    async (method) => {
+      const closeSession = vi.fn().mockResolvedValue(true)
+      const claude = adapterOf(vi.fn(async () => true))
+      claude.closeSession = closeSession
+      const codex = adapterOf(vi.fn(async () => false))
+      const router = new StructuredAgentSessionAdapterRouter({ claude, codex }, async () => {})
+      await router.acquire({
+        identity: { sessionId: 'session-1', agent: 'claude' } as never,
+        fence: 1,
+        spawnToken: 'spawn-1'
+      })
+      const stopSession = router[method]
+
+      await expect(stopSession('session-1')).resolves.toBe(true)
+      expect(closeSession).toHaveBeenCalledWith('session-1')
+    }
+  )
+})
