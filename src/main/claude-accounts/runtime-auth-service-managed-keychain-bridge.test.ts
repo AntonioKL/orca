@@ -14,7 +14,7 @@ import {
   testState
 } from './runtime-auth-service-test-harness'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 vi.mock('electron', () => createElectronMock())
@@ -266,7 +266,8 @@ describe('ClaudeRuntimeAuthService', () => {
     expect(testState.managedKeychainCredentials.get('account-1')).toBe(managedCredentials)
   })
 
-  it('retains a visible degraded provenance after scoped Keychain bridge failure', async () => {
+  // Why: precedent is to degrade the storage medium, never the account identity.
+  it('keeps the managed home and writes its credentials file when the scoped Keychain fails', async () => {
     if (process.platform !== 'darwin') {
       return
     }
@@ -284,10 +285,38 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     testState.throwScopedKeychainWrite = true
 
+    const preparation = await service.prepareForClaudeLaunch()
+
+    expect(preparation.provenance).toBe('managed:account-1')
+    expect(preparation.stripAuthEnv).toBe(true)
+    expect(preparation.configDir).toBe(realpathSync(managedAuthPath))
+    expect(readFileSync(join(managedAuthPath, '.credentials.json'), 'utf-8')).toBe(credentials)
+  })
+
+  it('retains a visible degraded provenance after scoped Keychain bridge failure', async () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+    const credentials = createClaudeCredentialsJson('user@example.com', 'managed')
+    const managedAuthPath = createManagedClaudeAuth(testState.userDataDir, 'account-1', credentials)
+    const store = createStore(
+      createSettings({
+        claudeManagedAccounts: [
+          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
+        ],
+        activeClaudeManagedAccountId: 'account-1'
+      })
+    )
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    testState.throwScopedKeychainWrite = true
+    testState.throwManagedKeychainRead = true
+
     const launchPreparation = await service.prepareForClaudeLaunch()
     expect(launchPreparation.provenance).toBe('system:managed-keychain-unavailable')
 
     testState.throwScopedKeychainWrite = false
+    testState.throwManagedKeychainRead = false
     await expect(service.prepareForRateLimitFetch()).resolves.toMatchObject({
       provenance: 'system:managed-keychain-unavailable',
       stripAuthEnv: false

@@ -109,8 +109,19 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
         }
       } catch {
         console.warn('[claude-runtime-auth] Failed to bridge macOS managed Claude Keychain')
-        // Never route a pane at a home whose credential surface could not be
-        // synchronized; fall back to the system lane instead.
+        // Degrade the medium before the identity: the CLI reads the config dir's own
+        // credentials file when the Keychain is unusable, so keep the pane on its account.
+        try {
+          if (await this.materializeManagedCredentialsFile(selected)) {
+            return preparation
+          }
+        } catch {
+          console.warn(
+            '[claude-runtime-auth] Failed to materialize managed Claude credentials file'
+          )
+        }
+        // Only with no readable managed credential is there nothing to route at; fall
+        // back to the system lane and surface it.
         const fallbackPreparation: ClaudeRuntimeAuthPreparation = {
           configDir: this.pathResolver.getRuntimePaths().configDir,
           runtime: 'host',

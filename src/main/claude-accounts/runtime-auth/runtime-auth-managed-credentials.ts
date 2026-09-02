@@ -35,6 +35,23 @@ export class ClaudeRuntimeAuthManagedCredentials extends ClaudeRuntimeAuthCreden
     return readClaudeManagedAuthFile(managedAuthPath, '.credentials.json')
   }
 
+  // Why: mirrors the CLI's own keychain-primary/file-fallback contract — when the scoped Keychain
+  // is unusable, degrade the storage medium inside the isolated home, never the account identity.
+  protected async materializeManagedCredentialsFile(
+    account: ClaudeManagedAccount
+  ): Promise<boolean> {
+    const managedAuthPath = await this.getOwnedManagedAuthPath(account)
+    if (!managedAuthPath) {
+      return false
+    }
+    const credentialsJson = await this.readManagedCredentials(account)
+    if (!credentialsJson || !this.isValidCredentialsJsonObject(credentialsJson)) {
+      return false
+    }
+    writeClaudeManagedAuthFile(managedAuthPath, '.credentials.json', credentialsJson)
+    return true
+  }
+
   protected async writeManagedCredentials(
     account: ClaudeManagedAccount,
     credentialsJson: string

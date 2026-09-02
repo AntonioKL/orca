@@ -27,6 +27,7 @@ export const testState = {
   throwRuntimeKeychainWrite: false,
   throwLegacyRuntimeKeychainWrite: false,
   throwScopedKeychainWrite: false,
+  throwManagedKeychainRead: false,
   runtimeWriteConfigDir: null as string | null,
   scopedKeychainCredentialsByConfigDir: new Map<string, string>(),
   managedKeychainCredentials: new Map<string, string>()
@@ -130,9 +131,12 @@ export function createKeychainMock() {
         testState.activeKeychainCredentials = contents
       }
     ),
-    readManagedClaudeKeychainCredentials: vi.fn(
-      async (accountId: string) => testState.managedKeychainCredentials.get(accountId) ?? null
-    ),
+    readManagedClaudeKeychainCredentials: vi.fn(async (accountId: string) => {
+      if (testState.throwManagedKeychainRead) {
+        throw new Error('managed keychain read failed')
+      }
+      return testState.managedKeychainCredentials.get(accountId) ?? null
+    }),
     writeManagedClaudeKeychainCredentials: vi.fn(async (accountId: string, contents: string) => {
       testState.managedKeychainCredentials.set(accountId, contents)
     })
