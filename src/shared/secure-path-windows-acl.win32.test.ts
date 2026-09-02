@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -8,6 +8,7 @@ import {
   resetSecureFileWindowsUserSidForTests,
   restrictWindowsPathSync
 } from './secure-path-windows-acl'
+import { removeTreeSync } from './windows-transient-lock-removal'
 
 /**
  * The half of the proof a mocked argv test cannot give.
@@ -24,6 +25,9 @@ import {
 const describeOnWindows = process.platform === 'win32' ? describe : describe.skip
 
 const EVERYONE_SID = 'S-1-1-0'
+const BUILTIN_ADMINISTRATORS_SID = 'S-1-5-32-544'
+/** High, System and Protected mandatory levels: the token is elevated. Medium (S-1-16-8192) is not. */
+const ELEVATED_INTEGRITY_SID = /\bS-1-16-(?:12288|16384|20480)\b/
 
 /** The SID the production code will grant to, so a planted DACL can differ only in its flags. */
 function currentUserSid(): string {
@@ -42,6 +46,33 @@ function icacls(...args: string[]): { code: number | null; stdout: string } {
     timeoutMs: 10_000
   })
   return { code: result.code, stdout: result.stdout }
+}
+
+/**
+ * Whether this process could rewrite a system file's DACL — decided before anything is written.
+ *
+ * `icacls <hosts> /save` is not the probe it looks like: `BUILTIN\Users` holds `(RX)`, so
+ * READ_CONTROL succeeds unelevated and every machine would report elevated. The token's mandatory
+ * integrity level is the thing that actually differs, and it is a SID rather than a localized
+ * string, so it reads the same on a non-English Windows.
+ */
+function isElevated(): boolean {
+  if (process.platform !== 'win32') {
+    return false
+  }
+  const result = runProcessSync({
+    program: windowsSystem32Binary('whoami.exe'),
+    args: ['/groups', '/fo', 'csv', '/nh'],
+    timeoutMs: 10_000
+  })
+  if (ELEVATED_INTEGRITY_SID.test(result.stdout)) {
+    return true
+  }
+  // Unelevated, Administrators is present only as "Group used for deny only".
+  const administrators = result.stdout
+    .split(/\r?\n/)
+    .find((line) => line.includes(BUILTIN_ADMINISTRATORS_SID))
+  return administrators?.includes('Enabled group') ?? false
 }
 
 /**
@@ -66,6 +97,7 @@ function readAclEntries(path: string): string[] {
 }
 
 describeOnWindows('restrictWindowsPathSync against a real filesystem', () => {
+  const elevated = isElevated()
   let root: string
 
   beforeAll(() => {
@@ -74,7 +106,11 @@ describeOnWindows('restrictWindowsPathSync against a real filesystem', () => {
   })
 
   afterAll(() => {
-    rmSync(root, { recursive: true, force: true })
+    // This suite plants hostile DACLs on purpose, and `removeTreeSync` only retries *transient*
+    // locks. Should a repair regress, an `(OI)(CI)(IO)` grant leaves the tree permanently
+    // undeletable — so restore inheritance first rather than leaking it into %TEMP% every run.
+    icacls(root, '/reset', '/t', '/q')
+    removeTreeSync(root)
   })
 
   it('actually applies the ACL to a real file, dropping inherited and foreign ACEs', () => {
@@ -296,22 +332,22 @@ describeOnWindows('restrictWindowsPathSync against a real filesystem', () => {
     warn.mockRestore()
   })
 
-  it('reports failure for a path it has no permission to modify', () => {
+  /**
+   * Skipped rather than branched: elevated, hardening *succeeds* here, so the case would assert
+   * nothing and would instead rewrite `hosts`. `icacls /reset` is no undo — it drops all explicit
+   * ACEs, and `hosts` ships with an explicit `NT AUTHORITY\SYSTEM:(F)`. Ephemeral on a CI runner;
+   * permanent for anyone running this lane from an elevated shell. So: assert, or skip.
+   */
+  it.skipIf(elevated)('reports failure for a path it has no permission to modify', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     // Owned by TrustedInstaller; a non-elevated user cannot rewrite its DACL.
     const systemFile = windowsSystem32Binary('drivers\\etc\\hosts')
 
-    const restricted = restrictWindowsPathSync(systemFile, false)
-
-    if (restricted) {
-      // Elevated runner: nothing to assert about denial, but never leave the box altered.
-      expect(icacls(systemFile, '/reset').code).toBe(0)
-    } else {
-      expect(warn).toHaveBeenCalledWith(
-        '[secure-path.windows-acl] failed to restrict path',
-        expect.objectContaining({ detail: expect.stringContaining('denied') })
-      )
-    }
+    expect(restrictWindowsPathSync(systemFile, false)).toBe(false)
+    expect(warn).toHaveBeenCalledWith(
+      '[secure-path.windows-acl] failed to restrict path',
+      expect.objectContaining({ detail: expect.stringContaining('denied') })
+    )
     warn.mockRestore()
   })
 })
