@@ -81,10 +81,7 @@ export function useComposerAsyncState(input: ComposerAsyncStateInput) {
   )
 
   const setupAgentStartupPolicyRef = useRef(setupAgentStartupPolicy)
-
-  useEffect(() => {
-    setupAgentStartupPolicyRef.current = setupAgentStartupPolicy
-  }, [setupAgentStartupPolicy])
+  setupAgentStartupPolicyRef.current = setupAgentStartupPolicy
 
   const setupAgentStartupPolicySaveRef = useRef<{
     repoId: string
@@ -128,14 +125,13 @@ export function useComposerAsyncState(input: ComposerAsyncStateInput) {
 
   const [linkDirectLoading, setLinkDirectLoading] = useState(false)
 
-  const lastAutoNameRef = useRef<string>(
-    getInitialAutoManagedWorkspaceName({
-      draftName: persistDraft ? newWorkspaceDraft?.name : null,
-      draftLinkedWorkItem: persistDraft ? draftLinkedWorkItemSeed : null,
-      initialName,
-      initialLinkedWorkItem: initialLinkedWorkItemSeed
-    })
-  )
+  const lastAutoNameRef = useRef<string>(undefined!)
+  lastAutoNameRef.current ??= getInitialAutoManagedWorkspaceName({
+    draftName: persistDraft ? newWorkspaceDraft?.name : null,
+    draftLinkedWorkItem: persistDraft ? draftLinkedWorkItemSeed : null,
+    initialName,
+    initialLinkedWorkItem: initialLinkedWorkItemSeed
+  })
 
   const nameRef = useRef<string>(name)
 
@@ -147,19 +143,22 @@ export function useComposerAsyncState(input: ComposerAsyncStateInput) {
   // Why: let handleBaseBranchPrSelect read the latest note without adding it to deps (would rebuild the callback on every keystroke).
   const noteRef = useRef<string>(note)
 
-  useEffect(() => {
-    nameRef.current = name
-    noteRef.current = note
-  }, [name, note])
+  // Mirrored during render, not from an Effect: both are verbatim copies read only from the
+  // once-mounted drop listener and submit callbacks, never during another component's render.
+  nameRef.current = name
+  noteRef.current = note
 
   // Why: PR checkout refs resolve async, so submit can still see the linked PR as a checkout source if Create fires before the resolver settles.
-  const smartGitHubPrStartPointSelectionRef = useRef<SmartGitHubPrStartPointSelection | null>(
-    getInitialGitHubPrStartPointSelection({
+  const smartGitHubPrStartPointSelectionRef = useRef<SmartGitHubPrStartPointSelection | null>(null)
+  const smartGitHubPrStartPointSelectionSeededRef = useRef(false)
+  if (!smartGitHubPrStartPointSelectionSeededRef.current) {
+    smartGitHubPrStartPointSelectionSeededRef.current = true
+    smartGitHubPrStartPointSelectionRef.current = getInitialGitHubPrStartPointSelection({
       item: initialGitHubWorkItem,
       linkedWorkItem: initialLinkedWorkItemSeed,
       repoId: selectedRepo?.id ?? initialRepoId
     })
-  )
+  }
 
   useEffect(() => {
     const clearAutoManagedName = (): void => {
@@ -203,13 +202,11 @@ export function useComposerAsyncState(input: ComposerAsyncStateInput) {
 
   const selectedRepoSettingsRef = useRef(selectedRepoSettings)
 
-  useEffect(() => {
-    agentPromptRef.current = agentPrompt
-    connectionIdRef.current = connectionId
-    selectedRepoConnectionIdRef.current = selectedRepoConnectionId
-    selectedRepoPathRef.current = selectedRepoPath
-    selectedRepoSettingsRef.current = selectedRepoSettings
-  }, [agentPrompt, connectionId, selectedRepoConnectionId, selectedRepoPath, selectedRepoSettings])
+  agentPromptRef.current = agentPrompt
+  connectionIdRef.current = connectionId
+  selectedRepoConnectionIdRef.current = selectedRepoConnectionId
+  selectedRepoPathRef.current = selectedRepoPath
+  selectedRepoSettingsRef.current = selectedRepoSettings
 
   return {
     yamlHooks,

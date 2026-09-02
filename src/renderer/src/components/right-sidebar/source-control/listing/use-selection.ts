@@ -91,25 +91,13 @@ export function useSourceControlSelection({
   const onOpenDiffRef = useRef(onOpenDiff)
   const shouldOpenAsSplitRef = useRef(shouldOpenAsSplit)
 
-  useEffect(() => {
-    flatEntriesRef.current = flatEntries
-  }, [flatEntries])
-
-  useEffect(() => {
-    anchorKeyRef.current = anchorKey
-  }, [anchorKey])
-
-  useEffect(() => {
-    selectedKeysRef.current = selectedKeys
-  }, [selectedKeys])
-
-  useEffect(() => {
-    onOpenDiffRef.current = onOpenDiff
-  }, [onOpenDiff])
-
-  useEffect(() => {
-    shouldOpenAsSplitRef.current = shouldOpenAsSplit
-  }, [shouldOpenAsSplit])
+  // Mirrored during render, not from Effects: `flatEntries` is a fresh array every render, so
+  // five commit-phase callbacks fired on every source-control commit to copy values verbatim.
+  flatEntriesRef.current = flatEntries
+  anchorKeyRef.current = anchorKey
+  selectedKeysRef.current = selectedKeys
+  onOpenDiffRef.current = onOpenDiff
+  shouldOpenAsSplitRef.current = shouldOpenAsSplit
 
   const reconciledSelection = reconcileSourceControlSelectionState({
     selectedKeys,

@@ -65,13 +65,18 @@ export function useCombinedDiffViewRestore({
     sectionLoadTokensRef
   } = registry
 
-  const scrollOffsetRef = useRef(combinedDiffScrollTopCache.get(viewStateKey) ?? 0)
-  const scrollAnchorRef = useRef<VirtualizedScrollAnchor>(
-    combinedDiffScrollAnchorCache.get(viewStateKey) ?? null
-  )
-  const latestDomScrollAnchorRef = useRef<VirtualizedScrollAnchor>(
-    combinedDiffScrollAnchorCache.get(viewStateKey) ?? null
-  )
+  // Why the seed flag: `useRef(expr)` re-reads all three caches on every render and throws the
+  // result away, and an anchor seeds legitimately to null so a nullish guard would keep re-reading.
+  const scrollOffsetRef = useRef(0)
+  const scrollAnchorRef = useRef<VirtualizedScrollAnchor>(null)
+  const latestDomScrollAnchorRef = useRef<VirtualizedScrollAnchor>(null)
+  const restoreSeedAppliedRef = useRef(false)
+  if (!restoreSeedAppliedRef.current) {
+    restoreSeedAppliedRef.current = true
+    scrollOffsetRef.current = combinedDiffScrollTopCache.get(viewStateKey) ?? 0
+    scrollAnchorRef.current = combinedDiffScrollAnchorCache.get(viewStateKey) ?? null
+    latestDomScrollAnchorRef.current = scrollAnchorRef.current
+  }
 
   // Why: tab/worktree switches unmount this viewer; cache by pane key so remount restores sections+scroll before repaint.
   const initializedEntryStateRef = useRef<{

@@ -40,9 +40,7 @@ export function useWorkspaceCleanupScanLifecycle({
   const autoScanAttemptedForOpenRef = useRef(false)
   const latestReadyToastScanAtRef = useRef<number | null>(null)
 
-  useEffect(() => {
-    openRef.current = open
-  }, [open])
+  openRef.current = open
 
   const startWorkspaceCleanupScan = useCallback(
     (options: { notifyWhenReady?: boolean } = {}) => {
