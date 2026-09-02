@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 /**
  * The command-line reader is a patch, not repo source, so its contract is
@@ -124,7 +124,13 @@ function loadAddon(): Addon {
 // strings, so a skipping suite would pass against the very binary this patch
 // exists to keep out. On win32 the addon must be present, and it must be ours.
 describe.runIf(process.platform === 'win32')('windows-process-tree command line addon', () => {
-  const addon = loadAddon()
+  // Why not at collection time: a require that throws there fails the whole
+  // file, and the patch-text cases above need no binary at all -- a Windows
+  // checkout without a built addon would lose them to an unrelated failure.
+  let addon: Addon
+  beforeAll(() => {
+    addon = loadAddon()
+  })
   const children: { kill: () => void }[] = []
   afterAll(() => {
     for (const child of children) {
