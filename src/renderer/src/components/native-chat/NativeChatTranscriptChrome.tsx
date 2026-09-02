@@ -194,11 +194,15 @@ export function NativeChatImageAttachments({
   if (images.length === 0) {
     return null
   }
+  const imageKeyCounts = new Map<string, number>()
   if (!enablePreview) {
     return (
       <div className="mb-2 flex flex-wrap gap-1.5">
-        {images.map((image, index) => {
+        {images.map((image) => {
           const label = image.alt ?? image.path ?? image.url ?? 'Image'
+          const imageKeyBase = `${label}-${image.url ?? ''}-${image.path ?? ''}`
+          const occurrence = imageKeyCounts.get(imageKeyBase) ?? 0
+          imageKeyCounts.set(imageKeyBase, occurrence + 1)
           const name =
             image.path && isNativeChatPastedImagePath(image.path)
               ? translate('components.native-chat.composer.pastedImageLabel', 'Pasted image')
@@ -207,7 +211,7 @@ export function NativeChatImageAttachments({
                 : label
           return (
             <div
-              key={`${label}-${image.url ?? ''}-${image.path ?? ''}-${index}`}
+              key={`${imageKeyBase}-${occurrence}`}
               className="flex max-w-full items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground"
               title={label}
             >
@@ -219,7 +223,6 @@ export function NativeChatImageAttachments({
       </div>
     )
   }
-  const imageKeyCounts = new Map<string, number>()
   return (
     <div className="mb-2 flex flex-wrap gap-1.5">
       {images.map((image) => {
