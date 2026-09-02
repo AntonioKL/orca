@@ -77,7 +77,7 @@ export abstract class RemoteRuntimeTerminalFlowController extends RemoteRuntimeT
     stream: RemoteRuntimeMultiplexedTerminalState,
     bytes: number
   ): boolean {
-    if (this.streams.get(stream.streamId) !== stream) {
+    if (!this.isRegisteredStream(stream)) {
       return true
     }
     stream.pendingAckBytes += bytes
@@ -110,9 +110,12 @@ export abstract class RemoteRuntimeTerminalFlowController extends RemoteRuntimeT
       stream.watchdog.recordOutputAcknowledged(bytes)
       return true
     }
-    // Why re-charged: dropping an unsent ack shrinks the host window for the stream's life, and the only retry trigger is the output that shrunken window blocks.
-    stream.pendingAckBytes += bytes
-    this.scheduleOutputAcknowledgementFlush(stream)
+    // Why guarded: a failed send may have torn the stream down, and re-charging a dropped stream reschedules itself forever.
+    if (this.isRegisteredStream(stream)) {
+      // Why re-charged: dropping an unsent ack shrinks the host window for the stream's life, and the only retry trigger is the output that shrunken window blocks.
+      stream.pendingAckBytes += bytes
+      this.scheduleOutputAcknowledgementFlush(stream)
+    }
     return false
   }
 
