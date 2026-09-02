@@ -147,7 +147,8 @@ describe('PtyHandler.resize against a stale PTY handle', () => {
   it('does not republish an exit node-pty already reported', async () => {
     // The listing sweep also reaps entries the natural `onExit` left behind; a
     // second `pty.exit` would hand the client a duplicate carrying -1 in place
-    // of the real status.
+    // of the real status. That sweep retires off `managed.disposed`, which is
+    // bookkeeping rather than liveness, so it never publishes a verdict at all.
     const onExit = mockPtyInstance.onExit.mock.calls.at(-1)?.[0] as (e: {
       exitCode: number
     }) => void

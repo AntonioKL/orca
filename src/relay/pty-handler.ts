@@ -2240,13 +2240,22 @@ export class PtyHandler {
     managed.reapTimer = timer
   }
 
-  /** Retire every record for a PTY whose process is proven gone. Shared by the attach probe, the
-   *  listing probe and the post-shutdown sweep so the three cannot drift on what "gone" retires. */
-  private reapExitedPty(managed: ManagedPty): void {
+  /**
+   * Retire every record for a PTY whose process is proven gone. Shared by the attach probe, the
+   * listing probe and the post-shutdown sweep so the three cannot drift on what "gone" retires.
+   *
+   * `evidence` is not decoration: `exited` publishes a verdict to the client, and only ESRCH from
+   * the host that owns the pid earns it. The disposed-record sweep retires off our own
+   * bookkeeping, which says we tore the record down — not that the shell died — so it stays
+   * silent (docs/reference/ssh-execution-boundary.md).
+   */
+  private reapExitedPty(managed: ManagedPty, evidence: 'exited' | 'record-torn-down'): void {
     managed.physicalExit?.markExited()
     this.releaseRelayIngress(managed)
     this.flushPtyOutput(managed.id)
-    this.publishReapedExit(managed)
+    if (evidence === 'exited') {
+      this.publishReapedExit(managed)
+    }
     this.notifyExitListener(managed)
     this.agentSessionOwners.release(managed.id)
     disposeManagedPty(managed)
@@ -2264,7 +2273,8 @@ export class PtyHandler {
    * `-1` is this wire's "gone, status unrecoverable": the pid is proven absent
    * (ESRCH from the host that owns it) but nothing waited on the shell, so no
    * status exists. `ssh-relay-session` already publishes the same code for a
-   * dropped lease.
+   * dropped lease. Reached only from the proven-exited path — a client that acts
+   * on this retires the pane, so nothing weaker than ESRCH may reach it.
    */
   private publishReapedExit(managed: ManagedPty): void {
     // Why the guard: node-pty's own `onExit` already queued and published this
@@ -2296,7 +2306,7 @@ export class PtyHandler {
     if (!managed.pty.pid || isProcessAlive(managed.pty.pid)) {
       return false
     }
-    this.reapExitedPty(managed)
+    this.reapExitedPty(managed, 'exited')
     return true
   }
 
@@ -2503,7 +2513,7 @@ export class PtyHandler {
     }
     for (const [entryIndex, [id, managed]] of managedEntries.entries()) {
       if (managed.disposed) {
-        this.reapExitedPty(managed)
+        this.reapExitedPty(managed, 'record-torn-down')
         continue
       }
       if (this.reapPtyProvenExited(managed)) {
