@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { hasRuntimeRpcErrorCode, RuntimeRpcCallError } from '@/runtime/runtime-rpc-client'
 import {
   isRuntimeTerminalNotWritable,
-  isRuntimeTerminalUnavailable
+  isRuntimeTerminalUnavailable,
+  isRuntimeTimeout
 } from './active-agent-terminal-send-readiness'
-import { runtimeFailureCode } from './active-agent-note-send-diagnostics'
+import {
+  runtimeFailureCode,
+  runtimeFailureFallbackCode
+} from './active-agent-note-send-diagnostics'
 
 function runtimeError(code: string): RuntimeRpcCallError {
   return new RuntimeRpcCallError({
@@ -30,6 +34,17 @@ describe('active agent note runtime error codes', () => {
 
     expect(isRuntimeTerminalNotWritable(error)).toBe(true)
     expect(hasRuntimeRpcErrorCode(error, 'terminal_not_writable')).toBe(true)
+  })
+
+  it('uses structured runtime_timeout with a human-readable message', () => {
+    const error = new RuntimeRpcCallError({
+      id: 'test-runtime-timeout',
+      ok: false,
+      error: { code: 'runtime_timeout', message: 'Timed out waiting for the remote runtime.' }
+    })
+
+    expect(isRuntimeTimeout(error)).toBe(true)
+    expect(runtimeFailureFallbackCode(error)).toBe('runtime-timeout')
   })
 
   it('retains support for transport-rewrapped error tokens', () => {

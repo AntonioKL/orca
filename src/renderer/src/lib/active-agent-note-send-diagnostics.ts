@@ -53,6 +53,9 @@ export function runtimeFailureFallbackCode(error: unknown): ActiveAgentNotesSend
 }
 
 function isTimeoutError(error: unknown): boolean {
+  if (hasRuntimeRpcErrorCode(error, 'runtime_timeout')) {
+    return true
+  }
   const message = error instanceof Error ? error.message : String(error)
   return message.includes('timeout')
 }
