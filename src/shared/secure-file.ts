@@ -50,12 +50,12 @@ const DEFAULT_HARDENING_CACHE_BOUNDS: SecurePathHardeningCacheBounds = {
 
 const UNSUPPORTED_DIRECTORY_FSYNC_CODES = new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP'])
 
-// Why: PowerShell hardening (~1-1.5s) stalls the main thread, so cache idempotent re-hardens per process.
+// Why: hardening spawns icacls synchronously (once when the DACL already verifies, four times when it must be rewritten), so cache idempotent re-hardens per process.
 let hardenedPathsThisProcess = new SecurePathHardeningCache<HardenedPathCacheEntry>(
   DEFAULT_HARDENING_CACHE_BOUNDS
 )
 
-// Why: child writes constantly bump a dir's mtime, so cache dirs by path (not metadata) to avoid a PowerShell spawn every read (#4901).
+// Why: child writes constantly bump a dir's mtime, so cache dirs by path (not metadata) to avoid an icacls spawn every read (#4901).
 // Limitation: a dir deleted+recreated in-process won't re-harden; fine since we never delete our secure dirs at runtime.
 let hardenedDirectoryPathsThisProcess = new SecurePathHardeningCache<true>(
   DEFAULT_HARDENING_CACHE_BOUNDS
