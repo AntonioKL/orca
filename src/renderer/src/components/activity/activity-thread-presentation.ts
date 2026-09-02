@@ -143,13 +143,15 @@ export function activityThreadRowCopy(thread: AgentPaneThread): ActivityThreadRo
     responsePreview: thread.responsePreview
   })
   const liveState = thread.currentAgentState ?? thread.latestEvent?.state ?? null
+  const toolPreviewState = liveState === 'monitoring' ? null : liveState
   const state = threadAgentState(thread)
   const needsAttention = state === 'waiting' || state === 'blocked' || state === 'permission'
   if (renderedPreview && !previewDuplicatesIdentity(renderedPreview, taskTitle, workspaceLabel)) {
     return {
       taskTitle,
       statusLine: renderedPreview,
-      statusKind: showsAgentToolPreview(liveState) ? 'tool' : 'message',
+      // Monitoring is a distinct live state, not a tool-running row state.
+      statusKind: showsAgentToolPreview(toolPreviewState) ? 'tool' : 'message',
       needsAttention,
       workspaceLabel
     }

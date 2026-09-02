@@ -88,3 +88,24 @@ describe('countActivityUnread with Clear completed cutoffs', () => {
     expect(countActivityUnread(source)).toBe(1)
   })
 })
+
+describe('countActivityUnread source overlap', () => {
+  it('counts an overlapping live and retained pane only once', () => {
+    const entry = makeEntry({})
+    const source = {
+      acknowledgedAgentsByPaneKey: { [PANE]: 0 },
+      agentStatusByPaneKey: { [PANE]: entry },
+      retainedAgentsByPaneKey: {
+        [PANE]: {
+          entry,
+          worktreeId: 'wt-1',
+          tab: {} as never,
+          agentType: 'claude',
+          startedAt: 1_000
+        }
+      },
+      migrationUnsupportedByPtyId: {}
+    }
+    expect(countActivityUnread(source)).toBe(1)
+  })
+})

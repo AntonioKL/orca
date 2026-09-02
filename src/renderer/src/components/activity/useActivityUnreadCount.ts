@@ -24,6 +24,7 @@ function isUnreadAgentState(state: AgentStatusState): boolean {
 /** Counts unread done/blocked/waiting events for the Activity page titlebar badge. */
 export function countActivityUnread(source: ActivityUnreadCountSource): number {
   let count = 0
+  const seenPaneKeys = new Set<string>()
 
   // Why no worktree.isUnread here: Activity lists only agent threads, so a worktree
   // unread would light a badge with no row to read and no way to clear it.
@@ -50,14 +51,21 @@ export function countActivityUnread(source: ActivityUnreadCountSource): number {
   }
 
   for (const [paneKey, entry] of Object.entries(source.agentStatusByPaneKey)) {
+    seenPaneKeys.add(paneKey)
     countEntry(entry, source.acknowledgedAgentsByPaneKey[paneKey] ?? 0)
   }
   for (const [paneKey, retained] of Object.entries(source.retainedAgentsByPaneKey)) {
+    // Live status is the primary source; retained is a handoff cache and may briefly overlap it.
+    if (seenPaneKeys.has(paneKey)) {
+      continue
+    }
+    seenPaneKeys.add(paneKey)
     countEntry(retained.entry, source.acknowledgedAgentsByPaneKey[paneKey] ?? 0)
   }
   for (const unsupported of Object.values(source.migrationUnsupportedByPtyId)) {
     const entry = migrationUnsupportedToAgentStatusEntry(unsupported)
-    if (entry) {
+    if (entry && !seenPaneKeys.has(entry.paneKey)) {
+      seenPaneKeys.add(entry.paneKey)
       countEntry(entry, source.acknowledgedAgentsByPaneKey[entry.paneKey] ?? 0)
     }
   }
