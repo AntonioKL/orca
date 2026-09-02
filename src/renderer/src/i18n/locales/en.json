@@ -17260,7 +17260,9 @@
   "dashboard": {
     "sidebar": {
       "label": "Agents",
-      "dashboardLabel": "Agent Dashboard"
+      "dashboardLabel": "Agent Dashboard",
+      "openActivity": "View activity",
+      "closeActivity": "Turn off activity view"
     }
   },
   "runtimeRpc": {
