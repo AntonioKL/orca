@@ -164,6 +164,53 @@ function findMissingProviderDeps(importedSymbols, neededLibraries) {
   return missing
 }
 
+// ELF e_machine values for the Linux slices we package. Names match electron-builder's Arch enum.
+const ELF_MACHINE_BY_ARCH = Object.freeze({ x64: 0x3e, arm64: 0xb7 })
+const ARCH_BY_ELF_MACHINE = Object.freeze({ 0x3e: 'x64', 0xb7: 'arm64' })
+
+/**
+ * ELF `e_machine`, or null when the file is not a readable little-endian ELF.
+ *
+ * Why this is checked at all: cross-building an arm64 package on an x64 host can silently pack an
+ * x86-64 `pty.node` into the arm64 slice — the rebuild logs a forced arm64 rebuild and still ships
+ * the host's binary. Every other gate here inspects symbol versions, which are perfectly valid on
+ * the wrong architecture, so nothing noticed. Observed on a Raspberry Pi 5: the app loaded, then
+ * failed with "Failed to load native module: pty.node".
+ */
+function readElfMachine(filePath) {
+  let fd
+  try {
+    fd = openSync(filePath, 'r')
+    const header = Buffer.alloc(20)
+    if (readSync(fd, header, 0, 20, 0) !== 20) {
+      return null
+    }
+    // EI_DATA (offset 5) must be ELFDATA2LSB for a little-endian e_machine read.
+    if (header[5] !== 1) {
+      return null
+    }
+    return header.readUInt16LE(18)
+  } catch {
+    return null
+  } finally {
+    if (fd !== undefined) {
+      closeSync(fd)
+    }
+  }
+}
+
+function findArchViolation(filePath, targetArch) {
+  const expected = ELF_MACHINE_BY_ARCH[targetArch]
+  if (expected === undefined) {
+    return null
+  }
+  const machine = readElfMachine(filePath)
+  if (machine === null || machine === expected) {
+    return null
+  }
+  return { machine, actual: ARCH_BY_ELF_MACHINE[machine] ?? `0x${machine.toString(16)}` }
+}
+
 function isElfFile(filePath) {
   let fd
   try {
@@ -312,6 +359,7 @@ function readImportedSymbols(filePath, objdumpPath) {
  */
 function verifyLinuxGlibcFloor(rootDir, options = {}) {
   const binaries = collectNativeBinaries(rootDir)
+  const targetArch = options.targetArch
   if (binaries.length === 0) {
     console.log(`[verify-linux-glibc-floor] OK — no bundled native binaries under ${rootDir}`)
     return
@@ -324,6 +372,27 @@ function verifyLinuxGlibcFloor(rootDir, options = {}) {
     throw new Error(
       '[verify-linux-glibc-floor] objdump not found. Install binutils on the Linux ' +
         'packaging host so the glibc-floor gate can inspect bundled native binaries.'
+    )
+  }
+
+  // Why before the glibc pass: a wrong-architecture binary's symbol versions are valid but
+  // meaningless, so reporting a floor violation for it would send the reader down the wrong path.
+  const archOffenders = binaries
+    .map((filePath) => ({ filePath, violation: findArchViolation(filePath, targetArch) }))
+    .filter(({ violation }) => violation !== null)
+  if (archOffenders.length > 0) {
+    const detail = archOffenders
+      .map(
+        ({ filePath, violation }) =>
+          `  ${relative(rootDir, filePath) || filePath} is ${violation.actual}`
+      )
+      .join('\n')
+    throw new Error(
+      `[verify-linux-glibc-floor] ${archOffenders.length} bundled native binar` +
+        `${archOffenders.length === 1 ? 'y is' : 'ies are'} built for the wrong architecture ` +
+        `(target ${targetArch}), so the app will fail to load them at runtime:\n${detail}\n` +
+        'Cross-building a Linux slice can pack the host architecture despite a forced rebuild; ' +
+        'build this slice on a native runner.'
     )
   }
 
@@ -375,6 +444,9 @@ function verifyLinuxGlibcFloor(rootDir, options = {}) {
 
 module.exports = {
   MIN_GLIBC,
+  ELF_MACHINE_BY_ARCH,
+  readElfMachine,
+  findArchViolation,
   VERSION_FLOORS,
   FLOOR_LABEL,
   RELOCATED_SYMBOL_PROVIDERS,

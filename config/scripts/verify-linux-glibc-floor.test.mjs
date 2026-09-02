@@ -6,6 +6,9 @@ import { describe, expect, it } from 'vitest'
 
 const require = createRequire(import.meta.url)
 const {
+  readElfMachine,
+  findArchViolation,
+  ELF_MACHINE_BY_ARCH,
   parseGlibcVersion,
   compareGlibcVersions,
   parseVersionNeeds,
@@ -319,5 +322,62 @@ describe.skipIf(process.platform === 'win32')('verifyLinuxGlibcFloor', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+})
+
+/** Minimal little-endian 64-bit ELF header with the given e_machine. */
+function elfHeader(machine) {
+  const header = Buffer.alloc(64)
+  header.write('\x7fELF', 0, 'latin1')
+  header[4] = 2 // ELFCLASS64
+  header[5] = 1 // ELFDATA2LSB
+  header[6] = 1 // EV_CURRENT
+  header.writeUInt16LE(3, 16) // ET_DYN
+  header.writeUInt16LE(machine, 18)
+  return header
+}
+
+describe('bundled native binary architecture', () => {
+  it('reads e_machine from a little-endian ELF', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orca-elf-arch-'))
+    const file = join(dir, 'pty.node')
+    await writeFile(file, elfHeader(ELF_MACHINE_BY_ARCH.arm64))
+    expect(readElfMachine(file)).toBe(ELF_MACHINE_BY_ARCH.arm64)
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  // The observed failure: cross-building arm64 on an x64 host packed an x86-64 pty.node, whose
+  // symbol versions are valid, so every other gate here passed it.
+  it('flags an x86-64 binary in an arm64 slice', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orca-elf-arch-'))
+    const file = join(dir, 'pty.node')
+    await writeFile(file, elfHeader(ELF_MACHINE_BY_ARCH.x64))
+    expect(findArchViolation(file, 'arm64')).toMatchObject({ actual: 'x64' })
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('accepts a matching architecture', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orca-elf-arch-'))
+    const file = join(dir, 'pty.node')
+    await writeFile(file, elfHeader(ELF_MACHINE_BY_ARCH.x64))
+    expect(findArchViolation(file, 'x64')).toBeNull()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('stays silent when no target architecture is supplied', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orca-elf-arch-'))
+    const file = join(dir, 'pty.node')
+    await writeFile(file, elfHeader(ELF_MACHINE_BY_ARCH.x64))
+    expect(findArchViolation(file, undefined)).toBeNull()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('ignores a file that is not a readable little-endian ELF', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orca-elf-arch-'))
+    const file = join(dir, 'not-elf.node')
+    await writeFile(file, Buffer.from('not an elf at all'))
+    expect(readElfMachine(file)).toBeNull()
+    expect(findArchViolation(file, 'arm64')).toBeNull()
+    await rm(dir, { recursive: true, force: true })
   })
 })

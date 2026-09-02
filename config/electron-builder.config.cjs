@@ -242,7 +242,11 @@ module.exports = {
     // requiring GLIBC_2.34, crashing the app on startup on Ubuntu 20.04 (#9902).
     // Fail packaging if any bundled native binary exceeds the supported floor.
     if (context.electronPlatformName === 'linux') {
-      verifyLinuxGlibcFloor(context.appOutDir)
+      // Why the arch is passed: symbol-version checks pass happily on a wrong-architecture binary,
+      // so a cross-built slice could ship the host's pty.node and only fail at runtime.
+      verifyLinuxGlibcFloor(context.appOutDir, {
+        targetArch: { 1: 'x64', 3: 'arm64' }[context.arch]
+      })
     }
     const resourcesDir =
       context.electronPlatformName === 'darwin'
