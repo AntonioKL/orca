@@ -44,6 +44,11 @@ function sendControlRequest(
             new ClaudeControlRequestError(subtype, 'this SDK exposes no get_settings request')
           )
     }
+    case 'list_models':
+      // The SDK reads the catalog off the initialize result rather than a
+      // separate request; the picker's parser keys on the `{ models }` envelope
+      // the CLI used to answer with.
+      return query.supportedModels().then((models) => ({ models }))
     case 'set_model':
       return query.setModel(readString(params, 'model')).then(() => ({}))
     case 'set_permission_mode':

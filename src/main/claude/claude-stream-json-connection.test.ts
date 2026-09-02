@@ -11,6 +11,8 @@ import {
   type ClaudeStreamJsonLaunch
 } from './claude-stream-json-connection'
 import { claudeAuthDiagnostic } from './claude-structured-init-proof'
+import { readClaudeStructuredSessionOptions } from './claude-structured-session-options'
+import type { ClaudeSession } from './claude-structured-session-state'
 import { CLAUDE_STRUCTURED_BASE_OPTIONS } from './claude-structured-launch-resolution'
 
 // These drive the real SDK against the scripted fake CLI, so every assertion is
@@ -298,6 +300,72 @@ describe('Claude stream-json connection', () => {
       'the set_model control request'
     )
     expect(requests.request.subtype).toBe('set_model')
+  })
+
+  it('answers list_models from the catalog the running CLI reported', async () => {
+    const scenario = scriptScenario([HOLD_OPEN], {
+      initialize: {
+        models: [
+          { value: 'default', resolvedModel: 'claude-opus-5' },
+          {
+            value: 'opus',
+            displayName: 'Opus 5',
+            description: 'The live row, not the seed',
+            resolvedModel: 'claude-opus-5',
+            supportsEffort: true,
+            supportedEffortLevels: ['low', 'high']
+          }
+        ]
+      }
+    })
+    const connection = await open(launchFor(scenario))
+
+    await expect(connection.request('list_models')).resolves.toMatchObject({
+      models: [
+        { value: 'default', resolvedModel: 'claude-opus-5' },
+        { value: 'opus', displayName: 'Opus 5', supportedEffortLevels: ['low', 'high'] }
+      ]
+    })
+  })
+
+  it('serves the picker the live catalog rather than falling back to the static seed', async () => {
+    const scenario = scriptScenario([HOLD_OPEN], {
+      initialize: {
+        models: [
+          { value: 'default', resolvedModel: 'claude-opus-5' },
+          {
+            value: 'opus',
+            displayName: 'Opus 5',
+            description: 'The live row, not the seed',
+            resolvedModel: 'claude-opus-5',
+            supportsEffort: true,
+            supportedEffortLevels: ['low', 'high']
+          }
+        ]
+      }
+    })
+    const connection = await open(launchFor(scenario))
+    const session = {
+      connection,
+      options: new Map<string, string>(),
+      reportedOptions: {}
+    } as unknown as ClaudeSession
+
+    const options = await readClaudeStructuredSessionOptions(session, 5_000)
+
+    // The seed carries neither this description nor a two-level effort list, so
+    // both can only have come from the child.
+    expect(options.models).toContainEqual({
+      id: 'opus',
+      label: 'Opus 5',
+      description: 'The live row, not the seed',
+      isDefault: true,
+      efforts: [
+        { value: 'low', label: 'Low' },
+        { value: 'high', label: 'High' }
+      ]
+    })
+    expect(options.current.model).toBe('opus')
   })
 
   it('feeds the auth diagnostic from the settings the running child reports', async () => {
