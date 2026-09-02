@@ -47,21 +47,34 @@ export function createClaudeAgentSdkControlBridge(
     }
   }
 
+  const emitCancel = (requestId: string): void => {
+    if (cancelling) {
+      handlers.onControlCancelRequest?.({
+        type: 'control_cancel_request',
+        request_id: requestId
+      } satisfies ClaudeControlCancelRequest)
+    }
+  }
+
   const settleFrom = (
     requestId: string,
     request: ClaudeControlRequest,
     signal: AbortSignal
   ): Promise<unknown> =>
     new Promise<unknown>((resolve, reject) => {
+      if (signal.aborted) {
+        // No abort event can still fire, so registering would park the callback
+        // forever behind a prompt nothing will ever answer.
+        emitCancel(requestId)
+        resolve(null)
+        return
+      }
       pending.set(requestId, { resolve, reject })
       signal.addEventListener(
         'abort',
         () => {
-          if (pending.delete(requestId) && cancelling) {
-            handlers.onControlCancelRequest?.({
-              type: 'control_cancel_request',
-              request_id: requestId
-            } satisfies ClaudeControlCancelRequest)
+          if (pending.delete(requestId)) {
+            emitCancel(requestId)
           }
           // Null is the SDK's "no response written" sentinel: a cancelled request
           // must not be answered, only forgotten.
