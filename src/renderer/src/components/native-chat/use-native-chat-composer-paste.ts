@@ -56,6 +56,21 @@ function ownerConnectionId(owner: NativeChatAttachmentOwner): string | null {
   return owner.kind === 'ssh' ? owner.connectionId : null
 }
 
+/** A save can outlive a worktree/connection switch; never settle its path into
+ * a composer whose backing host changed while the clipboard was in flight. */
+function attachmentOwnerStillMatches(
+  original: NativeChatAttachmentOwner,
+  current: NativeChatAttachmentOwner
+): boolean {
+  if (original.kind !== current.kind) {
+    return false
+  }
+  if (original.kind !== 'ssh') {
+    return true
+  }
+  return current.kind === 'ssh' && original.connectionId === current.connectionId
+}
+
 /**
  * Clipboard-paste behavior for the native chat composer: a clipboard image
  * becomes an attachment (TUI parity), otherwise text is inserted at the caret.
@@ -138,7 +153,19 @@ export function useNativeChatComposerPaste({
   /** Settle the chip started at paste time, or attach directly when the paste
    *  produced no placeholder (no clipboard preview was available). */
   const settleImagePaste = useCallback(
-    (pendingId: string | null, path: string, connectionId: string | null) => {
+    (
+      pendingId: string | null,
+      path: string,
+      connectionId: string | null,
+      originalOwner: NativeChatAttachmentOwner
+    ) => {
+      if (!attachmentOwnerStillMatches(originalOwner, resolveAttachmentOwner())) {
+        if (pendingId) {
+          dropPendingImageAttachment(pendingId)
+        }
+        setNotice(nativeChatWorktreeNotReadyNotice())
+        return
+      }
       if (pendingId) {
         resolvePendingImageAttachment(pendingId, path, connectionId)
       } else {
@@ -146,7 +173,13 @@ export function useNativeChatComposerPaste({
       }
       setNotice(null)
     },
-    [attachResolvedPaths, resolvePendingImageAttachment, setNotice]
+    [
+      attachResolvedPaths,
+      dropPendingImageAttachment,
+      resolveAttachmentOwner,
+      resolvePendingImageAttachment,
+      setNotice
+    ]
   )
 
   const handlePaste = useCallback(
@@ -194,7 +227,7 @@ export function useNativeChatComposerPaste({
           }
           return
         }
-        settleImagePaste(pendingId, saved.tempPath, ownerConnectionId(owner))
+        settleImagePaste(pendingId, saved.tempPath, ownerConnectionId(owner), owner)
         setCaret(caretAtPaste)
       })()
     },
@@ -247,7 +280,7 @@ export function useNativeChatComposerPaste({
           noteImagesUnsupported()
           return
         }
-        settleImagePaste(pendingId, saved.tempPath, ownerConnectionId(owner))
+        settleImagePaste(pendingId, saved.tempPath, ownerConnectionId(owner), owner)
         return
       }
       // Clipboard changed between the probe and the save: no image to attach.

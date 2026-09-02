@@ -264,6 +264,36 @@ describe('useNativeChatComposerPaste', () => {
     expect(store.chips[0]).toMatchObject({ path: '/tmp/orca-paste-1.png', pending: false })
   })
 
+  it('does not settle a local path after the attachment owner changes', async () => {
+    let resolveSave: (path: string) => void = () => {}
+    let owner: NativeChatAttachmentOwner = { kind: 'local' }
+    mocks.saveClipboardImageAsTempFile.mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveSave = resolve
+      })
+    )
+    const store = createChipStore()
+    const setNotice = vi.fn()
+    const probe = await renderProbe({
+      resolveAttachmentOwner: () => owner,
+      store,
+      setNotice
+    })
+
+    await act(async () => {
+      probe.latest().handlePaste(imagePasteEvent())
+    })
+    expect(store.chips).toHaveLength(1)
+
+    owner = sshOwner
+    await act(async () => {
+      resolveSave('/tmp/orca-paste-owner-changed.png')
+    })
+
+    expect(store.chips).toHaveLength(0)
+    expect(setNotice).toHaveBeenCalledWith('Worktree not ready — try again in a moment.')
+  })
+
   it('shows a pending chip for menu paste from the clipboard thumbnail probe', async () => {
     mocks.readClipboardImageThumbnail.mockResolvedValue({
       dataUrl: 'data:image/png;base64,AAA',

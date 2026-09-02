@@ -317,6 +317,7 @@ describe('useNativeChatComposerAttachments', () => {
     const cached = readNativeChatAttachmentCache('pty-1')
     expect(cached.some((attachment) => attachment.id === pendingId)).toBe(false)
     expect(cached).toMatchObject([{ path: '/tmp/settled.png' }])
+    expect(cached[0]?.previewUrl).toBeUndefined()
     act(() => probe.root.unmount())
   })
 
