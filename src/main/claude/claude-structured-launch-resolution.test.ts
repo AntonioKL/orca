@@ -34,6 +34,13 @@ function record(overrides: Partial<AgentSessionRecord> = {}): AgentSessionRecord
   } as AgentSessionRecord
 }
 
+function identityAt(leafUuid: string | null): typeof IDENTITY {
+  return {
+    ...IDENTITY,
+    providerHandle: { kind: 'claude', sessionId: 'provider-current', leafUuid }
+  }
+}
+
 function makeExecutable(path: string): void {
   mkdirSync(join(path, '..'), { recursive: true })
   writeFileSync(path, '')
@@ -90,7 +97,7 @@ describe('claude structured launch resolution', () => {
           }
         ] as AgentSessionRecord['providerHandleChain']
       })
-    )({ identity: IDENTITY })
+    )({ identity: identityAt('leaf-current') })
 
     expect(launch).toMatchObject({
       providerSessionId: 'provider-current',
@@ -98,7 +105,47 @@ describe('claude structured launch resolution', () => {
       resumed: true
     })
     expect(launch.options.resume).toBe('provider-current')
+    expect(launch.options.resumeSessionAt).toBe('leaf-current')
     expect(launch.options.sessionId).toBeUndefined()
+  })
+
+  it('refuses a durable journal leaf that diverged before resume resolution', async () => {
+    const resolve = resolverFor(
+      record({
+        providerHandleChain: [
+          {
+            handle: {
+              provider: 'claude',
+              sessionId: 'provider-current',
+              leafUuid: 'leaf-current'
+            }
+          }
+        ] as AgentSessionRecord['providerHandleChain']
+      })
+    )
+
+    await expect(resolve({ identity: identityAt('leaf-stale') })).rejects.toThrow(
+      'durable resume identity changed before spawn'
+    )
+  })
+
+  it('keeps session-only resume when the durable handle has no leaf', async () => {
+    const launch = await resolverFor(
+      record({
+        providerHandleChain: [
+          {
+            handle: {
+              provider: 'claude',
+              sessionId: 'provider-current',
+              leafUuid: null
+            }
+          }
+        ] as AgentSessionRecord['providerHandleChain']
+      })
+    )({ identity: identityAt(null) })
+
+    expect(launch.options.resume).toBe('provider-current')
+    expect(launch.options.resumeSessionAt).toBeUndefined()
   })
 
   it('preserves durable Claude launch arguments as typed options and extraArgs', async () => {

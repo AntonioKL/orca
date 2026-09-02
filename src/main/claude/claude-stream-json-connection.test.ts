@@ -542,6 +542,38 @@ describe('Claude stream-json connection', () => {
     expect(connection.exitVerdict).toEqual({ root: 'exited', tree: 'unverifiable' })
   })
 
+  it('settles a spawn error followed by close as processless and closes idempotently', async () => {
+    const scenario = scriptScenario([HOLD_OPEN])
+    const missingCli = join(scenario.cwd, 'claude-that-does-not-exist')
+    let fault: Error | null = null
+    let exit: Error | null = null
+    const connection = await open(
+      { ...launchFor(scenario), pathToClaudeCodeExecutable: missingCli },
+      {
+        onFault: (error) => {
+          fault = error
+        },
+        onExit: (error) => {
+          exit = error
+        }
+      }
+    )
+
+    await until(
+      () => (connection.exitVerdict.root === 'processless' ? connection.exitVerdict : null),
+      'the processless spawn settlement'
+    )
+    expect(connection.pid).toBeUndefined()
+    expect(fault).toBeInstanceOf(Error)
+    expect(exit).toBeNull()
+    await expect(Promise.all([connection.close(), connection.close()])).resolves.toEqual([
+      true,
+      true
+    ])
+    await expect(connection.close()).resolves.toBe(true)
+    expect(connection.exitVerdict).toEqual({ root: 'processless', tree: 'exited' })
+  })
+
   it('does not treat a child error event as first-hand root exit proof', async () => {
     const scenario = scriptScenario([HOLD_OPEN])
     let exit: Error | null = null

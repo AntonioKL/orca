@@ -56,11 +56,12 @@ export type ClaudeStreamJsonConnectionHandlers = {
 
 /**
  * Two questions with their own evidence. The root's verdict is first-hand: Orca's
- * own child handle reported exit. The tree's comes from the bounded descendant
- * verification, and `unverifiable` is never collapsed into either neighbour.
+ * own child handle reported exit, or reported error then close before it ever had
+ * a pid. The tree's comes from bounded descendant verification, and `unverifiable`
+ * is never collapsed into either neighbour.
  */
 export type ClaudeChildExitVerdict = {
-  root: 'exited' | 'live'
+  root: 'exited' | 'live' | 'processless'
   tree: DescendantTreeVerdict
 }
 
@@ -70,7 +71,7 @@ export type ClaudeStreamJsonConnection = ClaudeControlSurface & {
   /** What the ladder has observed so far; read after a `close()` that returned false. */
   readonly exitVerdict: ClaudeChildExitVerdict
   send: (message: Record<string, unknown>) => Promise<void>
-  /** Resolves true only after the child emitted exit AND its descendant tree was observed gone. */
+  /** Resolves true after processless settlement, or root exit plus observed tree exit. */
   close: () => Promise<boolean>
 }
 
@@ -119,12 +120,15 @@ export async function openClaudeStreamJsonConnection(
   let exited = false
   let exitStatus: ExitStatus | null = null
   let closing = false
+  let processless = false
+  let prePidSpawnError = false
   let terminalError: Error | null = null
   let faultReported = false
   let exitReported = false
   let closePromise: Promise<boolean> | null = null
   // One reaper per child: every close attempt and error-path reap shares its proof.
-  const tree = createClaudeChildTreeReaper(child, { exited: () => exited })
+  const rootSettled = (): boolean => exited || processless
+  const tree = createClaudeChildTreeReaper(child, { exited: rootSettled })
 
   let settleExit = (): void => {}
   const exitPromise = new Promise<void>((resolve) => {
@@ -167,12 +171,19 @@ export async function openClaudeStreamJsonConnection(
   })
 
   child.on('error', (error) => {
+    if (spawner.pid === undefined) {
+      prePidSpawnError = true
+    }
     if (!closing && !exited) {
       void tree.reap()
     }
     handleUnexpectedEnd(error)
   })
   child.on('close', () => {
+    if (prePidSpawnError && spawner.pid === undefined) {
+      processless = true
+      settleExit()
+    }
     handleUnexpectedEnd()
   })
   child.stdin.on('error', (error) => {
@@ -196,7 +207,7 @@ export async function openClaudeStreamJsonConnection(
       const proven = await proveClaudeChildExit({
         child,
         exitPromise,
-        exited: () => exited,
+        exited: rootSettled,
         tree
       })
       inbox.fail(new Error('claude stream-json connection closed'))
@@ -217,7 +228,10 @@ export async function openClaudeStreamJsonConnection(
       return closing || exited || terminalError !== null
     },
     get exitVerdict() {
-      return { root: exited ? 'exited' : 'live', tree: tree.treeVerdict } as const
+      return {
+        root: processless ? 'processless' : exited ? 'exited' : 'live',
+        tree: tree.treeVerdict
+      } as const
     },
     send,
     close

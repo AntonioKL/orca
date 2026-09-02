@@ -63,7 +63,7 @@ export type AgentSessionAcquisition = {
   acquisitionGeneration?: string
 }
 
-/** Acquisition validation failed before the adapter attempted to spawn. */
+/** Acquisition failed with first-hand proof that no provider process existed. */
 export class AgentSessionPreSpawnError extends Error {
   constructor(cause: unknown) {
     super(cause instanceof Error ? cause.message : String(cause), { cause })

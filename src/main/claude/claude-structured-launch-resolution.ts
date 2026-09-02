@@ -20,6 +20,7 @@ export type ClaudeStructuredSdkOptions = Pick<
   | 'effort'
   | 'sessionId'
   | 'resume'
+  | 'resumeSessionAt'
 >
 
 /**
@@ -147,6 +148,14 @@ export function createClaudeStructuredLaunchResolver(
       throw new Error(`claude sessions pin CLAUDE_CONFIG_DIR, not ${record.accountHome.variable}`)
     }
     const head = agentSessionProviderHandleChainHead(record.providerHandleChain)
+    if (
+      head?.handle.provider === 'claude' &&
+      (identity.providerHandle.kind !== 'claude' ||
+        identity.providerHandle.sessionId !== head.handle.sessionId ||
+        identity.providerHandle.leafUuid !== head.handle.leafUuid)
+    ) {
+      throw new Error('claude durable resume identity changed before spawn')
+    }
     const providerSessionId =
       head?.handle.provider === 'claude'
         ? head.handle.sessionId
@@ -180,7 +189,10 @@ export function createClaudeStructuredLaunchResolver(
         ...CLAUDE_STRUCTURED_BASE_OPTIONS,
         extraArgs: { ...durable.extraArgs, ...CLAUDE_STRUCTURED_BASE_OPTIONS.extraArgs },
         ...(head?.handle.provider === 'claude'
-          ? { resume: providerSessionId }
+          ? {
+              resume: providerSessionId,
+              ...(head.handle.leafUuid === null ? {} : { resumeSessionAt: head.handle.leafUuid })
+            }
           : { sessionId: providerSessionId })
       },
       cwd: await deps.resolveWorkspacePath(record.location.workspaceId),

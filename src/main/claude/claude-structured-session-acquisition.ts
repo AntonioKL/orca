@@ -1,6 +1,7 @@
 import {
   AgentSessionAcquisitionExitUnprovenError,
-  AgentSessionAcquisitionRootExitObservedError
+  AgentSessionAcquisitionRootExitObservedError,
+  AgentSessionPreSpawnError
 } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type {
   AgentSessionAcquisition,
@@ -72,6 +73,9 @@ function claudeAcquisitionCleanupError(
   cause: unknown
 ): Error {
   const verdict = connection?.exitVerdict
+  if (verdict?.root === 'processless') {
+    return new AgentSessionPreSpawnError(cause)
+  }
   return verdict?.root === 'exited' && verdict.tree === 'unverifiable'
     ? new AgentSessionAcquisitionRootExitObservedError(cause)
     : new AgentSessionAcquisitionExitUnprovenError(cause)
@@ -147,7 +151,13 @@ export async function acquireClaudeSession({
     // Any earlier session is closed or already gone: its exit says nothing about this start.
     exits.delete(sessionId)
     acquisitions.assertCurrent(sessionId, attempt)
-    const launch = await deps.resolveLaunch({ identity: input.identity })
+    const launch = await deps
+      .resolveLaunch({ identity: input.identity })
+      .catch((error: unknown) => {
+        throw error instanceof AgentSessionPreSpawnError
+          ? error
+          : new AgentSessionPreSpawnError(error)
+      })
     observedLeafUuid = launch.resumeLeafUuid
     acquisitions.assertCurrent(sessionId, attempt)
     const open = deps.openConnection ?? openClaudeStreamJsonConnection
@@ -247,6 +257,7 @@ export async function acquireClaudeSession({
     return acquired
   } catch (error) {
     initDeadline.clear()
+    let acquisitionError = error
     if (sessions.get(sessionId)?.connection !== attempt.connection) {
       translator?.dispose()
       // Settle any callback that fired before the failure so no SDK promise dangles.
@@ -254,12 +265,14 @@ export async function acquireClaudeSession({
         prompt.settle(null)
       }
       const closed = (await attempt.connection?.close()) ?? true
-      if (!closed) {
-        throw claudeAcquisitionCleanupError(attempt.connection, error)
+      if (attempt.connection?.exitVerdict.root === 'processless') {
+        acquisitionError = new AgentSessionPreSpawnError(error)
+      } else if (!closed) {
+        acquisitionError = claudeAcquisitionCleanupError(attempt.connection, error)
       }
     }
     acquisitions.deleteIfCurrent(sessionId, attempt)
-    throw error
+    throw acquisitionError
   } finally {
     attempt.finish()
   }
