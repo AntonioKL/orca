@@ -15,6 +15,7 @@ import {
   mergeWorkspaceSessionsWithHostShadow,
   pickPrimaryHostForClaims
 } from './workspace-session-host-contention'
+import { fetchWorkspaceSessionWithRuntimeHostOwners } from './workspace-session-host-hydration'
 import {
   buildHostIdByWorktreeId,
   patchWorkspaceSessionByHost,
@@ -301,5 +302,131 @@ describe('writing a contested workspace id back', () => {
     const set = await persist(contestedState({ contestedHostWorkspaceSessions: shadow }))
 
     expect(set.mock.calls.some(([, hostId]) => hostId === RUNTIME_HOST)).toBe(false)
+  })
+})
+
+/**
+ * The read decides which partition a row came from; the write must not re-decide it. When the two
+ * disagreed, a write copied one host's workspace into another host's partition — worse than the
+ * shared bucket this PR set out to fix.
+ */
+describe('read-time primary is the one the write path honours', () => {
+  const RUNTIME_HOST: ExecutionHostId = 'runtime:env-1'
+  const RUNTIME_ONLY_ID = 'repo-runtime::/srv/app'
+
+  function sshVersusRuntimeState(
+    overrides: Partial<HostPersistenceState> = {}
+  ): HostPersistenceState {
+    return {
+      repos: [],
+      worktreesByRepo: {
+        'repo-shared': [
+          { id: SHARED_ID, repoId: 'repo-shared', hostId: SSH_HOST },
+          { id: SHARED_ID, repoId: 'repo-shared', hostId: RUNTIME_HOST }
+        ],
+        'repo-runtime': [{ id: RUNTIME_ONLY_ID, repoId: 'repo-runtime', hostId: RUNTIME_HOST }]
+      },
+      ...overrides
+    }
+  }
+
+  it('keeps an SSH claimant in the local partition it actually persists in', () => {
+    // Why this shape: the claims catalog sorts `runtime:` before `ssh:`, so picking a primary from
+    // claimants sent the SSH workspace's rows into the runtime partition.
+    expect(buildHostIdByWorktreeId(sshVersusRuntimeState())(SHARED_ID)).toBe('local')
+  })
+
+  it('does not strand the runtime co-claimant when the SSH row is written', async () => {
+    const set: SessionWriteMock = vi.fn(async () => {})
+    await persistWorkspaceSessionByHost(
+      { set, get: vi.fn(), patch: vi.fn(), setSync: vi.fn(), flush: vi.fn(async () => {}) },
+      sessionWithTabs({
+        [SHARED_ID]: [tab('ssh-tab')],
+        [RUNTIME_ONLY_ID]: [tab('runtime-only-tab', RUNTIME_ONLY_ID)]
+      }),
+      sshVersusRuntimeState({
+        contestedHostWorkspaceSessions: {
+          [RUNTIME_HOST]: sessionWithTabs({ [SHARED_ID]: [tab('runtime-tab')] })
+        }
+      })
+    )
+
+    const runtimeWrite = set.mock.calls.find(([, hostId]) => hostId === RUNTIME_HOST)?.[0]
+    expect(runtimeWrite?.tabsByWorktree[SHARED_ID]?.map((entry) => entry.id)).toEqual([
+      'runtime-tab'
+    ])
+    const localWrite = set.mock.calls.find(([, hostId]) => hostId === undefined)?.[0]
+    expect(localWrite?.tabsByWorktree[SHARED_ID]?.map((entry) => entry.id)).toEqual(['ssh-tab'])
+  })
+
+  it('writes a row back to the only partition that had it instead of copying it', async () => {
+    const set: SessionWriteMock = vi.fn(async () => {})
+    await persistWorkspaceSessionByHost(
+      { set, get: vi.fn(), patch: vi.fn(), setSync: vi.fn(), flush: vi.fn(async () => {}) },
+      sessionWithTabs({ [SHARED_ID]: [tab('runtime-tab')] }),
+      {
+        repos: [],
+        worktreesByRepo: {
+          'repo-shared': [
+            { id: SHARED_ID, repoId: 'repo-shared', hostId: 'local' },
+            { id: SHARED_ID, repoId: 'repo-shared', hostId: RUNTIME_HOST }
+          ]
+        },
+        contestedPrimaryHostBySessionKey: { [SHARED_ID]: RUNTIME_HOST }
+      }
+    )
+
+    const runtimeWrite = set.mock.calls.find(([, hostId]) => hostId === RUNTIME_HOST)?.[0]
+    expect(runtimeWrite?.tabsByWorktree[SHARED_ID]?.map((entry) => entry.id)).toEqual([
+      'runtime-tab'
+    ])
+    const localWrite = set.mock.calls.find(([, hostId]) => hostId === undefined)?.[0]
+    expect(localWrite?.tabsByWorktree[SHARED_ID]).toBeUndefined()
+  })
+
+  it('still migrates a workspace the catalog has re-attributed to another partition', () => {
+    const owner = buildHostIdByWorktreeId({
+      repos: [],
+      worktreesByRepo: {
+        'repo-shared': [{ id: SHARED_ID, repoId: 'repo-shared', hostId: RUNTIME_HOST }]
+      },
+      contestedPrimaryHostBySessionKey: { [SHARED_ID]: 'local' }
+    })
+
+    expect(owner(SHARED_ID)).toBe(RUNTIME_HOST)
+  })
+
+  it('records the partition every restored key came from, contested or not', () => {
+    const merged = mergeWorkspaceSessionsWithHostShadow({
+      local: sessionWithTabs({ [SHARED_ID]: [tab('local-tab')] }),
+      [RUNTIME_HOST]: sessionWithTabs({
+        [SHARED_ID]: [tab('runtime-tab')],
+        [RUNTIME_ONLY_ID]: [tab('runtime-only-tab', RUNTIME_ONLY_ID)]
+      })
+    })
+
+    expect(merged.primaryHostBySessionKey).toEqual({
+      [SHARED_ID]: 'local',
+      [RUNTIME_ONLY_ID]: RUNTIME_HOST
+    })
+  })
+
+  it('does not name a runtime owner for a key the local partition kept', async () => {
+    const read = await fetchWorkspaceSessionWithRuntimeHostOwners(
+      {
+        get: vi.fn(async (hostId?: ExecutionHostId) =>
+          hostId === RUNTIME_HOST
+            ? sessionWithTabs({ [SHARED_ID]: [tab('runtime-tab')] })
+            : sessionWithTabs({ [SHARED_ID]: [tab('local-tab')] })
+        )
+      },
+      [],
+      [RUNTIME_HOST]
+    )
+
+    // Why it matters: a runtime owner here makes startup build runtime placeholders for the local
+    // workspace whose row the merge actually kept.
+    expect(read.runtimeHostIdByWorkspaceSessionKey[SHARED_ID]).toBeUndefined()
+    expect(read.contestedPrimaryHostBySessionKey[SHARED_ID]).toBe('local')
   })
 })

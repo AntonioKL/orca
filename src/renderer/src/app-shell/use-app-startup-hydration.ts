@@ -190,7 +190,8 @@ export function useAppStartupHydration(onOnboardingLoaded: (state: OnboardingSta
             actions.hydrateWorkspaceSession(sessionRead.session, {
               ...sessionHydrationOptions,
               runtimeHostIdByWorkspaceSessionKey: sessionRead.runtimeHostIdByWorkspaceSessionKey,
-              contestedHostWorkspaceSessions: sessionRead.contestedHostWorkspaceSessions
+              contestedHostWorkspaceSessions: sessionRead.contestedHostWorkspaceSessions,
+              contestedPrimaryHostBySessionKey: sessionRead.contestedPrimaryHostBySessionKey
             })
             actions.hydrateTabsSession(sessionRead.session, sessionHydrationOptions)
             actions.hydrateEditorSession(sessionRead.session, sessionHydrationOptions)

@@ -13,7 +13,9 @@ import { parseWorkspaceKey } from '../../../shared/workspace-scope'
 import { getRepoIdFromWorktreeId } from '../../../shared/worktree/id'
 import {
   attachHostSessionShadow,
+  contestedPartitionHosts,
   indexWorktreeHostClaims,
+  normalizeWorkspaceSessionKeyToWorktreeId,
   pickPrimaryHostForClaims,
   type HostSessionWriteMode,
   type WorktreeHostClaims
@@ -42,6 +44,9 @@ export type HostPersistenceState = {
   /** Entries a co-claimant host lost to the primary of a contested workspace id; written straight
    *  back to their own partition so the primary's write cannot erase them. */
   contestedHostWorkspaceSessions?: HostSessionSlices
+  /** Partition each restored session key was read from. Routing honours it so a write returns rows
+   *  to their own partition instead of re-deriving an owner the read never agreed to. */
+  contestedPrimaryHostBySessionKey?: Record<string, ExecutionHostId>
 }
 
 type SessionApi = {
@@ -123,9 +128,24 @@ function buildRepoHostById(
  *  snapshot — partitioning them too would double-own that data. The one exception is an id two
  *  hosts both publish: it gets a deterministic primary so the co-claimant's rows can be parked in
  *  the shadow instead of sharing one bucket with it. */
+/** True only when the catalog positively says `hostId` no longer holds the workspace. An id the
+ *  catalog cannot speak for yet keeps its restored partition — the same rule the shadow uses. */
+function catalogReattributedAwayFrom(
+  claims: WorktreeHostClaims,
+  worktreeId: string,
+  hostId: ExecutionHostId
+): boolean {
+  const claimed = claims.get(worktreeId)
+  return Boolean(claimed) && !contestedPartitionHosts(claimed ?? []).includes(hostId)
+}
+
 export function buildHostSessionRouting(state: HostPersistenceState): HostSessionRouting {
   const repoHostById = buildRepoHostById(state.repos)
   const claims = indexWorktreeHostClaims(state.worktreesByRepo, repoHostById)
+  const restoredPrimaryByWorktreeId = new Map<string, ExecutionHostId>()
+  for (const [key, hostId] of Object.entries(state.contestedPrimaryHostBySessionKey ?? {})) {
+    restoredPrimaryByWorktreeId.set(normalizeWorkspaceSessionKeyToWorktreeId(key), hostId)
+  }
   const { repoIdByWorktreeId, runtimeHostIdByWorktreeId } = indexWorkspaceRuntimeHostOwnership(
     state.worktreesByRepo
   )
@@ -137,11 +157,22 @@ export function buildHostSessionRouting(state: HostPersistenceState): HostSessio
     }
     const rawWorktreeId =
       workspaceScope?.type === 'worktree' ? workspaceScope.worktreeId : worktreeId
+    const restoredPrimary =
+      state.contestedPrimaryHostBySessionKey?.[worktreeId] ??
+      restoredPrimaryByWorktreeId.get(rawWorktreeId)
+    if (restoredPrimary && !catalogReattributedAwayFrom(claims, rawWorktreeId, restoredPrimary)) {
+      // Why first: the read already decided which partition each row came from. Re-deriving an
+      // owner here is what let a write copy one host's workspace into another host's partition.
+      return restoredPrimary
+    }
     const claimed = claims.get(rawWorktreeId)
     if (claimed && claimed.size > 1) {
-      // Why: folding a contested id into 'local' gave two workspaces one on-disk bucket. One
-      // primary owns the bare key; attachHostSessionShadow keeps the other claimants' rows.
-      return pickPrimaryHostForClaims(claimed)
+      // Why partitions, not claimants: 'local' and every ssh host share one blob, so a claimant set
+      // that collapses to a single partition is not separable and keeps its normal routing.
+      const partitions = contestedPartitionHosts(claimed)
+      if (partitions.length > 1) {
+        return pickPrimaryHostForClaims(partitions)
+      }
     }
     const worktreeHostId = runtimeHostIdByWorktreeId.get(rawWorktreeId)
     if (runtimeHostIdByWorktreeId.has(rawWorktreeId) && !worktreeHostId) {

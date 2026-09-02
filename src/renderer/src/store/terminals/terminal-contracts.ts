@@ -32,6 +32,8 @@ export type HydrateWorkspaceSessionOptions = {
   runtimeHostIdByWorkspaceSessionKey?: Record<string, ExecutionHostId>
   /** Rows parked for hosts that lost a contested workspace id; omitted leaves the store's copy. */
   contestedHostWorkspaceSessions?: HostSessionSlices
+  /** Partition each restored session key was read from; omitted leaves the store's copy. */
+  contestedPrimaryHostBySessionKey?: Record<string, ExecutionHostId>
 } & WorkspaceSessionHydrationOptions
 
 /** Scoped reconnect must still match this exact provider epoch and connection generation. */

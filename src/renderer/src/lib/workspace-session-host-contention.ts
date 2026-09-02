@@ -30,13 +30,20 @@ import {
  * bare id, so without this the two workspaces share one `tabsByWorktree` bucket and whichever host
  * writes last erases the other's tabs for good.
  *
- * The contested id gets one deterministic primary host, whose entries keep the normal bare key in
- * the unified renderer session. Every other claimant's entries are parked in a shadow that never
- * reaches renderer state and is written straight back to that host's own partition, so no host's
- * session is destroyed by another's write.
+ * The contested id gets one primary host, whose entries keep the normal bare key in the unified
+ * renderer session. Every other claimant's entries are parked in a shadow that never reaches
+ * renderer state and is written straight back to that host's own partition, so no host's session is
+ * destroyed by another's write.
  *
- * Known gap: the unified renderer session still holds one bucket per bare id, so both workspaces
- * display the primary's tabs. Closing that needs host-qualified keys through the whole tab store.
+ * The primary is decided ONCE, at read time, from the partition each row actually came from, and
+ * that decision is carried back to the write path. Re-deriving it from the catalog at write time
+ * would let the two disagree — the catalog names `ssh:*` hosts that own no partition — and the
+ * write would then copy one host's workspace into another host's partition.
+ *
+ * Known gaps: hosts that share a partition cannot be separated at all ('local' and every `ssh:*`
+ * host persist into the 'local' blob), and the unified renderer session still holds one bucket per
+ * bare id, so both workspaces display the primary's tabs. Closing either needs host-qualified keys
+ * through the whole tab store.
  */
 
 export type WorktreeHostClaims = ReadonlyMap<string, ReadonlySet<ExecutionHostId>>
@@ -93,8 +100,16 @@ export function indexWorktreeHostClaims(
   return claims
 }
 
-export function isContestedWorktreeId(claims: WorktreeHostClaims, worktreeId: string): boolean {
-  return (claims.get(worktreeId)?.size ?? 0) > 1
+/** The partition a host's session rows live in: a runtime host owns one, while 'local' and every
+ *  `ssh:*` host share the 'local' blob. */
+export function sessionPartitionHostFor(hostId: ExecutionHostId): ExecutionHostId {
+  return parseExecutionHostId(hostId)?.kind === 'runtime' ? hostId : LOCAL_EXECUTION_HOST_ID
+}
+
+/** Distinct partitions a set of claimants spans. Fewer than two means persistence cannot tell the
+ *  claimants apart, so the id keeps its uncontested routing. */
+export function contestedPartitionHosts(claimed: Iterable<ExecutionHostId>): ExecutionHostId[] {
+  return [...new Set([...claimed].map(sessionPartitionHostFor))]
 }
 
 /** Stable owner of a contested id: 'local' when it is a claimant, else the lowest host id.
@@ -169,24 +184,34 @@ function shadowHostEntries(
 }
 
 /** Split contested worktree-keyed entries out of the read partitions: the primary host's rows stay
- *  in the slices the renderer merges, every other claimant's rows move to the shadow. */
+ *  in the slices the renderer merges, every other claimant's rows move to the shadow.
+ *
+ *  `primaryHostBySessionKey` records where each key's live row came from — including the
+ *  uncontested single-partition case, so the write path can put every row back in its own
+ *  partition instead of re-deriving an owner that may not match. */
 export function extractContestedHostSessionEntries(slices: HostSessionSlices): {
   slices: HostSessionSlices
   shadow: HostSessionSlices
+  primaryHostBySessionKey: Record<string, ExecutionHostId>
 } {
   const shadow: HostSessionSlices = {}
   const hostIds = definedHostIds(slices)
+  const hostIdsByKey = indexHostIdsBySessionKey(slices, hostIds)
+  const primaryHostBySessionKey: Record<string, ExecutionHostId> = {}
+  for (const [key, owners] of hostIdsByKey) {
+    primaryHostBySessionKey[key] = pickPrimaryHostForClaims(owners)
+  }
   if (hostIds.length < 2) {
-    return { slices, shadow }
+    return { slices, shadow, primaryHostBySessionKey }
   }
   const primaryByKey = new Map<string, ExecutionHostId>()
-  for (const [key, owners] of indexHostIdsBySessionKey(slices, hostIds)) {
+  for (const [key, owners] of hostIdsByKey) {
     if (owners.length > 1) {
       primaryByKey.set(key, pickPrimaryHostForClaims(owners))
     }
   }
   if (primaryByKey.size === 0) {
-    return { slices, shadow }
+    return { slices, shadow, primaryHostBySessionKey }
   }
   const next: HostSessionSlices = { ...slices }
   for (const hostId of hostIds) {
@@ -200,17 +225,21 @@ export function extractContestedHostSessionEntries(slices: HostSessionSlices): {
       shadow[hostId] = result.shadow
     }
   }
-  return { slices: next, shadow }
+  return { slices: next, shadow, primaryHostBySessionKey }
 }
 
 export function mergeWorkspaceSessionsWithHostShadow(slices: HostSessionSlices): {
   session: WorkspaceSessionState
+  slices: HostSessionSlices
   shadow: HostSessionSlices
+  primaryHostBySessionKey: Record<string, ExecutionHostId>
 } {
   const extracted = extractContestedHostSessionEntries(slices)
   return {
     session: mergeWorkspaceSessionsFromHosts(extracted.slices),
-    shadow: extracted.shadow
+    slices: extracted.slices,
+    shadow: extracted.shadow,
+    primaryHostBySessionKey: extracted.primaryHostBySessionKey
   }
 }
 

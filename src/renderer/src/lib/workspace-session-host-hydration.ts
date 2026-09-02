@@ -20,6 +20,7 @@ export type WorkspaceSessionHostRead = {
   session: WorkspaceSessionState
   runtimeHostIdByWorkspaceSessionKey: Record<string, ExecutionHostId>
   contestedHostWorkspaceSessions: HostSessionSlices
+  contestedPrimaryHostBySessionKey: Record<string, ExecutionHostId>
 }
 
 const WORKSPACE_SESSION_KEYED_FIELDS = [
@@ -151,7 +152,10 @@ export async function fetchWorkspaceSessionWithRuntimeHostOwners(
   const merged = mergeWorkspaceSessionsWithHostShadow(slices)
   return {
     session: merged.session,
-    runtimeHostIdByWorkspaceSessionKey: buildRuntimeHostIdByWorkspaceSessionKey(slices),
-    contestedHostWorkspaceSessions: merged.shadow
+    // Why the merged slices and not the raw ones: a row parked out of the renderer session must not
+    // still name its host as the owner, or startup builds runtime placeholders for a local row.
+    runtimeHostIdByWorkspaceSessionKey: buildRuntimeHostIdByWorkspaceSessionKey(merged.slices),
+    contestedHostWorkspaceSessions: merged.shadow,
+    contestedPrimaryHostBySessionKey: merged.primaryHostBySessionKey
   }
 }

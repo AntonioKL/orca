@@ -99,6 +99,8 @@ export type TerminalState = {
    * host round-trip the other hosts' partitions instead of erasing them.
    */
   contestedHostWorkspaceSessions: HostSessionSlices
+  /** Partition each restored session key was read from, so a write returns its rows there. */
+  contestedPrimaryHostBySessionKey: Record<string, ExecutionHostId>
   defaultTerminalTabsAppliedByWorktreeId: Record<string, true>
   closedTerminalTabTombstonesByTabId: ClosedTerminalTabTombstonesByTabId
   hydrationSucceeded: boolean
