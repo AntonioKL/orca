@@ -57,13 +57,12 @@ describe('resolveNativeChatImageRuntimeContext', () => {
     expect(shallow(second, first)).toBe(true)
   })
 
-  it('keeps shallow selector identity stable when owner inputs are unchanged', () => {
+  it('reuses derived settings when owner inputs are unchanged', () => {
     const storeState = state()
     const first = resolveNativeChatImageRuntimeContext(storeState, 'tab-1')
     const second = resolveNativeChatImageRuntimeContext(storeState, 'tab-1')
 
     expect(first).not.toBeNull()
-    expect(second).not.toBe(first)
     expect(second?.settings).toBe(first?.settings)
     expect(shallow(second, first)).toBe(true)
   })

@@ -9,6 +9,7 @@ import { resolveNativeChatFileLinkContext } from './native-chat-file-link'
 import { captureDirectSshMutationExpectation } from '@/lib/ssh-mutation-expectation'
 import { parseExecutionHostId, type ExecutionHostId } from '../../../../shared/execution-host'
 import { parseWorkspaceKey } from '../../../../shared/workspace-scope'
+import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 /** The transcript must not read until ownership and its path are both known. */
@@ -169,5 +170,5 @@ export function resolveNativeChatImageRuntimeContext(
 
 export function useNativeChatImageRuntimeContext(tabId: string): NativeChatImageRuntimeContext {
   const ownerState = useAppStore(useShallow(selectNativeChatImageOwnerState))
-  return resolveNativeChatImageRuntimeContext(ownerState, tabId)
+  return useMemo(() => resolveNativeChatImageRuntimeContext(ownerState, tabId), [ownerState, tabId])
 }
