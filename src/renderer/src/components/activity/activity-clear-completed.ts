@@ -147,8 +147,8 @@ export function clearCompletedActivity(threads: readonly AgentPaneThread[]): boo
       ? translate('auto.components.activity.clearCompleted.clearedOne', 'Cleared 1 completed agent')
       : translate(
           'auto.components.activity.clearCompleted.clearedMany',
-          'Cleared {{value0}} completed agents',
-          { value0: plan.clearedThreadCount }
+          'Cleared {{count}} completed agents',
+          { count: plan.clearedThreadCount }
         ),
     {
       action: {

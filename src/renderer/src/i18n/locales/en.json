@@ -6923,9 +6923,6 @@
           "0277901cf7": "Adds an Agents entry to the left sidebar with a threaded worktree feed for completed agents, blocking questions, unread state, and worktree creation events. Experimental — the event model and UI may change.",
           "a05bcdaf57": "Agents View",
           "f63ea281e3": "Threaded left-sidebar feed for agent completions and blocking states.",
-          "agentsSidebar": {
-            "copy": "Controls whether the Agents tab appears in the left sidebar. Turn it on to monitor agent activity from the sidebar; turn it off to hide the tab."
-          },
           "agentHibernation": {
             "copy": "Stops idle background agent terminals after the configured idle window and resumes supported sessions when you open them again. Agent sleep preserves launch options for agents started by Orca. Manually started agents may resume with your current Orca defaults. Experimental while we tune the safety model.",
             "description": "Stops idle background agent terminals after the configured idle window and resumes supported sessions when you open them again.",
@@ -15944,8 +15941,12 @@
         },
         "clearCompleted": {
           "clearedOne": "Cleared 1 completed agent",
-          "clearedMany": "Cleared {{value0}} completed agents",
+          "clearedMany": "Cleared {{count}} completed agents",
           "undo": "Undo"
+        },
+        "standaloneWorktree": {
+          "floatingTerminal": "Floating terminal",
+          "standaloneTerminal": "Standalone terminal"
         },
         "ActivityTitlebarControls": {
           "f915168c8e": "unread",

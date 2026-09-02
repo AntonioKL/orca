@@ -19,8 +19,13 @@ function wasHiddenBySidebarFilters(worktreeId: string, executionHostId?: Executi
     if (target.id !== worktreeId) {
       return false
     }
-    if (!executionHostId || !target.executionHostId) {
+    if (!executionHostId) {
       return true
+    }
+    // Why strict: legacy rows publish without a host, and a hostless twin must not vouch for a
+    // filtered ssh:*/runtime:* target — that would clear the user's filters instead of warning.
+    if (!target.executionHostId) {
+      return false
     }
     return (
       normalizeExecutionHostId(target.executionHostId) === normalizeExecutionHostId(executionHostId)

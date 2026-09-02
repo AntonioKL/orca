@@ -75,11 +75,9 @@ export function ExperimentalPane({
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 shrink space-y-0.5">
               <Label>{getExperimentalSearchEntry().agentsSidebar.title}</Label>
+              {/* Same string the search entry advertises, so search results match the page. */}
               <p className="text-xs text-muted-foreground">
-                {translate(
-                  'auto.components.settings.ExperimentalPane.agentsSidebar.copy',
-                  'Controls whether the Agents tab appears in the left sidebar. Turn it on to monitor agent activity from the sidebar; turn it off to hide the tab.'
-                )}
+                {getExperimentalSearchEntry().agentsSidebar.description}
               </p>
             </div>
             <SettingsSwitch

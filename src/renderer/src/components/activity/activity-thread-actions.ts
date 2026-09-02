@@ -2,27 +2,45 @@ import { activateTabAndFocusPane } from '@/lib/activate-tab-and-focus-pane'
 import { activateStructuredAgentSessionTab } from '@/lib/structured-agent-session-tab-activation'
 import { jumpToWorktreeFromSidebar } from '@/lib/worktree-jump-navigation'
 import { useAppStore } from '@/store'
-import { getWorktreeExecutionHostId } from '../../../../shared/execution-host'
+import {
+  getSettingsFocusedExecutionHostId,
+  getWorktreeExecutionHostId,
+  type ExecutionHostId
+} from '../../../../shared/execution-host'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
 import { findKnownWorktreeById } from '@/store/slices/worktrees/listing/detected-worktree-meta'
 import type { AppState } from '@/store/types'
 import type { AgentPaneThread } from './activity-thread-types'
 
-function getActivityThreadExecutionHostId(thread: AgentPaneThread) {
-  return getWorktreeExecutionHostId(thread.worktree, thread.repo ?? undefined)
+// Same focused-host fallback the Agents scope filter uses; defaulting to `local` here would
+// look up a hostless runtime-owned workspace on the wrong host and silently drop the jump.
+function getActivityThreadExecutionHostId(
+  thread: AgentPaneThread,
+  defaultHostId: ExecutionHostId
+): ExecutionHostId {
+  return getWorktreeExecutionHostId(thread.worktree, thread.repo ?? undefined, defaultHostId)
 }
 
 type ActivityThreadWorkspaceCatalog = Pick<
   AppState,
   'worktreesByRepo' | 'detectedWorktreesByRepo' | 'folderWorkspaces'
->
+> & { defaultHostId: ExecutionHostId }
+
+function readActivityThreadWorkspaceCatalog(): ActivityThreadWorkspaceCatalog {
+  const state = useAppStore.getState()
+  return { ...state, defaultHostId: getSettingsFocusedExecutionHostId(state.settings) }
+}
 
 export function hasActivityThreadWorkspace(
   thread: AgentPaneThread,
-  catalog: ActivityThreadWorkspaceCatalog = useAppStore.getState()
+  catalog: ActivityThreadWorkspaceCatalog = readActivityThreadWorkspaceCatalog()
 ): boolean {
   return Boolean(
-    findKnownWorktreeById(catalog, thread.worktree.id, getActivityThreadExecutionHostId(thread))
+    findKnownWorktreeById(
+      catalog,
+      thread.worktree.id,
+      getActivityThreadExecutionHostId(thread, catalog.defaultHostId)
+    )
   )
 }
 
@@ -57,7 +75,10 @@ export function createActivityThreadActions({
 
   const activateThreadTarget = (thread: AgentPaneThread): void => {
     const state = useAppStore.getState()
-    const executionHostId = getActivityThreadExecutionHostId(thread)
+    const executionHostId = getActivityThreadExecutionHostId(
+      thread,
+      getSettingsFocusedExecutionHostId(state.settings)
+    )
     const worktree = state.getKnownWorktreeById(thread.worktree.id, executionHostId)
     if (!worktree) {
       return
@@ -99,12 +120,13 @@ export function createActivityThreadActions({
   }
 
   const jumpToWorkspace = (thread: AgentPaneThread): void => {
-    if (!hasActivityThreadWorkspace(thread)) {
+    const catalog = readActivityThreadWorkspaceCatalog()
+    if (!hasActivityThreadWorkspace(thread, catalog)) {
       return
     }
     markThreadRead(thread)
     jumpToWorktreeFromSidebar(thread.worktree.id, {
-      executionHostId: getActivityThreadExecutionHostId(thread)
+      executionHostId: getActivityThreadExecutionHostId(thread, catalog.defaultHostId)
     })
   }
 

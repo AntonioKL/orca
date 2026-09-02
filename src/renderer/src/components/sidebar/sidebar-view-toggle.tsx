@@ -26,6 +26,19 @@ export function SidebarViewToggle({
   onSelect,
   className
 }: SidebarViewToggleProps): React.JSX.Element {
+  const buttonRefs = React.useRef<(HTMLButtonElement | null)[]>([])
+  // Arrow keys must carry focus to the newly checked radio, or every later press
+  // would still step from the old index and re-select the same neighbour.
+  const selectAndFocus = (index: number): void => {
+    const option = options[index]
+    if (!option) {
+      return
+    }
+    if (option.value !== value) {
+      onSelect(option.value)
+    }
+    buttonRefs.current[index]?.focus()
+  }
   return (
     <div
       role="radiogroup"
@@ -40,6 +53,9 @@ export function SidebarViewToggle({
         const button = (
           <button
             key={option.value}
+            ref={(element) => {
+              buttonRefs.current[index] = element
+            }}
             type="button"
             role="radio"
             tabIndex={active ? 0 : -1}
@@ -53,16 +69,10 @@ export function SidebarViewToggle({
             onKeyDown={(e) => {
               if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
                 e.preventDefault()
-                const next = options[(index + 1) % options.length]
-                if (next) {
-                  onSelect(next.value)
-                }
+                selectAndFocus((index + 1) % options.length)
               } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
                 e.preventDefault()
-                const prev = options[(index - 1 + options.length) % options.length]
-                if (prev) {
-                  onSelect(prev.value)
-                }
+                selectAndFocus((index - 1 + options.length) % options.length)
               }
             }}
             className={cn(

@@ -162,11 +162,8 @@ export function createAgentStatusProviderSessionActions(
             s.acknowledgedAgentsByPaneKey,
             retiredPaneKeys
           ),
-          activityClearedAtByPaneKey: removePaneKeys(s.activityClearedAtByPaneKey, retiredPaneKeys),
-          manuallyUnreadTurnsByPaneKey: removePaneKeys(
-            s.manuallyUnreadTurnsByPaneKey,
-            retiredPaneKeys
-          ),
+          // Why the cleared-at/manual-unread maps stay: the pane survives this transition, so a
+          // repeat heartbeat would resurrect cleared history. They are swept on pane retirement.
           unreadAgentCompletionPanes: removePaneKeys(s.unreadAgentCompletionPanes, retiredPaneKeys),
           agentStatusEpoch: removedLiveStatus ? s.agentStatusEpoch + 1 : s.agentStatusEpoch,
           sortEpoch: removedLiveStatus ? s.sortEpoch + 1 : s.sortEpoch

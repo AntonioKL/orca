@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAppStore } from '@/store'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
@@ -53,6 +54,14 @@ function Sidebar({
   worktreeScrollOffsetRef,
   worktreeScrollAnchorRef
 }: SidebarProps): React.JSX.Element {
+  // Why: the memoized toolbar/search JSX below is localized, so it needs both a
+  // language subscription here and the locale as a memo dep to refresh on a switch.
+  const { i18n } = useTranslation()
+  const locale = i18n.resolvedLanguage ?? i18n.language
+  const sidebarTranslate = React.useCallback(
+    (key: string, fallback: string): string => translate(key, fallback, { lng: locale }),
+    [locale]
+  )
   const sidebarOpen = useAppStore((s) => s.sidebarOpen)
   const sidebarWidth = useAppStore((s) => s.sidebarWidth)
   const setSidebarWidth = useAppStore((s) => s.setSidebarWidth)
@@ -172,7 +181,7 @@ function Sidebar({
                 agentSearchOpen &&
                   'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
               )}
-              aria-label={translate(
+              aria-label={sidebarTranslate(
                 'auto.components.activity.ActivityPrototypePage.search',
                 'Search'
               )}
@@ -189,7 +198,7 @@ function Sidebar({
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom" sideOffset={6}>
-            {translate('auto.components.activity.ActivityPrototypePage.search', 'Search')}
+            {sidebarTranslate('auto.components.activity.ActivityPrototypePage.search', 'Search')}
           </TooltipContent>
         </Tooltip>
         <Tooltip>
@@ -207,7 +216,7 @@ function Sidebar({
                 agentReadFilter === 'unread' &&
                   'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
               )}
-              aria-label={translate(
+              aria-label={sidebarTranslate(
                 'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
                 'Show unread threads only'
               )}
@@ -216,7 +225,7 @@ function Sidebar({
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom" sideOffset={6}>
-            {translate(
+            {sidebarTranslate(
               'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
               'Show unread threads only'
             )}
@@ -225,7 +234,7 @@ function Sidebar({
         <div ref={setAgentOptionsTarget} className="flex items-center" />
       </div>
     ),
-    [agentReadFilter, agentSearchOpen, closeAgentSearch]
+    [agentReadFilter, agentSearchOpen, closeAgentSearch, sidebarTranslate]
   )
   const agentSearchRow = useMemo(
     () =>
@@ -240,19 +249,19 @@ function Sidebar({
                 closeAgentSearch()
               }
             }}
-            placeholder={translate(
+            placeholder={sidebarTranslate(
               'auto.components.activity.ActivityPrototypePage.795cbf26e2',
               'Filter...'
             )}
             className="h-7 w-full text-[11px]"
-            aria-label={translate(
+            aria-label={sidebarTranslate(
               'auto.components.activity.ActivityPrototypePage.search',
               'Search'
             )}
           />
         </div>
       ) : null,
-    [agentQuery, agentSearchOpen, closeAgentSearch]
+    [agentQuery, agentSearchOpen, closeAgentSearch, sidebarTranslate]
   )
 
   useWorkspaceRevealBodyRedirect(sidebarOpen && sidebarBody === 'agents' && showAgentsSidebar)

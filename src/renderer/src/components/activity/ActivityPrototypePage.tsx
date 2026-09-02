@@ -265,9 +265,15 @@ export default function ActivityPrototypePage(): React.JSX.Element {
       hasActivityThreadWorkspace(thread, {
         worktreesByRepo: storeData.worktreesByRepo,
         detectedWorktreesByRepo: storeData.detectedWorktreesByRepo,
-        folderWorkspaces: storeData.folderWorkspaces
+        folderWorkspaces: storeData.folderWorkspaces,
+        defaultHostId: storeData.defaultHostId
       }),
-    [storeData.worktreesByRepo, storeData.detectedWorktreesByRepo, storeData.folderWorkspaces]
+    [
+      storeData.worktreesByRepo,
+      storeData.detectedWorktreesByRepo,
+      storeData.folderWorkspaces,
+      storeData.defaultHostId
+    ]
   )
 
   useEffect(() => {

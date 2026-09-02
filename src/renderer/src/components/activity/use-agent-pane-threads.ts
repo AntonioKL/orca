@@ -3,7 +3,10 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
 import { getRepoMapFromState, getWorktreeMapFromState } from '@/store/selectors'
 import type { AppState } from '@/store/types'
-import { getSettingsFocusedExecutionHostId } from '../../../../shared/execution-host'
+import {
+  getSettingsFocusedExecutionHostId,
+  type ExecutionHostId
+} from '../../../../shared/execution-host'
 import { buildActivityEvents, createActivityEventBuildCache } from './activity-event-builder'
 import { projectActivityTabs, type ActivityTabProjection } from './activity-tab-projection'
 import { buildAgentPaneThreads, createAgentPaneThreadReuseCache } from './activity-thread-builder'
@@ -45,6 +48,8 @@ export type AgentPaneThreadsStoreData = Pick<
   worktreeMap: ReturnType<typeof getWorktreeMapFromState>
   repoMap: ReturnType<typeof getRepoMapFromState>
   generatedTitlesEnabled: boolean
+  /** Focused-host fallback for hostless worktrees, shared by the scope filter and the row actions. */
+  defaultHostId: ExecutionHostId
 }
 
 /** The Activity thread pipeline (store read -> events -> threads -> filter ->
@@ -72,7 +77,6 @@ export function useAgentPaneThreads(args: {
   const { query, readFilter, groupBy, selectedPaneKey, showChildAgents = false } = args
   const agentsVisibleHostIds = useAppStore((s) => s.agentsVisibleHostIds)
   const agentsFilterRepoIds = useAppStore((s) => s.agentsFilterRepoIds)
-  const defaultHostId = useAppStore((s) => getSettingsFocusedExecutionHostId(s.settings))
   // Why project: the unified tab map is rewritten on every tab focus; the projection keeps
   // its identity (and each tab's) unless a field this pipeline reads actually changed.
   const tabProjectionRef = useRef<{
@@ -106,7 +110,8 @@ export function useAgentPaneThreads(args: {
       activityClearedAtByPaneKey: s.activityClearedAtByPaneKey,
       acknowledgeAgents: s.acknowledgeAgents,
       unacknowledgeAgents: s.unacknowledgeAgents,
-      generatedTitlesEnabled: s.settings?.tabAutoGenerateTitle === true
+      generatedTitlesEnabled: s.settings?.tabAutoGenerateTitle === true,
+      defaultHostId: getSettingsFocusedExecutionHostId(s.settings)
     }))
   )
   // Why: agentStatusEpoch is a dep (not used in the body) so the memo recomputes when freshness boundaries expire even without new PTY data.
@@ -170,7 +175,7 @@ export function useAgentPaneThreads(args: {
         scope: {
           visibleHostIds: agentsVisibleHostIds,
           filterRepoIds: resolveActivityScopeRepoIds(agentsFilterRepoIds, storeData.repoMap),
-          defaultHostId
+          defaultHostId: storeData.defaultHostId
         },
         exemptPaneKey: effectiveSelectedPaneKey
       }),
@@ -179,7 +184,7 @@ export function useAgentPaneThreads(args: {
       agentsVisibleHostIds,
       agentsFilterRepoIds,
       storeData.repoMap,
-      defaultHostId,
+      storeData.defaultHostId,
       effectiveSelectedPaneKey
     ]
   )

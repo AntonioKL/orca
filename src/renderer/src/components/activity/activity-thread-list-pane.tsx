@@ -260,11 +260,14 @@ export function ActivityThreadListPane({
       scrollTopRef.current = 0
       return
     }
-    if (scrollTopRef.current > 0 && scrollTopRef.current >= totalSize) {
-      return
-    }
     const scrollContainer = scrollContainerRef.current
     if (!scrollContainer) {
+      return
+    }
+    // Against the max offset, not the content height: a viewport taller than the
+    // remaining content clamps the assignment to 0 and burns the one restore.
+    const maxScrollTop = Math.max(0, totalSize - scrollContainer.clientHeight)
+    if (scrollTopRef.current > maxScrollTop) {
       return
     }
     scrollContainer.scrollTop = scrollTopRef.current
