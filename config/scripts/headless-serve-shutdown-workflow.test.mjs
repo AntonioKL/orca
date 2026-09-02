@@ -15,6 +15,7 @@ const desktopStartupOracle = readFileSync(
   'config/docker/headless-serve-shutdown/run-appimage-desktop-startup-case.sh',
   'utf8'
 )
+const headlessLinuxProse = headlessLinuxGuide.replace(/\s+/g, ' ')
 
 function readSystemdUnitBlocks(doc, unitName) {
   const escapedUnitName = unitName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -168,5 +169,38 @@ describe('headless serve shutdown PR gate', () => {
     expect(ownedXvfbUnits[0]).toMatch(/^KillMode=mixed$/m)
     expect(managedXvfbUnits).toHaveLength(1)
     expect(managedXvfbUnits[0]).not.toMatch(/^KillMode=/m)
+  })
+
+  it('distinguishes persisted state from live work during a service restart', () => {
+    expect(headlessLinuxProse).toContain(
+      'Every `systemctl stop` or `restart` therefore ends live terminals and agent processes'
+    )
+    expect(headlessLinuxProse).toContain(
+      'These guarantees do not preserve live processes. The service restart kills every terminal and agent in its cgroup'
+    )
+    expect(headlessLinuxProse).toContain(
+      'A separately paired runtime is outside that boundary; local execution and SSH hosts reached through this runtime are not. An affected or unknown omission, missing scope, failed request or lost connection is `unverifiable`'
+    )
+    expect(headlessLinuxGuide).toContain(
+      'sudo -Hu orca /home/orca/.local/bin/orca-ide terminal list --json'
+    )
+    expect(headlessLinuxGuide).not.toContain('sudo -Hu orca orca-ide terminal list --json')
+    expect(headlessLinuxGuide).not.toContain('Two facts make this safe and predictable')
+  })
+
+  it('uses the registered CLI name from ordinary Linux shells', () => {
+    const commandRule =
+      'The registered Linux CLI command is `orca-ide`, not `orca`, to avoid shadowing the GNOME Orca screen reader.'
+    const substitutionRule =
+      "From an ordinary shell outside that service user's managed environment, substitute `orca-ide` for `orca` in commands below."
+    const censusCommand = '`sudo -Hu orca /home/orca/.local/bin/orca-ide terminal list --json`'
+
+    expect(headlessLinuxProse).toContain(commandRule)
+    expect(headlessLinuxProse).toContain(substitutionRule)
+    expect(headlessLinuxProse).toContain(censusCommand)
+    expect(headlessLinuxGuide).toContain('best-effort dispatcher at `$HOME/.local/bin/orca`')
+    expect(headlessLinuxProse.indexOf(substitutionRule)).toBeLessThan(
+      headlessLinuxProse.indexOf(censusCommand)
+    )
   })
 })
