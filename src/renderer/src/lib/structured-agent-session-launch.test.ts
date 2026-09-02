@@ -196,6 +196,35 @@ describe('startStructuredCodexLaunch', () => {
     expect(toast.error).not.toHaveBeenCalled()
   })
 
+  it('does not toast when cancelled during retry reconciliation', async () => {
+    const worktreeId = 'wt-retry-close-race'
+    const intent = launchIntent(worktreeId, 'session-retry-close-race')
+    let resolveRetryRefresh!: (snapshots: RuntimeMobileSessionTabsResult[]) => void
+    mocks.createIntent.mockReturnValueOnce(intent)
+    mocks.launch
+      .mockRejectedValueOnce(new Error('first response lost'))
+      .mockRejectedValueOnce(new Error('retry response lost'))
+    vi.mocked(refreshLocalStructuredSessionTabs)
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(
+        () =>
+          new Promise<RuntimeMobileSessionTabsResult[]>((resolve) => {
+            resolveRetryRefresh = resolve
+          })
+      )
+
+    startStructuredCodexLaunch(worktreeId)
+    await vi.waitFor(() => expect(refreshLocalStructuredSessionTabs).toHaveBeenCalledTimes(2))
+
+    expect(cancelStructuredCodexLaunch(worktreeId, intent.sessionId)).toBe(true)
+    resolveRetryRefresh([])
+    await flushLaunchSettlement()
+
+    expect(mocks.launch).toHaveBeenCalledTimes(2)
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(mocks.abandonIntent).toHaveBeenCalledWith(intent)
+  })
+
   it('keeps an unresolved identity reserved until inventory reconciles it', async () => {
     const worktreeId = 'wt-still-unknown'
     const intent = launchIntent(worktreeId)

@@ -88,6 +88,9 @@ async function retrySameIntent(state: StructuredLaunchState, priorError: unknown
     try {
       return await verifyPublishedSession(state.intent)
     } catch {
+      if (state.cancelled) {
+        throw new StructuredAgentSessionLaunchCancelledError()
+      }
       state.visibilityUnknown = true
       throw error ?? priorError
     }
