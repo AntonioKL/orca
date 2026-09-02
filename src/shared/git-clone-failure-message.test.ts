@@ -107,6 +107,16 @@ describe('getGitCloneFailureMessage', () => {
     ).toBe("fatal: repository 'https://github.com/org/repo.git/' not found")
   })
 
+  it('withholds SSH guidance when the failing transport was HTTPS', () => {
+    // Git reuses this line for the HTTP remote helper, so the string alone does not prove SSH.
+    const stderr =
+      'remote: Invalid username or token.\n' +
+      "fatal: Authentication failed for 'https://github.com/org/repo.git/'\n" +
+      'fatal: Could not read from remote repository.\n'
+
+    expect(getGitCloneFailureMessage(stderr)).not.toContain('BatchMode=yes')
+  })
+
   it('does not repeat the guidance when a relay message is re-parsed', () => {
     const relayMessage = `Clone failed: ${getGitCloneFailureMessage(
       'git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n'

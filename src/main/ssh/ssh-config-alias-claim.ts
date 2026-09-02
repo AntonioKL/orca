@@ -10,7 +10,8 @@ import { parseSshConfigAliasClaims, type SshConfigAliasClaims } from './ssh-conf
  * `Match` block other than a bare catch-all applies to it.
  *
  * Sound in the negative direction only. `false` means the parsed config proves nothing claims the
- * alias; every uncertainty (unreadable file, any `Match` block, any pattern that might match)
+ * alias; every uncertainty (unreadable file, any `Match` block, any negated `Host` group, any
+ * pattern that might match)
  * answers `true`, because "we could not tell" must never be read as "no block exists". Callers use
  * `false` as licence to override what OpenSSH would resolve, so a wrong `false` breaks a config the
  * user explicitly wrote, which is worse than the routing bug it exists to fix.
@@ -29,12 +30,14 @@ export function sshConfigMayClaimAlias(
     return true
   }
   return claims.hostPatternGroups.some((patterns) =>
-    patterns.some(
-      (pattern) =>
-        !pattern.startsWith('!') &&
-        !isCatchAllHostPattern(pattern) &&
-        matchesHostPattern(pattern, normalizedAlias)
-    )
+    // A negation makes the whole group uncertain: `Host * !prod` still routes every other alias,
+    // so skipping both the catch-all and the `!` would answer "unclaimed" for one that is claimed.
+    patterns.some((pattern) => pattern.startsWith('!'))
+      ? true
+      : patterns.some(
+          (pattern) =>
+            !isCatchAllHostPattern(pattern) && matchesHostPattern(pattern, normalizedAlias)
+        )
   )
 }
 

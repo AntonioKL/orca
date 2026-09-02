@@ -51,8 +51,15 @@ Match host prod
     expect(mayClaim(config, 'prod')).toBe(true)
   })
 
-  it('ignores a negated pattern as a claim of its own', () => {
-    expect(mayClaim('Host * !prod\n  ForwardAgent yes\n', 'prod')).toBe(false)
+  it('reads any negated group as uncertainty, because OpenSSH still applies its positives', () => {
+    // `Host * !prod` routes stage; answering false there would licence overriding a block the user
+    // wrote. The exempted alias is not worth a second matching rule to recover.
+    expect(mayClaim('Host * !prod\n  ForwardAgent yes\n', 'stage')).toBe(true)
+    expect(mayClaim('Host * !prod\n  ForwardAgent yes\n', 'prod')).toBe(true)
+  })
+
+  it('still proves absence when no group negates', () => {
+    expect(mayClaim('Host *\n  ForwardAgent yes\nHost prod\n  User ops\n', 'stage')).toBe(false)
   })
 
   it('reads an unreadable config as uncertainty, not absence', () => {

@@ -10,6 +10,10 @@ const CLONE_HOST_NOTE =
 const CLONE_KEY_HINT = `${CLONE_HOST_NOTE} A passphrase-protected key cannot prompt there, so load it into an agent on that machine (ssh-add) and retry.`
 const CLONE_HOST_KEY_HINT = `${CLONE_HOST_NOTE} It has not trusted this host key yet — connect once from a shell on that machine to record it in its known_hosts.`
 
+/** An ssh(1) diagnostic, i.e. a line only the SSH transport can have produced. */
+const SSH_TRANSPORT_DIAGNOSTIC =
+  /\bssh|permission denied \(|connection (?:closed|reset|refused|timed out) by/i
+
 export function getGitCloneFailureMessage(
   stderr: string,
   options: { clonePath?: string | null } = {}
@@ -32,8 +36,11 @@ function appendCloneTransportGuidance(message: string, scrubbedStderr: string): 
   if (/permission denied \(([^)]*publickey[^)]*)\)/i.test(scrubbedStderr)) {
     return `${message} ${CLONE_KEY_HINT}`
   }
-  // Every other SSH-transport failure still needs the one fact the reporter was missing.
-  return /could not read from remote repository/i.test(scrubbedStderr)
+  // Every other SSH-transport failure still needs the one fact the reporter was missing — but only
+  // once something proves the transport was SSH: git prints this same line for the HTTP remote
+  // helper, where a note about keys and agents is simply wrong.
+  return /could not read from remote repository/i.test(scrubbedStderr) &&
+    SSH_TRANSPORT_DIAGNOSTIC.test(scrubbedStderr)
     ? `${message} ${CLONE_HOST_NOTE}`
     : message
 }
