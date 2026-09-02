@@ -10,11 +10,6 @@ import { isRemoteExecutionHostPtyId } from './remote-execution-host-pty'
  * platform. Local Windows is costly for a different reason: it forks a
  * powershell.exe whole-process-table CIM scan per poll (~10-40x POSIX `ps`).
  * Local POSIX (and daemon/WSL panes on it) stays on the full cadence.
- *
- * Relaxing is the interim measure: once this renderer consumes the batched
- * foreground evidence direct-SSH/remote authorities already publish with their
- * PTY inventory (#17525), those panes can drop to `shouldPollNoEvidenceProcessCadence`
- * and stop scheduling idle host reads altogether.
  */
 export function isAgentProcessInspectionCostly(userAgent: string, ptyId: string | null): boolean {
   if (ptyId !== null && isRemoteExecutionHostPtyId(ptyId)) {
@@ -24,4 +19,20 @@ export function isAgentProcessInspectionCostly(userAgent: string, ptyId: string 
     return false
   }
   return ptyId !== null
+}
+
+/**
+ * Whether a pane with no agent evidence should keep a slow idle inspection
+ * timer at all, or rely purely on pane activity (output/replay/title/hook) to
+ * arm the hot cadence.
+ *
+ * Why remote is push-driven: an idle no-evidence timer can only discover an
+ * agent that started without printing a byte, changing the title, or firing a
+ * hook — and every one of those signals already re-arms the 2s cadence. On a
+ * remote pane that timer buys nothing and costs a host round trip plus two host
+ * forks per tick, so it is disarmed outright. Local hosts keep the timer: local
+ * inspection is cheap enough that the floor is worth its price.
+ */
+export function shouldPollNoEvidenceProcessCadenceForPty(ptyId: string | null): boolean {
+  return ptyId === null || !isRemoteExecutionHostPtyId(ptyId)
 }

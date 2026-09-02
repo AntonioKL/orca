@@ -13,7 +13,10 @@ import {
   resetAgentCompletionCoordinatorIdentitiesForTest
 } from './agent-completion-coordinator'
 import { resetAgentProcessInspectionQueueForTests } from './agent-process-inspection-queue'
-import { isAgentProcessInspectionCostly } from './agent-process-inspection-cost'
+import {
+  isAgentProcessInspectionCostly,
+  shouldPollNoEvidenceProcessCadenceForPty
+} from './agent-process-inspection-cost'
 import { toRemoteRuntimePtyId } from '../../../../shared/remote-runtime-pty-id'
 import { toAppSshPtyId } from '../../../../shared/ssh-pty-id'
 import type { RuntimeTerminalProcessInspection } from '@/runtime/runtime-terminal-inspection'
@@ -109,6 +112,96 @@ describe('agent completion no-evidence inspection cadence', () => {
     coordinator.observeOutputActivity()
     await vi.advanceTimersByTimeAsync(2_000)
     expect(inspectProcess).toHaveBeenCalledTimes(1)
+  })
+
+  describe('remote pane in the shipped option shape (push-driven, no idle timer)', () => {
+    // Why: mirror terminal-keydown-fit.ts exactly — both predicates fed from the
+    // same pty id — so these counts are what production remote panes pay.
+    function createRemoteCoordinator(
+      ptyId: string,
+      inspectProcess: AgentCompletionCoordinatorOptions['inspectProcess']
+    ) {
+      return createCoordinator(inspectProcess, {
+        getPtyId: () => ptyId,
+        isProcessInspectionCostly: () => isAgentProcessInspectionCostly(MAC_UA, ptyId),
+        shouldPollNoEvidenceProcessCadence: () => shouldPollNoEvidenceProcessCadenceForPty(ptyId)
+      })
+    }
+
+    it('costs zero idle host round trips for a silent remote pane with no evidence', async () => {
+      for (const ptyId of [
+        toAppSshPtyId('target-1', 'pty-1'),
+        toRemoteRuntimePtyId('term_1', 'env-a')
+      ]) {
+        const inspectProcess = vi.fn(async () => processResult(null, false))
+        const { coordinator } = createRemoteCoordinator(ptyId, inspectProcess)
+
+        coordinator.startProcessTracking()
+        await vi.advanceTimersByTimeAsync(60_000)
+
+        // Was 30 (2s idle), then 4 (15s no-evidence tier); now nothing is armed.
+        expect(inspectProcess).not.toHaveBeenCalled()
+        coordinator.dispose()
+      }
+    })
+
+    it('runs a bounded 2s hot window after a reattach paint, then disarms again', async () => {
+      // Why: a reattach paint routes through writeReplayData, which now records
+      // pane activity exactly like a live byte — so a restart onto a running
+      // remote agent gets the same 4 inspections (2s/4s/6s/8s inside the strict
+      // 10s window) a fresh output burst would.
+      const ptyId = toAppSshPtyId('target-1', 'pty-1')
+      const inspectProcess = vi.fn(async () => processResult(null, false))
+      const { coordinator } = createRemoteCoordinator(ptyId, inspectProcess)
+
+      coordinator.startProcessTracking()
+      coordinator.observeOutputActivity()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(inspectProcess).toHaveBeenCalledTimes(4)
+
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(inspectProcess).toHaveBeenCalledTimes(4)
+    })
+
+    it('escalates a running agent found in the hot window to the active cadence', async () => {
+      // Why: the reattach hot window must be enough to establish process evidence,
+      // after which the pane is on the ordinary active/idle tiers and exit
+      // detection is unchanged from every other host.
+      const ptyId = toRemoteRuntimePtyId('term_1', 'env-a')
+      let foreground: string | null = 'claude'
+      const inspectProcess = vi.fn(async () => processResult(foreground, foreground !== null))
+      const { coordinator, dispatchCompletion } = createRemoteCoordinator(ptyId, inspectProcess)
+
+      coordinator.startProcessTracking()
+      coordinator.observeOutputActivity()
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(inspectProcess).toHaveBeenCalledTimes(1)
+
+      // Active tier is 750ms: well past the 10s hot window it must keep polling.
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(inspectProcess.mock.calls.length).toBeGreaterThan(30)
+
+      foreground = null
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(dispatchCompletion).toHaveBeenCalledWith(
+        'claude',
+        expect.objectContaining({ terminalIdleConfirmed: true })
+      )
+    })
+
+    it('re-arms the hot window from a title change or hook status with no output', async () => {
+      const ptyId = toAppSshPtyId('target-1', 'pty-1')
+      const inspectProcess = vi.fn(async () => processResult(null, false))
+      const { coordinator } = createRemoteCoordinator(ptyId, inspectProcess)
+
+      coordinator.startProcessTracking()
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(inspectProcess).not.toHaveBeenCalled()
+
+      coordinator.observeTitle('vim')
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(inspectProcess).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('looks within 2s, not 15s, when a reattach paint marks activity at tracking start', async () => {
@@ -362,5 +455,21 @@ describe('isAgentProcessInspectionCostly', () => {
   // inspection crosses a link (see remote-execution-host-pty.test.ts).
   it('does not relax a POSIX pane for an ssh-prefixed id carrying no relay pty id', () => {
     expect(isAgentProcessInspectionCostly(MAC_UA, 'ssh:target-1')).toBe(false)
+  })
+})
+
+describe('shouldPollNoEvidenceProcessCadenceForPty', () => {
+  it('disarms the idle timer only for remote-execution-host ptys', () => {
+    expect(shouldPollNoEvidenceProcessCadenceForPty(toAppSshPtyId('target-1', 'pty-1'))).toBe(false)
+    expect(shouldPollNoEvidenceProcessCadenceForPty(toRemoteRuntimePtyId('term_1', 'env-a'))).toBe(
+      false
+    )
+    expect(shouldPollNoEvidenceProcessCadenceForPty(toRemoteRuntimePtyId('term_1'))).toBe(false)
+  })
+
+  it('keeps the timer for local, daemon-shaped, null and bare-ssh ids', () => {
+    expect(shouldPollNoEvidenceProcessCadenceForPty('worktree-1|pane-1')).toBe(true)
+    expect(shouldPollNoEvidenceProcessCadenceForPty(null)).toBe(true)
+    expect(shouldPollNoEvidenceProcessCadenceForPty('ssh:target-1')).toBe(true)
   })
 })
