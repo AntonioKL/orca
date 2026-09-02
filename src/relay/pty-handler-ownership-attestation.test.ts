@@ -142,12 +142,12 @@ describe('PtyHandler publishes host-attested PTY ownership', () => {
   it('dates the foreground observation instead of stamping it fresh', async () => {
     // `capturedAgeMs` used to be a hardcoded 0 with no reader anywhere, so the one field that
     // exists to bound staleness asserted the evidence was never stale. It now carries the
-    // worst-case age of the TTL-shared capture the record was derived from.
+    // actual age of the TTL-shared capture the record was derived from.
     const { id } = await spawnFrom(7, { env: { ORCA_PANE_KEY: PANE_KEY } })
 
     const entry = (await listProcesses()).find((process) => process.id === id)
 
-    expect(entry?.foregroundProcessEvidence?.capturedAgeMs).toBe(
+    expect(entry?.foregroundProcessEvidence?.capturedAgeMs).toBeLessThanOrEqual(
       PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS
     )
   })

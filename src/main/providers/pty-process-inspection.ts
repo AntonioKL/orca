@@ -1,14 +1,12 @@
 import type { IPtyProvider } from './types'
 import type { PtyIncarnationId } from '../../shared/pty-incarnation'
-import type { RemoteForegroundEvidence } from '../../shared/foreground-process-evidence'
+import {
+  classifyTerminalProcessInspectionFailure,
+  clientOnlyUnverifiableInspection,
+  type TerminalProcessInspection
+} from '../../shared/terminal-process-inspection'
 
-export type PtyProcessInspection = {
-  foregroundProcess: string | null
-  hasChildProcesses: boolean
-  /** Optional host-stamped fenced evidence; absent on legacy hosts. */
-  foregroundProcessEvidence?: RemoteForegroundEvidence
-  unavailable?: true
-}
+export type PtyProcessInspection = TerminalProcessInspection
 
 type CompletionSensitivePtyProvider = IPtyProvider & {
   inspectProcess?: (
@@ -44,8 +42,9 @@ export async function inspectPtyProviderProcessForRenderer(
   try {
     return await inspectPtyProviderProcess(provider, ptyId, options)
   } catch (error) {
-    if (error instanceof Error && error.message === 'terminal_gone') {
-      return { foregroundProcess: null, hasChildProcesses: false, unavailable: true }
+    const reason = classifyTerminalProcessInspectionFailure(error)
+    if (reason) {
+      return clientOnlyUnverifiableInspection(reason)
     }
     throw error
   }

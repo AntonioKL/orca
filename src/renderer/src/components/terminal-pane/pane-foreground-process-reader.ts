@@ -2,6 +2,7 @@ import type { RuntimeTerminalProcessInspection } from '@/runtime/runtime-termina
 import { getRemoteRuntimeTerminalHandle } from '@/runtime/runtime-terminal-stream'
 import { parseAppSshPtyId } from '../../../../shared/ssh-pty-id'
 import { admitRemoteForegroundEvidence } from '../../../../shared/remote-foreground-evidence-admission'
+import { isClientOnlyUnverifiableInspection } from '../../../../shared/terminal-process-inspection'
 
 type ForegroundReader = (
   ptyId: string,
@@ -21,8 +22,7 @@ export function createPaneForegroundProcessReader(deps: {
 
   return async (ptyId: string, requiresConfirmation: boolean) => {
     let processName: string | null = null
-    let remoteEvidenceAccepted = false
-    let remoteEvidenceUnavailable = false
+    let remoteEvidenceVerdict: 'live' | 'unverifiable' | 'exited' | null = null
     const expectedIncarnationId = deps.getExpectedIncarnationId?.() ?? null
     const options = expectedIncarnationId ? { expectedIncarnationId } : undefined
     const requestStartedAtMonotonic = performance.now()
@@ -41,9 +41,13 @@ export function createPaneForegroundProcessReader(deps: {
         ? (deps.confirmForegroundProcess ?? deps.readForegroundProcess)
         : deps.readForegroundProcess
       const inspection = await (options ? reader(ptyId, options) : reader(ptyId))
-      if (typeof inspection === 'string' || inspection === null) {
+      if (isClientOnlyUnverifiableInspection(inspection)) {
+        // A client-only result is never shell evidence, even for a local
+        // adapter that lost its provider while the pane stayed mounted.
+        remoteEvidenceVerdict = 'unverifiable'
+      } else if (typeof inspection === 'string' || inspection === null) {
         processName = inspection
-        remoteEvidenceUnavailable = remote
+        remoteEvidenceVerdict = remote ? 'unverifiable' : null
       } else if (remote) {
         const admitted = admitRemoteForegroundEvidence(inspection.foregroundProcessEvidence, {
           expectedPtyId:
@@ -60,22 +64,21 @@ export function createPaneForegroundProcessReader(deps: {
           observationEpoch = admitted.observationEpoch
           knownAuthorityGenerations.add(admitted.authorityGeneration)
         }
+        remoteEvidenceVerdict = admitted?.verdict ?? 'unverifiable'
         if (admitted?.verdict === 'live') {
           processName = admitted.processName
-          remoteEvidenceAccepted = true
-        } else {
-          remoteEvidenceUnavailable = true
         }
       } else {
         processName = inspection.foregroundProcess
       }
     } catch {
-      remoteEvidenceUnavailable = remote
+      // The reader adapter is deliberately conservative for injected/legacy
+      // providers: no answer is still an unverifiable remote verdict.
+      remoteEvidenceVerdict = 'unverifiable'
     }
     return {
       processName,
-      remoteEvidenceAccepted,
-      remoteEvidenceUnavailable,
+      remoteEvidenceVerdict,
       expectedIncarnationId,
       remote
     }

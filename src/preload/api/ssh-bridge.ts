@@ -11,8 +11,7 @@ import type {
   SshTargetUpdateInput,
   SshTerminateSessionsResult,
   PortForwardEntry,
-  EnrichedDetectedPort,
-  SshTerminateSessionsResult
+  EnrichedDetectedPort
 } from '../../shared/ssh-types'
 import {
   admitSshConnectionStateForAuthorityReconciliation,

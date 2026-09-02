@@ -9,6 +9,7 @@ import type { ProcessMonitorOptions } from './agent-completion-process-types'
 import { parseAppSshPtyId } from '../../../../shared/ssh-pty-id'
 import { getRemoteRuntimeTerminalHandle } from '@/runtime/runtime-terminal-stream'
 import { admitRemoteForegroundEvidence } from '../../../../shared/remote-foreground-evidence-admission'
+import { isClientOnlyUnverifiableInspection } from '../../../../shared/terminal-process-inspection'
 import { createAgentCompletionPollScheduler } from './agent-completion-poll-scheduler'
 
 export function createAgentCompletionProcessMonitor({
@@ -87,6 +88,12 @@ export function createAgentCompletionProcessMonitor({
     result: RuntimeTerminalProcessInspection,
     requestStartedAtMonotonic: number
   ): boolean {
+    if (isClientOnlyUnverifiableInspection(result)) {
+      state.pendingProcessExitAgent = null
+      state.consecutiveInspectionErrors += 1
+      scheduleNextPoll()
+      return false
+    }
     const remote = options.isRemotePtyId?.(options.getPtyId() ?? '') === true
     if (remote) {
       const evidence = result.foregroundProcessEvidence
@@ -156,12 +163,6 @@ export function createAgentCompletionProcessMonitor({
       }
       handleRecognizedProcess(recognizedRemote)
       return true
-    }
-    if (result.unavailable === true) {
-      state.pendingProcessExitAgent = null
-      state.consecutiveInspectionErrors += 1
-      scheduleNextPoll()
-      return false
     }
     state.consecutiveInspectionErrors = 0
     const recognized = recognizeAgentProcess(result.foregroundProcess)

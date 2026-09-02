@@ -1,6 +1,7 @@
 import {
   isAgentForegroundWrapperProcess,
-  isExpectedAgentProcess
+  isExpectedAgentProcess,
+  recognizeAgentProcessFromCommandLine
 } from '../../shared/agent-process-recognition'
 import { getFirstCommandToken } from '../../shared/command-token-scanner'
 import { resolveOuterWrapperForegroundProcess } from '../../shared/foreground-wrapper-agent'
@@ -17,7 +18,10 @@ import {
   type ProcessTableIndex,
   type ProcessTableIndexStats
 } from '../../shared/process-table-index'
-import { getStrictProcessTableSnapshot, type ProcessTableRow } from '../../shared/process-table-snapshot'
+import {
+  getStrictProcessTableSnapshot,
+  type ProcessTableRow
+} from '../../shared/process-table-snapshot'
 
 export type BatchedForegroundProcessRequest = {
   rootPid: number

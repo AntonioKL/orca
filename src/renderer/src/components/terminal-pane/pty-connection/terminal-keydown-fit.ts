@@ -13,6 +13,7 @@ import { registerTerminalSideEffectFactConsumer } from '../terminal-side-effect-
 import { isAgentTaskCompleteTrackingEnabled } from './agent-task-complete-settings'
 import { isAgentProcessInspectionCostly } from '../agent-process-inspection-cost'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
+import { isRemoteExecutionHostPtyId } from '../remote-execution-host-pty'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 

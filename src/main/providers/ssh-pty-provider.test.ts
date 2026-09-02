@@ -255,11 +255,12 @@ describe('SshPtyProvider', () => {
     expectRequest(mux.request, 'pty.getForegroundProcess', { id: 'pty-1' })
   })
 
-  it('preserves unavailable process inspection', async () => {
+  it('preserves client-only unverifiable process inspection', async () => {
     const inspection = {
       foregroundProcess: null,
-      hasChildProcesses: true,
-      unavailable: true as const
+      hasChildProcesses: false,
+      verdict: 'unverifiable' as const,
+      reason: 'transport_loss' as const
     }
     mux.request.mockResolvedValue(inspection)
 

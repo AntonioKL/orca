@@ -15,6 +15,7 @@ import {
   getProcessTableSnapshot,
   type ProcessTableRow
 } from '../shared/process-table-snapshot'
+import { PS_MAX_BUFFER_BYTES } from '../shared/process-table-snapshot-reader'
 import { selectForegroundProcessCandidate } from '../shared/foreground-process-selection'
 import {
   resolveOuterWrapperForegroundProcess,
@@ -341,7 +342,8 @@ export async function getForegroundProcessName(
   try {
     const { stdout } = await execFile('ps', ['-o', 'comm=', '-p', String(pid)], {
       encoding: 'utf-8',
-      timeout: 3000
+      timeout: 3000,
+      maxBuffer: PS_MAX_BUFFER_BYTES
     })
     return stdout.trim() || null
   } catch {

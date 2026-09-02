@@ -16,7 +16,7 @@ import type { TerminalSideEffectBatch } from '../../shared/terminal-side-effect-
 import type { TerminalViewAttributes } from '../../shared/terminal-view-attributes'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { PtyManagementApi } from './pty-management-api'
-import type { RemoteForegroundEvidence } from '../../shared/foreground-process-evidence'
+import type { TerminalProcessInspection } from '../../shared/terminal-process-inspection'
 
 export type PtyApi = {
   spawn: (opts: {
@@ -113,12 +113,7 @@ export type PtyApi = {
   inspectProcess: (
     id: string,
     options?: { expectedIncarnationId?: string }
-  ) => Promise<{
-    foregroundProcess: string | null
-    hasChildProcesses: boolean
-    foregroundProcessEvidence?: RemoteForegroundEvidence
-    unavailable?: true
-  }>
+  ) => Promise<TerminalProcessInspection>
   confirmForegroundProcess: (id: string) => Promise<string | null>
   getCwd: (id: string) => Promise<string>
   getSize: (id: string) => Promise<{ cols: number; rows: number } | null>

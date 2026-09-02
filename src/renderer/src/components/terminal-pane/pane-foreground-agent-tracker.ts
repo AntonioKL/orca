@@ -143,13 +143,10 @@ export function createPaneForegroundAgentTracker(deps: PaneForegroundAgentTracke
       hasForegroundAgentEvidence ||
       hasKnownAgentEvidence ||
       hasAgentExpectation
-    const {
-      processName,
-      remoteEvidenceAccepted,
-      remoteEvidenceUnavailable,
-      expectedIncarnationId,
-      remote
-    } = await readProcess(ptyId, requiresRoutingConfirmation)
+    const { processName, remoteEvidenceVerdict, expectedIncarnationId, remote } = await readProcess(
+      ptyId,
+      requiresRoutingConfirmation
+    )
     // Why: a pane key can be rebound while process inspection is pending; the
     // old PTY's identity must never publish into its replacement session.
     if (
@@ -161,11 +158,12 @@ export function createPaneForegroundAgentTracker(deps: PaneForegroundAgentTracke
       settleAbortedRead(generation)
       return
     }
-    const recognized = remoteEvidenceAccepted
-      ? recognizeAgentProcess(processName)
-      : remoteEvidenceUnavailable
-        ? null
-        : recognizeAgentProcess(processName)
+    const recognized =
+      remoteEvidenceVerdict === 'live'
+        ? recognizeAgentProcess(processName)
+        : remoteEvidenceVerdict !== null
+          ? null
+          : recognizeAgentProcess(processName)
     if (recognized) {
       hasForegroundAgentEvidence = true
       hasAgentExpectation = false
@@ -200,7 +198,7 @@ export function createPaneForegroundAgentTracker(deps: PaneForegroundAgentTracke
       return
     }
     if (reason === 'command') {
-      if (remoteEvidenceUnavailable) {
+      if (remoteEvidenceVerdict !== null && remoteEvidenceVerdict !== 'live') {
         hasAgentExpectation = false
         return
       }
@@ -227,11 +225,11 @@ export function createPaneForegroundAgentTracker(deps: PaneForegroundAgentTracke
     }
     if (reason === 'command-finished') {
       if (processName === null) {
-        if (remoteEvidenceUnavailable) {
+        if (remoteEvidenceVerdict !== null && remoteEvidenceVerdict !== 'live') {
           deps.onCommandFinishedUnavailable?.()
           return
         }
-        // Why: unavailable inspection is not confirmed shell evidence; retire
+        // Why: client-only unverifiable inspection is not confirmed shell evidence; retire
         // stale routing after the bounded D ladder without asserting shell truth.
         hasForegroundAgentEvidence = false
         hasKnownAgentEvidence = false
