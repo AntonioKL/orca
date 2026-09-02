@@ -44,7 +44,13 @@ describe('hosted iOS host-origin Source Control journey', () => {
       operations: { activate, longPress, readState, tapNative, waitForDocument }
     })
 
-    expect(longPress).toHaveBeenCalledWith({ udid: 'SIMULATOR-1' }, 'mobile-rearch', 30_000)
+    expect(longPress).toHaveBeenCalledWith(
+      { udid: 'SIMULATOR-1' },
+      'mobile-rearch',
+      30_000,
+      undefined,
+      'Source Control'
+    )
     expect(tapNative).toHaveBeenCalledWith({ udid: 'SIMULATOR-1' }, 'Source Control', 30_000)
     expect(activate.mock.calls.map((call) => call[1])).toEqual([
       { kind: 'label', value: 'Open changed file mobile/src/mobile-web/bridge.ts' },

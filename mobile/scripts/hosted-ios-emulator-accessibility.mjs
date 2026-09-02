@@ -278,6 +278,13 @@ export async function waitForHostedIosAccessibilityLabel(
   throw new Error(`${label} was not accessible in the visible viewport`)
 }
 
+export async function readHostedIosAccessibilityLabels(
+  args,
+  runCommand = runHostedIosEmulatorCommand
+) {
+  return accessibilityLabels(await readAccessibilityNodes(args, runCommand))
+}
+
 export async function rotateHostedIosEmulator(
   args,
   orientation,

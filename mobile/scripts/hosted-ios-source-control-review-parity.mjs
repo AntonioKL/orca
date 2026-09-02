@@ -24,7 +24,13 @@ export async function captureNativeSourceControlReviewBaselines({
   timeoutMs
 }) {
   await dismissEmulatorDeveloperMenuIfPresent(emulator)
-  await longPressHostedIosAccessibilityControlByLabelPrefix(emulator, expectedWorkspace, timeoutMs)
+  await longPressHostedIosAccessibilityControlByLabelPrefix(
+    emulator,
+    expectedWorkspace,
+    timeoutMs,
+    undefined,
+    'Source Control'
+  )
   await tapHostedIosAccessibilityControl(emulator, 'Source Control', timeoutMs)
   const changedFileControl = await waitForHostedIosAccessibilityControlMatching(
     emulator,
@@ -143,8 +149,11 @@ async function captureNativeRoute({
   title,
   timeoutMs
 }) {
-  const screenTitlePoint = await waitForHostedIosAccessibilityControl(emulator, title, timeoutMs)
+  await waitForHostedIosAccessibilityControl(emulator, title, timeoutMs)
   await delay(500)
+  // Why: the host-origin route animates in, so the first frame's landmark is a
+  // position the screenshot below never shows. Re-read it once the screen settles.
+  const screenTitlePoint = await waitForHostedIosAccessibilityControl(emulator, title, timeoutMs)
   const screenshot = path.join(runtimeDirectory, screenshotName)
   await captureSimulatorScreenshot(deviceUdid, screenshot)
   return { screenTitlePoint, screenshot }

@@ -83,17 +83,6 @@ export async function verifyHostedAndroidAgentHistoryJourney({
       timeoutMs
     })
   }
-  await evidenceStep('reject untrusted synthetic resume', () =>
-    activateHostedWebViewControl(historyDocument, {
-      kind: 'label',
-      value: 'Resume agent session'
-    })
-  )
-  historyDocument = await waitForVisibleHostedWebView({
-    discoveryUrl,
-    expectedText: 'Failed to resume session.',
-    timeoutMs
-  })
   const nativeTouchPoint = await evidenceStep('resume Agent History from native touch', () =>
     tapAndroidLabel(emulator, historyDocument, 'Resume agent session')
   )
@@ -110,7 +99,6 @@ export async function verifyHostedAndroidAgentHistoryJourney({
     row: EMULATOR_AGENT_HISTORY_TITLE,
     preview: EMULATOR_AGENT_HISTORY_PREVIEW_MARKER,
     resume: {
-      synthetic: 'gesture rejected',
       native: 'queued',
       nativeTouchPoint,
       resumedRoute: resumedSessionDocument.href

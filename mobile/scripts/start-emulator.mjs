@@ -167,6 +167,9 @@ async function getWorktree() {
 }
 
 function getMobileDir(worktree) {
+  if (process.env.ORCA_E2E_MOBILE_METRO_DIR) {
+    return path.resolve(process.env.ORCA_E2E_MOBILE_METRO_DIR)
+  }
   return !options.worktree && path.basename(process.cwd()) === 'mobile'
     ? process.cwd()
     : path.join(worktree, 'mobile')

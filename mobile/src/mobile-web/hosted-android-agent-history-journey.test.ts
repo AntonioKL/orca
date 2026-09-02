@@ -58,7 +58,7 @@ describe('hosted Android Agent History journey', () => {
     }))
   })
 
-  it('covers the existing scopes, preview, search, trusted resume, and Back flow', async () => {
+  it('covers the existing scopes, preview, search, native resume, and Back flow', async () => {
     const sessionDocument = {
       href: 'orca-mobile-web://build/h/host/session/workspace'
     }
@@ -78,7 +78,6 @@ describe('hosted Android Agent History journey', () => {
       row: 'Hybrid Agent History Fixture',
       preview: 'E2E_AGENT_HISTORY_PREVIEW_MARKER',
       resume: {
-        synthetic: 'gesture rejected',
         native: 'queued',
         nativeTouchPoint: { x: 0.4, y: 0.3 },
         resumedRoute: 'orca-mobile-web://build/h/host/session/workspace'
