@@ -2756,7 +2756,8 @@
             "e4aa243f8c": "重新启动守护进程",
             "a7e2fd2699": "提交议题",
             "5c8ce20be6": "如果这种情况持续存在，请",
-            "cc6d997c65": "从此处重新启动终端守护进程以清除失效的守护进程状态。"
+            "cc6d997c65": "从此处重新启动终端守护进程以清除失效的守护进程状态。",
+            "remoteTerminalClosed": "远程终端已关闭。"
           },
           "TerminalProcessExitOverlay": {
             "capacityTitle": "已达到 Git Bash 控制台上限",
@@ -14689,7 +14690,10 @@
         "SortableTabContextMenu": {
           "switchToTerminalView": "切换到终端视图",
           "switchToChatView": "切换到聊天视图",
-          "closeTabsToLeft": "关闭左侧的选项卡"
+          "closeTabsToLeft": "关闭左侧的选项卡",
+          "copySessionId": "复制会话 ID",
+          "copySessionIdSuccess": "已复制会话 ID",
+          "copySessionIdError": "复制会话 ID 失败"
         },
         "BrowserTab": {
           "closeOthers": "关闭其他",
