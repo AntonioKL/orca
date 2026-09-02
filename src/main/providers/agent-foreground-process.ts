@@ -200,7 +200,11 @@ export function resolveAgentForegroundProcessFromPs(
   const foregroundCandidates = foregroundIsKnown
     ? candidates.filter((candidate) => candidate.stat.includes('+'))
     : candidates
-  const selected = selectForegroundProcessCandidate(foregroundCandidates)
+  // Keep the complete process tree for ancestry checks. A recognized agent can
+  // sit above a non-foreground helper before another recognized process; the
+  // helper is filtered from selection but must remain traversable.
+  const ancestryCandidates = shellRow ? [{ ...shellRow, depth: 0 }, ...candidates] : candidates
+  const selected = selectForegroundProcessCandidate(foregroundCandidates, ancestryCandidates)
   if (selected) {
     // Why: return the outer wrapper (omp) rather than the deeper wrapped child
     // (pi) of a shell→omp→pi tree — see resolveOuterWrapperForegroundProcess.
