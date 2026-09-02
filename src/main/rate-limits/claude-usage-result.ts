@@ -7,6 +7,7 @@ import type {
 import type { ClaudeRuntimeAuthPreparation } from '../claude-accounts/runtime-auth-service'
 import {
   CLAUDE_MANAGED_AUTH_UNOWNED_PROVENANCE,
+  CLAUDE_MANAGED_FOREIGN_LOGIN_PROVENANCE,
   CLAUDE_MANAGED_KEYCHAIN_UNAVAILABLE_PROVENANCE
 } from '../claude-accounts/runtime-auth/runtime-auth-types'
 import type { ClaudeOAuthCredentialReadResult } from './claude-oauth-credentials'
@@ -82,7 +83,9 @@ export function metadataForClaudeUsageAttempt(input: {
       ? 'managed-keychain-unavailable'
       : degradedProvenance === CLAUDE_MANAGED_AUTH_UNOWNED_PROVENANCE
         ? 'managed-auth-unowned'
-        : input.failureKind
+        : degradedProvenance === CLAUDE_MANAGED_FOREIGN_LOGIN_PROVENANCE
+          ? 'managed-foreign-login'
+          : input.failureKind
   return {
     source: input.source,
     attemptedSources: [...input.attemptedSources],

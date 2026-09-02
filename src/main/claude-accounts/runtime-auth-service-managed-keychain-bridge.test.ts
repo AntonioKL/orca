@@ -99,9 +99,9 @@ describe('ClaudeRuntimeAuthService', () => {
     )
   })
 
-  // Why: production blobs carry no identity, so only the home's record can name the login. A
-  // record naming another account is a foreign login and must be reverted.
-  it('reverts a foreign login proven by the home identity record', async () => {
+  // Why: reverting would mean rewriting the CLI's own identity record, which Orca does not own.
+  // Refuse both directions instead, leave every store alone, and report it.
+  it('refuses and reports a foreign login instead of rewriting the home', async () => {
     if (process.platform !== 'darwin') {
       return
     }
@@ -109,8 +109,10 @@ describe('ClaudeRuntimeAuthService', () => {
       expiresAt: 2_000,
       refreshToken: 'managed-refresh'
     })
+    // Deliberately OLDER than the managed copy: freshness alone would re-impose here, so this
+    // pins the foreign-identity refusal rather than the freshness one.
     const foreignCredentials = createClaudeCredentialsWithoutEmail('foreign', null, {
-      expiresAt: 4_000,
+      expiresAt: 1_000,
       refreshToken: 'foreign-refresh'
     })
     const managedAuthPath = createManagedClaudeAuth(
@@ -131,25 +133,27 @@ describe('ClaudeRuntimeAuthService', () => {
 
     await service.prepareForClaudeLaunch()
     setScopedKeychainCredentialsForManagedPath(managedAuthPath, foreignCredentials)
-    writeFileSync(
-      join(managedAuthPath, '.claude.json'),
-      JSON.stringify({
-        oauthAccount: { accountUuid: 'account-2', emailAddress: 'other@example.com' }
-      }),
-      'utf-8'
-    )
+    const foreignRecord = JSON.stringify({
+      oauthAccount: { accountUuid: 'account-2', emailAddress: 'other@example.com' }
+    })
+    writeFileSync(join(managedAuthPath, '.claude.json'), foreignRecord, 'utf-8')
 
     await service.prepareForClaudeLaunch()
 
+    // Nothing moved in either store, and the CLI's own record is byte-identical.
     expect(testState.managedKeychainCredentials.get('account-1')).toBe(managedCredentials)
     expect(testState.scopedKeychainCredentialsByConfigDir.get(realpathSync(managedAuthPath))).toBe(
-      managedCredentials
+      foreignCredentials
     )
+    expect(readFileSync(join(managedAuthPath, '.claude.json'), 'utf-8')).toBe(foreignRecord)
+    // And the state is reported rather than silently tolerated.
+    await expect(service.prepareForRateLimitFetch()).resolves.toMatchObject({
+      provenance: 'managed:foreign-login'
+    })
   })
 
-  // Why: the revert must also repair the record it invalidates, or this account's own next
-  // rotation reads as the foreign login and gets clobbered with the credential it replaced.
-  it('keeps a rotation that follows a reverted foreign login', async () => {
+  // Why: once the home's record names this account again, its own rotation must adopt normally.
+  it('adopts this account rotation again once the home record names it', async () => {
     if (process.platform !== 'darwin') {
       return
     }
@@ -193,7 +197,15 @@ describe('ClaudeRuntimeAuthService', () => {
     )
     await service.prepareForClaudeLaunch()
 
-    // The account's own CLI then rotates; a refresh does not rewrite the identity record.
+    // The user signs back in as this account, so the home's record names it again, and the CLI
+    // then rotates normally.
+    writeFileSync(
+      join(managedAuthPath, '.claude.json'),
+      JSON.stringify({
+        oauthAccount: { accountUuid: 'account-1', emailAddress: 'user@example.com' }
+      }),
+      'utf-8'
+    )
     setScopedKeychainCredentialsForManagedPath(managedAuthPath, rotatedCredentials)
     await service.prepareForClaudeLaunch()
 
@@ -455,55 +467,6 @@ describe('ClaudeRuntimeAuthService', () => {
     ).toBeUndefined()
     expect(readFileSync(join(managedAuthPath, '.credentials.json'), 'utf-8')).toBe(
       rotatedCredentials
-    )
-  })
-
-  // Why: a login the home's identity record proves is someone else's is not a rotation to keep —
-  // the selected account must win, and discarding a foreign token replays nothing.
-  it('re-imposes the account credential over a provably foreign in-pane login', async () => {
-    if (process.platform !== 'darwin') {
-      return
-    }
-    const managedCredentials = createClaudeCredentialsWithoutEmail('managed', null, {
-      expiresAt: 2_000,
-      refreshToken: 'managed-refresh'
-    })
-    const foreignCredentials = createClaudeCredentialsWithoutEmail('foreign', null, {
-      expiresAt: 5_000,
-      refreshToken: 'foreign-refresh'
-    })
-    const managedAuthPath = createManagedClaudeAuth(
-      testState.userDataDir,
-      'account-1',
-      managedCredentials
-    )
-    const store = createStore(
-      createSettings({
-        claudeManagedAccounts: [
-          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
-        ],
-        activeClaudeManagedAccountId: 'account-1'
-      })
-    )
-    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
-    const service = new ClaudeRuntimeAuthService(store as never)
-
-    await service.prepareForClaudeLaunch()
-    // A different identity logged in inside the managed pane, and said so in the home's record.
-    setScopedKeychainCredentialsForManagedPath(managedAuthPath, foreignCredentials)
-    writeFileSync(
-      join(managedAuthPath, '.claude.json'),
-      JSON.stringify({
-        oauthAccount: { accountUuid: 'account-2', emailAddress: 'other@example.com' }
-      }),
-      'utf-8'
-    )
-
-    await service.prepareForClaudeLaunch()
-
-    expect(testState.managedKeychainCredentials.get('account-1')).toBe(managedCredentials)
-    expect(testState.scopedKeychainCredentialsByConfigDir.get(realpathSync(managedAuthPath))).toBe(
-      managedCredentials
     )
   })
 

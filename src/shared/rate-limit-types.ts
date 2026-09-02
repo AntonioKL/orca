@@ -27,6 +27,7 @@ export type UsageRateLimitFailureKind =
   | 'keychain-unavailable'
   | 'managed-keychain-unavailable'
   | 'managed-auth-unowned'
+  | 'managed-foreign-login'
   | 'missing-scope'
   | 'network'
   | 'server'

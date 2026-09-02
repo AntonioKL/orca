@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ClaudeManagedAccount } from '../../../shared/managed-account-types'
 import {
@@ -168,37 +168,6 @@ export class ClaudeRuntimeAuthRuntimeState extends ClaudeRuntimeAuthKeychainSnap
       return record.oauthAccount ?? null
     } catch {
       return RUNTIME_OAUTH_ACCOUNT_PARSE_ERROR
-    }
-  }
-
-  // Why: reverting a foreign login restores the credential but leaves the foreign identity record,
-  // and the CLI only rewrites it at login — so the account's own next rotation would read as
-  // foreign and be clobbered with the credential it just replaced.
-  protected repairRuntimeIdentityRecord(configDir: string, oauthAccount: unknown): boolean {
-    const configPath = join(configDir, '.claude.json')
-    let record: Record<string, unknown> = {}
-    if (existsSync(configPath)) {
-      try {
-        const parsed = this.asRecord(JSON.parse(readFileSync(configPath, 'utf-8')))
-        if (!parsed) {
-          return false
-        }
-        record = parsed
-      } catch {
-        // Torn or unreadable: repairing would discard whatever else the CLI keeps here.
-        return false
-      }
-    }
-    if (oauthAccount === null || oauthAccount === undefined) {
-      delete record.oauthAccount
-    } else {
-      record.oauthAccount = oauthAccount
-    }
-    try {
-      writeFileSync(configPath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 })
-      return true
-    } catch {
-      return false
     }
   }
 

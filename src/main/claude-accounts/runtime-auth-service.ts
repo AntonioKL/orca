@@ -6,6 +6,7 @@ import {
 } from './runtime-selection'
 import { ClaudeRuntimeAuthSync } from './runtime-auth/runtime-auth-sync'
 import {
+  CLAUDE_MANAGED_FOREIGN_LOGIN_PROVENANCE,
   CLAUDE_MANAGED_KEYCHAIN_UNAVAILABLE_PROVENANCE,
   type ClaudeRuntimeAuthPreparation
 } from './runtime-auth/runtime-auth-types'
@@ -19,6 +20,7 @@ import {
 export type { ClaudeRuntimeAuthPreparation } from './runtime-auth/runtime-auth-types'
 
 export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
+  private managedForeignLoginAccountId: string | null = null
   private managedKeychainUnavailable: {
     accountId: string
     preparation: ClaudeRuntimeAuthPreparation
@@ -142,21 +144,22 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
           fileCandidate !== null &&
           fileCandidate !== managed &&
           this.isValidCredentialsJsonObject(fileCandidate)
-        const refuseManagedWrite = !foreignLogin && (unadoptedFresher || wouldShadowLiveFile)
+        const refuseManagedWrite = foreignLogin || unadoptedFresher || wouldShadowLiveFile
         if (managed && !refuseManagedWrite && this.isValidCredentialsJsonObject(managed)) {
           await writeActiveClaudeKeychainCredentials(managed, preparation.configDir)
-          if (foreignLogin) {
-            // Restore the invariant the revert consumes, so this account's own next rotation is
-            // not mistaken for the foreign login we just undid.
-            this.repairRuntimeIdentityRecord(
-              preparation.configDir,
-              await this.readManagedOauthAccount(selected)
-            )
-          }
+        } else if (foreignLogin) {
+          // Someone signed in as a different identity inside this account's home. Reverting it
+          // would mean rewriting the CLI's own identity record, which Orca does not own — so
+          // report it and leave both stores alone.
+          console.warn('[claude-runtime-auth] Managed Claude home is signed in as another account')
+          this.managedForeignLoginAccountId = selected.id
         } else if (refuseManagedWrite) {
           console.warn(
             '[claude-runtime-auth] Refusing to overwrite an unadopted Claude credential rotation'
           )
+        }
+        if (!foreignLogin && this.managedForeignLoginAccountId === selected.id) {
+          this.managedForeignLoginAccountId = null
         }
         if (this.managedKeychainUnavailable?.accountId === selected.id) {
           this.managedKeychainUnavailable = null
@@ -210,8 +213,12 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
       this.store.getSettings(),
       effectiveTarget
     )
-    return this.managedKeychainUnavailable?.accountId === selectedId
-      ? this.managedKeychainUnavailable.preparation
+    if (this.managedKeychainUnavailable?.accountId === selectedId) {
+      return this.managedKeychainUnavailable.preparation
+    }
+    // Keep the pane on its own home; only the reported state changes.
+    return this.managedForeignLoginAccountId === selectedId
+      ? { ...preparation, provenance: CLAUDE_MANAGED_FOREIGN_LOGIN_PROVENANCE }
       : preparation
   }
 
