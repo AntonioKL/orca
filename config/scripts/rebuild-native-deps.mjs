@@ -144,18 +144,21 @@ if (!ignoreModules.includes('cpu-features')) {
   }
 }
 
-if (
-  rebuildPlatform === 'win32' &&
-  modulesToRebuild.includes('@vscode/windows-process-tree') &&
-  existsSync(join(projectDir, 'node_modules', '@vscode', 'windows-process-tree', 'package.json'))
-) {
-  stageWindowsProcessTreeNodeAddonApiHeaders()
-  if (ensureWindowsProcessTreeCommandLinePatch()) {
-    console.warn('[rebuild] Repaired the un-applied windows-process-tree command-line patch.')
-  }
-}
-
 try {
+  // Why inside the try: the patch guard deletes a stale addon binary, and that
+  // delete fails EPERM when the addon is loaded -- exactly the running-Orca case
+  // the catch below is written for. Outside, it aborted `pnpm install` with a
+  // raw stack instead of the "close running Orca/Electron processes" message.
+  if (
+    rebuildPlatform === 'win32' &&
+    modulesToRebuild.includes('@vscode/windows-process-tree') &&
+    existsSync(join(projectDir, 'node_modules', '@vscode', 'windows-process-tree', 'package.json'))
+  ) {
+    stageWindowsProcessTreeNodeAddonApiHeaders()
+    if (ensureWindowsProcessTreeCommandLinePatch()) {
+      console.warn('[rebuild] Repaired the un-applied windows-process-tree command-line patch.')
+    }
+  }
   await rebuild({
     buildPath: projectDir,
     electronVersion,
