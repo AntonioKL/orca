@@ -2160,9 +2160,9 @@ type RuntimePtyController = {
   // the mux's own 30s default and blows every inventory refresh (STA-517).
   listProcesses?(
     connectionId?: string | null,
-    opts?: { deadlineMs?: number }
+    opts?: { deadlineMs?: number; signal?: AbortSignal }
   ): Promise<PtyProcessInfo[]>
-  listProcessesWithHostScope?(opts?: { deadlineMs?: number }): Promise<{
+  listProcessesWithHostScope?(opts?: { deadlineMs?: number; signal?: AbortSignal }): Promise<{
     processes: PtyProcessInfo[]
     hostIds: ExecutionHostId[]
   }>
@@ -3566,6 +3566,16 @@ export class OrcaRuntimeService {
   // record so a close/stop receipt can still say the stop was unconfirmed.
   private ptyLivenessVerdictByPtyId = new Map<string, TrackedPtyLivenessVerdict>()
   private ptyLivenessObservationSequence = 0
+  // Catalog polls reuse the last controller census until a PTY lifecycle or
+  // output event invalidates it; this keeps idle mobile polls read-free.
+  private ptyLivenessRefreshRequired = false
+  private ptyLivenessRefreshInProgress = 0
+
+  private invalidatePtyLivenessSnapshot(): void {
+    if (this.ptyLivenessRefreshInProgress === 0) {
+      this.ptyLivenessRefreshRequired = true
+    }
+  }
   private readonly pairedRendererSessionOwnedPtyIds = new Set<string>()
   private wslDistroByPtyId = new Map<string, string>()
   private titleObservationSequence = 0
@@ -6705,6 +6715,28 @@ export class OrcaRuntimeService {
     // instead of tunneling back through renderer IPC, or live handles could
     // drift from the process they are supposed to control during reloads.
     this.ptyController = controller
+    // A controller attached after restart must reconcile persisted PTY ids once;
+    // an otherwise idle runtime with no persisted terminals stays read-free.
+    if (controller && this.hasPersistedPtyReferences()) {
+      this.invalidatePtyLivenessSnapshot()
+    }
+  }
+
+  private hasPersistedPtyReferences(): boolean {
+    const session = this.store?.getWorkspaceSession?.()
+    if (!session) {
+      return false
+    }
+    if (
+      Object.values(session.tabsByWorktree ?? {}).some((tabs) =>
+        tabs.some((tab) => tab.ptyId !== null)
+      )
+    ) {
+      return true
+    }
+    return Object.values(session.terminalLayoutsByTabId ?? {}).some((layout) =>
+      Object.values(layout?.ptyIdsByLeafId ?? {}).some((ptyId) => Boolean(ptyId))
+    )
   }
 
   setNotifier(notifier: RuntimeNotifier | null): void {
@@ -6965,6 +6997,7 @@ export class OrcaRuntimeService {
   }
 
   private notifyWorktreesChanged(repoId: string): void {
+    this.invalidatePtyLivenessSnapshot()
     this.notifier?.worktreesChanged(repoId)
     this.emitClientEvent({ type: 'worktreesChanged', repoId })
   }
@@ -6992,6 +7025,7 @@ export class OrcaRuntimeService {
   }
 
   private notifyReposChanged(): void {
+    this.invalidatePtyLivenessSnapshot()
     wakeFolderRepoGitUpgradeWatch()
     this.notifier?.reposChanged()
     this.emitClientEvent({ type: 'reposChanged' })
@@ -13455,6 +13489,7 @@ export class OrcaRuntimeService {
     captureModelReceipt?: (completion: Promise<void>) => void,
     sourceRanges?: readonly TerminalOutputSourceRange[]
   ): number {
+    this.invalidatePtyLivenessSnapshot()
     const outputSequence = (this.ptyOutputSequenceById.get(ptyId) ?? 0) + sequenceChars
     this.ptyOutputSequenceById.set(ptyId, outputSequence)
     this.providerModeTrackersByPtyId.get(ptyId)?.scan(data)
@@ -17730,6 +17765,7 @@ export class OrcaRuntimeService {
     if (exitIncarnationId && pty?.incarnationId && exitIncarnationId !== pty.incarnationId) {
       return
     }
+    this.invalidatePtyLivenessSnapshot()
     // Why intent first: a requested stop can still be delivered by the provider's
     // own exit event, whose status looks exactly like a natural finish.
     //
@@ -22619,7 +22655,8 @@ export class OrcaRuntimeService {
 
   async getWorktreePs(
     limit = DEFAULT_WORKTREE_PS_LIMIT,
-    sourceDefaultsSupported = true
+    sourceDefaultsSupported = true,
+    opts?: { deadlineMs?: number; signal?: AbortSignal }
   ): Promise<{
     worktrees: RuntimeWorktreePsSummary[]
     totalCount: number
@@ -22651,7 +22688,14 @@ export class OrcaRuntimeService {
     )
     // Why: worktree.ps backs the mobile sidebar, so it must use the same
     // host-owned imported-worktree visibility gate as worktree.list/desktop.
-    const freshPtyLiveness = await this.refreshPtyWorktreeRecordsFromController(resolvedWorktrees)
+    const freshPtyLiveness = this.ptyLivenessRefreshRequired
+      ? await this.refreshPtyWorktreeRecordsFromController(
+          resolvedWorktrees,
+          null,
+          opts?.deadlineMs,
+          opts?.signal
+        )
+      : null
     const repoById = new Map((this.store?.getRepos() ?? []).map((repo) => [repo.id, repo]))
     const platformByRepoId = resolvedWorktreeSnapshot.platformByRepoId
     const summaries = new Map<string, RuntimeWorktreePsSummary>()
@@ -35344,6 +35388,7 @@ export class OrcaRuntimeService {
     this.clientSessionTabSelections.migrateWorktree(oldWorktreeId, newWorktreeId)
     this.invalidateResolvedWorktreeCache()
     this.invalidateWorktreeScanCacheForRepo(repoId)
+    this.invalidatePtyLivenessSnapshot()
     this.notifier?.worktreesChanged(repoId, { oldWorktreeId, newWorktreeId })
     // Mirror notifyBranchRenamed so in-process onClientEvent listeners also see the rename.
     this.emitClientEvent({ type: 'worktreesChanged', repoId })
@@ -35375,6 +35420,7 @@ export class OrcaRuntimeService {
       >
     > = {}
   ): RuntimePtyWorktreeRecord {
+    this.invalidatePtyLivenessSnapshot()
     let pty = this.ptysById.get(ptyId)
     if (!pty) {
       const titleObservedAt = state.title ? this.nextTitleObservationSequence() : null
@@ -35537,14 +35583,26 @@ export class OrcaRuntimeService {
   private async refreshPtyWorktreeRecordsFromController(
     resolvedWorktrees: ResolvedWorktree[],
     targetWorktreeId: string | null = null,
-    deadline?: number
+    deadline?: number,
+    signal?: AbortSignal
   ): Promise<Set<string> | null> {
-    const inventory = await this.refreshPtyWorktreeRecordsWithControllerInventory(
-      resolvedWorktrees,
-      targetWorktreeId,
-      deadline
-    )
-    return inventory ? new Set(inventory.livePtyIds) : null
+    this.ptyLivenessRefreshInProgress += 1
+    try {
+      const inventory = await this.refreshPtyWorktreeRecordsWithControllerInventory(
+        resolvedWorktrees,
+        targetWorktreeId,
+        deadline,
+        undefined,
+        false,
+        signal
+      )
+      if (inventory) {
+        this.ptyLivenessRefreshRequired = false
+      }
+      return inventory ? new Set(inventory.livePtyIds) : null
+    } finally {
+      this.ptyLivenessRefreshInProgress -= 1
+    }
   }
 
   private async refreshPtyWorktreeRecordsWithControllerInventory(
@@ -35552,7 +35610,8 @@ export class OrcaRuntimeService {
     targetWorktreeId: string | null = null,
     deadline?: number,
     connectionId?: string | null,
-    retryStale = false
+    retryStale = false,
+    signal?: AbortSignal
   ): Promise<PtyControllerInventory | null> {
     if (targetWorktreeId === FLOATING_TERMINAL_WORKTREE_ID) {
       const targetedLiveness = this.refreshFloatingWorkspacePtyLiveness()
@@ -35585,7 +35644,8 @@ export class OrcaRuntimeService {
     // never answers still leaves the aggregate time to return the providers that did
     // — expiring at the same instant would discard the whole inventory instead.
     const providerListOpts = {
-      deadlineMs: Date.now() + Math.max(1, listBudgetMs - PTY_CONTROLLER_LIST_PROVIDER_MARGIN_MS)
+      deadlineMs: Date.now() + Math.max(1, listBudgetMs - PTY_CONTROLLER_LIST_PROVIDER_MARGIN_MS),
+      ...(signal ? { signal } : {})
     }
     const processInventory =
       connectionId === undefined && this.ptyController.listProcessesWithHostScope
@@ -35635,7 +35695,8 @@ export class OrcaRuntimeService {
           targetWorktreeId,
           deadline,
           connectionId,
-          true
+          true,
+          signal
         )
       }
       return null

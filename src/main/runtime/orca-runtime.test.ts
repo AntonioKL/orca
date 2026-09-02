@@ -38157,6 +38157,31 @@ describe('OrcaRuntimeService', () => {
     })
   })
 
+  it('does not read guest inventories on idle worktree poll ticks', async () => {
+    const guestInventoryReads = vi.fn()
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null,
+      listProcesses: async () => {
+        guestInventoryReads()
+        return []
+      }
+    })
+
+    await runtime.getWorktreePs()
+    await runtime.getWorktreePs()
+    await runtime.getWorktreePs()
+    expect(guestInventoryReads).not.toHaveBeenCalled()
+
+    runtime.notifyBranchRenamed(TEST_REPO_ID)
+    await runtime.getWorktreePs()
+    expect(guestInventoryReads).toHaveBeenCalledOnce()
+    await runtime.getWorktreePs()
+    expect(guestInventoryReads).toHaveBeenCalledOnce()
+  })
+
   it('reads the linked-PR state from the renderer repoId-keyed GitHub cache', async () => {
     // Regression: renderer keys the PR cache by repoId::branch; reading by path::branch missed every entry (muted mobile badge).
     const runtimeStore = {
