@@ -81,7 +81,9 @@ describe('hosted iOS Source Control and Review parity', () => {
     expect(mocks.longPressControlByPrefix).toHaveBeenCalledWith(
       { deviceUdid: 'simulator' },
       'mobile-rearch',
-      30_000
+      30_000,
+      undefined,
+      'Source Control'
     )
     expect(mocks.tapControl).toHaveBeenCalledWith(
       { deviceUdid: 'simulator' },
