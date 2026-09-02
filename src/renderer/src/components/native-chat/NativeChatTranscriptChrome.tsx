@@ -128,34 +128,33 @@ function TranscriptImagePreview({
     return () => releaseLocalImageSrc(source, filePath, context.connectionId, context)
   }, [external, filePath, leaseActive, runtimeContext, source])
 
-  if (
-    !leaseActive ||
-    !displaySrc ||
-    thumbnailError ||
-    !source ||
-    (!external && runtimeContext === null)
-  ) {
+  const showPreview =
+    leaseActive &&
+    Boolean(displaySrc) &&
+    !thumbnailError &&
+    Boolean(source) &&
+    (external || runtimeContext !== null)
+
+  if (!showPreview) {
     return <div ref={ref}>{fallback}</div>
   }
   return (
-    <>
-      <div ref={ref} className="relative size-20 shrink-0">
-        <button
-          type="button"
-          aria-label={`${viewImageLabel}: ${label}`}
-          title={label}
-          onClick={() => setOpen(true)}
-          className="flex size-full items-center justify-center overflow-hidden rounded-md border border-border bg-background transition-colors hover:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <img
-            src={displaySrc}
-            alt={label}
-            loading="lazy"
-            onError={() => setThumbnailError(true)}
-            className="size-full object-cover"
-          />
-        </button>
-      </div>
+    <div ref={ref} className="relative size-20 shrink-0">
+      <button
+        type="button"
+        aria-label={`${viewImageLabel}: ${label}`}
+        title={label}
+        onClick={() => setOpen(true)}
+        className="flex size-full items-center justify-center overflow-hidden rounded-md border border-border bg-background transition-colors hover:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <img
+          src={displaySrc}
+          alt={label}
+          loading="lazy"
+          onError={() => setThumbnailError(true)}
+          className="size-full object-cover"
+        />
+      </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="flex max-h-[90vh] max-w-[90vw] flex-col gap-3 border-border bg-background p-3 sm:max-w-4xl">
           <DialogTitle className="truncate text-sm">{label}</DialogTitle>
@@ -176,7 +175,7 @@ function TranscriptImagePreview({
           </div>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   )
 }
 

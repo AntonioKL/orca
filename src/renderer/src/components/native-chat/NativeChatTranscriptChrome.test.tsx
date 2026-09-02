@@ -132,4 +132,47 @@ describe('NativeChatImageAttachments', () => {
 
     root.unmount()
   })
+
+  it('keeps the observed element stable while a preview is materialized', async () => {
+    let callback: IntersectionObserverCallback | undefined
+    class FakeIntersectionObserver {
+      readonly observe = vi.fn()
+      readonly unobserve = vi.fn()
+      readonly disconnect = vi.fn()
+
+      constructor(nextCallback: IntersectionObserverCallback) {
+        callback = nextCallback
+      }
+    }
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
+
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(
+        createElement(NativeChatImageAttachments, {
+          blocks: [{ type: 'image-ref' as const, path: '/repo/image.png' }],
+          runtimeContext: runtimeContext('wt-1')
+        })
+      )
+      await flushPromises()
+    })
+
+    const observedElement = container.firstElementChild
+    expect(observedElement).not.toBeNull()
+    if (!observedElement || !callback) {
+      throw new Error('image preview did not register visibility observation')
+    }
+    const notifyVisibility = callback
+    await act(async () => {
+      notifyVisibility(
+        [{ target: observedElement, isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver
+      )
+      await flushPromises()
+    })
+
+    expect(container.firstElementChild).toBe(observedElement)
+    root.unmount()
+  })
 })

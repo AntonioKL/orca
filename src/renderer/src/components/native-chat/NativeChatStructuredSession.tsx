@@ -147,7 +147,7 @@ export function NativeChatStructuredSession(props: {
             showTurnStatus={props.agent === 'codex'}
             onLinkClick={fileLinkClick}
             allowFileUriLinks={fileLinkClick !== undefined}
-            runtimeContext={imageRuntimeContext}
+            runtimeContext={props.agent === 'codex' ? imageRuntimeContext : undefined}
           />
         )}
       </div>
