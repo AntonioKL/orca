@@ -70,12 +70,14 @@ out of the install directory into `%LOCALAPPDATA%` under a different name, which
 then spawns shells, matches the textbook description closely enough that no
 behavioural engine can be expected to score it low.
 
-### Every process gets a handle and a memory read, on a timer
+### Every process gets a handle, on a timer
 
-`src/main/windows/windows-process-table.ts` takes a Toolhelp32 snapshot with
-`Memory | CommandLine | CreationTime`. As its own comment records, each of those
-flags costs an `OpenProcess` per process — `GetProcessMemoryInfo` for memory, a
-**PEB read** for the command line.
+`src/main/windows/windows-process-table.ts` takes a Toolhelp32 snapshot under one
+of two flag sets. Identity (`None | CreationTime`) answers pid/ppid/name from the
+snapshot alone and opens nothing; the detailed set adds `CommandLine`, which
+costs one `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` per process. `Memory`
+is retired — it took a second handle carrying `PROCESS_VM_READ` and never read
+through it.
 
 It exists because seven independent readers used to fork `powershell.exe` for a
 `Get-CimInstance Win32_Process` scan. That cost, measured: a PowerShell
@@ -84,58 +86,77 @@ ran every ~2 seconds (#15209); a Group Policy or AV block turned a query into
 "unavailable", which callers read as "no evidence", which is how a PTY tree
 survived its own teardown (#9045, #10475); and the scan cost ~700 ms per pane, so
 panes multiplied it (#15036). The native snapshot answers the same question in
-15.9 ms (30.6 ms with memory and command line) against 706 ms for CIM — p50,
-measured on Windows 11 at 1050 processes. See
+15.9 ms against 706 ms for CIM — p50, measured on Windows 11 at 1050 processes.
+See
 [`windows-process-enumeration.md`](./windows-process-enumeration.md).
 
-Asking for fewer fields would be cheaper, but the module deliberately does not:
-every read shares one snapshot so a 32-wide teardown collapses into a single
-scan, and splitting the cache per field set would restore exactly the fan-out it
-exists to prevent.
+Asking for fewer fields is cheaper, and since the split the module does: one
+cache per flag set, so teardown identity and the session owner probe open no
+handle at all (6.3 ms p50) while only the callers that read a command line pay
+for one (12.3 ms p50, at 492 processes). Each cache still single-flights within
+itself, and one gate serializes the native reads because the vendored wrapper
+coalesces the flags of two overlapping calls.
 
 **How an EDR reads it:** a cross-process handle plus a remote memory read against
 every process on the box, repeating on a cadence, is the read half of the
 telemetry that credential dumping and process injection produce. MDE surfaced it
-as "suspicious memory activity". This one is genuinely hard to soften — the
-information is only in the PEB — so treat it as a shape to be declared to
-administrators rather than one to engineer away.
+as "suspicious memory activity". The memory read is gone: the command line now
+comes from the kernel, through `NtQueryInformationProcess`'s
+`ProcessCommandLineInformation` class, which needs only
+`PROCESS_QUERY_LIMITED_INFORMATION`. `ReadProcessMemory` is absent from the
+compiled addon, asserted against the binary's import table because the published
+prebuild loads fine and emits byte-identical strings. What is left to declare to
+administrators is the per-process handle itself.
 
 ### Encoded, policy-bypassing PowerShell
 
 Three sites are named in the incident analysis:
 
-- `src/relay/windows-port-scan.ts` runs
+- `src/relay/windows-port-scan.ts` ran
   `-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand` over a
   `Get-NetTCPConnection -State Listen` script to find dev-server ports.
   Enumerating listening ports is **MITRE T1049**, network service discovery, and
   doing it through an encoded policy-bypassed shell is the aggravating factor
-  rather than the finding itself.
+  rather than the finding itself. The ordinary scan now starts no PowerShell at
+  all — `netstat.exe -ano`, with the owning process name projected off the shared
+  native table — and that payload survives only as the last-resort fallback, as
+  `-Command` with no policy override.
 - `src/main/daemon/shell-ready.ts` uses `-EncodedCommand` for the OSC 133
   bootstrap.
 - `src/main/agent-hooks/windows-powershell-hook-launcher.ts` wraps managed hooks.
 
-Several more spell the same pair of `-ExecutionPolicy Bypass` and
-`-EncodedCommand`: `src/main/ssh/ssh-remote-powershell.ts`,
+**No site spells the pair any more.** `src/main/ssh/ssh-remote-powershell.ts`,
 `src/shared/setup-agent-sequencing.ts`,
-`src/shared/windows-cmd-runner-delayed-launch.ts`, and
-`src/shared/windows-interactive-login-spawn.ts`.
-`src/main/runtime/windows-mobile-firewall.ts` encodes a script and launches it
-_elevated_ through `Start-Process -Verb RunAs`, which is a stronger shape than
-any of those.
+`src/shared/windows-cmd-runner-delayed-launch.ts` and
+`src/shared/windows-interactive-login-spawn.ts` each dropped
+`-ExecutionPolicy Bypass` as a measured no-op: the policy gates script *files*,
+never `-EncodedCommand`. Where the bypass was load-bearing it moved in-payload as
+a process-scope `Set-ExecutionPolicy` (`setup-agent-sequencing.ts`), which is the
+pattern to copy rather than restoring the switch — the switch loses to a GPO
+scope anyway, so it never covered the locked-down case.
 
-A further set spells `-EncodedCommand` without the bypass — the PTY bootstraps
+What remains is `-EncodedCommand` without the bypass: the PTY bootstraps
 (`src/main/daemon/shell-ready.ts`, `src/main/providers/local-pty-shell-ready.ts`,
 `src/main/providers/windows-shell-args.ts`), the hook wrappers
-(`src/main/agent-hooks/runtime-home-hook-command.ts`,
+(`src/main/agent-hooks/windows-powershell-hook-launcher.ts` and its callers
+`src/main/agent-hooks/runtime-home-hook-command.ts`,
 `src/main/agent-hooks/installer-utils.ts`, `src/main/claude/hook-settings.ts`),
 `src/main/runtime/windows-default-route-interfaces.ts`,
-`src/main/runtime/orchestration/setup-completion-signal.ts`, and
-`src/shared/hermes-startup-query.ts`.
+`src/main/runtime/orchestration/setup-completion-signal.ts`,
+`src/shared/hermes-startup-query.ts`, and the four ex-bypass sites above.
+`src/main/runtime/windows-mobile-firewall.ts` encodes a script and launches it
+_elevated_ through `Start-Process -Verb RunAs`, which is a stronger shape than
+any of those; only that hop is encoded, because `-ArgumentList` re-splits an
+unquoted parameter string on whitespace.
 
-A third set spells `-ExecutionPolicy Bypass` with **no** encoding, which is the
-weaker signal: `src/main/system-fonts.ts` (`-Command`),
-`src/main/computer/desktop-script-provider-bridge.ts` (`-File`),
-`src/shared/secure-path-windows-acl.ts`, and `src/main/cli/wsl-cli-scripts.ts`.
+One site still spells `-ExecutionPolicy Bypass` with **no** encoding, the weaker
+signal: `src/main/cli/wsl-cli-scripts.ts` (`-File`, and it is a real script
+file, so the switch is not a no-op there). `src/main/system-fonts.ts` dropped it
+for plain `-Command`; `src/shared/secure-path-windows-acl.ts` no longer runs
+PowerShell at all, having moved to `icacls.exe`; and computer use now asks for
+`-ExecutionPolicy RemoteSigned` in
+`src/main/computer/windows-powershell-execution-policy.ts`, falling back to
+`Bypass` only after a policy-blocked start.
 
 Regenerate with `rg -- '-EncodedCommand|-ExecutionPolicy' src/` rather than
 trusting the lists above, and note that a raw grep under-reports: the hook sites
@@ -199,8 +220,9 @@ a scored edge, which is why the shipped doctrine of #15520 and #15595 is to
 
 `native/computer-use-windows/runtime.ps1` is a large PowerShell script.
 `src/main/computer/desktop-script-provider-bridge.ts` launches it as
-`powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File
-runtime.ps1 <operation.json>` — **once per operation**, with
+`powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned
+-File runtime.ps1 <operation.json>`, retrying once at `Bypass` only if the start
+comes back policy-blocked — **once per operation**, with
 `desktop-script-provider-client.ts` writing a fresh `operation.json` into a new
 temp directory each time. On every launch the script runs `Add-Type
 -TypeDefinition` over inline C# that P/Invokes `SendInput` and the window APIs,
