@@ -353,6 +353,56 @@ describe('Claude structured journal translation', () => {
     ).toEqual(['turn-lifecycle:user-replay-1', 'turn-lifecycle:user-interrupt'])
   })
 
+  it('surfaces an API error carried by a success-subtype result with no assistant frame', () => {
+    const state = sinkState()
+    const translator = createClaudeJournalTranslator({ sink: state.sink })
+
+    translator.handle(message('user', 'user-1', [{ type: 'text', text: 'summarize this' }]))
+    // The SDK models this as a SUCCESS-subtype result whose `result` string is the
+    // user-facing API error. Suppressing it as ordinary turn bookkeeping ends the
+    // turn with nothing shown at all.
+    translator.handle(
+      resultFrame('success', {
+        is_error: true,
+        result: 'API Error: 529 upstream overloaded',
+        stop_reason: null,
+        terminal_reason: 'api_error'
+      })
+    )
+
+    expect(providerFrameKinds(state.items)).toEqual(['message:result:success'])
+    expect(state.items.at(-1)?.body).toMatchObject({
+      kind: 'status',
+      text: 'API Error: 529 upstream overloaded'
+    })
+    // The turn still settles: the error is an extra row, not a stuck lifecycle.
+    expect(
+      state.tombstones.flatMap((identity) =>
+        identity.provider === 'legacy' ? [identity.recordId] : []
+      )
+    ).toEqual(['turn-lifecycle:user-1'])
+  })
+
+  it('keeps an ordinary successful result off the timeline', () => {
+    const state = sinkState()
+    const translator = createClaudeJournalTranslator({ sink: state.sink })
+
+    translator.handle(resultFrame('success', { is_error: false, result: 'done', errors: [] }))
+
+    expect(providerFrameKinds(state.items)).toEqual([])
+  })
+
+  it('surfaces the reason an error-subtype result stopped the turn', () => {
+    const state = sinkState()
+    const translator = createClaudeJournalTranslator({ sink: state.sink })
+
+    translator.handle(
+      resultFrame('error_max_turns', { is_error: true, errors: ['turn limit reached'] })
+    )
+
+    expect(providerFrameKinds(state.items)).toEqual(['message:result:error_max_turns'])
+  })
+
   it('keeps an unmodeled result subtype on the bounded provider fallback', () => {
     const state = sinkState()
     const translator = createClaudeJournalTranslator({ sink: state.sink })

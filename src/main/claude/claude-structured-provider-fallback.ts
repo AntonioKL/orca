@@ -1,4 +1,8 @@
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
+import {
+  boundInlineText,
+  DEFAULT_JOURNAL_PAYLOAD_LIMITS
+} from '../native-chat/agent-session-journal/journal-payload-bounds'
 import { CLAUDE_STREAM_JSON_FRAME_KINDS } from '../native-chat/agent-session-wire/claude-stream-json-frame-schema'
 import { unhandledProviderFrameJournalItem } from '../native-chat/agent-session-wire/unhandled-provider-frame'
 import { claudeRecord, claudeText } from './claude-structured-item-translation'
@@ -18,6 +22,40 @@ const SETTLED_RESULT_KINDS: ReadonlySet<string> = new Set(
  *  itself; only an unmodeled subtype still needs the provider-fallback row. */
 export function isSettledClaudeResultKind(kind: string): boolean {
   return SETTLED_RESULT_KINDS.has(kind)
+}
+
+/**
+ * The failure a result frame carries that the turn's own frames never showed.
+ *
+ * Suppression is by meaning, not by kind. The SDK models an API failure as a
+ * SUCCESS-subtype result whose `result` string IS the error text and which has
+ * no assistant frame behind it, so keying on the subtype tombstones the turn and
+ * shows the user a completed, empty reply. A turn the user aborted is the
+ * opposite: its interrupt frame already says so, and the diagnostic in `errors`
+ * would only be noise.
+ */
+export function claudeResultFailure(
+  message: Record<string, unknown>
+): { text: string | null } | null {
+  if (message.is_error !== true) {
+    return null
+  }
+  const terminalReason = claudeText(message.terminal_reason)
+  if (terminalReason === 'aborted_streaming' || terminalReason === 'aborted_tools') {
+    return null
+  }
+  const result = claudeText(message.result)?.trim()
+  if (result) {
+    return { text: result }
+  }
+  const errors = Array.isArray(message.errors)
+    ? message.errors.flatMap((entry) => {
+        const text = claudeText(entry)?.trim()
+        return text ? [text] : []
+      })
+    : []
+  // Nothing readable to lead with, but a reported failure still gets its row.
+  return { text: errors.length > 0 ? errors.join('\n') : null }
 }
 
 export function isModeledClaudeContent(value: unknown): boolean {
@@ -46,22 +84,26 @@ export function createClaudeProviderFrameFallback(
   sink: StructuredAgentSessionEventSink,
   acquisitionId: string
 ): {
-  append: (kind: string, payload: unknown) => void
+  /** `displayText` leads the row when Claude knows the sentence the frame itself does not name. */
+  append: (kind: string, payload: unknown, displayText?: string | null) => void
 } {
   let sequence = 0
   return {
-    append: (kind, payload) => {
+    append: (kind, payload, displayText) => {
       sequence += 1
       const translated = unhandledProviderFrameJournalItem('claude', kind, payload)
       if (!translated) {
         return
       }
+      const bounded = displayText
+        ? boundInlineText(displayText, DEFAULT_JOURNAL_PAYLOAD_LIMITS).text
+        : null
       sink.appendItem(
         {
           provider: 'orca',
           clientMessageId: `provider-frame:claude:${acquisitionId}:${sequence}`
         },
-        translated.body,
+        bounded ? { ...translated.body, text: bounded } : translated.body,
         translated.blobs
       )
       sink.publish()

@@ -34,6 +34,7 @@ import {
 import type { ClaudePromptRegistry } from './claude-structured-prompt-replies'
 import {
   claudeProviderFrameKind,
+  claudeResultFailure,
   createClaudeProviderFrameFallback,
   isModeledClaudeContent,
   isSettledClaudeResultKind
@@ -281,8 +282,10 @@ export function createClaudeJournalTranslator(
         // The turn is over: a block still awaiting its final keeps its flushed text.
         streamedBlocks.clear()
         const kind = claudeProviderFrameKind(event.message)
-        if (!isSettledClaudeResultKind(kind)) {
-          providerFallback.append(kind, event.message)
+        // Ordinary turn bookkeeping stays suppressed; a reported failure never does.
+        const failure = claudeResultFailure(event.message)
+        if (failure || !isSettledClaudeResultKind(kind)) {
+          providerFallback.append(kind, event.message, failure?.text)
         }
       } else if (event.type === 'message') {
         if (!handleMessage(event.message)) {
