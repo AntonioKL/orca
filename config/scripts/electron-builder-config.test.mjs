@@ -1,5 +1,6 @@
-import { readFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -9,6 +10,7 @@ const SRC_MAIN_DIR = join(REPO_ROOT, 'src', 'main')
 const require = createRequire(import.meta.url)
 const electronBuilderConfig = require('../electron-builder.config.cjs')
 const { FileMatcher } = require('app-builder-lib/out/fileMatcher')
+const FpmTarget = require('app-builder-lib/out/targets/FpmTarget').default
 const electronBuilderNativeRebuild = require('./electron-builder-native-rebuild.cjs')
 
 describe('electron-builder config', () => {
@@ -269,8 +271,9 @@ describe('electron-builder config', () => {
     expect(electronBuilderConfig.linux.desktop.entry.StartupWMClass).toBe('orca')
   })
 
-  it('uses AppImage and deb as local Linux targets without changing existing artifact names', () => {
-    expect(electronBuilderConfig.linux.target).toEqual(['AppImage', 'deb'])
+  it('uses the release artifact set as local Linux targets without changing existing names', () => {
+    expect(electronBuilderConfig.linux.target).toEqual(['AppImage', 'deb', 'rpm'])
+    expect(electronBuilderConfig.toolsets).toEqual({ appimage: '1.0.3' })
     expect(electronBuilderConfig.appImage.artifactName).toBe('orca-linux.${ext}')
     expect(electronBuilderConfig.deb.artifactName).toBe('orca-ide_${version}_${arch}.${ext}')
     expect(electronBuilderConfig.rpm).toMatchObject({
@@ -279,6 +282,33 @@ describe('electron-builder config', () => {
     })
   })
 
+  it('retains electron-builder runtime dependencies in deb and rpm packages', () => {
+    for (const target of ['deb', 'rpm']) {
+      const dependencies = electronBuilderConfig[target].depends
+      expect(dependencies).toEqual(
+        expect.arrayContaining(FpmTarget.prototype.getDefaultDepends(target))
+      )
+      expect(new Set(dependencies).size).toBe(dependencies.length)
+    }
+  })
+
+  it('validates each AppImage before electron-builder publishes it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-electron-builder-appimage-'))
+    try {
+      const appImage = join(root, 'orca-linux.AppImage')
+      await writeFile(appImage, 'not an ELF')
+      await chmod(appImage, 0o755)
+
+      expect(() =>
+        electronBuilderConfig.artifactBuildCompleted({ file: appImage, arch: 1 })
+      ).toThrow(/ELF header is outside/)
+      expect(() =>
+        electronBuilderConfig.artifactBuildCompleted({ file: join(root, 'orca-ide.deb') })
+      ).not.toThrow()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
   it('uses a distinct AppImage name for Linux arm64 release uploads', () => {
     const configPath = require.resolve('../electron-builder.config.cjs')
     const original = process.env.ORCA_LINUX_ARM64_RELEASE
@@ -387,6 +417,18 @@ describe('electron-builder config', () => {
       )
       for (const target of linuxTargets.filter((entry) => RECOVERABLE_TARGETS.has(entry))) {
         expect(source).toContain(`value === '${target}'`)
+      }
+    })
+
+    it('keeps the pinned FpmTarget overwrite for configured deb and rpm artifacts', async () => {
+      const source = await readFile(
+        require.resolve('app-builder-lib/out/targets/FpmTarget'),
+        'utf8'
+      )
+
+      expect(source).toContain('path.join(resourceDir, "package-type"), target')
+      for (const target of RECOVERABLE_TARGETS) {
+        expect(electronBuilderConfig[target]).toBeDefined()
       }
     })
   })
