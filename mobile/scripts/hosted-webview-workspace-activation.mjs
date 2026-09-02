@@ -33,7 +33,10 @@ export async function activateHostedWorkspaceRow(
       await delay(250)
     }
   }
-  throw lastError ?? new Error(`Hosted WebView control was not found: ${workspaceName}`)
+  throw new Error(
+    `${lastError?.message ?? `Hosted WebView control was not found: ${workspaceName}`} (document ${activeDocument.href})`,
+    { cause: lastError }
+  )
 }
 
 async function activateHostedWorkspaceRowOnce(document, workspaceName, activateControl) {

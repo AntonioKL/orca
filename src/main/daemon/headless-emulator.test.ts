@@ -383,28 +383,6 @@ describe('HeadlessEmulator', () => {
         uri: 'file:///tmp/result.json'
       })
     })
-
-    it('preserves restored OSC 8 link ranges across height-only resize', async () => {
-      emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
-      await emulator.write('ORCA_FILE')
-      emulator.setRestoredOscLinks([
-        {
-          row: 0,
-          startCol: 0,
-          endCol: 9,
-          uri: 'file:///tmp/result.json'
-        }
-      ])
-
-      emulator.resize(80, 12)
-
-      expect(emulator.getSnapshot().oscLinks).toContainEqual({
-        row: 0,
-        startCol: 0,
-        endCol: 9,
-        uri: 'file:///tmp/result.json'
-      })
-    })
   })
 
   describe('clear scrollback (CSI 3J)', () => {

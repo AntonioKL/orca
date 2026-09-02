@@ -66,7 +66,10 @@ function listSourceFiles(root: string): string[] {
       files.push(...listSourceFiles(path))
       continue
     }
-    if (!/\.[cm]?[jt]sx?$/.test(entry) || /\.test\.[cm]?[jt]sx?$/.test(entry)) {
+    if (
+      !/\.[cm]?[jt]sx?$/.test(entry) ||
+      /(\.test|-test-fakes|-test-fixtures?|\.test-support)\.[cm]?[jt]sx?$/.test(entry)
+    ) {
       continue
     }
     files.push(path)

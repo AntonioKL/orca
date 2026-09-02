@@ -281,18 +281,21 @@ async function restoreHostedIosSessionAfterLaunch({
     expectedText: expectedWorkspace,
     timeoutMs
   })
-  await activateWorkspace(
-    workspaceDocument,
-    expectedWorkspace,
-    activateHostedWebViewControl,
-    timeoutMs,
-    () =>
-      waitForDocument({
-        discoveryUrl,
-        expectedText: expectedWorkspace,
-        timeoutMs
-      })
-  )
+  // Why: cold resume can land the hybrid route on the session itself; the row only exists on the list.
+  if (!isSessionRoute(workspaceDocument)) {
+    await activateWorkspace(
+      workspaceDocument,
+      expectedWorkspace,
+      activateHostedWebViewControl,
+      timeoutMs,
+      () =>
+        waitForDocument({
+          discoveryUrl,
+          expectedText: expectedWorkspace,
+          timeoutMs
+        })
+    )
+  }
   return {
     document: await waitForSessionDocument(
       discoveryUrl,
@@ -326,8 +329,12 @@ function assertNoPrivilegedPageMarkers(state) {
   }
 }
 
+function isSessionRoute(document) {
+  return new URL(document.href).pathname.split('/').at(-2) === 'session'
+}
+
 function assertSessionRoute(document) {
-  if (new URL(document.href).pathname.split('/').at(-2) !== 'session') {
+  if (!isSessionRoute(document)) {
     throw new Error(`Photos permission change did not restore the session route: ${document.href}`)
   }
 }

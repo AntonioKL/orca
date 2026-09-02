@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { PNG } from 'pngjs'
@@ -36,7 +37,8 @@ export async function copyHostedIosPhotoFixtureToClipboard(
   const tapPoint = operations.tapPoint ?? tapHostedIosPoint
   const waitForControl = operations.waitForControl ?? waitForHostedIosAccessibilityControl
   const waitForMatch = operations.waitForMatch ?? waitForHostedIosAccessibilityControlMatch
-  await runCommand('xcrun', ['simctl', 'addmedia', deviceUdid, fixturePath])
+  const stageFixture = operations.stageFixture ?? stageFreshHostedIosPhotoFixture
+  await runCommand('xcrun', ['simctl', 'addmedia', deviceUdid, await stageFixture(fixturePath)])
   await runCommand('xcrun', ['simctl', 'launch', deviceUdid, PHOTOS_APP_BUNDLE_ID])
 
   await reachHostedIosPhotosLibrary({
@@ -163,6 +165,19 @@ export async function verifyHostedIosTerminalClipboardImagePaste(
     },
     sessionDocument: activeSessionDocument
   }
+}
+
+// Why: Photos orders the library by capture date, which addmedia takes from the file's creation
+// time. A checked-in fixture is older than existing photos, so "last Photo" would pick another
+// asset. Writing the bytes (never copyFile, which clones the birth time on APFS) dates it now.
+export async function stageFreshHostedIosPhotoFixture(fixturePath, operations = {}) {
+  const readFixture = operations.readFixture ?? readFile
+  const writeFixture = operations.writeFixture ?? writeFile
+  const createDirectory = operations.createDirectory ?? mkdtemp
+  const directory = await createDirectory(path.join(tmpdir(), 'orca-hosted-photo-fixture-'))
+  const stagedPath = path.join(directory, path.basename(fixturePath))
+  await writeFixture(stagedPath, await readFixture(fixturePath))
+  return stagedPath
 }
 
 async function reachHostedIosPhotosLibrary({

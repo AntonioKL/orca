@@ -23,8 +23,9 @@ const execFileAsync = promisify(execFile)
 export const HOSTED_IOS_DOCUMENT_FIXTURE_NAME = 'orca-document-upload-fixture.png'
 const LOCAL_FILE_PROVIDER_GROUP = 'group.com.apple.FileProvider.LocalStorage'
 const PRIVILEGED_PAGE_MARKERS = ['orca-paste-', 'data:image/']
+// Why lazy: two pasted paths can abut in the joined tail; greedy segments would fuse them into one.
 const UPLOADED_PATH_PATTERN =
-  /\/(?:private\/)?var\/folders\/(?:[^/\s]+\/)+T\/orca-paste-[0-9]+-[0-9a-f-]+\.png/gi
+  /\/(?:private\/)?var\/folders\/(?:[^/\s]+\/)+?T\/orca-paste-[0-9]+-[0-9a-f-]+\.png/gi
 
 export async function seedHostedIosDocumentFixture({ deviceUdid, fixturePath }, operations = {}) {
   const runCommand = operations.runCommand ?? execFileAsync

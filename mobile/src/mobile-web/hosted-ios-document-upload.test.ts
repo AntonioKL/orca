@@ -103,6 +103,14 @@ describe('hosted iOS document upload', () => {
     expect(waitForPickerDismissal).toHaveBeenCalledWith(args.emulator, 'Browse', 3_000)
   })
 
+  it('splits abutting uploaded paths instead of fusing them', () => {
+    const first =
+      '/var/folders/x/y/T/orca-paste-1780000000000-00000000-0000-4000-8000-000000000000.png'
+    const second =
+      '/var/folders/x/y/T/orca-paste-1780000000001-00000000-0000-4000-8000-000000000001.png'
+    expect(uploadedPathsFromTerminalSnapshot([first + second])).toEqual([first, second])
+  })
+
   it('reconstructs wrapped uploaded paths from terminal rows', () => {
     expect(
       uploadedPathsFromTerminalSnapshot([

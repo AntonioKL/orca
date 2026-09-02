@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { PNG } from 'pngjs'
 import {
   copyHostedIosPhotoFixtureToClipboard,
+  stageFreshHostedIosPhotoFixture,
   pngPixelIdentity,
   verifyHostedIosTerminalClipboardImagePaste
 } from '../../scripts/hosted-ios-terminal-clipboard-image-paste.mjs'
@@ -45,6 +46,7 @@ describe('hosted iOS terminal clipboard image paste', () => {
         {
           readFixture: vi.fn().mockResolvedValue(fixtureBytes),
           runCommand,
+          stageFixture: vi.fn().mockResolvedValue('/repo/mobile/assets/favicon.png'),
           tapControl,
           tapLastControl,
           tapPoint,
@@ -80,6 +82,19 @@ describe('hosted iOS terminal clipboard image paste', () => {
     expect(tapPoint).not.toHaveBeenCalled()
   })
 
+  it('stages a freshly written copy so the fixture is the newest library photo', async () => {
+    const writeFixture = vi.fn().mockResolvedValue(undefined)
+
+    await expect(
+      stageFreshHostedIosPhotoFixture('/repo/mobile/assets/favicon.png', {
+        createDirectory: vi.fn().mockResolvedValue('/tmp/staged'),
+        readFixture: vi.fn().mockResolvedValue(fixtureBytes),
+        writeFixture
+      })
+    ).resolves.toBe('/tmp/staged/favicon.png')
+    expect(writeFixture).toHaveBeenCalledWith('/tmp/staged/favicon.png', fixtureBytes)
+  })
+
   it('dismisses first-launch Photos surfaces before copying', async () => {
     const waitForMatch = vi
       .fn()
@@ -99,6 +114,7 @@ describe('hosted iOS terminal clipboard image paste', () => {
       {
         readFixture: vi.fn().mockResolvedValue(fixtureBytes),
         runCommand: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+        stageFixture: vi.fn().mockResolvedValue('/repo/mobile/assets/favicon.png'),
         tapControl: vi.fn().mockResolvedValue({ x: 0.5, y: 0.5 }),
         tapLastControl: vi.fn().mockResolvedValue({ x: 0.16, y: 0.52 }),
         tapPoint,
@@ -147,6 +163,7 @@ describe('hosted iOS terminal clipboard image paste', () => {
       {
         readFixture: vi.fn().mockResolvedValue(fixtureBytes),
         runCommand: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+        stageFixture: vi.fn().mockResolvedValue('/repo/mobile/assets/favicon.png'),
         tapControl: vi.fn().mockResolvedValue({ x: 0.5, y: 0.5 }),
         tapLastControl,
         tapPoint,

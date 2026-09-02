@@ -268,6 +268,23 @@ describe('hosted iOS Photos permission revocation', () => {
     })
   })
 
+  it('skips row activation when the hybrid route restores the session itself', async () => {
+    const operations = createOperations()
+    operations.waitForDocument
+      .mockReset()
+      .mockRejectedValueOnce(new Error('session not retained'))
+      .mockResolvedValueOnce(grantedDocument)
+      .mockResolvedValueOnce(grantedDocument)
+      .mockResolvedValueOnce(grantedDocument)
+      .mockResolvedValueOnce(revokedDocument)
+
+    const result = await verifyHostedIosPhotoPermissionRevocation(args, operations)
+
+    expect(result.evidence).toMatchObject({ grantSessionRecovery: 'hybrid-route-handoff' })
+    expect(operations.openHybridRoute).toHaveBeenCalledOnce()
+    expect(operations.activateWorkspace).not.toHaveBeenCalled()
+  })
+
   it('reopens the production hybrid route after permission-triggered termination', async () => {
     const operations = createOperations()
     const workspaceDocument = { href: 'orca-mobile-web://workspace/h/host' }
