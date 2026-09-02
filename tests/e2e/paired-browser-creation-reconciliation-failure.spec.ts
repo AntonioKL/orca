@@ -279,6 +279,13 @@ async function runCapabilityFailureJourney(args: {
     await expect(page.getByText(/E2E forced browser capability rejection/)).toBeVisible({
       timeout: 30_000
     })
+    // Why: baseline equality alone also holds for a create that was rolled back. A null page id is
+    // what separates rejecting before the host create from undoing one afterwards.
+    expect(
+      await page.evaluate(
+        () => (window as FaultWindow).__webRuntimeBrowserCreationFault?.snapshot() ?? null
+      )
+    ).toMatchObject({ createdPageId: null })
     await expect
       .poll(() => readClientTabs(page, worktreeId), {
         timeout: 30_000,
