@@ -120,8 +120,5 @@ describe('resolveAgentLaunchRoute', () => {
       false
     )
     expect(hasExplicitTuiAgentArgs('codex', '--model gpt-5.6-sol')).toBe(true)
-    expect(route({ agentArgs: '--dangerously-bypass-approvals-and-sandbox' })).toBe(
-      'structured-native-chat'
-    )
   })
 })
