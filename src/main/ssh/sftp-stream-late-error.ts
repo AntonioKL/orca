@@ -18,12 +18,16 @@
  * guarantee one level down, on the streams.
  */
 
-/** SSH_FX_* status codes ssh2 copies onto the `Error` it builds from a STATUS reply. */
+/** SSH_FX_* status code ssh2 copies onto the `Error` it builds from a STATUS reply. */
 const SSH_FX_NO_SUCH_FILE = 2
-const SSH_FX_PERMISSION_DENIED = 3
 
 type ErrorEmitter = {
   on(event: 'error', listener: (err: Error) => void): unknown
+}
+
+type SftpSessionEmitter = ErrorEmitter & {
+  once(event: 'close', listener: () => void): unknown
+  removeListener(event: 'error', listener: (err: Error) => void): unknown
 }
 
 export type SftpStreamErrorLatch = {
@@ -52,9 +56,34 @@ export function latchLateSftpStreamErrors(
   }
 }
 
+/**
+ * Hold one `'error'` listener on the SFTP *session* for as long as the session lives.
+ *
+ * A transfer that attaches and removes its own session listener — `writeStringViaSftp`
+ * does, so a session error can reject the write in flight — leaves the emitter with zero
+ * listeners between transfers and after the last one. A late STATUS reply arriving in
+ * that window is the synchronous throw described above. Errors during a transfer still
+ * reach that transfer first: it prepends its listener ahead of this one.
+ *
+ * Attach this once, right after `conn.sftp()`, on every path that runs transfers over a
+ * session it owns.
+ */
+export function latchLateSftpSessionErrors(sftp: SftpSessionEmitter): void {
+  const swallowLateSftpError = (): void => {}
+  sftp.on('error', swallowLateSftpError)
+  sftp.once('close', () => sftp.removeListener('error', swallowLateSftpError))
+}
+
+/**
+ * A chrooted SFTP subsystem answers a path outside its namespace with
+ * `SSH_FX_NO_SUCH_FILE`, because the path genuinely does not exist in the view it
+ * serves. `SSH_FX_PERMISSION_DENIED` is not that: it is an ordinary mode/ownership
+ * refusal on a path the subsystem *can* see — a read-only home, a root-owned parent,
+ * a quota — and rewriting it into "your bastion chroots SFTP" would send the user to
+ * fix ProxyJump for a `chmod`.
+ */
 export function isSandboxedSftpNamespaceError(error: unknown): boolean {
-  const code = (error as { code?: unknown } | null)?.code
-  return code === SSH_FX_NO_SUCH_FILE || code === SSH_FX_PERMISSION_DENIED
+  return (error as { code?: unknown } | null)?.code === SSH_FX_NO_SUCH_FILE
 }
 
 /**

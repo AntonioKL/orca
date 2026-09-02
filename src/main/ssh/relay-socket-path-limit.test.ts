@@ -68,8 +68,10 @@ import {
   parseShortRelaySocketDir,
   remoteSocketPathFitsLimit,
   remoteUnixSocketPathByteLimit,
+  shortRelayVersionSegment,
   SHORT_RELAY_SOCKET_DIR_PREFIX
 } from './relay-socket-path-limit'
+import { supersededRelayEndpointListCommand } from './ssh-relay-superseded-endpoints'
 import { getRemoteHostPlatform } from './ssh-remote-platform'
 import type { SshConnection } from './ssh-connection'
 
@@ -79,6 +81,9 @@ const WINDOWS = getRemoteHostPlatform('win32-x64')
 
 // The reporter's host: a managed-hosting container whose $HOME is 45 bytes (#10726).
 const LONG_HOME = '/var/www/611f7cf9-f715-49e6-91d9-0ffac1d7c4c0'
+
+/** Matches the version this suite's mocked build reports. */
+const RELAY_VERSION_DIR_NAME = 'relay-0.1.0+8d4e15ad63eb'
 
 function makeMockConnection(): SshConnection {
   return {
@@ -133,13 +138,24 @@ describe('remote unix socket path limit', () => {
   })
 
   it('accepts only the marker line as the short directory', () => {
+    const segment = shortRelayVersionSegment(RELAY_VERSION_DIR_NAME)
     expect(
       parseShortRelaySocketDir(
-        'Welcome to Ubuntu\nORCA-RELAY-SHORT-SOCKET-DIR /tmp/.orca-relay-1000\n'
+        `Welcome to Ubuntu\nORCA-RELAY-SHORT-SOCKET-DIR /tmp/.orca-relay-1000/${segment}\n`,
+        segment
       )
-    ).toBe('/tmp/.orca-relay-1000')
-    expect(parseShortRelaySocketDir('mkdir: permission denied\n')).toBeNull()
-    expect(parseShortRelaySocketDir('ORCA-RELAY-SHORT-SOCKET-DIR /etc\n')).toBeNull()
+    ).toBe(`/tmp/.orca-relay-1000/${segment}`)
+    expect(parseShortRelaySocketDir('mkdir: permission denied\n', segment)).toBeNull()
+    expect(
+      parseShortRelaySocketDir(`ORCA-RELAY-SHORT-SOCKET-DIR /etc/${segment}\n`, segment)
+    ).toBeNull()
+    // A directory belonging to another build must not be adopted as this build's.
+    expect(
+      parseShortRelaySocketDir(
+        `ORCA-RELAY-SHORT-SOCKET-DIR /tmp/.orca-relay-1000/${shortRelayVersionSegment('relay-9.9.9+other')}\n`,
+        segment
+      )
+    ).toBeNull()
   })
 })
 
@@ -156,7 +172,9 @@ describe('relay launch with a long remote $HOME', () => {
       .mockResolvedValueOnce(LONG_HOME)
       .mockResolvedValueOnce('ORCA-NATIVE-DEPS-OK')
       .mockResolvedValueOnce('') // launch namespace marker
-      .mockResolvedValueOnce(`ORCA-RELAY-SHORT-SOCKET-DIR ${SHORT_RELAY_SOCKET_DIR_PREFIX}1000`)
+      .mockResolvedValueOnce(
+        `ORCA-RELAY-SHORT-SOCKET-DIR ${SHORT_RELAY_SOCKET_DIR_PREFIX}1000/${shortRelayVersionSegment(RELAY_VERSION_DIR_NAME)}`
+      )
       .mockResolvedValueOnce('DEAD')
       .mockResolvedValueOnce('READY')
       .mockResolvedValue('')
@@ -172,10 +190,32 @@ describe('relay launch with a long remote $HOME', () => {
     )
     expect(sockPath.startsWith(`${SHORT_RELAY_SOCKET_DIR_PREFIX}1000/`)).toBe(true)
     expect(result.sockPath).toBe(sockPath)
-    // The hashed socket name survives intact, so two targets cannot collide.
+    // The hashed socket name survives intact, so two targets cannot collide -- and the
+    // build's version segment sits above it, so the next Orca release binds a path of
+    // its own instead of the one this relay is still holding.
     expect(sockPath).toBe(
-      `${SHORT_RELAY_SOCKET_DIR_PREFIX}1000/${relaySocketNameForInstanceId('ssh-target-1')}`
+      `${SHORT_RELAY_SOCKET_DIR_PREFIX}1000/${shortRelayVersionSegment(RELAY_VERSION_DIR_NAME)}/${relaySocketNameForInstanceId('ssh-target-1')}`
     )
+    expect(shortRelayVersionSegment('relay-0.1.0+next')).not.toBe(
+      shortRelayVersionSegment(RELAY_VERSION_DIR_NAME)
+    )
+  })
+
+  it('sweeps superseded relays under the short base too, but never the live one', () => {
+    const currentShortSocketDir = `${SHORT_RELAY_SOCKET_DIR_PREFIX}1000/${shortRelayVersionSegment(RELAY_VERSION_DIR_NAME)}`
+    const script = supersededRelayEndpointListCommand({
+      remoteHome: LONG_HOME,
+      currentRelayDir: `${LONG_HOME}/.orca-remote/${RELAY_VERSION_DIR_NAME}`,
+      sockName: relaySocketNameForInstanceId('ssh-target-1'),
+      currentShortSocketDir
+    })
+
+    // A relocated orphan lives outside $HOME, so the sweep that exists to make orphans
+    // visible has to look at the short base as well.
+    expect(script).toContain(`short_base="${SHORT_RELAY_SOCKET_DIR_PREFIX}$(id -u 2>/dev/null)"`)
+    expect(script).toContain('"$short_base"/relay-*/"$sock_name"')
+    expect(script).toContain(`short_current='${currentShortSocketDir}'`)
+    expect(script).toContain('[ -n "$short_current" ] && [ "$dir" = "$short_current" ] && continue')
   })
 
   it('leaves the socket in the versioned relay dir when it already fits', async () => {
@@ -205,5 +245,6 @@ describe('relay launch with a long remote $HOME', () => {
 
     const script = vi.mocked(execCommand).mock.calls[0]?.[1] as string
     expect(script).toContain(`short_base="${SHORT_RELAY_SOCKET_DIR_PREFIX}$(id -u 2>/dev/null)"`)
+    expect(script).toContain('"$short_base"/relay-*/"$sock_name"')
   })
 })

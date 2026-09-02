@@ -16,7 +16,7 @@ export async function forceStopRelayForTarget(
     // Why: a long $HOME moves the socket to the sun_path-safe short base (#10726); reset must reach it there too.
     `short_base="${SHORT_RELAY_SOCKET_DIR_PREFIX}$(id -u 2>/dev/null)"`,
     'if [ -d "$base" ] || [ -d "$short_base" ]; then',
-    '  for sock in "$base"/relay-*/"$sock_name" "$base"/"$sock_name" "$short_base"/"$sock_name"; do',
+    '  for sock in "$base"/relay-*/"$sock_name" "$base"/"$sock_name" "$short_base"/relay-*/"$sock_name"; do',
     '    [ -S "$sock" ] || continue',
     '    pid=""',
     // Why: lsof ORs selectors by default; -a prevents reset from targeting

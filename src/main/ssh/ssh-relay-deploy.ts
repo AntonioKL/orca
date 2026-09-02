@@ -89,7 +89,9 @@ import {
   parseShortRelaySocketDir,
   remoteSocketPathFitsLimit,
   resolveShortRelaySocketDirCommand,
-  shortRelaySocketPath
+  shortRelaySocketPath,
+  shortRelayVersionSegment,
+  SHORT_RELAY_SOCKET_DIR_PREFIX
 } from './relay-socket-path-limit'
 import { isSshSessionLimitError } from './ssh-session-limit-error'
 import {
@@ -604,6 +606,13 @@ async function deployAndLaunchRelayAttempt(
         remoteHome,
         currentRelayDir: remoteRelayDir,
         sockName: relaySocketNameForInstanceId(relayInstanceId),
+        // Set only when this launch relocated past sun_path; the sweep must not reap
+        // the socket the transport it just handed back is talking to.
+        ...(launched.sockPath.startsWith(SHORT_RELAY_SOCKET_DIR_PREFIX)
+          ? {
+              currentShortSocketDir: launched.sockPath.slice(0, launched.sockPath.lastIndexOf('/'))
+            }
+          : {}),
         nodePath: launched.nodePath
       })
     )
@@ -1648,7 +1657,7 @@ async function launchRelay(
   // Why: a long remote $HOME pushes the default endpoint past sun_path and bind fails with a bare `listen EINVAL` (#10726).
   const sockFile = remoteSocketPathFitsLimit(hostPlatform, defaultSockFile)
     ? defaultSockFile
-    : await resolveShortPosixRelaySocketPath(conn, sockName, defaultSockFile, signal)
+    : await resolveShortPosixRelaySocketPath(conn, remoteDir, sockName, defaultSockFile, signal)
 
   if (isWindowsRemoteHost(hostPlatform)) {
     const activePipeMarkerPath = windowsActivePipeMarkerPath(hostPlatform, remoteDir, sockName)
@@ -1799,23 +1808,27 @@ async function launchRelay(
  *
  * The hashed socket name is preserved in full: only the directory shrinks, so the
  * short form stays deterministic per target and cannot collide with another target.
+ * The version directory's identity comes along as a hashed segment, so a later build
+ * still binds a path of its own rather than the one its predecessor is holding.
  */
 async function resolveShortPosixRelaySocketPath(
   conn: SshConnection,
+  remoteDir: string,
   sockName: string,
   defaultSockFile: string,
   signal?: AbortSignal
 ): Promise<string> {
-  const output = await execCommand(conn, resolveShortRelaySocketDirCommand(), { signal }).catch(
-    (err: unknown) => {
-      if (isUnconfirmedSshCommandTermination(err)) {
-        throw err
-      }
-      signal?.throwIfAborted()
-      return ''
+  const versionSegment = shortRelayVersionSegment(remoteDir.slice(remoteDir.lastIndexOf('/') + 1))
+  const output = await execCommand(conn, resolveShortRelaySocketDirCommand(versionSegment), {
+    signal
+  }).catch((err: unknown) => {
+    if (isUnconfirmedSshCommandTermination(err)) {
+      throw err
     }
-  )
-  const shortDir = parseShortRelaySocketDir(output)
+    signal?.throwIfAborted()
+    return ''
+  })
+  const shortDir = parseShortRelaySocketDir(output, versionSegment)
   if (!shortDir) {
     throw new Error(
       `Relay socket path ${defaultSockFile} exceeds the remote Unix socket limit and no short socket directory could be created on the host.`

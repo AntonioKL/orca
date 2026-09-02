@@ -15,7 +15,8 @@ import {
 import type { RemoteHostPlatform } from './ssh-remote-platform'
 import {
   describeSandboxedSftpFailure,
-  isSandboxedSftpNamespaceError
+  isSandboxedSftpNamespaceError,
+  latchLateSftpSessionErrors
 } from './sftp-stream-late-error'
 
 export type RelayTransferOptions = {
@@ -105,7 +106,6 @@ async function runSftpFallbackTransfer(
   transfer: (sftp: SFTPWrapper) => Promise<void>
 ): Promise<void> {
   const sftp = await conn.sftp(options?.signal)
-  const swallowLateSftpError = (): void => {}
   let sftpEndRequested = false
   const endSftp = (): void => {
     if (!sftpEndRequested) {
@@ -113,9 +113,7 @@ async function runSftpFallbackTransfer(
       sftp.end()
     }
   }
-  // A late session 'error' after settle would otherwise be unhandled and crash main.
-  sftp.on('error', swallowLateSftpError)
-  sftp.once('close', () => sftp.removeListener('error', swallowLateSftpError))
+  latchLateSftpSessionErrors(sftp)
   try {
     await raceSftpFileTransferWithAbort(
       transfer(sftp),
