@@ -10,7 +10,8 @@ import type {
   SshTarget,
   SshTargetUpdateInput,
   PortForwardEntry,
-  EnrichedDetectedPort
+  EnrichedDetectedPort,
+  SshTerminateSessionsResult
 } from '../../shared/ssh-types'
 import {
   admitSshConnectionStateForAuthorityReconciliation,
@@ -50,7 +51,7 @@ export const sshApi = {
   disconnect: (args: { targetId: string }): Promise<void> =>
     ipcRenderer.invoke('ssh:disconnect', args),
 
-  terminateSessions: (args: { targetId: string }): Promise<void> =>
+  terminateSessions: (args: { targetId: string }): Promise<SshTerminateSessionsResult> =>
     ipcRenderer.invoke('ssh:terminateSessions', args),
 
   resetRelay: (args: { targetId: string }): Promise<void> =>
