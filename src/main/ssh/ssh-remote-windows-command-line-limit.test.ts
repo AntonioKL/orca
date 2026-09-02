@@ -1,6 +1,6 @@
 import { gunzipSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
-import { CMD_EXE_MAX_COMMAND_LINE_CHARS } from '../../shared/windows-command-line-budget'
+import { CMD_EXE_COMMAND_LINE_MAX_CHARS } from '../providers/windows-shell-args'
 import { getRemoteHostPlatform } from './ssh-remote-platform'
 import { tryStealInstallLockCommand } from './ssh-relay-install-lock-commands'
 import { decodeRemotePowerShellScript, powerShellCommand } from './ssh-remote-powershell'
@@ -40,7 +40,7 @@ describe('Windows remote command line limit', () => {
       tryStealInstallLockCommand(windows, 'C:\\Users\\orca\\.orca-remote\\relay', 1_200)
     ]
   ])('keeps the %s command inside what sshd\u2019s cmd.exe accepts', (_name, command) => {
-    expect(command.length).toBeLessThanOrEqual(CMD_EXE_MAX_COMMAND_LINE_CHARS)
+    expect(command.length).toBeLessThanOrEqual(CMD_EXE_COMMAND_LINE_MAX_CHARS)
   })
 
   it('leaves a command that already fits byte-identical', () => {
@@ -54,7 +54,7 @@ describe('Windows remote command line limit', () => {
       (_unused, index) => `Write-Output ${index}; $slot = 'C:\\Users\\orca\\stage-${index}'`
     ).join('\n')
     const command = powerShellCommand(script)
-    expect(command.length).toBeLessThanOrEqual(CMD_EXE_MAX_COMMAND_LINE_CHARS)
+    expect(command.length).toBeLessThanOrEqual(CMD_EXE_COMMAND_LINE_MAX_CHARS)
     expect(decodeRemotePowerShellScript(command)).toBe(script)
     const bootstrap = Buffer.from(
       command.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)$/u)?.[1] ?? '',
@@ -72,7 +72,7 @@ describe('Windows remote command line limit', () => {
       return String.fromCharCode(97 + (seed % 26))
     }).join('')
     expect(() => powerShellCommand(`Write-Output '${incompressible}'`)).toThrow(
-      /sshd's cmd\.exe refuses more than 8191/u
+      /Orca budgets 8000 for a line sshd hands to cmd\.exe/u
     )
   })
 })

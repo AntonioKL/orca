@@ -15,18 +15,6 @@
 export const MAX_COMMAND_LINE_CHARS = 30_000
 
 /**
- * The much smaller cap that applies once cmd.exe is in the chain.
- *
- * cmd.exe refuses a longer line outright — exit 1 and a localized "The command
- * line is too long" — and it is in the chain more often than it looks: Windows
- * OpenSSH runs every exec request through sshd's `DefaultShell`, which is
- * cmd.exe on a stock install. So a command Orca sends to a Windows SSH host is
- * charged this budget, not the 32767 one, and `-EncodedCommand` spends 2.67
- * characters per script character on the way there.
- */
-export const CMD_EXE_MAX_COMMAND_LINE_CHARS = 8_191
-
-/**
  * What `CreateProcess` will count.
  *
  * libuv escapes every `"` and doubles a backslash run before a quote, so a

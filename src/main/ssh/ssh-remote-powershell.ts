@@ -1,12 +1,14 @@
 import { gunzipSync, gzipSync } from 'node:zlib'
 import { encodePowerShellCommand } from '../../shared/powershell-command-encoding'
-import { CMD_EXE_MAX_COMMAND_LINE_CHARS } from '../../shared/windows-command-line-budget'
+import { CMD_EXE_COMMAND_LINE_MAX_CHARS } from '../providers/windows-shell-args'
 export {
   quotePowerShellLiteral as powerShellLiteral,
   quotePowerShellNativeArgument as powerShellNativeArg
 } from '../../shared/powershell-native-argument'
 
-// Margin for the `/c` wrapper sshd puts around the command before cmd.exe counts it.
+// Why cmd.exe and not the 32767 CreateProcess cap: Windows OpenSSH runs every exec request
+// through sshd's DefaultShell, cmd.exe on a stock install. Budget under cmd.exe's own ceiling
+// to leave room for the `/c` wrapper sshd adds before cmd.exe counts the line.
 const WINDOWS_REMOTE_COMMAND_LINE_BUDGET_CHARS = 8_000
 
 export function powerShellCommand(script: string): string {
@@ -19,7 +21,7 @@ export function powerShellCommand(script: string): string {
   const compressed = encodedPowerShellCommand(selfExtractingPowerShellScript(script))
   if (compressed.length > WINDOWS_REMOTE_COMMAND_LINE_BUDGET_CHARS) {
     throw new Error(
-      `Remote Windows command needs ${compressed.length} characters; sshd's cmd.exe refuses more than ${CMD_EXE_MAX_COMMAND_LINE_CHARS}.`
+      `Remote Windows command needs ${compressed.length} characters; Orca budgets ${WINDOWS_REMOTE_COMMAND_LINE_BUDGET_CHARS} for a line sshd hands to cmd.exe, which itself refuses more than ${CMD_EXE_COMMAND_LINE_MAX_CHARS}.`
     )
   }
   return compressed
