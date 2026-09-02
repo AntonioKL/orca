@@ -39,10 +39,11 @@ const STALE_PID = 424_242
 /**
  * node-pty's native `pty.resize` error when the ioctl reaches a closed master.
  *
- * Orca's node-pty patch retires `_fd` when it gives up the master, so a real
- * handle answers a late resize with a no-op instead. What is left for this
- * handler to contain is the tick between libuv closing the fd on a read error
- * and node-pty's own handler observing it.
+ * Orca's node-pty patch retires `_fd` when it gives up the master, so a patched
+ * handle answers a late resize with a no-op. That leaves this handler two cases
+ * it still has to contain: the tick between libuv closing the fd and node-pty's
+ * own handler observing it, and a relay host, which installs node-pty from npm
+ * and has no such guard.
  */
 function ebadfResize(): never {
   throw new Error('ioctl(2) failed, EBADF')
@@ -107,6 +108,26 @@ describe('PtyHandler.resize against a stale PTY handle', () => {
     expect(stderr.mock.calls.map(([line]) => String(line)).join('')).toContain(
       'ioctl(2) failed, EBADF'
     )
+  })
+
+  it('retires the entry when the pid goes absent between the pre-probe and the ioctl', () => {
+    // The race the catch-block re-probe exists for, and the one a constant
+    // liveness mock cannot express: alive when the pre-probe asks, gone by the
+    // time the ioctl fails. libuv closes the master synchronously inside
+    // `uv_close`, so this window opens before any JS guard can be set — and on
+    // a relay host, where node-pty comes from npm, there is no JS guard at all.
+    vi.spyOn(ptyShellUtils, 'isProcessAlive').mockReturnValueOnce(true).mockReturnValueOnce(false)
+    resize.mockImplementation(ebadfResize)
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+    expect(() =>
+      dispatcher.callNotification('pty.resize', { id: PTY_1, cols: 120, rows: 40 })
+    ).not.toThrow()
+
+    expect(resize).toHaveBeenCalledTimes(1)
+    expect(handler.activePtyCount).toBe(0)
+    // Proven `exited` retires silently; only live-or-unverifiable is reported.
+    expect(stderr).not.toHaveBeenCalled()
   })
 
   it('still resizes a live PTY, with the clamped geometry', () => {

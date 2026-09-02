@@ -3,10 +3,16 @@ import { describe, expect, it } from 'vitest'
 
 /**
  * node-pty hands the master fd to libuv, which closes it on EIO/EOF, but upstream
- * never invalidated `_fd`, and neither `resize()` nor the `process` getter consulted
- * anything. Orca's patch retires `_fd` in the same block that gives up the handle
- * (config/patches/node-pty@1.1.0.patch), which is what makes a stale handle
- * unreachable instead of merely unlucky.
+ * never invalidated `_fd`, and none of the three fd-addressed surfaces consulted
+ * anything: `resize()`, the `process` getter, and `CustomWriteStream`, which holds
+ * its own plain-number copy of the fd taken at spawn. Orca's patch retires all
+ * three in the same block that gives up the handle
+ * (config/patches/node-pty@1.1.0.patch).
+ *
+ * Scope: this narrows the window, it does not close it. libuv closes the fd
+ * synchronously inside `uv_close`, before the JS `'close'` that runs `_close()`,
+ * so callers still need their own liveness verdict for that tick — and a relay
+ * host installs node-pty from npm, where this patch is not applied at all.
  */
 
 const POSIX_SHELL = '/bin/sh'
@@ -25,14 +31,36 @@ function masterFd(term: pty.IPty): number {
   return (term as unknown as { fd: number }).fd
 }
 
-/** Run `command` to completion and let node-pty finish giving up the master. */
-async function retiredPty(command = 'exit 0'): Promise<{ term: pty.IPty; spawnFd: number }> {
+type CustomWriteStream = { _fd: number; _writeQueue: unknown[]; write(data: string): void }
+
+/**
+ * `Terminal._close()` already shadows `terminal.write` with a no-op, so the stream
+ * itself is the surface that still reached the fd: a residual `_writeQueue` and an
+ * in-flight `fs.write` both re-enter it after the close.
+ */
+function writeStream(term: pty.IPty): CustomWriteStream {
+  return (term as unknown as { _writeStream: CustomWriteStream })._writeStream
+}
+
+/**
+ * Run `command` to completion and let node-pty finish giving up the master.
+ *
+ * `destroy: false` exercises only the EIO/EOF read-error path, which reaches
+ * `_close()` without ever calling `destroy()` — the path the exit of a shell
+ * actually takes, and the one the write stream was previously never told about.
+ */
+async function retiredPty(
+  command = 'exit 0',
+  { destroy = true }: { destroy?: boolean } = {}
+): Promise<{ term: pty.IPty; spawnFd: number }> {
   const term = spawnPty(command)
   const spawnFd = masterFd(term)
   await new Promise<void>((resolve) => {
     term.onExit(() => resolve())
   })
-  ;(term as unknown as { destroy?: () => void }).destroy?.()
+  if (destroy) {
+    ;(term as unknown as { destroy?: () => void }).destroy?.()
+  }
   await new Promise<void>((resolve) => setTimeout(resolve, 400))
   return { term, spawnFd }
 }
@@ -57,6 +85,17 @@ describeOnPosix('node-pty master fd retirement', () => {
     // Geometry stays at the last size actually applied rather than claiming one
     // that no descriptor ever received.
     expect([term.cols, term.rows]).toEqual([80, 24])
+  }, 15000)
+
+  it('retires the write stream fd on _close(), not only on destroy()', async () => {
+    const { term } = await retiredPty('exit 0', { destroy: false })
+
+    // The stream copied the fd number at spawn, so `Terminal._fd = -1` alone
+    // leaves it addressing a descriptor the kernel may already have reissued.
+    expect(writeStream(term)._fd).toBe(-1)
+
+    writeStream(term).write('x')
+    expect(writeStream(term)._writeQueue).toHaveLength(0)
   }, 15000)
 
   it('names the spawn file rather than tcgetpgrp on a retired descriptor', async () => {
@@ -94,6 +133,28 @@ describeOnLinux('node-pty master fd reuse', () => {
         live.onExit(() => resolve())
       })
       expect(output.trim()).toBe('24 80')
+    } finally {
+      live.kill()
+    }
+  }, 15000)
+
+  it('cannot write into a live pty handed the retired descriptor number', async () => {
+    const { term: retired, spawnFd } = await retiredPty('exit 0', { destroy: false })
+
+    const live = spawnPty('read -r line; printf "got:%s" "$line"')
+    let output = ''
+    live.onData((data) => {
+      output += data
+    })
+    try {
+      expect(masterFd(live)).toBe(spawnFd)
+
+      // Pre-patch this fs.write reached `live`'s master and the tty echoed it
+      // back: a retired pane's bytes landing in an unrelated terminal.
+      writeStream(retired).write('leak\r')
+      await new Promise<void>((resolve) => setTimeout(resolve, 300))
+
+      expect(output).not.toContain('leak')
     } finally {
       live.kill()
     }
