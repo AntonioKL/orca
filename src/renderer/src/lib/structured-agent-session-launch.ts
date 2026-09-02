@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 import {
   createStructuredCodexSessionLaunchIntent,
@@ -8,6 +9,7 @@ import {
 } from '@/lib/launch-structured-codex-session'
 import { refreshLocalStructuredSessionTabs } from '@/runtime/local-structured-session-tabs-sync'
 import { translate } from '@/i18n/i18n'
+import { useAppStore } from '@/store'
 
 type StructuredLaunchState = {
   intent: StructuredAgentSessionLaunchIntent
@@ -16,7 +18,37 @@ type StructuredLaunchState = {
   cancelled: boolean
 }
 
+export type StructuredCodexLaunchStatus = 'idle' | 'pending' | 'unknown'
+
 const pendingStructuredLaunchesByWorktree = new Map<string, StructuredLaunchState>()
+const structuredLaunchListeners = new Set<() => void>()
+
+function notifyStructuredLaunchListeners(): void {
+  for (const listener of structuredLaunchListeners) {
+    listener()
+  }
+}
+
+export function subscribeStructuredCodexLaunchStatus(listener: () => void): () => void {
+  structuredLaunchListeners.add(listener)
+  return () => structuredLaunchListeners.delete(listener)
+}
+
+export function getStructuredCodexLaunchStatus(worktreeId: string): StructuredCodexLaunchStatus {
+  const state = pendingStructuredLaunchesByWorktree.get(worktreeId)
+  if (!state) {
+    return 'idle'
+  }
+  return state.visibilityUnknown ? 'unknown' : 'pending'
+}
+
+export function useStructuredCodexLaunchStatus(worktreeId: string): StructuredCodexLaunchStatus {
+  return useSyncExternalStore(
+    subscribeStructuredCodexLaunchStatus,
+    () => getStructuredCodexLaunchStatus(worktreeId),
+    () => 'idle'
+  )
+}
 
 class StructuredAgentSessionLaunchCancelledError extends Error {
   constructor() {
@@ -43,6 +75,7 @@ function trackLaunchSettlement(
         pendingStructuredLaunchesByWorktree.get(worktreeId) === state
       ) {
         pendingStructuredLaunchesByWorktree.delete(worktreeId)
+        notifyStructuredLaunchListeners()
       }
     },
     () => {
@@ -52,6 +85,7 @@ function trackLaunchSettlement(
         pendingStructuredLaunchesByWorktree.get(worktreeId) === state
       ) {
         pendingStructuredLaunchesByWorktree.delete(worktreeId)
+        notifyStructuredLaunchListeners()
       }
     }
   )
@@ -68,6 +102,17 @@ async function verifyPublishedSession(intent: StructuredAgentSessionLaunchIntent
   )
   if (!published) {
     throw new Error('structured session tab publication unavailable')
+  }
+  const adopted = useAppStore
+    .getState()
+    .unifiedTabsByWorktree[intent.worktreeId]?.some(
+      (tab) =>
+        tab.contentType === 'agent-session' &&
+        tab.entityId === intent.sessionId &&
+        tab.worktreeId === intent.worktreeId
+    )
+  if (!adopted) {
+    throw new Error('structured session tab adoption unavailable')
   }
   return intent.sessionId
 }
@@ -89,6 +134,7 @@ async function retrySameIntent(state: StructuredLaunchState, priorError: unknown
       return await verifyPublishedSession(state.intent)
     } catch {
       state.visibilityUnknown = true
+      notifyStructuredLaunchListeners()
       throw error ?? priorError
     }
   }
@@ -125,6 +171,7 @@ async function launchAndReconcile(state: StructuredLaunchState): Promise<string>
 async function reconcileUnknownLaunch(state: StructuredLaunchState): Promise<string> {
   throwIfLaunchCancelled(state)
   state.visibilityUnknown = false
+  notifyStructuredLaunchListeners()
   try {
     return await verifyPublishedSession(state.intent)
   } catch (error) {
@@ -149,6 +196,7 @@ function launchStructuredCodexSessionOnce(worktreeId: string): Promise<string> {
   }
   state.promise = launchAndReconcile(state)
   pendingStructuredLaunchesByWorktree.set(worktreeId, state)
+  notifyStructuredLaunchListeners()
   trackLaunchSettlement(worktreeId, state, state.promise)
   return state.promise
 }
@@ -161,6 +209,7 @@ export function cancelStructuredCodexLaunch(worktreeId: string, sessionId: strin
   }
   state.cancelled = true
   pendingStructuredLaunchesByWorktree.delete(worktreeId)
+  notifyStructuredLaunchListeners()
   abandonStructuredAgentSessionLaunchIntent(state.intent)
   return true
 }

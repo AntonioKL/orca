@@ -49,6 +49,9 @@ const store = {
   detectedWorktreesByRepo: {},
   allWorktrees: vi.fn(() => store.worktreesByRepo['repo-1']),
   tabsByWorktree: { 'wt-1': [{ id: 'tab-1' }] },
+  unifiedTabsByWorktree: {
+    'wt-1': [{ contentType: 'agent-session', entityId: 'codex-session-1', worktreeId: 'wt-1' }]
+  },
   openFiles: [] as { id: string; worktreeId: string }[],
   browserTabsByWorktree: {} as Record<string, { id: string }[]>,
   tabBarOrderByWorktree: {} as Record<string, string[]>,
@@ -249,6 +252,9 @@ describe('structured chat adoption guard on the launch path', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // A successful retry must release the reservation so a later launch can start normally.
+    store.unifiedTabsByWorktree['wt-1'] = [
+      { contentType: 'agent-session', entityId: secondIntent.sessionId, worktreeId: 'wt-1' }
+    ]
     launchAgentInNewTab({ agent: 'codex', worktreeId: 'wt-1' })
     await vi.waitFor(() => expect(mockRefreshLocalStructuredSessionTabs).toHaveBeenCalledTimes(4))
     expect(mockCreateStructuredCodexSessionLaunchIntent).toHaveBeenCalledTimes(2)

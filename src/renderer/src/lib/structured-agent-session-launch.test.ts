@@ -5,7 +5,8 @@ import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-ses
 const mocks = vi.hoisted(() => ({
   createIntent: vi.fn(),
   launch: vi.fn(),
-  abandonIntent: vi.fn()
+  abandonIntent: vi.fn(),
+  rendererTabs: {} as Record<string, unknown[]>
 }))
 
 vi.mock('sonner', () => ({
@@ -31,6 +32,12 @@ vi.mock('@/runtime/local-structured-session-tabs-sync', () => ({
 
 vi.mock('@/i18n/i18n', () => ({
   translate: (_key: string, fallback: string) => fallback
+}))
+
+vi.mock('@/store', () => ({
+  useAppStore: {
+    getState: () => ({ unifiedTabsByWorktree: mocks.rendererTabs })
+  }
 }))
 
 import {
@@ -64,6 +71,9 @@ function launchIntent(
 }
 
 function publishedSnapshot(worktreeId: string, sessionId: string): RuntimeMobileSessionTabsResult {
+  mocks.rendererTabs[worktreeId] = [
+    { contentType: 'agent-session', entityId: sessionId, worktreeId }
+  ]
   return {
     worktree: worktreeId,
     publicationEpoch: 'epoch-1',
@@ -93,6 +103,7 @@ async function flushLaunchSettlement(): Promise<void> {
 describe('startStructuredCodexLaunch', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.rendererTabs = {}
     mocks.createIntent.mockImplementation((worktreeId: string) => launchIntent(worktreeId))
   })
 
