@@ -3,7 +3,10 @@ import {
   createRemoteRuntimeTransportMocks,
   type MultiplexSubscriptionCallbacks
 } from './remote-runtime-pty-transport-test-harness'
-import { REMOTE_RUNTIME_AUTO_RECOVERY_TIMEOUT_MS } from './remote-runtime-pty-recovery-state'
+import {
+  REMOTE_RUNTIME_AUTO_RECOVERY_TIMEOUT_MS,
+  REMOTE_RUNTIME_RECOVERY_ATTEMPT_BUDGET_MS
+} from './remote-runtime-pty-recovery-state'
 
 let subscriptionCallbacks: MultiplexSubscriptionCallbacks = null
 let resolvedPaneHandle = 'terminal-1'
@@ -30,6 +33,24 @@ describe('recoverable connect failures on a remote runtime pane', () => {
       if (args.method === 'terminal.resolvePane') {
         resolvePaneCalls += 1
       }
+      throw Object.assign(new Error('Remote Orca runtime closed the connection.'), {
+        code: 'remote_runtime_unavailable'
+      })
+    })
+  }
+
+  // Why: installUnreachableRuntime() rejects synchronously, so every failure lands during a backoff
+  // wait. A silently dropped link instead burns the whole RPC budget, so the rejection arrives while
+  // the attempt is still in flight — including after the auto-recovery deadline has already latched.
+  function installSilentlyDroppedRuntime(): void {
+    resolvePaneCalls = 0
+    runtimeCall.mockImplementation(async (args: { method: string }) => {
+      if (args.method === 'terminal.resolvePane') {
+        resolvePaneCalls += 1
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, REMOTE_RUNTIME_RECOVERY_ATTEMPT_BUDGET_MS)
+      })
       throw Object.assign(new Error('Remote Orca runtime closed the connection.'), {
         code: 'remote_runtime_unavailable'
       })
@@ -101,6 +122,34 @@ describe('recoverable connect failures on a remote runtime pane', () => {
       // ...and so must the Reconnect button, which returned false before #12684.
       await vi.advanceTimersByTimeAsync(REMOTE_RUNTIME_AUTO_RECOVERY_TIMEOUT_MS + 1_000)
       expect(transport.getRecoveryState?.().phase).toBe('disconnected')
+      expect(transport.retryRecovery?.()).toBe(true)
+
+      transport.destroy?.()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+  it('keeps the window bounded when a silent drop fails after the deadline latched', async () => {
+    vi.useFakeTimers()
+    try {
+      installSilentlyDroppedRuntime()
+      const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
+      const transport = createRemoteRuntimePtyTransport('env-1', {
+        worktreeId: 'wt-1',
+        tabId: 'tab-1',
+        leafId: 'pane:1'
+      })
+
+      void transport.connect({ url: '', sessionId: 'remote:env-1@@', callbacks: {} })
+      await vi.advanceTimersByTimeAsync(REMOTE_RUNTIME_AUTO_RECOVERY_TIMEOUT_MS * 2)
+
+      // The in-flight rejection must not begin a new epoch; that re-arms a full-length window forever.
+      expect(transport.getRecoveryState?.().phase).toBe('disconnected')
+      const callsAtCutoff = resolvePaneCalls
+      await vi.advanceTimersByTimeAsync(REMOTE_RUNTIME_AUTO_RECOVERY_TIMEOUT_MS * 2)
+      expect(resolvePaneCalls).toBe(callsAtCutoff)
+
+      // A deadline that lands mid-attempt parks nothing, so the latch must still stay revivable.
       expect(transport.retryRecovery?.()).toBe(true)
 
       transport.destroy?.()

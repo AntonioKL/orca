@@ -129,11 +129,22 @@ export class RemoteRuntimePtyRecoveryState {
 
   // Why: a wait that ends with no liveness evidence arms no timer, so park a retry or online/resume/reconnect find nothing to revive.
   parkRetryForExternalTrigger(epoch: number, retry: (epoch: number) => void): boolean {
-    if (!this.isCurrent(epoch) || this.pendingRetry !== null) {
+    return this.isCurrent(epoch) && this.parkRetry(retry)
+  }
+
+  // Why: the deadline can latch while an attempt is still in flight, before schedule() parked anything,
+  // so the late failure has no live epoch to join and must not begin a new one — that would re-arm a
+  // full-length window and the budget would never actually expire.
+  parkRetryAfterDeadline(retry: (epoch: number) => void): boolean {
+    return this.phase === 'disconnected' && this.parkRetry(retry)
+  }
+
+  private parkRetry(retry: (epoch: number) => void): boolean {
+    if (this.pendingRetry !== null) {
       return false
     }
     this.pendingRetry = retry
-    this.pendingEpoch = epoch
+    this.pendingEpoch = this.epoch
     scheduledRecoveries.add(this)
     return true
   }

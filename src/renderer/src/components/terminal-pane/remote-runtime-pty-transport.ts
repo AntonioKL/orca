@@ -90,6 +90,10 @@ const HOST_SESSION_POLL_MAX_MS = 1_000
 const HOST_SESSION_ATTACH_TIMEOUT_MS = 15_000
 const HOST_SESSION_INVENTORY_MAX_WINDOWS_PER_RECOVERY = 2
 const HOST_SESSION_SAME_HANDLE_END_REUSE_LIMIT = 2
+// Why its own constant: this fences how long an end-then-reattach on the same handle still counts as
+// one recovery, which is unrelated to how long auto-recovery keeps retrying. It read the recovery
+// budget before that budget became a derived value, and must not drift with it.
+const HOST_SESSION_SAME_HANDLE_END_REUSE_WINDOW_MS = 60_000
 const MAX_SURFACED_TERMINAL_ERRORS = 8
 const TERMINAL_CREATE_RETRY_DELAYS_MS = [250, 500, 1000, 2000, 4000, 8000, 15_000, 30_000] as const
 
@@ -328,7 +332,7 @@ export function createRemoteRuntimePtyTransport(
     if (
       sameHandleEndReuseHandle !== targetHandle ||
       sameHandleEndReuseAttachedAt === null ||
-      Date.now() - sameHandleEndReuseAttachedAt >= REMOTE_RUNTIME_AUTO_RECOVERY_TIMEOUT_MS
+      Date.now() - sameHandleEndReuseAttachedAt >= HOST_SESSION_SAME_HANDLE_END_REUSE_WINDOW_MS
     ) {
       resetSameHandleEndReuse()
       return 'prefer-replacement'
@@ -897,6 +901,12 @@ export function createRemoteRuntimePtyTransport(
       recovery.markDisconnected()
       return
     }
+    // Why: the last attempt's RPC budget expires at the same instant as the deadline, so a silent drop
+    // rejects after the latch. Beginning a new epoch there re-arms the whole window, so park instead.
+    if (recovery.currentPhase === 'disconnected') {
+      recovery.parkRetryAfterDeadline(retryAfterRecoverableConnectFailure)
+      return
+    }
     const recoveryEpoch = recovery.isActive ? recovery.currentEpoch : recovery.begin()
     if (!recovery.schedule(recoveryEpoch, retryAfterRecoverableConnectFailure)) {
       recovery.markDisconnected()
@@ -1066,6 +1076,8 @@ export function createRemoteRuntimePtyTransport(
       kind === 'agent-session'
         ? agentSessionRequiresHostAuthorityReplay
         : terminalCreateNeedsReconciliation
+    // Why the same budget: this loop calls recovery.begin(), so a shorter local deadline would abandon
+    // the create while the recovery state still reports 'recovering' with nothing in flight.
     let recoveryDeadlineAt: number | null = recovery.isActive
       ? Date.now() + REMOTE_RUNTIME_AUTO_RECOVERY_TIMEOUT_MS
       : null
