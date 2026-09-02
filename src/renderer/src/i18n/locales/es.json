@@ -13740,7 +13740,9 @@
           "loading": "Cargando ejecuciones…",
           "noRuns": "Aún no hay ejecuciones",
           "emptyDescription": "Las ejecuciones aparecerán aquí después de activar una automatización.",
-          "runs": "Ejecuciones"
+          "runs": "Ejecuciones",
+          "local": "Local",
+          "remote": "Remoto"
         },
         "AutomationsPageBreadcrumb": {
           "ariaLabel": "Ruta de navegación de automatizaciones",

@@ -13796,7 +13796,9 @@
           "loading": "실행 로드 중…",
           "noRuns": "아직 실행이 없습니다",
           "emptyDescription": "자동화를 트리거하면 여기에 실행이 표시됩니다.",
-          "runs": "실행"
+          "runs": "실행",
+          "local": "로컬",
+          "remote": "원격"
         },
         "AutomationsPageBreadcrumb": {
           "ariaLabel": "자동화 탐색경로",

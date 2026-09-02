@@ -13740,7 +13740,9 @@
           "loading": "実行を読み込み中…",
           "noRuns": "実行はまだありません",
           "emptyDescription": "自動化がトリガーされると、ここに実行が表示されます。",
-          "runs": "実行"
+          "runs": "実行",
+          "local": "ローカル",
+          "remote": "リモート"
         },
         "AutomationsPageBreadcrumb": {
           "ariaLabel": "自動化のパンくずリスト",

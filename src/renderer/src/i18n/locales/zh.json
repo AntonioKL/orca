@@ -13796,7 +13796,9 @@
           "loading": "正在加载运行…",
           "noRuns": "尚无运行",
           "emptyDescription": "触发自动化后，运行记录会显示在这里。",
-          "runs": "运行"
+          "runs": "运行",
+          "local": "本地",
+          "remote": "远程"
         },
         "AutomationsPageBreadcrumb": {
           "ariaLabel": "自动化面包屑导航",
