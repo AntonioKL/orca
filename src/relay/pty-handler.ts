@@ -74,6 +74,7 @@ import { getStrictProcessTableSnapshotWithAge } from '../shared/process-table-sn
 import type { ForegroundProcessEvidence } from '../shared/foreground-process-evidence'
 import type { RemoteForegroundEvidence } from '../shared/foreground-process-evidence'
 import { expandWindowsPathEnvironmentVariables } from '../shared/windows-environment-expansion'
+import { pruneRetiredPtyIncarnations } from '../shared/retired-pty-incarnations'
 import {
   agentSessionOwnerBindingsEqual,
   ClaimedAgentPtyOwnerRegistry
@@ -982,6 +983,7 @@ export class PtyHandler {
         incarnationId: managed.incarnationId,
         expiresAt: Date.now() + 5_000
       })
+      pruneRetiredPtyIncarnations(this.retiredIncarnations)
       this.publishPendingExit(managed.id)
       this.notifyExitListener(managed)
       this.agentSessionOwners.release(managed.id)
@@ -2343,6 +2345,7 @@ export class PtyHandler {
       incarnationId: managed.incarnationId,
       expiresAt: Date.now() + 5_000
     })
+    pruneRetiredPtyIncarnations(this.retiredIncarnations)
     disposeManagedPty(managed)
     this.removePty(managed.id)
     this.clearPtyFlowState(managed.id)
@@ -2555,6 +2558,7 @@ export class PtyHandler {
     hasChildProcesses: boolean
     foregroundProcessEvidence?: RemoteForegroundEvidence
   }> {
+    pruneRetiredPtyIncarnations(this.retiredIncarnations)
     const id = params.id as string
     const managed = this.ptys.get(id)
     if (!managed || managed.disposed) {
