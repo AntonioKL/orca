@@ -30,6 +30,12 @@ export function BrowserFavicon({
   const displayUrl = displayableFaviconUrl(faviconUrl)
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
 
+  // Why: reset during render on any favicon identity change — including a clear to null while
+  // a page loads — so navigating back to the same url retries instead of keeping the fallback.
+  if (failedUrl !== null && failedUrl !== displayUrl) {
+    setFailedUrl(null)
+  }
+
   if (displayUrl && failedUrl !== displayUrl) {
     return (
       <img

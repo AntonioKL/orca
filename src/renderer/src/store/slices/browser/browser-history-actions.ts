@@ -74,7 +74,7 @@ export function createBrowserHistoryActions(
                 ? {
                     ...entry,
                     title,
-                    ...(faviconUrl ? { faviconUrl } : {}),
+                    ...(faviconUrl !== undefined ? { faviconUrl } : {}),
                     lastVisitedAt: Date.now(),
                     visitCount: entry.visitCount + 1
                   }
@@ -85,7 +85,7 @@ export function createBrowserHistoryActions(
                 url: safeUrl,
                 normalizedUrl: normalized,
                 title,
-                ...(faviconUrl ? { faviconUrl } : {}),
+                ...(faviconUrl !== undefined ? { faviconUrl } : {}),
                 lastVisitedAt: Date.now(),
                 visitCount: 1
               },

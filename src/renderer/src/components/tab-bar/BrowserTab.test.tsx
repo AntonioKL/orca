@@ -313,4 +313,30 @@ describe('BrowserTab favicon', { timeout: 30_000 }, () => {
     expect(images[0].props.src).toBe(nextIconUrl)
     expect(findElementsByType(resetRender, 'Globe')).toHaveLength(0)
   })
+
+  it('retries a failed favicon after a navigation clears and restores the same url', async () => {
+    const iconUrl = 'https://example.com/favicon.ico'
+    const tab = baseBrowserTab({ faviconUrl: iconUrl })
+    const firstRender = await renderExpandedBrowserTab(tab)
+    const image = findElementsByType(firstRender, 'img')[0]
+
+    ;(image.props.onError as () => void)()
+    const failedRender = await renderExpandedBrowserTab(tab)
+    expect(findElementsByType(failedRender, 'Globe')).toHaveLength(1)
+
+    // A load clears the favicon, then the same site reports it again.
+    const loadingRender = await renderExpandedBrowserTab(
+      baseBrowserTab({ id: tab.id, faviconUrl: null })
+    )
+    expect(findElementsByType(loadingRender, 'Globe')).toHaveLength(1)
+
+    const retryRender = await renderExpandedBrowserTab(
+      baseBrowserTab({ id: tab.id, faviconUrl: iconUrl })
+    )
+
+    const images = findElementsByType(retryRender, 'img')
+    expect(images).toHaveLength(1)
+    expect(images[0].props.src).toBe(iconUrl)
+    expect(findElementsByType(retryRender, 'Globe')).toHaveLength(0)
+  })
 })

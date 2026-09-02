@@ -321,6 +321,34 @@ describe('createBrowserSlice annotations', () => {
     expect(store.getState().browserUrlHistory[0]?.faviconUrl).toBe(refreshedFavicon)
   })
 
+  it('clears a stale history favicon when a page reports none, and keeps it when none is reported', () => {
+    const store = createTestStore()
+    const tab = store.getState().createBrowserTab('wt-1', 'https://example.com', {
+      title: 'Example'
+    })
+    const pageId = tab.activePageId
+    if (!pageId) {
+      throw new Error('Expected a new browser page')
+    }
+    const favicon = 'https://example.com/favicon.ico'
+
+    store.getState().addBrowserHistoryEntry('https://example.com', 'Example', favicon)
+    store.getState().updateBrowserPageState(pageId, { faviconUrl: favicon })
+
+    // An omitted favicon leaves the stored one alone; an explicit null clears it.
+    store.getState().addBrowserHistoryEntry('https://example.com', 'Example')
+    expect(store.getState().browserUrlHistory[0]?.faviconUrl).toBe(favicon)
+
+    store.getState().updateBrowserPageState(pageId, { faviconUrl: null })
+    expect(store.getState().browserUrlHistory[0]?.faviconUrl).toBeNull()
+
+    store.getState().addBrowserHistoryEntry('https://example.com', 'Example', favicon)
+    expect(store.getState().browserUrlHistory[0]?.faviconUrl).toBe(favicon)
+
+    store.getState().addBrowserHistoryEntry('https://example.com', 'Example', null)
+    expect(store.getState().browserUrlHistory[0]?.faviconUrl).toBeNull()
+  })
+
   it('repairs a stale active browser unified-tab label on an otherwise unchanged title update', () => {
     const store = createTestStore()
     const tab = store.getState().createBrowserTab('wt-1', 'https://example.com', {

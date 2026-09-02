@@ -101,7 +101,7 @@ export function createBrowserPageStateActions(
             [workspace.id]: nextPages
           }
         }
-        if (updates.faviconUrl && updates.faviconUrl !== page.faviconUrl) {
+        if (updates.faviconUrl !== undefined && updates.faviconUrl !== page.faviconUrl) {
           const historyIndex = s.browserUrlHistory.findIndex(
             (entry) => entry.normalizedUrl === normalizeBrowserHistoryUrl(page.url)
           )
