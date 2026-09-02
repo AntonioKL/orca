@@ -169,7 +169,11 @@ import {
 } from './startup/main-process-error-guards'
 import { enableRendererHeapHeadroom } from './startup/renderer-heap-headroom'
 import { argvRequestsServeMode, normalizeServeModeArgv } from './startup/serve-mode-argv'
-import { ensureVirtualDisplayForHeadlessServe } from './startup/ensure-virtual-display'
+import {
+  ensureVirtualDisplayForHeadlessServe,
+  hasUsableLinuxDisplay,
+  MISSING_LINUX_DISPLAY_MESSAGE
+} from './startup/ensure-virtual-display'
 import {
   clearGpuFallbackMarker,
   readActiveGpuFallbackMarker,
@@ -548,6 +552,11 @@ if (argvRequestsServeMode(process.argv)) {
   process.argv = normalizeServeModeArgv(process.argv)
 }
 const isServeMode = process.argv.includes('--serve')
+// Fail before Chromium's missing-display teardown can segfault (#13719).
+if (app.isPackaged && !isServeMode && !hasUsableLinuxDisplay()) {
+  process.stderr.write(`${MISSING_LINUX_DISPLAY_MESSAGE}\n`)
+  app.exit(1)
+}
 
 function updateGpuAccelerationAboutPanel(): void {
   app.setAboutPanelOptions(
@@ -1006,6 +1015,11 @@ if (hasSingleInstanceLock) {
   }
   // Why: headless serve's offscreen BrowserWindows need an X display (Xvfb) on Linux; the result gates whether the offscreen backend is installed.
   headlessBrowserDisplayAvailable = ensureVirtualDisplayForHeadlessServe({ isServeMode })
+  // Why: continuing without Xvfb lets Ozone initialize without a display and SIGSEGV (#17615).
+  if (isServeMode && !headlessBrowserDisplayAvailable) {
+    process.stderr.write(`${MISSING_LINUX_DISPLAY_MESSAGE}\n`)
+    app.exit(1)
+  }
 }
 
 ipcMain.handle('app:awaitFirstWindowStartupServices', async () => {
