@@ -71,7 +71,7 @@ describe('hosted mobile bridge over cloud Relay transport', () => {
   })
 
   it('carries hosted authority and package delivery through the real mobile Relay client', async () => {
-    const relayServer = new WebSocketServer({ port: 0, perMessageDeflate: false })
+    const relayServer = new WebSocketServer({ host: '127.0.0.1', port: 0, perMessageDeflate: false })
     servers.push(relayServer)
     await new Promise<void>((resolve) => relayServer.once('listening', resolve))
     const address = relayServer.address()
