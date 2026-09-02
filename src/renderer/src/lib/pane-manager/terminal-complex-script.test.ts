@@ -522,6 +522,11 @@ describe('terminalOutputPrefersRenderRefresh single-pass classification', () => 
     '\x1b[38;5;3;44mfg then bg\x1b[0m',
     '\x1b[38;2;1;2;3;41mfg truecolor then bg\x1b[0m',
     '\x1b[38:5:9mcolon fg\x1b[0m',
+    // 38;2 consumes four parameters, so this 44 is the blue component, not a background.
+    '\x1b[38;2;1;2;44m',
+    // The colon form does not consume trailing parameters, so this 44 is a background.
+    '\x1b[38:5:1;44m',
+    '\x1b[38:2::1:2:3;44m',
     '\x1b[m',
     '\x1b[;m',
     '\x1b[38m',
@@ -547,6 +552,8 @@ describe('terminalOutputPrefersRenderRefresh single-pass classification', () => 
     'replacement \ufffd',
     'lone surrogate \ud83d',
     'astral tail \u{2f81a}',
+    // An astral code point outside every risk range must advance past both halves.
+    'math bold \u{1d400} x',
     '\x1b[41m\u{1f680}',
     '\u{1f680}\x1b[41m'
   ]
