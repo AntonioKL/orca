@@ -9,6 +9,7 @@ import {
 } from './hosted-ios-emulator-accessibility.mjs'
 import {
   captureHostedSourceControlReviewScreen,
+  HEADLESS_REVIEW_OPEN_ERROR,
   sourceControlReviewParityEvidence
 } from './hosted-ios-source-control-review-parity.mjs'
 import { navigateHostedWebViewRoute } from './hosted-webview-route-navigation.mjs'
@@ -28,6 +29,7 @@ export async function verifyHostedSourceControlReviewJourney({
   sessionDocument,
   timeoutMs,
   expectedSessionDiffText = '2 tabs',
+  nativeReviewOpen = null,
   inspectChangedContent,
   inspectProviderContent,
   tapPoint = tapHostedJourneyPoint,
@@ -108,25 +110,32 @@ export async function verifyHostedSourceControlReviewJourney({
         })
       )
     : null
-  const sessionDiff = await journeyStep('wait for Session diff route', () =>
-    openSessionDiffRoute({
-      discoveryUrl,
-      emulator,
-      expectedText: expectedSessionDiffText,
-      label: changedFileLabel,
-      sourceControl,
-      tapPoint,
-      timeoutMs,
-      transformPoint
-    })
+  const reviewOpen = await journeyStep(
+    'session-origin reviewOpen, diff route or the headless host outcome',
+    () =>
+      resolveSessionOriginReviewOpen({
+        discoveryUrl,
+        emulator,
+        expectedText: expectedSessionDiffText,
+        label: changedFileLabel,
+        nativeReviewOpen,
+        sourceControl,
+        tapPoint,
+        timeoutMs,
+        transformPoint
+      })
   )
-  if (inspectChangedContent) {
+  const sessionDiff = reviewOpen.sessionDiff
+  if (inspectChangedContent && sessionDiff) {
     await journeyStep('inspect Session diff content', () =>
       inspectChangedContent({ phase: 'sessionDiff', document: sessionDiff })
     )
   }
   await journeyStep('open standalone Review route', () =>
-    navigateHostedWebViewRoute(sessionDiff, standaloneReviewRoute(sourceState.href))
+    navigateHostedWebViewRoute(
+      sessionDiff ?? sourceControl,
+      standaloneReviewRoute(sourceState.href)
+    )
   )
   const review = await journeyStep('wait for Review route', () =>
     waitForVisibleHostedWebView({
@@ -164,7 +173,13 @@ export async function verifyHostedSourceControlReviewJourney({
   return {
     sourceControlRoute: sourceState.href,
     sourceControlSegments: ['Changes', 'Pull Request', 'Commits'],
-    sessionDiffRoute: sessionDiff.href,
+    sessionDiffRoute: sessionDiff?.href ?? null,
+    reviewOpen: {
+      headless: reviewOpen.headless,
+      native: reviewOpen.native,
+      ...(reviewOpen.bridgeError ? { bridgeError: reviewOpen.bridgeError } : {}),
+      ...(reviewOpen.visibleMessage ? { visibleMessage: reviewOpen.visibleMessage } : {})
+    },
     reviewRoute: reviewState.href,
     reviewControls: ['Back', 'Open review actions'],
     ...(hostedSourceControl && hostedReview
@@ -228,6 +243,75 @@ async function openSourceControlRoute({
     }
   }
   throw lastError
+}
+
+// Why: the diff tab needs a renderer notifier, and the e2e host is
+// `orca serve --mobile-pairing`, which has none. Rather than hardcode either
+// answer, take whichever arrives first and pin it against what the native app
+// did on the same host, so the claim is "hybrid matches native here". On a full
+// desktop the diff route wins and `headless` records false.
+async function resolveSessionOriginReviewOpen({
+  discoveryUrl,
+  emulator,
+  expectedText,
+  label,
+  nativeReviewOpen,
+  sourceControl,
+  tapPoint,
+  timeoutMs,
+  transformPoint
+}) {
+  await startHostedWebViewBridgeErrorObservation(sourceControl)
+  const sessionDiff = await openSessionDiffRoute({
+    discoveryUrl,
+    emulator,
+    expectedText,
+    label,
+    sourceControl,
+    tapPoint,
+    timeoutMs,
+    transformPoint
+  }).catch(() => null)
+  const native = nativeReviewOpen?.headless ?? null
+  if (sessionDiff) {
+    assertSessionOriginReviewOpenParity(false, native)
+    return { headless: false, native, sessionDiff }
+  }
+  const bridgeError = (await readHostedWebViewBridgeErrors(sourceControl)).find(
+    (entry) => entry.capability === 'sourceControl' && entry.operation === 'reviewOpen'
+  )
+  if (!bridgeError) {
+    throw new Error(
+      'Session-origin reviewOpen neither opened the diff route nor reported a bridge error'
+    )
+  }
+  assertSessionOriginReviewOpenParity(HEADLESS_REVIEW_OPEN_ERROR, native)
+  return {
+    bridgeError,
+    headless: HEADLESS_REVIEW_OPEN_ERROR,
+    native,
+    sessionDiff: null,
+    // The hybrid banner is generic where native names the host error; kept as evidence.
+    visibleMessage: await readSourceControlActionMessage(sourceControl)
+  }
+}
+
+function assertSessionOriginReviewOpenParity(hosted, native) {
+  if (native !== null && native !== hosted) {
+    throw new Error(
+      `Session-origin reviewOpen diverged: native ${JSON.stringify(native)}, hybrid ${JSON.stringify(hosted)}`
+    )
+  }
+}
+
+async function readSourceControlActionMessage(document) {
+  const state = await readHostedWebViewState(document).catch(() => null)
+  return (
+    state?.bodyText
+      ?.split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.endsWith('failed') || line.includes(HEADLESS_REVIEW_OPEN_ERROR)) ?? null
+  )
 }
 
 async function openSessionDiffRoute({

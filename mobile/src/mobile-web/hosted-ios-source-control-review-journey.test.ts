@@ -38,6 +38,7 @@ vi.mock('../../scripts/hosted-webview-bridge-error-observation.mjs', () => ({
 
 vi.mock('../../scripts/hosted-ios-source-control-review-parity.mjs', () => ({
   captureHostedSourceControlReviewScreen: mocks.captureParityScreen,
+  HEADLESS_REVIEW_OPEN_ERROR: 'renderer_unavailable',
   sourceControlReviewParityEvidence: mocks.parityEvidence
 }))
 
@@ -59,6 +60,7 @@ describe('hosted iOS Source Control and Review journey', () => {
     mocks.tapAccessibilityControl.mockResolvedValue(undefined)
     mocks.tapPoint.mockResolvedValue(undefined)
     mocks.startBridgeErrorObservation.mockResolvedValue(undefined)
+    mocks.readBridgeErrors.mockResolvedValue([])
     mocks.waitForDocument
       .mockResolvedValueOnce({
         href: 'orca-mobile-web://build/h/host/source-control/workspace'
@@ -99,6 +101,7 @@ describe('hosted iOS Source Control and Review journey', () => {
       sourceControlRoute: 'orca-mobile-web://build/h/host/source-control/workspace',
       sourceControlSegments: ['Changes', 'Pull Request', 'Commits'],
       sessionDiffRoute: 'orca-mobile-web://build/h/host/session/workspace',
+      reviewOpen: { headless: false, native: null },
       reviewRoute: 'orca-mobile-web://build/h/host/review/workspace',
       reviewControls: ['Back', 'Open review actions']
     })
@@ -444,5 +447,85 @@ describe('hosted iOS Source Control and Review journey', () => {
       4,
       expect.objectContaining({ expectedText: '2 tabs' })
     )
+  })
+  it('records the headless host outcome when the diff route never opens', async () => {
+    // Why: `orca serve --mobile-pairing` registers no renderer, so files.openDiff
+    // answers renderer_unavailable. The claim is parity with native on this host.
+    mocks.waitForDocument.mockReset()
+    mocks.waitForDocument.mockImplementation(({ expectedHrefIncludes }) => {
+      if (expectedHrefIncludes === '/session/') {
+        return Promise.reject(new Error('Session diff route did not open'))
+      }
+      return Promise.resolve({
+        href: `orca-mobile-web://build/h/host${expectedHrefIncludes ?? '/review/'}workspace`
+      })
+    })
+    mocks.readBridgeErrors.mockResolvedValue([
+      { capability: 'sourceControl', operation: 'reviewOpen', code: 'host_error', retryable: true }
+    ])
+    mocks.readState.mockReset()
+    mocks.readState
+      .mockResolvedValueOnce({
+        href: 'orca-mobile-web://build/h/host/source-control/workspace',
+        bodyText: 'Source Control Changes Pull Request Commits Create pull request 128 on branch',
+        labels: ['Refresh source control', 'Open changed file mobile/app/index.tsx']
+      })
+      .mockResolvedValueOnce({
+        href: 'orca-mobile-web://build/h/host/source-control/workspace',
+        bodyText: 'Source Control\nSource control action failed\nStage All'
+      })
+      .mockResolvedValueOnce({
+        href: 'orca-mobile-web://build/h/host/review/workspace',
+        bodyText: 'reviewed',
+        labels: ['Back', 'Open review actions']
+      })
+
+    const result = await verifyHostedSourceControlReviewJourney({
+      discoveryUrl: 'http://127.0.0.1:9222',
+      emulator: { deviceUdid: 'simulator' },
+      nativeReviewOpen: { headless: 'renderer_unavailable' },
+      sessionDocument: { href: 'orca-mobile-web://build/h/host/session/workspace' },
+      timeoutMs: 30_000
+    })
+
+    expect(result.sessionDiffRoute).toBeNull()
+    expect(result.reviewOpen).toEqual({
+      headless: 'renderer_unavailable',
+      native: 'renderer_unavailable',
+      bridgeError: {
+        capability: 'sourceControl',
+        operation: 'reviewOpen',
+        code: 'host_error',
+        retryable: true
+      },
+      visibleMessage: 'Source control action failed'
+    })
+    // The standalone Review route still opens, from the Source Control document.
+    expect(result.reviewRoute).toBe('orca-mobile-web://build/h/host/review/workspace')
+  })
+
+  it('fails when the hybrid outcome diverges from what native did on the same host', async () => {
+    mocks.waitForDocument.mockReset()
+    mocks.waitForDocument.mockImplementation(({ expectedHrefIncludes }) => {
+      if (expectedHrefIncludes === '/session/') {
+        return Promise.reject(new Error('Session diff route did not open'))
+      }
+      return Promise.resolve({
+        href: `orca-mobile-web://build/h/host${expectedHrefIncludes ?? '/review/'}workspace`
+      })
+    })
+    mocks.readBridgeErrors.mockResolvedValue([
+      { capability: 'sourceControl', operation: 'reviewOpen', code: 'host_error', retryable: true }
+    ])
+
+    await expect(
+      verifyHostedSourceControlReviewJourney({
+        discoveryUrl: 'http://127.0.0.1:9222',
+        emulator: { deviceUdid: 'simulator' },
+        nativeReviewOpen: { headless: false },
+        sessionDocument: { href: 'orca-mobile-web://build/h/host/session/workspace' },
+        timeoutMs: 30_000
+      })
+    ).rejects.toThrow('Session-origin reviewOpen diverged')
   })
 })
