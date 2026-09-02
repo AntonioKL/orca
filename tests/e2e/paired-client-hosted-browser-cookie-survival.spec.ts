@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net'
 import type { ElectronApplication, Page } from '@stablyai/playwright-test'
 import { expect, test } from './helpers/orca-app'
 import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
+import { readHostBrowserPageIds } from './helpers/host-session-tabs'
 import {
   launchPairedElectronClient,
   type PairedElectronClient
@@ -308,7 +309,7 @@ test('keeps client-hosted browser cookies across a paired runtime restart', asyn
     const worktreeId = await waitForPairedWorktreeId(client.page, testRepoPath)
     await selectPairedWorktreeGroup(client.page, client.environmentId, worktreeId)
 
-    await openClientHostedFixturePage(client, worktreeId, fixture.loginUrl)
+    const loginPage = await openClientHostedFixturePage(client, worktreeId, fixture.loginUrl)
     const login = await waitForRenderedClientWebview(
       client.page,
       fixture.loginUrl,
@@ -319,7 +320,11 @@ test('keeps client-hosted browser cookies across a paired runtime restart', asyn
       ROUTE_PARTITION_RE
     )
 
-    await openClientHostedFixturePage(client, worktreeId, fixture.echoBeforeUrl)
+    const echoBeforePage = await openClientHostedFixturePage(
+      client,
+      worktreeId,
+      fixture.echoBeforeUrl
+    )
     const echoBefore = await waitForRenderedClientWebview(
       client.page,
       fixture.echoBeforeUrl,
@@ -350,6 +355,12 @@ test('keeps client-hosted browser cookies across a paired runtime restart', asyn
     await host.client.call('repo.add', { path: testRepoPath, kind: 'git' }).catch(() => undefined)
     const restartedWorktreeId = await waitForPairedWorktreeId(client.page, testRepoPath)
     await selectPairedWorktreeGroup(client.page, client.environmentId, restartedWorktreeId)
+    await expect
+      .poll(() => readHostBrowserPageIds(host.client, testRepoPath), {
+        timeout: 180_000,
+        message: 'the relaunched runtime never reclaimed the existing client-hosted pages'
+      })
+      .toEqual(expect.arrayContaining([loginPage.remotePageId, echoBeforePage.remotePageId]))
 
     await openClientHostedFixturePage(client, restartedWorktreeId, fixture.echoAfterUrl)
     const echoAfter = await waitForRenderedClientWebview(

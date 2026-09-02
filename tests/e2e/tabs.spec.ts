@@ -28,7 +28,8 @@ import {
   getActiveTabType,
   getWorktreeTabs,
   getTabBarOrder,
-  ensureTerminalVisible
+  ensureTerminalVisible,
+  waitForStartupWorktreeRefresh
 } from './helpers/store'
 
 const SORTABLE_TAB = '[data-testid="sortable-tab"]'
@@ -68,6 +69,7 @@ async function getFocusedTerminalTabId(page: Page): Promise<string | null> {
 test.describe('Tabs', () => {
   test.beforeEach(async ({ orcaPage }) => {
     await waitForSessionReady(orcaPage)
+    await waitForStartupWorktreeRefresh(orcaPage)
     await waitForActiveWorktree(orcaPage)
     await ensureTerminalVisible(orcaPage)
   })
