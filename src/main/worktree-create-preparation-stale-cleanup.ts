@@ -74,6 +74,10 @@ export async function cleanupStalePreparations(
   }
 }
 
+export function hasStaleCleanupInFlight(): boolean {
+  return staleCleanupInFlight.size > 0
+}
+
 export function resetStalePreparationCleanupForTests(): void {
   staleCleanupInFlight.clear()
 }
