@@ -3,7 +3,10 @@ import { hasRuntimeRpcErrorCode } from '../../../shared/runtime-rpc-error-code'
 import type { ActiveAgentNotesSendFailureCode } from './active-agent-note-send-result'
 import { callRuntimeRpc, RuntimeRpcCallError } from '@/runtime/runtime-rpc-client'
 import type { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
-import { runtimeFailureCode } from './active-agent-note-send-diagnostics'
+import {
+  runtimeFailureCode,
+  TERMINAL_RUNTIME_FAILURE_CODES
+} from './active-agent-note-send-diagnostics'
 
 export const ACTIVE_AGENT_SEND_RPC_TIMEOUT_MS = 15000
 
@@ -98,9 +101,7 @@ export function isRuntimeTimeout(error: unknown): boolean {
 }
 
 export function isRuntimeTerminalUnavailable(error: unknown): boolean {
-  return ['terminal_handle_stale', 'terminal_exited', 'terminal_gone', 'no_active_terminal'].some(
-    (code) => hasRuntimeRpcErrorCode(error, code)
-  )
+  return TERMINAL_RUNTIME_FAILURE_CODES.some((code) => hasRuntimeRpcErrorCode(error, code))
 }
 
 export function isRuntimeTerminalNotWritable(error: unknown): boolean {

@@ -5,7 +5,7 @@ import type {
 } from './active-agent-note-send-result'
 import { hasRuntimeRpcErrorCode } from '../../../shared/runtime-rpc-error-code'
 
-const TERMINAL_RUNTIME_FAILURE_CODES = [
+export const TERMINAL_RUNTIME_FAILURE_CODES = [
   'terminal_handle_stale',
   'terminal_exited',
   'terminal_gone',
