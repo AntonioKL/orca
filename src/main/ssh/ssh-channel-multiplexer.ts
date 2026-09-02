@@ -74,6 +74,20 @@ function sshMuxRequestTimeoutError(method: string, timeoutMs: number): Error {
   })
 }
 
+// Why: `request` rejects a disposed mux and an already-aborted signal before it frames anything,
+// so the peer provably never saw those calls. A caller fencing a possibly-applied mutation needs
+// that apart from a mid-flight loss, which carries the identical code and message.
+export function isUndispatchedSshRequestError(error: unknown): boolean {
+  return (
+    (error as { sshRequestUndispatched?: unknown } | null | undefined)?.sshRequestUndispatched ===
+    true
+  )
+}
+
+function markUndispatched<T extends Error>(error: T): T {
+  return Object.assign(error, { sshRequestUndispatched: true as const })
+}
+
 /**
  * True when a request may have run on the host despite failing here.
  *
@@ -82,9 +96,13 @@ function sshMuxRequestTimeoutError(method: string, timeoutMs: number): Error {
  * wedged link lost at TIMEOUT_MS turned what used to surface as SSH_MUX_REQUEST_TIMEOUT into
  * CONNECTION_LOST, so callers that phrase the verdict to a user must branch on this rather than on
  * the timeout alone or they silently start reporting absence
- * (docs/reference/ssh-execution-boundary.md).
+ * (docs/reference/ssh-execution-boundary.md). Only a request the multiplexer refused before framing
+ * anything is provably un-run — hence the undispatched carve-out.
  */
 export function isSshRequestOutcomeUnverifiable(error: unknown): boolean {
+  if (isUndispatchedSshRequestError(error)) {
+    return false
+  }
   const code = error instanceof Error ? (error as Error & { code?: unknown }).code : undefined
   return code === SSH_MUX_REQUEST_TIMEOUT_CODE || code === 'CONNECTION_LOST'
 }
@@ -230,12 +248,12 @@ export class SshChannelMultiplexer {
     options?: SshMultiplexerRequestOptions
   ): Promise<unknown> {
     if (this.disposed) {
-      throw this.disposedError()
+      throw markUndispatched(this.disposedError())
     }
     if (options?.signal?.aborted) {
       const error = new Error(`Request "${method}" was cancelled`) as Error & { name: string }
       error.name = 'AbortError'
-      throw error
+      throw markUndispatched(error)
     }
 
     const id = this.nextRequestId++
