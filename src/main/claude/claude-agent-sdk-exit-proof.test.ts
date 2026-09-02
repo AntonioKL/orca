@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { spawnProcess, type SpawnedProcess } from '../../shared/child-process/run-process'
 import type { DescendantTreeVerdict } from '../pty-descendant-exit-verification'
 import type { DescendantSnapshot } from '../pty-descendant-termination'
+import type { WindowsDescendantSnapshot } from '../windows-descendant-exit-verification'
 import {
   createClaudeChildTreeReaper,
   proveClaudeChildExit,
@@ -130,6 +131,13 @@ function mockTree(verdicts: DescendantTreeVerdict[]): ClaudeChildTreeReaper & {
     get treeVerdict() {
       return treeVerdict
     }
+  }
+}
+
+function windowsSnapshotOf(descendantPid: number): WindowsDescendantSnapshot {
+  return {
+    descendants: [{ pid: descendantPid, creationTimeMs: 1_700_000_000_000 }],
+    capturedAtMs: 1
   }
 }
 
@@ -458,19 +466,93 @@ describe('claude child tree reaper', () => {
     const release = Promise.withResolvers<void>()
     const terminateWindowsTree = vi.fn(() => release.promise)
     const captureDescendants = vi.fn()
+    const terminateWindowsDescendants = vi.fn(async () => 'exited' as const)
     const tree = createClaudeChildTreeReaper(child, {
       platform: 'win32',
       captureDescendants,
-      terminateWindowsTree
+      captureWindowsDescendants: vi.fn(async () => windowsSnapshotOf(4243)),
+      terminateWindowsTree,
+      terminateWindowsDescendants
     })
 
     const reap = tree.reap()
     await vi.waitFor(() => expect(terminateWindowsTree).toHaveBeenCalledWith(424242))
     expect(child.kill).not.toHaveBeenCalled()
+    expect(terminateWindowsDescendants).not.toHaveBeenCalled()
     release.resolve()
     await expect(reap).resolves.toBe('exited')
     expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+    expect(terminateWindowsDescendants).toHaveBeenCalledWith(windowsSnapshotOf(4243))
     expect(captureDescendants).not.toHaveBeenCalled()
+  })
+
+  it('stays unproven on Windows when taskkill fails and a descendant is still observed', async () => {
+    const child = mockChild()
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'win32',
+      captureWindowsDescendants: vi.fn(async () => windowsSnapshotOf(4243)),
+      terminateWindowsTree: vi.fn(async () => {
+        throw new Error('taskkill: access denied')
+      }),
+      terminateWindowsDescendants: vi.fn(async () => 'live' as const)
+    })
+
+    // taskkill's own outcome is not the proof; the table read after it is.
+    await expect(tree.reap()).resolves.toBe('live')
+    expect(tree.treeVerdict).toBe('live')
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+  })
+
+  it('stays unproven on Windows when taskkill resolves but a descendant survives it', async () => {
+    const child = mockChild()
+    const terminateWindowsTree = vi.fn(async () => {})
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'win32',
+      captureWindowsDescendants: vi.fn(async () => windowsSnapshotOf(4243)),
+      terminateWindowsTree,
+      terminateWindowsDescendants: vi.fn(async () => 'live' as const)
+    })
+
+    await expect(tree.reap()).resolves.toBe('live')
+    expect(terminateWindowsTree).toHaveBeenCalledTimes(1)
+    expect(tree.treeVerdict).toBe('live')
+  })
+
+  it('never taskkills a Windows root that already exited, but still verifies its snapshot', async () => {
+    const child = mockChild()
+    let exited = false
+    const terminateWindowsTree = vi.fn(async () => {})
+    const terminateWindowsDescendants = vi.fn(async () => 'exited' as const)
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'win32',
+      exited: () => exited,
+      captureWindowsDescendants: vi.fn(async () => windowsSnapshotOf(4243)),
+      terminateWindowsTree,
+      terminateWindowsDescendants
+    })
+
+    await tree.capture()
+    exited = true
+    await expect(tree.reap()).resolves.toBe('exited')
+    // A dead root's pid may already belong to a stranger: taskkill /T /F on it
+    // would take down an unrelated tree.
+    expect(terminateWindowsTree).not.toHaveBeenCalled()
+    expect(terminateWindowsDescendants).toHaveBeenCalledWith(windowsSnapshotOf(4243))
+  })
+
+  it('treats an unreadable Windows table as unproven', async () => {
+    const child = mockChild()
+    const terminateWindowsDescendants = vi.fn()
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'win32',
+      captureWindowsDescendants: vi.fn(async () => null),
+      terminateWindowsTree: vi.fn(async () => {}),
+      terminateWindowsDescendants
+    })
+
+    await expect(tree.reap()).resolves.toBe('unverifiable')
+    expect(terminateWindowsDescendants).not.toHaveBeenCalled()
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
   })
 
   it('has nothing to reap for a child that never spawned', async () => {
