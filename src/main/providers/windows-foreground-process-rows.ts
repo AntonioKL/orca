@@ -124,10 +124,11 @@ export function windowsDescendantsFromRows<Row extends { pid: number; ppid: numb
   rows: Row[],
   rootPid: number
 ): (Row & { depth: number })[] | null {
-  if (!rows.some((row) => row.pid === rootPid)) {
+  const index = getProcessTableIndex(rows)
+  if (!index.byPid.has(rootPid)) {
     return null
   }
-  return collectDescendants(rows, rootPid).sort((a, b) => b.depth - a.depth)
+  return collectDescendantsFromIndex(index, rootPid).sort((a, b) => b.depth - a.depth)
 }
 
 /** Test-only: clear the shared snapshot so one case's rows never serve the next. */
