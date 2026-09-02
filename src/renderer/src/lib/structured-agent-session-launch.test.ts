@@ -129,6 +129,33 @@ describe('startStructuredCodexLaunch', () => {
     expect(mocks.abandonIntent).toHaveBeenCalledWith(intent)
   })
 
+  it('does not park or toast when close races the final verification retry', async () => {
+    const worktreeId = 'wt-close-final-verify'
+    const intent = launchIntent(worktreeId, 'session-close-final-verify')
+    let resolveFinalRefresh!: (snapshots: RuntimeMobileSessionTabsResult[]) => void
+    mocks.createIntent.mockReturnValueOnce(intent)
+    mocks.launch.mockResolvedValue(intent.sessionId)
+    vi.mocked(refreshLocalStructuredSessionTabs)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(
+        () =>
+          new Promise<RuntimeMobileSessionTabsResult[]>((resolve) => {
+            resolveFinalRefresh = resolve
+          })
+      )
+
+    startStructuredCodexLaunch(worktreeId)
+    await vi.waitFor(() => expect(refreshLocalStructuredSessionTabs).toHaveBeenCalledTimes(3))
+    expect(cancelStructuredCodexLaunch(worktreeId, intent.sessionId)).toBe(true)
+    resolveFinalRefresh([])
+    await flushLaunchSettlement()
+
+    expect(mocks.launch).toHaveBeenCalledTimes(2)
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(mocks.abandonIntent).toHaveBeenCalledWith(intent)
+  })
+
   it('opens the chat without an informational progress toast', async () => {
     const worktreeId = 'wt-open-quiet'
     const intent = launchIntent(worktreeId, 'session-1')
