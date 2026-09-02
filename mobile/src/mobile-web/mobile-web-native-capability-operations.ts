@@ -19,7 +19,6 @@ import {
   MobileWebTerminalTextScaleUpdatePayloadSchema
 } from '../../../src/shared/mobile-web/native-operation-contract'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
-import { requireRecentUserGesture } from './mobile-web-user-gesture-requirement'
 import type { MobileWebNativeCapabilityAuthority } from './mobile-web-native-capability-authority'
 import type { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
@@ -30,12 +29,9 @@ export async function executeMobileWebNativeCapabilityOperation(args: {
   authority: MobileWebNativeCapabilityAuthority
   browserAuthority?: MobileWebBrowserAuthority
   workspaceAuthority?: MobileWebWorkspaceAuthority
-  consumeRecentUserGesture: () => boolean
-  hasRecentUserGesture: () => boolean
 }): Promise<unknown> {
   if (args.operation === 'alert') {
     const payload = MobileWebNativeAlertPayloadSchema.parse(args.payload)
-    requireRecentUserGesture(args.hasRecentUserGesture)
     if (!args.authority.alert) {
       throw new MobileWebBrokerError('unavailable')
     }
@@ -103,26 +99,22 @@ export async function executeMobileWebNativeCapabilityOperation(args: {
   }
   if (args.operation === 'clipboardWrite') {
     const payload = MobileWebClipboardWritePayloadSchema.parse(args.payload)
-    requireRecentUserGesture(args.consumeRecentUserGesture)
     return MobileWebClipboardWriteResultSchema.parse(
       await args.authority.clipboardWrite(payload.text)
     )
   }
   if (args.operation === 'openExternal') {
     const payload = MobileWebOpenExternalPayloadSchema.parse(args.payload)
-    requireRecentUserGesture(args.consumeRecentUserGesture)
     await args.authority.openExternal(payload.url)
     return null
   }
   if (args.operation === 'terminalTextScaleUpdate') {
     const payload = MobileWebTerminalTextScaleUpdatePayloadSchema.parse(args.payload)
-    requireRecentUserGesture(args.consumeRecentUserGesture)
     await args.authority.terminalTextScaleUpdate(payload.textScale)
     return null
   }
   if (args.operation === 'terminalCustomKeysUpdate') {
     const payload = MobileWebTerminalCustomKeysUpdatePayloadSchema.parse(args.payload)
-    requireRecentUserGesture(args.consumeRecentUserGesture)
     if (!args.authority.terminalCustomKeysUpdate) {
       throw new MobileWebBrokerError('unavailable')
     }

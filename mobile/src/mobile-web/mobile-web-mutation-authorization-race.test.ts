@@ -95,8 +95,7 @@ describe('mobile web mutation authorization races', () => {
       workspaceAuthority: workspace.authority,
       nativeChatAuthority: chat,
       nativeAuthority: { sessionChatPendingWrite },
-      terminalClientId: 'mobile-client',
-      consumeRecentUserGesture: () => false
+      terminalClientId: 'mobile-client'
     })
     const rejection = expect(pending).rejects.toMatchObject({ code: 'not_found' })
 

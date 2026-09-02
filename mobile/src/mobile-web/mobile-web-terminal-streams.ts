@@ -9,7 +9,6 @@ import {
   type TerminalStreamFrame
 } from '../transport/terminal-stream-protocol'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
-import { requireRecentUserGesture } from './mobile-web-user-gesture-requirement'
 import { runMobileWebTerminalAction } from './mobile-web-terminal-actions'
 import {
   acknowledgeMobileWebTerminalOutput,
@@ -114,8 +113,7 @@ export class MobileWebTerminalStreams {
 
   handle(
     payload: unknown,
-    client: RpcClient,
-    consumeRecentUserGesture: () => boolean = () => false
+    client: RpcClient
   ): null | Promise<null | MobileWebTerminalDeviceInputResult> {
     const request = MobileWebTerminalRequestSchema.parse(payload)
     if (request.operation === 'subscribe') {
@@ -141,9 +139,6 @@ export class MobileWebTerminalStreams {
         record,
         request
       }).then(() => null)
-    }
-    if (request.operation === 'clipboardPaste' || request.operation === 'attachImage') {
-      requireRecentUserGesture(consumeRecentUserGesture)
     }
     return handleMobileWebTerminalStreamRequest({
       client,

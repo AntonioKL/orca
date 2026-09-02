@@ -7,7 +7,6 @@ import { MOBILE_WEB_PRODUCTION_WORKSPACE_CREATION_GRANTS } from './mobile-web-pr
 
 describe('mobile web workspace creation round trip', () => {
   it('carries page requests through schemas and resolves host authority only in native', async () => {
-    const consumeRecentUserGesture = vi.fn(() => true)
     const sendRequest = vi.fn(async (method: string) => {
       if (method === 'repo.list') {
         return {
@@ -45,9 +44,7 @@ describe('mobile web workspace creation round trip', () => {
       navigationAuthority: {
         route: vi.fn(),
         reconnect: vi.fn(),
-        removeHost: vi.fn(),
-        consumeRecentUserGesture,
-        hasRecentUserGesture: () => true
+        removeHost: vi.fn()
       }
     })
 
@@ -75,7 +72,6 @@ describe('mobile web workspace creation round trip', () => {
       workspaceId: expect.stringMatching(/^workspace_/),
       name: 'mobile-workspace'
     })
-    expect(consumeRecentUserGesture).toHaveBeenCalledOnce()
     expect(sendRequest).toHaveBeenCalledWith(
       'worktree.create',
       expect.objectContaining({

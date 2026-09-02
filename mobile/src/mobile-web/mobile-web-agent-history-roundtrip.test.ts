@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
 import { createMobileWebBridgeRoundtripFixture } from './mobile-web-bridge-roundtrip-fixture'
 
-it('round trips opaque agent history and gesture-gates resume through the production bridge', async () => {
+it('round trips opaque agent history and resume through the production bridge', async () => {
   const sendRequest = vi.fn(async (method: string) => {
     if (method === 'status.get') {
       return {
@@ -12,6 +12,16 @@ it('round trips opaque agent history and gesture-gates resume through the produc
     }
     if (method === 'worktree.ps') {
       return { ok: true, result: { worktrees: [worktree()] } }
+    }
+    if (method === 'repo.list') {
+      return { ok: true, result: { repos: [] } }
+    }
+    if (
+      method === 'folderWorkspace.list' ||
+      method === 'projectGroup.list' ||
+      method === 'settings.get'
+    ) {
+      return { ok: true, result: {} }
     }
     if (method === 'aiVault.listSessions') {
       return {
@@ -35,9 +45,7 @@ it('round trips opaque agent history and gesture-gates resume through the produc
     navigationAuthority: {
       route: vi.fn(),
       reconnect: vi.fn(),
-      removeHost: vi.fn(),
-      consumeRecentUserGesture: () => false,
-      hasRecentUserGesture: () => true
+      removeHost: vi.fn()
     },
     randomBytes: (length) => new Uint8Array(length).fill(5)
   })
@@ -65,13 +73,12 @@ it('round trips opaque agent history and gesture-gates resume through the produc
   await expect(client.agentHistory.preview(row.handle)).resolves.toEqual({
     messages: [{ role: 'assistant', text: 'safe preview' }]
   })
-  await expect(
-    client.agentHistory.resume({
-      workspaceId: route.workspaceId,
-      sessionHandle: row.handle
-    })
-  ).rejects.toMatchObject({ code: 'permission_required' })
-  expect(sendRequest).not.toHaveBeenCalledWith('repo.list', expect.anything(), expect.anything())
+  const resume = await client.agentHistory.resume({
+    workspaceId: route.workspaceId,
+    sessionHandle: row.handle
+  })
+  expect(JSON.stringify(resume)).not.toContain('/Users/ada')
+  expect(JSON.stringify(resume)).not.toContain('provider-secret')
 })
 
 function agentHistoryGrant(operation: 'snapshot' | 'preview' | 'resume') {

@@ -3,7 +3,7 @@ import { createMobileWebBridgeRoundtripFixture } from './mobile-web-bridge-round
 import { MOBILE_WEB_PRODUCTION_NATIVE_GRANTS } from './mobile-web-production-native-grants'
 
 describe('mobile web native capability round trip', () => {
-  it('keeps device effects in the shell behind typed grants and gestures', async () => {
+  it('keeps device effects in the shell behind typed grants', async () => {
     const alert = vi.fn().mockResolvedValue({ kind: 'button' as const, buttonIndex: 1 })
     const hapticFeedback = vi.fn()
     const clipboardWrite = vi.fn().mockResolvedValue({ confirmation: 'in-app' as const })
@@ -20,7 +20,6 @@ describe('mobile web native capability round trip', () => {
     })
     const terminalCustomKeysUpdate = vi.fn().mockResolvedValue(undefined)
     const terminalTextScaleUpdate = vi.fn().mockResolvedValue(undefined)
-    const consumeRecentUserGesture = vi.fn(() => true)
     let requestIndex = 0
     const { client } = createMobileWebBridgeRoundtripFixture({
       grants: [...MOBILE_WEB_PRODUCTION_NATIVE_GRANTS],
@@ -39,9 +38,7 @@ describe('mobile web native capability round trip', () => {
       navigationAuthority: {
         route: vi.fn(),
         reconnect: vi.fn(),
-        removeHost: vi.fn(),
-        consumeRecentUserGesture,
-        hasRecentUserGesture: () => true
+        removeHost: vi.fn()
       }
     })
 
@@ -96,6 +93,5 @@ describe('mobile web native capability round trip', () => {
     expect(terminalCustomKeysUpdate).toHaveBeenCalledWith([
       { id: 'custom-2', label: 'Test', bytes: 'pnpm test\r', enter: false }
     ])
-    expect(consumeRecentUserGesture).toHaveBeenCalledTimes(4)
   })
 })

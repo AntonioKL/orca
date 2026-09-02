@@ -1,4 +1,3 @@
-import { mobileWebUserGestureConsumer } from './mobile-web-user-gesture-requirement'
 import { MobileWebAccountSubscribePayloadSchema } from '../../../src/shared/mobile-web/account-operation-contract'
 import { executeMobileWebAccountOperation } from './mobile-web-account-operations'
 import type { MobileWebCapabilityExecutionDependencies } from './mobile-web-capability-execution-dependencies'
@@ -21,8 +20,7 @@ export async function executeMobileWebAccountCapability(
       operation: request.operation,
       payload: request.payload,
       client: args.connectedClient(),
-      nativeAuthority: args.nativeAuthority,
-      consumeRecentUserGesture: mobileWebUserGestureConsumer(args.navigationAuthority)
+      nativeAuthority: args.nativeAuthority
     })
   }
   throw new Error('unsupported_account_request')

@@ -27,9 +27,7 @@ it('round trips typed account reads, selection, and snapshots through the produc
     navigationAuthority: {
       route: vi.fn(),
       reconnect: vi.fn(),
-      removeHost: vi.fn(),
-      consumeRecentUserGesture: () => true,
-      hasRecentUserGesture: () => true
+      removeHost: vi.fn()
     }
   })
 

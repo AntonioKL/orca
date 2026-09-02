@@ -8,7 +8,6 @@ import {
 import { pasteMobileNativeChatImagePaths } from '../session/mobile-native-chat-image-send'
 import type { RpcClient } from '../transport/rpc-client'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
-import { requireRecentUserGesture } from './mobile-web-user-gesture-requirement'
 import {
   assertCurrentMobileWebNativeChatPageBinding,
   resolveFreshMobileWebNativeChatPageBinding
@@ -30,11 +29,9 @@ export async function executeMobileWebNativeChatImageOperation(args: {
   terminalClientId: string
   workspaceAuthority: MobileWebWorkspaceAuthority
   nativeChatAuthority: MobileWebNativeChatAuthority
-  consumeRecentUserGesture: () => boolean
 }): Promise<unknown> {
   if (args.operation === 'attachImage') {
     const payload = MobileWebNativeChatAttachImagePayloadSchema.parse(args.payload)
-    requireRecentUserGesture(args.consumeRecentUserGesture)
     const binding = await resolveFreshMobileWebNativeChatPageBinding(
       args,
       payload.workspaceId,

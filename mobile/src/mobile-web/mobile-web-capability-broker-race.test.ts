@@ -134,9 +134,7 @@ async function createPrimedHarness(alert?: MobileWebNativeCapabilityAuthority['a
     navigationAuthority: {
       route: vi.fn(),
       reconnect: vi.fn(),
-      removeHost: vi.fn(),
-      consumeRecentUserGesture: () => true,
-      hasRecentUserGesture: () => true
+      removeHost: vi.fn()
     }
   })
   sendRequest.mockResolvedValueOnce({

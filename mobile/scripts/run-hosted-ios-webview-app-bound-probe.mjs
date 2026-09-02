@@ -20,9 +20,12 @@ import {
   bootHostedIosSimulator,
   resolveHostedIosSimulatorUdid
 } from './hosted-ios-simulator-device.mjs'
-import { probeHostedIosUserGestureWindow } from './hosted-ios-user-gesture-window-probe.mjs'
-import { waitForVisibleHostedWebView } from './hosted-webview-cdp-session.mjs'
+import {
+  activateHostedWebViewControl,
+  waitForVisibleHostedWebView
+} from './hosted-webview-cdp-session.mjs'
 import { resolveHostedWebViewRuntimeDirectory } from './hosted-webview-runtime-directory.mjs'
+import { activateHostedWorkspaceRow } from './hosted-webview-workspace-activation.mjs'
 
 const worktree = path.resolve(import.meta.dirname, '../..')
 const options = parseOptions(process.argv.slice(2))
@@ -41,7 +44,6 @@ const orcaSelection = resolveEmulatorOrcaCli({
 function parseOptions(args) {
   const parsed = {
     device: 'iPhone 17 Pro',
-    gestureOnly: false,
     reuseNativeInstall: false,
     skipNativeBuild: false,
     timeoutMs: 180_000
@@ -55,8 +57,6 @@ function parseOptions(args) {
       parsed.skipNativeBuild = true
     } else if (args[index] === '--reuse-native-install') {
       parsed.reuseNativeInstall = true
-    } else if (args[index] === '--gesture-only') {
-      parsed.gestureOnly = true
     } else {
       throw new Error(`Unknown argument: ${args[index]}`)
     }
@@ -66,7 +66,7 @@ function parseOptions(args) {
 
 async function main() {
   if (process.platform !== 'darwin') {
-    throw new Error('Hosted iOS WebView probes require macOS and Xcode.')
+    throw new Error('The hosted iOS app-bound navigation probe requires macOS and Xcode.')
   }
   mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 })
   const deviceUdid = await resolveHostedIosSimulatorUdid(options.device)
@@ -107,23 +107,31 @@ async function main() {
       expectedText: expectedWorkspace,
       timeoutMs: options.timeoutMs
     })
-    const gesture = await probeHostedIosUserGestureWindow({
-      discoveryUrl,
-      emulator,
+    await activateHostedWorkspaceRow(
+      workspaceDocument,
       expectedWorkspace,
-      timeoutMs: options.timeoutMs,
-      workspaceDocument
-    })
-    const appBound = options.gestureOnly
-      ? null
-      : await probeHostedIosAppBoundNavigation({
-          deviceUdid,
-          emulator,
-          sessionDocument: gesture.sessionDocument,
+      activateHostedWebViewControl,
+      options.timeoutMs,
+      () =>
+        waitForVisibleHostedWebView({
+          discoveryUrl,
+          expectedText: expectedWorkspace,
           timeoutMs: options.timeoutMs
         })
-    const { sessionDocument: _session, ...gestureEvidence } = gesture
-    console.log(JSON.stringify({ appBound, gesture: gestureEvidence, nativeAppPath }, null, 2))
+    )
+    const sessionDocument = await waitForVisibleHostedWebView({
+      discoveryUrl,
+      expectedText: 'Mobile Emulator',
+      expectedHrefIncludes: '/session/',
+      timeoutMs: options.timeoutMs
+    })
+    const appBound = await probeHostedIosAppBoundNavigation({
+      deviceUdid,
+      emulator,
+      sessionDocument,
+      timeoutMs: options.timeoutMs
+    })
+    console.log(JSON.stringify({ appBound, nativeAppPath }, null, 2))
   } finally {
     inspector?.stop()
     await stopHostedChildProcess(launcher)

@@ -23,7 +23,7 @@ import { useMobileWebColdResumeRoute } from '../src/mobile-web/use-mobile-web-co
 import { mobileWebBridgeConnectionState } from '../src/mobile-web/mobile-web-bridge-connection-state'
 import { MobileWebOneShotResponseDrop } from '../src/mobile-web/mobile-web-one-shot-response-drop'
 import { useMobileWebE2eHostSelection } from '../src/mobile-web/mobile-web-e2e-host-selection'
-import { useMobileWebUserGestureAuthority as useGestureAuthority } from '../src/mobile-web/use-mobile-web-user-gesture-authority'
+import { useMobileWebAppForegroundAuthority } from '../src/mobile-web/use-mobile-web-app-foreground-authority'
 import { useMobileWebHostCatalog } from '../src/mobile-web/use-mobile-web-host-catalog'
 import { mobileWebDiagnosticsStore } from '../src/mobile-web/mobile-web-diagnostics-store'
 import { useMobileWebBridgeRuntimeRef } from '../src/mobile-web/use-mobile-web-bridge-runtime-ref'
@@ -53,11 +53,7 @@ export default function HybridScreen() {
   const brokerRef = useRef<MobileWebCapabilityBroker | null>(null)
   const postInitRef = useRef<() => Promise<void>>(() => Promise.resolve())
   const nativeRouteHandoffRef = useRef(new MobileWebNativeRouteHandoff())
-  const recentWebGestureAtRef = useRef<number | null>(null)
-  const { consumeRecentUserGesture, hasRecentUserGesture } = useGestureAuthority(
-    recentWebGestureAtRef,
-    brokerRef
-  )
+  useMobileWebAppForegroundAuthority(brokerRef)
   const responseDropRef = useRef(
     new MobileWebOneShotResponseDrop(process.env.EXPO_PUBLIC_ORCA_E2E_MOBILE_WEB_DROP_RESPONSE_ONCE)
   )
@@ -149,7 +145,6 @@ export default function HybridScreen() {
   // A view-epoch bump replaces the document, so every page-scoped grant retires with it.
   useEffect(() => {
     initializedSessionRef.current = undefined
-    recentWebGestureAtRef.current = null
     nativeRouteHandoffRef.current.clear()
     setPageReadySessionId(undefined)
     healthDeadlineRef.current.clear()
@@ -181,9 +176,7 @@ export default function HybridScreen() {
     router,
     clearColdResumeRoute: coldResumeRoute.clearRoute,
     closeHostClient,
-    forceReconnectHost,
-    consumeRecentUserGesture,
-    hasRecentUserGesture
+    forceReconnectHost
   })
   const createBroker = useCallback(
     (page: MobileWebBrokerPageIdentity) => {
@@ -386,9 +379,6 @@ export default function HybridScreen() {
       onRecoveryFailure={() =>
         showWarning('The workspace interface recovery action could not be completed.')
       }
-      onTouch={() => {
-        recentWebGestureAtRef.current = Date.now()
-      }}
       onBridgeMessage={(message) => void handleBridgeMessage(message)}
       onPageLoaded={() => {
         hardwareBackHandoff.resetPage()

@@ -16,9 +16,7 @@ export function useMobileWebNavigationAuthority({
   router,
   clearColdResumeRoute,
   closeHostClient,
-  forceReconnectHost,
-  consumeRecentUserGesture,
-  hasRecentUserGesture
+  forceReconnectHost
 }: {
   hostId: string | undefined
   hostPublicKeyB64: string | undefined
@@ -27,8 +25,6 @@ export function useMobileWebNavigationAuthority({
   clearColdResumeRoute: () => void
   closeHostClient: (hostId: string) => void
   forceReconnectHost: (hostId: string) => void | Promise<void>
-  consumeRecentUserGesture: () => boolean
-  hasRecentUserGesture: () => boolean
 }): MobileWebNavigationAuthority | undefined {
   return useMemo(() => {
     if (!hostId || !hostPublicKeyB64) {
@@ -52,16 +48,12 @@ export function useMobileWebNavigationAuthority({
       },
       removeHost() {
         return removeHostAndCloseClient(hostId, hostPublicKeyB64, closeHostClient)
-      },
-      consumeRecentUserGesture,
-      hasRecentUserGesture
+      }
     }
   }, [
     clearColdResumeRoute,
     closeHostClient,
-    consumeRecentUserGesture,
     forceReconnectHost,
-    hasRecentUserGesture,
     hostId,
     hostPublicKeyB64,
     routeHandoffRef,

@@ -27,8 +27,7 @@ describe('mobile web native route handoff', () => {
           }
         },
         reconnect: vi.fn(),
-        removeHost: vi.fn(),
-        consumeRecentUserGesture: () => true
+        removeHost: vi.fn()
       },
       terminalClientId: 'native-only-device',
       randomBytes: (length) => new Uint8Array(length),

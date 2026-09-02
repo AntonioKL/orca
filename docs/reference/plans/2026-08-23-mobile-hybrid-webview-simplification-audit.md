@@ -40,7 +40,7 @@ The non-negotiable constraints were:
 - Preserve the existing React Native presentation and behavior.
 - Keep page authority opaque and the private origin network/storage isolated.
 - Preserve exact named operations, per-operation schemas/bounds,
-  reauthorization, gesture mediation, result correlation, and cleanup.
+  reauthorization, result correlation, and cleanup.
 - Preserve native, folder-workspace, WSL, SSH, Relay, provider-neutral, and
   mixed-version ownership even where their final matrices remain open.
 - Remove tests only when equivalent or stronger coverage remains.
@@ -104,7 +104,7 @@ commit is independently releasable.
   trust boundaries even when both use the same page transport envelope.
 - Package delivery RPC is separate from page capability dispatch.
 - Terminal streaming, native-chat subscriptions, ordinary request/response,
-  and gesture-bound native actions have different lifecycle rules.
+  and native device actions have different lifecycle rules.
 - iOS and Android origin/cache implementations may share contracts and corpora,
   but their platform enforcement remains explicit.
 - Desktop package rollback and native-shell/store correction are independent
@@ -120,7 +120,7 @@ does not, by itself, preserve:
 - pre-allocation collection, string, binary, and envelope limits;
 - opaque host/build/shell/workspace/stream authority binding;
 - destructive mutation reauthorization after asynchronous host resolution;
-- foreground, route, permission, and recent-gesture mediation;
+- foreground, route, and permission mediation;
 - request/result identity and delayed-response correlation;
 - subscription ownership, cancellation, invalid-event retirement, and
   reconnect resnapshot;
@@ -141,7 +141,7 @@ dispatch tables, compatibility declarations, and invariant tests.
 It must not generate or hide authorization decisions. Each domain retains an
 explicit adapter that resolves opaque authority, checks the current execution
 host and provider/workspace context, reauthorizes mutations, mediates native
-gesture/permission state, applies result-specific bounds, and owns cleanup.
+permission state, applies result-specific bounds, and owns cleanup.
 Generated output must remain reviewable, deterministic, exact-v2 compatible,
 and covered by the existing malformed/lifecycle corpora. Prototype this on
 Tasks, Files, and Session before any broad conversion.
@@ -221,8 +221,9 @@ merge subject rather than SHA, because the branch is still rebased.
   rebuilds the capability broker through a `viewEpoch` remount.
 - Android installs a document-start script denying `fetch`, `XMLHttpRequest`,
   `WebSocket`, and `serviceWorker`, matching iOS.
-- `native.alert` is gated on a gesture witness that does not spend the gesture.
-  The gesture requirement now lives in one module with its own census.
+- The `native.alert` gesture gate this group added was deleted on 2026-09-02,
+  along with the whole recent-user-gesture window: a scroll armed it, so it
+  gated nothing on a first-party page. The rest of this group stands.
 
 `Merge mr-p1-ci: run native shell tests in CI and fix the Android module build`
 

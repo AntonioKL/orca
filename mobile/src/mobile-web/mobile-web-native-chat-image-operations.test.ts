@@ -19,25 +19,6 @@ const BINDING = {
 }
 
 describe('mobile web native-chat image operations', () => {
-  it('denies image picking before resolving host authority without a recent gesture', async () => {
-    const context = operationContext()
-    const sendRequest = vi.fn<RpcClient['sendRequest']>()
-
-    await expect(
-      executeMobileWebNativeChatOperation({
-        ...operationArgs(context, sendRequest, false),
-        operation: 'attachImage',
-        payload: {
-          workspaceId: context.pageWorkspaceId,
-          sessionId: context.pageSessionId,
-          source: 'library'
-        }
-      })
-    ).rejects.toMatchObject({ code: 'permission_required' })
-    expect(sendRequest).not.toHaveBeenCalled()
-    expect(prepareMobileWebNativeChatImageAttachment).not.toHaveBeenCalled()
-  })
-
   it('returns an opaque scoped reference instead of the uploaded host path', async () => {
     const context = operationContext()
     const sendRequest = vi
@@ -50,7 +31,7 @@ describe('mobile web native-chat image operations', () => {
     })
 
     const result = await executeMobileWebNativeChatOperation({
-      ...operationArgs(context, sendRequest, true),
+      ...operationArgs(context, sendRequest),
       operation: 'attachImage',
       payload: {
         workspaceId: context.pageWorkspaceId,
@@ -91,7 +72,7 @@ describe('mobile web native-chat image operations', () => {
 
       await expect(
         executeMobileWebNativeChatOperation({
-          ...operationArgs(context, sendRequest, false),
+          ...operationArgs(context, sendRequest),
           operation: 'prepareCommit',
           payload: {
             workspaceId: context.pageWorkspaceId,
@@ -125,7 +106,7 @@ describe('mobile web native-chat image operations', () => {
 
       await expect(
         executeMobileWebNativeChatOperation({
-          ...operationArgs(context, sendRequest, false),
+          ...operationArgs(context, sendRequest),
           operation: 'sendMessage',
           payload: {
             workspaceId: context.pageWorkspaceId,
@@ -156,16 +137,14 @@ function operationContext() {
 
 function operationArgs(
   context: ReturnType<typeof operationContext>,
-  sendRequest: RpcClient['sendRequest'],
-  gesture: boolean
+  sendRequest: RpcClient['sendRequest']
 ) {
   return {
     client: { sendRequest } as unknown as RpcClient,
     terminalClientId: 'mobile-device',
     workspaceAuthority: context.workspaceAuthority,
     nativeChatAuthority: context.nativeChatAuthority,
-    nativeAuthority: {},
-    consumeRecentUserGesture: () => gesture
+    nativeAuthority: {}
   }
 }
 

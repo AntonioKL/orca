@@ -180,8 +180,7 @@ function createFromSource(args: {
       agentChoice: 'blank'
     },
     client: { sendRequest: args.sendRequest } as unknown as RpcClient,
-    authority: args.authority,
-    consumeRecentUserGesture: vi.fn(() => true)
+    authority: args.authority
   })
 }
 

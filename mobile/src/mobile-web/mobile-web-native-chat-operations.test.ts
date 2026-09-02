@@ -14,8 +14,7 @@ const binding = {
   transcriptPath: '/private/transcript.jsonl'
 }
 const OPERATION_RUNTIME = {
-  terminalClientId: 'mobile-device',
-  consumeRecentUserGesture: () => false
+  terminalClientId: 'mobile-device'
 }
 
 describe('mobile web native chat operations', () => {
