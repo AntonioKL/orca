@@ -70,6 +70,9 @@ export const agentStatusApi = {
   dropPersisted: (identity: AgentStatusCacheIdentity): void => {
     ipcRenderer.send('agentStatus:dropPersisted', identity)
   },
+  dropPersistedBatch: (identities: readonly AgentStatusCacheIdentity[]): void => {
+    ipcRenderer.send('agentStatus:dropPersistedBatch', identities)
+  },
   reconcileEndedProcess: (paneKey: string): void => {
     ipcRenderer.send('agentStatus:reconcileEndedProcess', paneKey)
   },

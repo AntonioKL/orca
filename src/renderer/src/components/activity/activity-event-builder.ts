@@ -1,6 +1,4 @@
 import { isExplicitAgentStatusFresh } from '@/lib/agent-status'
-import { findIndexedRepoOwnerForHost } from '@/lib/worktree-runtime-owner-index'
-import { getRemoteRuntimePtyEnvironmentId } from '@/runtime/runtime-terminal-stream'
 import type { RetainedAgentEntry } from '@/store/slices/agent-status'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
@@ -9,22 +7,12 @@ import {
   type AgentStatusState,
   type MigrationUnsupportedPtyEntry
 } from '../../../../shared/agent-status-types'
-import {
-  LOCAL_EXECUTION_HOST_ID,
-  toRuntimeExecutionHostId,
-  toSshExecutionHostId,
-  type ExecutionHostId
-} from '../../../../shared/execution-host'
+import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type { Repo } from '../../../../shared/repo-types'
-import { parseAppSshPtyId } from '../../../../shared/ssh-pty-id'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
 import type { Tab } from '../../../../shared/tab-types'
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import type { Worktree } from '../../../../shared/worktree/types'
-import {
-  effectiveWorktreeAgentRowStartedAt,
-  tabFromWorktreeAttributedStatusEntry
-} from '../sidebar/worktree-agent-row-fallback-tab'
 import type {
   ActivityEvent,
   ActivityHookLiveAgentState,
@@ -38,8 +26,14 @@ import {
   resolvePaneBuild,
   type ActivityEventBuildCache
 } from './activity-event-build-cache'
-import { standaloneActivityWorktree } from './activity-standalone-worktree'
 import { appendUnsupportedAndRetainedEvents } from './activity-event-builder-sources'
+import {
+  attributedActivityTabContext,
+  buildActivityTabContext,
+  buildActivityTabHostIndex,
+  resolveActivityEventOwner,
+  type ActivityEventOwner
+} from './activity-event-builder-context'
 
 export { createActivityEventBuildCache, type ActivityEventBuildCache, newestActivityHistoryEntries }
 
@@ -81,145 +75,6 @@ export type BuildActivityEventsArgs = {
   now: number
 }
 
-type ActivityTabContext = { worktreeId: string; tab: TerminalTab }
-type ActivityEventOwner = { worktree: Worktree; repo: Repo | null; knownWorktree: boolean }
-type ActivityTabHostIndex = Map<string, Map<string, ExecutionHostId | null>>
-
-function terminalTabFromAgentSessionTab(tab: Tab): TerminalTab {
-  return {
-    id: tab.id,
-    ptyId: null,
-    worktreeId: tab.worktreeId,
-    title: tab.customLabel ?? tab.generatedLabel ?? tab.label,
-    customTitle: tab.customLabel,
-    color: tab.color,
-    isPinned: tab.isPinned,
-    sortOrder: tab.sortOrder,
-    createdAt: tab.createdAt
-  }
-}
-
-function buildActivityTabContext(args: BuildActivityEventsArgs): Map<string, ActivityTabContext> {
-  const contexts = new Map<string, ActivityTabContext>()
-  for (const [worktreeId, tabs] of Object.entries(args.tabsByWorktree)) {
-    for (const tab of tabs) {
-      contexts.set(tab.id, { worktreeId, tab })
-    }
-  }
-  for (const [worktreeId, tabs] of Object.entries(args.unifiedTabsByWorktree ?? {})) {
-    for (const tab of tabs) {
-      if (tab.contentType !== 'agent-session' || contexts.has(tab.id)) {
-        continue
-      }
-      contexts.set(tab.id, { worktreeId, tab: terminalTabFromAgentSessionTab(tab) })
-    }
-  }
-  return contexts
-}
-
-function attributedActivityTabContext(entry: AgentStatusEntry): ActivityTabContext | null {
-  const tab = tabFromWorktreeAttributedStatusEntry(entry, effectiveWorktreeAgentRowStartedAt(entry))
-  return tab ? { worktreeId: tab.worktreeId, tab } : null
-}
-
-function buildActivityTabHostIndex(args: BuildActivityEventsArgs): ActivityTabHostIndex {
-  const index: ActivityTabHostIndex = new Map()
-  for (const [worktreeId, tabs] of Object.entries(args.unifiedTabsByWorktree ?? {})) {
-    for (const tab of tabs) {
-      if (
-        (tab.contentType !== 'terminal' && tab.contentType !== 'agent-session') ||
-        !tab.executionHostId
-      ) {
-        continue
-      }
-      let byTabId = index.get(worktreeId)
-      if (!byTabId) {
-        byTabId = new Map()
-        index.set(worktreeId, byTabId)
-      }
-      const contextTabId = tab.contentType === 'terminal' ? tab.entityId : tab.id
-      const existing = byTabId.get(contextTabId)
-      byTabId.set(
-        contextTabId,
-        existing === undefined || existing === tab.executionHostId ? tab.executionHostId : null
-      )
-    }
-  }
-  return index
-}
-
-function resolveActivityExecutionHostId(
-  context: ActivityTabContext,
-  entry: AgentStatusEntry,
-  terminalPtyId: string | null | undefined,
-  tabHostIndex: ActivityTabHostIndex
-): ExecutionHostId | undefined {
-  const tabHostId = tabHostIndex.get(context.worktreeId)?.get(context.tab.id)
-  if (tabHostId) {
-    return tabHostId
-  }
-  // Why before connectionId: a runtime pane's status entry publishes connectionId: null,
-  // which would otherwise resolve to LOCAL (see dashboard-card-terminal-input's precedent).
-  const runtimeEnvironmentId = getRemoteRuntimePtyEnvironmentId(terminalPtyId ?? '')
-  if (runtimeEnvironmentId) {
-    return toRuntimeExecutionHostId(runtimeEnvironmentId)
-  }
-  if (entry.connectionId !== undefined) {
-    return entry.connectionId ? toSshExecutionHostId(entry.connectionId) : LOCAL_EXECUTION_HOST_ID
-  }
-  const connectionId = parseAppSshPtyId(terminalPtyId ?? '')?.connectionId
-  return connectionId ? toSshExecutionHostId(connectionId) : undefined
-}
-
-function resolveActivityEventOwner(
-  args: BuildActivityEventsArgs,
-  context: ActivityTabContext,
-  entry: AgentStatusEntry,
-  terminalPtyId: string | null | undefined,
-  tabHostIndex: ActivityTabHostIndex,
-  ownerCache: Map<string, ActivityEventOwner>
-): ActivityEventOwner {
-  const executionHostId = resolveActivityExecutionHostId(
-    context,
-    entry,
-    terminalPtyId,
-    tabHostIndex
-  )
-  // Why: resolution runs per pane per rebuild and the miss path scans detected worktrees;
-  // everything below depends only on worktreeId + host, so memoize per build.
-  const ownerCacheKey = `${context.worktreeId}\0${executionHostId ?? ''}`
-  const cached = ownerCache.get(ownerCacheKey)
-  if (cached) {
-    return cached
-  }
-  const resolvedWorktree = args.resolveWorktree?.(context.worktreeId, executionHostId)
-  const mappedWorktree = args.worktreeMap.get(context.worktreeId)
-  const worktree =
-    resolvedWorktree ??
-    mappedWorktree ??
-    standaloneActivityWorktree(context.worktreeId, executionHostId)
-  let repo =
-    executionHostId && args.repos
-      ? findIndexedRepoOwnerForHost(args.repos, worktree.repoId, executionHostId)
-      : null
-  if (!repo && worktree.runtimeOwnerEnvironmentId && args.repos) {
-    repo = findIndexedRepoOwnerForHost(
-      args.repos,
-      worktree.repoId,
-      toRuntimeExecutionHostId(worktree.runtimeOwnerEnvironmentId)
-    )
-  }
-  const owner: ActivityEventOwner = {
-    worktree,
-    repo: repo ?? args.repoMap.get(worktree.repoId) ?? null,
-    knownWorktree: Boolean(
-      resolvedWorktree || mappedWorktree || args.tabsByWorktree[context.worktreeId]
-    )
-  }
-  ownerCache.set(ownerCacheKey, owner)
-  return owner
-}
-
 export function buildActivityEvents(
   args: BuildActivityEventsArgs,
   cache?: ActivityEventBuildCache
@@ -229,8 +84,8 @@ export function buildActivityEvents(
 } {
   const events: ActivityEvent[] = []
   const seenEventIds = new Set<string>()
-  const tabContext = buildActivityTabContext(args)
-  const tabHostIndex = buildActivityTabHostIndex(args)
+  const tabContext = buildActivityTabContext(args.tabsByWorktree, args.unifiedTabsByWorktree)
+  const tabHostIndex = buildActivityTabHostIndex(args.unifiedTabsByWorktree)
   const ownerCache = new Map<string, ActivityEventOwner>()
   const liveAgentByPaneKey: Record<string, ActivityLiveAgentSnapshot> = {}
   const seenCacheKeys = cache ? new Set<string>() : null

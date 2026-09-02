@@ -92,7 +92,7 @@ const SidebarHeader = React.memo(function SidebarHeader({
               options={[
                 {
                   value: 'workspaces',
-                  label: 'Spaces',
+                  label: translate('auto.components.sidebar.SidebarHeader.spaces', 'Spaces'),
                   sectionTitle: 'projects'
                 },
                 ...(showAgentsSidebar

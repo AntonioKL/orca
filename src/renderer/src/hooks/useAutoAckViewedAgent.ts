@@ -122,6 +122,35 @@ export function shouldClearViewedAgentWorktreeUnread(
   return true
 }
 
+/**
+ * Manual mark-unread protections that no longer apply: the user moved to another pane, or the
+ * agent took a new turn. Exported for the startup-race test.
+ */
+export function computeLapsedManualUnreadProtections(
+  state: {
+    agentStatusByPaneKey: Record<string, AgentStatusEntry>
+    retainedAgentsByPaneKey: Record<string, RetainedAgentEntry>
+    manuallyUnreadTurnsByPaneKey: Record<string, number>
+  },
+  activePaneKeys: ReadonlySet<string>
+): string[] {
+  const lapsed: string[] = []
+  for (const [paneKey, turnTimestamp] of Object.entries(state.manuallyUnreadTurnsByPaneKey)) {
+    if (!activePaneKeys.has(paneKey)) {
+      lapsed.push(paneKey)
+      continue
+    }
+    const currentTurn = getAgentTurnTimestamp(state, paneKey)
+    // Why keep on null: persisted UI hydrates before the status snapshot lands, so an active
+    // pane with no row yet is "not known", not "moved on"; wiping it would lose the mark-unread
+    // the user made before relaunch.
+    if (currentTurn !== null && currentTurn !== turnTimestamp) {
+      lapsed.push(paneKey)
+    }
+  }
+  return lapsed
+}
+
 type ViewedAgentAttentionActions = {
   acknowledgeAgents: (paneKeys: string[]) => void
   clearWorktreeUnread: (worktreeId: string) => void
@@ -269,12 +298,7 @@ export function useAutoAckViewedAgent(floatingPanelVisible: boolean): void {
       }
       // Protection lapses when the user moves on to another pane or the agent takes a new
       // turn; a still-active pane with an unchanged turn keeps its explicit mark-unread.
-      const lapsedProtections: string[] = []
-      for (const [paneKey, turnTimestamp] of Object.entries(s.manuallyUnreadTurnsByPaneKey)) {
-        if (!activePaneKeys.has(paneKey) || getAgentTurnTimestamp(s, paneKey) !== turnTimestamp) {
-          lapsedProtections.push(paneKey)
-        }
-      }
+      const lapsedProtections = computeLapsedManualUnreadProtections(s, activePaneKeys)
       if (lapsedProtections.length > 0) {
         s.clearManuallyUnreadTurns(lapsedProtections)
       }

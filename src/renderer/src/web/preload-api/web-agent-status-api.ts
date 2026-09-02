@@ -15,6 +15,7 @@ export function createWebAgentStatusApi(): Partial<PreloadApi> {
       getMigrationUnsupportedSnapshot: () => Promise.resolve([]),
       drop: () => {},
       dropPersisted: () => {},
+      dropPersistedBatch: () => {},
       reconcileEndedProcess: () => {},
       dropByTabPrefix: () => {},
       retirePaneAuthority: () => {},

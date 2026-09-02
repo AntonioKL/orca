@@ -307,6 +307,42 @@ describe('AgentHookServer listener replay', () => {
     ).toBe(false)
   })
 
+  it('evicts a batch of persisted identities with one status-change notification', () => {
+    const server = new AgentHookServer()
+    const otherPane = makePaneKey('tab-2', '22222222-2222-4222-8222-222222222222')
+    for (const paneKey of [PANE, otherPane]) {
+      server.ingestRemote(
+        {
+          paneKey,
+          tabId: paneKey.split(':')[0]!,
+          worktreeId: 'wt-1',
+          payload: { state: 'done', prompt: 'run', agentType: 'claude' }
+        },
+        'conn-1'
+      )
+    }
+    const listener = vi.fn()
+    server.subscribeStatusChanges(listener)
+    const dropped: string[] = []
+    server.subscribeStatusDrop((paneKey) => dropped.push(paneKey))
+    const identities = server.getStatusSnapshot().map((entry) => ({
+      paneKey: entry.paneKey,
+      receivedAt: entry.receivedAt,
+      stateStartedAt: entry.stateStartedAt
+    }))
+
+    const evicted = server.dropPersistedStatusEntries([
+      ...identities,
+      // A stale identity never matches and never blocks the rest of the batch.
+      { ...identities[0]!, stateStartedAt: identities[0]!.stateStartedAt + 1 }
+    ])
+
+    expect(evicted.sort()).toEqual([PANE, otherPane].sort())
+    expect(dropped.sort()).toEqual([PANE, otherPane].sort())
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(server.getStatusSnapshot()).toEqual([])
+  })
+
   it('notifies pane-status-clear listener when pane teardown evicts a cached status', () => {
     const server = new AgentHookServer()
     const listener = vi.fn()

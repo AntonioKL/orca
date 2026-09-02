@@ -5,6 +5,7 @@ import { getRepoMapFromState, getWorktreeMapFromState } from '@/store/selectors'
 import type { AppState } from '@/store/types'
 import { getSettingsFocusedExecutionHostId } from '../../../../shared/execution-host'
 import { buildActivityEvents, createActivityEventBuildCache } from './activity-event-builder'
+import { projectActivityTabs, type ActivityTabProjection } from './activity-tab-projection'
 import { buildAgentPaneThreads, createAgentPaneThreadReuseCache } from './activity-thread-builder'
 import { collectChildAgentPaneKeys } from './activity-thread-child-agent'
 
@@ -29,7 +30,6 @@ export type AgentPaneThreadsStoreData = Pick<
   | 'migrationUnsupportedByPtyId'
   | 'retainedAgentsByPaneKey'
   | 'tabsByWorktree'
-  | 'unifiedTabsByWorktree'
   | 'repos'
   | 'worktreesByRepo'
   | 'folderWorkspaces'
@@ -40,6 +40,8 @@ export type AgentPaneThreadsStoreData = Pick<
   | 'acknowledgeAgents'
   | 'unacknowledgeAgents'
 > & {
+  /** Terminal and agent-session tabs only, identity-stable across focus writes. */
+  activityTabs: ActivityTabProjection
   worktreeMap: ReturnType<typeof getWorktreeMapFromState>
   repoMap: ReturnType<typeof getRepoMapFromState>
   generatedTitlesEnabled: boolean
@@ -71,6 +73,12 @@ export function useAgentPaneThreads(args: {
   const agentsVisibleHostIds = useAppStore((s) => s.agentsVisibleHostIds)
   const agentsFilterRepoIds = useAppStore((s) => s.agentsFilterRepoIds)
   const defaultHostId = useAppStore((s) => getSettingsFocusedExecutionHostId(s.settings))
+  // Why project: the unified tab map is rewritten on every tab focus; the projection keeps
+  // its identity (and each tab's) unless a field this pipeline reads actually changed.
+  const tabProjectionRef = useRef<{
+    raw: AppState['unifiedTabsByWorktree'] | null
+    projected: ActivityTabProjection | null
+  }>({ raw: null, projected: null })
   const storeData = useAppStore(
     useShallow((s) => ({
       agentStatusByPaneKey: s.agentStatusByPaneKey,
@@ -78,7 +86,15 @@ export function useAgentPaneThreads(args: {
       migrationUnsupportedByPtyId: s.migrationUnsupportedByPtyId,
       retainedAgentsByPaneKey: s.retainedAgentsByPaneKey,
       tabsByWorktree: s.tabsByWorktree,
-      unifiedTabsByWorktree: s.unifiedTabsByWorktree,
+      activityTabs: (() => {
+        const cache = tabProjectionRef.current
+        if (cache.raw === s.unifiedTabsByWorktree && cache.projected) {
+          return cache.projected
+        }
+        const projected = projectActivityTabs(s.unifiedTabsByWorktree, cache.projected)
+        tabProjectionRef.current = { raw: s.unifiedTabsByWorktree, projected }
+        return projected
+      })(),
       repos: s.repos,
       worktreesByRepo: s.worktreesByRepo,
       folderWorkspaces: s.folderWorkspaces,
@@ -112,7 +128,7 @@ export function useAgentPaneThreads(args: {
           migrationUnsupportedByPtyId: storeData.migrationUnsupportedByPtyId,
           retainedAgentsByPaneKey: storeData.retainedAgentsByPaneKey,
           tabsByWorktree: storeData.tabsByWorktree,
-          unifiedTabsByWorktree: storeData.unifiedTabsByWorktree,
+          unifiedTabsByWorktree: storeData.activityTabs,
           worktreeMap: storeData.worktreeMap,
           repoMap: storeData.repoMap,
           repos: storeData.repos,

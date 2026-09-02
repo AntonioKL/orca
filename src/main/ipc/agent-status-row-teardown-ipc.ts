@@ -16,9 +16,13 @@ import { isValidAgentStatusDropTabId } from './agent-status-ipc-boundary'
  * still be alive; a confirmed process exit must take them too, or a surviving Claude latch resolves
  * the pane's next event straight back to `working`.
  */
+// Why a cap: the renderer sends one batch per Clear-completed click, bounded by visible rows.
+const MAX_DROP_PERSISTED_BATCH = 5_000
+
 export function registerAgentStatusRowTeardownIpcHandlers(): void {
   ipcMain.removeAllListeners('agentStatus:drop')
   ipcMain.removeAllListeners('agentStatus:dropPersisted')
+  ipcMain.removeAllListeners('agentStatus:dropPersistedBatch')
   ipcMain.removeAllListeners('agentStatus:reconcileEndedProcess')
   ipcMain.removeAllListeners('agentStatus:dropByTabPrefix')
 
@@ -48,6 +52,23 @@ export function registerAgentStatusRowTeardownIpcHandlers(): void {
       }
     } catch (err) {
       console.warn('[agent-hooks] dropPersistedStatusEntry failed:', err)
+    }
+  })
+
+  ipcMain.on('agentStatus:dropPersistedBatch', (_event, request: unknown) => {
+    if (!Array.isArray(request) || request.length > MAX_DROP_PERSISTED_BATCH) {
+      return
+    }
+    const identities = request.filter(isValidAgentStatusCacheIdentity)
+    if (identities.length === 0) {
+      return
+    }
+    try {
+      for (const paneKey of agentHookServer.dropPersistedStatusEntries(identities)) {
+        clearMigrationUnsupportedPtysForPaneKey(paneKey)
+      }
+    } catch (err) {
+      console.warn('[agent-hooks] dropPersistedStatusEntries failed:', err)
     }
   })
 

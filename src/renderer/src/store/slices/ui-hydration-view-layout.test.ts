@@ -49,6 +49,22 @@ beforeEach(() => {
   mocks.toastError.mockReset()
 })
 
+describe('sidebar reveal actions', () => {
+  it('switch the sidebar body back to Spaces so the worktree list can consume the reveal', () => {
+    const store = createUIStore()
+    store.getState().setSidebarBody('agents')
+
+    store.getState().revealWorktreeInSidebar('wt-1', { highlight: true })
+    expect(store.getState().sidebarBody).toBe('workspaces')
+    expect(store.getState().pendingRevealWorktree?.worktreeId).toBe('wt-1')
+
+    store.getState().setSidebarBody('agents')
+    store.getState().revealSidebarRow('repo:r1')
+    expect(store.getState().sidebarBody).toBe('workspaces')
+    expect(store.getState().pendingRevealSidebarRow?.rowKey).toBe('repo:r1')
+  })
+})
+
 describe('createUISlice hydratePersistedUI', () => {
   it('defaults persisted right sidebar visibility to open', () => {
     expect(getDefaultUIState().rightSidebarOpen).toBe(true)

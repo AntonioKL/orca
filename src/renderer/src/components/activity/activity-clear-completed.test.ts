@@ -54,6 +54,7 @@ vi.mock('@/store', () => ({
 vi.mock('sonner', () => ({ toast: toastSpy }))
 
 import {
+  CLEAR_COMPLETED_EVICTION_FALLBACK_MS,
   clearCompletedActivity,
   flushPendingClearCompletedEvictions,
   isClearableActivityThread,
@@ -134,7 +135,9 @@ describe('clearCompletedActivity', () => {
     mockStore.agentStatusByPaneKey = {}
     mockStore.retainedAgentsByPaneKey = { 't-done:1': makeRetained('t-done:1') }
     mockStore.retentionSuppressedPaneKeys = {}
-    vi.stubGlobal('window', { api: { agentStatus: { dropPersisted: vi.fn() } } })
+    vi.stubGlobal('window', {
+      api: { agentStatus: { dropPersisted: vi.fn(), dropPersistedBatch: vi.fn() } }
+    })
   })
 
   afterEach(() => {
@@ -173,16 +176,16 @@ describe('clearCompletedActivity', () => {
     expect(mockStore.dismissRetainedAgents).toHaveBeenCalledWith(['t-done:1'])
     const drop = (
       window as unknown as {
-        api: { agentStatus: { dropPersisted: ReturnType<typeof vi.fn> } }
+        api: { agentStatus: { dropPersistedBatch: ReturnType<typeof vi.fn> } }
       }
-    ).api.agentStatus.dropPersisted
+    ).api.agentStatus.dropPersistedBatch
     expect(drop).not.toHaveBeenCalled()
 
     lastToastOptions().onAutoClose()
     expect(drop).toHaveBeenCalledTimes(1)
-    expect(drop).toHaveBeenCalledWith(
+    expect(drop).toHaveBeenCalledWith([
       expect.objectContaining({ paneKey: 't-done:1', receivedAt: 5_000, stateStartedAt: 5_000 })
-    )
+    ])
     // A later dismiss must not double-drop.
     lastToastOptions().onDismiss()
     expect(drop).toHaveBeenCalledTimes(1)
@@ -204,9 +207,9 @@ describe('clearCompletedActivity', () => {
     lastToastOptions().onAutoClose()
     const drop = (
       window as unknown as {
-        api: { agentStatus: { dropPersisted: ReturnType<typeof vi.fn> } }
+        api: { agentStatus: { dropPersistedBatch: ReturnType<typeof vi.fn> } }
       }
-    ).api.agentStatus.dropPersisted
+    ).api.agentStatus.dropPersistedBatch
     expect(drop).not.toHaveBeenCalled()
   })
 
@@ -268,6 +271,59 @@ describe('clearCompletedActivity', () => {
     expect(mockStore.activityClearedAtByPaneKey['t-done:1']).toBeUndefined()
   })
 
+  it('stamps a real cutoff for a thread with no usable timestamp', () => {
+    // A zero cutoff is dropped by the hydrate sanitizer and the clear would replay after restart.
+    const unstamped = makeThread('t-done:1', { latestEvent: doneEvent(false), latestTimestamp: 0 })
+    const plan = planClearCompletedActivity([unstamped], mockStore, 42_000)
+    expect(plan.cutoffPatch).toEqual({ 't-done:1': 42_000 })
+  })
+
+  it('evicts after the fallback window when no toast close callback ever fires', () => {
+    vi.useFakeTimers()
+    try {
+      clearCompletedActivity([doneThread])
+      const drop = (
+        window as unknown as {
+          api: { agentStatus: { dropPersistedBatch: ReturnType<typeof vi.fn> } }
+        }
+      ).api.agentStatus.dropPersistedBatch
+      expect(drop).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(CLEAR_COMPLETED_EVICTION_FALLBACK_MS)
+      expect(drop).toHaveBeenCalledTimes(1)
+
+      lastToastOptions().onDismiss()
+      expect(drop).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('undo cancels the fallback eviction timer', () => {
+    vi.useFakeTimers()
+    try {
+      clearCompletedActivity([doneThread])
+      lastToastOptions().action.onClick()
+      vi.advanceTimersByTime(CLEAR_COMPLETED_EVICTION_FALLBACK_MS)
+      const drop = (
+        window as unknown as {
+          api: { agentStatus: { dropPersistedBatch: ReturnType<typeof vi.fn> } }
+        }
+      ).api.agentStatus.dropPersistedBatch
+      expect(drop).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('falls back to per-identity drops when the batch API is absent', () => {
+    const dropOne = vi.fn()
+    vi.stubGlobal('window', { api: { agentStatus: { dropPersisted: dropOne } } })
+    clearCompletedActivity([doneThread])
+    lastToastOptions().onAutoClose()
+    expect(dropOne).toHaveBeenCalledTimes(1)
+  })
+
   it('does nothing when no thread is clearable', () => {
     expect(clearCompletedActivity([workingThread, blockedThread])).toBe(false)
     expect(toastSpy).not.toHaveBeenCalled()
@@ -278,9 +334,9 @@ describe('clearCompletedActivity', () => {
     clearCompletedActivity([doneThread])
     const drop = (
       window as unknown as {
-        api: { agentStatus: { dropPersisted: ReturnType<typeof vi.fn> } }
+        api: { agentStatus: { dropPersistedBatch: ReturnType<typeof vi.fn> } }
       }
-    ).api.agentStatus.dropPersisted
+    ).api.agentStatus.dropPersistedBatch
     expect(drop).not.toHaveBeenCalled()
 
     // Quit/reload path: the toast's close callbacks never fire.
@@ -298,9 +354,9 @@ describe('clearCompletedActivity', () => {
     flushPendingClearCompletedEvictions()
     const drop = (
       window as unknown as {
-        api: { agentStatus: { dropPersisted: ReturnType<typeof vi.fn> } }
+        api: { agentStatus: { dropPersistedBatch: ReturnType<typeof vi.fn> } }
       }
-    ).api.agentStatus.dropPersisted
+    ).api.agentStatus.dropPersistedBatch
     expect(drop).not.toHaveBeenCalled()
   })
 })

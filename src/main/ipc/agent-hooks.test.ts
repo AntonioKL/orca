@@ -9,6 +9,7 @@ import { makePaneKey } from '../../shared/stable-pane-id'
 
 const dropStatusEntry = vi.fn()
 const dropPersistedStatusEntry = vi.fn()
+const dropPersistedStatusEntries = vi.fn(() => [] as string[])
 const dropStatusEntriesByTabPrefix = vi.fn()
 const retirePaneAuthority = vi.fn()
 const transferPaneAuthority = vi.fn()
@@ -46,6 +47,7 @@ vi.mock('../agent-hooks/server', async () => {
     agentHookServer: {
       dropStatusEntry,
       dropPersistedStatusEntry,
+      dropPersistedStatusEntries,
       dropStatusEntriesByTabPrefix,
       retirePaneAuthority,
       transferPaneAuthority,
@@ -108,6 +110,8 @@ vi.mock('../kimi/hook-service', () => ({
 beforeEach(() => {
   dropStatusEntry.mockReset()
   dropPersistedStatusEntry.mockReset()
+  dropPersistedStatusEntries.mockReset()
+  dropPersistedStatusEntries.mockReturnValue([])
   dropStatusEntriesByTabPrefix.mockReset()
   retirePaneAuthority.mockReset()
   transferPaneAuthority.mockReset()
@@ -297,6 +301,33 @@ describe('agentStatus:dropPersisted IPC', () => {
     handler!({}, identity)
     expect(dropPersistedStatusEntry).toHaveBeenCalledWith(identity)
     expect(dropStatusEntry).not.toHaveBeenCalled()
+  })
+
+  it('forwards a batch, keeping only valid identities, and clears migration state per evicted pane', async () => {
+    const { registerAgentHookHandlers } = await import('./agent-hooks')
+    registerAgentHookHandlers()
+
+    const handler = onHandlers.get('agentStatus:dropPersistedBatch')
+    expect(handler).toBeDefined()
+    const good = { paneKey: PANE_KEY, receivedAt: 2_000, stateStartedAt: 1_000 }
+    const alsoGood = { paneKey: CHILD_PANE_KEY, receivedAt: 3_000, stateStartedAt: 2_500 }
+    dropPersistedStatusEntries.mockReturnValue([PANE_KEY])
+    handler!({}, [good, { paneKey: 'not-a-pane-key', receivedAt: 1, stateStartedAt: 1 }, alsoGood])
+    expect(dropPersistedStatusEntries).toHaveBeenCalledWith([good, alsoGood])
+    expect(clearMigrationUnsupportedPtysForPaneKey).toHaveBeenCalledWith(PANE_KEY)
+    expect(clearMigrationUnsupportedPtysForPaneKey).not.toHaveBeenCalledWith(CHILD_PANE_KEY)
+    expect(dropPersistedStatusEntry).not.toHaveBeenCalled()
+  })
+
+  it('ignores a batch that is not an array or is empty after validation', async () => {
+    const { registerAgentHookHandlers } = await import('./agent-hooks')
+    registerAgentHookHandlers()
+
+    const handler = onHandlers.get('agentStatus:dropPersistedBatch')!
+    for (const value of [null, {}, 'x', [], [{ paneKey: PANE_KEY }]]) {
+      expect(() => handler({}, value)).not.toThrow()
+    }
+    expect(dropPersistedStatusEntries).not.toHaveBeenCalled()
   })
 
   it('rejects malformed cache identities', async () => {

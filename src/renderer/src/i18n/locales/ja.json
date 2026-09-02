@@ -14853,7 +14853,7 @@
     "new": {
       "title": "Agent タブのご紹介",
       "description": "Agent が何に取り組んでいるか、何が完了したか、どこで対応が必要かを確認できます。",
-      "hide": "エージェントを隠す",
+      "hide": "Agent を隠す",
       "action": "Agent を試す",
       "hiddenToast": "Agent タブを非表示にしました。設定 → 実験的機能で再度有効にできます。"
     }

@@ -178,14 +178,21 @@ export function ActivityThreadListPane({
     [virtualItems, selectedPaneKey]
   )
 
+  // Why keyed on virtualItems: getItemKey identity is a measurement-memo input in tanstack
+  // virtual. A per-render closure recomputes every row on unrelated re-renders; a fully stable
+  // one would miss same-count reorders. Changing exactly with the items is the correct middle.
+  const getItemKey = useCallback(
+    (index: number) => {
+      const item = virtualItems[index]
+      return item ? getActivityVirtualItemKey(item) : `__stale_${index}`
+    },
+    [virtualItems]
+  )
   const virtualizer = useVirtualizer({
     count: virtualItems.length,
     getScrollElement: () => scrollContainerRef.current,
     estimateSize: (index) => estimateActivityVirtualItemSize(virtualItems[index], compactMode),
-    getItemKey: (index) => {
-      const item = virtualItems[index]
-      return item ? getActivityVirtualItemKey(item) : `__stale_${index}`
-    },
+    getItemKey,
     measureElement: (element, entry, instance) => {
       const measured = measureVirtualElementSize(element, entry, instance)
       if (measured > 0) {

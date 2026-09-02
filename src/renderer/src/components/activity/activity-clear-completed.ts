@@ -30,7 +30,8 @@ export function planClearCompletedActivity(
   state: {
     activityClearedAtByPaneKey: Record<string, number>
     retainedAgentsByPaneKey: Record<string, RetainedAgentEntry>
-  }
+  },
+  now: number = Date.now()
 ): ClearCompletedActivityPlan {
   const cutoffPatch: Record<string, number | null> = {}
   const restorePatch: Record<string, number | null> = {}
@@ -43,7 +44,10 @@ export function planClearCompletedActivity(
     }
     clearedThreadCount += 1
     const previousCutoff = state.activityClearedAtByPaneKey[thread.paneKey] ?? null
-    cutoffPatch[thread.paneKey] = Math.max(previousCutoff ?? 0, thread.latestTimestamp)
+    const latestCutoff = Math.max(previousCutoff ?? 0, thread.latestTimestamp)
+    // Why `now` for an unstamped thread: the hydrate sanitizer drops non-positive cutoffs, so a
+    // zero cutoff would replay the cleared thread after restart.
+    cutoffPatch[thread.paneKey] = latestCutoff > 0 ? latestCutoff : now
     restorePatch[thread.paneKey] = previousCutoff
     const retained = state.retainedAgentsByPaneKey[thread.paneKey]
     if (retained) {
@@ -72,6 +76,24 @@ export function flushPendingClearCompletedEvictions(): void {
 }
 if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', flushPendingClearCompletedEvictions)
+}
+
+// Why a fallback: sonner only fires onDismiss/onAutoClose for the toast's own close paths; a
+// `toast.dismiss()` from another caller leaves the eviction pending until pagehide.
+export const CLEAR_COMPLETED_EVICTION_FALLBACK_MS = 60_000
+
+function evictPersistedStatuses(identities: readonly AgentStatusCacheIdentity[]): void {
+  const api = window.api?.agentStatus
+  if (!api || identities.length === 0) {
+    return
+  }
+  if (api.dropPersistedBatch) {
+    api.dropPersistedBatch(identities)
+    return
+  }
+  for (const identity of identities) {
+    api.dropPersisted?.(identity)
+  }
 }
 
 /**
@@ -105,17 +127,21 @@ export function clearCompletedActivity(threads: readonly AgentPaneThread[]): boo
 
   let undone = false
   let dropped = false
+  let fallbackTimer: ReturnType<typeof setTimeout> | null = null
   const dropRetainedFromDiskCache = (): void => {
     pendingDiskEvictions.delete(dropRetainedFromDiskCache)
+    if (fallbackTimer !== null) {
+      clearTimeout(fallbackTimer)
+      fallbackTimer = null
+    }
     if (undone || dropped) {
       return
     }
     dropped = true
-    for (const identity of plan.cacheIdentities) {
-      window.api?.agentStatus?.dropPersisted?.(identity)
-    }
+    evictPersistedStatuses(plan.cacheIdentities)
   }
   pendingDiskEvictions.add(dropRetainedFromDiskCache)
+  fallbackTimer = setTimeout(dropRetainedFromDiskCache, CLEAR_COMPLETED_EVICTION_FALLBACK_MS)
   toast(
     plan.clearedThreadCount === 1
       ? translate('auto.components.activity.clearCompleted.clearedOne', 'Cleared 1 completed agent')
@@ -130,6 +156,10 @@ export function clearCompletedActivity(threads: readonly AgentPaneThread[]): boo
         onClick: () => {
           undone = true
           pendingDiskEvictions.delete(dropRetainedFromDiskCache)
+          if (fallbackTimer !== null) {
+            clearTimeout(fallbackTimer)
+            fallbackTimer = null
+          }
           const current = useAppStore.getState()
           const retainedByPaneKey = new Map(
             plan.retainedSnapshots.map((retained) => [retained.entry.paneKey, retained])
