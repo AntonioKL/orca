@@ -31,6 +31,10 @@ export async function closeClaudePublishedSession(input: {
     fence: number
   }) => Promise<void>
   onEvent?: (event: ClaudeStructuredSessionEvent) => void
+  readTranscriptLeaf?: (input: {
+    providerSessionId: string
+    previousLeafUuid: string | null
+  }) => Promise<string | null>
 }): Promise<boolean> {
   const session = input.sessions.get(input.sessionId)
   if (!session) {
@@ -44,6 +48,18 @@ export async function closeClaudePublishedSession(input: {
   }
   if ((await session.connection.close()) !== true) {
     return false
+  }
+  try {
+    const transcriptLeaf = await input.readTranscriptLeaf?.({
+      providerSessionId: session.providerSessionId,
+      previousLeafUuid: session.leafUuid
+    })
+    if (transcriptLeaf) {
+      session.leafUuid = transcriptLeaf
+    }
+  } catch {
+    // Keep the last observed main-transcript frame when the durable tail is
+    // unavailable or proves a stale/divergent branch.
   }
   input.sessions.delete(input.sessionId)
   let persistenceError: unknown
@@ -90,6 +106,10 @@ export function closeClaudePublishedSessionForDeps(
       fence: number
     }) => Promise<void>
     onEvent?: (event: ClaudeStructuredSessionEvent) => void
+    readTranscriptLeaf?: (input: {
+      providerSessionId: string
+      previousLeafUuid: string | null
+    }) => Promise<string | null>
   }
 ): Promise<boolean> {
   return closeClaudePublishedSession({ sessions, sessionId, ...deps })
@@ -106,6 +126,10 @@ export async function closeClaudeSession(input: {
     fence: number
   }) => Promise<void>
   onEvent?: (event: ClaudeStructuredSessionEvent) => void
+  readTranscriptLeaf?: (input: {
+    providerSessionId: string
+    previousLeafUuid: string | null
+  }) => Promise<string | null>
 }): Promise<boolean> {
   const attempt = input.acquisitions.get(input.sessionId)
   if (!(await cancelClaudeAcquisitionAttempt(attempt))) {

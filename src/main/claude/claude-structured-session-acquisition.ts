@@ -35,6 +35,7 @@ import { createClaudeSessionJournalTranslator } from './claude-structured-journa
 import { createClaudeSessionPublication } from './claude-structured-session-publication'
 import {
   cancelClaudeAcquisitionAttempt,
+  mintClaudeAcquisitionGeneration,
   type ClaudeAcquisitionRegistry,
   type ClaudeAcquisitionAttempt,
   type ClaudeSession,
@@ -144,7 +145,13 @@ export async function acquireClaudeSession({
     }
     acquisitions.assertCurrent(sessionId, attempt)
     const priorSession = sessions.get(sessionId)
-    if (!(await closeClaudePublishedSessionForDeps(sessions, sessionId, deps))) {
+    if (
+      !(await closeClaudePublishedSessionForDeps(sessions, sessionId, {
+        ...(deps.persistHandle ? { persistHandle: deps.persistHandle } : {}),
+        ...(deps.readTranscriptLeaf ? { readTranscriptLeaf: deps.readTranscriptLeaf } : {}),
+        ...(deps.onEvent ? { onEvent: deps.onEvent } : {})
+      }))
+    ) {
       throw new AgentSessionAcquisitionExitUnprovenError(
         new Error(`claude session ${sessionId} could not be stopped`)
       )
@@ -250,6 +257,7 @@ export async function acquireClaudeSession({
       translator,
       events: input.events,
       process,
+      acquisitionGeneration: mintClaudeAcquisitionGeneration(deps),
       options: restoredClaudeStructuredSessionOptions(input.options),
       capabilities: readClaudeCapabilities(init, initialization),
       ...(deps.mintLinkId ? { linkId: deps.mintLinkId() } : {}),
@@ -307,8 +315,10 @@ export async function releaseClaudeAcquisition(input: {
   if (!exit || input.sessions.has(input.sessionId) || input.acquisitions.get(input.sessionId)) {
     return closeClaudeSession(input)
   }
-  input.exits.delete(input.sessionId)
   if (await exit.connection.close()) {
+    // Keep the first-hand exit evidence indexed until the tree proof succeeds;
+    // a failed close must be retryable and cannot look like an absent session.
+    input.exits.delete(input.sessionId)
     return true
   }
   throw claudeAcquisitionCleanupError(exit.connection, exit.error)

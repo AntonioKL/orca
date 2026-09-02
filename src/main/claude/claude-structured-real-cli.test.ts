@@ -88,7 +88,9 @@ describe.skipIf(!realClaudeAvailable)('Claude structured real CLI handshake', ()
         expect(acquisition.link.handle).toMatchObject({
           provider: 'claude',
           sessionId: providerSessionId,
-          leafUuid: expect.any(String)
+          // Init/SessionStart UUIDs are protocol frames, not resumable
+          // main-transcript leaves; no cursor exists before the first user turn.
+          leafUuid: null
         })
         expect(observedSubtypes).toContain('hook_started')
       } finally {

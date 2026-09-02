@@ -307,7 +307,13 @@ beforeEach(async () => {
   transcriptPath = join(root, 'claude-home', 'projects', 'workspace', `${PROVIDER_SESSION}.jsonl`)
   await mkdir(join(root, 'claude-home', 'projects', 'workspace'), { recursive: true })
   resolveSessionFilePath.mockResolvedValue(transcriptPath)
-  readClaudeTranscriptLeafUuid.mockResolvedValue('init-leaf')
+  // The production branch proof returns the latest descendant of the prior
+  // cursor; mirror that contract so structured close does not regress to a
+  // stale mocked head.
+  readClaudeTranscriptLeafUuid.mockImplementation(
+    async (_path: string, _providerSessionId: string, previousLeafUuid?: string | null) =>
+      previousLeafUuid ?? 'init-leaf'
+  )
   claude = fakeClaude()
   tuiOwner = null
   cleanups = new Map()
@@ -468,6 +474,22 @@ describe('a structured Claude session over agentSession.*', () => {
       handoffStage: 'manual-recovery'
     })
     claude.setSelfExit(null)
+  })
+
+  it('routes a published Claude first-hand exit through fenced host reconciliation', async () => {
+    await ok<{ fence: number }>('agentSession.create', createIntentParams())
+    const connection = claude.live()
+    connection.exitVerdict = { root: 'exited', tree: 'unverifiable' }
+    connection.handlers.onExit?.(new Error('claude stream-json exited (code 1): crashed'))
+
+    for (
+      let attempt = 0;
+      attempt < 20 && leaseOf(SESSION).claimStatus !== 'released';
+      attempt += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    expect(leaseOf(SESSION)).toMatchObject({ claimStatus: 'released', handoffStage: null })
   })
 
   it('creates, sends, streams, approves, interrupts, and resumes from the chain head', async () => {

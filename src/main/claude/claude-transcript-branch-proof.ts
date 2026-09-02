@@ -5,6 +5,8 @@ const MAX_CLAUDE_TRANSCRIPT_ANCESTRY = 10_000
 type TranscriptNode = {
   parentUuid: string | null
   sessionId: string | null
+  /** UUIDs from result/init/stream frames and sidechains are never leaves. */
+  disallowedLeaf: boolean
 }
 
 export type ClaudeTranscriptBranchProof = {
@@ -70,24 +72,53 @@ export function proveClaudeTranscriptBranchFromJsonl(input: {
     }
     const sessionId = nonEmptyString(row.sessionId)
     const existing = nodes.get(uuid)
-    if (existing && (existing.parentUuid !== parentUuid || existing.sessionId !== sessionId)) {
+    const disallowedLeaf =
+      row.isSidechain === true ||
+      row.type === 'result' ||
+      row.type === 'stream_event' ||
+      (row.type === 'system' && row.subtype === 'init')
+    if (
+      existing &&
+      (existing.parentUuid !== parentUuid ||
+        existing.sessionId !== sessionId ||
+        existing.disallowedLeaf !== disallowedLeaf)
+    ) {
       throw transcriptError(`record ${uuid} has conflicting ancestry`)
     }
-    nodes.set(uuid, { parentUuid, sessionId })
+    nodes.set(uuid, { parentUuid, sessionId, disallowedLeaf })
   }
   if (!leafUuid) {
     throw transcriptError('missing last-prompt marker')
   }
   const leaf = nodes.get(leafUuid)
-  if (!leaf || leaf.sessionId !== input.providerSessionId) {
+  if (!leaf || leaf.sessionId !== input.providerSessionId || leaf.disallowedLeaf) {
     throw transcriptError('marker leaf is missing from the session graph')
   }
   const previousLeafUuid = input.previousLeafUuid
   if (!previousLeafUuid) {
+    const visited = new Set<string>()
+    let cursor: string | null = leafUuid
+    for (let depth = 0; cursor !== null && depth < MAX_CLAUDE_TRANSCRIPT_ANCESTRY; depth += 1) {
+      if (visited.has(cursor)) {
+        throw transcriptError('cycle in parentUuid ancestry')
+      }
+      visited.add(cursor)
+      const node = nodes.get(cursor)
+      if (!node || node.sessionId !== input.providerSessionId) {
+        throw transcriptError(`missing ancestor ${cursor}`)
+      }
+      if (node.disallowedLeaf) {
+        throw transcriptError(`ancestor ${cursor} is not on the main transcript`)
+      }
+      cursor = node.parentUuid
+    }
+    if (cursor !== null) {
+      throw transcriptError('ancestry exceeds the bounded proof limit')
+    }
     return { leafUuid, relation: 'initial' }
   }
   const previous = nodes.get(previousLeafUuid)
-  if (!previous || previous.sessionId !== input.providerSessionId) {
+  if (!previous || previous.sessionId !== input.providerSessionId || previous.disallowedLeaf) {
     throw transcriptError('previous cursor is missing from the session graph')
   }
   if (leafUuid === previousLeafUuid) {
@@ -103,6 +134,9 @@ export function proveClaudeTranscriptBranchFromJsonl(input: {
     const node = nodes.get(cursor)
     if (!node || node.sessionId !== input.providerSessionId) {
       throw transcriptError(`missing ancestor ${cursor}`)
+    }
+    if (node.disallowedLeaf) {
+      throw transcriptError(`ancestor ${cursor} is not on the main transcript`)
     }
     cursor = node.parentUuid
     if (cursor === previousLeafUuid) {

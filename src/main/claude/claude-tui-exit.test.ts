@@ -50,6 +50,24 @@ describe('Claude TUI exit', () => {
     await expect(readClaudeTranscriptLeafUuid(transcriptPath)).resolves.toBe('assistant-one')
   })
 
+  it('ignores sidechain messages when selecting a fallback transcript leaf', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-claude-tui-sidechain-leaf-'))
+    const transcriptPath = join(root, 'session.jsonl')
+    await writeFile(
+      transcriptPath,
+      [
+        { type: 'assistant', uuid: 'main-assistant' },
+        { type: 'assistant', uuid: 'subagent-assistant', isSidechain: true },
+        { type: 'result', uuid: 'result-frame' }
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n'),
+      'utf8'
+    )
+
+    await expect(readClaudeTranscriptLeafUuid(transcriptPath)).resolves.toBe('main-assistant')
+  })
+
   it('persists the resumed chain head only after the exact Claude child exits', async () => {
     let resolveExit!: (exit: {
       pid: number

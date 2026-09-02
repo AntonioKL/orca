@@ -139,6 +139,73 @@ describe('resolveSessionFilePath', () => {
     )
   })
 
+  it('rejects non-transcript and sidechain UUIDs as the durable leaf', async () => {
+    const root = await makeRoot('orca-native-chat-resolve-claude-leaf-filter-')
+    const transcript = join(root, 'session.jsonl')
+    await writeFile(
+      transcript,
+      [
+        { type: 'user', uuid: 'main-user', parentUuid: null, sessionId: 'session-1' },
+        {
+          type: 'assistant',
+          uuid: 'sidechain-assistant',
+          parentUuid: 'main-user',
+          sessionId: 'session-1',
+          isSidechain: true
+        },
+        { type: 'result', uuid: 'result-frame', parentUuid: 'main-user', sessionId: 'session-1' },
+        {
+          type: 'system',
+          subtype: 'init',
+          uuid: 'init-frame',
+          parentUuid: null,
+          sessionId: 'session-1'
+        },
+        { type: 'stream_event', uuid: 'stream-frame', parentUuid: null, sessionId: 'session-1' },
+        { type: 'last-prompt', leafUuid: 'sidechain-assistant', sessionId: 'session-1' }
+      ]
+        .map((record) => JSON.stringify(record))
+        .join('\n'),
+      'utf8'
+    )
+
+    await expect(readClaudeTranscriptLeafUuid(transcript, 'session-1')).rejects.toThrow(
+      'marker leaf is missing from the session graph'
+    )
+  })
+
+  it('rejects a main leaf whose ancestry crosses a subagent sidechain', async () => {
+    const root = await makeRoot('orca-native-chat-resolve-claude-sidechain-ancestry-')
+    const transcript = join(root, 'session.jsonl')
+    await writeFile(
+      transcript,
+      [
+        { type: 'user', uuid: 'main-user', parentUuid: null, sessionId: 'session-1' },
+        {
+          type: 'assistant',
+          uuid: 'sidechain-assistant',
+          parentUuid: 'main-user',
+          sessionId: 'session-1',
+          isSidechain: true
+        },
+        {
+          type: 'assistant',
+          uuid: 'main-after-sidechain',
+          parentUuid: 'sidechain-assistant',
+          sessionId: 'session-1'
+        },
+        { type: 'last-prompt', leafUuid: 'main-after-sidechain', sessionId: 'session-1' }
+      ]
+        .map((record) => JSON.stringify(record))
+        .join('\n'),
+      'utf8'
+    )
+
+    await expect(readClaudeTranscriptLeafUuid(transcript, 'session-1')).rejects.toThrow(
+      'not on the main transcript'
+    )
+  })
+
   it('globs Claude project subdirs for <sessionId>.jsonl', async () => {
     const root = await makeRoot('orca-native-chat-resolve-claude-')
     const claudeProjectsDir = join(root, 'claude-projects')

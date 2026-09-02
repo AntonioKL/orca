@@ -8,6 +8,7 @@ import type { ClaudeStructuredLaunch } from './claude-structured-launch-resoluti
 import type { ClaudeJournalTranslator } from './claude-structured-journal-translation'
 import type { ClaudePendingPrompt, ClaudePromptRegistry } from './claude-structured-prompt-replies'
 import { cancelProcessAcquisition } from '../../shared/child-process/cancel-process-acquisition'
+import { randomUUID } from 'node:crypto'
 
 export type ClaudeAuthDiagnostic = {
   apiKeySourceConfigured: boolean
@@ -37,7 +38,16 @@ export type ClaudeStructuredSessionEvent =
       fence: number
     }
   | { type: 'auth-diagnostic'; sessionId: string; diagnostic: ClaudeAuthDiagnostic }
-  | { type: 'ended'; sessionId: string; reason: string }
+  | {
+      type: 'ended'
+      sessionId: string
+      reason: string
+      /** Present for first-hand child exits so the host can fence recovery. */
+      cause?: 'unexpected-exit' | 'requested-close'
+      fence?: number
+      acquisitionGeneration?: string
+      settlementRetryRequired?: boolean
+    }
 
 export type ClaudeStructuredSessionAdapterDeps = {
   resolveLaunch: (input: {
@@ -47,6 +57,7 @@ export type ClaudeStructuredSessionAdapterDeps = {
   openConnection?: typeof openClaudeStreamJsonConnection
   readProcessStartTime?: (pid: number) => Promise<number | null>
   mintLinkId?: () => string
+  mintAcquisitionGeneration?: () => string
   now?: () => number
   requestTimeoutMs?: number
   initTimeoutMs?: number
@@ -57,6 +68,11 @@ export type ClaudeStructuredSessionAdapterDeps = {
     leafUuid: string | null
     fence: number
   }) => Promise<void>
+  /** Read the durable transcript branch after a child has flushed its final rows. */
+  readTranscriptLeaf?: (input: {
+    providerSessionId: string
+    previousLeafUuid: string | null
+  }) => Promise<string | null>
 }
 
 export type ClaudeDispatchWaiter = {
@@ -70,6 +86,7 @@ export type ClaudeSession = {
   providerSessionId: string
   leafUuid: string | null
   fence: number
+  acquisitionGeneration: string
   prompts: ClaudePromptRegistry
   dispatchWaiters: ClaudeDispatchWaiter[]
   options: Map<string, string>
@@ -78,6 +95,10 @@ export type ClaudeSession = {
   capabilities: readonly string[]
   translator: ClaudeJournalTranslator | null
   events: StructuredAgentSessionEventSink | undefined
+}
+
+export function mintClaudeAcquisitionGeneration(deps: ClaudeStructuredSessionAdapterDeps): string {
+  return deps.mintAcquisitionGeneration?.() ?? randomUUID()
 }
 
 /**

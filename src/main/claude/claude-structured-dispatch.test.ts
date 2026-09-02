@@ -12,6 +12,7 @@ function sessionFor(send = vi.fn().mockResolvedValue(undefined)): ClaudeSession 
     providerSessionId: 'provider-session',
     leafUuid: null,
     fence: 1,
+    acquisitionGeneration: 'generation-1',
     prompts: {} as ClaudeSession['prompts'],
     dispatchWaiters: [],
     options: new Map(),

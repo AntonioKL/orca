@@ -1,253 +1,31 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import type {
-  AgentJournalMessageItem,
-  AgentSessionJournalIdentity
-} from '../../shared/agent-session-journal-types'
 import {
   AgentSessionAcquisitionExitUnprovenError,
   AgentSessionAcquisitionRefusal,
   AgentSessionAcquisitionRootExitObservedError
 } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
-import type {
-  ClaudeStreamJsonConnection,
-  ClaudeStreamJsonConnectionHandlers,
-  ClaudeStreamJsonLaunch,
-  openClaudeStreamJsonConnection
-} from './claude-stream-json-connection'
+import type { ClaudeStreamJsonConnection } from './claude-stream-json-connection'
 import { ClaudeControlRequestError } from './claude-stream-json-connection'
 import { CLAUDE_SPAWN_TOKEN_ENV } from './claude-structured-owner-identity'
 import { encodeClaudeQuestionOptionId } from './claude-structured-prompt-replies'
 import {
   CLAUDE_STRUCTURED_INIT_TIMEOUT_MS,
-  ClaudeStructuredSessionAdapter,
-  type ClaudeStructuredLaunch,
+  type ClaudeStructuredSessionAdapter,
   type ClaudeStructuredSessionEvent
 } from './claude-structured-session-adapter'
-
-const PROVIDER_SESSION_ID = '819cf9f8-e43c-4ad7-b50f-54aa158a726a'
-
-const USER_MESSAGE: AgentJournalMessageItem = {
-  kind: 'message',
-  role: 'user',
-  blocks: [{ type: 'text', text: 'ship it' }]
-}
-
-function identityFor(sessionId = 'session-1'): AgentSessionJournalIdentity {
-  return {
-    sessionId,
-    workspaceId: 'workspace-1',
-    hostId: 'host-1',
-    agent: 'claude',
-    providerHandle: { kind: 'claude', sessionId: PROVIDER_SESSION_ID, leafUuid: null }
-  }
-}
-
-type Route = (params: Record<string, unknown> | undefined) => unknown
-
-type FakeConnection = Omit<ClaudeStreamJsonConnection, 'closed' | 'exitVerdict'> & {
-  closed: boolean
-  exitVerdict: ClaudeStreamJsonConnection['exitVerdict']
-  launch: ClaudeStreamJsonLaunch
-  handlers: ClaudeStreamJsonConnectionHandlers
-  calls: { subtype: string; params?: Record<string, unknown> }[]
-  sent: Record<string, unknown>[]
-  closeCount: number
-}
-
-function fakeClaude(
-  options: {
-    initSessionId?: string
-    initUuid?: string
-    initModel?: string
-    initEffort?: string
-    initProof?: 'init' | 'session-start' | 'none'
-    initAccount?: unknown
-    exitBeforeInit?: string
-    settings?: unknown
-    replayUuid?: string | null
-    capabilities?: string[]
-    /** Scripts a close that cannot prove the tree, with the verdict it observed. */
-    unprovenCloseVerdict?: ClaudeStreamJsonConnection['exitVerdict']
-    routes?: Record<string, Route>
-  } = {}
-): {
-  connections: FakeConnection[]
-  openConnection: typeof openClaudeStreamJsonConnection
-  routes: Record<string, Route>
-} {
-  const connections: FakeConnection[] = []
-  const routes = options.routes ?? {}
-  const routed = (subtype: string, params?: Record<string, unknown>): unknown => {
-    const route = routes[subtype]
-    return route ? route(params) : undefined
-  }
-  const openConnection = (async (launch, handlers = {}) => {
-    const connection: FakeConnection = {
-      launch,
-      handlers,
-      calls: [],
-      sent: [],
-      closeCount: 0,
-      pid: 4321,
-      closed: false,
-      initializationResult: async () => {
-        connection.calls.push({ subtype: 'initialize' })
-        if (options.exitBeforeInit) {
-          handlers.onExit?.(new Error(options.exitBeforeInit))
-          return { models: [] }
-        }
-        if (options.initProof === 'session-start') {
-          handlers.onMessage?.({
-            type: 'system',
-            subtype: 'hook_started',
-            hook_name: 'SessionStart:startup',
-            session_id: options.initSessionId ?? PROVIDER_SESSION_ID,
-            uuid: options.initUuid ?? 'init-uuid'
-          })
-        } else if (options.initProof !== 'none') {
-          handlers.onMessage?.({
-            type: 'system',
-            subtype: 'init',
-            session_id: options.initSessionId ?? PROVIDER_SESSION_ID,
-            uuid: options.initUuid ?? 'init-uuid',
-            model: options.initModel ?? 'claude-sonnet-5',
-            effortLevel: options.initEffort ?? 'high',
-            apiKeySource: 'none',
-            ...(options.capabilities ? { capabilities: options.capabilities } : {})
-          })
-        }
-        return {
-          models: [{ value: 'claude-sonnet', displayName: 'Sonnet' }],
-          ...(options.initAccount === undefined ? {} : { account: options.initAccount })
-        }
-      },
-      getSettings: async () => {
-        connection.calls.push({ subtype: 'get_settings' })
-        return options.settings ?? { env: {} }
-      },
-      supportedModels: async () => {
-        connection.calls.push({ subtype: 'list_models' })
-        return (routed('list_models') as unknown[] | undefined) ?? []
-      },
-      setModel: async (model) => {
-        connection.calls.push({ subtype: 'set_model', params: { model } })
-        routed('set_model', { model })
-      },
-      setPermissionMode: async (mode) => {
-        connection.calls.push({ subtype: 'set_permission_mode', params: { mode } })
-        routed('set_permission_mode', { mode })
-      },
-      applyFlagSettings: async (settings) => {
-        connection.calls.push({ subtype: 'apply_flag_settings', params: { settings } })
-        routed('apply_flag_settings', { settings })
-      },
-      interrupt: async (interruptOptions) => {
-        connection.calls.push({
-          subtype: 'interrupt',
-          params: interruptOptions?.cancelQueued ? { cancelQueued: true } : {}
-        })
-        return routed('interrupt', interruptOptions) as
-          | Awaited<ReturnType<ClaudeStreamJsonConnection['interrupt']>>
-          | undefined
-      },
-      cancelAsyncMessage: async (uuid) => {
-        connection.calls.push({ subtype: 'cancel_async_message', params: { uuid } })
-        routed('cancel_async_message', { uuid })
-      },
-      send: async (message) => {
-        connection.sent.push(message)
-        if (message.type === 'user' && options.replayUuid !== null) {
-          handlers.onMessage?.({
-            ...message,
-            uuid: options.replayUuid ?? 'user-uuid'
-          })
-        }
-      },
-      exitVerdict: options.unprovenCloseVerdict ?? { root: 'live', tree: 'unverifiable' },
-      close: async () => {
-        connection.closeCount += 1
-        connection.closed = true
-        return options.unprovenCloseVerdict === undefined
-      }
-    }
-    connections.push(connection)
-    return connection
-  }) as typeof openClaudeStreamJsonConnection
-  return { connections, openConnection, routes }
-}
-
-function adapterFor(
-  claude: ReturnType<typeof fakeClaude>,
-  launch: Partial<ClaudeStructuredLaunch> = {},
-  events: ClaudeStructuredSessionEvent[] = [],
-  persistedHandles: unknown[] = [],
-  initTimeoutMs?: number
-): ClaudeStructuredSessionAdapter {
-  return new ClaudeStructuredSessionAdapter({
-    resolveLaunch: async () => ({
-      pathToClaudeCodeExecutable: 'claude',
-      options: {},
-      cwd: '/work/repo',
-      claudeConfigDir: '/accounts/claude',
-      providerSessionId: PROVIDER_SESSION_ID,
-      resumeLeafUuid: null,
-      resumed: false,
-      ...launch
-    }),
-    onEvent: (event) => events.push(event),
-    openConnection: claude.openConnection,
-    readProcessStartTime: async () => 1_700_000_000_000,
-    now: () => 1_700_000_000_500,
-    ...(initTimeoutMs === undefined ? {} : { initTimeoutMs }),
-    dispatchAckTimeoutMs: 10,
-    persistHandle: async (handle) => {
-      persistedHandles.push(handle)
-    }
-  })
-}
-
-async function acquired(
-  claude: ReturnType<typeof fakeClaude>,
-  launch: Partial<ClaudeStructuredLaunch> = {},
-  events: ClaudeStructuredSessionEvent[] = []
-): Promise<ClaudeStructuredSessionAdapter> {
-  const adapter = adapterFor(claude, launch, events)
-  await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
-  return adapter
-}
-
-function tick(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve))
-}
-
-/** Drive the connection's SDK `canUseTool` callback the way the running CLI would. */
-function invokeCanUseTool(
-  connection: FakeConnection,
-  toolName: string,
-  requestId: string,
-  toolUseID: string,
-  extra: {
-    input?: Record<string, unknown>
-    suggestions?: unknown[]
-    signal?: AbortSignal
-  } = {}
-): { promise: Promise<unknown>; settled: () => boolean } {
-  const options = {
-    requestId,
-    toolUseID,
-    signal: extra.signal ?? new AbortController().signal,
-    ...(extra.suggestions ? { suggestions: extra.suggestions } : {})
-  } as unknown as Parameters<NonNullable<ClaudeStreamJsonConnectionHandlers['canUseTool']>>[2]
-  let done = false
-  const promise = Promise.resolve(
-    connection.handlers.canUseTool?.(toolName, extra.input ?? {}, options)
-  ).finally(() => {
-    done = true
-  })
-  return { promise, settled: () => done }
-}
+import {
+  acquired,
+  adapterFor,
+  fakeClaude,
+  identityFor,
+  invokeCanUseTool,
+  PROVIDER_SESSION_ID,
+  tick,
+  USER_MESSAGE,
+  type FakeConnection
+} from './claude-structured-session-test-support'
 
 describe('ClaudeStructuredSessionAdapter.acquire', () => {
   it('finishes its startup deadline before the paired mobile request deadline', () => {
@@ -734,6 +512,22 @@ describe('ClaudeStructuredSessionAdapter acquisition cleanup', () => {
       'no live claude stream-json session'
     )
   })
+
+  it('does not report a second release as successful while retained exit evidence is unproven', async () => {
+    const claude = fakeClaude({ unprovenCloseVerdict: { root: 'exited', tree: 'unverifiable' } })
+    const adapter = await acquired(claude)
+    const connection = claude.connections[0]
+    connection.handlers.onExit?.(new Error('claude stream-json exited (code 1): crashed'))
+    connection.close = vi.fn().mockResolvedValue(false) as unknown as FakeConnection['close']
+
+    await expect(adapter.releaseAcquisition({ sessionId: 'session-1' })).rejects.toBeInstanceOf(
+      AgentSessionAcquisitionRootExitObservedError
+    )
+    await expect(adapter.releaseAcquisition({ sessionId: 'session-1' })).rejects.toBeInstanceOf(
+      AgentSessionAcquisitionRootExitObservedError
+    )
+    expect(connection.close).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('ClaudeStructuredSessionAdapter prompts', () => {
@@ -849,47 +643,5 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
     await adapter.closeSession('session-1')
 
     await expect(answered.promise).resolves.toBeNull()
-  })
-
-  it('persists only the last transcript-entry uuid before graceful close', async () => {
-    const claude = fakeClaude()
-    const events: ClaudeStructuredSessionEvent[] = []
-    const persistedHandles: unknown[] = []
-    const adapter = adapterFor(claude, {}, events, persistedHandles)
-    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
-    claude.connections[0].handlers.onMessage?.({
-      type: 'assistant',
-      session_id: PROVIDER_SESSION_ID,
-      uuid: 'assistant-leaf'
-    })
-    claude.connections[0].handlers.onMessage?.({
-      type: 'result',
-      session_id: PROVIDER_SESSION_ID,
-      uuid: 'result-frame-uuid'
-    })
-    claude.connections[0].handlers.onMessage?.({
-      type: 'stream_event',
-      session_id: PROVIDER_SESSION_ID,
-      uuid: 'stream-event-frame-uuid'
-    })
-
-    await adapter.closeSession('session-1')
-
-    expect(persistedHandles).toEqual([
-      {
-        sessionId: 'session-1',
-        providerSessionId: PROVIDER_SESSION_ID,
-        leafUuid: 'assistant-leaf',
-        fence: 7
-      }
-    ])
-    expect(events.at(-2)).toEqual({
-      type: 'handle',
-      sessionId: 'session-1',
-      providerSessionId: PROVIDER_SESSION_ID,
-      leafUuid: 'assistant-leaf',
-      fence: 7
-    })
-    expect(claude.connections[0].closeCount).toBe(1)
   })
 })

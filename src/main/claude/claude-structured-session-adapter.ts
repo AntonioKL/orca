@@ -77,8 +77,42 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     }
     this.sessions.delete(sessionId)
     this.exits.set(sessionId, { connection: session.connection, error })
-    this.emit(session, session.events, { type: 'ended', sessionId, reason: error.message })
-    settleClaudeExitedSession(session)
+    // Persist the transcript-derived cursor before publishing the lifecycle
+    // event that lets the host release and reacquire this exact child.
+    void this.persistSessionHandle(sessionId, session)
+      .catch(() => undefined)
+      .then(() => {
+        const ended: ClaudeStructuredSessionEvent = {
+          type: 'ended',
+          sessionId,
+          reason: error.message,
+          cause: 'unexpected-exit',
+          fence: session.fence,
+          acquisitionGeneration: session.acquisitionGeneration
+        }
+        this.emit(session, session.events, ended)
+        settleClaudeExitedSession(session)
+      })
+  }
+
+  private async persistSessionHandle(sessionId: string, session: ClaudeSession): Promise<void> {
+    try {
+      const transcriptLeaf = await this.deps.readTranscriptLeaf?.({
+        providerSessionId: session.providerSessionId,
+        previousLeafUuid: session.leafUuid
+      })
+      if (transcriptLeaf) {
+        session.leafUuid = transcriptLeaf
+      }
+    } catch {
+      // A stale or unavailable tail must not overwrite the last observed leaf.
+    }
+    await this.deps.persistHandle?.({
+      sessionId,
+      providerSessionId: session.providerSessionId,
+      leafUuid: session.leafUuid,
+      fence: session.fence
+    })
   }
 
   private emit(
@@ -131,6 +165,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       sessions: this.sessions,
       acquisitions: this.acquisitions,
       ...(this.deps.persistHandle ? { persistHandle: this.deps.persistHandle } : {}),
+      ...(this.deps.readTranscriptLeaf ? { readTranscriptLeaf: this.deps.readTranscriptLeaf } : {}),
       ...(this.deps.onEvent ? { onEvent: this.deps.onEvent } : {})
     })
 

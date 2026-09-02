@@ -10,6 +10,7 @@ export function createClaudeSessionPublication(input: {
   init: ClaudeInitObservation
   leafUuid: string | null
   fence: number
+  acquisitionGeneration: string
   resumed: boolean
   prompts: ClaudePromptRegistry
   translator: ClaudeJournalTranslator | null
@@ -32,13 +33,15 @@ export function createClaudeSessionPublication(input: {
         fence: input.fence,
         ...(input.linkId ? { linkId: input.linkId } : {}),
         observedAt: input.observedAt
-      })
+      }),
+      acquisitionGeneration: input.acquisitionGeneration
     },
     session: {
       connection: input.connection,
       providerSessionId: input.init.providerSessionId,
       leafUuid: input.leafUuid,
       fence: input.fence,
+      acquisitionGeneration: input.acquisitionGeneration,
       prompts: input.prompts,
       dispatchWaiters: [],
       options: new Map(input.options),

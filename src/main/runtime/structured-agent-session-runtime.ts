@@ -16,13 +16,7 @@ import {
   CodexStructuredSessionAdapter,
   type CodexStructuredSessionAdapterDeps
 } from '../codex/codex-structured-session-adapter'
-import { createClaudeStructuredLaunchResolver } from '../claude/claude-structured-launch-resolution'
-import {
-  ClaudeStructuredSessionAdapter,
-  type ClaudeStructuredSessionAdapterDeps
-} from '../claude/claude-structured-session-adapter'
-import { claudeProviderHandleLink } from '../claude/claude-structured-owner-identity'
-import { resolveClaudeCommand } from '../codex-cli/command'
+import type { ClaudeStructuredSessionAdapterDeps } from '../claude/claude-structured-session-adapter'
 import { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-host'
 import { StructuredAgentSessionAdapterRouter } from '../native-chat/agent-session-wire/structured-agent-session-adapter-router'
 import type { StructuredAgentSessionHandoffTransport } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
@@ -40,6 +34,7 @@ import { readEchoedAgentSessionSpawnToken } from './agent-session-spawn-token-re
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import { resolveLoginShellEnvironment } from '../startup/login-shell-environment'
 import { recordAgentSessionProviderHandle } from './agent-session-provider-handle-transition'
+import { createStructuredClaudeRuntimeAdapter } from './structured-claude-runtime-adapter'
 
 /** Sibling of the journal tree rather than inside it: one file adjudicates every
  *  session's lease, while a journal is per session. */
@@ -183,32 +178,23 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
         })
       }
     })
-    const claude = new ClaudeStructuredSessionAdapter({
-      resolveLaunch: createClaudeStructuredLaunchResolver({
-        store,
-        resolveWorkspacePath: deps.resolveWorkspacePath,
-        resolveCommand: deps.resolveClaudeCommand ?? resolveClaudeCommand,
-        ...(deps.resolveClaudeLaunchEnv ? { resolveEnv: deps.resolveClaudeLaunchEnv } : {})
-      }),
-      persistHandle: async ({ sessionId, providerSessionId, leafUuid, fence }) => {
-        const currentFence = store.getRecord(sessionId)?.lease.runtimeFence ?? fence
-        const observedAt = Date.now()
-        await store.transitionHandoff(sessionId, (record) =>
-          recordAgentSessionProviderHandle({
-            record,
-            fence: currentFence,
-            link: claudeProviderHandleLink({
-              sessionId: providerSessionId,
-              leafUuid,
-              resumed: true,
-              fence: currentFence,
-              observedAt
-            }),
-            now: observedAt
-          })
-        )
+    const claude = createStructuredClaudeRuntimeAdapter({
+      store,
+      resolveWorkspacePath: deps.resolveWorkspacePath,
+      ...(deps.resolveClaudeCommand ? { resolveClaudeCommand: deps.resolveClaudeCommand } : {}),
+      ...(deps.resolveClaudeLaunchEnv
+        ? { resolveClaudeLaunchEnv: deps.resolveClaudeLaunchEnv }
+        : {}),
+      onUnexpectedExit: (event) => {
+        recoveryChain = recoveryChain.then(async () => {
+          try {
+            await host?.handleAdapterEvent(event)
+          } catch (error) {
+            deps.onError?.({ scope: `structured-agent-session-exit:${event.sessionId}`, error })
+          }
+        })
       },
-      ...(deps.openClaudeConnection ? { openConnection: deps.openClaudeConnection } : {}),
+      ...(deps.openClaudeConnection ? { openClaudeConnection: deps.openClaudeConnection } : {}),
       ...(deps.readProcessStartTime ? { readProcessStartTime: deps.readProcessStartTime } : {})
     })
     const adapter = new StructuredAgentSessionAdapterRouter({ codex, claude }, async () => {
