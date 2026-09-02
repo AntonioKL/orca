@@ -33,9 +33,9 @@ import { join, resolve } from 'node:path'
 import { RELAY_WINDOWS_PROCESS_TREE_FILENAME } from '../../src/shared/relay-artifacts.ts'
 import {
   ensureWindowsProcessTreeCommandLinePatch,
+  inspectWindowsProcessTreeAddon,
   nodeGypRebuildInvocation,
   stageWindowsProcessTreeNodeAddonApiHeaders,
-  windowsProcessTreeAddonReadsProcessMemory,
   WINDOWS_PROCESS_TREE_PACKAGE_DIR as PACKAGE_DIR
 } from './windows-process-tree-gyp-rebuild.mjs'
 
@@ -192,7 +192,7 @@ function main() {
   }
   // Why check the artifact and not only the source: the source checks above run
   // before node-gyp, and a stale build directory can outlive them.
-  if (windowsProcessTreeAddonReadsProcessMemory()) {
+  if (inspectWindowsProcessTreeAddon(built) === 'unpatched') {
     throw new Error(
       'The built addon still calls ReadProcessMemory, so it did not come from the patched ' +
         'command-line reader. A relay would get the primitive MDE scores as credential dumping.'

@@ -7,8 +7,9 @@ import { release } from 'node:os'
 import { basename, dirname, resolve } from 'node:path'
 import {
   ensureWindowsProcessTreeCommandLinePatch,
+  inspectWindowsProcessTreeAddon,
   stageWindowsProcessTreeNodeAddonApiHeaders,
-  windowsProcessTreeAddonReadsProcessMemory
+  windowsProcessTreeAddonPath
 } from './windows-process-tree-gyp-rebuild.mjs'
 
 const require = createRequire(import.meta.url)
@@ -264,7 +265,7 @@ function loadNativeModule(moduleName) {
     // node-addon-api, so it requires cleanly and then reads every process's
     // command line out of its address space. Check the binary, not the load.
     require(moduleName)
-    if (windowsProcessTreeAddonReadsProcessMemory()) {
+    if (inspectWindowsProcessTreeAddon(windowsProcessTreeAddonPath()) === 'unpatched') {
       throw new Error(
         'the loaded addon still calls ReadProcessMemory, so it was not built from the patched ' +
           'source. Rebuild it (pnpm run rebuild:electron) rather than using the published prebuild.'

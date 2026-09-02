@@ -263,9 +263,12 @@ line is recoverable; silently resuming address-space reads is not.
 
 This also makes the property checkable on the artifact rather than the source:
 the patched reader never calls `ReadProcessMemory`, so the symbol is absent from
-the compiled addon's import table. `windowsProcessTreeAddonReadsProcessMemory()`
-in `config/scripts/windows-process-tree-gyp-rebuild.mjs` is that check, and it
-is the only way to tell the two binaries apart — see below.
+the compiled addon's import table. `inspectWindowsProcessTreeAddon()` in
+`config/scripts/windows-process-tree-gyp-rebuild.mjs` is that check, and it is
+the only way to tell the two binaries apart — see below. It answers
+`clean` / `unpatched` / `missing` rather than a boolean, because a binary that is
+not there has not been cleared, and a caller reading `false` as “verified” would
+pass exactly the thing the check exists to catch.
 
 Because the returned `UNICODE_STRING` comes from that same hookable boundary,
 its `Buffer` and `Length` are bounds-checked against the allocation before the
@@ -287,13 +290,18 @@ health check cannot tell the two binaries apart, and a rebuild that is skipped �
 `rebuild-native-deps.mjs` soft-exits 0 on a Windows file lock during postinstall
 — leaves the upstream prebuilt in place and cached.
 
-Three checks close that, all keyed on the absent `ReadProcessMemory` import:
+Four checks close that, all keyed on the absent `ReadProcessMemory` import:
 
 - `ensureWindowsProcessTreeCommandLinePatch()` deletes a binary that still has
   it, so a skipped rebuild fails loudly instead of using the prebuilt;
 - `ensure-native-runtime.mjs` treats such a binary as a load failure, which is
   what triggers the rebuild;
-- the relay build asserts it on the artifact it just produced.
+- the relay build asserts it on the artifact it just produced;
+- `loadWindowsProcessTree()` asserts it again on the addon staged beside a relay
+  bundle and refuses to bind one that still imports the symbol, falling back to
+  the CIM scan. The build-time assertion is not enough on its own: a bundle and
+  the addon beside it redeploy independently, so a host that has not taken a new
+  bundle keeps whatever `.node` is already there.
 
 What none of this does is narrow _which_ processes are asked. A detailed scan
 still queries every pid, including `lsass.exe`; it now asks with the same right
@@ -315,6 +323,10 @@ The addon is Windows-only, so it follows the same contract as
 - listed in the win32 branch of `rebuild-native-deps.mjs` and
   `ensure-native-runtime.mjs`;
 - copied into the packaged `node_modules` for win32 only.
+
+The relay's copy is a separate artifact staged beside the bundle, so a relay host
+only picks up a rebuilt addon on redeploy. Until then it keeps whatever binary it
+already has, which is why the addon is checked again at load.
 
 ## What the snapshot does not provide
 

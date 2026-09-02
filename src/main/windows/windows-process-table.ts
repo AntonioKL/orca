@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createProcessTableSnapshotReader } from '../../shared/process-table-snapshot'
 import { reportWindowsCommandLineRecoveryHealth } from './windows-command-line-recovery-health'
@@ -62,10 +63,15 @@ type WindowsProcessTreeModule = {
 
 const requireFromMain = createRequire(__filename)
 
+/** `resolve` is optional so a test can inject a bare function for the require alone. */
+type NativeRequire = ((specifier: string) => unknown) & {
+  resolve?: (specifier: string) => string
+}
+
 // Why injectable: `createRequire` bypasses the module mocker, and the two
 // resolution steps below are the exact thing #15749 shipped untested -- the
 // relay suites replaced the loader wholesale, so nothing exercised the require.
-let requireNative: (specifier: string) => unknown = requireFromMain
+let requireNative: NativeRequire = requireFromMain
 
 /**
  * The bare addon a relay host receives, with no npm package around it.
@@ -88,6 +94,42 @@ const PROCESS_DATA_FLAG = { None: 0, Memory: 1, CommandLine: 2 } as const
 
 /** Staged beside the relay bundle by build-relay; see RELAY_ARTIFACTS. */
 const RELAY_ADDON_FILENAME = './windows-process-tree.node'
+
+/** The import whose absence tells the patched binary from the published prebuilt. */
+const FLAGGED_ADDON_IMPORT = 'ReadProcessMemory'
+
+/**
+ * Refuse a staged relay addon built from unpatched source.
+ *
+ * The build asserts this on the artifact it produces, but a relay bundle and the
+ * addon beside it are redeployed independently: a host that has not taken a new
+ * bundle keeps whatever `.node` is already there, and the published prebuilt is
+ * node-addon-api, so it binds cleanly and then opens every process with
+ * `PROCESS_VM_READ` to walk its PEB -- the primitive MDE scores as credential
+ * dumping. Nothing checked that at load until here.
+ *
+ * Same predicate as `inspectWindowsProcessTreeAddon` in
+ * `config/scripts/windows-process-tree-gyp-rebuild.mjs`, which cannot be
+ * imported here: it is install-time tooling that pulls in node-gyp and
+ * `child_process`, and this module is bundled into the app and the relay.
+ *
+ * Falling back to the CIM scan is the correct loss: it is slower, and it is not
+ * the thing an EDR quarantines the host for.
+ */
+function stagedRelayAddonIsUnpatched(): boolean {
+  // No resolver means an injected test double, so there is no file to inspect.
+  // Production always has one, and a require that just succeeded proves the
+  // path is readable -- "cannot tell" here is never a real deployment.
+  const addonPath = requireNative.resolve?.(RELAY_ADDON_FILENAME)
+  if (!addonPath) {
+    return false
+  }
+  try {
+    return readFileSync(addonPath).includes(FLAGGED_ADDON_IMPORT)
+  } catch {
+    return false
+  }
+}
 
 let cachedModule: WindowsProcessTreeModule | null | undefined
 let moduleLoader: () => WindowsProcessTreeModule | null = loadWindowsProcessTree
@@ -133,8 +175,22 @@ function loadWindowsProcessTree(): WindowsProcessTreeModule | null {
     // Why check the shape: a truncated upload or an addon built for another
     // arch can load and still not answer. Binding to it would then reject every
     // read forever, where falling through reaches a scan that works.
-    cachedModule =
-      typeof addon?.getProcessList === 'function' ? adaptAddon(addon) : /* v8 ignore next */ null
+    if (typeof addon?.getProcessList !== 'function') {
+      /* v8 ignore next 2 */
+      cachedModule = null
+      return cachedModule
+    }
+    if (stagedRelayAddonIsUnpatched()) {
+      console.warn(
+        `[windows-process-table] the addon staged beside the relay bundle still imports ` +
+          `${FLAGGED_ADDON_IMPORT}, so it was built from unpatched source and reads every ` +
+          'process address space. Refusing it and falling back to the CIM scan; redeploy the ' +
+          'relay so the staged addon is rebuilt.'
+      )
+      cachedModule = null
+      return cachedModule
+    }
+    cachedModule = adaptAddon(addon)
   } catch {
     cachedModule = null
   }
@@ -148,7 +204,7 @@ function loadWindowsProcessTree(): WindowsProcessTreeModule | null {
  * `requestInProgress` and clears it only after draining its callback queue,
  * with no try/catch. One throw or one worker that never calls back leaves it
  * latched, every later call enqueues a callback that never fires, and the
- * single-flight cache above then holds a promise that never settles â€” the
+ * single-flight cache above then holds a promise that never settles — the
  * process table is dead for the life of the app. The PowerShell reader this
  * replaced self-healed in 3s because execFile owned a timeout; keep that.
  */
@@ -175,7 +231,7 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
       // Why only when the module is absent: a binding that loads is the fast
       // path even when a read fails or wedges, so a failing native reader must
       // never silently start forking shells at the caller's poll rate. Absence
-      // is the one condition that can never resolve itself â€” see
+      // is the one condition that can never resolve itself — see
       // docs/reference/windows-process-enumeration.md.
       return readCimRows()
     }
@@ -291,7 +347,7 @@ export function readWindowsProcessTable(): Promise<WindowsProcessRow[]> {
 /**
  * A snapshot taken after this call returns.
  *
- * Identity checks during teardown must not reuse a cached row â€” it can predate
+ * Identity checks during teardown must not reuse a cached row — it can predate
  * the very process exit it is being asked about.
  */
 export function readWindowsProcessTableFresh(): Promise<WindowsProcessRow[]> {
@@ -330,10 +386,13 @@ export function __setWindowsProcessTreeLoaderForTests(
   snapshotReader.reset()
 }
 
-/** Test-only: substitute the require that resolves the package and the addon. */
-export function __setWindowsProcessTreeRequireForTests(
-  resolve?: (specifier: string) => unknown
-): void {
+/**
+ * Test-only: substitute the require that resolves the package and the addon.
+ *
+ * Attach a `resolve` to the injected function to also exercise the staged-addon
+ * binary check; without one, the loader has no path to inspect.
+ */
+export function __setWindowsProcessTreeRequireForTests(resolve?: NativeRequire): void {
   requireNative = resolve ?? requireFromMain
   moduleLoader = loadWindowsProcessTree
   cachedModule = undefined

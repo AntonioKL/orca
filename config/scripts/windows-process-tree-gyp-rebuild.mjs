@@ -55,6 +55,9 @@ export function windowsProcessTreeAddonPath(packageDir = WINDOWS_PROCESS_TREE_PA
   return join(packageDir, 'build', 'Release', 'windows_process_tree.node')
 }
 
+/** The import whose absence tells the patched binary from the published prebuilt. */
+const FLAGGED_IMPORT = 'ReadProcessMemory'
+
 /**
  * Does this compiled addon still carry the flagged primitive?
  *
@@ -64,12 +67,20 @@ export function windowsProcessTreeAddonPath(packageDir = WINDOWS_PROCESS_TREE_PA
  * because the published tarball ships a *loadable* prebuilt built from
  * unpatched source: it is node-addon-api, so it satisfies a bare `require()`
  * under both Node and Electron, and a skipped rebuild would use it.
+ *
+ * Tri-state, not a predicate: a binary that is not there has not been cleared,
+ * and a boolean makes "absent" indistinguishable from "verified clean" at every
+ * call site. Takes the binary path so the relay's staged addon -- which sits
+ * beside the bundle, with no package around it -- gets the same check.
+ *
+ * @param {string} addonPath
+ * @returns {'clean' | 'unpatched' | 'missing'}
  */
-export function windowsProcessTreeAddonReadsProcessMemory(
-  packageDir = WINDOWS_PROCESS_TREE_PACKAGE_DIR
-) {
-  const addonPath = windowsProcessTreeAddonPath(packageDir)
-  return existsSync(addonPath) && readFileSync(addonPath).includes('ReadProcessMemory')
+export function inspectWindowsProcessTreeAddon(addonPath) {
+  if (!existsSync(addonPath)) {
+    return 'missing'
+  }
+  return readFileSync(addonPath).includes(FLAGGED_IMPORT) ? 'unpatched' : 'clean'
 }
 
 /**
@@ -125,7 +136,10 @@ export function ensureWindowsProcessTreeCommandLinePatch(
 
   // A binary from before the repair -- or the tarball's own prebuilt -- would
   // otherwise survive a skipped rebuild and load the flagged reader anyway.
-  if (windowsProcessTreeAddonReadsProcessMemory(packageDir)) {
+  // Deleting it can fail EPERM against a loaded (memory-mapped) addon, which
+  // `force: true` does not cover -- it only swallows ENOENT. That throw is the
+  // caller's to classify as a Windows file lock, so it must not be swallowed.
+  if (inspectWindowsProcessTreeAddon(windowsProcessTreeAddonPath(packageDir)) === 'unpatched') {
     rmSync(windowsProcessTreeAddonPath(packageDir), { force: true })
     repaired = true
   }

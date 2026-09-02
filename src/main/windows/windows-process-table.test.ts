@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   __setWindowsProcessTableCimScanForTests,
@@ -366,6 +369,7 @@ describe('resolving the native reader', () => {
   let platform: PropertyDescriptor | undefined
   const PACKAGE_SPECIFIER = '@vscode/windows-process-tree'
   const ADDON_SPECIFIER = './windows-process-tree.node'
+  const stagedAddonDirs: string[] = []
 
   beforeEach(() => {
     platform = Object.getOwnPropertyDescriptor(process, 'platform')
@@ -375,6 +379,9 @@ describe('resolving the native reader', () => {
   afterEach(() => {
     __setWindowsProcessTreeRequireForTests()
     __setWindowsProcessTableCimScanForTests()
+    for (const dir of stagedAddonDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true })
+    }
     if (platform) {
       Object.defineProperty(process, 'platform', platform)
     }
@@ -474,6 +481,64 @@ describe('resolving the native reader', () => {
     })
     await expect(readWindowsProcessTableFresh()).resolves.toHaveLength(1)
     expect(cimScan).toHaveBeenCalledTimes(1)
+  })
+
+  // A relay bundle and the addon staged beside it redeploy independently, so a
+  // host that never took a new bundle can still be loading the published
+  // prebuilt -- which binds fine and then walks every process's address space.
+  // The relay build asserts the symbol is absent; nothing did at load.
+  function withStagedAddonBinary(
+    bytes: string,
+    addon: unknown
+  ): ((specifier: string) => unknown) & { resolve: (specifier: string) => string } {
+    const dir = mkdtempSync(join(tmpdir(), 'orca-relay-addon-'))
+    const addonPath = join(dir, 'windows-process-tree.node')
+    writeFileSync(addonPath, bytes)
+    stagedAddonDirs.push(dir)
+    const resolve = (specifier: string): unknown => {
+      if (specifier === ADDON_SPECIFIER) {
+        return addon
+      }
+      throw new Error('MODULE_NOT_FOUND')
+    }
+    resolve.resolve = (specifier: string): string => {
+      if (specifier === ADDON_SPECIFIER) {
+        return addonPath
+      }
+      throw new Error('MODULE_NOT_FOUND')
+    }
+    return resolve
+  }
+
+  it('refuses a staged relay addon still built from unpatched source', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const cimScan = vi
+      .fn()
+      .mockResolvedValue([
+        { pid: process.pid, ppid: 0, name: 'node.exe', command: 'node relay.js' }
+      ])
+    __setWindowsProcessTableCimScanForTests(cimScan)
+    const addon = addonReturning(NATIVE)
+    __setWindowsProcessTreeRequireForTests(
+      withStagedAddonBinary('MZ\0KERNEL32.dll\0ReadProcessMemory\0', addon)
+    )
+
+    await expect(readWindowsProcessTableFresh()).resolves.toHaveLength(1)
+    expect(addon.getProcessList).not.toHaveBeenCalled()
+    expect(cimScan).toHaveBeenCalledTimes(1)
+    expect(isWindowsProcessTableAvailable()).toBe(false)
+    expect(warn.mock.calls[0]?.[0]).toContain('ReadProcessMemory')
+    warn.mockRestore()
+  })
+
+  it('binds a staged relay addon whose binary carries no such import', async () => {
+    const addon = addonReturning(NATIVE)
+    __setWindowsProcessTreeRequireForTests(
+      withStagedAddonBinary('MZ\0ntdll.dll\0NtQueryInformationProcess\0', addon)
+    )
+
+    await expect(readWindowsProcessTableFresh()).resolves.toHaveLength(2)
+    expect(addon.getProcessList).toHaveBeenCalledTimes(1)
   })
 
   it('never probes either specifier off Windows', async () => {
