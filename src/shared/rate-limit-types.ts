@@ -26,6 +26,7 @@ export type UsageRateLimitFailureKind =
   | 'deferred-by-live-session'
   | 'keychain-unavailable'
   | 'managed-keychain-unavailable'
+  | 'managed-auth-unowned'
   | 'missing-scope'
   | 'network'
   | 'server'

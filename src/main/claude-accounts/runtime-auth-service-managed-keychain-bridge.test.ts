@@ -9,6 +9,7 @@ import {
   createOauthRefreshMock,
   createSettings,
   createStore,
+  expectedRuntimeConfigDir,
   resetRuntimeAuthTestState,
   setScopedKeychainCredentialsForManagedPath,
   testState
@@ -264,6 +265,75 @@ describe('ClaudeRuntimeAuthService', () => {
     await service.prepareForClaudeLaunch()
 
     expect(testState.managedKeychainCredentials.get('account-1')).toBe(managedCredentials)
+  })
+
+  // Why: a pane that never reached the managed home runs the personal login; labelling it
+  // `managed:` hid that from the usage lane, which then reported personal numbers as the account's.
+  it('does not claim managed provenance when the managed auth dir is unusable', async () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+    const credentials = createClaudeCredentialsJson('user@example.com', 'managed')
+    const managedAuthPath = createManagedClaudeAuth(testState.userDataDir, 'account-1', credentials)
+    const store = createStore(
+      createSettings({
+        claudeManagedAccounts: [
+          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
+        ],
+        activeClaudeManagedAccountId: 'account-1'
+      })
+    )
+    // The account's auth dir is gone (cleanup tool, backup restore).
+    rmSync(managedAuthPath, { recursive: true, force: true })
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+
+    const preparation = await service.prepareForClaudeLaunch()
+
+    expect(preparation.provenance).toBe('system:managed-auth-unowned')
+    expect(preparation.configDir).toBe(expectedRuntimeConfigDir())
+    expect(preparation.envPatch.CLAUDE_CONFIG_DIR).toBeUndefined()
+  })
+
+  // Why: a torn .claude.json makes identity unprovable; the CLI's newer rotation must still not be
+  // overwritten with an already-consumed refresh token.
+  it('does not overwrite a fresher scoped credential when identity cannot be proven', async () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+    const managedCredentials = createClaudeCredentialsWithoutEmail('managed', null, {
+      expiresAt: 2_000,
+      refreshToken: 'managed-refresh'
+    })
+    const rotatedCredentials = createClaudeCredentialsWithoutEmail('rotated', null, {
+      expiresAt: 3_000,
+      refreshToken: 'rotated-refresh'
+    })
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      managedCredentials
+    )
+    // A torn write of the CLI's own state file: identity becomes unprovable.
+    writeFileSync(join(managedAuthPath, '.claude.json'), '{"oauthAccount":', 'utf-8')
+    const store = createStore(
+      createSettings({
+        claudeManagedAccounts: [
+          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
+        ],
+        activeClaudeManagedAccountId: 'account-1'
+      })
+    )
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+
+    await service.prepareForClaudeLaunch()
+    setScopedKeychainCredentialsForManagedPath(managedAuthPath, rotatedCredentials)
+    await service.prepareForClaudeLaunch()
+
+    expect(testState.scopedKeychainCredentialsByConfigDir.get(realpathSync(managedAuthPath))).toBe(
+      rotatedCredentials
+    )
   })
 
   // Why: precedent is to degrade the storage medium, never the account identity.

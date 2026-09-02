@@ -10,6 +10,7 @@ import {
   type ClaudeAccountSelectionTarget
 } from '../runtime-selection'
 import { ClaudeRuntimeAuthSnapshotRestore } from './runtime-auth-snapshot-restore'
+import { CLAUDE_MANAGED_AUTH_UNOWNED_PROVENANCE } from './runtime-auth-types'
 import type { ClaudeRuntimeAuthPreparation } from './runtime-auth-types'
 import { resolveOwnedClaudeManagedAuthPath } from '../managed-auth-path'
 
@@ -81,6 +82,7 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
         provenance: `wsl:${normalizeClaudeAccountSelectionTarget(normalizedTarget).wslDistro ?? '__default__'}:system`
       }
     }
+    let managedRoutingFailed = false
     if (activeAccount?.managedAuthRuntime === 'host') {
       const managedPath = resolveOwnedClaudeManagedAuthPath(
         activeAccount.id,
@@ -92,6 +94,7 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
           console.warn(
             '[claude-runtime-auth] Refusing managed Claude routing after home provisioning failed'
           )
+          managedRoutingFailed = true
         } else {
           return {
             configDir: managedPath,
@@ -106,6 +109,8 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
             provenance: `managed:${activeAccount.id}`
           }
         }
+      } else {
+        managedRoutingFailed = true
       }
     }
     return {
@@ -120,8 +125,11 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
         activeAccount?.managedAuthRuntime === 'host' &&
         this.managedRefreshDeferredByLivePtyAccountId === activeAccountId
       ),
-      provenance:
-        activeAccountId && activeAccount?.managedAuthRuntime === 'host'
+      // Why: this pane is on the personal login; labelling it `managed:` hides that from
+      // every consumer, including the usage lane that reports the numbers.
+      provenance: managedRoutingFailed
+        ? CLAUDE_MANAGED_AUTH_UNOWNED_PROVENANCE
+        : activeAccountId && activeAccount?.managedAuthRuntime === 'host'
           ? `managed:${activeAccountId}`
           : 'system'
     }

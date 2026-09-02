@@ -103,6 +103,8 @@ export function getProviderUsageStatusLabel(p: ProviderRateLimits): string {
           'auto.components.status.bar.tooltip.7fe52bf9dc',
           'Managed sign-in unavailable'
         )
+      case 'managed-auth-unowned':
+        return translate('auto.components.status.bar.tooltip.3ac91d7e42', 'Account files missing')
       case 'token_expired':
         return translate('auto.components.status.bar.tooltip.b1f47ac902', 'Sign-in expired')
       case 'cli-unavailable':
@@ -175,6 +177,11 @@ export function getProviderUsageErrorMessage(p: ProviderRateLimits): string {
         return translate(
           'auto.components.status.bar.tooltip.9195af66c1',
           'Claude could not load the selected managed sign-in. This session is using your personal Claude sign-in.'
+        )
+      case 'managed-auth-unowned':
+        return translate(
+          'auto.components.status.bar.tooltip.5d0b8c1af7',
+          'The selected Claude account\u2019s files are missing or unreadable. This session is using your personal Claude sign-in.'
         )
       // Why: Orca no longer refreshes Claude tokens; the CLI owns refresh, so running it repairs this.
       case 'token_expired':

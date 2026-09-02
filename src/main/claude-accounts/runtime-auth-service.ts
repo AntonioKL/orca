@@ -75,7 +75,10 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
     if (
       process.platform === 'darwin' &&
       selected?.managedAuthRuntime === 'host' &&
-      preparation.provenance.startsWith(`managed:${selected.id}`)
+      preparation.provenance.startsWith(`managed:${selected.id}`) &&
+      // Why: provenance alone can say `managed:` while the pane is routed at the system dir;
+      // bridging then writes the account's token into an item no reader ever reads.
+      preparation.envPatch.CLAUDE_CONFIG_DIR === preparation.configDir
     ) {
       try {
         const scoped = await readActiveClaudeKeychainCredentialsStrict(preparation.configDir)
@@ -102,8 +105,20 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
           }
         }
         const managed = await this.readManagedCredentials(selected)
-        if (managed && this.isValidCredentialsJsonObject(managed)) {
+        // Why: a scoped credential we could not positively match may still be the CLI's newer
+        // rotation; overwriting it would hand the next reader an already-consumed refresh token.
+        const wouldOverwriteFresherScoped =
+          scoped !== null &&
+          scoped !== managed &&
+          this.isValidCredentialsJsonObject(scoped) &&
+          managed !== null &&
+          this.runtimeCredentialsAreFresher(scoped, managed)
+        if (managed && !wouldOverwriteFresherScoped && this.isValidCredentialsJsonObject(managed)) {
           await writeActiveClaudeKeychainCredentials(managed, preparation.configDir)
+        } else if (wouldOverwriteFresherScoped) {
+          console.warn(
+            '[claude-runtime-auth] Refusing to overwrite a fresher scoped Claude credential'
+          )
         }
         if (this.managedKeychainUnavailable?.accountId === selected.id) {
           this.managedKeychainUnavailable = null
