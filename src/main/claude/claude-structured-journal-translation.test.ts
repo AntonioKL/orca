@@ -383,6 +383,45 @@ describe('Claude structured journal translation', () => {
     ).toEqual(['turn-lifecycle:user-1'])
   })
 
+  it('drops the stream state of turns that ended without their final frame', () => {
+    const state = sinkState()
+    let scheduled: (() => void) | null = null
+    const translator = createClaudeJournalTranslator({
+      sink: state.sink,
+      schedule: (run) => {
+        scheduled = run
+        return () => {
+          scheduled = null
+        }
+      }
+    })
+    for (let turn = 0; turn < 3; turn += 1) {
+      const aborted = streamedTextTurn({
+        messageId: `msg_abort_${turn}`,
+        startUuid: `abort-start-${turn}`,
+        finalUuid: `abort-final-${turn}`,
+        chunks: ['x'.repeat(4_000)]
+      })
+      for (const event of [...aborted.start, ...aborted.deltas]) {
+        translator.handle(event)
+      }
+      const run = scheduled as (() => void) | null
+      run?.()
+      // The user interrupts: the result arrives with no final assistant frame,
+      // so nothing ever reconciles these blocks.
+      translator.handle(
+        resultFrame('error_during_execution', {
+          is_error: true,
+          terminal_reason: 'aborted_streaming'
+        })
+      )
+      // The partial text is already journaled; only the live state is dropped.
+      expect(translator.pendingStreamedBlocks).toBe(0)
+    }
+
+    expect(assistantMessages(state.items)).toHaveLength(3)
+  })
+
   it('keeps an ordinary successful result off the timeline', () => {
     const state = sinkState()
     const translator = createClaudeJournalTranslator({ sink: state.sink })

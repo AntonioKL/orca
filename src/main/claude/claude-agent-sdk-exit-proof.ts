@@ -109,6 +109,9 @@ export function createClaudeChildTreeReaper(
     }
     const rootPid = child.pid
     if (!rootPid || exited()) {
+      // Only the root's death makes a missing snapshot final: its descendants
+      // have reparented, and no later walk can reach them.
+      snapshot = exited() ? null : snapshot
       return Promise.resolve()
     }
     const capture =
@@ -119,8 +122,12 @@ export function createClaudeChildTreeReaper(
       .catch(() => null)
       .then((captured) => {
         // A walk that found no root, or that raced the root's death, can only
-        // have missed descendants that already reparented away.
-        snapshot = admissibleTree(captured, platform, exited())
+        // have missed descendants that already reparented away. A table that
+        // could not be read in time is not an answer at all: while the root
+        // still lives the walk is simply retried, rather than latching a failed
+        // read as proof that there was nothing to find.
+        const tree = admissibleTree(captured, platform, exited())
+        snapshot = captured === null && tree === null && !exited() ? undefined : tree
       })
       .finally(() => {
         capturing = null

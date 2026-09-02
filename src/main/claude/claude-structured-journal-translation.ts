@@ -1,9 +1,6 @@
 import type { AgentJournalItemIdentity } from '../../shared/agent-session-journal-types'
 import { agentJournalItemKey } from '../../shared/agent-session-journal-item-key'
-import {
-  createAgentSessionDeltaCoalescer,
-  type AgentSessionDeltaCoalescerDeps
-} from '../native-chat/agent-session-wire/agent-session-delta-coalescer'
+import type { AgentSessionDeltaCoalescerDeps } from '../native-chat/agent-session-wire/agent-session-delta-coalescer'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import {
   boundInlineText,
@@ -40,6 +37,7 @@ import {
   isSettledClaudeResultKind
 } from './claude-structured-provider-fallback'
 import { createClaudeStreamedBlockRegistry } from './claude-streamed-block-identity'
+import { createClaudeStreamedTextCheckpoints } from './claude-streamed-text-checkpoints'
 
 export type ClaudeJournalTranslatorDeps = {
   sink: StructuredAgentSessionEventSink
@@ -52,6 +50,8 @@ export type ClaudeJournalTranslatorDeps = {
 export type ClaudeJournalTranslator = {
   handle: (event: ClaudeStructuredSessionEvent) => void
   flush: () => void
+  /** Streamed blocks still awaiting a final frame. A settled turn leaves none. */
+  readonly pendingStreamedBlocks: number
   dispose: () => void
 }
 
@@ -84,15 +84,20 @@ export function createClaudeJournalTranslator(
 ): ClaudeJournalTranslator {
   const tools = new Map<string, ClaudeToolUse>()
   const promptItems = new Map<string, AgentJournalItemIdentity[]>()
-  const streamIdentities = new Map<string, AgentJournalItemIdentity>()
   const streamedBlocks = createClaudeStreamedBlockRegistry()
-  const latestStreamText = new Map<string, string>()
-  const checkpointLengths = new Map<string, number>()
   let currentTurn: { sessionId: string; turnId: string } | null = null
   const providerFallback = createClaudeProviderFrameFallback(
     deps.sink,
     deps.fallbackIdPrefix ?? 'acquisition'
   )
+  const streamedText = createClaudeStreamedTextCheckpoints({
+    ...(deps.coalesceMs === undefined ? {} : { coalesceMs: deps.coalesceMs }),
+    ...(deps.schedule ? { schedule: deps.schedule } : {}),
+    persist: (identity, text) => {
+      deps.sink.appendItem(identity, claudeStreamingMessageBody(text))
+      deps.sink.publish()
+    }
+  })
 
   const publishLifecycle = (sessionId: string, turnId: string, running: boolean): void => {
     const identity = lifecycleIdentity(sessionId, turnId)
@@ -108,45 +113,12 @@ export function createClaudeJournalTranslator(
     deps.sink.publish()
   }
 
-  const persistStream = (key: string, text: string, force: boolean): void => {
-    latestStreamText.set(key, text)
-    const checkpointLength = checkpointLengths.get(key) ?? 0
-    const nextLength = Math.max(checkpointLength + 32, Math.ceil(checkpointLength * 1.125))
-    if (!force && checkpointLength > 0 && text.length < nextLength) {
-      return
-    }
-    const identity = streamIdentities.get(key)
-    if (!identity) {
-      return
-    }
-    checkpointLengths.set(key, text.length)
-    deps.sink.appendItem(identity, claudeStreamingMessageBody(text))
-    deps.sink.publish()
-  }
-
-  const coalescer = createAgentSessionDeltaCoalescer({
-    windowMs: deps.coalesceMs,
-    schedule: deps.schedule,
-    emit: (key, text) => persistStream(key, text, false)
-  })
-
-  const flushStreams = (): void => {
-    coalescer.flushAll()
-    for (const [key, text] of latestStreamText) {
-      if (checkpointLengths.get(key) !== text.length) {
-        persistStream(key, text, true)
-      }
-    }
-  }
-
   const handleStream = (message: Record<string, unknown>): boolean => {
     const delta = streamedBlocks.observe(message)
     if (!delta) {
       return false
     }
-    const key = agentJournalItemKey(delta.identity)
-    streamIdentities.set(key, delta.identity)
-    coalescer.append(key, delta.text)
+    streamedText.append(delta.identity, delta.text)
     return true
   }
 
@@ -161,11 +133,7 @@ export function createClaudeJournalTranslator(
     const identity =
       (body && envelope.role === 'assistant' ? streamedBlocks.reconcile(envelope) : null) ??
       claudeMessageIdentity(envelope)
-    const key = agentJournalItemKey(identity)
-    coalescer.forget(key)
-    latestStreamText.delete(key)
-    checkpointLengths.delete(key)
-    streamIdentities.delete(key)
+    streamedText.forget(agentJournalItemKey(identity))
     if (body) {
       deps.sink.appendItem(identity, body)
       changed = true
@@ -255,7 +223,7 @@ export function createClaudeJournalTranslator(
   return {
     handle: (event) => {
       if (event.type === 'ended') {
-        flushStreams()
+        streamedText.flush()
         if (currentTurn) {
           publishLifecycle(currentTurn.sessionId, currentTurn.turnId, false)
           currentTurn = null
@@ -265,7 +233,7 @@ export function createClaudeJournalTranslator(
       if (event.type === 'message' && handleStream(event.message)) {
         return
       }
-      flushStreams()
+      streamedText.flush()
       if (event.type === 'prompt') {
         handlePrompt(event)
       } else if (event.type === 'prompt-cancelled') {
@@ -279,8 +247,11 @@ export function createClaudeJournalTranslator(
           publishLifecycle(currentTurn.sessionId, currentTurn.turnId, false)
           currentTurn = null
         }
-        // The turn is over: a block still awaiting its final keeps its flushed text.
+        // The turn is over. A block still awaiting its final keeps the text the
+        // flush above journaled, but its live state goes: an interrupted turn
+        // would otherwise retain that text for the life of the session.
         streamedBlocks.clear()
+        streamedText.settle()
         const kind = claudeProviderFrameKind(event.message)
         // Ordinary turn bookkeeping stays suppressed; a reported failure never does.
         const failure = claudeResultFailure(event.message)
@@ -295,15 +266,15 @@ export function createClaudeJournalTranslator(
         providerFallback.append(event.kind, event.payload)
       }
     },
-    flush: flushStreams,
+    flush: streamedText.flush,
+    get pendingStreamedBlocks() {
+      return streamedText.pending
+    },
     dispose: () => {
-      coalescer.dispose()
+      streamedText.dispose()
       tools.clear()
       promptItems.clear()
-      streamIdentities.clear()
       streamedBlocks.clear()
-      latestStreamText.clear()
-      checkpointLengths.clear()
     }
   }
 }

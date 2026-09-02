@@ -78,6 +78,25 @@ function ageDescendantPastTheCaptureSecond(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 1_000 - (Date.now() % 1_000) + 20))
 }
 
+/**
+ * The close ladder as production drives it: `closeProcessRegistry` retries an
+ * unproven close, and each retry re-verifies the retained snapshot. A loaded
+ * host can spend one attempt's whole window inside `ps`, and reporting false
+ * there is the honest verdict — the requirement is that TRUE never outruns the
+ * observation, which the caller asserts at whichever boundary returns it.
+ */
+async function proveExitWithRetries(
+  input: Parameters<typeof proveClaudeChildExit>[0],
+  attempts = 3
+): Promise<boolean> {
+  for (let attempt = 1; attempt < attempts; attempt += 1) {
+    if (await proveClaudeChildExit(input)) {
+      return true
+    }
+  }
+  return proveClaudeChildExit(input)
+}
+
 function spawnScript(script: string): ReturnType<typeof spawnProcess> {
   return spawnProcess({
     program: process.execPath,
@@ -165,7 +184,7 @@ describe('claude child exit proof', () => {
       await ageDescendantPastTheCaptureSecond()
 
       try {
-        const proven = await proveClaudeChildExit({ child, ...observeExit(child) })
+        const proven = await proveExitWithRetries({ child, ...observeExit(child) })
         // Evaluated AT the boundary, not by polling until a deferred sweep timer
         // wins: true releases the lease, so a descendant still running here is
         // exactly the orphan the proof exists to prevent. False would be the
@@ -202,7 +221,7 @@ describe('claude child exit proof', () => {
       await ageDescendantPastTheCaptureSecond()
 
       try {
-        const proven = await proveClaudeChildExit({ child, ...observeExit(child) })
+        const proven = await proveExitWithRetries({ child, ...observeExit(child) })
         expect({ proven, descendant: descendantState(descendantPid) }).toEqual({
           proven: true,
           descendant: 'exited'
@@ -228,7 +247,7 @@ describe('claude child exit proof', () => {
         descendantPid: number
       }
       try {
-        const proven = await proveClaudeChildExit({ child, ...observeExit(child) })
+        const proven = await proveExitWithRetries({ child, ...observeExit(child) })
         expect({ proven, descendant: descendantState(descendantPid) }).toEqual({
           proven: true,
           descendant: 'exited'
@@ -394,10 +413,15 @@ describe('claude child tree reaper', () => {
     expect(tree.treeVerdict).toBe('exited')
   })
 
-  it('treats an unreadable process table as unproven, and stays unproven on retry', async () => {
+  it('treats an unreadable process table as unproven and re-walks the live root', async () => {
     const child = mockChild()
-    const captureDescendants = vi.fn(async () => null)
-    const terminateDescendants = vi.fn()
+    // A loaded host can miss the table's deadline; while the root still lives
+    // that is a retryable read, not evidence that it has no descendants.
+    const captureDescendants = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(snapshotOf(4243))
+    const terminateDescendants = vi.fn(async () => 'exited' as const)
     const tree = createClaudeChildTreeReaper(child, {
       platform: 'linux',
       captureDescendants,
@@ -405,10 +429,27 @@ describe('claude child tree reaper', () => {
     })
 
     await expect(tree.reap()).resolves.toBe('unverifiable')
-    await expect(tree.reap()).resolves.toBe('unverifiable')
-    expect(child.kill.mock.calls).toEqual([['SIGKILL'], ['SIGKILL']])
-    expect(captureDescendants).toHaveBeenCalledTimes(1)
     expect(terminateDescendants).not.toHaveBeenCalled()
+    await expect(tree.reap()).resolves.toBe('exited')
+    expect(captureDescendants).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops re-walking once the root is gone, however the table behaved', async () => {
+    const child = mockChild()
+    let exited = false
+    const captureDescendants = vi.fn(async () => null)
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'linux',
+      exited: () => exited,
+      captureDescendants,
+      terminateDescendants: vi.fn()
+    })
+
+    await expect(tree.reap()).resolves.toBe('unverifiable')
+    exited = true
+    await expect(tree.reap()).resolves.toBe('unverifiable')
+    expect(captureDescendants).toHaveBeenCalledTimes(1)
+    expect(child.kill.mock.calls).toEqual([['SIGKILL'], ['SIGKILL']])
   })
 
   it('discards a walk that found no root instead of proving an empty tree', async () => {
