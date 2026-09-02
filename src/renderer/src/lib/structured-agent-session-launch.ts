@@ -6,8 +6,8 @@ import {
   StructuredAgentSessionCreateRefusalError
 } from '@/lib/launch-structured-codex-session'
 import {
-  enqueueStructuredAgentSessionLaunchPrompt,
-  mutateStructuredAgentSessionLaunchPrompt
+  discardStructuredAgentSessionLaunchOutbox,
+  enqueueStructuredAgentSessionLaunchPrompt
 } from '@/components/native-chat/structured-agent-session-outbox-storage'
 import {
   launchAndReconcile,
@@ -30,7 +30,6 @@ type StructuredRefusalFallback = () =>
 
 type StructuredLaunchState = StructuredLaunchRecoveryState & {
   identity: string
-  stagedPromptId: string | null
   promptDeliveryResult?: Promise<StructuredPromptDeliveryResult>
   refusalFallback: {
     callback: StructuredRefusalFallback | null
@@ -67,14 +66,6 @@ function launchIdentity(worktreeId: string): string {
   return worktreeId
 }
 
-function discardStagedPrompt(state: StructuredLaunchState): void {
-  if (!state.stagedPromptId) {
-    return
-  }
-  mutateStructuredAgentSessionLaunchPrompt(state.intent.sessionId, state.stagedPromptId, () => null)
-  state.stagedPromptId = null
-}
-
 function cleanupLaunchState(state: StructuredLaunchState): void {
   if (pendingStructuredLaunchesByIdentity.get(state.identity) === state) {
     pendingStructuredLaunchesByIdentity.delete(state.identity)
@@ -87,7 +78,7 @@ function settleDefinitiveRefusalFallback(state: StructuredLaunchState): void {
   }
   state.refusalFallback.started = true
   abandonStructuredAgentSessionLaunchIntent(state.intent)
-  discardStagedPrompt(state)
+  discardStructuredAgentSessionLaunchOutbox(state.intent.sessionId)
   const fallback = state.refusalFallback.callback
   if (!fallback) {
     state.refusalFallback.resolve(false)
@@ -214,7 +205,6 @@ function structuredCodexLaunchState(
     promise: Promise.resolve({ sessionId: '', fence: 0 }),
     visibilityUnknown: false,
     cancelled: false,
-    stagedPromptId: stagedPrompt?.clientMessageId ?? null,
     refusalFallback: {
       callback: null,
       promise: fallback.promise,
@@ -268,7 +258,7 @@ export function cancelStructuredCodexLaunch(worktreeId: string, sessionId: strin
   }
   state.cancelled = true
   cleanupLaunchState(state)
-  discardStagedPrompt(state)
+  discardStructuredAgentSessionLaunchOutbox(state.intent.sessionId)
   abandonStructuredAgentSessionLaunchIntent(state.intent)
   return true
 }

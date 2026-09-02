@@ -49,6 +49,7 @@ import {
   cancelStructuredCodexLaunch,
   startStructuredCodexLaunch
 } from './structured-agent-session-launch'
+import { readOutbox } from '@/components/native-chat/structured-agent-session-outbox-storage'
 
 function launchIntent(
   worktreeId: string,
@@ -314,6 +315,29 @@ describe('startStructuredCodexLaunch', () => {
     storageFailure.mockRestore()
   })
 
+  it('discards every coalesced prompt when the launch is definitively refused', async () => {
+    const worktreeId = 'wt-refused-coalesced-prompts'
+    const intent = launchIntent(worktreeId)
+    let rejectLaunch!: (error: unknown) => void
+    mocks.createIntent.mockReturnValueOnce(intent)
+    mocks.launch.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => (rejectLaunch = reject))
+    )
+
+    const first = startStructuredCodexLaunch(worktreeId, { prompt: 'first prompt' })
+    startStructuredCodexLaunch(worktreeId, { prompt: 'second prompt' })
+    const fallback = first.claimDefinitiveRefusalFallback(vi.fn())
+    expect(readOutbox(intent.sessionId)).toHaveLength(2)
+
+    rejectLaunch(new StructuredAgentSessionCreateRefusalError('unsupported'))
+    await expect(first.launchResult).rejects.toBeInstanceOf(
+      StructuredAgentSessionCreateRefusalError
+    )
+    await expect(fallback).resolves.toBe(true)
+
+    expect(readOutbox(intent.sessionId)).toEqual([])
+  })
+
   it('cancels a close-racing launch without retrying or toasting', async () => {
     const worktreeId = 'wt-close-race'
     const intent = launchIntent(worktreeId, 'session-close-race')
@@ -333,6 +357,27 @@ describe('startStructuredCodexLaunch', () => {
     expect(mocks.launch).toHaveBeenCalledOnce()
     expect(mocks.abandonIntent).toHaveBeenCalledWith(intent)
     expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('discards every coalesced prompt when a close cancels the launch', async () => {
+    const worktreeId = 'wt-close-coalesced-prompts'
+    const intent = launchIntent(worktreeId)
+    let resolveRefresh!: (snapshots: RuntimeMobileSessionTabsResult[]) => void
+    mocks.createIntent.mockReturnValueOnce(intent)
+    mocks.launch.mockResolvedValueOnce({ sessionId: intent.sessionId, fence: 1 })
+    vi.mocked(refreshLocalStructuredSessionTabs).mockImplementationOnce(
+      () => new Promise((resolve) => (resolveRefresh = resolve))
+    )
+
+    startStructuredCodexLaunch(worktreeId, { prompt: 'first prompt' })
+    startStructuredCodexLaunch(worktreeId, { prompt: 'second prompt' })
+    await vi.waitFor(() => expect(refreshLocalStructuredSessionTabs).toHaveBeenCalledOnce())
+    expect(readOutbox(intent.sessionId)).toHaveLength(2)
+
+    expect(cancelStructuredCodexLaunch(worktreeId, intent.sessionId)).toBe(true)
+    expect(readOutbox(intent.sessionId)).toEqual([])
+    resolveRefresh([])
+    await flushLaunchSettlement()
   })
 
   it('suppresses a close that races the retry verification catch', async () => {

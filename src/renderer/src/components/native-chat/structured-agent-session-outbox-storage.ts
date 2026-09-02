@@ -58,6 +58,10 @@ export function enqueueStructuredAgentSessionLaunchPrompt(
   return writeOutbox(sessionId, [...readOutbox(sessionId), entry]) ? entry : null
 }
 
+export function discardStructuredAgentSessionLaunchOutbox(sessionId: string): void {
+  writeOutbox(sessionId, [])
+}
+
 export function mutateStructuredAgentSessionLaunchPrompt(
   sessionId: string,
   clientMessageId: string,
