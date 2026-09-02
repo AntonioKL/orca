@@ -103,6 +103,7 @@ export function useComposerSubmitOrchestration(
     persistSetupAgentStartupPolicy: target.providerRuntimeSync.persistSetupAgentStartupPolicy,
     prepareFullSubmit: fullSubmitPreparation.prepareFullSubmit,
     resolvedInitialWorkspaceStatus: target.initialTargetState.resolvedInitialWorkspaceStatus,
+    selectedRepoAgentLaunchPlatform: target.runtimeTargetSelection.selectedRepoAgentLaunchPlatform,
     selectedRepoExecutionHostId: target.runtimeTargetSelection.selectedRepoExecutionHostId,
     selectedRepoIsGit: target.runtimeTargetSelection.selectedRepoIsGit,
     selectedRepoIsRemote: target.runtimeTargetSelection.selectedRepoIsRemote,

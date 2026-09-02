@@ -17,6 +17,7 @@ export type FullCreationExecutionInput = Pick<
   | 'persistSetupAgentStartupPolicy'
   | 'prepareFullSubmit'
   | 'resolvedInitialWorkspaceStatus'
+  | 'selectedRepoAgentLaunchPlatform'
   | 'selectedRepoExecutionHostId'
   | 'selectedRepoIsGit'
   | 'selectedRepoIsRemote'
@@ -65,6 +66,7 @@ export function useFullCreationExecution(input: FullCreationExecutionInput) {
     persistSetupAgentStartupPolicy,
     prepareFullSubmit,
     resolvedInitialWorkspaceStatus,
+    selectedRepoAgentLaunchPlatform,
     selectedRepoExecutionHostId,
     selectedRepoIsGit,
     selectedRepoIsRemote,

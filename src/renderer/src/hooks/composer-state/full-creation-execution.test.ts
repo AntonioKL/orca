@@ -79,6 +79,7 @@ describe('useFullCreationExecution cancellation', () => {
         .fn<FullCreationExecutionInput['prepareFullSubmit']>()
         .mockResolvedValue(prepared),
       resolvedInitialWorkspaceStatus: undefined,
+      selectedRepoAgentLaunchPlatform: 'darwin',
       selectedRepoExecutionHostId: 'local',
       selectedRepoIsGit: true,
       selectedRepoIsRemote: false,
