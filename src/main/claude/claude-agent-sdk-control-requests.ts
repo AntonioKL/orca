@@ -1,4 +1,8 @@
-import type { PermissionMode, Query } from '@anthropic-ai/claude-agent-sdk'
+import type {
+  PermissionMode,
+  Query,
+  SDKControlInterruptResponse
+} from '@anthropic-ai/claude-agent-sdk'
 
 export class ClaudeControlRequestError extends Error {
   constructor(
@@ -23,80 +27,128 @@ export function claudeQuerySettingsReader(query: Query): (() => Promise<unknown>
   return typeof reader === 'function' ? reader.bind(query) : null
 }
 
-function readString(params: Record<string, unknown>, key: string): string | undefined {
-  const value = params[key]
-  return typeof value === 'string' ? value : undefined
+/**
+ * cancel_async_message is a runtime Query method the shipped 0.3.251 declaration omits;
+ * it withdraws a single still-queued async user message by uuid so an interrupted turn
+ * cannot spawn a later unexpected turn. The typeof guard is its degradation path.
+ */
+type ClaudeQueryAsyncCanceller = { cancelAsyncMessage?: (uuid: string) => Promise<unknown> }
+
+export function claudeQueryAsyncCanceller(
+  query: Query
+): ((uuid: string) => Promise<unknown>) | null {
+  const cancel = (query as unknown as ClaudeQueryAsyncCanceller).cancelAsyncMessage
+  return typeof cancel === 'function' ? cancel.bind(query) : null
 }
 
-function sendControlRequest(
-  query: Query,
-  subtype: string,
-  params: Record<string, unknown>
-): Promise<unknown> {
-  switch (subtype) {
-    case 'initialize':
-      return query.initializationResult()
-    case 'get_settings': {
-      const read = claudeQuerySettingsReader(query)
-      return read
-        ? read()
-        : Promise.reject(
-            new ClaudeControlRequestError(subtype, 'this SDK exposes no get_settings request')
-          )
-    }
-    case 'list_models':
-      // The SDK reads the catalog off the initialize result rather than a
-      // separate request; the picker's parser keys on the `{ models }` envelope
-      // the CLI used to answer with.
-      return query.supportedModels().then((models) => ({ models }))
-    case 'set_model':
-      return query.setModel(readString(params, 'model')).then(() => ({}))
-    case 'set_permission_mode':
-      return query.setPermissionMode(readString(params, 'mode') as PermissionMode).then(() => ({}))
-    case 'apply_flag_settings':
-      return query
-        .applyFlagSettings((params.settings ?? {}) as Parameters<Query['applyFlagSettings']>[0])
-        .then(() => ({}))
-    case 'interrupt':
-      return query.interrupt().then((receipt) => receipt ?? {})
-    default:
-      return Promise.reject(
-        new ClaudeControlRequestError(subtype, `claude ${subtype} is not an SDK control request`)
-      )
-  }
-}
+export type ClaudeControlOptions = { timeoutMs?: number }
 
 /**
- * Issue one of the control requests this transport used to frame by hand.
+ * Run one native Query control method under Orca's deadline and error classification.
  *
- * The SDK owns correlation but applies no deadline, so the timeout stays here —
- * and its message is load-bearing: the init proof matches on it.
+ * The SDK owns correlation but applies no deadline, so the timeout stays here — and its
+ * message is load-bearing: the init proof matches on `claude initialize request timed out`.
+ * A closed query is a transport failure, not the CLI rejecting the request, so only the
+ * latter is re-thrown as a `ClaudeControlRequestError` a caller may surface as a rejection.
  */
-export function requestClaudeControl(
-  query: Query,
+export function runClaudeControl<T>(
   subtype: string,
-  params: Record<string, unknown> = {},
+  run: () => Promise<T>,
   timeoutMs: number = CLAUDE_DEFAULT_REQUEST_TIMEOUT_MS
-): Promise<unknown> {
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null
   const deadline = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => reject(new Error(`claude ${subtype} request timed out`)), timeoutMs)
     timer.unref?.()
   })
   return Promise.race([
-    sendControlRequest(query, subtype, params).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error)
-      // A closed query is a transport failure, not the CLI rejecting the option:
-      // only the latter may surface as a rejected session option.
-      if (error instanceof ClaudeControlRequestError || message === QUERY_CLOSED_MESSAGE) {
-        throw error
-      }
-      throw new ClaudeControlRequestError(subtype, message)
-    }),
+    Promise.resolve()
+      .then(run)
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error)
+        if (error instanceof ClaudeControlRequestError || message === QUERY_CLOSED_MESSAGE) {
+          throw error
+        }
+        throw new ClaudeControlRequestError(subtype, message)
+      }),
     deadline
   ]).finally(() => {
     if (timer) {
       clearTimeout(timer)
     }
   })
+}
+
+/** The native control surface Orca drives, one method per Query control request. */
+export type ClaudeControlSurface = {
+  interrupt: (
+    options?: ClaudeControlOptions & { cancelQueued?: boolean }
+  ) => Promise<SDKControlInterruptResponse | undefined>
+  cancelAsyncMessage: (uuid: string, options?: ClaudeControlOptions) => Promise<void>
+  setModel: (model: string | undefined, options?: ClaudeControlOptions) => Promise<void>
+  setPermissionMode: (mode: PermissionMode, options?: ClaudeControlOptions) => Promise<void>
+  applyFlagSettings: (
+    settings: Parameters<Query['applyFlagSettings']>[0],
+    options?: ClaudeControlOptions
+  ) => Promise<void>
+  supportedModels: (options?: ClaudeControlOptions) => Promise<unknown[]>
+  initializationResult: (options?: ClaudeControlOptions) => Promise<unknown>
+  getSettings: (options?: ClaudeControlOptions) => Promise<unknown>
+}
+
+type InterruptingQuery = {
+  interrupt: (options?: {
+    cancelQueued?: boolean
+  }) => Promise<SDKControlInterruptResponse | undefined>
+}
+
+export function createClaudeControlSurface(query: Query): ClaudeControlSurface {
+  return {
+    interrupt: (options) =>
+      runClaudeControl(
+        'interrupt',
+        () =>
+          (query as unknown as InterruptingQuery).interrupt(
+            options?.cancelQueued ? { cancelQueued: true } : undefined
+          ),
+        options?.timeoutMs
+      ),
+    cancelAsyncMessage: (uuid, options) => {
+      const cancel = claudeQueryAsyncCanceller(query)
+      return cancel
+        ? runClaudeControl('cancel_async_message', () => cancel(uuid), options?.timeoutMs).then(
+            () => {}
+          )
+        : Promise.resolve()
+    },
+    setModel: (model, options) =>
+      runClaudeControl('set_model', () => query.setModel(model), options?.timeoutMs).then(() => {}),
+    setPermissionMode: (mode, options) =>
+      runClaudeControl(
+        'set_permission_mode',
+        () => query.setPermissionMode(mode),
+        options?.timeoutMs
+      ).then(() => {}),
+    applyFlagSettings: (settings, options) =>
+      runClaudeControl(
+        'apply_flag_settings',
+        () => query.applyFlagSettings(settings),
+        options?.timeoutMs
+      ).then(() => {}),
+    supportedModels: (options) =>
+      runClaudeControl('list_models', () => query.supportedModels(), options?.timeoutMs),
+    initializationResult: (options) =>
+      runClaudeControl('initialize', () => query.initializationResult(), options?.timeoutMs),
+    getSettings: (options) => {
+      const read = claudeQuerySettingsReader(query)
+      return read
+        ? runClaudeControl('get_settings', read, options?.timeoutMs)
+        : Promise.reject(
+            new ClaudeControlRequestError(
+              'get_settings',
+              'this SDK exposes no get_settings request'
+            )
+          )
+    }
+  }
 }

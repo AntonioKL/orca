@@ -15,7 +15,9 @@ export function settleClaudeDispatchWaiters(session: ClaudeSession): void {
 
 export function settleClaudeExitedSession(session: ClaudeSession): void {
   settleClaudeDispatchWaiters(session)
-  session.prompts.clear()
+  for (const prompt of session.prompts.clear()) {
+    prompt.settle(null)
+  }
   session.translator?.dispose()
 }
 
@@ -35,17 +37,11 @@ export async function closeClaudePublishedSession(input: {
     return true
   }
   settleClaudeDispatchWaiters(session)
-  const pending = session.prompts.clear()
-  await Promise.allSettled(
-    pending.map((prompt) =>
-      session.connection.respond(prompt.requestId, {
-        behavior: 'deny',
-        message: 'Structured Claude session closed.',
-        interrupt: true,
-        toolUseID: prompt.toolUseId
-      })
-    )
-  )
+  // Settle every in-flight permission callback so closing leaves no dangling promise; `null`
+  // writes no response, and the SDK ignores any post-cleanup answer regardless.
+  for (const prompt of session.prompts.clear()) {
+    prompt.settle(null)
+  }
   if ((await session.connection.close()) !== true) {
     return false
   }

@@ -26,11 +26,7 @@ export async function requestClaudeInitialization(
   timeoutMs: number
 ): Promise<unknown> {
   try {
-    const result = await connection.request(
-      'initialize',
-      { supportedDialogKinds: [] },
-      { timeoutMs }
-    )
+    const result = await connection.initializationResult({ timeoutMs })
     const authError = claudeInitializationAuthError(result)
     if (authError) {
       throw authError

@@ -1,105 +1,164 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createClaudeAcquisitionAttempt } from './claude-structured-session-state'
+import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk'
 import { ClaudePromptRegistry } from './claude-structured-prompt-replies'
 import {
-  CLAUDE_BLOCKING_CONTROL_REQUEST_SUBTYPES,
+  buildClaudePermissionCallbacks,
+  CLAUDE_BLOCKING_CONTROL_CALLBACKS,
   CLAUDE_CAN_USE_TOOL_SUBTYPE,
-  CLAUDE_REQUEST_USER_DIALOG_SUBTYPE,
-  handleClaudeInboundControl
+  CLAUDE_REQUEST_USER_DIALOG_SUBTYPE
 } from './claude-structured-inbound-control'
 
-function rejectingAttempt() {
-  const attempt = createClaudeAcquisitionAttempt(new ClaudePromptRegistry())
-  const respond = vi.fn().mockRejectedValue(new Error('connection closed'))
-  const respondWithError = vi.fn().mockRejectedValue(new Error('connection closed'))
-  attempt.connection = { respond, respondWithError } as never
-  return { attempt, respond, respondWithError }
+type CanUseToolOptions = Parameters<CanUseTool>[2]
+
+function permissionOptions(
+  requestId: string,
+  toolUseID: string,
+  signal: AbortSignal,
+  suggestions?: unknown[]
+): CanUseToolOptions {
+  return {
+    requestId,
+    toolUseID,
+    signal,
+    ...(suggestions ? { suggestions } : {})
+  } as unknown as CanUseToolOptions
 }
 
-describe('Claude inbound control', () => {
-  it('routes a valid permission request to the durable prompt registry', () => {
-    const control = rejectingAttempt()
-    const emit = vi.fn()
+function callbacksFor() {
+  const prompts = new ClaudePromptRegistry()
+  const emit = vi.fn()
+  const { canUseTool, onUserDialog } = buildClaudePermissionCallbacks({
+    sessionId: 'session-1',
+    prompts,
+    emit
+  })
+  return { prompts, emit, canUseTool, onUserDialog }
+}
 
-    expect(
-      handleClaudeInboundControl({
+describe('Claude permission callbacks', () => {
+  it('registers a decodable can_use_tool as a durable prompt and settles it from the registry', async () => {
+    const control = callbacksFor()
+    const answered = control.canUseTool(
+      'Bash',
+      { command: 'git status' },
+      permissionOptions('perm-1', 'tool-1', new AbortController().signal, [{ type: 'addRules' }])
+    )
+
+    expect(control.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'prompt',
         sessionId: 'session-1',
-        attempt: control.attempt,
-        request: {
-          type: 'control_request',
-          request_id: 'permission-1',
-          request: {
-            subtype: CLAUDE_CAN_USE_TOOL_SUBTYPE,
-            tool_use_id: 'tool-1',
-            tool_name: 'Bash',
-            input: { command: 'git status' }
-          }
-        },
-        emit
+        prompt: expect.objectContaining({ promptKey: 'perm-1', toolName: 'Bash', kind: 'approval' })
       })
-    ).toEqual({ kind: 'prompt' })
-    expect(control.respond).not.toHaveBeenCalled()
-    expect(control.respondWithError).not.toHaveBeenCalled()
-    expect(emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'prompt' }))
+    )
+    const found = control.prompts.find('perm-1')
+    expect(found?.prompt.suggestions).toEqual([{ type: 'addRules' }])
+    // The prompt's settle is the SDK callback's own resolve — answering resolves this promise.
+    found?.prompt.settle({ behavior: 'allow', toolUseID: 'tool-1' })
+    await expect(answered).resolves.toEqual({ behavior: 'allow', toolUseID: 'tool-1' })
   })
 
-  it('denies a malformed permission request with a protocol response', () => {
-    const control = rejectingAttempt()
+  it('denies a malformed permission request without registering a prompt', async () => {
+    const control = callbacksFor()
+    const answered = control.canUseTool(
+      '',
+      {},
+      permissionOptions('perm-2', 'tool-2', new AbortController().signal)
+    )
 
-    expect(
-      handleClaudeInboundControl({
-        sessionId: 'session-1',
-        attempt: control.attempt,
-        request: {
-          type: 'control_request',
-          request_id: 'permission-2',
-          request: { subtype: CLAUDE_CAN_USE_TOOL_SUBTYPE, tool_use_id: 'tool-2' }
-        },
-        emit: vi.fn()
-      })
-    ).toEqual({ kind: 'responded', subtype: CLAUDE_CAN_USE_TOOL_SUBTYPE })
-    expect(control.respond).toHaveBeenCalledWith('permission-2', {
+    await expect(answered).resolves.toEqual({
       behavior: 'deny',
       message: 'Orca could not decode this permission request.',
       toolUseID: 'tool-2'
     })
+    expect(control.prompts.find('perm-2')).toBeNull()
+    expect(control.emit).not.toHaveBeenCalled()
   })
 
-  it('consumes rejected writes while declining unsupported controls', async () => {
-    const dialog = rejectingAttempt()
-    handleClaudeInboundControl({
-      sessionId: 'session-1',
-      attempt: dialog.attempt,
-      request: {
-        type: 'control_request',
-        request_id: 'dialog-1',
-        request: { subtype: 'request_user_dialog' }
-      },
-      emit: vi.fn()
-    })
-    const unsupported = rejectingAttempt()
-    handleClaudeInboundControl({
-      sessionId: 'session-1',
-      attempt: unsupported.attempt,
-      request: {
-        type: 'control_request',
-        request_id: 'control-1',
-        request: { subtype: 'future_control' }
-      },
-      emit: vi.fn()
-    })
-    await new Promise((resolve) => setImmediate(resolve))
+  it('settles a pending prompt with null and forgets it when the abort signal fires', async () => {
+    const control = callbacksFor()
+    const controller = new AbortController()
+    const answered = control.canUseTool(
+      'Bash',
+      { command: 'ls' },
+      permissionOptions('perm-3', 'tool-3', controller.signal)
+    )
+    expect(control.prompts.find('perm-3')).not.toBeNull()
 
-    expect(dialog.respond).toHaveBeenCalledWith('dialog-1', { behavior: 'cancelled' })
-    expect(unsupported.respondWithError).toHaveBeenCalledWith(
-      'control-1',
-      'Orca does not handle future_control'
+    controller.abort()
+
+    await expect(answered).resolves.toBeNull()
+    expect(control.emit).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'prompt-cancelled', promptKey: 'perm-3' })
+    )
+    // Forgotten: a late answer can no longer find the prompt to authorize the wrong tool.
+    expect(control.prompts.find('perm-3')).toBeNull()
+  })
+
+  it('cancels a request whose abort raced ahead of delivery without emitting a prompt', async () => {
+    const control = callbacksFor()
+    const controller = new AbortController()
+    controller.abort()
+
+    const answered = control.canUseTool(
+      'Bash',
+      { command: 'ls' },
+      permissionOptions('perm-4', 'tool-4', controller.signal)
+    )
+
+    await expect(answered).resolves.toBeNull()
+    expect(control.prompts.find('perm-4')).toBeNull()
+    expect(control.emit).toHaveBeenCalledTimes(1)
+    expect(control.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'prompt-cancelled', promptKey: 'perm-4' })
     )
   })
 
-  it('enumerates every blocking control request in the stable stream-json surface', () => {
-    expect(new Set(CLAUDE_BLOCKING_CONTROL_REQUEST_SUBTYPES)).toEqual(
+  it('settles every in-flight prompt with null when the registry is cleared', async () => {
+    const control = callbacksFor()
+    const first = control.canUseTool(
+      'Bash',
+      { command: 'a' },
+      permissionOptions('perm-5', 'tool-5', new AbortController().signal)
+    )
+    const second = control.canUseTool(
+      'Bash',
+      { command: 'b' },
+      permissionOptions('perm-6', 'tool-6', new AbortController().signal)
+    )
+
+    // What session close does: settle each pending callback so no promise dangles.
+    for (const prompt of control.prompts.clear()) {
+      prompt.settle(null)
+    }
+
+    await expect(first).resolves.toBeNull()
+    await expect(second).resolves.toBeNull()
+  })
+
+  it('answers a user dialog deny-safe', async () => {
+    const control = callbacksFor()
+    await expect(
+      control.onUserDialog(
+        { dialogKind: 'refusal_fallback_prompt', payload: {} },
+        { signal: new AbortController().signal, requestId: 'dialog-1' }
+      )
+    ).resolves.toEqual({ behavior: 'cancelled' })
+  })
+
+  it('enumerates every blocking control request and wires a callback for each', () => {
+    // The stable surface of controls a turn can block on. Adding one here without wiring its
+    // callback below fails this test rather than silently leaving a control unhandled.
+    expect(new Set(Object.keys(CLAUDE_BLOCKING_CONTROL_CALLBACKS))).toEqual(
       new Set([CLAUDE_CAN_USE_TOOL_SUBTYPE, CLAUDE_REQUEST_USER_DIALOG_SUBTYPE])
     )
+    const callbacks = buildClaudePermissionCallbacks({
+      sessionId: 'session-1',
+      prompts: new ClaudePromptRegistry(),
+      emit: vi.fn()
+    }) as unknown as Record<string, unknown>
+    for (const callbackName of Object.values(CLAUDE_BLOCKING_CONTROL_CALLBACKS)) {
+      expect(typeof callbacks[callbackName], `${callbackName} must be wired`).toBe('function')
+    }
   })
 })

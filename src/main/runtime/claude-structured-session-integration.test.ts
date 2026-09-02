@@ -56,7 +56,6 @@ type FakeClaudeConnection = Omit<ClaudeStreamJsonConnection, 'closed'> & {
   handlers: ClaudeStreamJsonConnectionHandlers
   calls: { subtype: string; params?: Record<string, unknown> }[]
   sent: Record<string, unknown>[]
-  replies: { requestId: string; response: unknown }[]
 }
 
 function fakeClaude() {
@@ -68,37 +67,51 @@ function fakeClaude() {
       handlers,
       calls: [],
       sent: [],
-      replies: [],
       pid: 4321 + connections.length,
       closed: false,
-      request: async (subtype, params) => {
-        connection.calls.push({ subtype, params })
-        if (subtype === 'initialize') {
-          handlers.onMessage?.({
-            type: 'system',
-            subtype: 'init',
-            session_id: PROVIDER_SESSION,
-            ...(connections.length === 0 ? { uuid: 'init-leaf' } : {}),
-            model: 'claude-sonnet-5',
-            apiKeySource: 'none'
-          })
-          return {
-            models: [{ value: 'sonnet', displayName: 'Sonnet' }],
-            ...(initializeAccount === undefined ? {} : { account: initializeAccount })
-          }
+      initializationResult: async () => {
+        connection.calls.push({ subtype: 'initialize' })
+        handlers.onMessage?.({
+          type: 'system',
+          subtype: 'init',
+          session_id: PROVIDER_SESSION,
+          ...(connections.length === 0 ? { uuid: 'init-leaf' } : {}),
+          model: 'claude-sonnet-5',
+          apiKeySource: 'none'
+        })
+        return {
+          models: [{ value: 'sonnet', displayName: 'Sonnet' }],
+          ...(initializeAccount === undefined ? {} : { account: initializeAccount })
         }
-        return subtype === 'get_settings' ? { env: {} } : {}
       },
+      getSettings: async () => {
+        connection.calls.push({ subtype: 'get_settings' })
+        return { env: {} }
+      },
+      supportedModels: async () => {
+        connection.calls.push({ subtype: 'list_models' })
+        return [{ value: 'sonnet', displayName: 'Sonnet' }]
+      },
+      setModel: async (model) => {
+        connection.calls.push({ subtype: 'set_model', params: { model } })
+      },
+      setPermissionMode: async (mode) => {
+        connection.calls.push({ subtype: 'set_permission_mode', params: { mode } })
+      },
+      applyFlagSettings: async (settings) => {
+        connection.calls.push({ subtype: 'apply_flag_settings', params: { settings } })
+      },
+      interrupt: async () => {
+        connection.calls.push({ subtype: 'interrupt', params: {} })
+        return undefined
+      },
+      cancelAsyncMessage: async () => {},
       send: async (message) => {
         connection.sent.push(message)
         if (message.type === 'user') {
           handlers.onMessage?.({ ...message, uuid: 'user-1' })
         }
       },
-      respond: async (requestId, response) => {
-        connection.replies.push({ requestId, response })
-      },
-      respondWithError: async () => {},
       close: async () => {
         connection.closed = true
         return true
@@ -447,16 +460,13 @@ describe('a structured Claude session over agentSession.*', () => {
       `claude:${PROVIDER_SESSION}:assistant-leaf`
     )
 
-    claude.live().handlers.onControlRequest?.({
-      type: 'control_request',
-      request_id: 'permission-1',
-      request: {
-        subtype: 'can_use_tool',
-        tool_name: 'Bash',
-        tool_use_id: 'tool-1',
-        input: { command: 'ls' }
-      }
-    })
+    const answeredPermission = Promise.resolve(
+      claude.live().handlers.canUseTool?.('Bash', { command: 'ls' }, {
+        requestId: 'permission-1',
+        toolUseID: 'tool-1',
+        signal: new AbortController().signal
+      } as never)
+    )
     await getStructuredAgentSessionHost()?.flushStreamedEvents(SESSION)
     const approval = itemsOf(stream).find((item) => item.body?.kind === 'approval')
     expect(approval?.body).toMatchObject({ title: 'Allow Bash?', detail: '{"command":"ls"}' })
@@ -474,9 +484,10 @@ describe('a structured Claude session over agentSession.*', () => {
       expectedRevision: approval?.revision,
       optionId: 'allow'
     })
-    expect(claude.live().replies.at(-1)).toMatchObject({
-      requestId: 'permission-1',
-      response: { behavior: 'allow', toolUseID: 'tool-1' }
+    // Answering resolves the SDK's own canUseTool callback with the allow decision.
+    await expect(answeredPermission).resolves.toMatchObject({
+      behavior: 'allow',
+      toolUseID: 'tool-1'
     })
 
     await expect(

@@ -1,90 +1,91 @@
-import type { ClaudeControlRequest, ClaudeControlResponder } from './claude-stream-json-connection'
-import type {
-  ClaudeAcquisitionAttempt,
-  ClaudeStructuredSessionEvent
-} from './claude-structured-session-state'
+import type { CanUseTool, OnUserDialog, PermissionResult } from '@anthropic-ai/claude-agent-sdk'
+import type { ClaudePromptRegistry } from './claude-structured-prompt-replies'
+import type { ClaudeStructuredSessionEvent } from './claude-structured-session-state'
 
 export const CLAUDE_CAN_USE_TOOL_SUBTYPE = 'can_use_tool'
 export const CLAUDE_REQUEST_USER_DIALOG_SUBTYPE = 'request_user_dialog'
-export const CLAUDE_BLOCKING_CONTROL_REQUEST_SUBTYPES = [
-  CLAUDE_CAN_USE_TOOL_SUBTYPE,
-  CLAUDE_REQUEST_USER_DIALOG_SUBTYPE
-] as const
 
-export type ClaudeInboundControlDisposition =
-  | { kind: 'prompt' }
-  | { kind: 'responded'; subtype: string }
+/**
+ * The blocking control requests Orca answers, each mapped to the SDK consumer callback that
+ * answers it. This is the stable surface a real turn can block on: `can_use_tool` through
+ * `canUseTool` and `request_user_dialog` through `onUserDialog`. Every other control-request
+ * subtype the SDK routes (elicitation, oauth/host token refresh, mcp_message, hook_callback)
+ * is either not surfaced to this consumer or fails closed inside the SDK; adding a new
+ * blocking control Orca must answer means adding its callback here, and the catalog test
+ * fails if a named callback is missing.
+ */
+export const CLAUDE_BLOCKING_CONTROL_CALLBACKS = {
+  [CLAUDE_CAN_USE_TOOL_SUBTYPE]: 'canUseTool',
+  [CLAUDE_REQUEST_USER_DIALOG_SUBTYPE]: 'onUserDialog'
+} as const
 
-export function handleClaudeInboundControlCancel(input: {
+export type ClaudeBlockingControlSubtype = keyof typeof CLAUDE_BLOCKING_CONTROL_CALLBACKS
+
+export type ClaudePermissionCallbackDeps = {
   sessionId: string
-  attempt: ClaudeAcquisitionAttempt
-  requestId: string
+  prompts: ClaudePromptRegistry
   emit: (event: ClaudeStructuredSessionEvent) => void
-}): void {
-  const prompt = input.attempt.prompts.cancel(input.requestId)
-  input.emit(
-    prompt
-      ? {
-          type: 'prompt-cancelled',
-          sessionId: input.sessionId,
-          promptKey: prompt.promptKey
-        }
-      : {
-          type: 'provider-frame',
-          sessionId: input.sessionId,
-          kind: 'control_cancel_request',
-          payload: { request_id: input.requestId }
-        }
-  )
 }
 
-/** Every Claude control request becomes a durable prompt or receives a safe reply. */
-export function handleClaudeInboundControl(input: {
-  sessionId: string
-  attempt: ClaudeAcquisitionAttempt
-  request: ClaudeControlRequest
-  responder?: ClaudeControlResponder
-  emit: (event: ClaudeStructuredSessionEvent) => void
-}): ClaudeInboundControlDisposition {
-  const responder = input.responder ?? input.attempt.connection
-  const subtype = input.request.request.subtype
-  if (subtype === CLAUDE_REQUEST_USER_DIALOG_SUBTYPE) {
-    void responder?.respond(input.request.request_id, { behavior: 'cancelled' }).catch(() => {})
-    input.emit({
-      type: 'provider-frame',
-      sessionId: input.sessionId,
-      kind: `control_request:${subtype}`,
-      payload: input.request.request
-    })
-    return { kind: 'responded', subtype }
+function denySafeResult(toolUseId: string | undefined): PermissionResult {
+  return {
+    behavior: 'deny',
+    message: 'Orca could not decode this permission request.',
+    ...(toolUseId ? { toolUseID: toolUseId } : {})
   }
-  const prompt = input.attempt.prompts.register(input.request)
-  if (prompt) {
-    input.emit({ type: 'prompt', sessionId: input.sessionId, prompt })
-    return { kind: 'prompt' }
-  }
-  if (subtype === CLAUDE_CAN_USE_TOOL_SUBTYPE) {
-    const toolUseId =
-      typeof input.request.request.tool_use_id === 'string'
-        ? input.request.request.tool_use_id
-        : undefined
-    void responder
-      ?.respond(input.request.request_id, {
-        behavior: 'deny',
-        message: 'Orca could not decode this permission request.',
-        ...(toolUseId ? { toolUseID: toolUseId } : {})
+}
+
+/**
+ * Build the SDK permission callbacks from the durable prompt registry.
+ *
+ * A decodable `can_use_tool` becomes a durable prompt whose `settle` resolves this callback;
+ * a malformed one is denied without registering. The SDK's abort signal fires on
+ * `control_cancel_request` (a cancelled turn), which forgets the prompt and settles it with
+ * `null` — never authorizing a tool. A late answer after abort finds no prompt and is refused
+ * by `answerClaudePrompt`. `onUserDialog` is deny-safe; the CLI only emits dialog kinds Orca
+ * declares in `supportedDialogKinds`, which is empty.
+ */
+export function buildClaudePermissionCallbacks(deps: ClaudePermissionCallbackDeps): {
+  canUseTool: CanUseTool
+  onUserDialog: OnUserDialog
+} {
+  const canUseTool: CanUseTool = (toolName, input, options) =>
+    new Promise<PermissionResult | null>((resolve) => {
+      const prompt = deps.prompts.register({
+        requestId: options.requestId,
+        toolName,
+        toolUseId: options.toolUseID,
+        input,
+        suggestions: options.suggestions ?? [],
+        settle: resolve as (response: Record<string, unknown> | null) => void
       })
-      .catch(() => {})
-  } else {
-    void responder
-      ?.respondWithError(input.request.request_id, `Orca does not handle ${subtype}`)
-      .catch(() => {})
-  }
-  input.emit({
-    type: 'provider-frame',
-    sessionId: input.sessionId,
-    kind: `control_request:${subtype}`,
-    payload: input.request.request
-  })
-  return { kind: 'responded', subtype }
+      if (!prompt) {
+        resolve(denySafeResult(options.toolUseID))
+        return
+      }
+      const cancel = (): void => {
+        if (deps.prompts.forgetIfPending(prompt)) {
+          deps.emit({
+            type: 'prompt-cancelled',
+            sessionId: deps.sessionId,
+            promptKey: prompt.promptKey
+          })
+          // Null is the SDK's "no response written" sentinel: a cancelled request must not
+          // be answered, only forgotten.
+          resolve(null)
+        }
+      }
+      if (options.signal.aborted) {
+        // No abort event can still fire, so registering a listener would park the callback
+        // forever behind a prompt nothing will answer.
+        cancel()
+        return
+      }
+      options.signal.addEventListener('abort', cancel, { once: true })
+      deps.emit({ type: 'prompt', sessionId: deps.sessionId, prompt })
+    })
+
+  const onUserDialog: OnUserDialog = () => Promise.resolve({ behavior: 'cancelled' })
+
+  return { canUseTool, onUserDialog }
 }

@@ -4,9 +4,9 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawnProcess, type SpawnedProcess } from '../../shared/child-process/run-process'
 import type { ProcessSpec } from '../../shared/child-process/process-spec'
+import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk'
 import {
   openClaudeStreamJsonConnection,
-  type ClaudeControlRequest,
   type ClaudeStreamJsonConnection,
   type ClaudeStreamJsonLaunch
 } from './claude-stream-json-connection'
@@ -343,7 +343,7 @@ describe('Claude stream-json connection', () => {
     ).toEqual([])
   })
 
-  it('routes an inbound permission request and writes the answer back on its own id', async () => {
+  it('feeds an inbound permission request to canUseTool and writes its answer back on the same id', async () => {
     const scenario = scriptScenario([
       {
         emit: {
@@ -358,29 +358,31 @@ describe('Claude stream-json connection', () => {
           }
         }
       },
+      { awaitControlResponse: 'perm-421' },
       HOLD_OPEN
     ])
-    let inbound: ClaudeControlRequest | null = null
-    const connection = await open(launchFor(scenario), {
-      onControlRequest: (request) => {
-        inbound = request
-      }
-    })
+    const seen: { toolName: string; requestId: string; toolUseID: string; suggestions: unknown }[] =
+      []
+    const canUseTool: CanUseTool = (toolName, _input, options) => {
+      seen.push({
+        toolName,
+        requestId: options.requestId,
+        toolUseID: options.toolUseID,
+        suggestions: options.suggestions
+      })
+      return Promise.resolve({ behavior: 'deny', message: 'No', toolUseID: options.toolUseID })
+    }
+    await open(launchFor(scenario), { canUseTool })
 
-    await until(() => inbound, 'the inbound permission request')
-    expect(inbound).toEqual({
-      type: 'control_request',
-      request_id: 'perm-421',
-      request: {
-        subtype: 'can_use_tool',
-        tool_name: 'Bash',
-        input: { command: 'ls' },
-        tool_use_id: 'toolu_1',
-        permission_suggestions: [{ type: 'addRules' }]
+    await until(() => (seen.length > 0 ? seen : null), 'the inbound permission request')
+    expect(seen).toEqual([
+      {
+        toolName: 'Bash',
+        requestId: 'perm-421',
+        toolUseID: 'toolu_1',
+        suggestions: [{ type: 'addRules' }]
       }
-    })
-
-    await connection.respond('perm-421', { behavior: 'deny', message: 'No', toolUseID: 'toolu_1' })
+    ])
     const written = await until(
       () =>
         readReportSafely(scenario)?.controlResponses.find(
@@ -391,20 +393,20 @@ describe('Claude stream-json connection', () => {
     expect(written.response.response).toMatchObject({ behavior: 'deny', message: 'No' })
   })
 
-  it('maps Orca control requests onto the SDK and times out with the init proof message', async () => {
+  it('drives Orca control methods onto the SDK and times out with the init proof message', async () => {
     const scenario = scriptScenario([HOLD_OPEN], {
       initialize: { models: [{ value: 'sonnet' }], account: { tokenSource: 'oauth' } },
       get_settings: { env: { ANTHROPIC_BASE_URL: 'https://settings.example.test' } }
     })
     const connection = await open(launchFor(scenario))
 
-    await expect(
-      connection.request('initialize', { supportedDialogKinds: [] })
-    ).resolves.toMatchObject({ models: [{ value: 'sonnet' }] })
-    await expect(connection.request('get_settings')).resolves.toEqual({
+    await expect(connection.initializationResult()).resolves.toMatchObject({
+      models: [{ value: 'sonnet' }]
+    })
+    await expect(connection.getSettings()).resolves.toEqual({
       env: { ANTHROPIC_BASE_URL: 'https://settings.example.test' }
     })
-    await expect(connection.request('set_model', { model: 'opus' })).resolves.toEqual({})
+    await expect(connection.setModel('opus')).resolves.toBeUndefined()
     const requests = await until(
       () =>
         readReportSafely(scenario)?.controlRequests.find(
@@ -415,7 +417,7 @@ describe('Claude stream-json connection', () => {
     expect(requests.request.subtype).toBe('set_model')
   })
 
-  it('answers list_models from the catalog the running CLI reported', async () => {
+  it('reads supportedModels from the catalog the running CLI reported', async () => {
     const scenario = scriptScenario([HOLD_OPEN], {
       initialize: {
         models: [
@@ -433,12 +435,10 @@ describe('Claude stream-json connection', () => {
     })
     const connection = await open(launchFor(scenario))
 
-    await expect(connection.request('list_models')).resolves.toMatchObject({
-      models: [
-        { value: 'default', resolvedModel: 'claude-opus-5' },
-        { value: 'opus', displayName: 'Opus 5', supportedEffortLevels: ['low', 'high'] }
-      ]
-    })
+    await expect(connection.supportedModels()).resolves.toMatchObject([
+      { value: 'default', resolvedModel: 'claude-opus-5' },
+      { value: 'opus', displayName: 'Opus 5', supportedEffortLevels: ['low', 'high'] }
+    ])
   })
 
   it('serves the picker the live catalog rather than falling back to the static seed', async () => {
@@ -501,7 +501,7 @@ describe('Claude stream-json connection', () => {
       baseUrlConfigured: false,
       authTokenConfigured: false
     })
-    const diagnostic = claudeAuthDiagnostic(init, await connection.request('get_settings'))
+    const diagnostic = claudeAuthDiagnostic(init, await connection.getSettings())
     expect(diagnostic).toMatchObject({
       baseUrlConfigured: true,
       authTokenConfigured: true,
@@ -518,9 +518,9 @@ describe('Claude stream-json connection', () => {
       env: { ...launchFor(scenario).env, ORCA_SDK_CONTRACT_IGNORE_CONTROL_REQUESTS: '1' }
     })
 
-    await expect(
-      connection.request('initialize', { supportedDialogKinds: [] }, { timeoutMs: 200 })
-    ).rejects.toThrow('claude initialize request timed out')
+    await expect(connection.initializationResult({ timeoutMs: 200 })).rejects.toThrow(
+      'claude initialize request timed out'
+    )
   })
 
   it('reports an exit only after the child is gone and surfaces its stderr tail', async () => {

@@ -22,7 +22,7 @@ describe('Claude structured question addressing', () => {
       suggestions: [],
       questionIds: [questionId],
       answers: new Map(),
-      request: { subtype: 'can_use_tool' }
+      settle: () => {}
     }
 
     const item = claudeQuestionItems({ sessionId: 'session-1', prompt })[0]!
@@ -46,7 +46,7 @@ describe('Claude structured question addressing', () => {
       suggestions: [],
       questionIds: [questionId],
       answers: new Map(),
-      request: { subtype: 'can_use_tool' }
+      settle: () => {}
     }
     const answer = 'https://example.test:8443/path'
 
@@ -84,7 +84,7 @@ describe('Claude structured question addressing', () => {
       suggestions: [],
       questionIds: [multiQuestion, singleQuestion, otherQuestion],
       answers: new Map(),
-      request: { subtype: 'can_use_tool' }
+      settle: () => {}
     }
     const item = claudeQuestionItems({ sessionId: 'session-1', prompt })[0]!
     const questions = item.body.questions!

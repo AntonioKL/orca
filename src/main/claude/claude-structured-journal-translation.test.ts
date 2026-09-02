@@ -671,6 +671,6 @@ function prompt(
     ...input,
     suggestions: [],
     answers: new Map(),
-    request: { subtype: 'can_use_tool' }
+    settle: () => {}
   }
 }

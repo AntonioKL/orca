@@ -90,10 +90,8 @@ export async function readClaudeStructuredSessionOptions(
   session: ClaudeSession,
   timeoutMs: number | undefined
 ): Promise<AgentSessionOptionsResult> {
-  const response = await session.connection
-    .request('list_models', {}, { timeoutMs })
-    .catch(() => null)
-  const discovered = listedModels(response)
+  const catalog = await session.connection.supportedModels({ timeoutMs }).catch(() => null)
+  const discovered = listedModels(catalog ? { models: catalog } : null)
   const models = discovered.length > 0 ? discovered : seedModels()
   const reportedModel = session.options.get('model') ?? session.reportedOptions.model
   const model = currentModelId(models, reportedModel)

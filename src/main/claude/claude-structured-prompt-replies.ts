@@ -1,8 +1,10 @@
-import type { ClaudeControlRequest } from './claude-stream-json-connection'
 import { decodeAgentSessionQuestionAnswers } from '../../shared/agent-session-question-answer'
 
 export const CLAUDE_APPROVAL_DECISIONS = ['allow', 'allowForSession', 'deny', 'cancel'] as const
 export type ClaudeApprovalDecision = (typeof CLAUDE_APPROVAL_DECISIONS)[number]
+
+/** Settles the SDK's `canUseTool` promise; `null` is the SDK's "no response written" sentinel. */
+export type ClaudePromptSettle = (response: Record<string, unknown> | null) => void
 
 export type ClaudePendingPrompt = {
   requestId: string
@@ -14,7 +16,16 @@ export type ClaudePendingPrompt = {
   suggestions: unknown[]
   questionIds: readonly string[]
   answers: Map<string, string | readonly string[]>
-  request: ClaudeControlRequest['request']
+  settle: ClaudePromptSettle
+}
+
+export type ClaudePromptRegistration = {
+  requestId: string
+  toolName: string
+  toolUseId: string
+  input: Record<string, unknown>
+  suggestions: unknown[]
+  settle: ClaudePromptSettle
 }
 
 type PromptBinding = {
@@ -98,33 +109,37 @@ export class ClaudePromptRegistry {
   private readonly prompts = new Map<string, ClaudePendingPrompt>()
   private readonly journalBindings = new Map<string, PromptBinding>()
 
-  register(control: ClaudeControlRequest): ClaudePendingPrompt | null {
-    if (control.request.subtype !== 'can_use_tool') {
-      return null
-    }
-    const toolUseId = readString(control.request.tool_use_id)
-    const toolName = readString(control.request.tool_name)
-    const input = isRecord(control.request.input) ? control.request.input : null
+  register(registration: ClaudePromptRegistration): ClaudePendingPrompt | null {
+    const toolUseId = readString(registration.toolUseId)
+    const toolName = readString(registration.toolName)
+    const input = isRecord(registration.input) ? registration.input : null
     if (!toolUseId || !toolName || !input) {
       return null
     }
     const questions = toolName === 'AskUserQuestion' ? questionsFrom(input) : []
     const prompt: ClaudePendingPrompt = {
-      requestId: control.request_id,
-      promptKey: control.request_id,
+      requestId: registration.requestId,
+      promptKey: registration.requestId,
       toolUseId,
       toolName,
       kind: questions.length > 0 ? 'question' : 'approval',
       input,
-      suggestions: Array.isArray(control.request.permission_suggestions)
-        ? control.request.permission_suggestions
-        : [],
+      suggestions: Array.isArray(registration.suggestions) ? registration.suggestions : [],
       questionIds: questions.map(questionId),
       answers: new Map(),
-      request: control.request
+      settle: registration.settle
     }
     this.prompts.set(prompt.promptKey, prompt)
     return prompt
+  }
+
+  /** True only if the prompt was still pending; lets an abort and an answer race settle once. */
+  forgetIfPending(prompt: ClaudePendingPrompt): boolean {
+    if (!this.prompts.has(prompt.promptKey)) {
+      return false
+    }
+    this.forget(prompt)
+    return true
   }
 
   bindJournalItemId(journalItemId: string, promptKey: string, questionIdForItem?: string): void {

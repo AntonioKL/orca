@@ -1,3 +1,4 @@
+import type { EffortLevel, PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import { ClaudeControlRequestError } from './claude-stream-json-connection'
 import { AgentSessionOptionRejectedError } from '../native-chat/agent-session-wire/structured-agent-session-option-error'
 import type { ClaudeSession } from './claude-structured-session-state'
@@ -20,21 +21,25 @@ export async function setClaudeStructuredOption(
   input: { key: string; value: string },
   timeoutMs: number | undefined
 ): Promise<Readonly<Record<string, string>>> {
-  const request =
+  const apply =
     input.key === 'model'
-      ? { subtype: 'set_model', params: { model: input.value } }
+      ? () => session.connection.setModel(input.value, { timeoutMs })
       : input.key === 'permissionMode'
-        ? { subtype: 'set_permission_mode', params: { mode: input.value } }
+        ? () => session.connection.setPermissionMode(input.value as PermissionMode, { timeoutMs })
         : input.key === 'effort'
-          ? { subtype: 'apply_flag_settings', params: { settings: { effortLevel: input.value } } }
+          ? () =>
+              session.connection.applyFlagSettings(
+                { effortLevel: input.value as EffortLevel },
+                { timeoutMs }
+              )
           : null
-  if (!request) {
+  if (!apply) {
     throw new AgentSessionOptionRejectedError(
       `claude stream-json has no session option named ${input.key}`
     )
   }
   try {
-    await session.connection.request(request.subtype, request.params, { timeoutMs })
+    await apply()
   } catch (error) {
     if (error instanceof ClaudeControlRequestError) {
       throw new AgentSessionOptionRejectedError(error)

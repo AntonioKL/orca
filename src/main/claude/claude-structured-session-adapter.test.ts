@@ -48,7 +48,6 @@ type FakeConnection = Omit<ClaudeStreamJsonConnection, 'closed'> & {
   handlers: ClaudeStreamJsonConnectionHandlers
   calls: { subtype: string; params?: Record<string, unknown> }[]
   sent: Record<string, unknown>[]
-  replies: { requestId: string; response?: unknown; error?: string }[]
   closeCount: number
 }
 
@@ -63,6 +62,7 @@ function fakeClaude(
     exitBeforeInit?: string
     settings?: unknown
     replayUuid?: string | null
+    capabilities?: string[]
     routes?: Record<string, Route>
   } = {}
 ): {
@@ -72,52 +72,82 @@ function fakeClaude(
 } {
   const connections: FakeConnection[] = []
   const routes = options.routes ?? {}
+  const routed = (subtype: string, params?: Record<string, unknown>): unknown => {
+    const route = routes[subtype]
+    return route ? route(params) : undefined
+  }
   const openConnection = (async (launch, handlers = {}) => {
     const connection: FakeConnection = {
       launch,
       handlers,
       calls: [],
       sent: [],
-      replies: [],
       closeCount: 0,
       pid: 4321,
       closed: false,
-      request: async (subtype, params) => {
-        connection.calls.push({ subtype, params })
-        if (subtype === 'initialize') {
-          if (options.exitBeforeInit) {
-            handlers.onExit?.(new Error(options.exitBeforeInit))
-            return { models: [] }
-          }
-          if (options.initProof === 'session-start') {
-            handlers.onMessage?.({
-              type: 'system',
-              subtype: 'hook_started',
-              hook_name: 'SessionStart:startup',
-              session_id: options.initSessionId ?? PROVIDER_SESSION_ID,
-              uuid: options.initUuid ?? 'init-uuid'
-            })
-          } else if (options.initProof !== 'none') {
-            handlers.onMessage?.({
-              type: 'system',
-              subtype: 'init',
-              session_id: options.initSessionId ?? PROVIDER_SESSION_ID,
-              uuid: options.initUuid ?? 'init-uuid',
-              model: options.initModel ?? 'claude-sonnet-5',
-              effortLevel: options.initEffort ?? 'high',
-              apiKeySource: 'none'
-            })
-          }
-          return {
-            models: [{ value: 'claude-sonnet', displayName: 'Sonnet' }],
-            ...(options.initAccount === undefined ? {} : { account: options.initAccount })
-          }
+      initializationResult: async () => {
+        connection.calls.push({ subtype: 'initialize' })
+        if (options.exitBeforeInit) {
+          handlers.onExit?.(new Error(options.exitBeforeInit))
+          return { models: [] }
         }
-        if (subtype === 'get_settings') {
-          return options.settings ?? { env: {} }
+        if (options.initProof === 'session-start') {
+          handlers.onMessage?.({
+            type: 'system',
+            subtype: 'hook_started',
+            hook_name: 'SessionStart:startup',
+            session_id: options.initSessionId ?? PROVIDER_SESSION_ID,
+            uuid: options.initUuid ?? 'init-uuid'
+          })
+        } else if (options.initProof !== 'none') {
+          handlers.onMessage?.({
+            type: 'system',
+            subtype: 'init',
+            session_id: options.initSessionId ?? PROVIDER_SESSION_ID,
+            uuid: options.initUuid ?? 'init-uuid',
+            model: options.initModel ?? 'claude-sonnet-5',
+            effortLevel: options.initEffort ?? 'high',
+            apiKeySource: 'none',
+            ...(options.capabilities ? { capabilities: options.capabilities } : {})
+          })
         }
-        const route = routes[subtype]
-        return route ? route(params) : {}
+        return {
+          models: [{ value: 'claude-sonnet', displayName: 'Sonnet' }],
+          ...(options.initAccount === undefined ? {} : { account: options.initAccount })
+        }
+      },
+      getSettings: async () => {
+        connection.calls.push({ subtype: 'get_settings' })
+        return options.settings ?? { env: {} }
+      },
+      supportedModels: async () => {
+        connection.calls.push({ subtype: 'list_models' })
+        return (routed('list_models') as unknown[] | undefined) ?? []
+      },
+      setModel: async (model) => {
+        connection.calls.push({ subtype: 'set_model', params: { model } })
+        routed('set_model', { model })
+      },
+      setPermissionMode: async (mode) => {
+        connection.calls.push({ subtype: 'set_permission_mode', params: { mode } })
+        routed('set_permission_mode', { mode })
+      },
+      applyFlagSettings: async (settings) => {
+        connection.calls.push({ subtype: 'apply_flag_settings', params: { settings } })
+        routed('apply_flag_settings', { settings })
+      },
+      interrupt: async (interruptOptions) => {
+        connection.calls.push({
+          subtype: 'interrupt',
+          params: interruptOptions?.cancelQueued ? { cancelQueued: true } : {}
+        })
+        return routed('interrupt', interruptOptions) as
+          | Awaited<ReturnType<ClaudeStreamJsonConnection['interrupt']>>
+          | undefined
+      },
+      cancelAsyncMessage: async (uuid) => {
+        connection.calls.push({ subtype: 'cancel_async_message', params: { uuid } })
+        routed('cancel_async_message', { uuid })
       },
       send: async (message) => {
         connection.sent.push(message)
@@ -127,12 +157,6 @@ function fakeClaude(
             uuid: options.replayUuid ?? 'user-uuid'
           })
         }
-      },
-      respond: async (requestId, response) => {
-        connection.replies.push({ requestId, response })
-      },
-      respondWithError: async (requestId, error) => {
-        connection.replies.push({ requestId, error })
       },
       close: async () => {
         connection.closeCount += 1
@@ -186,6 +210,37 @@ async function acquired(
   return adapter
 }
 
+function tick(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+/** Drive the connection's SDK `canUseTool` callback the way the running CLI would. */
+function invokeCanUseTool(
+  connection: FakeConnection,
+  toolName: string,
+  requestId: string,
+  toolUseID: string,
+  extra: {
+    input?: Record<string, unknown>
+    suggestions?: unknown[]
+    signal?: AbortSignal
+  } = {}
+): { promise: Promise<unknown>; settled: () => boolean } {
+  const options = {
+    requestId,
+    toolUseID,
+    signal: extra.signal ?? new AbortController().signal,
+    ...(extra.suggestions ? { suggestions: extra.suggestions } : {})
+  } as unknown as Parameters<NonNullable<ClaudeStreamJsonConnectionHandlers['canUseTool']>>[2]
+  let done = false
+  const promise = Promise.resolve(
+    connection.handlers.canUseTool?.(toolName, extra.input ?? {}, options)
+  ).finally(() => {
+    done = true
+  })
+  return { promise, settled: () => done }
+}
+
 describe('ClaudeStructuredSessionAdapter.acquire', () => {
   it('finishes its startup deadline before the paired mobile request deadline', () => {
     expect(CLAUDE_STRUCTURED_INIT_TIMEOUT_MS).toBeLessThan(30_000)
@@ -209,9 +264,10 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
         CLAUDE_CONFIG_DIR: '/accounts/claude'
       }
     })
+    // supportedDialogKinds is now a query() launch option, not an initialize request param.
     expect(claude.connections[0].calls.slice(0, 2)).toEqual([
-      { subtype: 'initialize', params: { supportedDialogKinds: [] } },
-      { subtype: 'get_settings', params: {} }
+      { subtype: 'initialize' },
+      { subtype: 'get_settings' }
     ])
     expect(acquisition.process).toEqual({
       hostId: 'host-1',
@@ -394,10 +450,7 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     expect(error).toMatchObject({
       message: expect.stringMatching(/selected Claude account is signed in.*CLAUDE_CONFIG_DIR/s)
     })
-    expect(claude.connections[0].calls[0]).toEqual({
-      subtype: 'initialize',
-      params: { supportedDialogKinds: [] }
-    })
+    expect(claude.connections[0].calls[0]).toEqual({ subtype: 'initialize' })
     expect(claude.connections[0].closeCount).toBe(1)
   })
 
@@ -508,23 +561,21 @@ describe('ClaudeStructuredSessionAdapter turns and controls', () => {
     const claude = fakeClaude({
       initModel: 'claude-sonnet-5',
       routes: {
-        list_models: () => ({
-          models: [
-            { value: 'default', resolvedModel: 'claude-opus-5', displayName: 'Default' },
-            {
-              value: 'opus',
-              resolvedModel: 'claude-opus-5',
-              displayName: 'Opus',
-              supportsEffort: true,
-              supportedEffortLevels: ['low', 'high']
-            },
-            {
-              value: 'sonnet',
-              resolvedModel: 'claude-sonnet-5',
-              displayName: 'Sonnet'
-            }
-          ]
-        })
+        list_models: () => [
+          { value: 'default', resolvedModel: 'claude-opus-5', displayName: 'Default' },
+          {
+            value: 'opus',
+            resolvedModel: 'claude-opus-5',
+            displayName: 'Opus',
+            supportsEffort: true,
+            supportedEffortLevels: ['low', 'high']
+          },
+          {
+            value: 'sonnet',
+            resolvedModel: 'claude-sonnet-5',
+            displayName: 'Sonnet'
+          }
+        ]
       }
     })
     const adapter = await acquired(claude)
@@ -591,20 +642,13 @@ describe('ClaudeStructuredSessionAdapter acquisition cleanup', () => {
 })
 
 describe('ClaudeStructuredSessionAdapter prompts', () => {
-  it('turns can_use_tool into an addressable durable approval callback', async () => {
+  it('turns can_use_tool into an addressable durable approval that settles the SDK callback', async () => {
     const claude = fakeClaude()
     const events: ClaudeStructuredSessionEvent[] = []
     const adapter = await acquired(claude, {}, events)
-    claude.connections[0].handlers.onControlRequest?.({
-      type: 'control_request',
-      request_id: 'permission-1',
-      request: {
-        subtype: 'can_use_tool',
-        tool_name: 'Bash',
-        tool_use_id: 'tool-1',
-        input: { command: 'git status' },
-        permission_suggestions: [{ type: 'addRules' }]
-      }
+    const answered = invokeCanUseTool(claude.connections[0], 'Bash', 'permission-1', 'tool-1', {
+      input: { command: 'git status' },
+      suggestions: [{ type: 'addRules' }]
     })
     expect(events.at(-1)).toMatchObject({
       type: 'prompt',
@@ -619,29 +663,24 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       optionId: 'allowForSession',
       fence: 7
     })
-    expect(claude.connections[0].replies).toEqual([
-      {
-        requestId: 'permission-1',
-        response: {
-          behavior: 'allow',
-          updatedInput: { command: 'git status' },
-          updatedPermissions: [{ type: 'addRules' }],
-          toolUseID: 'tool-1'
-        }
-      }
-    ])
+    // The answer resolves the SDK's own callback promise; the SDK writes the wire response.
+    await expect(answered.promise).resolves.toEqual({
+      behavior: 'allow',
+      updatedInput: { command: 'git status' },
+      updatedPermissions: [{ type: 'addRules' }],
+      toolUseID: 'tool-1'
+    })
   })
 
-  it('collects every AskUserQuestion card before answering the one callback', async () => {
+  it('collects every AskUserQuestion card before settling the one callback', async () => {
     const claude = fakeClaude()
     const adapter = await acquired(claude)
-    claude.connections[0].handlers.onControlRequest?.({
-      type: 'control_request',
-      request_id: 'question-1',
-      request: {
-        subtype: 'can_use_tool',
-        tool_name: 'AskUserQuestion',
-        tool_use_id: 'tool-question',
+    const answered = invokeCanUseTool(
+      claude.connections[0],
+      'AskUserQuestion',
+      'question-1',
+      'tool-question',
+      {
         input: {
           questions: [
             { question: 'Library?', options: [{ label: 'Luxon' }] },
@@ -649,7 +688,7 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
           ]
         }
       }
-    })
+    )
     adapter.bindPromptItemId('session-1', 'journal-q1', 'question-1', 'Library?')
     adapter.bindPromptItemId('session-1', 'journal-q2', 'question-1', 'Ship now?')
 
@@ -660,7 +699,8 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       optionId: encodeClaudeQuestionOptionId('Library?', 'Luxon'),
       fence: 7
     })
-    expect(claude.connections[0].replies).toEqual([])
+    await tick()
+    expect(answered.settled()).toBe(false)
     await adapter.answerPrompt({
       sessionId: 'session-1',
       itemId: 'journal-q2',
@@ -668,14 +708,52 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       optionId: encodeClaudeQuestionOptionId('Ship now?', 'Yes'),
       fence: 7
     })
-    expect(claude.connections[0].replies[0]).toMatchObject({
-      requestId: 'question-1',
-      response: {
-        behavior: 'allow',
-        updatedInput: { answers: { 'Library?': 'Luxon', 'Ship now?': 'Yes' } },
-        toolUseID: 'tool-question'
-      }
+    await expect(answered.promise).resolves.toMatchObject({
+      behavior: 'allow',
+      updatedInput: { answers: { 'Library?': 'Luxon', 'Ship now?': 'Yes' } },
+      toolUseID: 'tool-question'
     })
+  })
+
+  it('leaves a prompt cancelled and unanswerable once the SDK abort signal fires', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = await acquired(claude, {}, events)
+    const controller = new AbortController()
+    const answered = invokeCanUseTool(claude.connections[0], 'Bash', 'permission-9', 'tool-9', {
+      input: { command: 'rm -rf /' },
+      signal: controller.signal
+    })
+    adapter.bindPromptItemId('session-1', 'journal-9', 'permission-9')
+
+    controller.abort()
+    // A cancelled request is forgotten and settled with null — never an authorization.
+    await expect(answered.promise).resolves.toBeNull()
+    expect(events.at(-1)).toMatchObject({ type: 'prompt-cancelled', promptKey: 'permission-9' })
+    // A late answer after the abort must not authorize the wrong tool.
+    await expect(
+      adapter.answerPrompt({
+        sessionId: 'session-1',
+        itemId: 'journal-9',
+        kind: 'approval',
+        optionId: 'allow',
+        fence: 7
+      })
+    ).rejects.toThrow(/no longer waiting/)
+  })
+
+  it('settles an in-flight permission callback when the session closes, leaving no dangling promise', async () => {
+    const claude = fakeClaude()
+    const adapter = await acquired(claude)
+    const answered = invokeCanUseTool(claude.connections[0], 'Bash', 'permission-close', 'tool-c', {
+      input: { command: 'ls' }
+    })
+    await tick()
+    expect(answered.settled()).toBe(false)
+
+    await adapter.closeSession('session-1')
+
+    await expect(answered.promise).resolves.toBeNull()
   })
 
   it('persists the last observed leaf before graceful close', async () => {

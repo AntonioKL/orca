@@ -4,18 +4,12 @@ import type {
   StructuredAgentSessionAcquireInput
 } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
-import {
-  openClaudeStreamJsonConnection,
-  type ClaudeControlRequest,
-  type ClaudeControlResponder
-} from './claude-stream-json-connection'
-import {
-  handleClaudeInboundControl,
-  handleClaudeInboundControlCancel
-} from './claude-structured-inbound-control'
+import { openClaudeStreamJsonConnection } from './claude-stream-json-connection'
+import { buildClaudePermissionCallbacks } from './claude-structured-inbound-control'
 import { resolveClaudeReplayWaiter } from './claude-structured-dispatch'
 import {
   claudeAuthDiagnostic,
+  readClaudeCapabilities,
   readClaudeFrameString,
   readClaudeInit,
   readClaudeModels
@@ -95,21 +89,12 @@ export async function acquireClaudeSession({
       callbacks.emit(liveSession, input.events, { type: 'message', sessionId, message })
     )
   }
-  const onControlRequest = (
-    request: ClaudeControlRequest,
-    responder?: ClaudeControlResponder
-  ): void => {
-    handleClaudeInboundControl({
-      sessionId,
-      attempt,
-      request,
-      responder,
-      emit: (event) =>
-        callbacks.deliver(attempt, sessionId, () =>
-          callbacks.emit(liveSession, input.events, event)
-        )
-    })
-  }
+  const { canUseTool, onUserDialog } = buildClaudePermissionCallbacks({
+    sessionId,
+    prompts,
+    emit: (event) =>
+      callbacks.deliver(attempt, sessionId, () => callbacks.emit(liveSession, input.events, event))
+  })
 
   try {
     if (previous && !(await cancelClaudeAcquisitionAttempt(previous))) {
@@ -145,18 +130,8 @@ export async function acquireClaudeSession({
       },
       {
         onMessage,
-        onControlRequest,
-        onControlCancelRequest: ({ request_id: requestId }) => {
-          handleClaudeInboundControlCancel({
-            sessionId,
-            attempt,
-            requestId,
-            emit: (event) =>
-              callbacks.deliver(attempt, sessionId, () =>
-                callbacks.emit(liveSession, input.events, event)
-              )
-          })
-        },
+        canUseTool,
+        onUserDialog,
         onExit: (error) => {
           if (!attempt.published) {
             initDeadline.reject(error)
@@ -184,7 +159,7 @@ export async function acquireClaudeSession({
       )
     }
     const settings = await connection
-      .request('get_settings', {}, { timeoutMs: deps.requestTimeoutMs })
+      .getSettings({ timeoutMs: deps.requestTimeoutMs })
       .catch(() => null)
     callbacks.deliver(attempt, sessionId, () =>
       callbacks.emit(liveSession, input.events, {
@@ -213,6 +188,7 @@ export async function acquireClaudeSession({
       events: input.events,
       process,
       options: restoredClaudeStructuredSessionOptions(input.options),
+      capabilities: readClaudeCapabilities(init, initialization),
       ...(deps.mintLinkId ? { linkId: deps.mintLinkId() } : {}),
       observedAt: deps.now?.() ?? Date.now()
     })
@@ -231,7 +207,10 @@ export async function acquireClaudeSession({
     initDeadline.clear()
     if (sessions.get(sessionId)?.connection !== attempt.connection) {
       translator?.dispose()
-      prompts.clear()
+      // Settle any callback that fired before the failure so no SDK promise dangles.
+      for (const prompt of prompts.clear()) {
+        prompt.settle(null)
+      }
       const closed = (await attempt.connection?.close()) ?? true
       if (!closed) {
         throw new AgentSessionAcquisitionExitUnprovenError(error)

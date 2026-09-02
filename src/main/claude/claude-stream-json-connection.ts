@@ -1,12 +1,11 @@
 import type * as ClaudeAgentSdk from '@anthropic-ai/claude-agent-sdk'
-import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { CanUseTool, OnUserDialog, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { spawnProcess } from '../../shared/child-process/run-process'
 import { buildClaudeChildProcessEnv } from './claude-child-process-environment'
-import { createClaudeAgentSdkControlBridge } from './claude-agent-sdk-control-bridge'
 import {
-  CLAUDE_DEFAULT_REQUEST_TIMEOUT_MS,
   ClaudeControlRequestError,
-  requestClaudeControl
+  createClaudeControlSurface,
+  type ClaudeControlSurface
 } from './claude-agent-sdk-control-requests'
 import { createClaudeChildTreeReaper, proveClaudeChildExit } from './claude-agent-sdk-exit-proof'
 import { createClaudeCodeProcessSpawn } from './claude-agent-sdk-process-spawn'
@@ -38,40 +37,24 @@ export type ClaudeStreamJsonLaunch = {
   env?: Record<string, string>
 }
 
-export type ClaudeControlRequest = {
-  type: 'control_request'
-  request_id: string
-  request: Record<string, unknown> & { subtype: string }
-}
-
-export type ClaudeControlCancelRequest = {
-  type: 'control_cancel_request'
-  request_id: string
-}
-
-export type ClaudeControlResponder = Pick<
-  ClaudeStreamJsonConnection,
-  'respond' | 'respondWithError'
->
-
 export type ClaudeStreamJsonConnectionHandlers = {
   onMessage?: (message: Record<string, unknown>) => void
-  onControlRequest?: (request: ClaudeControlRequest, responder?: ClaudeControlResponder) => void
-  onControlCancelRequest?: (request: ClaudeControlCancelRequest) => void
+  /**
+   * The SDK owns inbound permission control: it hands `can_use_tool` to this callback with
+   * a stable requestId and an abort signal, dedups duplicate delivery, and matches the
+   * response by request_id itself. Setting it makes the SDK pass `--permission-prompt-tool
+   * stdio` automatically; it must not be paired with `permissionPromptToolName`.
+   */
+  canUseTool?: CanUseTool
+  /** `request_user_dialog` control; the CLI only emits kinds declared in `supportedDialogKinds`. */
+  onUserDialog?: OnUserDialog
   onExit?: (error: Error) => void
 }
 
-export type ClaudeStreamJsonConnection = {
+export type ClaudeStreamJsonConnection = ClaudeControlSurface & {
   readonly pid: number | undefined
   readonly closed: boolean
   send: (message: Record<string, unknown>) => Promise<void>
-  request: (
-    subtype: string,
-    params?: Record<string, unknown>,
-    options?: { timeoutMs?: number }
-  ) => Promise<unknown>
-  respond: (requestId: string, response: unknown) => Promise<void>
-  respondWithError: (requestId: string, error: string) => Promise<void>
   /** Resolves true only after the child emitted exit/close; false is unproven. */
   close: () => Promise<boolean>
 }
@@ -89,7 +72,6 @@ export async function openClaudeStreamJsonConnection(
 ): Promise<ClaudeStreamJsonConnection> {
   const { query } = await loadClaudeAgentSdk()
   const spawner = createClaudeCodeProcessSpawn(spawnImpl)
-  const bridge = createClaudeAgentSdkControlBridge(handlers)
   const inbox = createClaudeUserMessageQueue()
   const session = query({
     prompt: inbox.messages,
@@ -101,8 +83,8 @@ export async function openClaudeStreamJsonConnection(
       env: buildClaudeChildProcessEnv(launch.env),
       pathToClaudeCodeExecutable: launch.pathToClaudeCodeExecutable,
       spawnClaudeCodeProcess: spawner.spawn,
-      canUseTool: bridge.canUseTool,
-      onUserDialog: bridge.onUserDialog
+      ...(handlers.canUseTool ? { canUseTool: handlers.canUseTool } : {}),
+      ...(handlers.onUserDialog ? { onUserDialog: handlers.onUserDialog } : {})
     }
   })
   const child = spawner.child
@@ -176,7 +158,6 @@ export async function openClaudeStreamJsonConnection(
   const close = (): Promise<boolean> => {
     closePromise ??= (async () => {
       closing = true
-      bridge.stopCancelling()
       inbox.end()
       const proven = await proveClaudeChildExit({
         child,
@@ -194,6 +175,7 @@ export async function openClaudeStreamJsonConnection(
   }
 
   return {
+    ...createClaudeControlSurface(session),
     get pid() {
       return spawner.pid
     },
@@ -201,15 +183,6 @@ export async function openClaudeStreamJsonConnection(
       return closing || exited || terminalError !== null
     },
     send,
-    request: (subtype, params = {}, options = {}) =>
-      requestClaudeControl(
-        session,
-        subtype,
-        params,
-        options.timeoutMs ?? CLAUDE_DEFAULT_REQUEST_TIMEOUT_MS
-      ),
-    respond: bridge.respond,
-    respondWithError: bridge.respondWithError,
     close
   }
 }

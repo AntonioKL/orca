@@ -68,6 +68,8 @@ export type ClaudeSession = {
   dispatchWaiters: ClaudeDispatchWaiter[]
   options: Map<string, string>
   reportedOptions: { model?: string; effort?: string }
+  /** CLI-advertised protocol capabilities from init; gates interrupt-receipt handling. */
+  capabilities: readonly string[]
   translator: ClaudeJournalTranslator | null
   events: StructuredAgentSessionEventSink | undefined
 }

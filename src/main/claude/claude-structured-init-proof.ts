@@ -43,6 +43,17 @@ export function readClaudeModels(initialization: unknown): unknown[] {
     : []
 }
 
+/** CLI capabilities advertised on the initialize result or the yielded system/init frame. */
+export function readClaudeCapabilities(
+  init: ClaudeInitObservation,
+  initialization: unknown
+): string[] {
+  const fromResult = isRecord(initialization) ? initialization.capabilities : undefined
+  const fromFrame = init.message.capabilities
+  const source = Array.isArray(fromResult) ? fromResult : Array.isArray(fromFrame) ? fromFrame : []
+  return source.filter((value): value is string => typeof value === 'string')
+}
+
 export function claudeInitializationAuthError(
   initialization: unknown
 ): AgentSessionAcquisitionRefusal | null {
