@@ -105,6 +105,55 @@ describe('processless structured session reservation', () => {
     expect(acquire).not.toHaveBeenCalled()
   })
 
+  it('refuses a replay when adapter support drifts after durable reservation', async () => {
+    root = await mkdtemp(join(tmpdir(), 'orca-replay-support-drift-'))
+    const store = await AgentSessionRecordStore.open({
+      directory: join(root, 'store'),
+      hostId: 'local'
+    })
+    const supportsCreate = vi
+      .fn<NonNullable<StructuredAgentSessionAdapter['supportsCreate']>>()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false)
+    const adapter = {
+      supportsCreate,
+      acquire: vi.fn(async ({ fence, spawnToken }) => ({
+        process: { hostId: 'local', pid: 4242, processStartTimeMs: NOW, spawnToken },
+        link: {
+          linkId: 'link-1',
+          handle: { provider: 'codex' as const, threadId: 'thread-1' },
+          origin: 'created' as const,
+          mintedAtFence: fence,
+          observedAt: NOW
+        }
+      }))
+    } as unknown as StructuredAgentSessionAdapter
+    const input = {
+      store,
+      adapter,
+      journalRoot: root,
+      authority: {
+        spawnToken: 'spawn-a',
+        claimKeyId: 'key-1',
+        handoffOperationId: OPERATION,
+        probe: { outcome: 'reservation-unused' as const }
+      },
+      callerKey: 'client-1',
+      params: attachParams(),
+      now: () => NOW,
+      onAttached: () => {}
+    }
+
+    await expect(performAttach(input)).resolves.toMatchObject({ ok: true })
+    await expect(performAttach(input)).resolves.toMatchObject({
+      ok: false,
+      refusal: { code: 'structured_agent_session_unsupported' }
+    })
+    expect(supportsCreate).toHaveBeenCalledTimes(3)
+    expect(adapter.acquire).toHaveBeenCalledOnce()
+  })
+
   it('settles a pre-spawn failure and its processless evidence in one durable transaction', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-processless-reservation-'))
     const storeDir = join(root, 'store')

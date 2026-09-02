@@ -9,6 +9,11 @@ const LOCAL_WINDOWS_LOCATION: AgentSessionExecutionLocation = {
   workspaceKind: 'folder'
 }
 
+const WSL_WINDOWS_LOCATION: AgentSessionExecutionLocation = {
+  ...LOCAL_WINDOWS_LOCATION,
+  wslDistro: 'Ubuntu'
+}
+
 function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
   const original = process.platform
   Object.defineProperty(process, 'platform', { configurable: true, value: platform })
@@ -30,6 +35,13 @@ describe('Codex structured location support', () => {
       expect(supportsCodexStructuredLocation(LOCAL_WINDOWS_LOCATION, () => proofAvailable)).toBe(
         true
       )
+    })
+  })
+
+  it('rejects WSL locations while retaining native folder support on Windows', () => {
+    withPlatform('win32', () => {
+      expect(supportsCodexStructuredLocation(WSL_WINDOWS_LOCATION, () => true)).toBe(false)
+      expect(supportsCodexStructuredLocation(LOCAL_WINDOWS_LOCATION, () => true)).toBe(true)
     })
   })
 })

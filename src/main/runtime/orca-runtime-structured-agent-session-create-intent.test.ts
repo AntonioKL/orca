@@ -52,4 +52,69 @@ describe('structured agent-session create intent', () => {
       path: '/accounts/selected/home'
     })
   })
+
+  it('derives WSL ownership from a local folder workspace UNC path', async () => {
+    const runtime = new OrcaRuntimeService({ getSettings: () => ({}) } as never)
+    const internal = runtime as unknown as {
+      store: {
+        getRepo: () => undefined
+      }
+      resolveRuntimeFileTarget: (selector: string) => Promise<{
+        worktree: { id: string; path: string }
+        connectionId?: string
+      }>
+      resolveStructuredAgentSessionLocation: (selector: string) => Promise<{
+        executionHostId: string
+        wslDistro: string | null
+        workspaceId: string
+        workspaceKind: 'folder' | 'git-worktree'
+      }>
+    }
+    internal.store = { getRepo: () => undefined }
+    internal.resolveRuntimeFileTarget = async () => ({
+      worktree: {
+        id: 'folder:folder-1',
+        path: String.raw`\\wsl.localhost\Ubuntu\home\dev\repo`
+      }
+    })
+
+    await expect(
+      internal.resolveStructuredAgentSessionLocation('id:folder:folder-1')
+    ).resolves.toEqual({
+      executionHostId: 'local',
+      wslDistro: 'Ubuntu',
+      workspaceId: 'folder:folder-1',
+      workspaceKind: 'folder'
+    })
+  })
+
+  it('keeps native folder paths native and does not infer WSL ownership for SSH folders', async () => {
+    const runtime = new OrcaRuntimeService({ getSettings: () => ({}) } as never)
+    const internal = runtime as unknown as {
+      store: { getRepo: () => undefined }
+      resolveRuntimeFileTarget: (selector: string) => Promise<{
+        worktree: { id: string; path: string }
+        connectionId?: string
+      }>
+      resolveStructuredAgentSessionLocation: (selector: string) => Promise<unknown>
+    }
+    internal.store = { getRepo: () => undefined }
+    internal.resolveRuntimeFileTarget = async (selector) => ({
+      worktree: {
+        id: 'folder:folder-2',
+        path: selector === 'ssh' ? String.raw`\\wsl.localhost\Ubuntu\home\dev\repo` : 'C:\\repo'
+      },
+      ...(selector === 'ssh' ? { connectionId: 'ssh-host' } : {})
+    })
+
+    await expect(internal.resolveStructuredAgentSessionLocation('native')).resolves.toMatchObject({
+      wslDistro: null,
+      workspaceKind: 'folder'
+    })
+    await expect(internal.resolveStructuredAgentSessionLocation('ssh')).resolves.toMatchObject({
+      executionHostId: expect.stringContaining('ssh:'),
+      wslDistro: null,
+      workspaceKind: 'folder'
+    })
+  })
 })

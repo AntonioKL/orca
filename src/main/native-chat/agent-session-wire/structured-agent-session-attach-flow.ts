@@ -67,6 +67,13 @@ export async function performAttach(
   input: AttachFlowInput
 ): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
   const { params, store } = input
+  const unsupported = (): AgentSessionMutationResult<AgentSessionAttachResult> => ({
+    ok: false,
+    refusal: {
+      code: 'structured_agent_session_unsupported',
+      message: 'This execution host cannot create the requested structured agent session.'
+    }
+  })
   const sessionId = params.envelope.sessionId
   const admitted = admitAttachOrRefuse(params)
   if (!admitted.ok) {
@@ -74,13 +81,7 @@ export async function performAttach(
   }
   // Ensure/recovery bypass create-intent, so recheck before reserving or spawning.
   if (!adapterSupportsCreateIfDeclared(input.adapter, params.location, params.agent)) {
-    return {
-      ok: false,
-      refusal: {
-        code: 'structured_agent_session_unsupported',
-        message: 'This execution host cannot create the requested structured agent session.'
-      }
-    }
+    return unsupported()
   }
 
   let record: AgentSessionRecord
@@ -100,6 +101,14 @@ export async function performAttach(
     )
     record = reserved.record
     replayed = reserved.disposition === 'replayed'
+    // Capability can change while the durable reservation is in flight. Recheck
+    // a replay at its effect boundary so it cannot bypass the support gate.
+    if (
+      replayed &&
+      !adapterSupportsCreateIfDeclared(input.adapter, params.location, params.agent)
+    ) {
+      return unsupported()
+    }
     if (
       replayed &&
       reserved.operationRow.outcome.status !== 'pending' &&

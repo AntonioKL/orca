@@ -190,6 +190,11 @@ export async function acquireNativeHandoffOwner(
     throw priorBarrier.error
   }
   eventSink.unbind()
+  // Recheck immediately before acquisition; capability probes may drift while
+  // the old TUI event sink is draining.
+  if (!adapterSupportsCreateIfDeclared(deps.adapter, record.location, record.provider)) {
+    throw new Error('structured_agent_session_unsupported')
+  }
   const acquired = await deps.adapter.acquire({
     identity: journalIdentityFor(record, session.params),
     fence: input.fence,

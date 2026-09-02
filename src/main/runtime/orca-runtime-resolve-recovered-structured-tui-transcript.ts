@@ -13,6 +13,8 @@ import { getSystemCodexHomePath } from '../codex/codex-home-paths'
 import { resolveTuiAgentLaunchEnv } from '../../shared/tui-agent-launch-defaults'
 import { hasPersistedStructuredAgentSessionStore as hasPersistedStructuredAgentSessionStoreOnDisk } from './structured-agent-session-runtime'
 import { getProfileUserDataPath } from '../orca-profiles/profile-storage-paths'
+import { parseWslUncPath } from '../../shared/wsl-paths'
+import { parseWorkspaceKey } from '../../shared/workspace-scope'
 
 export class OrcaRuntimeWithResolveRecoveredStructuredTuiTranscript extends OrcaRuntimeWithStopStructuredSessionProcess {
   protected async resolveRecoveredStructuredTuiTranscript(input: {
@@ -90,13 +92,19 @@ export class OrcaRuntimeWithResolveRecoveredStructuredTuiTranscript extends Orca
   protected async resolveStructuredAgentSessionLocation(worktreeSelector: string) {
     const target = await this.resolveRuntimeFileTarget(worktreeSelector)
     const repo = this.store?.getRepo(target.worktree.repoId)
-    const wslDistro =
+    const folderScope = parseWorkspaceKey(target.worktree.id)
+    const folderWorkspace = folderScope?.type === 'folder'
+    const configuredWslDistro =
       repo && !target.connectionId
         ? (getLocalProjectWorktreeGitOptions(this.requireStore(), repo).wslDistro ?? null)
         : null
-    const folderWorkspace = this.store
-      ?.getFolderWorkspaces?.()
-      .some((workspace) => workspace.id === target.worktree.id)
+    // Folder workspaces have no repo Git options, so a WSL UNC path is the only
+    // durable signal that native Windows structured Codex cannot safely use it.
+    const wslDistro =
+      configuredWslDistro ??
+      (folderWorkspace && !target.connectionId
+        ? (parseWslUncPath(target.worktree.path)?.distro ?? null)
+        : null)
     return {
       executionHostId: getRuntimeFileTargetExecutionHostId({
         worktree: target.worktree,
