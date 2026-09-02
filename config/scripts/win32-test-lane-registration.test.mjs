@@ -8,9 +8,9 @@ import { classifyPrJobs } from './pr-code-change-scope.mjs'
 /**
  * Every Windows-gated test file must be registered in BOTH Windows-lane lists.
  *
- * PR CI has exactly one `windows-2022` job -- asserted below, because that
- * premise is what makes this guard meaningful -- and it runs a curated explicit
- * file list. Everything else runs on `ubuntu-latest`, where a Windows-gated
+ * PR CI has exactly one job on a Windows runner -- asserted below on any
+ * `runs-on` spelling that could land there, because that premise is what makes
+ * this guard meaningful -- and it runs a curated explicit file list. Everything else runs on `ubuntu-latest`, where a Windows-gated
  * suite self-skips and reports success. So a new Windows-gated file that nobody
  * registers executes on no machine and passes green, silently. A recent
  * security effort added six such files; five ran nowhere, including one whose
@@ -42,17 +42,20 @@ import { classifyPrJobs } from './pr-code-change-scope.mjs'
  * WHAT THIS CANNOT DETECT -- known blind spots, each deliberate:
  *   - `it`/`test`-level gates. A single win32-only case inside a cross-platform
  *     suite still leaves the file running its other cases on ubuntu, and
- *     pulling all ~30 such files into the serial Windows job is not the trade
- *     CI wants. This is the largest limit, and it is a policy choice, not an
- *     oversight: a suite-level gate means a whole block exists only for
- *     Windows, which is the shape worth a lane entry.
+ *     pulling all such files -- about thirty, though the figure moves with
+ *     which gate spellings you count, so do not lean on it -- into the serial
+ *     Windows job is not the trade CI wants. This is the largest limit, and it
+ *     is a policy choice, not an oversight: a suite-level gate means a whole
+ *     block exists only for Windows, which is the shape worth a lane entry.
  *   - a gate whose condition crosses a module boundary or a function call --
  *     an imported flag, an imported `describeOnWindows`, `isWindows()`.
  *     `legacy-wsl-runtime-auth-drain-apply-script.test.ts` imports its
  *     `isWindows`; it happens to be a POSIX-only gate, so nothing is missed
  *     today, but a win32-only one written that way would be.
  *   - `runIf(<win32> || <x>)` and `skipIf(<not win32> && <x>)` are rejected on
- *     purpose: both can run off Windows, so neither is a win32-only gate.
+ *     purpose: both can run off Windows, so neither is a win32-only gate. That
+ *     holds whether the condition is written at the gate or routed through a
+ *     named flag -- the two spellings used to disagree.
  *   - whether a registered suite EXECUTES. Registration is what is asserted. A
  *     suite gated on win32 plus an env var stays skipped on the CI runner even
  *     when registered -- see MANUAL_OPT_IN -- and a path registered but gated
@@ -164,12 +167,22 @@ const SUITE = String.raw`(?:describe|suite)`
  * read rather than guessed from the name.
  *
  * Why the trailing lookahead: `const d = platform === 'win32' ? describe : …`
- * is a suite alias, not a boolean, and must not be collected as one. Why `&&`
- * is allowed: `A && B` is still true only on Windows. `||` is not, so it is
- * excluded here and in the gates below.
+ * is a suite alias, not a boolean, and must not be collected as one.
+ *
+ * Why the two patterns differ on `&&`: a second conjunct NARROWS a
+ * truthy-on-Windows flag, which stays Windows-only, but WIDENS a
+ * falsy-on-Windows one -- `p = platform !== 'win32' && x` used as `skipIf(p)`
+ * runs on Windows AND on POSIX whenever `x` is false, so it is not a
+ * Windows-only gate. One lookahead shared across both polarities had that
+ * backwards, and routing the condition through a named flag flipped the answer
+ * the literal form got right. `||` is excluded from both.
  */
-const FLAG_ASSIGNMENT = new RegExp(
-  String.raw`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(${WIN32_TRUE_EXPRESSION}|${WIN32_FALSE_EXPRESSION})(?=\s*(?:&&|;|\r?\n|$))`,
+const FLAG_TRUE_ASSIGNMENT = new RegExp(
+  String.raw`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*${WIN32_TRUE_EXPRESSION}(?=\s*(?:&&|;|\r?\n|$))`,
+  'g'
+)
+const FLAG_FALSE_ASSIGNMENT = new RegExp(
+  String.raw`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*${WIN32_FALSE_EXPRESSION}(?=\s*(?:;|\r?\n|$))`,
   'g'
 )
 
@@ -185,12 +198,8 @@ function alternation(names) {
 }
 
 function buildGates(source) {
-  const trueOnWindows = []
-  const falseOnWindows = []
-  for (const match of source.matchAll(FLAG_ASSIGNMENT)) {
-    const [, name, expression] = match
-    ;(expression.includes('===') ? trueOnWindows : falseOnWindows).push(name)
-  }
+  const trueOnWindows = [...source.matchAll(FLAG_TRUE_ASSIGNMENT)].map(([, name]) => name)
+  const falseOnWindows = [...source.matchAll(FLAG_FALSE_ASSIGNMENT)].map(([, name]) => name)
   const isTrue = `(?:${WIN32_TRUE_EXPRESSION}|\\b(?:${alternation(trueOnWindows)})\\b)`
   const isFalse = `(?:${WIN32_FALSE_EXPRESSION}|!\\s*(?:${alternation(trueOnWindows)})\\b|\\b(?:${alternation(falseOnWindows)})\\b)`
   return [
@@ -219,25 +228,65 @@ export function isWindows32GatedTestFile(path, source) {
 }
 
 /**
- * True when the win32 gate is compound AND the file reads an env var, i.e. the
- * suite is manual by design.
+ * True when the env read REACHES the gate: the win32 check is compound, and one
+ * of its other conjuncts either reads `process.env` itself or names a const
+ * that does.
  *
- * The compound half is what stops MANUAL_OPT_IN becoming a quiet parking spot:
- * a bare `runIf(platform === 'win32')` file mentions `process.env` all the
- * time, but CI could run it, so it must be registered.
+ * "Mentions an env var anywhere in the file" is not enough and was the earlier
+ * bug here. `runIf(platform === 'win32' && hasAddon)` in a file that happens to
+ * read `process.env.RUNNER_TEMP` for a temp dir is a test CI COULD run -- the
+ * native-addon-bytes shape, exactly what this effort exists to keep in CI --
+ * and it would have parked in MANUAL_OPT_IN unnoticed. Only the cap number
+ * stood in the way, and a number is not an argument.
+ *
+ * One hop is enough for every real case: `distro = process.env.ORCA_TEST_WSL_DISTRO`
+ * then `runIf(platform === 'win32' && Boolean(distro))`. Deeper chains fail
+ * closed -- the file reads as registrable, which is the safe direction.
  */
-const COMPOUND_WIN32_GATE = new RegExp(String.raw`${WIN32_TRUE_EXPRESSION}\s*&&`)
+const WIN32_CONJUNCT = new RegExp(String.raw`${WIN32_TRUE_EXPRESSION}\s*&&([^\n]*)`, 'g')
+const ENV_READ = /process\.env\.[A-Za-z0-9_]+/
+const IDENTIFIER = /[A-Za-z_$][\w$]*/g
+
+function isAssignedFromEnv(name, code) {
+  return new RegExp(
+    String.raw`(?:const|let|var)\s+${escapeForAlternation(name)}\s*=[^\n]*process\.env\.`
+  ).test(code)
+}
 
 export function requiresEnvOptIn(source) {
   const code = stripComments(source)
-  return COMPOUND_WIN32_GATE.test(code) && /process\.env\.[A-Z0-9_]+/.test(code)
+  return [...code.matchAll(WIN32_CONJUNCT)].some(([, conjunct]) => {
+    if (ENV_READ.test(conjunct)) {
+      return true
+    }
+    return [...conjunct.matchAll(IDENTIFIER)].some(([name]) => isAssignedFromEnv(name, code))
+  })
+}
+
+/**
+ * Any `runs-on` that could put a job on Windows.
+ *
+ * Not an equality test against `windows-2022`: `windows-latest` resolves to the
+ * same image today, a label array or `{ group, labels }` object is valid YAML
+ * here, and a `${{ matrix.os }}` expression cannot be resolved from the file at
+ * all. An unresolvable expression counts as "could be Windows" so it fails
+ * closed -- someone has to look rather than have a second lane appear silently.
+ */
+export function couldRunOnWindows(runsOn) {
+  const labels =
+    typeof runsOn === 'string'
+      ? [runsOn]
+      : Array.isArray(runsOn)
+        ? runsOn
+        : [...(runsOn?.labels ?? []), runsOn?.group ?? ''].flat()
+  return labels.some((label) => /windows/i.test(String(label)) || String(label).includes('${{'))
 }
 
 /** The vitest argv of the one Windows job's one curated-file step. */
 function readWindowsWorkflow() {
   const workflow = parse(readFileSync(join(projectDir, '.github/workflows/pr.yml'), 'utf8'))
   const jobs = Object.entries(workflow.jobs ?? {})
-  const windowsJobs = jobs.filter(([, job]) => job?.['runs-on'] === WINDOWS_LANE_RUNNER)
+  const windowsJobs = jobs.filter(([, job]) => couldRunOnWindows(job?.['runs-on']))
   const steps = workflow.jobs?.[WINDOWS_LANE_JOB]?.steps ?? []
   const step = steps.find((candidate) => candidate?.name === WINDOWS_LANE_STEP)
   if (!step) {
@@ -412,6 +461,74 @@ describe('Windows-gated test files are registered in the Windows CI lane', () =>
         'Register it in both lists and delete the line.'
     ).toEqual([])
   })
+
+  it('keeps every UNREGISTERED_ON_MAIN file ineligible for MANUAL_OPT_IN', () => {
+    // The two lists must not be interchangeable: debt that CI could run must
+    // not be re-labelled as manual to make the debt cap look better.
+    const movable = UNREGISTERED_ON_MAIN.filter((path) => requiresEnvOptIn(sourceOf(path)))
+    expect(
+      movable,
+      'This file is registrable; it cannot be reclassified as MANUAL_OPT_IN.'
+    ).toEqual([])
+  })
+})
+
+describe('manual opt-in classification', () => {
+  it('requires the env read to reach the gate', () => {
+    // The parking attack: a compound gate CI could satisfy, in a file that
+    // happens to read an unrelated env var. This is the native-addon-bytes
+    // shape, and it must read as registrable.
+    expect(
+      requiresEnvOptIn(
+        "const tmp = process.env.RUNNER_TEMP\ndescribe.runIf(process.platform === 'win32' && hasAddon)('x', () => {})"
+      )
+    ).toBe(false)
+    // One hop through a const: the real shape of the ten listed suites.
+    expect(
+      requiresEnvOptIn(
+        "const distro = process.env.ORCA_TEST_WSL_DISTRO\ndescribe.runIf(process.platform === 'win32' && Boolean(distro))('x', () => {})"
+      )
+    ).toBe(true)
+    // Read inline in the conjunct: the other real shape.
+    expect(
+      requiresEnvOptIn(
+        "const RUN = process.platform === 'win32' && process.env.ORCA_REAL_X === '1'"
+      )
+    ).toBe(true)
+  })
+
+  it('requires the gate to be compound at all', () => {
+    // A bare `runIf(win32)` file -- which CI can run -- must never park as
+    // manual, however much `process.env` the file reads elsewhere.
+    expect(
+      requiresEnvOptIn(
+        "const t = process.env.CI\ndescribe.runIf(process.platform === 'win32')('x', () => {})"
+      )
+    ).toBe(false)
+    // The case that makes the `&&` in WIN32_CONJUNCT load-bearing rather than
+    // decorative: an env read on the SAME line as a bare gate. Drop the `&&`
+    // and this reads as manual, which is the parking hole reopened.
+    expect(
+      requiresEnvOptIn(
+        "describe.runIf(process.platform === 'win32')(`x ${process.env.ORCA_TAG}`, () => {})"
+      )
+    ).toBe(false)
+  })
+})
+
+describe('Windows runner detection', () => {
+  it('reads every runs-on spelling that could land on Windows', () => {
+    expect(couldRunOnWindows('windows-2022')).toBe(true)
+    // The spelling that would have slipped past an equality test.
+    expect(couldRunOnWindows('windows-latest')).toBe(true)
+    expect(couldRunOnWindows(['self-hosted', 'Windows', 'X64'])).toBe(true)
+    expect(couldRunOnWindows({ group: 'windows-runners', labels: ['x64'] })).toBe(true)
+    // Unresolvable from the file, so it fails closed rather than reading as safe.
+    expect(couldRunOnWindows('${{ matrix.os }}')).toBe(true)
+    expect(couldRunOnWindows('ubuntu-latest')).toBe(false)
+    expect(couldRunOnWindows(['self-hosted', 'linux'])).toBe(false)
+    expect(couldRunOnWindows(undefined)).toBe(false)
+  })
 })
 
 describe('Windows-gate detection', () => {
@@ -523,6 +640,26 @@ describe('Windows-gate detection', () => {
         "import { isWindows } from './f'\ndescribe.runIf(isWindows)('x', () => {})"
       )
     ).toBe(false)
+  })
+
+  it('does not treat a widening conjunct behind a named flag as Windows-only', () => {
+    // `!== 'win32' && x` skips only when BOTH hold, so the suite runs on
+    // Windows and on POSIX when `x` is false. The literal form is rejected by
+    // the `||` pair above; this is the same condition routed through a flag,
+    // which is where the shared lookahead used to flip the answer.
+    expect(
+      isWindows32GatedTestFile(
+        'src/x/sample.test.ts',
+        "const p = process.platform !== 'win32' && Boolean(x)\ndescribe.skipIf(p)('x', () => {})"
+      )
+    ).toBe(false)
+    // The narrowing direction still counts: `=== 'win32' && x` is Windows-only.
+    expect(
+      isWindows32GatedTestFile(
+        'src/x/sample.test.ts',
+        "const p = process.platform === 'win32' && Boolean(x)\ndescribe.runIf(p)('x', () => {})"
+      )
+    ).toBe(true)
   })
 
   it('ignores a gate that only appears in prose', () => {
