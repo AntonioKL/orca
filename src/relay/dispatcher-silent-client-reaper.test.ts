@@ -122,6 +122,12 @@ describe('RelayDispatcher silent-client reaper', () => {
     dispatcher = new RelayDispatcher(() => true)
     dispatcher.onClientDetached(detachListener)
 
+    // Feed the primary first, or the test proves nothing: an unfed client is skipped by the
+    // never-spoken and no-keepalive guards, so it survives whether or not the exemption exists.
+    // A real primary answers keepalives, so the exemption is the only thing standing between it
+    // and the reaper.
+    dispatcher.feed(encodeKeepAliveFrame(1, 0))
+
     vi.advanceTimersByTime(TIMEOUT_MS * 20)
 
     // Client id 1 is the primary sink; closing it would tear down the relay's own stdin/stdout and
