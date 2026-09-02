@@ -166,10 +166,8 @@ describePosix('zsh launch config', () => {
     const foreignWrapper = join(home, 'other-terminal', 'zsh')
     mkdirSync(foreignWrapper, { recursive: true })
     const previousZdotdir = process.env.ZDOTDIR
-    const previousOriginalZdotdir = process.env.ORCA_ORIG_ZDOTDIR
     const previousHome = process.env.HOME
     process.env.ZDOTDIR = foreignWrapper
-    delete process.env.ORCA_ORIG_ZDOTDIR
     process.env.HOME = home
     try {
       const { getShellLaunchConfig } = await importFreshLocalPtyShellReady()
@@ -199,11 +197,6 @@ describePosix('zsh launch config', () => {
         delete process.env.ZDOTDIR
       } else {
         process.env.ZDOTDIR = previousZdotdir
-      }
-      if (previousOriginalZdotdir === undefined) {
-        delete process.env.ORCA_ORIG_ZDOTDIR
-      } else {
-        process.env.ORCA_ORIG_ZDOTDIR = previousOriginalZdotdir
       }
       if (previousHome === undefined) {
         delete process.env.HOME
