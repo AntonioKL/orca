@@ -15909,7 +15909,9 @@
           "loading": "Loading runs…",
           "noRuns": "No runs yet",
           "emptyDescription": "Runs appear here after an automation is triggered.",
-          "runs": "Runs"
+          "runs": "Runs",
+          "local": "Local",
+          "remote": "Remote"
         },
         "AutomationsPageBreadcrumb": {
           "ariaLabel": "Automations breadcrumb",
