@@ -3,14 +3,12 @@ import {
   type InspectionPriority
 } from './agent-process-inspection-queue'
 import type { RecognizedAgentProcess } from '../../../../shared/agent-process-recognition'
-import { recognizeAgentProcess } from '../../../../shared/agent-process-recognition'
-import type { RuntimeTerminalProcessInspection } from '@/runtime/runtime-terminal-inspection'
 import type { ProcessMonitorOptions } from './agent-completion-process-types'
-import { parseAppSshPtyId } from '../../../../shared/ssh-pty-id'
-import { getRemoteRuntimeTerminalHandle } from '@/runtime/runtime-terminal-stream'
-import { admitRemoteForegroundEvidence } from '../../../../shared/remote-foreground-evidence-admission'
-import { isClientOnlyUnverifiableInspection } from '../../../../shared/terminal-process-inspection'
 import { createAgentCompletionPollScheduler } from './agent-completion-poll-scheduler'
+import {
+  handleAgentCompletionInspectionResult,
+  type RemoteInspectionState
+} from './agent-completion-inspection-result'
 
 export function createAgentCompletionProcessMonitor({
   options,
@@ -23,26 +21,25 @@ export function createAgentCompletionProcessMonitor({
   hasPendingCodexAttention,
   dispatchCompletion
 }: ProcessMonitorOptions) {
-  let remoteAuthorityGeneration: string | null = null,
-    remoteObservationEpoch = -1
-  let remoteBindingKey: string | null = null
-  const remoteKnownAuthorityGenerations = new Set<string>()
-
-  const expectedRemotePtyId = (ptyId: string): string =>
-    parseAppSshPtyId(ptyId)?.relayPtyId ?? getRemoteRuntimeTerminalHandle(ptyId) ?? ptyId
+  const remoteInspection: RemoteInspectionState = {
+    authorityGeneration: null,
+    observationEpoch: -1,
+    bindingKey: null,
+    knownAuthorityGenerations: new Set<string>()
+  }
 
   function bindRemoteInspectionGeneration(ptyId: string, incarnationId: string | null): void {
     if (options.isRemotePtyId?.(ptyId) !== true) {
       return
     }
     const bindingKey = `${ptyId}\0${incarnationId ?? ''}`
-    if (remoteBindingKey === bindingKey) {
+    if (remoteInspection.bindingKey === bindingKey) {
       return
     }
-    remoteBindingKey = bindingKey
-    remoteAuthorityGeneration = null
-    remoteObservationEpoch = -1
-    remoteKnownAuthorityGenerations.clear()
+    remoteInspection.bindingKey = bindingKey
+    remoteInspection.authorityGeneration = null
+    remoteInspection.observationEpoch = -1
+    remoteInspection.knownAuthorityGenerations.clear()
     // Invalidate reads queued for a prior same-id incarnation.
     state.inspectionGeneration += 1
   }
@@ -84,142 +81,6 @@ export function createAgentCompletionProcessMonitor({
     establishAgentEvidence()
   }
 
-  function handleInspectionResult(
-    result: RuntimeTerminalProcessInspection,
-    requestStartedAtMonotonic: number
-  ): boolean {
-    if (isClientOnlyUnverifiableInspection(result)) {
-      state.pendingProcessExitAgent = null
-      state.consecutiveInspectionErrors += 1
-      scheduleNextPoll()
-      return false
-    }
-    const remote = options.isRemotePtyId?.(options.getPtyId() ?? '') === true
-    if (remote) {
-      const evidence = result.foregroundProcessEvidence
-      // Remote identity is host-authoritative. Bare compatibility names,
-      // transport failures, and unverifiable observations never mutate
-      // routing state or synthesize process exit.
-      const expectedIncarnationId = options.getExpectedIncarnationId?.() ?? null
-      const ptyId = options.getPtyId()
-      const bindingKey = `${ptyId ?? ''}\0${expectedIncarnationId ?? ''}`
-      if (remoteBindingKey !== bindingKey) {
-        remoteBindingKey = bindingKey
-        remoteAuthorityGeneration = null
-        remoteObservationEpoch = -1
-        remoteKnownAuthorityGenerations.clear()
-      }
-      const admitted = admitRemoteForegroundEvidence(evidence, {
-        expectedPtyId: ptyId ? expectedRemotePtyId(ptyId) : '',
-        expectedIncarnationId,
-        requestStartedAtMonotonic,
-        receivedAtMonotonic: performance.now(),
-        lastAuthorityGeneration: remoteAuthorityGeneration,
-        lastObservationEpoch: remoteObservationEpoch,
-        knownAuthorityGenerations: remoteKnownAuthorityGenerations
-      })
-      if (!admitted) {
-        state.pendingProcessExitAgent = null
-        state.consecutiveInspectionErrors += 1
-        return false
-      }
-      remoteAuthorityGeneration = admitted.authorityGeneration
-      remoteObservationEpoch = admitted.observationEpoch
-      remoteKnownAuthorityGenerations.add(admitted.authorityGeneration)
-      if (admitted.verdict === 'exited') {
-        const exited = state.lastForegroundAgent
-        if (exited && state.hasAgentRunEvidence) {
-          if (options.shouldSuppressConfirmedProcessExitCompletion?.(exited) !== true) {
-            dispatchCompletion('process-exit', exited.processName, {
-              terminalIdleConfirmed: true,
-              completionIdentity: {
-                source: 'process-exit',
-                identity: `${exited.agent}:${exited.processName}`,
-                agentIdentity: exited.agent
-              }
-            })
-          }
-        }
-        state.lastForegroundAgent = null
-        clearAgentRunEvidence()
-        return false
-      }
-      if (admitted.verdict !== 'live') {
-        state.pendingProcessExitAgent = null
-        return false
-      }
-      state.consecutiveInspectionErrors = 0
-      // A host-stamped shell/unknown foreground is still not process-exit
-      // evidence. Remote completion may recognize only the fenced process
-      // name; the compatibility `foregroundProcess` string is display-only.
-      if (admitted.processName === null) {
-        state.pendingProcessExitAgent = null
-        return false
-      }
-      const recognizedRemote = recognizeAgentProcess(admitted.processName)
-      if (!recognizedRemote) {
-        state.pendingProcessExitAgent = null
-        return false
-      }
-      handleRecognizedProcess(recognizedRemote)
-      return true
-    }
-    state.consecutiveInspectionErrors = 0
-    const recognized = recognizeAgentProcess(result.foregroundProcess)
-    if (recognized) {
-      handleRecognizedProcess(recognized)
-      return true
-    }
-    if (hasPendingHookDone() || hasPendingCodexAttention()) {
-      scheduleNextPoll()
-      return false
-    }
-    if (state.lastForegroundAgent && state.hasAgentRunEvidence) {
-      if (result.hasChildProcesses) {
-        state.pendingProcessExitAgent = null
-        scheduleNextPoll()
-        return false
-      }
-      const pending = state.pendingProcessExitAgent
-      if (
-        !pending ||
-        pending.agent !== state.lastForegroundAgent.agent ||
-        pending.processName !== state.lastForegroundAgent.processName
-      ) {
-        state.pendingProcessExitAgent = state.lastForegroundAgent
-        scheduleNextPoll()
-        return false
-      }
-      const exited = state.lastForegroundAgent
-      state.pendingProcessExitAgent = null
-      if (options.shouldSuppressConfirmedProcessExitCompletion?.(exited) !== true) {
-        const replayIdentityBeforeExit = identityScope.getLast()
-        const committed = dispatchCompletion('process-exit', exited.processName, {
-          terminalIdleConfirmed: true,
-          completionIdentity: {
-            source: 'process-exit',
-            identity: `${exited.agent}:${exited.processName}`,
-            agentIdentity: exited.agent
-          }
-        })
-        if (
-          !committed &&
-          !identityScope.hasUnconsumedStampedTail() &&
-          replayIdentityBeforeExit?.source === 'hook' &&
-          replayIdentityBeforeExit.agentIdentity === exited.agent
-        ) {
-          identityScope.deleteLast()
-        }
-      }
-      state.lastForegroundAgent = null
-      clearAgentRunEvidence()
-    } else {
-      state.lastForegroundAgent = null
-      clearAgentRunEvidence()
-    }
-    return false
-  }
-
   function requestInspection(priority: InspectionPriority): void {
     if (state.disposed || state.inspectionInFlight || !options.isLive()) {
       return
@@ -259,7 +120,20 @@ export function createAgentCompletionProcessMonitor({
               !currentPendingTitle ||
               (priority === 'pending-title' && currentPendingTitle.id === pendingTitleIdAtRequest)
             if (appliesToCurrentPendingTitle) {
-              inspectedRecognizedAgent = handleInspectionResult(result, requestStartedAtMonotonic)
+              inspectedRecognizedAgent = handleAgentCompletionInspectionResult({
+                result,
+                requestStartedAtMonotonic,
+                options,
+                state,
+                identityScope,
+                clearAgentRunEvidence,
+                hasPendingHookDone,
+                hasPendingCodexAttention,
+                scheduleNextPoll,
+                handleRecognizedProcess,
+                dispatchCompletion,
+                remoteInspection
+              })
             }
             inspectionSucceeded = true
           }
