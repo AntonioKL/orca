@@ -8,7 +8,7 @@ import {
   ClaudeControlRequestError,
   requestClaudeControl
 } from './claude-agent-sdk-control-requests'
-import { proveClaudeChildExit, reapClaudeChildTree } from './claude-agent-sdk-exit-proof'
+import { createClaudeChildTreeReaper, proveClaudeChildExit } from './claude-agent-sdk-exit-proof'
 import { createClaudeCodeProcessSpawn } from './claude-agent-sdk-process-spawn'
 import { createClaudeUserMessageQueue } from './claude-agent-sdk-user-message-queue'
 import type { ClaudeStructuredSdkOptions } from './claude-structured-launch-resolution'
@@ -109,6 +109,8 @@ export async function openClaudeStreamJsonConnection(
   if (!child) {
     throw new Error('the claude agent SDK returned without spawning a child')
   }
+  // One reaper per child: every close attempt and error-path reap shares its proof.
+  const tree = createClaudeChildTreeReaper(child)
 
   let exited = false
   let closing = false
@@ -144,7 +146,7 @@ export async function openClaudeStreamJsonConnection(
     // The SDK ends its generator in error when the child dies or the transport
     // fails; a transport failure with a live child still has to reap the tree.
     if (!closing && !exited) {
-      void reapClaudeChildTree(child)
+      void tree.reap()
     }
     handleUnexpectedEnd(error instanceof Error ? error : new Error(String(error)))
   })
@@ -159,7 +161,7 @@ export async function openClaudeStreamJsonConnection(
   })
   child.stdin.on('error', (error) => {
     if (!closing) {
-      void reapClaudeChildTree(child)
+      void tree.reap()
       handleUnexpectedEnd(error)
     }
   })
@@ -179,7 +181,8 @@ export async function openClaudeStreamJsonConnection(
       const proven = await proveClaudeChildExit({
         child,
         exitPromise,
-        exited: () => exited
+        exited: () => exited,
+        tree
       })
       inbox.fail(new Error('claude stream-json connection closed'))
       if (!proven) {
