@@ -493,6 +493,7 @@ async function main() {
                   ? '2 tabs'
                   : '3 tabs',
               nativeBaselines: nativeSourceControlReview,
+              nativeReviewOpen: nativeSourceControlReview?.sessionOriginReviewOpen ?? null,
               inspectChangedContent: adversarialInspector?.inspect,
               inspectProviderContent: adversarialProviderContent
                 ? async ({ document }) => {

@@ -5,8 +5,10 @@ const mocks = vi.hoisted(() => ({
   compareScreenshots: vi.fn(),
   dismissDeveloperMenu: vi.fn(),
   longPressControlByPrefix: vi.fn(),
+  readLabels: vi.fn(),
   readTextPoint: vi.fn(),
   tapControl: vi.fn(),
+  tapControlByPrefix: vi.fn(),
   waitForControl: vi.fn(),
   waitForControlByPrefix: vi.fn(),
   waitForControlEndingWith: vi.fn(),
@@ -20,7 +22,9 @@ vi.mock('../../scripts/emulator-developer-menu-dismissal.mjs', () => ({
   dismissEmulatorDeveloperMenuIfPresent: mocks.dismissDeveloperMenu
 }))
 vi.mock('../../scripts/hosted-ios-emulator-accessibility.mjs', () => ({
+  readHostedIosAccessibilityLabels: mocks.readLabels,
   tapHostedIosAccessibilityControl: mocks.tapControl,
+  tapHostedIosAccessibilityControlByLabelPrefix: mocks.tapControlByPrefix,
   waitForHostedIosAccessibilityControl: mocks.waitForControl,
   waitForHostedIosAccessibilityControlByLabelPrefix: mocks.waitForControlByPrefix,
   waitForHostedIosAccessibilityControlEndingWith: mocks.waitForControlEndingWith,
@@ -38,7 +42,8 @@ vi.mock('../../scripts/hosted-webview-cdp-session.mjs', () => ({
 
 import {
   captureHostedSourceControlReviewScreen,
-  captureNativeSourceControlReviewBaselines
+  captureNativeSourceControlReviewBaselines,
+  HEADLESS_REVIEW_OPEN_ERROR
 } from '../../scripts/hosted-ios-source-control-review-parity.mjs'
 
 describe('hosted iOS Source Control and Review parity', () => {
@@ -49,8 +54,15 @@ describe('hosted iOS Source Control and Review parity', () => {
     )
     mocks.compareScreenshots.mockResolvedValue({ changedPixelRatio: 0.01 })
     mocks.longPressControlByPrefix.mockResolvedValue({ x: 0.5, y: 0.4 })
+    mocks.readLabels.mockResolvedValue([
+      'Open source control',
+      'Source Control',
+      'Back to session',
+      HEADLESS_REVIEW_OPEN_ERROR
+    ])
     mocks.readTextPoint.mockResolvedValue({ x: 0.2, y: 0.1 })
     mocks.tapControl.mockResolvedValue({ x: 0.2, y: 0.1 })
+    mocks.tapControlByPrefix.mockResolvedValue({ x: 0.5, y: 0.4 })
     mocks.waitForControl.mockResolvedValue({ x: 0.2, y: 0.1 })
     mocks.waitForControlByPrefix.mockResolvedValue({ x: 0.5, y: 0.4 })
     mocks.waitForControlEndingWith.mockResolvedValue({ x: 0.5, y: 0.4 })
@@ -66,6 +78,12 @@ describe('hosted iOS Source Control and Review parity', () => {
         value: '',
         x: 0.5,
         y: 0.3
+      })
+      .mockResolvedValue({
+        label: 'Open changed file mobile/app/index.tsx',
+        value: '',
+        x: 0.5,
+        y: 0.5
       })
   })
 
@@ -100,6 +118,12 @@ describe('hosted iOS Source Control and Review parity', () => {
         screenTitlePoint: { x: 0.2, y: 0.1 },
         screenshot: '/tmp/parity/native-review-portrait.png'
       },
+      // Why: the session-origin probe records what the paired host answers, so the
+      // hosted journey can assert parity instead of asserting a failure.
+      sessionOriginReviewOpen: {
+        changedFileLabel: 'Open changed file mobile/app/index.tsx',
+        headless: HEADLESS_REVIEW_OPEN_ERROR
+      },
       sourceControl: {
         changedFileLabel: 'Open changed file mobile/app/index.tsx',
         pullRequestState: {
@@ -116,6 +140,12 @@ describe('hosted iOS Source Control and Review parity', () => {
   it('uses value-backed accessibility text for the changed file and pull request', async () => {
     mocks.waitForControlMatching
       .mockReset()
+      .mockResolvedValue({
+        label: 'Changed file',
+        value: 'Open changed file mobile/src/mobile-web/bridge.ts',
+        x: 0.5,
+        y: 0.5
+      })
       .mockResolvedValueOnce({
         label: 'Changed file',
         value: 'Open changed file mobile/src/mobile-web/bridge.ts',

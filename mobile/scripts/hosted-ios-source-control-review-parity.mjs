@@ -3,7 +3,9 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { dismissEmulatorDeveloperMenuIfPresent } from './emulator-developer-menu-dismissal.mjs'
 import {
+  readHostedIosAccessibilityLabels,
   tapHostedIosAccessibilityControl,
+  tapHostedIosAccessibilityControlByLabelPrefix,
   waitForHostedIosAccessibilityControl,
   waitForHostedIosAccessibilityControlByLabelPrefix,
   waitForHostedIosAccessibilityControlEndingWith,
@@ -15,6 +17,7 @@ import { readHostedWebViewTextPoint } from './hosted-webview-cdp-session.mjs'
 
 const execFileAsync = promisify(execFile)
 const CHANGED_FILE_LABEL_PREFIX = 'Open changed file '
+export const HEADLESS_REVIEW_OPEN_ERROR = 'renderer_unavailable'
 
 export async function captureNativeSourceControlReviewBaselines({
   deviceUdid,
@@ -74,7 +77,73 @@ export async function captureNativeSourceControlReviewBaselines({
   await waitForHostedIosAccessibilityControl(emulator, 'Source Control', timeoutMs)
   await tapHostedIosAccessibilityControl(emulator, 'Back to session', timeoutMs)
   await waitForHostedIosAccessibilityControlByLabelPrefix(emulator, expectedWorkspace, timeoutMs)
-  return { review, sourceControl }
+  const sessionOriginReviewOpen = await captureNativeSessionOriginReviewOpen({
+    emulator,
+    expectedWorkspace,
+    timeoutMs
+  })
+  return { review, sessionOriginReviewOpen, sourceControl }
+}
+
+// Why: opening a changed file from a SESSION-origin Source Control sends
+// files.openDiff, which needs a renderer notifier. The e2e pairs against
+// `orca serve --mobile-pairing`, which has none, so the host answers
+// renderer_unavailable. Capturing the native outcome lets the hosted journey
+// assert "hybrid matches native on this host" instead of "hybrid fails", and it
+// records `false` on a full desktop where the diff tab really opens.
+export async function captureNativeSessionOriginReviewOpen({
+  emulator,
+  expectedWorkspace,
+  timeoutMs
+}) {
+  if (!(await readHostedIosAccessibilityLabels(emulator)).includes('Open source control')) {
+    await tapHostedIosAccessibilityControlByLabelPrefix(emulator, expectedWorkspace, timeoutMs)
+    await waitForHostedIosAccessibilityControlByLabelPrefix(emulator, 'Mobile Emulator', timeoutMs)
+  }
+  await tapHostedIosAccessibilityControl(emulator, 'Open source control', timeoutMs)
+  await waitForHostedIosAccessibilityControl(emulator, 'Source Control', timeoutMs)
+  const changedFile = await waitForHostedIosAccessibilityControlMatching(
+    emulator,
+    (node) =>
+      node.label?.startsWith(CHANGED_FILE_LABEL_PREFIX) ||
+      node.value?.startsWith(CHANGED_FILE_LABEL_PREFIX),
+    timeoutMs
+  )
+  const changedFileLabel = accessibilityControlText(changedFile, (value) =>
+    value.startsWith(CHANGED_FILE_LABEL_PREFIX)
+  )
+  await tapHostedIosAccessibilityControl(emulator, changedFileLabel, timeoutMs)
+  const headless = await readNativeReviewOpenOutcome(emulator, timeoutMs)
+  await returnNativeFromSessionOriginSourceControl(emulator, expectedWorkspace, timeoutMs)
+  return { changedFileLabel, headless }
+}
+
+async function readNativeReviewOpenOutcome(emulator, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  let lastLabels = []
+  while (Date.now() < deadline) {
+    lastLabels = await readHostedIosAccessibilityLabels(emulator)
+    if (lastLabels.some((label) => label.includes(HEADLESS_REVIEW_OPEN_ERROR))) {
+      return HEADLESS_REVIEW_OPEN_ERROR
+    }
+    if (!lastLabels.includes('Source Control')) {
+      return false
+    }
+    await delay(500)
+  }
+  throw new Error(
+    `Native session-origin reviewOpen produced neither a diff route nor ${HEADLESS_REVIEW_OPEN_ERROR}. Last labels: ${lastLabels.slice(-40).join(', ')}`
+  )
+}
+
+async function returnNativeFromSessionOriginSourceControl(emulator, expectedWorkspace, timeoutMs) {
+  const labels = await readHostedIosAccessibilityLabels(emulator)
+  if (labels.includes('Back to session')) {
+    await tapHostedIosAccessibilityControl(emulator, 'Back to session', timeoutMs)
+  }
+  await waitForHostedIosAccessibilityControlByLabelPrefix(emulator, 'Mobile Emulator', timeoutMs)
+  await tapHostedIosAccessibilityControl(emulator, 'Back to worktrees', timeoutMs)
+  await waitForHostedIosAccessibilityControlByLabelPrefix(emulator, expectedWorkspace, timeoutMs)
 }
 
 function nativePullRequestState(label) {
@@ -149,11 +218,8 @@ async function captureNativeRoute({
   title,
   timeoutMs
 }) {
-  await waitForHostedIosAccessibilityControl(emulator, title, timeoutMs)
-  await delay(500)
-  // Why: the host-origin route animates in, so the first frame's landmark is a
-  // position the screenshot below never shows. Re-read it once the screen settles.
   const screenTitlePoint = await waitForHostedIosAccessibilityControl(emulator, title, timeoutMs)
+  await delay(500)
   const screenshot = path.join(runtimeDirectory, screenshotName)
   await captureSimulatorScreenshot(deviceUdid, screenshot)
   return { screenTitlePoint, screenshot }
