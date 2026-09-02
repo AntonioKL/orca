@@ -90,6 +90,9 @@ afterEach(() => {
 })
 
 describe('session write subscriber allocation', () => {
+  // Scope: a subscriber whose baseline is still the priming write. This is the easy half — it
+  // says nothing about a baseline that has since advanced over a tabs write, which is what the
+  // collapsed-write cases below cover. It stayed green while that case was broken.
   it('allocates nothing for store writes that touch no session field', () => {
     const harness = createHarness()
     try {
