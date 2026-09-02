@@ -1,6 +1,7 @@
 import type { DescendantTreeVerdict } from './pty-descendant-exit-verification'
 import { windowsDescendantsFromRows } from './providers/windows-foreground-process-rows'
 import { readWindowsProcessTableFresh } from './windows/windows-process-table'
+import { terminateWindowsProcessTree } from './windows-process-tree-kill'
 
 export const WINDOWS_DESCENDANT_KILL_VERIFY_MS = 3_500
 const WINDOWS_DESCENDANT_POLL_MS = 100
@@ -13,8 +14,11 @@ const WINDOWS_DESCENDANT_POLL_MS = 100
  * but they are counted: a descendant that was seen and denied identification
  * is one no later read can prove gone.
  */
+export type WindowsProcessIdentity = { pid: number; creationTimeMs: number }
+
 export type WindowsDescendantSnapshot = {
-  descendants: { pid: number; creationTimeMs: number }[]
+  root: WindowsProcessIdentity
+  descendants: WindowsProcessIdentity[]
   /** Descendants seen in the walk that denied the creation-time query. */
   unidentifiedCount: number
   capturedAtMs: number
@@ -51,10 +55,12 @@ export async function captureWindowsDescendantSnapshot(
   // seconds, and this runs inside the close ladder's budget.
   const table = await (deps.readTable ?? readWindowsProcessTableFresh)().catch(() => null)
   const descendants = table && windowsDescendantsFromRows(table, rootPid)
-  if (!descendants) {
+  const root = table?.find((row) => row.pid === rootPid)
+  if (!descendants || typeof root?.creationTimeMs !== 'number') {
     return null
   }
   return {
+    root: { pid: root.pid, creationTimeMs: root.creationTimeMs },
     descendants: descendants.flatMap((row) =>
       // A descendant that denied a creation-time query cannot be told from a
       // recycled pid later, so it is never signalled on a bare pid.
@@ -65,6 +71,33 @@ export async function captureWindowsDescendantSnapshot(
     unidentifiedCount: descendants.filter((row) => typeof row.creationTimeMs !== 'number').length,
     capturedAtMs
   }
+}
+
+export type IdentifiedWindowsTreeTerminationDeps = {
+  readTable?: WindowsDescendantVerificationDeps['readTable']
+  terminateTree?: (target: WindowsProcessIdentity) => Promise<void>
+  ownsRoot?: () => boolean
+}
+
+/** Revalidate the captured root at the last async boundary before taskkill. */
+export async function terminateIdentifiedWindowsProcessTree(
+  target: WindowsProcessIdentity,
+  deps: IdentifiedWindowsTreeTerminationDeps = {}
+): Promise<boolean> {
+  const table = await (deps.readTable ?? readWindowsProcessTableFresh)().catch(() => null)
+  const current = table?.filter((row) => row.pid === target.pid) ?? []
+  if (
+    current.length !== 1 ||
+    current[0]?.creationTimeMs !== target.creationTimeMs ||
+    deps.ownsRoot?.() === false
+  ) {
+    return false
+  }
+  await (
+    deps.terminateTree ??
+    ((identified: WindowsProcessIdentity) => terminateWindowsProcessTree(identified.pid))
+  )(target)
+  return true
 }
 
 /**

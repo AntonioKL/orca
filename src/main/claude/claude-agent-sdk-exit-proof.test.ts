@@ -155,6 +155,7 @@ function mockTree(verdicts: DescendantTreeVerdict[]): ClaudeChildTreeReaper & {
 
 function windowsSnapshotOf(descendantPid: number): WindowsDescendantSnapshot {
   return {
+    root: { pid: 424242, creationTimeMs: 1_700_000_000_001 },
     descendants: [{ pid: descendantPid, creationTimeMs: 1_700_000_000_000 }],
     unidentifiedCount: 0,
     capturedAtMs: 1
@@ -539,7 +540,12 @@ describe('claude child tree reaper', () => {
     })
 
     const reap = tree.reap()
-    await vi.waitFor(() => expect(terminateWindowsTree).toHaveBeenCalledWith(424242))
+    await vi.waitFor(() =>
+      expect(terminateWindowsTree).toHaveBeenCalledWith({
+        pid: 424242,
+        creationTimeMs: 1_700_000_000_001
+      })
+    )
     expect(child.kill).not.toHaveBeenCalled()
     expect(terminateWindowsDescendants).not.toHaveBeenCalled()
     release.resolve()

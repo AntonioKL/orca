@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   captureWindowsDescendantSnapshot,
+  terminateIdentifiedWindowsProcessTree,
   verifyWindowsDescendantSnapshotExit,
   type WindowsDescendantSnapshot
 } from './windows-descendant-exit-verification'
@@ -9,7 +10,12 @@ function snapshot(
   descendants: { pid: number; creationTimeMs: number }[],
   unidentifiedCount = 0
 ): WindowsDescendantSnapshot {
-  return { descendants, unidentifiedCount, capturedAtMs: 1_700_000_000_000 }
+  return {
+    root: { pid: 100, creationTimeMs: 5 },
+    descendants,
+    unidentifiedCount,
+    capturedAtMs: 1_700_000_000_000
+  }
 }
 
 describe('captureWindowsDescendantSnapshot', () => {
@@ -28,6 +34,7 @@ describe('captureWindowsDescendantSnapshot', () => {
     })
 
     expect(captured).toEqual({
+      root: { pid: 100, creationTimeMs: 5 },
       descendants: [
         { pid: 400, creationTimeMs: 9 },
         { pid: 200, creationTimeMs: 7 }
@@ -131,5 +138,38 @@ describe('verifyWindowsDescendantSnapshotExit', () => {
         now: vi.fn().mockReturnValueOnce(0).mockReturnValue(9_999)
       })
     ).resolves.toBe('unverifiable')
+  })
+})
+
+describe('terminateIdentifiedWindowsProcessTree', () => {
+  it('never taskkills a replacement that reused the captured root pid', async () => {
+    const terminateTree = vi.fn(async () => {})
+
+    await expect(
+      terminateIdentifiedWindowsProcessTree(
+        { pid: 100, creationTimeMs: 5 },
+        {
+          readTable: vi.fn(async () => [{ pid: 100, ppid: 1, creationTimeMs: 99 }]),
+          terminateTree
+        }
+      )
+    ).resolves.toBe(false)
+    expect(terminateTree).not.toHaveBeenCalled()
+  })
+
+  it('rechecks retained-child ownership after the identity read settles', async () => {
+    const terminateTree = vi.fn(async () => {})
+
+    await expect(
+      terminateIdentifiedWindowsProcessTree(
+        { pid: 100, creationTimeMs: 5 },
+        {
+          readTable: vi.fn(async () => [{ pid: 100, ppid: 1, creationTimeMs: 5 }]),
+          ownsRoot: () => false,
+          terminateTree
+        }
+      )
+    ).resolves.toBe(false)
+    expect(terminateTree).not.toHaveBeenCalled()
   })
 })

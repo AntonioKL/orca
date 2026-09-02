@@ -7,10 +7,11 @@ import {
 import { captureDescendantSnapshot, type DescendantSnapshot } from '../pty-descendant-termination'
 import {
   captureWindowsDescendantSnapshot,
+  terminateIdentifiedWindowsProcessTree,
   verifyWindowsDescendantSnapshotExit,
-  type WindowsDescendantSnapshot
+  type WindowsDescendantSnapshot,
+  type WindowsProcessIdentity
 } from '../windows-descendant-exit-verification'
-import { terminateWindowsProcessTree } from '../windows-process-tree-kill'
 
 const GRACEFUL_EXIT_MS = 1_500
 const FORCED_EXIT_MS = 1_000
@@ -60,7 +61,7 @@ export type ClaudeChildTreeReaperDeps = {
   exited?: () => boolean
   captureDescendants?: (rootPid: number) => Promise<DescendantSnapshot | null>
   terminateDescendants?: (snapshot: DescendantSnapshot) => Promise<DescendantTreeVerdict>
-  terminateWindowsTree?: (rootPid: number) => Promise<void>
+  terminateWindowsTree?: (root: WindowsProcessIdentity) => Promise<void>
   captureWindowsDescendants?: (rootPid: number) => Promise<WindowsDescendantSnapshot | null>
   terminateWindowsDescendants?: (
     snapshot: WindowsDescendantSnapshot
@@ -157,10 +158,16 @@ export function createClaudeChildTreeReaper(
     if (platform === 'win32') {
       // Why taskkill's own outcome is never the verdict: it resolves identically
       // on a timeout, an access denial, a recycled root and a real kill.
-      if (!exited()) {
+      if (!exited() && snapshot?.platform === 'win32') {
         // A dead root's pid can already belong to a stranger, and `/T /F` would
         // take that stranger's whole tree down with it.
-        await (deps.terminateWindowsTree ?? terminateWindowsProcessTree)(rootPid).catch(() => {})
+        await (
+          deps.terminateWindowsTree
+            ? deps.terminateWindowsTree(snapshot.tree.root)
+            : terminateIdentifiedWindowsProcessTree(snapshot.tree.root, {
+                ownsRoot: () => !exited()
+              })
+        ).catch(() => {})
       }
       // taskkill owns the tree; this preserves the direct-child fallback when it fails.
       child.kill('SIGKILL')

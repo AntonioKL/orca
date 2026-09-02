@@ -9,6 +9,7 @@ import type {
   AgentSessionJournalIdentity
 } from '../../shared/agent-session-journal-types'
 import { agentJournalItemKey } from '../../shared/agent-session-journal-item-key'
+import { activeStructuredAgentSessionTurnId } from '../../shared/structured-agent-session-projection'
 import { openAgentSessionJournal } from '../native-chat/agent-session-journal/journal-store-factory'
 import {
   createDeferredStructuredAgentSessionEventSink,
@@ -41,6 +42,7 @@ function message(
   return {
     type: 'message' as const,
     sessionId: 'orca-session',
+    ...(type === 'user' && parentToolUseId === null ? { startsTurn: true as const } : {}),
     message: {
       type,
       uuid,
@@ -297,6 +299,7 @@ describe('Claude structured journal translation', () => {
     translator.handle({
       type: 'message',
       sessionId: 'orca-session',
+      startsTurn: true,
       message: {
         type: 'user',
         uuid: 'user-replay-1',
@@ -351,6 +354,49 @@ describe('Claude structured journal translation', () => {
         identity.provider === 'legacy' ? [identity.recordId] : []
       )
     ).toEqual(['turn-lifecycle:user-replay-1', 'turn-lifecycle:user-interrupt'])
+  })
+
+  it('does not reopen a completed turn when the SDK replays its user row after restart', () => {
+    const live = sinkState()
+    const liveTranslator = createClaudeJournalTranslator({ sink: live.sink })
+    const replay = {
+      type: 'message' as const,
+      sessionId: 'orca-session',
+      message: {
+        type: 'user',
+        uuid: 'picker-command-1',
+        session_id: 'claude-session',
+        parent_tool_use_id: null,
+        isReplay: true,
+        message: { role: 'user', content: '/model' }
+      }
+    }
+
+    liveTranslator.handle({ ...replay, startsTurn: true })
+    liveTranslator.handle(resultFrame('success', { is_error: false, result: '' }))
+    expect(live.tombstones).toContainEqual({
+      provider: 'legacy',
+      agent: 'claude',
+      sessionId: 'claude-session',
+      recordId: 'turn-lifecycle:picker-command-1'
+    })
+    liveTranslator.dispose()
+
+    const restarted = sinkState()
+    const restartedTranslator = createClaudeJournalTranslator({ sink: restarted.sink })
+    restartedTranslator.handle(replay)
+
+    expect(
+      activeStructuredAgentSessionTurnId(
+        restarted.items.map((item, sequence) => ({
+          itemId: agentJournalItemKey(item.identity),
+          revision: 1,
+          body: item.body,
+          sequence,
+          observedAt: sequence
+        }))
+      )
+    ).toBeNull()
   })
 
   it('surfaces an API error carried by a success-subtype result with no assistant frame', () => {

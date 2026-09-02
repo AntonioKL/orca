@@ -49,6 +49,8 @@ export type ClaudeStreamJsonConnectionHandlers = {
   canUseTool?: CanUseTool
   /** `request_user_dialog` control; the CLI only emits kinds declared in `supportedDialogKinds`. */
   onUserDialog?: OnUserDialog
+  /** A transport/process fault that is not itself first-hand root exit proof. */
+  onFault?: (error: Error) => void
   onExit?: (error: Error) => void
 }
 
@@ -118,6 +120,8 @@ export async function openClaudeStreamJsonConnection(
   let exitStatus: ExitStatus | null = null
   let closing = false
   let terminalError: Error | null = null
+  let faultReported = false
+  let exitReported = false
   let closePromise: Promise<boolean> | null = null
   // One reaper per child: every close attempt and error-path reap shares its proof.
   const tree = createClaudeChildTreeReaper(child, { exited: () => exited })
@@ -133,15 +137,18 @@ export async function openClaudeStreamJsonConnection(
   child.on('exit', (code, signal) => {
     exitStatus = { code, signal }
     markExited()
+    handleUnexpectedEnd()
   })
 
   const handleUnexpectedEnd = (cause?: Error): void => {
-    if (terminalError) {
-      return
-    }
-    terminalError = exitError(spawner.stderrTail, exitStatus, cause)
+    terminalError ??= exitError(spawner.stderrTail, exitStatus, cause)
     inbox.fail(terminalError)
-    if (!closing) {
+    if (!closing && !faultReported) {
+      faultReported = true
+      handlers.onFault?.(terminalError)
+    }
+    if (!closing && exited && !exitReported) {
+      exitReported = true
       handlers.onExit?.(terminalError)
     }
   }
@@ -160,11 +167,12 @@ export async function openClaudeStreamJsonConnection(
   })
 
   child.on('error', (error) => {
-    markExited()
+    if (!closing && !exited) {
+      void tree.reap()
+    }
     handleUnexpectedEnd(error)
   })
   child.on('close', () => {
-    markExited()
     handleUnexpectedEnd()
   })
   child.stdin.on('error', (error) => {

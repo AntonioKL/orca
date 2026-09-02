@@ -542,6 +542,25 @@ describe('Claude stream-json connection', () => {
     expect(connection.exitVerdict).toEqual({ root: 'exited', tree: 'unverifiable' })
   })
 
+  it('does not treat a child error event as first-hand root exit proof', async () => {
+    const scenario = scriptScenario([HOLD_OPEN])
+    let exit: Error | null = null
+    const connection = await open(launchFor(scenario), {
+      onExit: (error) => {
+        exit = error
+      }
+    })
+    const child = spawnedChildren.at(-1)
+    expect(child).toBeDefined()
+
+    child?.emit('error', new Error('child transport fault'))
+
+    expect(exit).toBeNull()
+    expect(connection.exitVerdict.root).toBe('live')
+    await until(() => exit, 'the distinct child exit')
+    expect(connection.exitVerdict.root).toBe('exited')
+  })
+
   it('proves the exit of a child that ignores a graceful shutdown', async () => {
     const scenario = scriptScenario([HOLD_OPEN])
     const connection = await open({

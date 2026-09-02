@@ -113,10 +113,15 @@ export async function acquireClaudeSession({
     observedLeafUuid = readClaudeFrameString(message, 'uuid') ?? observedLeafUuid
     if (liveSession) {
       liveSession.leafUuid = observedLeafUuid
-      resolveClaudeReplayWaiter(liveSession, message)
     }
+    const startsTurn = liveSession ? resolveClaudeReplayWaiter(liveSession, message) : false
     callbacks.deliver(attempt, sessionId, () =>
-      callbacks.emit(liveSession, input.events, { type: 'message', sessionId, message })
+      callbacks.emit(liveSession, input.events, {
+        type: 'message',
+        sessionId,
+        message,
+        ...(startsTurn ? { startsTurn: true } : {})
+      })
     )
   }
   const { canUseTool, onUserDialog } = buildClaudePermissionCallbacks({
@@ -164,6 +169,11 @@ export async function acquireClaudeSession({
         onMessage,
         canUseTool,
         onUserDialog,
+        onFault: (error) => {
+          if (!attempt.published) {
+            initDeadline.reject(error)
+          }
+        },
         onExit: (error) => {
           if (!attempt.published) {
             initDeadline.reject(error)

@@ -36,12 +36,14 @@ describe('Claude structured dispatch image limits', () => {
     )
     await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
 
-    resolveClaudeReplayWaiter(session, {
-      type: 'result',
-      subtype: 'success',
-      session_id: 'provider-session',
-      uuid: 'command-result-uuid'
-    })
+    expect(
+      resolveClaudeReplayWaiter(session, {
+        type: 'result',
+        subtype: 'success',
+        session_id: 'provider-session',
+        uuid: 'command-result-uuid'
+      })
+    ).toBe(false)
 
     await expect(dispatched).resolves.toEqual({
       state: 'accepted',
@@ -62,22 +64,26 @@ describe('Claude structured dispatch image limits', () => {
     )
     await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
 
-    resolveClaudeReplayWaiter(session, {
-      type: 'result',
-      session_id: 'provider-session',
-      uuid: 'unrelated-result-uuid'
-    })
+    expect(
+      resolveClaudeReplayWaiter(session, {
+        type: 'result',
+        session_id: 'provider-session',
+        uuid: 'unrelated-result-uuid'
+      })
+    ).toBe(false)
     expect(session.dispatchWaiters).toHaveLength(1)
-    resolveClaudeReplayWaiter(session, {
-      type: 'user',
-      parent_tool_use_id: null,
-      session_id: 'provider-session',
-      uuid: 'user-replay-uuid',
-      message: {
-        role: 'user',
-        content: [{ type: 'text', text: 'hello' }]
-      }
-    })
+    expect(
+      resolveClaudeReplayWaiter(session, {
+        type: 'user',
+        parent_tool_use_id: null,
+        session_id: 'provider-session',
+        uuid: 'user-replay-uuid',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'hello' }]
+        }
+      })
+    ).toBe(true)
 
     await expect(dispatched).resolves.toMatchObject({
       state: 'accepted',

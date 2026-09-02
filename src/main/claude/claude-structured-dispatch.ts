@@ -57,7 +57,7 @@ const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
 export function resolveClaudeReplayWaiter(
   session: ClaudeSession,
   message: Record<string, unknown>
-): void {
+): boolean {
   const envelope = readClaudeMessageEnvelope(message)
   const isUserReplay =
     envelope?.role === 'user' &&
@@ -68,18 +68,20 @@ export function resolveClaudeReplayWaiter(
     (!isUserReplay && !isCompletedCommand) ||
     readClaudeFrameString(message, 'session_id') !== session.providerSessionId
   ) {
-    return
+    return false
   }
   const uuid = readClaudeFrameString(message, 'uuid')
   const current = session.dispatchWaiters[0]
   if (isCompletedCommand && !current?.acceptsResult) {
-    return
+    return false
   }
   const waiter = uuid ? session.dispatchWaiters.shift() : undefined
   if (waiter && uuid) {
     clearTimeout(waiter.timer)
     waiter.resolve(uuid)
+    return isUserReplay
   }
+  return false
 }
 
 async function imageContent(

@@ -122,7 +122,7 @@ export function createClaudeJournalTranslator(
     return true
   }
 
-  const handleMessage = (message: Record<string, unknown>): boolean => {
+  const handleMessage = (message: Record<string, unknown>, startsTurn: boolean): boolean => {
     const envelope = readClaudeMessageEnvelope(message)
     if (!envelope) {
       return false
@@ -181,6 +181,7 @@ export function createClaudeJournalTranslator(
     }
     if (
       envelope.role === 'user' &&
+      startsTurn &&
       claudeHasReplayContent(envelope) &&
       message.parent_tool_use_id === null
     ) {
@@ -259,7 +260,7 @@ export function createClaudeJournalTranslator(
           providerFallback.append(kind, event.message, failure?.text)
         }
       } else if (event.type === 'message') {
-        if (!handleMessage(event.message)) {
+        if (!handleMessage(event.message, event.startsTurn === true)) {
           providerFallback.append(claudeProviderFrameKind(event.message), event.message)
         }
       } else if (event.type === 'provider-frame') {

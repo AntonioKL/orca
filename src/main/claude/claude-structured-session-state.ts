@@ -18,7 +18,13 @@ export type ClaudeAuthDiagnostic = {
 }
 
 export type ClaudeStructuredSessionEvent =
-  | { type: 'message'; sessionId: string; message: Record<string, unknown> }
+  | {
+      type: 'message'
+      sessionId: string
+      message: Record<string, unknown>
+      /** Present only when this replay acknowledged Orca's in-flight dispatch. */
+      startsTurn?: true
+    }
   | { type: 'provider-frame'; sessionId: string; kind: string; payload: unknown }
   | { type: 'prompt'; sessionId: string; prompt: ClaudePendingPrompt }
   | { type: 'prompt-cancelled'; sessionId: string; promptKey: string }
