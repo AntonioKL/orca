@@ -22,6 +22,7 @@ import os from 'node:os'
 import { promisify, stripVTControlCharacters } from 'node:util'
 import path from 'node:path'
 import process from 'node:process'
+import readline from 'node:readline'
 import {
   registerWorktreeForPairingRuntime,
   startHeadlessPairingRuntime
@@ -30,11 +31,6 @@ import { installEmulatorPairingRuntimeRestart } from './emulator-pairing-runtime
 import { hostedMobileMetroArguments } from './hosted-mobile-e2e-launch.mjs'
 import { waitForEmulatorLauncherShutdown } from './emulator-launcher-shutdown.mjs'
 import { emulatorControlRuntime } from './emulator-control-runtime.mjs'
-import {
-  appendProcessOutputTail,
-  attachBoundedProcessLineReader
-} from './bounded-process-line-reader.mjs'
-import { responseBodyIncludesWithinLimit } from './bounded-response-body.mjs'
 import { confirmEmulatorPairingDeepLink } from './emulator-deep-link-confirmation.mjs'
 import { dismissEmulatorDeveloperMenuBeforePairing } from './emulator-developer-menu-dismissal.mjs'
 import { buildEmulatorOrcaArgs, resolveEmulatorOrcaCli } from './emulator-orca-cli-selection.mjs'
@@ -44,7 +40,6 @@ import { ensureMobileExpoCli, getMobileExpoExecutablePath } from './mobile-expo-
 const execFileAsync = promisify(execFile)
 const DEFAULT_METRO_PORT = 8081
 const METRO_PORT_SEARCH_LIMIT = 100
-const METRO_STATUS_MAX_BYTES = 64 * 1024
 
 // Parse CLI arguments
 const args = process.argv.slice(2)
@@ -131,22 +126,6 @@ function logSuccess(message) {
 
 function logInfo(message) {
   log(`[info] ${message}`, 'yellow')
-}
-
-function createBackpressuredLineWriter(source, target, color) {
-  let waitingForDrain = false
-  return (line) => {
-    const accepted = target.write(`${color}${line}${colors.reset}\n`)
-    if (accepted || waitingForDrain) {
-      return
-    }
-    waitingForDrain = true
-    source.pause()
-    target.once('drain', () => {
-      waitingForDrain = false
-      source.resume()
-    })
-  }
 }
 
 function assertIosSimulatorPlatform() {
@@ -421,10 +400,8 @@ async function startMetro(worktree, pairingRuntime) {
     let url = null
     let resolved = false
     let exited = false
-    let closeStdout = () => {}
-    let closeStderr = () => {}
-    const writeStdoutLine = createBackpressuredLineWriter(metro.stdout, process.stdout, colors.dim)
-    const writeStderrLine = createBackpressuredLineWriter(metro.stderr, process.stderr, colors.red)
+    let rl = null
+    let rlErr = null
 
     const metroResult = () => ({
       process: metro,
@@ -432,8 +409,8 @@ async function startMetro(worktree, pairingRuntime) {
       output,
       isExited: () => exited,
       closeOutput: () => {
-        closeStdout()
-        closeStderr()
+        rl?.close()
+        rlErr?.close()
         metro.stdin?.destroy()
         metro.stdout?.destroy()
         metro.stderr?.destroy()
@@ -441,11 +418,10 @@ async function startMetro(worktree, pairingRuntime) {
     })
 
     // Parse Metro output for the development URL
-    closeStdout = attachBoundedProcessLineReader(metro.stdout, (line) => {
-      if (!resolved) {
-        output = appendProcessOutputTail(output, line)
-      }
-      writeStdoutLine(line)
+    rl = readline.createInterface({ input: metro.stdout })
+    rl.on('line', (line) => {
+      output += line + '\n'
+      process.stdout.write(colors.dim + line + colors.reset + '\n')
       const parseLine = stripVTControlCharacters(line)
 
       // Look for "Waiting on" message from Metro
@@ -491,11 +467,10 @@ async function startMetro(worktree, pairingRuntime) {
     })
 
     // Also check stderr
-    closeStderr = attachBoundedProcessLineReader(metro.stderr, (line) => {
-      if (!resolved) {
-        output = appendProcessOutputTail(output, line)
-      }
-      writeStderrLine(line)
+    rlErr = readline.createInterface({ input: metro.stderr })
+    rlErr.on('line', (line) => {
+      output += line + '\n'
+      process.stderr.write(colors.red + line + colors.reset + '\n')
     })
 
     metro.on('error', (error) => {
@@ -595,11 +570,7 @@ async function verifyMetro(url) {
 
   try {
     const response = await fetch(statusUrl, { signal: controller.signal })
-    return await responseBodyIncludesWithinLimit(
-      response,
-      'packager-status:running',
-      METRO_STATUS_MAX_BYTES
-    )
+    return (await response.text()).includes('packager-status:running')
   } catch {
     return false
   } finally {

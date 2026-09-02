@@ -15,12 +15,11 @@ export function useMobileTasksProjectFileMergeActions(model: ProjectReviewCheckA
     activeGitHubProjectHost,
     expandedPrFilePath,
     findProjectRowRepo,
-    loadPrFileContent,
     loadTasks,
     mutatingStatus,
     prFileCommentDrafts,
+    prFileContents,
     projectMutating,
-    projectPrFileContentScope,
     projectRowDetail,
     setActionItem,
     setError,
@@ -28,6 +27,8 @@ export function useMobileTasksProjectFileMergeActions(model: ProjectReviewCheckA
     setGithubProjectTable,
     setMutatingStatus,
     setPrFileCommentDrafts,
+    setPrFileContents,
+    setPrFileLoadingPath,
     setProjectMutating,
     setProjectRowDetail,
     setProjectRowDetailError,
@@ -43,6 +44,9 @@ export function useMobileTasksProjectFileMergeActions(model: ProjectReviewCheckA
         return
       }
       setExpandedPrFilePath(file.path)
+      if (prFileContents[file.path]) {
+        return
+      }
       const repo = findProjectRowRepo(row)
       const target = projectRowMutationTarget(row, activeGitHubProjectHost)
       if (
@@ -52,32 +56,35 @@ export function useMobileTasksProjectFileMergeActions(model: ProjectReviewCheckA
         !target ||
         projectRowDetail?.provider !== 'github' ||
         !projectRowDetail.headSha ||
-        !projectRowDetail.baseSha ||
-        !projectPrFileContentScope
+        !projectRowDetail.baseSha
       ) {
         setProjectRowDetailError('Unable to load file contents for this pull request.')
         return
       }
-      await loadPrFileContent(
-        projectPrFileContentScope,
-        file,
-        () =>
-          taskProjectFileOperations.loadFileContents(target, repo.id, {
-            path: file.path,
-            ...(file.oldPath ? { oldPath: file.oldPath } : {}),
-            status: file.status ?? 'modified',
-            headSha: projectRowDetail.headSha as string,
-            baseSha: projectRowDetail.baseSha as string
-          }),
-        setProjectRowDetailError
-      )
+      setPrFileLoadingPath(file.path)
+      setProjectRowDetailError('')
+      try {
+        const contents = await taskProjectFileOperations.loadFileContents(target, repo.id, {
+          path: file.path,
+          ...(file.oldPath ? { oldPath: file.oldPath } : {}),
+          status: file.status ?? 'modified',
+          headSha: projectRowDetail.headSha,
+          baseSha: projectRowDetail.baseSha
+        })
+        setPrFileContents((current) => ({ ...current, [file.path]: contents }))
+      } catch (err) {
+        setProjectRowDetailError(
+          err instanceof Error ? err.message : 'Failed to load file contents'
+        )
+      } finally {
+        setPrFileLoadingPath(null)
+      }
     },
     [
       activeGitHubProjectHost,
       expandedPrFilePath,
       findProjectRowRepo,
-      loadPrFileContent,
-      projectPrFileContentScope,
+      prFileContents,
       projectRowDetail,
       taskProjectFileOperations
     ]

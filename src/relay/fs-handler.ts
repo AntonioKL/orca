@@ -40,26 +40,6 @@ import { RipgrepUnavailableError } from '../shared/ripgrep-process-availability'
 import { RelayFilesystemWatchRegistry } from './relay-filesystem-watch-registry'
 import type { RelayWatcherProcessPool } from './relay-watcher-process-pool'
 import {
-  MOBILE_FILE_DIRECTORY_MAX_ENTRIES,
-  MOBILE_FILE_DIRECTORY_MAX_RETAINED_BYTES
-} from '../shared/mobile-file-directory-limit'
-import { readMobileRelayDirectory } from './mobile-file-directory-reader'
-import { readRelayFilesystemDirectory } from './filesystem-directory-reader'
-import type { FilesystemDirectoryListingLimits } from '../shared/filesystem-directory-listing-limit'
-import { listRelayMarkdownDocumentPaths } from './markdown-document-listing'
-import { sortDirEntries } from '../shared/file-name-sort'
-
-function readDirectoryLimitsFromParams(
-  params: Record<string, unknown>
-): Partial<FilesystemDirectoryListingLimits> {
-  return {
-    ...(typeof params.maxEntries === 'number' ? { maxEntries: params.maxEntries } : {}),
-    ...(typeof params.maxRetainedBytes === 'number'
-      ? { maxRetainedBytes: params.maxRetainedBytes }
-      : {})
-  }
-}
-import {
   readAuthorizedDocPreviewFile,
   type DocPreviewFileAccessRequest
 } from '../shared/doc-preview-file-access'
@@ -92,7 +72,6 @@ export class FsHandler {
 
   private registerHandlers(): void {
     this.dispatcher.onRequest('fs.readDir', (p) => readRelayDir(p))
-    this.dispatcher.onRequest('fs.readDirBounded', (p) => this.readDirBounded(p))
     this.dispatcher.onRequest('fs.readFile', (p) => this.readFile(p))
     this.dispatcher.onRequest('fs.readFileChunk', (p) => this.readFileChunk(p))
     this.dispatcher.onRequest('fs.readFileStream', (p, c) => this.readFileStream(p, c))
@@ -123,9 +102,6 @@ export class FsHandler {
       rangedReadVersion: 1
     }))
     this.dispatcher.onRequest('fs.listFiles', (p, c) => this.listFiles(p, c))
-    this.dispatcher.onRequest('fs.listMarkdownDocuments', (p, c) =>
-      listRelayMarkdownDocumentPaths(expandTilde(p.rootPath as string), c.signal)
-    )
     this.dispatcher.onRequest('fs.workspaceSpaceScan', (p, c) => this.workspaceSpaceScan(p, c))
     this.dispatcher.onRequest('fs.watch', (p, context) =>
       this.watchRegistry.watch(
@@ -142,17 +118,6 @@ export class FsHandler {
     )
     this.dispatcher.onNotification('fs.cancelStream', (p) => this.cancelStream(p))
     this.dispatcher.onNotification('fs.streamAck', (p) => this.streamAck(p))
-  }
-
-  private async readDirBounded(params: Record<string, unknown>) {
-    const dirPath = expandTilde(params.dirPath as string)
-    if (
-      params.maxEntries === MOBILE_FILE_DIRECTORY_MAX_ENTRIES &&
-      params.maxRetainedBytes === MOBILE_FILE_DIRECTORY_MAX_RETAINED_BYTES
-    ) {
-      return sortDirEntries(await readMobileRelayDirectory(dirPath))
-    }
-    return readRelayFilesystemDirectory(dirPath, readDirectoryLimitsFromParams(params))
   }
 
   private async readFile(params: Record<string, unknown>) {

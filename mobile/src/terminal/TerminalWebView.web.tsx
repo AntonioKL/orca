@@ -20,7 +20,7 @@ import type {
   TerminalWebViewHandle,
   TerminalWebViewProps
 } from './terminal-webview-contract'
-import { DEFAULT_TERMINAL_WEBVIEW_THEME } from './terminal-webview-default-theme'
+import { DEFAULT_TERMINAL_THEME } from './terminal-webview-html/theme'
 import { TERMINAL_WEBVIEW_FRAME_STYLES } from './terminal-webview-frame-styles'
 import { createTerminalWebRendererRecovery } from './terminal-web-renderer-recovery'
 import { createTerminalWebSelectionController } from './terminal-web-selection-controller'
@@ -111,7 +111,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
       if (!terminal) {
         return
       }
-      terminal.options.theme = props.terminalTheme?.theme ?? DEFAULT_TERMINAL_WEBVIEW_THEME
+      terminal.options.theme = props.terminalTheme?.theme ?? DEFAULT_TERMINAL_THEME
       terminal.options.fontSize = 13 * (props.textScale ?? 1)
       fitRef.current?.fit()
     }, [props.terminalTheme, props.textScale])
@@ -211,7 +211,7 @@ function terminalOptions(
       allowNonHttpProtocols: true
     },
     scrollback: 5_000,
-    theme: props.terminalTheme?.theme ?? DEFAULT_TERMINAL_WEBVIEW_THEME
+    theme: props.terminalTheme?.theme ?? DEFAULT_TERMINAL_THEME
   }
 }
 

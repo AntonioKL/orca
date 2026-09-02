@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from './mobile-tasks-dependencies'
 import {
   type DetailPayload,
   type GitHubAssignableUser,
+  type GitHubPRFileContents,
   groupDetailComments
 } from './mobile-tasks-legacy-foundation'
 
@@ -26,6 +27,8 @@ export function useMobileTasksItemState() {
   const [itemReviewersDraft, setItemReviewersDraft] = useState('')
   const [itemReplyDrafts, setItemReplyDrafts] = useState<Record<string, string>>({})
   const [expandedPrFilePath, setExpandedPrFilePath] = useState<string | null>(null)
+  const [prFileContents, setPrFileContents] = useState<Record<string, GitHubPRFileContents>>({})
+  const [prFileLoadingPath, setPrFileLoadingPath] = useState<string | null>(null)
   const [prFileCommentDrafts, setPrFileCommentDrafts] = useState<Record<string, string>>({})
   const [copiedLinkKey, setCopiedLinkKey] = useState<string | null>(null)
   const copiedLinkResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -62,6 +65,8 @@ export function useMobileTasksItemState() {
     itemReviewersDraft,
     itemTitleDraft,
     prFileCommentDrafts,
+    prFileContents,
+    prFileLoadingPath,
     setCopiedLinkKey,
     setDetailError,
     setDetailLoading,
@@ -84,6 +89,8 @@ export function useMobileTasksItemState() {
     setItemReplyDrafts,
     setItemReviewersDraft,
     setItemTitleDraft,
-    setPrFileCommentDrafts
+    setPrFileCommentDrafts,
+    setPrFileContents,
+    setPrFileLoadingPath
   }
 }

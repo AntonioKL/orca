@@ -9,7 +9,6 @@ import {
   typeMobileNativeChatCommandWithOutcome,
   type MobileNativeChatSendOutcome
 } from './mobile-native-chat-send'
-import { retainMobileNativeChatFilePaths } from './use-mobile-native-chat-file-search'
 import { rankSuggestions } from './mobile-native-chat-autocomplete'
 import { getRepoIdFromMobileWorktreeId } from './mobile-session-route-helpers'
 import type {
@@ -18,9 +17,6 @@ import type {
 } from './host-session-native-chat-operations'
 
 const FILE_RESULT_LIMIT = 16
-const LEGACY_PATH_LIMIT = 50_000
-const LEGACY_RETAINED_BYTES = 8 * 1024 * 1024
-const SEARCH_RETAINED_BYTES = 256 * 1024
 
 export function nativeHostSessionNativeChatOperations(
   client: RpcClient
@@ -107,11 +103,7 @@ export function nativeHostSessionNativeChatOperations(
         })
         if (response.ok) {
           searchSupported = true
-          return retainMobileNativeChatFilePaths(
-            response.result,
-            FILE_RESULT_LIMIT,
-            SEARCH_RETAINED_BYTES
-          )
+          return extractPaths(response.result)
         }
         if (response.error.code !== 'method_not_found') {
           return []
@@ -124,15 +116,7 @@ export function nativeHostSessionNativeChatOperations(
             .sendRequest('files.list', {
               worktree: `id:${target.workspaceId}`
             })
-            .then((response) =>
-              response.ok
-                ? retainMobileNativeChatFilePaths(
-                    response.result,
-                    LEGACY_PATH_LIMIT,
-                    LEGACY_RETAINED_BYTES
-                  )
-                : null
-            )
+            .then((response) => (response.ok ? extractPaths(response.result) : null))
             .finally(() => {
               legacyLoad = null
             })
@@ -192,4 +176,11 @@ function sendNative(
 
 function escape(): string {
   return String.fromCharCode(27)
+}
+
+function extractPaths(result: unknown): string[] {
+  const files = (result as { files?: Array<{ relativePath?: string }> }).files ?? []
+  return files
+    .map((file) => file.relativePath ?? '')
+    .filter((path): path is string => path.length > 0)
 }

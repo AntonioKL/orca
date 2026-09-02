@@ -1,23 +1,19 @@
-import { decrypt, deriveSharedKey, generateKeyPair, publicKeyToBase64 } from './e2ee'
-import { createMobileDirectRpcOutbound } from './mobile-direct-rpc-outbound'
-import { createMobileDirectRpcSender } from './mobile-direct-rpc-sender'
 import {
-  createMobileInboundFrameQueue,
-  MOBILE_INBOUND_BUFFER_OVERFLOW_MESSAGE,
-  MOBILE_INBOUND_FRAME_TOO_LARGE_MESSAGE,
-  mobileInboundFrameLogDetail,
-  type MobileInboundFrameQueue
-} from './mobile-inbound-frame-queue'
-import { tryParseMobileJsonTextWithinLimits } from './mobile-json-text-admission'
-import { handleMobileRpcSocketBinaryMessage } from './mobile-rpc-binary-frame-handler'
+  decrypt,
+  decryptBytes,
+  deriveSharedKey,
+  encrypt,
+  generateKeyPair,
+  publicKeyToBase64
+} from './e2ee'
 import { sendMobileTerminalBinaryFrame } from './mobile-terminal-binary-sender'
-import { redactedWebSocketEndpoint } from './redacted-websocket-endpoint'
 import { isRpcResponse } from './rpc-response-shape'
 import { RpcClientSocketTimeouts } from './rpc-client-socket-timeouts'
 import { isStaleRpcSocketEvent, logRpcSocketClose } from './rpc-socket-close-evidence'
-import { describeSocketEvent } from './socket-event-debug'
+import { describeSocketEvent, redactedWebSocketEndpoint } from './socket-event-debug'
 import type { TerminalStreamFrame } from './terminal-stream-protocol'
 import type { ConnectionLogEmitter, ConnectionState, RpcResponse } from './types'
+import { websocketPayloadToUint8 } from './websocket-payload-bytes'
 
 type SocketSessionOptions = {
   endpoint: string
@@ -46,30 +42,9 @@ export class RpcClientSocketSession {
   private authenticated = false
   private lastInboundAt: number | null = null
   private readonly timeouts: RpcClientSocketTimeouts
-  private readonly outbound: ReturnType<typeof createMobileDirectRpcOutbound>
-  private readonly inboundQueue: MobileInboundFrameQueue
-  readonly sendEncrypted: (request: unknown) => boolean
 
   constructor(private readonly options: SocketSessionOptions) {
     this.socket = new WebSocket(options.endpoint)
-    this.outbound = createMobileDirectRpcOutbound({
-      socket: this.socket,
-      isActive: () => this.options.getCurrentSocket() === this.socket,
-      onOverflow: () => this.closeForOverload('Outbound', 'Mobile RPC outbound buffer overflow')
-    })
-    this.inboundQueue = createMobileInboundFrameQueue({
-      process: (raw) => this.handleMessage(raw),
-      onError: (error) => this.closeForOverload('Inbound', mobileInboundFrameLogDetail(error)),
-      overflowMessage: MOBILE_INBOUND_BUFFER_OVERFLOW_MESSAGE,
-      frameTooLargeMessage: MOBILE_INBOUND_FRAME_TOO_LARGE_MESSAGE
-    })
-    this.sendEncrypted = createMobileDirectRpcSender({
-      getOutbound: () => this.outbound,
-      getSharedKey: () => this.sharedKey,
-      getSocket: () => this.socket,
-      getState: () => this.options.getState(),
-      onSocketDesync: () => this.options.onForcedClose(this)
-    })
     this.timeouts = new RpcClientSocketTimeouts({
       emitLog: options.emitLog,
       getReconnectAttempt: options.getReconnectAttempt,
@@ -82,6 +57,7 @@ export class RpcClientSocketSession {
     )
   }
 
+  // Why: the hosted bridge multiplexes terminal bytes over one binary channel.
   sendTerminalBinaryFrame(frame: TerminalStreamFrame): boolean {
     return sendMobileTerminalBinaryFrame({
       frame,
@@ -92,18 +68,39 @@ export class RpcClientSocketSession {
     })
   }
 
+  sendEncrypted(request: unknown): boolean {
+    if (this.socket.readyState === WebSocket.OPEN && this.sharedKey) {
+      try {
+        this.socket.send(encrypt(JSON.stringify(request), this.sharedKey))
+        return true
+      } catch {
+        if (this.options.getCurrentSocket() === this.socket) {
+          this.options.onForcedClose(this)
+        }
+        return false
+      }
+    }
+    console.log('[net] sendEncrypted FAILED — channel not ready', {
+      hasWs: this.options.getCurrentSocket() !== null,
+      readyState: this.socket.readyState,
+      hasKey: this.sharedKey !== null,
+      state: this.options.getState()
+    })
+    if (
+      this.options.getState() === 'connected' &&
+      this.options.getCurrentSocket() === this.socket &&
+      this.socket.readyState !== WebSocket.OPEN
+    ) {
+      console.log('[net] sendEncrypted detected ws desync — forcing reconnect', {
+        readyState: this.socket.readyState
+      })
+      this.options.onForcedClose(this)
+    }
+    return false
+  }
+
   close(): void {
     this.socket.close()
-  }
-
-  dispose(): void {
-    this.inboundQueue.dispose()
-    this.outbound.dispose()
-  }
-
-  private closeForOverload(direction: 'Inbound' | 'Outbound', detail: string): void {
-    this.options.emitLog('error', `${direction} WebSocket overload`, detail)
-    this.options.onForcedClose(this)
   }
 
   clearTimers(): void {
@@ -142,12 +139,10 @@ export class RpcClientSocketSession {
     }
     this.socket.onmessage = (event) => {
       if (!this.isStale('message')) {
-        void this.inboundQueue.enqueue(event.data)
+        void this.handleMessage(event.data)
       }
     }
     this.socket.onclose = (event) => {
-      this.inboundQueue.dispose()
-      this.outbound.socketClosed()
       const closeCode = logRpcSocketClose({
         event,
         state: this.options.getState(),
@@ -172,7 +167,7 @@ export class RpcClientSocketSession {
     }
   }
 
-  private handleMessage(rawData: unknown): Promise<void> | void {
+  private async handleMessage(rawData: unknown): Promise<void> {
     const receivedAt = Date.now()
     this.lastInboundAt = receivedAt
     this.options.onAnyInbound(receivedAt)
@@ -181,43 +176,51 @@ export class RpcClientSocketSession {
       this.handleHandshakeMessage(raw)
       return
     }
-    const key = this.sharedKey
-    if (!key || key.length !== 32) {
+    if (!this.sharedKey || this.sharedKey.length !== 32) {
       return
     }
     if (raw === null) {
-      return handleMobileRpcSocketBinaryMessage({
-        rawData,
-        key,
-        isCurrent: () => this.options.getCurrentSocket() === this.socket,
-        onFrame: (plaintext) => {
-          this.options.onAuthenticatedInbound(this)
-          this.options.onBinary(plaintext)
-        }
-      })
+      const bytes = await websocketPayloadToUint8(rawData)
+      if (this.options.getCurrentSocket() !== this.socket || !bytes) {
+        return
+      }
+      const plaintext = decryptBytes(bytes, this.sharedKey)
+      if (!plaintext) {
+        return
+      }
+      this.options.onAuthenticatedInbound(this)
+      this.options.onBinary(plaintext)
+      return
     }
-    const plaintext = decrypt(raw, key)
+    const plaintext = decrypt(raw, this.sharedKey)
     if (plaintext === null) {
       return
     }
     this.options.onAuthenticatedInbound(this)
-    const response = tryParseMobileJsonTextWithinLimits(plaintext)
-    if (!isRpcResponse(response)) {
+    let response: unknown
+    try {
+      response = JSON.parse(plaintext)
+    } catch {
       return
     }
-    this.outbound.acknowledge(response.id)
-    this.options.onRpcResponse(response)
+    if (isRpcResponse(response)) {
+      this.options.onRpcResponse(response)
+    }
   }
 
   private handleHandshakeMessage(raw: string | null): void {
     if (raw === null) {
       return
     }
-    const plaintextControl = tryParseMobileJsonTextWithinLimits<{ type?: unknown }>(raw)
-    if (plaintextControl?.type === 'e2ee_ready') {
-      this.options.emitLog('success', 'Received e2ee_ready', 'Sending device token')
-      this.sendEncrypted({ type: 'e2ee_auth', deviceToken: this.options.deviceToken })
-      return
+    try {
+      const message = JSON.parse(raw) as { type?: unknown }
+      if (message.type === 'e2ee_ready') {
+        this.options.emitLog('success', 'Received e2ee_ready', 'Sending device token')
+        this.sendEncrypted({ type: 'e2ee_auth', deviceToken: this.options.deviceToken })
+        return
+      }
+    } catch {
+      // The authenticated handshake messages are encrypted.
     }
     if (!this.sharedKey || this.sharedKey.length !== 32) {
       return
@@ -226,30 +229,29 @@ export class RpcClientSocketSession {
     if (plaintext === null) {
       return
     }
-    const message = tryParseMobileJsonTextWithinLimits<{
-      type?: unknown
-      ok?: unknown
-      error?: { code?: unknown }
-    }>(plaintext)
-    if (!message) {
-      return
-    }
-    if (message.type === 'e2ee_authenticated') {
-      this.outbound.acknowledgeAuthentication()
-      this.timeouts.clearHandshake()
-      this.authenticated = true
-      this.options.onAuthenticated(this)
-    } else if (
-      message.type === 'e2ee_error' ||
-      (message.ok === false && message.error?.code === 'unauthorized')
-    ) {
-      this.outbound.acknowledgeAuthentication()
-      // Why: the failure signal is loggable; the server error body is not.
-      console.log('[net] e2ee auth FAILED', {
-        signal: message.type === 'e2ee_error' ? 'e2ee_error' : 'unauthorized_response'
-      })
-      this.timeouts.clearHandshake()
-      this.options.onAuthRejected('Unauthorized — pairing may be revoked')
+    try {
+      const message = JSON.parse(plaintext) as {
+        type?: unknown
+        ok?: unknown
+        error?: { code?: unknown }
+      }
+      if (message.type === 'e2ee_authenticated') {
+        this.timeouts.clearHandshake()
+        this.authenticated = true
+        this.options.onAuthenticated(this)
+      } else if (
+        message.type === 'e2ee_error' ||
+        (message.ok === false && message.error?.code === 'unauthorized')
+      ) {
+        // Why: the failure signal is loggable; the server error body is not.
+        console.log('[net] e2ee auth FAILED', {
+          signal: message.type === 'e2ee_error' ? 'e2ee_error' : 'unauthorized_response'
+        })
+        this.timeouts.clearHandshake()
+        this.options.onAuthRejected('Unauthorized — pairing may be revoked')
+      }
+    } catch {
+      // Ignore malformed handshake payloads.
     }
   }
 

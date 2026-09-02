@@ -62,7 +62,6 @@ export class RpcClientSocketCloseController {
       return
     }
     this.options.socketFactory.noteClosed()
-    session.dispose()
     session.clearTimers()
     session.clearKey()
     this.options.clearCurrentSession()

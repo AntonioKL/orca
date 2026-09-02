@@ -199,9 +199,9 @@ describe('mobile E2EE v2 physical channel', () => {
     await authenticate(ctx)
     ctx.socket.bufferedAmount = 9 * 1024 * 1024
     const megabyte = new Uint8Array(1024 * 1024)
-    const accepted = Array.from({ length: 65 }, () => ctx.channel.sendBinary(megabyte))
-    expect(accepted.filter(Boolean).length).toBeLessThan(65)
-    expect(accepted.at(-1)).toBe(false)
+    for (let index = 0; index < 65; index++) {
+      expect(ctx.channel.sendBinary(megabyte)).toBe(true)
+    }
     expect(ctx.onError).toHaveBeenCalledOnce()
     expect(ctx.onError.mock.calls[0]![0].message).toBe('E2EE v2 outbound buffer overflow')
   })

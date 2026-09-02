@@ -20,7 +20,6 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
     activeGitHubProjectViewId,
     appliedGithubProjectSearch,
     appliedQuery,
-    clearPrFileContents,
     connState,
     copiedLinkResetTimerRef,
     githubKind,
@@ -63,6 +62,8 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
     setLinearSubIssueTitle,
     setLinearTeams,
     setPrFileCommentDrafts,
+    setPrFileContents,
+    setPrFileLoadingPath,
     showCreateTask,
     showGitHubProjectPicker,
     taskLinearOperations,
@@ -239,6 +240,10 @@ export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsM
       stale = true
     }
   }, [linearMetadataItem, taskLinearOperations, tasksSupported])
+  const clearPrFileContents = useCallback(() => {
+    setPrFileContents({})
+    setPrFileLoadingPath(null)
+  }, [setPrFileContents, setPrFileLoadingPath])
   useEffect(() => {
     resetActionItemDrafts(actionItem, {
       updateTitle: setItemTitleDraft,

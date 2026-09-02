@@ -8,14 +8,9 @@ import { MobileRelayRpcStreams } from './mobile-relay-rpc-streams'
 import { MobileE2EEAuthenticationError } from './mobile-e2ee-v2-physical-channel'
 import { markRpcDeliveryUnknown } from './rpc-delivery-ambiguity'
 import { openRpcRequestBudget, resolvePostConnectRequestTimeout } from './rpc-request-budget'
-import { stringifyMobileOutboundJson } from './mobile-outbound-json'
 import { isRpcResponse } from './rpc-response-shape'
 import type { RpcClient } from './rpc-client'
 import type { ConnectionLogSink, ConnectionState, RpcResponse } from './types'
-import {
-  isMobileJsonStructureCapacityError,
-  parseMobileJsonTextWithinLimits
-} from './mobile-json-text-admission'
 import { encodeTerminalStreamFrame } from './terminal-stream-protocol'
 import { createMobileRelayLivenessWatchdog } from './mobile-relay-liveness-watchdog'
 
@@ -202,23 +197,14 @@ export function connectMobileRelayRpcSession(args: {
   }
 
   function sendFrame(request: { id: string; method: string; params?: unknown }): boolean {
-    try {
-      return link.sendText(
-        stringifyMobileOutboundJson({ ...request, deviceToken: args.deviceToken })
-      )
-    } catch {
-      return false
-    }
+    return link.sendText(JSON.stringify({ ...request, deviceToken: args.deviceToken }))
   }
 
   function handleText(plaintext: string): void {
     let value: unknown
     try {
-      value = parseMobileJsonTextWithinLimits(plaintext)
-    } catch (error) {
-      if (isMobileJsonStructureCapacityError(error)) {
-        throw error
-      }
+      value = JSON.parse(plaintext)
+    } catch {
       return
     }
     if (!isRpcResponse(value)) {

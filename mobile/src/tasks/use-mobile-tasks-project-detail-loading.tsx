@@ -1,5 +1,5 @@
 import type { ItemDetailLoadingModel } from './use-mobile-tasks-item-detail-loading'
-import { useEffect } from './mobile-tasks-dependencies'
+import { useCallback, useEffect } from './mobile-tasks-dependencies'
 import {
   editableProjectFields,
   projectFieldDraftValue,
@@ -10,12 +10,13 @@ import {
 export function useMobileTasksProjectDetailLoading(model: ItemDetailLoadingModel) {
   const {
     activeGitHubProjectHost,
-    clearPrFileContents,
     githubProjectTable,
     projectRowDetailRefreshSeq,
     projectRowItem,
     setExpandedPrFilePath,
     setPrFileCommentDrafts,
+    setPrFileContents,
+    setPrFileLoadingPath,
     setProjectBodyDraft,
     setProjectCommentDraft,
     setProjectEditingCommentDraft,
@@ -29,6 +30,10 @@ export function useMobileTasksProjectDetailLoading(model: ItemDetailLoadingModel
     taskProjectReadOperations,
     tasksSupported
   } = model
+  const clearPrFileContents = useCallback(() => {
+    setPrFileContents({})
+    setPrFileLoadingPath(null)
+  }, [setPrFileContents, setPrFileLoadingPath])
   useEffect(() => {
     if (!projectRowItem) {
       setProjectRowDetail(null)

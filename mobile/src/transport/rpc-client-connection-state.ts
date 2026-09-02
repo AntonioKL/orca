@@ -1,4 +1,4 @@
-import { redactedWebSocketEndpoint } from './redacted-websocket-endpoint'
+import { redactedWebSocketEndpoint } from './socket-event-debug'
 import type { ConnectionState } from './types'
 
 type ConnectWaiter = {

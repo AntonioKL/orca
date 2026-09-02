@@ -1,7 +1,6 @@
 import { publicKeyFromBase64 } from './e2ee'
 import { RpcClientSocketSession } from './rpc-client-socket-session'
-import { processMobileOutboundMemoryBudget } from './mobile-outbound-memory-budget'
-import { redactedWebSocketEndpoint } from './redacted-websocket-endpoint'
+import { redactedWebSocketEndpoint } from './socket-event-debug'
 import type { ConnectionLogEmitter, ConnectionState, RpcResponse } from './types'
 
 type SocketFactoryOptions = {
@@ -33,10 +32,6 @@ export class RpcClientSocketFactory {
 
   constructor(private readonly options: SocketFactoryOptions) {
     this.serverPublicKey = publicKeyFromBase64(options.serverPublicKeyB64)
-  }
-
-  canOpen(): boolean {
-    return processMobileOutboundMemoryBudget.canRegisterBufferedAmount()
   }
 
   open(): RpcClientSocketSession {

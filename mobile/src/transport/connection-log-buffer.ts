@@ -1,5 +1,4 @@
 import type { ConnectionLogEntry } from './types'
-import { measureUtf8ByteLength } from '../../../src/shared/utf8-byte-limits'
 import { redactConnectionLogEntry } from '../diagnostics/connection-log-redaction'
 
 // Why: the rpc-client's onLog entries were only wired during pairing; for
@@ -10,57 +9,13 @@ import { redactConnectionLogEntry } from '../diagnostics/connection-log-redactio
 // swaps (forceReconnect) and provider remounts (hot reload); bounded so an
 // all-night reconnect loop can't grow memory unbounded.
 const MAX_ENTRIES_PER_HOST = 200
-const MAX_RETAINED_HOSTS = 128
-export const CONNECTION_LOG_HOST_ID_MAX_BYTES = 4 * 1024
-export const CONNECTION_LOG_ENTRY_MAX_BYTES = 64 * 1024
-export const CONNECTION_LOG_HOST_MAX_RETAINED_BYTES = 256 * 1024
-export const CONNECTION_LOG_STORE_MAX_RETAINED_BYTES = 8 * 1024 * 1024
-const CONNECTION_LOG_MAX_LISTENERS_PER_HOST = 16
-
-type RetainedConnectionLogEntry = {
-  entry: ConnectionLogEntry
-  bytes: number
-}
-
-type RetainedHostLog = {
-  entries: RetainedConnectionLogEntry[]
-  bytes: number
-}
-
-type ConnectionLogByteLimits = {
-  maxEntryBytes: number
-  maxHostBytes: number
-  maxStoreBytes: number
-}
-
-function measureBoundedString(value: unknown, maxBytes: number): number | null {
-  if (value === undefined) {
-    return 0
-  }
-  if (typeof value !== 'string') {
-    return null
-  }
-  const measurement = measureUtf8ByteLength(value, { stopAfterBytes: maxBytes })
-  return measurement.exceededLimit ? null : measurement.byteLength
-}
-
-function measureConnectionLogEntry(entry: ConnectionLogEntry, maxBytes: number): number | null {
-  let bytes = 256
-  for (const value of [entry.id, entry.level, entry.message, entry.detail]) {
-    const valueBytes = measureBoundedString(value, maxBytes - bytes)
-    if (valueBytes === null) {
-      return null
-    }
-    bytes += valueBytes
-  }
-  return bytes <= maxBytes ? bytes : null
-}
 
 export type ConnectionLogStore = {
   append: (hostId: string, entry: ConnectionLogEntry) => void
   get: (hostId: string) => readonly ConnectionLogEntry[]
   hydrate: (hostId: string) => Promise<void>
   subscribe: (hostId: string, listener: () => void) => () => void
+  // Why: a completed unpair must not leave the removed host's log in process memory.
   delete: (hostId: string) => void
 }
 
@@ -71,31 +26,9 @@ export type ConnectionLogPersistence = {
 
 export function createConnectionLogStore(
   maxEntriesPerHost: number = MAX_ENTRIES_PER_HOST,
-  persistenceOrMaxRetainedHosts: ConnectionLogPersistence | number = MAX_RETAINED_HOSTS,
-  byteLimits: Partial<ConnectionLogByteLimits> = {},
-  explicitPersistence?: ConnectionLogPersistence
+  persistence?: ConnectionLogPersistence
 ): ConnectionLogStore {
-  const maxRetainedHosts =
-    typeof persistenceOrMaxRetainedHosts === 'number'
-      ? persistenceOrMaxRetainedHosts
-      : MAX_RETAINED_HOSTS
-  const persistence =
-    typeof persistenceOrMaxRetainedHosts === 'number'
-      ? explicitPersistence
-      : persistenceOrMaxRetainedHosts
-  const maxEntryBytes = Math.min(
-    byteLimits.maxEntryBytes ?? CONNECTION_LOG_ENTRY_MAX_BYTES,
-    CONNECTION_LOG_ENTRY_MAX_BYTES
-  )
-  const maxHostBytes = Math.min(
-    byteLimits.maxHostBytes ?? CONNECTION_LOG_HOST_MAX_RETAINED_BYTES,
-    CONNECTION_LOG_HOST_MAX_RETAINED_BYTES
-  )
-  const maxStoreBytes = Math.min(
-    byteLimits.maxStoreBytes ?? CONNECTION_LOG_STORE_MAX_RETAINED_BYTES,
-    CONNECTION_LOG_STORE_MAX_RETAINED_BYTES
-  )
-  const entriesByHost = new Map<string, RetainedHostLog>()
+  const entriesByHost = new Map<string, ConnectionLogEntry[]>()
   const listenersByHost = new Map<string, Set<() => void>>()
   const hydratedHosts = new Set<string>()
   const hydrationFailedHosts = new Set<string>()
@@ -106,26 +39,11 @@ export function createConnectionLogStore(
   // loops re-rendering. Cache per host; invalidate on append.
   const snapshotByHost = new Map<string, readonly ConnectionLogEntry[]>()
   const EMPTY: readonly ConnectionLogEntry[] = []
-  let retainedStoreBytes = 0
 
-  const deleteHost = (hostId: string): boolean => {
-    const host = entriesByHost.get(hostId)
-    if (!host) {
-      return false
+  const trim = (entries: ConnectionLogEntry[]): void => {
+    if (entries.length > maxEntriesPerHost) {
+      entries.splice(0, entries.length - maxEntriesPerHost)
     }
-    entriesByHost.delete(hostId)
-    retainedStoreBytes -= host.bytes
-    snapshotByHost.delete(hostId)
-    return true
-  }
-
-  const evictOldestUnobservedHost = (exceptHostId?: string): boolean => {
-    for (const hostId of entriesByHost.keys()) {
-      if (hostId !== exceptHostId && !listenersByHost.has(hostId)) {
-        return deleteHost(hostId)
-      }
-    }
-    return false
   }
 
   const notify = (hostId: string): void => {
@@ -142,7 +60,7 @@ export function createConnectionLogStore(
     if (!persistence || !hydratedHosts.has(hostId)) {
       return
     }
-    const snapshot = entriesByHost.get(hostId)?.entries.map((retained) => retained.entry) ?? []
+    const snapshot = [...(entriesByHost.get(hostId) ?? [])]
     const previous = saveByHost.get(hostId) ?? Promise.resolve()
     const pending = previous
       .catch(() => {})
@@ -171,7 +89,7 @@ export function createConnectionLogStore(
     const pending = persistence
       .load(hostId)
       .then((stored) => {
-        const live = entriesByHost.get(hostId)?.entries.map((retained) => retained.entry) ?? []
+        const live = entriesByHost.get(hostId) ?? []
         const seen = new Set<string>()
         const merged: ConnectionLogEntry[] = []
         for (const entry of [...stored, ...live]) {
@@ -183,10 +101,8 @@ export function createConnectionLogStore(
           }
         }
         merged.sort((a, b) => a.ts - b.ts)
-        deleteHost(hostId)
-        for (const entry of merged) {
-          appendRetainedEntry(hostId, entry)
-        }
+        trim(merged)
+        entriesByHost.set(hostId, merged)
         hydratedHosts.add(hostId)
         hydrationFailedHosts.delete(hostId)
         notify(hostId)
@@ -201,65 +117,15 @@ export function createConnectionLogStore(
     return pending
   }
 
-  const appendRetainedEntry = (hostId: string, rawEntry: ConnectionLogEntry): boolean => {
-    const hostIdBytes = measureBoundedString(hostId, CONNECTION_LOG_HOST_ID_MAX_BYTES)
-    const entry = redactConnectionLogEntry(rawEntry)
-    const entryBytes = measureConnectionLogEntry(entry, maxEntryBytes)
-    if (hostIdBytes === null || entryBytes === null || entryBytes > maxHostBytes) {
-      return false
-    }
-    let host = entriesByHost.get(hostId)
-    if (!host) {
-      while (entriesByHost.size >= maxRetainedHosts) {
-        if (!evictOldestUnobservedHost()) {
-          return false
-        }
-      }
-      const retainedHostKeyBytes = hostIdBytes + 128
-      while (retainedStoreBytes + retainedHostKeyBytes + entryBytes > maxStoreBytes) {
-        if (!evictOldestUnobservedHost()) {
-          return false
-        }
-      }
-      host = { entries: [], bytes: retainedHostKeyBytes }
-      entriesByHost.set(hostId, host)
-      retainedStoreBytes += retainedHostKeyBytes
-    } else {
-      entriesByHost.delete(hostId)
-      entriesByHost.set(hostId, host)
-    }
-    while (
-      host.entries.length >= maxEntriesPerHost ||
-      host.bytes + entryBytes > maxHostBytes ||
-      retainedStoreBytes + entryBytes > maxStoreBytes
-    ) {
-      const oldest = host.entries.shift()
-      if (oldest) {
-        host.bytes -= oldest.bytes
-        retainedStoreBytes -= oldest.bytes
-        continue
-      }
-      if (!evictOldestUnobservedHost(hostId)) {
-        break
-      }
-    }
-    if (host.bytes + entryBytes > maxHostBytes || retainedStoreBytes + entryBytes > maxStoreBytes) {
-      if (host.entries.length === 0) {
-        deleteHost(hostId)
-      }
-      return false
-    }
-    host.entries.push({ entry, bytes: entryBytes })
-    host.bytes += entryBytes
-    retainedStoreBytes += entryBytes
-    return true
-  }
-
   return {
     append(hostId, entry) {
-      if (!appendRetainedEntry(hostId, entry)) {
-        return
+      let entries = entriesByHost.get(hostId)
+      if (!entries) {
+        entries = []
+        entriesByHost.set(hostId, entries)
       }
+      entries.push(redactConnectionLogEntry(entry))
+      trim(entries)
       notify(hostId)
       void hydrateHost(hostId, false)
         .then(() => persist(hostId))
@@ -271,11 +137,11 @@ export function createConnectionLogStore(
       if (cached) {
         return cached
       }
-      const host = entriesByHost.get(hostId)
-      if (!host || host.entries.length === 0) {
+      const entries = entriesByHost.get(hostId)
+      if (!entries || entries.length === 0) {
         return EMPTY
       }
-      const snapshot = Object.freeze(host.entries.map((retained) => retained.entry))
+      const snapshot = Object.freeze([...entries])
       snapshotByHost.set(hostId, snapshot)
       return snapshot
     },
@@ -283,19 +149,10 @@ export function createConnectionLogStore(
     hydrate: (hostId) => hydrateHost(hostId, true),
 
     subscribe(hostId, listener) {
-      if (measureBoundedString(hostId, CONNECTION_LOG_HOST_ID_MAX_BYTES) === null) {
-        return () => {}
-      }
       let listeners = listenersByHost.get(hostId)
       if (!listeners) {
-        if (listenersByHost.size >= maxRetainedHosts) {
-          return () => {}
-        }
         listeners = new Set()
         listenersByHost.set(hostId, listeners)
-      }
-      if (listeners.size >= CONNECTION_LOG_MAX_LISTENERS_PER_HOST) {
-        return () => {}
       }
       listeners.add(listener)
       return () => {
@@ -311,12 +168,10 @@ export function createConnectionLogStore(
     },
 
     delete(hostId) {
-      deleteHost(hostId)
-      const listeners = listenersByHost.get(hostId)
-      if (listeners) {
-        for (const listener of listeners) {
-          listener()
-        }
+      entriesByHost.delete(hostId)
+      snapshotByHost.delete(hostId)
+      for (const listener of listenersByHost.get(hostId) ?? []) {
+        listener()
       }
     }
   }
