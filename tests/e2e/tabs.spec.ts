@@ -18,8 +18,9 @@
  * (dnd-kit reorder); in those cases a DOM assertion still follows.
  */
 
-import { test, expect } from './helpers/orca-app'
+import { rm } from 'node:fs/promises'
 import type { Page } from '@stablyai/playwright-test'
+import { test, expect } from './helpers/orca-app'
 import {
   waitForSessionReady,
   waitForActiveWorktree,
@@ -116,6 +117,50 @@ test.describe('Tabs', () => {
         message: 'Menu-created terminal tab did not receive keyboard focus'
       })
       .toBe(storeActiveId)
+  })
+
+  test('clicking "+" then "New Markdown" focuses the editor', async ({
+    orcaPage,
+    registerPostElectronShutdownCleanup
+  }) => {
+    let createdFilePath: string | null = null
+    registerPostElectronShutdownCleanup(async () => {
+      if (createdFilePath) {
+        await rm(createdFilePath, { force: true })
+      }
+    })
+
+    await orcaPage.getByRole('button', { name: 'New tab' }).click({ force: true })
+    const newMarkdownMenuItem = orcaPage.getByRole('menuitem', { name: /New Markdown/i }).first()
+    await newMarkdownMenuItem.click({ force: true })
+    await expect(newMarkdownMenuItem).toBeHidden({ timeout: 3_000 })
+
+    const editor = orcaPage.locator('.rich-markdown-editor')
+    await expect(editor).toBeVisible({ timeout: 25_000 })
+    const createdFile = await orcaPage.evaluate(() => {
+      const state = window.__store?.getState()
+      const file = state?.openFiles.find((candidate) => candidate.id === state.activeFileId)
+      return file ? { id: file.id, filePath: file.filePath } : null
+    })
+    expect(createdFile).not.toBeNull()
+    createdFilePath = createdFile?.filePath ?? null
+
+    await expect
+      .poll(() => editor.evaluate((element) => document.activeElement === element), {
+        timeout: 5_000,
+        message: 'Menu-created Markdown editor did not receive keyboard focus'
+      })
+      .toBe(true)
+
+    const sentinel = `autofocus-${Date.now()}`
+    // Why: typing through the page keyboard proves focus landed without an editor click.
+    await orcaPage.keyboard.type(sentinel)
+    await expect(editor).toContainText(sentinel)
+
+    await orcaPage.evaluate((fileId) => {
+      window.__store?.getState().closeFile(fileId)
+    }, createdFile!.id)
+    await expect(editor).toBeHidden()
   })
 
   /**
