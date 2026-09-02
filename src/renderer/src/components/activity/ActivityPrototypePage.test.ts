@@ -399,7 +399,7 @@ describe('buildActivityEvents', () => {
     expect(threads[0].events[0].entry.prompt).toBe('Retained prior run')
   })
 
-  it('groups visible threads by current status order', () => {
+  it('groups visible threads with attention states before working and done', () => {
     const repo = makeRepo()
     const worktree = makeWorktree()
     const workingTab = makeTab()
@@ -442,10 +442,10 @@ describe('buildActivityEvents', () => {
       })
     )
 
-    expect(groups.map((group) => group.id)).toEqual(['working', 'blocked', 'done'])
+    expect(groups.map((group) => group.id)).toEqual(['blocked', 'working', 'done'])
     expect(groups.map((group) => group.threads.map((thread) => thread.paneKey))).toEqual([
-      [PANE_KEY],
       [PANE_KEY_2],
+      [PANE_KEY],
       [PANE_KEY_3]
     ])
   })

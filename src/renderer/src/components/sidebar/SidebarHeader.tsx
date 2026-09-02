@@ -1,10 +1,11 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '@/store'
 import { translate } from '@/i18n/i18n'
 import { SidebarViewToggle } from './sidebar-view-toggle'
 import { SidebarHeaderActions } from './sidebar-header-actions'
 import { shouldShowAgentsSidebar } from './agents-sidebar-visibility'
+import { useActivityUnreadCount } from '@/components/activity/useActivityUnreadCount'
 import { Popover, PopoverAnchor, PopoverArrow, PopoverContent } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { Sparkles } from 'lucide-react'
@@ -36,16 +37,20 @@ const SidebarHeader = React.memo(function SidebarHeader({
   const migratedFromExperimental = useAppStore(
     (s) => s.settings?.agentsSidebarMigratedFromExperimental === true
   )
+  const introTitleId = useId()
+  const introDescriptionId = useId()
   // Why: settings are null until hydration; deriving intro visibility from the
   // null default would flash the popover open (and stamp it shown) every launch.
   const settingsHydrated = useAppStore((s) => s.settings != null)
   const agentsViewActive = showAgentsSidebar && sidebarBody === 'agents'
+  // Why only while inactive: the open list already shows unread rows, so the pill would be noise.
+  const agentsUnreadCount = useActivityUnreadCount(showAgentsSidebar && !agentsViewActive)
   const introOpen = settingsHydrated && showAgentsSidebar && !agentsSidebarIntroShown
   const acknowledgeIntro = React.useCallback(() => {
     void updateSettings?.({ agentsSidebarIntroShown: true })
   }, [updateSettings])
   const deferAgentsIntro = React.useCallback(() => {
-    // “Maybe later” means hide the new tab; users can re-enable it in Settings.
+    // Hide the new tab; users can re-enable it in Settings.
     void updateSettings?.({ agentsSidebarIntroShown: true, showAgentsSidebar: false })
     toast(
       translate(
@@ -96,6 +101,7 @@ const SidebarHeader = React.memo(function SidebarHeader({
                         value: 'agents' as const,
                         label: translate('dashboard.sidebar.label', 'Agents'),
                         sectionTitle: 'agents' as const,
+                        badgeCount: agentsUnreadCount,
                         renderWrapper: (button: React.ReactNode) => (
                           <PopoverAnchor asChild>{button}</PopoverAnchor>
                         )
@@ -113,6 +119,8 @@ const SidebarHeader = React.memo(function SidebarHeader({
             className="w-72 overflow-visible rounded-xl border border-border bg-popover p-3.5 text-popover-foreground shadow-floating"
             onOpenAutoFocus={(event) => event.preventDefault()}
             onFocusOutside={(event) => event.preventDefault()}
+            aria-labelledby={introTitleId}
+            aria-describedby={introDescriptionId}
           >
             <PopoverArrow asChild width={14} height={7} className="overflow-visible">
               <svg
@@ -143,13 +151,16 @@ const SidebarHeader = React.memo(function SidebarHeader({
                     fillOpacity={0.15}
                     strokeWidth={2}
                   />
-                  <h3 className="text-sm font-semibold text-foreground">
+                  <h3 id={introTitleId} className="text-sm font-semibold text-foreground">
                     {migratedFromExperimental
                       ? translate('agentsSidebarIntro.migrated.title', 'Agents are easier to find')
                       : translate('agentsSidebarIntro.new.title', 'Meet your Agents tab')}
                   </h3>
                 </div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
+                <p
+                  id={introDescriptionId}
+                  className="text-xs leading-relaxed text-muted-foreground"
+                >
                   {migratedFromExperimental
                     ? translate(
                         'agentsSidebarIntro.migrated.description',
@@ -164,7 +175,7 @@ const SidebarHeader = React.memo(function SidebarHeader({
               <div className="flex justify-end items-center gap-2 pt-0.5">
                 {!migratedFromExperimental ? (
                   <Button variant="ghost" size="sm" onClick={deferAgentsIntro}>
-                    {translate('agentsSidebarIntro.new.dismiss', 'Maybe later')}
+                    {translate('agentsSidebarIntro.new.hide', 'Hide Agents')}
                   </Button>
                 ) : null}
                 <Button

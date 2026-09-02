@@ -18,13 +18,14 @@ import type {
   AgentPaneThread
 } from './activity-thread-types'
 
+// Attention-needing groups first (interrupted included: it's stopped and awaiting the user) so they're never buried under Working/Done.
 const ACTIVITY_STATUS_GROUP_ORDER: ActivityStatusGroupId[] = [
+  'waiting',
+  'blocked',
+  'interrupted',
   'working',
   'monitoring',
-  'blocked',
-  'waiting',
-  'done',
-  'interrupted'
+  'done'
 ]
 
 export function getActivityThreadGroup(

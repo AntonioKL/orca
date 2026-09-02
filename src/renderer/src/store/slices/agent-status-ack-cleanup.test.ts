@@ -63,6 +63,27 @@ describe('acknowledgedAgentsByPaneKey cleanup on teardown', () => {
     expect(store.getState().manuallyUnreadTurnsByPaneKey).toEqual({ 'tab-10:0': 400 })
   })
 
+  it('removeAgentStatus leaves read state alone for a retained-only pane (unverified SSH exit)', () => {
+    vi.useFakeTimers()
+    const store = createTestStore()
+    // Why: PTY exit calls removeAgentStatus unconditionally, including a synthetic exit from a
+    // lost SSH link. The live row is already gone; the retained/persisted read state must
+    // survive so acked rows do not re-bold and cleared history does not replay on reconnect.
+    store.getState().acknowledgeAgents(['tab-6:0'])
+    store.setState({
+      activityClearedAtByPaneKey: { 'tab-6:0': 100 },
+      manuallyUnreadTurnsByPaneKey: { 'tab-6:0': 200 }
+    })
+    const epochBefore = store.getState().agentStatusEpoch
+
+    store.getState().removeAgentStatus('tab-6:0')
+
+    expect(store.getState().acknowledgedAgentsByPaneKey['tab-6:0']).toBeGreaterThan(0)
+    expect(store.getState().activityClearedAtByPaneKey['tab-6:0']).toBe(100)
+    expect(store.getState().manuallyUnreadTurnsByPaneKey['tab-6:0']).toBe(200)
+    expect(store.getState().agentStatusEpoch).toBe(epochBefore)
+  })
+
   it('dropAgentStatus drops the ack entry even when the pane had no live entry', () => {
     vi.useFakeTimers()
     const store = createTestStore()

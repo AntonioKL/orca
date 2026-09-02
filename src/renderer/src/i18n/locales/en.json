@@ -9320,7 +9320,8 @@
             },
             "agentDashboard": {
               "title": "Agent Dashboard",
-              "description": "Kanban board for monitoring agents across worktrees, in-window or as a pop-out."
+              "description": "Kanban board for monitoring agents across worktrees, in-window or as a pop-out.",
+              "dashboard": "dashboard"
             }
           }
         },
@@ -17285,7 +17286,7 @@
     "new": {
       "title": "Meet your Agents tab",
       "description": "See what your agents are working on, what is done, and where you need to step in.",
-      "dismiss": "Maybe later",
+      "hide": "Hide Agents",
       "action": "Try Agents",
       "hiddenToast": "Agents tab hidden. Re-enable it in Settings → Experimental."
     }

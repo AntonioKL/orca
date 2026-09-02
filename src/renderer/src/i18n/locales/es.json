@@ -8234,7 +8234,8 @@
             },
             "agentDashboard": {
               "title": "Panel de agentes",
-              "description": "Tablero Kanban para monitorear agentes en diferentes worktrees, en ventana o como ventana emergente."
+              "description": "Tablero Kanban para monitorear agentes en diferentes worktrees, en ventana o como ventana emergente.",
+              "dashboard": "panel"
             }
           }
         },
@@ -14852,7 +14853,7 @@
     "new": {
       "title": "Conoce tu pestaña de Agentes",
       "description": "Ve en qué están trabajando tus agentes, qué está terminado y dónde necesitas intervenir.",
-      "dismiss": "Quizás más tarde",
+      "hide": "Ocultar Agentes",
       "action": "Probar Agentes",
       "hiddenToast": "La pestaña Agentes está oculta. Vuelve a activarla en Configuración → Experimental."
     }

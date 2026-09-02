@@ -65,7 +65,21 @@ export function countActivityUnread(source: ActivityUnreadCountSource): number {
   return count
 }
 
-export function useActivityUnreadCount(): number {
+const EMPTY_MIGRATION_UNSUPPORTED: AppState['migrationUnsupportedByPtyId'] = {}
+const EMPTY_RETAINED_AGENTS: AppState['retainedAgentsByPaneKey'] = {}
+const EMPTY_ACKNOWLEDGED_AGENTS: AppState['acknowledgedAgentsByPaneKey'] = {}
+const EMPTY_CLEARED_AT: Record<string, number> = {}
+
+// Why constant inputs when disabled: a hidden badge must not re-render its host on status churn.
+const DISABLED_ACTIVITY_UNREAD_INPUTS = {
+  sortEpoch: 0,
+  migrationUnsupportedByPtyId: EMPTY_MIGRATION_UNSUPPORTED,
+  retainedAgentsByPaneKey: EMPTY_RETAINED_AGENTS,
+  acknowledgedAgentsByPaneKey: EMPTY_ACKNOWLEDGED_AGENTS,
+  activityClearedAtByPaneKey: EMPTY_CLEARED_AT
+}
+
+export function useActivityUnreadCount(enabled: boolean = true): number {
   const {
     sortEpoch,
     migrationUnsupportedByPtyId,
@@ -73,19 +87,27 @@ export function useActivityUnreadCount(): number {
     acknowledgedAgentsByPaneKey,
     activityClearedAtByPaneKey
   } = useAppStore(
-    useShallow((state) => ({
-      // Why: live status prompt/tool updates churn agentStatusByPaneKey but
-      // cannot change unread count unless a sort-relevant state transition
-      // or removal occurred. sortEpoch is the cheap invalidation signal.
-      sortEpoch: state.sortEpoch,
-      migrationUnsupportedByPtyId: state.migrationUnsupportedByPtyId,
-      retainedAgentsByPaneKey: state.retainedAgentsByPaneKey,
-      acknowledgedAgentsByPaneKey: state.acknowledgedAgentsByPaneKey,
-      activityClearedAtByPaneKey: state.activityClearedAtByPaneKey
-    }))
+    useShallow((state) => {
+      if (!enabled) {
+        return DISABLED_ACTIVITY_UNREAD_INPUTS
+      }
+      return {
+        // Why: live status prompt/tool updates churn agentStatusByPaneKey but
+        // cannot change unread count unless a sort-relevant state transition
+        // or removal occurred. sortEpoch is the cheap invalidation signal.
+        sortEpoch: state.sortEpoch,
+        migrationUnsupportedByPtyId: state.migrationUnsupportedByPtyId,
+        retainedAgentsByPaneKey: state.retainedAgentsByPaneKey,
+        acknowledgedAgentsByPaneKey: state.acknowledgedAgentsByPaneKey,
+        activityClearedAtByPaneKey: state.activityClearedAtByPaneKey
+      }
+    })
   )
 
   return useMemo(() => {
+    if (!enabled) {
+      return 0
+    }
     void sortEpoch
     return countActivityUnread({
       agentStatusByPaneKey: useAppStore.getState().agentStatusByPaneKey,
@@ -95,6 +117,7 @@ export function useActivityUnreadCount(): number {
       activityClearedAtByPaneKey
     })
   }, [
+    enabled,
     acknowledgedAgentsByPaneKey,
     activityClearedAtByPaneKey,
     migrationUnsupportedByPtyId,

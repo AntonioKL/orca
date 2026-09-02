@@ -8256,7 +8256,8 @@
             },
             "agentDashboard": {
               "title": "Agent ダッシュボード",
-              "description": "ワークツリー Agent を監視するカンバンボード。ウィンドウ内またはポップアウトで表示できます。"
+              "description": "ワークツリー Agent を監視するカンバンボード。ウィンドウ内またはポップアウトで表示できます。",
+              "dashboard": "ダッシュボード"
             }
           }
         },
@@ -14852,7 +14853,7 @@
     "new": {
       "title": "Agent タブのご紹介",
       "description": "Agent が何に取り組んでいるか、何が完了したか、どこで対応が必要かを確認できます。",
-      "dismiss": "後で",
+      "hide": "エージェントを隠す",
       "action": "Agent を試す",
       "hiddenToast": "Agent タブを非表示にしました。設定 → 実験的機能で再度有効にできます。"
     }

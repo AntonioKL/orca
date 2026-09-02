@@ -29,6 +29,11 @@ function wasHiddenBySidebarFilters(worktreeId: string, executionHostId?: Executi
   if (inRenderedTargets) {
     return false
   }
+  // Why: a retained agent can outlive its worktree; a deleted worktree fails every filter
+  // pass, so without this check any active filter would blame itself for the missing row.
+  if (!state.getKnownWorktreeById?.(worktreeId, executionHostId)) {
+    return false
+  }
   // Absent from the rendered list can mean a collapsed group, not a filter:
   // collapsed-but-unfiltered targets should be revealed, not toasted. The host
   // matters: an id-only check would pass on a filtered target's same-id twin

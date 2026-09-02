@@ -18,6 +18,7 @@ import type { ActivityGroupBy, ThreadReadFilter } from '@/components/activity/ac
 import { ActivityThreadCollapseContext } from '@/components/activity/activity-thread-collapse-context'
 import { useSidebarProjectDrop } from './useSidebarProjectDrop'
 import { useWorkspaceBoardPanel } from './useWorkspaceBoardPanel'
+import { useWorkspaceRevealBodyRedirect } from './use-workspace-reveal-body-redirect'
 import { resolveLeftSidebarStyleVariables } from '@/lib/left-sidebar-appearance'
 import { useSystemPrefersDark } from '@/components/terminal-pane/use-system-prefers-dark'
 import { lazyWithRetry } from '@/lib/lazy-with-retry'
@@ -155,6 +156,107 @@ function Sidebar({
     onDraftWidthChange: setLiveSidebarWidth
   })
 
+  // Why memoized: SidebarHeader is React.memo; fresh JSX here on every Sidebar render would
+  // defeat that memo and re-render the header subtree on unrelated store churn.
+  const agentToolbar = useMemo(
+    () => (
+      <div className="flex items-center gap-1 shrink-0">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className={cn(
+                'text-muted-foreground',
+                agentSearchOpen &&
+                  'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
+              )}
+              aria-label={translate(
+                'auto.components.activity.ActivityPrototypePage.search',
+                'Search'
+              )}
+              aria-pressed={agentSearchOpen}
+              onClick={() => {
+                if (agentSearchOpen) {
+                  closeAgentSearch()
+                } else {
+                  setAgentSearchOpen(true)
+                }
+              }}
+            >
+              <Search className="size-3.5" strokeWidth={2.25} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>
+            {translate('auto.components.activity.ActivityPrototypePage.search', 'Search')}
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-pressed={agentReadFilter === 'unread'}
+              onClick={() =>
+                setAgentReadFilter((filter) => (filter === 'unread' ? 'all' : 'unread'))
+              }
+              className={cn(
+                'text-muted-foreground',
+                agentReadFilter === 'unread' &&
+                  'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
+              )}
+              aria-label={translate(
+                'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
+                'Show unread threads only'
+              )}
+            >
+              <BellDot className="size-3.5" strokeWidth={2.25} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>
+            {translate(
+              'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
+              'Show unread threads only'
+            )}
+          </TooltipContent>
+        </Tooltip>
+        <div ref={setAgentOptionsTarget} className="flex items-center" />
+      </div>
+    ),
+    [agentReadFilter, agentSearchOpen, closeAgentSearch]
+  )
+  const agentSearchRow = useMemo(
+    () =>
+      agentSearchOpen ? (
+        <div className="shrink-0 border-b border-border px-2 py-1.5">
+          <Input
+            autoFocus
+            value={agentQuery}
+            onChange={(event) => setAgentQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                closeAgentSearch()
+              }
+            }}
+            placeholder={translate(
+              'auto.components.activity.ActivityPrototypePage.795cbf26e2',
+              'Filter...'
+            )}
+            className="h-7 w-full text-[11px]"
+            aria-label={translate(
+              'auto.components.activity.ActivityPrototypePage.search',
+              'Search'
+            )}
+          />
+        </div>
+      ) : null,
+    [agentQuery, agentSearchOpen, closeAgentSearch]
+  )
+
+  useWorkspaceRevealBodyRedirect(sidebarOpen && sidebarBody === 'agents' && showAgentsSidebar)
+
   return (
     <TooltipProvider delayDuration={400}>
       <div
@@ -171,97 +273,8 @@ function Sidebar({
             <SidebarHeader
               onWorkspaceBoardMenuOpenChange={setWorkspaceBoardMenuOpen}
               showAgentsSidebar={showAgentsSidebar}
-              agentToolbar={
-                <div className="flex items-center gap-1 shrink-0">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className={cn(
-                          'text-muted-foreground',
-                          agentSearchOpen &&
-                            'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
-                        )}
-                        aria-label={translate(
-                          'auto.components.activity.ActivityPrototypePage.search',
-                          'Search'
-                        )}
-                        aria-pressed={agentSearchOpen}
-                        onClick={() => {
-                          if (agentSearchOpen) {
-                            closeAgentSearch()
-                          } else {
-                            setAgentSearchOpen(true)
-                          }
-                        }}
-                      >
-                        <Search className="size-3.5" strokeWidth={2.25} />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={6}>
-                      {translate('auto.components.activity.ActivityPrototypePage.search', 'Search')}
-                    </TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-pressed={agentReadFilter === 'unread'}
-                        onClick={() =>
-                          setAgentReadFilter((filter) => (filter === 'unread' ? 'all' : 'unread'))
-                        }
-                        className={cn(
-                          'text-muted-foreground',
-                          agentReadFilter === 'unread' &&
-                            'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
-                        )}
-                        aria-label={translate(
-                          'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
-                          'Show unread threads only'
-                        )}
-                      >
-                        <BellDot className="size-3.5" strokeWidth={2.25} />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={6}>
-                      {translate(
-                        'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
-                        'Show unread threads only'
-                      )}
-                    </TooltipContent>
-                  </Tooltip>
-                  <div ref={setAgentOptionsTarget} className="flex items-center" />
-                </div>
-              }
-              agentSearchRow={
-                agentSearchOpen ? (
-                  <div className="shrink-0 border-b border-border px-2 py-1.5">
-                    <Input
-                      autoFocus
-                      value={agentQuery}
-                      onChange={(event) => setAgentQuery(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Escape') {
-                          closeAgentSearch()
-                        }
-                      }}
-                      placeholder={translate(
-                        'auto.components.activity.ActivityPrototypePage.795cbf26e2',
-                        'Filter...'
-                      )}
-                      className="h-7 w-full text-[11px]"
-                      aria-label={translate(
-                        'auto.components.activity.ActivityPrototypePage.search',
-                        'Search'
-                      )}
-                    />
-                  </div>
-                ) : null
-              }
+              agentToolbar={agentToolbar}
+              agentSearchRow={agentSearchRow}
             />
             {sidebarBody === 'agents' && showAgentsSidebar ? (
               <React.Suspense fallback={<div className="min-h-0 flex-1" />}>

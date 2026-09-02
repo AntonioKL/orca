@@ -42,8 +42,22 @@ describe('worktree jump navigation', () => {
       alwaysShowDefaultBranchWorkspace: true,
       visibleWorkspaceHostIds: null,
       workspaceHostScope: 'all',
-      revealWorktreeInSidebar: vi.fn()
+      revealWorktreeInSidebar: vi.fn(),
+      getKnownWorktreeById: vi.fn(() => ({ id: 'known' }))
     })
+  })
+
+  it('does not blame filters for a worktree that no longer exists', () => {
+    // A retained agent row can outlive its (deleted) worktree; every filter check fails for
+    // an unknown id, so without the existence guard any active filter would toast.
+    const state = mocks.getState()
+    state.getKnownWorktreeById.mockReturnValue(undefined)
+
+    expect(jumpToWorktreeFromSidebar('repo::/deleted')).toBe(true)
+
+    expect(mocks.worktreePassesSidebarFilters).not.toHaveBeenCalled()
+    expect(mocks.warning).not.toHaveBeenCalled()
+    expect(mocks.activateAndRevealWorkspace).toHaveBeenCalledWith('repo::/deleted', {})
   })
 
   it('switches the left sidebar to Spaces and warns when filters hide the target', () => {

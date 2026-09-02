@@ -37,8 +37,10 @@ type SplitGroupTerminal = {
   tabId: string
 }
 
+// The Agents tab is a radio in the sidebar view toggle; its accessible name carries the
+// unread count ("Agents 3") while there is something to read.
 function agentsSidebarButton(page: Page) {
-  return page.getByRole('button', { name: /^Agents(?:\s+\d+)?$/ }).first()
+  return page.getByRole('radio', { name: /^Agents(?:\s+\d+)?$/ }).first()
 }
 
 async function seedActivityThread(
@@ -164,9 +166,12 @@ async function enableInlineAgentCards(page: Page): Promise<void> {
 
 async function enableActivityAgentsView(page: Page): Promise<void> {
   await page.evaluate(async () => {
-    const settings = await window.api.settings.set({ experimentalActivity: true })
-    // Why: these specs exercise the experimental Agents page. E2E profiles use
-    // production defaults, where the sidebar entry is hidden unless enabled.
+    // Why: the Agents tab is on by default, but a fresh profile opens the intro popover
+    // over it; stamping it as shown keeps the toggle clickable without dismissing it first.
+    const settings = await window.api.settings.set({
+      showAgentsSidebar: true,
+      agentsSidebarIntroShown: true
+    })
     window.__store?.setState({ settings })
   })
 }
@@ -359,7 +364,7 @@ test.describe('Activity Agent Pane Isolation', () => {
     }, thread.paneKey)
 
     await expect(agentsSidebarButton(orcaPage)).toHaveAccessibleName(/^Agents$/)
-    await expect(orcaPage.getByRole('button', { name: /^Agents\s+1$/ })).toHaveCount(0)
+    await expect(orcaPage.getByRole('radio', { name: /^Agents\s+1$/ })).toHaveCount(0)
   })
 
   test('workspace card agent rows focus the matching terminal split pane', async ({ orcaPage }) => {

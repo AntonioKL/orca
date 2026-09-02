@@ -10,7 +10,15 @@ import SidebarHeader from './SidebarHeader'
 const mocks = vi.hoisted(() => ({
   openWorkspaceCreationComposerWithTourHandoff: vi.fn(),
   popoverContentProps: { current: null as Record<string, unknown> | null },
-  toast: vi.fn()
+  toast: vi.fn(),
+  unreadCount: { value: 0, lastEnabled: null as boolean | null }
+}))
+
+vi.mock('@/components/activity/useActivityUnreadCount', () => ({
+  useActivityUnreadCount: (enabled: boolean) => {
+    mocks.unreadCount.lastEnabled = enabled
+    return enabled ? mocks.unreadCount.value : 0
+  }
 }))
 
 type MockState = {
@@ -105,6 +113,8 @@ function workspaceViewLabel(): string {
 beforeEach(() => {
   mocks.openWorkspaceCreationComposerWithTourHandoff.mockClear()
   mocks.toast.mockClear()
+  mocks.unreadCount.value = 0
+  mocks.unreadCount.lastEnabled = null
   mockState = {
     repos: [],
     groupBy: 'repo',
@@ -190,6 +200,34 @@ describe('SidebarHeader', () => {
     })
 
     expect(mockState.setSidebarBody).toHaveBeenCalledWith('workspaces')
+  })
+
+  it('shows the unread count on the Agents tab while Spaces is showing', () => {
+    mocks.unreadCount.value = 3
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    const agentTab = container.querySelector<HTMLButtonElement>(
+      'button[data-sidebar-section-title="agents"]'
+    )
+    expect(mocks.unreadCount.lastEnabled).toBe(true)
+    expect(agentTab?.getAttribute('aria-label')).toBe('Agents 3')
+    expect(agentTab?.textContent).toContain('3')
+  })
+
+  it('does not subscribe to the unread count while the Agents body is already showing', () => {
+    mocks.unreadCount.value = 3
+    mockState.sidebarBody = 'agents'
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    const agentTab = container.querySelector<HTMLButtonElement>(
+      'button[data-sidebar-section-title="agents"]'
+    )
+    expect(mocks.unreadCount.lastEnabled).toBe(false)
+    expect(agentTab?.getAttribute('aria-label')).toBeNull()
   })
 
   it('always labels the workspace view as Spaces', () => {
@@ -319,13 +357,13 @@ describe('SidebarHeader', () => {
     expect(mockState.updateSettings).toHaveBeenCalledWith({ agentsSidebarIntroShown: true })
   })
 
-  it('hides the Agents tab when a new user chooses Maybe later', () => {
+  it('hides the Agents tab when a new user chooses Hide Agents', () => {
     act(() => {
       root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
     })
 
     const deferButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === 'Maybe later'
+      (button) => button.textContent?.trim() === 'Hide Agents'
     )
     expect(deferButton).toBeTruthy()
     act(() => {
@@ -351,7 +389,7 @@ describe('SidebarHeader', () => {
     })
 
     const introButtons = Array.from(container.querySelectorAll('button')).filter((button) =>
-      ['Open Agents', 'Maybe later'].includes(button.textContent?.trim() ?? '')
+      ['Open Agents', 'Hide Agents'].includes(button.textContent?.trim() ?? '')
     )
     expect(introButtons).toHaveLength(1)
     expect(introButtons[0]?.textContent?.trim()).toBe('Open Agents')

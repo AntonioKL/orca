@@ -7,6 +7,8 @@ type SidebarViewToggleOption = {
   /** Every label this slot can ever show; reserves width so switching never resizes the tab. */
   widthLabels?: readonly string[]
   sectionTitle?: string
+  /** Trailing count pill; folded into the accessible name so "Agents 3" reads as one control. */
+  badgeCount?: number
   renderWrapper?: (button: React.ReactNode) => React.ReactNode
 }
 
@@ -37,6 +39,7 @@ export function SidebarViewToggle({
     >
       {options.map((option, index) => {
         const active = option.value === value
+        const badgeCount = option.badgeCount ?? 0
         const button = (
           <button
             key={option.value}
@@ -44,6 +47,7 @@ export function SidebarViewToggle({
             role="radio"
             tabIndex={active ? 0 : -1}
             aria-checked={active}
+            aria-label={badgeCount > 0 ? `${option.label} ${badgeCount}` : undefined}
             data-sidebar-section-title={option.sectionTitle}
             onClick={() => {
               if (!active) {
@@ -82,6 +86,14 @@ export function SidebarViewToggle({
               </span>
             ))}
             <span className="col-start-1 row-start-1 whitespace-nowrap">{option.label}</span>
+            {badgeCount > 0 ? (
+              <span
+                aria-hidden
+                className="pointer-events-none absolute -top-1.5 -right-1.5 rounded-full bg-primary px-1 text-[9px] font-semibold leading-3.5 text-primary-foreground"
+              >
+                {badgeCount}
+              </span>
+            ) : null}
           </button>
         )
 
