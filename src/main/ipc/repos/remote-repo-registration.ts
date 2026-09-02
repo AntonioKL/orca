@@ -3,7 +3,7 @@ import type { Store } from '../../persistence'
 import type { Repo } from '../../../shared/repo-types'
 import { DEFAULT_REPO_BADGE_COLOR } from '../../../shared/constants'
 import { normalizeRuntimePathForComparison } from '../../../shared/cross-platform-path'
-import { getRepoSshConnectionId } from '../../../shared/execution-host'
+import { getRepoSshConnectionId, toSshExecutionHostId } from '../../../shared/execution-host'
 import { getSshGitProvider } from '../../providers/ssh-git-dispatch'
 import { detectRepoIconAndUpstream } from '../../repo-icon-autodetect'
 import { getActiveMultiplexer } from '../../ssh/ssh-target-registry'
@@ -95,6 +95,9 @@ export async function addRemoteRepoFromPath(
     addedAt: Date.now(),
     kind: repoKind,
     connectionId: args.connectionId,
+    // Stamp the unified spelling at creation: this is now the runtime's SSH registration path too,
+    // and minting `connectionId`-only rows leaves every host-resolving reader on the legacy field.
+    executionHostId: toSshExecutionHostId(args.connectionId),
     ...(repoKind === 'git'
       ? {
           externalWorktreeVisibilityLegacy: false,
