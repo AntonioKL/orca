@@ -63,8 +63,9 @@ function hasClaudeModelSwitchRejection(buffer: string): boolean {
 }
 
 // Why: compactTerminalText only strips whitespace, so a point release keeps its
-// dot ("fable5.1uses...") and a version-pinned literal stops matching.
-const FABLE_VERSION = String.raw`fable\d+(?:\.\d+)*`
+// dot ("fable5.1uses..."). The version is optional because the CLI's own label
+// for the newest Fable carries no number at all.
+const FABLE_VERSION = String.raw`fable(?:\d+(?:\.\d+)*)?`
 const FABLE_CONSENT_RE = new RegExp(`${FABLE_VERSION}usesusagecreditsandneedsaone-timeconsent`)
 const FABLE_SWITCH_PROMPT_RE = new RegExp(`switchto${FABLE_VERSION}\\?`)
 
