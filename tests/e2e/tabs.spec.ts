@@ -130,20 +130,35 @@ test.describe('Tabs', () => {
       }
     })
 
+    const preExistingFileIds = await orcaPage.evaluate(
+      () => window.__store?.getState().openFiles.map((file) => file.id) ?? []
+    )
+
     await orcaPage.getByRole('button', { name: 'New tab' }).click({ force: true })
     const newMarkdownMenuItem = orcaPage.getByRole('menuitem', { name: /New Markdown/i }).first()
     await newMarkdownMenuItem.click({ force: true })
     await expect(newMarkdownMenuItem).toBeHidden({ timeout: 3_000 })
 
+    // Why: require an id that did not exist before the click, so an already-open
+    // Markdown file can't satisfy the assertions (or be deleted by cleanup), and
+    // record the path here so cleanup still has it if a later assertion fails.
+    const createdFileHandle = await orcaPage.waitForFunction(
+      (knownFileIds) => {
+        const state = window.__store?.getState()
+        const file = state?.openFiles.find((candidate) => candidate.id === state.activeFileId)
+        if (!file || knownFileIds.includes(file.id)) {
+          return null
+        }
+        return { id: file.id, filePath: file.filePath }
+      },
+      preExistingFileIds,
+      { timeout: 25_000 }
+    )
+    const createdFile = (await createdFileHandle.jsonValue())!
+    createdFilePath = createdFile.filePath
+
     const editor = orcaPage.locator('.rich-markdown-editor')
     await expect(editor).toBeVisible({ timeout: 25_000 })
-    const createdFile = await orcaPage.evaluate(() => {
-      const state = window.__store?.getState()
-      const file = state?.openFiles.find((candidate) => candidate.id === state.activeFileId)
-      return file ? { id: file.id, filePath: file.filePath } : null
-    })
-    expect(createdFile).not.toBeNull()
-    createdFilePath = createdFile?.filePath ?? null
 
     await expect
       .poll(() => editor.evaluate((element) => document.activeElement === element), {
@@ -159,7 +174,7 @@ test.describe('Tabs', () => {
 
     await orcaPage.evaluate((fileId) => {
       window.__store?.getState().closeFile(fileId)
-    }, createdFile!.id)
+    }, createdFile.id)
     await expect(editor).toBeHidden()
   })
 
@@ -421,7 +436,9 @@ test.describe('Tabs', () => {
       }
     }, worktreeId)
     await expect
-      .poll(async () => (await getWorktreeTabs(orcaPage, worktreeId)).length, { timeout: 5_000 })
+      .poll(async () => (await getWorktreeTabs(orcaPage, worktreeId)).length, {
+        timeout: 5_000
+      })
       .toBeGreaterThanOrEqual(3)
 
     const initialOrder = await getTabBarOrder(orcaPage, worktreeId)
@@ -448,7 +465,9 @@ test.describe('Tabs', () => {
       state.reorderUnifiedTabs(activeGroup.id, [...rest, first])
     }, worktreeId)
     await expect
-      .poll(async () => getTabBarOrder(orcaPage, worktreeId), { timeout: 3_000 })
+      .poll(async () => getTabBarOrder(orcaPage, worktreeId), {
+        timeout: 3_000
+      })
       .toEqual([b, c, a])
 
     // Activate the last tab in the new visible order, then walk left twice.
