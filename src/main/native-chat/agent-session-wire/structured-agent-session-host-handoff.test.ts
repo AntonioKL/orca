@@ -10,6 +10,7 @@ import { LOCAL_EXECUTION_HOST_ID } from '../../../shared/execution-host'
 import { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import { openAgentSessionJournal } from '../agent-session-journal/journal-store-factory'
 import { createDeferredStructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
+import type { StructuredAgentSessionHostDeps } from './structured-agent-session-host-types'
 import {
   acquireNativeHandoffOwner,
   structuredTuiTranscriptImportOptions
@@ -195,5 +196,98 @@ describe('native handoff acquisition', () => {
     await acquiring
 
     expect(order).toEqual(['append-entered', 'append-complete', 'unbind', 'acquire'])
+  })
+
+  it('refuses an unsupported adapter before unbinding the TUI owner', async () => {
+    const location: AgentSessionExecutionLocation = {
+      executionHostId: LOCAL_EXECUTION_HOST_ID,
+      wslDistro: null,
+      workspaceId: 'workspace-unsupported',
+      workspaceKind: 'folder'
+    }
+    const operationId = `${now}-00000000000000000000000000000011`
+    const reserved = await store.reserveOwner({
+      sessionId: 'session-handoff-unsupported',
+      location,
+      provider: 'codex',
+      accountHome: { variable: 'CODEX_HOME', path: join(root, 'codex-home') },
+      runtimeKind: 'native',
+      expectedFence: null,
+      spawnToken: 'unsupported-spawn',
+      claimKeyId: 'key-1',
+      handoffOperationId: operationId,
+      probe: { outcome: 'reservation-unused' },
+      operation: { callerKey: 'test', operationId, fingerprint: 'unsupported' },
+      now
+    })
+    const journal = await openAgentSessionJournal({
+      identity: {
+        sessionId: 'session-handoff-unsupported',
+        workspaceId: location.workspaceId,
+        hostId: location.executionHostId,
+        agent: 'codex',
+        providerHandle: { kind: 'codex', threadId: 'unsupported-thread' }
+      },
+      journalDir: join(root, 'unsupported-journal')
+    })
+    const eventSink = createDeferredStructuredAgentSessionEventSink()
+    eventSink.bind({ journal, fence: reserved.record.lease.runtimeFence, publish: () => undefined })
+    const unbind = vi.spyOn(eventSink, 'unbind')
+    const acquire = vi.fn<NonNullable<StructuredAgentSessionHostDeps['adapter']['acquire']>>()
+    const adapter = {
+      supportsLocation: vi.fn(() => false),
+      acquire
+    }
+    const session = {
+      journal,
+      params: {
+        envelope: {
+          sessionId: 'session-handoff-unsupported',
+          clientOperationId: `${now}-00000000000000000000000000000012`,
+          expectedRuntimeFence: reserved.record.lease.runtimeFence,
+          payloadFingerprint: 'unsupported'
+        },
+        location,
+        provider: 'codex' as const,
+        agent: 'codex' as const,
+        accountHome: { variable: 'CODEX_HOME' as const, path: join(root, 'codex-home') },
+        runtimeKind: 'native' as const,
+        providerHandle: { kind: 'codex' as const, threadId: 'unsupported-thread' }
+      },
+      fence: reserved.record.lease.runtimeFence,
+      hasProviderChild: false,
+      acquisitionGeneration: null
+    }
+
+    await expect(
+      acquireNativeHandoffOwner(
+        {
+          store,
+          adapter: adapter as never,
+          journalRoot: root,
+          claimKeyId: 'key-1'
+        },
+        {
+          session: () => session,
+          eventSink: () => eventSink,
+          flush: async () => undefined,
+          serialize: async (_sessionId, task) => task(),
+          subscribers: {
+            publish: vi.fn(),
+            reset: vi.fn(),
+            handoff: vi.fn(),
+            snapshot: vi.fn()
+          } as never,
+          now: () => now
+        },
+        {
+          sessionId: 'session-handoff-unsupported',
+          fence: reserved.record.lease.runtimeFence,
+          spawnToken: 'unsupported-spawn'
+        }
+      )
+    ).rejects.toThrow('structured_agent_session_unsupported')
+    expect(unbind).not.toHaveBeenCalled()
+    expect(acquire).not.toHaveBeenCalled()
   })
 })

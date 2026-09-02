@@ -259,7 +259,7 @@ describe('ExperimentalPane', () => {
 
     expect(container.textContent).toContain('Use updated structured native chat')
     expect(container.textContent).toContain(
-      'Local macOS and Linux sessions only for now. Windows, WSL, and remote execution hosts (including SSH) continue to use terminal chat.'
+      "Uses the local execution host's structured Codex runtime when it advertises support. Windows hosts without process identity proof, WSL, SSH, and other remote hosts keep the recoverable terminal chat path."
     )
     expect(container.textContent).toContain('Default view')
     root.unmount()

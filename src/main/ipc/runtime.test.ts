@@ -108,16 +108,18 @@ describe('registerRuntimeHandlers', () => {
   })
 
   it('routes generic local runtime RPC calls through the dispatcher', async () => {
+    const status = {
+      runtimeId: 'runtime-1',
+      rendererGraphEpoch: 0,
+      graphStatus: 'ready',
+      authoritativeWindowId: null,
+      liveTabCount: 0,
+      liveLeafCount: 0
+    }
     const runtime = {
       syncWindowGraph: vi.fn(),
-      getStatus: vi.fn().mockReturnValue({
-        runtimeId: 'runtime-1',
-        rendererGraphEpoch: 0,
-        graphStatus: 'ready',
-        authoritativeWindowId: null,
-        liveTabCount: 0,
-        liveLeafCount: 0
-      }),
+      getStatus: vi.fn().mockReturnValue(status),
+      getStatusAfterWindowsProcessStartTimeProbe: vi.fn().mockResolvedValue(status),
       getRuntimeId: vi.fn().mockReturnValue('runtime-1')
     }
 
@@ -134,6 +136,19 @@ describe('registerRuntimeHandlers', () => {
       result: { runtimeId: 'runtime-1', graphStatus: 'ready' },
       _meta: { runtimeId: 'runtime-1' }
     })
+  })
+
+  it('waits for the host process identity probe before returning local runtime status', async () => {
+    const status = { runtimeId: 'runtime-1', windowsProcessStartTimeAvailable: true }
+    const getStatusAfterWindowsProcessStartTimeProbe = vi.fn().mockResolvedValue(status)
+    registerRuntimeHandlers({
+      syncWindowGraph: vi.fn(),
+      getStatusAfterWindowsProcessStartTimeProbe
+    } as never)
+    const handler = handleMock.mock.calls.find(([channel]) => channel === 'runtime:getStatus')![1]
+
+    await expect(handler()).resolves.toBe(status)
+    expect(getStatusAfterWindowsProcessStartTimeProbe).toHaveBeenCalledOnce()
   })
 
   it('registers project group runtime RPC methods for local desktop callers', async () => {

@@ -6936,7 +6936,7 @@
             "defaultViewNative": "Chat UI",
             "structuredTitle": "Use updated structured native chat",
             "structuredCopy": "Opt in to the host-owned structured Codex runtime. Off keeps the existing terminal-backed chat path.",
-            "structuredScope": "Local macOS and Linux sessions only for now. Windows, WSL, and remote execution hosts (including SSH) continue to use terminal chat.",
+            "structuredScope": "Uses the local execution host's structured Codex runtime when it advertises support. Windows hosts without process identity proof, WSL, SSH, and other remote hosts keep the recoverable terminal chat path.",
             "structuredToggleLabel": "Toggle updated structured native chat"
           },
           "agentDashboard": {

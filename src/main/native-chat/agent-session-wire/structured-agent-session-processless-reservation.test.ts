@@ -64,6 +64,47 @@ function attachParams(
 }
 
 describe('processless structured session reservation', () => {
+  it('refuses an adapter that declares no create support before reserving a lease', async () => {
+    root = await mkdtemp(join(tmpdir(), 'orca-unsupported-attach-'))
+    const store = await AgentSessionRecordStore.open({
+      directory: join(root, 'store'),
+      hostId: 'local'
+    })
+    const reserveOwner = vi.spyOn(store, 'reserveOwner')
+    const acquire = vi.fn<StructuredAgentSessionAdapter['acquire']>()
+    const adapter = {
+      supportsCreate: vi.fn(() => false),
+      acquire,
+      dispatch: vi.fn(),
+      cancelTurn: vi.fn(),
+      answerPrompt: vi.fn(),
+      setOption: vi.fn()
+    } as unknown as StructuredAgentSessionAdapter
+
+    await expect(
+      performAttach({
+        store,
+        adapter,
+        journalRoot: root,
+        authority: {
+          spawnToken: 'spawn-a',
+          claimKeyId: 'key-1',
+          handoffOperationId: OPERATION,
+          probe: { outcome: 'reservation-unused' }
+        },
+        callerKey: 'client-1',
+        params: attachParams(),
+        now: () => NOW,
+        onAttached: () => {}
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      refusal: { code: 'structured_agent_session_unsupported' }
+    })
+    expect(reserveOwner).not.toHaveBeenCalled()
+    expect(acquire).not.toHaveBeenCalled()
+  })
+
   it('settles a pre-spawn failure and its processless evidence in one durable transaction', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-processless-reservation-'))
     const storeDir = join(root, 'store')

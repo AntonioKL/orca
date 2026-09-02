@@ -83,7 +83,7 @@ type WindowsProcessTreeAddon = {
 }
 
 /** Mirrors the package's enum; the addon takes the raw bit field. */
-const PROCESS_DATA_FLAG = { None: 0, Memory: 1, CommandLine: 2 } as const
+const PROCESS_DATA_FLAG = { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 } as const
 
 /** Staged beside the relay bundle by build-relay; see RELAY_ARTIFACTS. */
 const RELAY_ADDON_FILENAME = './windows-process-tree.node'
@@ -161,10 +161,28 @@ const WINDOWS_PROCESS_QUERY_TIMEOUT_MS = 3_000
 const unreturnedReads = new Set<number>()
 let readSequence = 0
 let nativeReaderEpoch = 0
+let nativeProcessStartTimeCapability: boolean | undefined
+let nativeProcessStartTimeProbe: Promise<boolean> | null = null
 
 function resetNativeReaderState(): void {
   nativeReaderEpoch += 1
   unreturnedReads.clear()
+  nativeProcessStartTimeCapability = undefined
+  nativeProcessStartTimeProbe = null
+}
+
+function normalizeCreationTimeMs(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
+function hasNativeCreationTimeFlag(native: WindowsProcessTreeModule): boolean {
+  return native.ProcessDataFlag.CreationTime === PROCESS_DATA_FLAG.CreationTime
+}
+
+function hasOwnProcessStartTime(processes: readonly NativeProcessInfo[]): boolean {
+  return processes.some(
+    (row) => row.pid === process.pid && normalizeCreationTimeMs(row.creationTimeMs) !== undefined
+  )
 }
 
 function readNativeRows(): Promise<WindowsProcessRow[]> {
@@ -199,7 +217,7 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
   const flags =
     native.ProcessDataFlag.Memory |
     native.ProcessDataFlag.CommandLine |
-    (native.ProcessDataFlag.CreationTime ?? 0)
+    (hasNativeCreationTimeFlag(native) ? PROCESS_DATA_FLAG.CreationTime : 0)
   return new Promise((resolve, reject) => {
     // Hoisted so a synchronous throw from getAllProcesses can clear it. An
     // orphaned timer would otherwise fire later and wedge a reader that had
@@ -221,6 +239,9 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
         // that actually wedged can be holding the gate shut.
         unreturnedReads.delete(readId)
         if (!processes) {
+          if (readerEpoch === nativeReaderEpoch) {
+            nativeProcessStartTimeCapability = false
+          }
           reject(new Error('windows process table returned no snapshot'))
           return
         }
@@ -232,20 +253,31 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
         // unfalsifiably present in any honest snapshot, so this one predicate
         // catches empty, truncated and permission-filtered tables alike.
         if (!processes.some((row) => row.pid === process.pid)) {
+          if (readerEpoch === nativeReaderEpoch) {
+            nativeProcessStartTimeCapability = false
+          }
           reject(new Error('windows process table is unreadable'))
           return
         }
+        if (readerEpoch === nativeReaderEpoch) {
+          // The enum is copied into JS, so a stale package can claim the new bit
+          // while its old binary silently drops it. A real own-PID row is the
+          // only capability evidence we trust.
+          nativeProcessStartTimeCapability =
+            hasNativeCreationTimeFlag(native) && hasOwnProcessStartTime(processes)
+        }
         resolve(
-          processes.map((row) => ({
-            pid: row.pid,
-            ppid: row.ppid,
-            name: row.name,
-            command: row.commandLine ?? '',
-            memoryBytes: row.memory,
-            ...(typeof row.creationTimeMs === 'number'
-              ? { creationTimeMs: row.creationTimeMs }
-              : {})
-          }))
+          processes.map((row) => {
+            const creationTimeMs = normalizeCreationTimeMs(row.creationTimeMs)
+            return {
+              pid: row.pid,
+              ppid: row.ppid,
+              name: row.name,
+              command: row.commandLine ?? '',
+              memoryBytes: row.memory,
+              ...(creationTimeMs === undefined ? {} : { creationTimeMs })
+            }
+          })
         )
       }, flags)
     } catch (error) {
@@ -263,6 +295,7 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
  * so nothing downstream reads it as proof a process died.
  */
 async function readCimRows(): Promise<WindowsProcessRow[]> {
+  nativeProcessStartTimeCapability = false
   const rows = await cimScan()
   if (!rows.some((row) => row.pid === process.pid)) {
     throw new Error('windows process table is unreadable')
@@ -306,7 +339,56 @@ export function isWindowsProcessTableAvailable(): boolean {
  */
 export function isWindowsProcessStartTimeAvailable(): boolean {
   const native = moduleLoader()
-  return native !== null && typeof native.ProcessDataFlag.CreationTime === 'number'
+  if (native === null || !hasNativeCreationTimeFlag(native)) {
+    nativeProcessStartTimeCapability = false
+    return false
+  }
+  if (nativeProcessStartTimeCapability === undefined) {
+    void probeWindowsProcessStartTimeAvailability()
+  }
+  return nativeProcessStartTimeCapability === true
+}
+
+/** Probe the native binary, rather than trusting its JS enum, before advertising ownership. */
+export function probeWindowsProcessStartTimeAvailability(): Promise<boolean> {
+  if (process.platform !== 'win32') {
+    return Promise.resolve(false)
+  }
+  const native = moduleLoader()
+  if (native === null || !hasNativeCreationTimeFlag(native)) {
+    nativeProcessStartTimeCapability = false
+    return Promise.resolve(false)
+  }
+  if (nativeProcessStartTimeCapability !== undefined) {
+    return Promise.resolve(nativeProcessStartTimeCapability)
+  }
+  if (nativeProcessStartTimeProbe) {
+    return nativeProcessStartTimeProbe
+  }
+  const probeEpoch = nativeReaderEpoch
+  nativeProcessStartTimeProbe = readWindowsProcessTableFresh()
+    .then((rows) => {
+      const supported = rows.some(
+        (row) =>
+          row.pid === process.pid && normalizeCreationTimeMs(row.creationTimeMs) !== undefined
+      )
+      if (probeEpoch === nativeReaderEpoch) {
+        nativeProcessStartTimeCapability = supported
+      }
+      return probeEpoch === nativeReaderEpoch ? supported : false
+    })
+    .catch(() => {
+      if (probeEpoch === nativeReaderEpoch) {
+        nativeProcessStartTimeCapability = false
+      }
+      return false
+    })
+    .finally(() => {
+      if (probeEpoch === nativeReaderEpoch) {
+        nativeProcessStartTimeProbe = null
+      }
+    })
+  return nativeProcessStartTimeProbe
 }
 
 /**

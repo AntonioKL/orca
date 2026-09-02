@@ -24,6 +24,7 @@ import {
 } from './structured-agent-session-attach'
 import type { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import type { StructuredAgentSessionAdapter } from './structured-agent-session-adapter'
+import { adapterSupportsCreateIfDeclared } from './structured-agent-session-provider-support'
 import {
   AgentSessionAcquisitionExitUnprovenError,
   AgentSessionAcquisitionRefusal,
@@ -70,6 +71,16 @@ export async function performAttach(
   const admitted = admitAttachOrRefuse(params)
   if (!admitted.ok) {
     return admitted
+  }
+  // Ensure/recovery bypass create-intent, so recheck before reserving or spawning.
+  if (!adapterSupportsCreateIfDeclared(input.adapter, params.location, params.agent)) {
+    return {
+      ok: false,
+      refusal: {
+        code: 'structured_agent_session_unsupported',
+        message: 'This execution host cannot create the requested structured agent session.'
+      }
+    }
   }
 
   let record: AgentSessionRecord

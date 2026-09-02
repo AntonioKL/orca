@@ -87,7 +87,8 @@ describe('structured session runtime provider-exit wiring', () => {
       resolveCodexCommand: () => 'codex',
       resolveEnvironment: async () => ({ PATH: process.env.PATH }),
       openCodexConnection: openConnection,
-      readProcessStartTime: async () => 1_700_000_000_000
+      readProcessStartTime: async () => 1_700_000_000_000,
+      isWindowsProcessStartTimeAvailable: () => true
     })
     const attachParams = hostTestAttachParams(null, { providerHandle: undefined })
     attachParams.envelope.clientOperationId = operationId()
@@ -183,7 +184,8 @@ describe('structured session runtime provider-exit wiring', () => {
       resolveCodexCommand: () => 'codex',
       resolveEnvironment: async () => ({ PATH: process.env.PATH }),
       openCodexConnection: openConnection,
-      readProcessStartTime: async () => 1_700_000_000_000
+      readProcessStartTime: async () => 1_700_000_000_000,
+      isWindowsProcessStartTimeAvailable: () => true
     })
     const attachParams = hostTestAttachParams(null, { providerHandle: undefined })
     attachParams.envelope.clientOperationId = operationId()
@@ -263,7 +265,8 @@ describe('structured session runtime provider-exit wiring', () => {
       resolveCodexCommand: () => 'codex',
       resolveEnvironment: async () => ({ PATH: process.env.PATH }),
       openCodexConnection: openConnection,
-      readProcessStartTime: async () => 1_700_000_000_000
+      readProcessStartTime: async () => 1_700_000_000_000,
+      isWindowsProcessStartTimeAvailable: () => true
     })
     const attachParams = hostTestAttachParams(null, { providerHandle: undefined })
     attachParams.envelope.clientOperationId = operationId()

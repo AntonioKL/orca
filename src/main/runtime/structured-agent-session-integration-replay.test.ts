@@ -270,7 +270,8 @@ beforeEach(async () => {
           return { CODEX_PROFILE: configuredCodexProfile }
         },
         openCodexConnection: codex.openConnection,
-        readProcessStartTime: async () => 1_700_000_000_000
+        readProcessStartTime: async () => 1_700_000_000_000,
+        isWindowsProcessStartTimeAvailable: () => true
       }).then(() => undefined),
     registerOwnedSubscriptionCleanup: vi.fn((_id: string, dispose: () => void) => {
       return {
@@ -318,7 +319,8 @@ describe('a structured codex session over agentSession.*', () => {
       resolveWorkspacePath: async (workspaceId) => `/repos/${workspaceId}`,
       resolveCodexCommand: () => '/usr/local/bin/codex',
       openCodexConnection: codex.openConnection,
-      readProcessStartTime: async () => 1_700_000_000_000
+      readProcessStartTime: async () => 1_700_000_000_000,
+      isWindowsProcessStartTimeAvailable: () => true
     })
     const adapter = (host as unknown as { deps: { adapter: CodexStructuredSessionAdapter } }).deps
       .adapter

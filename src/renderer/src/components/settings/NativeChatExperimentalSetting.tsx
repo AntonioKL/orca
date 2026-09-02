@@ -132,7 +132,7 @@ export function NativeChatExperimentalSetting({
                 <p className="text-xs text-muted-foreground">
                   {translate(
                     'auto.components.settings.ExperimentalPane.nativeChat.structuredScope',
-                    'Local macOS and Linux sessions only for now. Windows, WSL, and remote execution hosts (including SSH) continue to use terminal chat.'
+                    "Uses the local execution host's structured Codex runtime when it advertises support. Windows hosts without process identity proof, WSL, SSH, and other remote hosts keep the recoverable terminal chat path."
                   )}
                 </p>
               </div>

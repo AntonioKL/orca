@@ -109,7 +109,7 @@ overrides:
   monaco-editor>dompurify: 3.4.13
 
 patchedDependencies:
-  '@vscode/windows-process-tree@0.8.0': 9217ef36c01ed74127fef5512b0c92089cdbf820fd6c109dd671137eebdc7585
+  '@vscode/windows-process-tree@0.8.0': c8de5dc333734ff23891a849ffb4cbbac724357d9ea385b8606d2f924d27ba6e
   '@xterm/addon-ligatures@0.11.0-beta.300': 47405b9994b5acf1b4e90b49250358c1ca03649854d59560e7732b72fe336920
   '@xterm/addon-serialize@0.15.0-beta.300': 851eac3d75e6d8c013b9f4c053e61d824b23965cb19ecc28e335e05059f3a294
   '@xterm/addon-webgl@0.20.0-beta.299': 94687e89a0115e6e6aa102837f986debdc029c091527ee5eb4a4e17ceaf9473e
@@ -506,7 +506,7 @@ importers:
     optionalDependencies:
       '@vscode/windows-process-tree':
         specifier: 0.8.0
-        version: 0.8.0(patch_hash=9217ef36c01ed74127fef5512b0c92089cdbf820fd6c109dd671137eebdc7585)
+        version: 0.8.0(patch_hash=c8de5dc333734ff23891a849ffb4cbbac724357d9ea385b8606d2f924d27ba6e)
       sherpa-onnx-darwin-arm64:
         specifier: 1.12.37
         version: 1.12.37
@@ -9737,7 +9737,7 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
 
-  '@vscode/windows-process-tree@0.8.0(patch_hash=9217ef36c01ed74127fef5512b0c92089cdbf820fd6c109dd671137eebdc7585)':
+  '@vscode/windows-process-tree@0.8.0(patch_hash=c8de5dc333734ff23891a849ffb4cbbac724357d9ea385b8606d2f924d27ba6e)':
     dependencies:
       node-addon-api: 7.1.0
     optional: true

@@ -1,7 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '@/store/types'
 import type * as localPreflightContext from '@/lib/local-preflight-context'
 import type { ProjectExecutionRuntimeResolution } from '../../../shared/project-execution-runtime'
+import {
+  loadWindowsTerminalCapabilities,
+  resetWindowsTerminalCapabilitiesForTests
+} from './windows-terminal-capabilities'
 import { canUseStructuredNativeChat } from './structured-native-chat-availability'
 
 const { mockGetRendererAppPlatform } = vi.hoisted(() => ({
@@ -82,6 +86,26 @@ function stateFor(input: {
   } as unknown as AppState
 }
 
+async function cacheWindowsProcessStartTimeCapability(): Promise<void> {
+  vi.stubGlobal('window', {
+    api: {
+      wsl: {
+        isAvailable: vi.fn().mockResolvedValue(false),
+        listDistros: vi.fn().mockResolvedValue([])
+      },
+      pwsh: { isAvailable: vi.fn().mockResolvedValue(false) },
+      gitBash: { isAvailable: vi.fn().mockResolvedValue(false) },
+      runtime: {
+        getStatus: vi.fn().mockResolvedValue({
+          hostPlatform: 'win32',
+          windowsProcessStartTimeAvailable: true
+        })
+      }
+    }
+  })
+  await loadWindowsTerminalCapabilities()
+}
+
 describe('canUseStructuredNativeChat', () => {
   beforeEach(() => {
     mockGetRendererAppPlatform.mockReturnValue('darwin')
@@ -92,6 +116,11 @@ describe('canUseStructuredNativeChat', () => {
       }
       return projectRuntimeMock.actual(...args)
     })
+  })
+
+  afterEach(() => {
+    resetWindowsTerminalCapabilitiesForTests()
+    vi.unstubAllGlobals()
   })
 
   it('allows the structured stack on a local worktree', () => {
@@ -152,20 +181,52 @@ describe('canUseStructuredNativeChat', () => {
     expect(canUseStructuredNativeChat(stateFor({ windowsRuntime: 'wsl' }), 'wt-1')).toBe(false)
   })
 
-  it('allows Windows-host projects when structured chat is enabled', () => {
+  it('refuses Windows-host projects when process identity proof is unavailable', () => {
     mockGetRendererAppPlatform.mockReturnValue('win32')
-    expect(canUseStructuredNativeChat(stateFor({ windowsRuntime: 'windows-host' }), 'wt-1')).toBe(true)
+    expect(canUseStructuredNativeChat(stateFor({ windowsRuntime: 'windows-host' }), 'wt-1')).toBe(
+      false
+    )
   })
 
-  it('refuses a Windows folder workspace even though its key resolves no project runtime', () => {
+  it('allows Windows-host projects once native start-time proof is cached', async () => {
+    await cacheWindowsProcessStartTimeCapability()
+    mockGetRendererAppPlatform.mockReturnValue('win32')
+    expect(canUseStructuredNativeChat(stateFor({ windowsRuntime: 'windows-host' }), 'wt-1')).toBe(
+      true
+    )
+  })
+
+  it('refuses a Windows folder workspace without process identity proof', () => {
     mockGetRendererAppPlatform.mockReturnValue('win32')
     const state = {
       ...stateFor({}),
       activeRepoId: null,
       activeWorktreeId: null
     } as unknown as AppState
+    expect(canUseStructuredNativeChat(state, 'folder:folder-1')).toBe(false)
+  })
+
+  it('allows a local Windows folder workspace once process identity is proved', async () => {
+    await cacheWindowsProcessStartTimeCapability()
+    mockGetRendererAppPlatform.mockReturnValue('win32')
+    const state = {
+      ...stateFor({}),
+      activeRepoId: null,
+      activeWorktreeId: null
+    } as unknown as AppState
+
     expect(canUseStructuredNativeChat(state, 'folder:folder-1')).toBe(true)
   })
+
+  it.each(['ssh-a', 'runtime-ssh-a'])(
+    'keeps the Windows terminal path for remote owner %s even with local proof',
+    async (connectionId) => {
+      await cacheWindowsProcessStartTimeCapability()
+      mockGetRendererAppPlatform.mockReturnValue('win32')
+
+      expect(canUseStructuredNativeChat(stateFor({ connectionId }), 'wt-1')).toBe(false)
+    }
+  )
 
   it('allows a folder workspace on a non-Windows platform', () => {
     const state = {

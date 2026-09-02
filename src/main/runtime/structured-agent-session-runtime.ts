@@ -32,6 +32,7 @@ import { readEchoedAgentSessionSpawnToken } from './agent-session-spawn-token-re
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import { resolveLoginShellEnvironment } from '../startup/login-shell-environment'
 import { recordAgentSessionProviderHandle } from './agent-session-provider-handle-transition'
+import { probeWindowsProcessStartTimeAvailability } from '../windows/windows-process-table'
 
 /** Sibling of the journal tree rather than inside it: one file adjudicates every
  *  session's lease, while a journal is per session. */
@@ -59,6 +60,11 @@ export type StructuredAgentSessionRuntimeDeps = {
   openCodexConnection?: CodexStructuredSessionAdapterDeps['openConnection']
   /** Scripted app-servers carry fake pids the real start-time read cannot answer for. */
   readProcessStartTime?: CodexStructuredSessionAdapterDeps['readProcessStartTime']
+  /** Capability paired with an injected process identity reader in tests. */
+  isWindowsProcessStartTimeAvailable?: () => boolean
+  /** Scripted app-server pids need scripted turn-process cancellation. */
+  captureTurnProcesses?: CodexStructuredSessionAdapterDeps['captureTurnProcesses']
+  terminateTurnProcesses?: CodexStructuredSessionAdapterDeps['terminateTurnProcesses']
   resolveLaunchArgs?: (provider: AgentSessionRecord['provider']) => Promise<string[]> | string[]
   resolveLaunchEnv?: () => Promise<NodeJS.ProcessEnv>
   resolveLaunchEnvOverlay?: () => Promise<Record<string, string>> | Record<string, string>
@@ -145,6 +151,11 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
     }
   })
   try {
+    // Populate the synchronous admission cache before any restore or attach checks it.
+    if (process.platform === 'win32' && !deps.isWindowsProcessStartTimeAvailable) {
+      await probeWindowsProcessStartTimeAvailability()
+    }
+    const isWindowsProcessStartTimeAvailable = deps.isWindowsProcessStartTimeAvailable
     let host: StructuredAgentSessionHost | null = null
     let recoveryChain = Promise.resolve()
     const codex = new CodexStructuredSessionAdapter({
@@ -152,10 +163,16 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
         store,
         resolveWorkspacePath: deps.resolveWorkspacePath,
         resolveEnvironment,
-        ...(deps.resolveCodexCommand ? { resolveCommand: deps.resolveCodexCommand } : {})
+        ...(deps.resolveCodexCommand ? { resolveCommand: deps.resolveCodexCommand } : {}),
+        ...(isWindowsProcessStartTimeAvailable ? { isWindowsProcessStartTimeAvailable } : {})
       }),
       ...(deps.openCodexConnection ? { openConnection: deps.openCodexConnection } : {}),
       ...(deps.readProcessStartTime ? { readProcessStartTime: deps.readProcessStartTime } : {}),
+      ...(isWindowsProcessStartTimeAvailable ? { isWindowsProcessStartTimeAvailable } : {}),
+      ...(deps.captureTurnProcesses ? { captureTurnProcesses: deps.captureTurnProcesses } : {}),
+      ...(deps.terminateTurnProcesses
+        ? { terminateTurnProcesses: deps.terminateTurnProcesses }
+        : {}),
       onEvent: (event) => {
         if (event.type !== 'ended' || !('cause' in event) || event.cause !== 'unexpected-exit') {
           return

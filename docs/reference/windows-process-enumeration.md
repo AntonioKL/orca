@@ -1,8 +1,9 @@
 # Reading the Windows process table
 
-Orca needs three things from the Windows process table: who a PID's parent is
+Orca needs four things from the Windows process table: who a PID's parent is
 (descendant walks and teardown identity), what a process is running (agent
-recognition), and how much memory/CPU it uses (Resource Manager).
+recognition), when it started (PID-reuse-safe ownership), and how much
+memory/CPU it uses (Resource Manager).
 
 Node cannot answer the first one without native code. That is why seven
 independent readers existed, each forking `powershell.exe` to run
@@ -180,7 +181,7 @@ on any other OS keeps using the scan.
 
 ## Why the package is patched
 
-`config/patches/@vscode__windows-process-tree@0.8.0.patch` carries three hunks.
+`config/patches/@vscode__windows-process-tree@0.8.0.patch` carries four changes.
 
 1. **Spectre mitigation.** The upstream `binding.gyp` requires Spectre-mitigated
    libraries, which Orca's Windows build agents do not install. `node-pty` is
@@ -195,6 +196,12 @@ on any other OS keeps using the scan.
    realpath, then loads the relative path from the `node_modules` symlink, so
    `node_addon_api.gyp` resolves outside the repo and hourly Windows builds
    die at configure. `node-pty` is patched the same way for the same reason.
+4. **Process creation time.** The addon requests `GetProcessTimes` under
+   `PROCESS_QUERY_LIMITED_INFORMATION` and publishes Unix milliseconds only
+   when Windows returned them. Orca requests that field with the shared
+   snapshot and requires a valid value for its own PID before advertising the
+   capability; a patched JavaScript enum over a stale binary therefore fails
+   closed.
 
 The typings claim `commandLine` is truncated at 512 characters. Measured, it is
 not: the longest observed on a real host was 26,059.
@@ -212,12 +219,21 @@ The addon is Windows-only, so it follows the same contract as
   `ensure-native-runtime.mjs`;
 - copied into the packaged `node_modules` for win32 only.
 
-## What the snapshot does not provide
+## Creation time and identity
 
-`CreationDate` (process start time) has no equivalent. Anything using a start
-time to prove a PID has not been recycled — daemon identity, managed-hook
-ownership, and CPU accounting in the memory collector — still reads it through
-its own query. Those callers are not migrated.
+The patched snapshot exposes `creationTimeMs`, and
+`agent-session-process-identity-probe.ts` uses it for Windows process identity.
+The field is omitted when a process denies the query handle or the native
+binary predates the patch. Structured Codex ownership therefore probes the
+querying process first and stays unavailable unless the native binary proves
+the field end to end.
+
+Start time is a PID-reuse guard, not ownership by itself. Structured sessions
+also retain host, provider, account, workspace, spawn-token, and lease-fence
+evidence. For PTY trees Orca creates, an inherited job-object handle remains
+stronger than reconstructing ownership from process-table fields.
+
+## What the snapshot does not provide
 
 Committed private bytes have no equivalent either, and the one memory value the
 snapshot does carry is unusable for the sizes Orca now sees: `process.cc` stores
@@ -225,11 +241,6 @@ snapshot does carry is unusable for the sizes Orca now sees: `process.cc` stores
 second reason `windows-process-resource-collector.ts` still runs its own
 `Get-CimInstance` sweep — it needs `PageFileUsage` (commit) and the CPU-time
 counters in the same pass. Migrating it to the native table would cost both.
-
-Start time is a proxy for identity, not identity. The durable answer for the
-process trees Orca itself spawns is an inherited handle: a job object names the
-tree Orca created, so no start-time comparison is needed. Those readers should
-be resolved that way rather than by adding a start time to this module.
 
 Do not adopt `getProcessCpuUsage()` from the package. It takes both CPU samples
 inside one call with a blocking `Sleep(1000)` in the middle, which would hold a

@@ -319,7 +319,10 @@ beforeEach(async () => {
           return { CODEX_PROFILE: configuredCodexProfile }
         },
         openCodexConnection: codex.openConnection,
-        readProcessStartTime: async () => 1_700_000_000_000
+        readProcessStartTime: async () => 1_700_000_000_000,
+        isWindowsProcessStartTimeAvailable: () => true,
+        captureTurnProcesses: async () => null,
+        terminateTurnProcesses: async () => true
       }).then(() => undefined),
     registerOwnedSubscriptionCleanup: vi.fn((_id: string, dispose: () => void) => {
       return {
