@@ -1,10 +1,12 @@
 import { dirname, join } from 'node:path'
 import type {
   WorktreeBasePollEvent,
-  WorktreeBaseSubscription,
   WorktreePollerWindowVisibility
 } from './worktree-base-directory-poller'
-import { startGitCommonPolling } from './worktree-git-common-polling'
+import {
+  startGitCommonPolling,
+  type GitCommonPollingSubscription
+} from './worktree-git-common-polling'
 
 // The native stream is still the fast path. A scheduled 15-tick reconciliation
 // bounds silent watcher loss at the existing 30-second backstop without joining
@@ -24,6 +26,11 @@ type GitCommonWatchReconciliationOptions = {
 type GitCommonWatchReconciliation = {
   ensureStarted: () => Promise<void>
   notifyWindowBecameVisible: () => void
+  /** Overflow/interruption/error/resubscribe on the narrow watch mean events
+   *  since then can't be trusted — request an early tick so the (always-on,
+   *  per-entry-gated) sweep runs sooner than the regular 30s cadence, rather
+   *  than gating whether it runs at all. */
+  notifyLossSignal: () => void
   unsubscribe: () => Promise<void>
 }
 
@@ -37,7 +44,7 @@ export function createGitCommonWatchReconciliation({
   onEvents
 }: GitCommonWatchReconciliationOptions): GitCommonWatchReconciliation {
   const worktreesDir = join(commonDirPath, 'worktrees')
-  let subscription: WorktreeBaseSubscription | null = null
+  let subscription: GitCommonPollingSubscription | null = null
   const visibilityListeners = new Set<() => void>()
   const pollVisibility: WorktreePollerWindowVisibility = {
     isWindowVisible: visibility.isWindowVisible,
@@ -94,7 +101,15 @@ export function createGitCommonWatchReconciliation({
         undefined,
         false,
         () => [],
-        { forceFullScanEveryTick: true }
+        // Why: #17839 made an unchanged entry's own per-entry stat gate (in
+        // snapshotGitCommonEntry) the cheap path, so this backstop no longer
+        // needs an outer sweep-skipping gate to stay affordable at fleet scale
+        // — every regular tick can just run. earlyTickMinIntervalMs bounds
+        // notifyLossSignal's requestEarlyTick to the same cadence the primary
+        // git-common poller (WORKTREE_BASE_POLL_INTERVAL_MS) already runs a
+        // full sweep at unconditionally, so a loss-signal storm can't drive
+        // this backstop's fan-out faster than a rate already proven cheap.
+        { earlyTickMinIntervalMs: pollIntervalMs }
       )
       if (!shouldKeep()) {
         await reconciliation.unsubscribe()
@@ -106,6 +121,9 @@ export function createGitCommonWatchReconciliation({
       for (const listener of visibilityListeners) {
         listener()
       }
+    },
+    notifyLossSignal: () => {
+      subscription?.requestEarlyTick()
     },
     unsubscribe: async () => {
       const current = subscription

@@ -121,6 +121,30 @@ async function snapshotGitCommon(
 export type GitCommonPollingOptions = {
   /** Reconciliation backstop: never trust the per-entry gate, re-stat every tick. */
   forceFullScanEveryTick?: boolean
+  /**
+   * Gate the whole tick behind a caller-owned check (e.g. a cheap root
+   * tripwire) instead of always sweeping. Returning false skips this tick's
+   * readdir + per-entry stat fan-out entirely — EXCEPT on a forced
+   * (visibility-resume, or requestEarlyTick) tick, which always runs
+   * regardless of this gate (see the `forceFullScan ||` short-circuit below).
+   * Omit to sweep every tick.
+   */
+  shouldSweep?: () => boolean | Promise<boolean>
+  /**
+   * Floor between requestEarlyTick()-triggered ticks. Defaults to
+   * pollIntervalMs (an early tick can't outrun the poller's own regular
+   * cadence). Callers that want faster-than-cadence reaction to a loss
+   * signal — without sweeping as fast as the loss signal itself can arrive —
+   * pass an explicit, smaller floor.
+   */
+  earlyTickMinIntervalMs?: number
+}
+
+export type GitCommonPollingSubscription = WorktreeBaseSubscription & {
+  /** Requests a tick sooner than the next scheduled one. Coalesced and
+   *  rate-limited to earlyTickMinIntervalMs: a burst of calls produces at
+   *  most one early tick per interval, not one per call. */
+  requestEarlyTick: () => void
 }
 
 export async function startGitCommonPolling(
@@ -132,7 +156,7 @@ export async function startGitCommonPolling(
   includePrimary = true,
   getStatusRefPaths: () => readonly string[] = () => [],
   options: GitCommonPollingOptions = {}
-): Promise<WorktreeBaseSubscription> {
+): Promise<GitCommonPollingSubscription> {
   let disposed = false
   let ticking = false
   let tickCount = 0
@@ -144,7 +168,10 @@ export async function startGitCommonPolling(
     new Set(getStatusRefPaths())
   )
   let timer: ReturnType<typeof setTimeout> | null = null
+  let earlyTickTimer: ReturnType<typeof setTimeout> | null = null
   let parkedWhileHidden = false
+  let lastTickStartedAt = 0
+  const earlyTickMinIntervalMs = options.earlyTickMinIntervalMs ?? pollIntervalMs
 
   const tick = async (forceFullScan = false): Promise<void> => {
     timer = null
@@ -162,29 +189,32 @@ export async function startGitCommonPolling(
     // Why: measure from tick start so cadence is start-to-start, not gap-after-completion (which would
     // land each visible refresh a full scan-duration late every tick).
     const startedAt = Date.now()
+    lastTickStartedAt = startedAt
     tickCount++
-    const shouldForceFullScan =
-      options.forceFullScanEveryTick === true ||
-      forceFullScan ||
-      tickCount % INDEX_BACKSTOP_TICKS === 0
     try {
-      const next = await snapshotGitCommon(
-        commonDirPath,
-        snapshot,
-        includePrimary,
-        shouldForceFullScan,
-        new Set(getStatusRefPaths())
-      )
-      if (disposed) {
-        return
-      }
-      if (next.didFullScan) {
-        onFullScan?.()
-      }
-      const events = diffGitCommon(commonDirPath, snapshot, next)
-      snapshot = next
-      if (events.length > 0) {
-        onEvents(events)
+      if (forceFullScan || !options.shouldSweep || (await options.shouldSweep())) {
+        const shouldForceFullScan =
+          options.forceFullScanEveryTick === true ||
+          forceFullScan ||
+          tickCount % INDEX_BACKSTOP_TICKS === 0
+        const next = await snapshotGitCommon(
+          commonDirPath,
+          snapshot,
+          includePrimary,
+          shouldForceFullScan,
+          new Set(getStatusRefPaths())
+        )
+        if (disposed) {
+          return
+        }
+        if (next.didFullScan) {
+          onFullScan?.()
+        }
+        const events = diffGitCommon(commonDirPath, snapshot, next)
+        snapshot = next
+        if (events.length > 0) {
+          onEvents(events)
+        }
       }
     } catch {
       // Transient fs error: keep the previous snapshot and retry next tick.
@@ -217,11 +247,34 @@ export async function startGitCommonPolling(
   timer = setTimeout(() => void tick(), pollIntervalMs)
   timer.unref?.()
 
+  const requestEarlyTick = (): void => {
+    // Why: a pending early tick already covers any request that arrives before
+    // it fires — coalescing here (not just relying on tick()'s own re-entrancy
+    // guard) is what keeps a burst of N requests to at most one extra tick
+    // instead of N redundant timers.
+    if (disposed || earlyTickTimer) {
+      return
+    }
+    const delay = Math.max(0, earlyTickMinIntervalMs - (Date.now() - lastTickStartedAt))
+    earlyTickTimer = setTimeout(() => {
+      earlyTickTimer = null
+      if (timer) {
+        clearTimeout(timer)
+      }
+      void tick(true)
+    }, delay)
+    earlyTickTimer.unref?.()
+  }
+
   return {
+    requestEarlyTick,
     unsubscribe: async () => {
       disposed = true
       if (timer) {
         clearTimeout(timer)
+      }
+      if (earlyTickTimer) {
+        clearTimeout(earlyTickTimer)
       }
       unsubscribeVisibility()
     }
