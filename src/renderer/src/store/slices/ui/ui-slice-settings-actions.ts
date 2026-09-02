@@ -1,5 +1,7 @@
 import type { UISlice, UISliceGet, UISliceSet } from './ui-slice-contract'
 import { isSettingsNavigationTarget } from '../../../lib/settings-navigation-types'
+// Pure predicate over GlobalSettings; safe to share with the store layer.
+import { shouldShowAgentDashboardSidebarButton } from '@/components/sidebar/agent-dashboard-sidebar-visibility'
 
 export function createUiSettingsActions(set: UISliceSet, get: UISliceGet): Partial<UISlice> {
   return {
@@ -15,9 +17,10 @@ export function createUiSettingsActions(set: UISliceSet, get: UISliceGet): Parti
     },
     closeSettingsPage: () =>
       set((state) => {
+        // Agents graduated from experimentalActivity; match openActivityPage's gate.
         const previousView =
           state.previousViewBeforeSettings === 'activity' &&
-          state.settings?.experimentalActivity !== true
+          !shouldShowAgentDashboardSidebarButton(state.settings)
             ? 'terminal'
             : state.previousViewBeforeSettings
         return { activeView: previousView }

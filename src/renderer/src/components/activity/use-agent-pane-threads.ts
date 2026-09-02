@@ -55,9 +55,13 @@ export function useAgentPaneThreads(args: {
   allThreads: AgentPaneThread[]
   selectedPaneKeyIsLive: boolean
   effectiveSelectedPaneKey: string | null
-  /** Threads shown after every active filter; bulk actions (mark all read, clear
-   *  completed) operate on exactly this set so they never touch hidden rows. */
+  /** Threads shown after every active filter; Clear completed operates on exactly
+   *  this set so it never destroys rows the user cannot see. */
   visibleThreads: AgentPaneThread[]
+  /** Threads after the child-agent classification only — the set the Agents-tab
+   *  badge counts and Mark all read clears; transient search/scope/read narrowing
+   *  is ignored so the badge is always clearable. */
+  markAllReadThreads: AgentPaneThread[]
   visibleThreadGroups: ActivityThreadGroup[]
   /** Threads excluded by the persisted host/project scope — the chips row shows this so scope filtering is never silent. */
   scopeHiddenThreadCount: number
@@ -205,6 +209,17 @@ export function useAgentPaneThreads(args: {
     childAgentPaneKeys
   ])
 
+  const markAllReadThreads = useMemo(
+    () =>
+      allThreads.filter(
+        (thread) =>
+          showChildAgents ||
+          !childAgentPaneKeys.has(thread.paneKey) ||
+          thread.paneKey === effectiveSelectedPaneKey
+      ),
+    [allThreads, showChildAgents, childAgentPaneKeys, effectiveSelectedPaneKey]
+  )
+
   const visibleThreadGroups = useMemo(
     () => buildActivityThreadGroups(visibleThreads, groupBy),
     [visibleThreads, groupBy]
@@ -216,6 +231,7 @@ export function useAgentPaneThreads(args: {
     selectedPaneKeyIsLive,
     effectiveSelectedPaneKey,
     visibleThreads,
+    markAllReadThreads,
     visibleThreadGroups,
     scopeHiddenThreadCount
   }

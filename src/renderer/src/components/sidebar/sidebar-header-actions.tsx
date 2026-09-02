@@ -14,6 +14,7 @@ import { useShortcutLabel } from '@/hooks/useShortcutLabel'
 import { translate } from '@/i18n/i18n'
 import { openWorkspaceCreationComposerWithTourHandoff } from '../contextual-tours/workspace-creation-tour-handoff'
 import SidebarWorkspaceOptionsMenu from './SidebarWorkspaceOptionsMenu'
+import { SidebarCountBadge } from './sidebar-count-badge'
 import {
   useWorkspaceOptionsFilterBadge,
   WorkspaceOptionsMenuItems
@@ -41,17 +42,6 @@ function AddProjectButton(): React.JSX.Element {
         {translate('auto.components.sidebar.SidebarHeader.25a95899c9', 'Add Project')}
       </TooltipContent>
     </Tooltip>
-  )
-}
-
-function FilterBadge({ count }: { count: number }): React.JSX.Element {
-  return (
-    <span
-      aria-hidden
-      className="absolute -top-0.5 -right-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-medium leading-none text-primary-foreground"
-    >
-      {count > 9 ? '9+' : count}
-    </span>
   )
 }
 
@@ -92,7 +82,7 @@ function CompactWorkspaceOverflow({
               data-workspace-board-preserve-open={boardAttr}
             >
               <Ellipsis className="size-3.5" strokeWidth={2.25} />
-              {hasAnyFilter ? <FilterBadge count={activeFilterCount} /> : null}
+              {hasAnyFilter ? <SidebarCountBadge count={activeFilterCount} /> : null}
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

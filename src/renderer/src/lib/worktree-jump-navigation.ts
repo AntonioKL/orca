@@ -33,8 +33,10 @@ function wasHiddenBySidebarFilters(worktreeId: string, executionHostId?: Executi
     return false
   }
   // Absent from the rendered list can mean a collapsed group, not a filter:
-  // collapsed-but-unfiltered targets should be revealed, not toasted.
-  return !worktreePassesSidebarFilters(worktreeId)
+  // collapsed-but-unfiltered targets should be revealed, not toasted. The host
+  // matters: an id-only check would pass on a filtered target's same-id twin
+  // from another execution host.
+  return !worktreePassesSidebarFilters(worktreeId, executionHostId)
 }
 
 /** Navigate from a worktree reference in either sidebar back to the workspace surface. */

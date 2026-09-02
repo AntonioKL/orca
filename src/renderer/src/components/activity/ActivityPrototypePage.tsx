@@ -12,8 +12,8 @@ import {
 } from './activity-portal-thread-reconciliation'
 import { useAgentPaneThreads } from './use-agent-pane-threads'
 import { handleActivityFilterFocusShortcut } from './activity-filter-focus-shortcut'
-import { clearCompletedActivity, isClearableActivityThread } from './activity-clear-completed'
-import { createActivityThreadActions, hasActivityThreadWorkspace } from './activity-thread-actions'
+import { hasActivityThreadWorkspace } from './activity-thread-actions'
+import { useActivityThreadActionBindings } from './use-activity-thread-action-bindings'
 import { ActivityThreadListPane } from './activity-thread-list-pane'
 import { ActivityThreadDetailPane } from './activity-thread-detail-pane'
 import {
@@ -68,6 +68,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     selectedPaneKeyIsLive,
     effectiveSelectedPaneKey,
     visibleThreads,
+    markAllReadThreads,
     visibleThreadGroups,
     scopeHiddenThreadCount
   } = useAgentPaneThreads({ query, readFilter, groupBy, selectedPaneKey, showChildAgents })
@@ -243,34 +244,22 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     return () => window.removeEventListener('keydown', focusActivityFilter, { capture: true })
   }, [activePortalTargetEl, inactivePortalTargetEl])
 
-  // Why a ref: rows are React.memo'd on these handlers; recreating them whenever the
-  // thread array identity changes (every status ping) would re-render every mounted row.
-  const visibleThreadsRef = useRef(visibleThreads)
-  useEffect(() => {
-    visibleThreadsRef.current = visibleThreads
-  }, [visibleThreads])
-  const { markThreadRead, markThreadUnread, selectThread, jumpToWorkspace, markAllThreadsRead } =
-    useMemo(
-      () =>
-        createActivityThreadActions({
-          getVisibleThreads: () => visibleThreadsRef.current,
-          acknowledgeAgents: storeData.acknowledgeAgents,
-          unacknowledgeAgents: storeData.unacknowledgeAgents,
-          setSelectedPaneKey
-        }),
-      [storeData.acknowledgeAgents, storeData.unacknowledgeAgents]
-    )
-
-  // Why visibleThreads: bulk actions and their enablement must match what the list
-  // shows — clearing/acking rows hidden by search, unread, or child filters would be silent.
-  const hasUnreadThreads = useMemo(() => visibleThreads.some((t) => t.unread), [visibleThreads])
-  const hasCompletedThreads = useMemo(
-    () => visibleThreads.some(isClearableActivityThread),
-    [visibleThreads]
-  )
-  const handleClearCompleted = useCallback(() => {
-    clearCompletedActivity(visibleThreadsRef.current)
-  }, [])
+  const {
+    markThreadRead,
+    markThreadUnread,
+    selectThread,
+    jumpToWorkspace,
+    markAllThreadsRead,
+    hasUnreadThreads,
+    hasCompletedThreads,
+    handleClearCompleted
+  } = useActivityThreadActionBindings({
+    visibleThreads,
+    markAllReadThreads,
+    acknowledgeAgents: storeData.acknowledgeAgents,
+    unacknowledgeAgents: storeData.unacknowledgeAgents,
+    setSelectedPaneKey
+  })
 
   const canJumpToWorkspace = hasActivityThreadWorkspace
 

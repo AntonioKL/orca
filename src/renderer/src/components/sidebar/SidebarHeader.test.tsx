@@ -20,7 +20,6 @@ type MockState = {
   setSidebarBody: (body: 'workspaces' | 'agents') => void
   openModal: (modal: string, data?: unknown) => void
   updateSettings: (patch: Record<string, unknown>) => void
-  openActivityPage: () => void
   activeContextualTourId: string | null
   settings?: {
     showAgentsSidebar?: boolean
@@ -110,7 +109,6 @@ beforeEach(() => {
     setSidebarBody: vi.fn(),
     openModal: vi.fn(),
     updateSettings: vi.fn(),
-    openActivityPage: vi.fn(),
     activeContextualTourId: null,
     // Hydrated settings: the Agents tab is hidden until settings load.
     settings: { showAgentsSidebar: true }
@@ -347,22 +345,14 @@ describe('SidebarHeader', () => {
     expect(mockState.updateSettings).not.toHaveBeenCalled()
   })
 
-  it('opens the full Agents view from the expand button in agents mode', () => {
+  it('does not expose the deprecated full Agents view in agents mode', () => {
     mockState.settings = { showAgentsSidebar: true, agentsSidebarIntroShown: true }
     mockState.sidebarBody = 'agents'
     act(() => {
       root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
     })
 
-    const expandButton = container.querySelector<HTMLButtonElement>(
-      '[aria-label="Open full Agents view"]'
-    )
-    expect(expandButton).toBeTruthy()
-
-    act(() => {
-      expandButton?.click()
-    })
-    expect(mockState.openActivityPage).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('[aria-label="Open full Agents view"]')).toBeNull()
   })
 
   it('switches to compact actions only below the wide-layout breakpoint', () => {

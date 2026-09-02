@@ -1,5 +1,4 @@
 import React, { useEffect } from 'react'
-import { Maximize2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '@/store'
 import { translate } from '@/i18n/i18n'
@@ -9,7 +8,6 @@ import { shouldShowAgentDashboardSidebarButton } from './agent-dashboard-sidebar
 import { useActivityUnreadCount } from '@/components/activity/useActivityUnreadCount'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 type SidebarHeaderProps = {
   onWorkspaceBoardMenuOpenChange: (open: boolean) => void
@@ -43,7 +41,6 @@ const SidebarHeader = React.memo(function SidebarHeader({
   // Why: settings are null until hydration; deriving intro visibility from the
   // null default would flash the popover open (and stamp it shown) every launch.
   const settingsHydrated = useAppStore((s) => s.settings != null)
-  const openActivityPage = useAppStore((s) => s.openActivityPage)
   const agentsViewActive = showAgentsSidebar && sidebarBody === 'agents'
   const agentsUnreadCount = useActivityUnreadCount(showAgentsSidebar, 'sidebar-badge')
   const introOpen = settingsHydrated && showAgentsSidebar && !agentsSidebarIntroShown
@@ -149,29 +146,7 @@ const SidebarHeader = React.memo(function SidebarHeader({
         </Popover>
         {agentsViewActive ? (
           <div className="flex shrink-0 items-center gap-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  type="button"
-                  className="text-muted-foreground"
-                  aria-label={translate(
-                    'auto.components.sidebar.SidebarHeader.openFullAgentsView',
-                    'Open full Agents view'
-                  )}
-                  onClick={() => openActivityPage?.()}
-                >
-                  <Maximize2 className="size-3.5" strokeWidth={2.25} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={6}>
-                {translate(
-                  'auto.components.sidebar.SidebarHeader.openFullAgentsView',
-                  'Open full Agents view'
-                )}
-              </TooltipContent>
-            </Tooltip>
+            {/* Do not add an expand action: the full Agents view is deprecated and must not open. */}
             {agentToolbar}
           </div>
         ) : null}

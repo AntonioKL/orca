@@ -15,6 +15,7 @@ import { BellDot, FolderPlus, Loader2, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { ActivityGroupBy, ThreadReadFilter } from '@/components/activity/activity-thread-types'
+import { ActivityThreadCollapseContext } from '@/components/activity/activity-thread-collapse-context'
 import { useSidebarProjectDrop } from './useSidebarProjectDrop'
 import { useWorkspaceBoardPanel } from './useWorkspaceBoardPanel'
 import { resolveLeftSidebarStyleVariables } from '@/lib/left-sidebar-appearance'
@@ -72,6 +73,27 @@ function Sidebar({
   }, [])
   const [agentOptionsTarget, setAgentOptionsTarget] = React.useState<HTMLDivElement | null>(null)
   const agentsScrollTopRef = React.useRef(0)
+  // Held here so collapsed groups (and the layout the saved scrollTop assumes)
+  // survive the Agents list unmounting on sidebar body switches.
+  const [agentsCollapsedGroupKeys, setAgentsCollapsedGroupKeys] = React.useState<
+    ReadonlySet<string>
+  >(() => new Set())
+  const agentsCollapseState = useMemo(
+    () => ({
+      collapsedGroupKeys: agentsCollapsedGroupKeys,
+      onToggleGroupCollapse: (groupKey: string) =>
+        setAgentsCollapsedGroupKeys((prev) => {
+          const next = new Set(prev)
+          if (next.has(groupKey)) {
+            next.delete(groupKey)
+          } else {
+            next.add(groupKey)
+          }
+          return next
+        })
+    }),
+    [agentsCollapsedGroupKeys]
+  )
   const fetchAllWorktrees = useAppStore((s) => s.fetchAllWorktrees)
   const activeModal = useAppStore((s) => s.activeModal)
   const statusBarVisible = useAppStore((s) => s.statusBarVisible)
@@ -242,16 +264,18 @@ function Sidebar({
             />
             {sidebarBody === 'agents' && showAgentsSidebar ? (
               <React.Suspense fallback={<div className="min-h-0 flex-1" />}>
-                <SidebarAgentsList
-                  readFilter={agentReadFilter}
-                  setReadFilter={setAgentReadFilter}
-                  groupBy={agentGroupBy}
-                  setGroupBy={setAgentGroupBy}
-                  query={agentQuery}
-                  setQuery={setAgentQuery}
-                  optionsTarget={agentOptionsTarget}
-                  scrollTopRef={agentsScrollTopRef}
-                />
+                <ActivityThreadCollapseContext.Provider value={agentsCollapseState}>
+                  <SidebarAgentsList
+                    readFilter={agentReadFilter}
+                    setReadFilter={setAgentReadFilter}
+                    groupBy={agentGroupBy}
+                    setGroupBy={setAgentGroupBy}
+                    query={agentQuery}
+                    setQuery={setAgentQuery}
+                    optionsTarget={agentOptionsTarget}
+                    scrollTopRef={agentsScrollTopRef}
+                  />
+                </ActivityThreadCollapseContext.Provider>
               </React.Suspense>
             ) : (
               <WorktreeList

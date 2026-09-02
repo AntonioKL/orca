@@ -1,5 +1,6 @@
 import React from 'react'
 import { cn } from '@/lib/utils'
+import { SidebarCountBadge } from './sidebar-count-badge'
 
 type SidebarViewToggleOption = {
   value: string
@@ -7,7 +8,8 @@ type SidebarViewToggleOption = {
   /** Every label this slot can ever show; reserves width so switching never resizes the tab. */
   widthLabels?: readonly string[]
   sectionTitle?: string
-  /** Unread count rendered after the label; hidden at 0. */
+  /** Unread count shown as a corner overlay (9+ clamp); hidden at 0. Absolute so
+   *  the frozen-width contract holds as the count appears and changes. */
   badgeCount?: number
 }
 
@@ -62,14 +64,8 @@ export function SidebarViewToggle({
                 {widthLabel}
               </span>
             ))}
-            <span className="col-start-1 row-start-1 inline-flex items-center justify-center gap-1 whitespace-nowrap">
-              {option.label}
-              {option.badgeCount ? (
-                <span className="rounded-full bg-primary px-1.5 py-px text-[10px] font-semibold text-primary-foreground">
-                  {option.badgeCount}
-                </span>
-              ) : null}
-            </span>
+            <span className="col-start-1 row-start-1 whitespace-nowrap">{option.label}</span>
+            {option.badgeCount ? <SidebarCountBadge count={option.badgeCount} /> : null}
           </button>
         )
       })}

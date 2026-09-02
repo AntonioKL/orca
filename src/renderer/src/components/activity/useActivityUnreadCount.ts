@@ -2,9 +2,18 @@ import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 import { migrationUnsupportedToAgentStatusEntry } from '@/lib/migration-unsupported-agent-entry'
+import { entryWithRuntimeOrchestration } from '../sidebar/worktree-agent-row-orchestration'
 import { useAppStore } from '@/store'
 import type { AppState } from '@/store/types'
-import type { AgentStatusEntry, AgentStatusState } from '../../../../shared/agent-status-types'
+import type {
+  AgentStatusEntry,
+  AgentStatusOrchestrationContext,
+  AgentStatusState
+} from '../../../../shared/agent-status-types'
+import {
+  collectChildAgentPaneKeys,
+  type ChildAgentClassifiableThread
+} from './activity-thread-child-agent'
 
 type ActivityUnreadCountSource = Pick<
   AppState,
@@ -12,31 +21,70 @@ type ActivityUnreadCountSource = Pick<
   | 'agentStatusByPaneKey'
   | 'migrationUnsupportedByPtyId'
   | 'retainedAgentsByPaneKey'
-  | 'worktreesByRepo'
 > & {
   /** Per-pane "Clear completed" cutoffs; hidden events must not count as unread. */
   activityClearedAtByPaneKey?: Record<string, number>
+  runtimeAgentOrchestrationByPaneKey?: Record<string, AgentStatusOrchestrationContext>
+  /** Mirrors the Agents list's child filter: children of listed parents are
+   *  excluded from sidebar-badge counts unless the user shows child agents. */
+  showChildAgents?: boolean
 }
 
 type ActivityUnreadCountMode = 'agent-events' | 'sidebar-badge'
 
-const EMPTY_WORKTREES_BY_REPO: AppState['worktreesByRepo'] = {}
 const EMPTY_MIGRATION_UNSUPPORTED: AppState['migrationUnsupportedByPtyId'] = {}
 const EMPTY_RETAINED_AGENTS: AppState['retainedAgentsByPaneKey'] = {}
 const EMPTY_ACKNOWLEDGED_AGENTS: AppState['acknowledgedAgentsByPaneKey'] = {}
 const EMPTY_ACTIVITY_CLEARED_AT: Record<string, number> = {}
+const EMPTY_RUNTIME_ORCHESTRATION: Record<string, AgentStatusOrchestrationContext> = {}
 
 const DISABLED_ACTIVITY_UNREAD_INPUTS = {
   sortEpoch: 0,
-  worktreesByRepo: EMPTY_WORKTREES_BY_REPO,
   migrationUnsupportedByPtyId: EMPTY_MIGRATION_UNSUPPORTED,
   retainedAgentsByPaneKey: EMPTY_RETAINED_AGENTS,
   acknowledgedAgentsByPaneKey: EMPTY_ACKNOWLEDGED_AGENTS,
-  activityClearedAtByPaneKey: EMPTY_ACTIVITY_CLEARED_AT
+  activityClearedAtByPaneKey: EMPTY_ACTIVITY_CLEARED_AT,
+  runtimeAgentOrchestrationByPaneKey: EMPTY_RUNTIME_ORCHESTRATION,
+  showChildAgents: false
 }
 
 function isUnreadAgentState(state: AgentStatusState): boolean {
   return state === 'done' || state === 'blocked' || state === 'waiting'
+}
+
+/** Minimal rows stand in for threads so the always-mounted badge never runs the
+ *  full thread-building pipeline. */
+function toChildClassifierRow(entry: AgentStatusEntry): ChildAgentClassifiableThread {
+  return {
+    paneKey: entry.paneKey,
+    currentAgentEntry: entry
+  }
+}
+
+function collectHiddenChildPaneKeys(source: ActivityUnreadCountSource): ReadonlySet<string> {
+  const rows: ChildAgentClassifiableThread[] = []
+  const seenPaneKeys = new Set<string>()
+  const push = (entry: AgentStatusEntry | null): void => {
+    if (!entry || seenPaneKeys.has(entry.paneKey)) {
+      return
+    }
+    seenPaneKeys.add(entry.paneKey)
+    rows.push(
+      toChildClassifierRow(
+        entryWithRuntimeOrchestration(entry, source.runtimeAgentOrchestrationByPaneKey)
+      )
+    )
+  }
+  for (const entry of Object.values(source.agentStatusByPaneKey)) {
+    push(entry)
+  }
+  for (const retained of Object.values(source.retainedAgentsByPaneKey)) {
+    push(retained.entry)
+  }
+  for (const unsupported of Object.values(source.migrationUnsupportedByPtyId)) {
+    push(migrationUnsupportedToAgentStatusEntry(unsupported))
+  }
+  return collectChildAgentPaneKeys(rows)
 }
 
 export function countActivityUnread(
@@ -45,15 +93,14 @@ export function countActivityUnread(
 ): number {
   let count = 0
 
-  if (mode === 'sidebar-badge') {
-    for (const worktrees of Object.values(source.worktreesByRepo)) {
-      for (const worktree of worktrees) {
-        if (worktree.createdAt && worktree.isUnread) {
-          count += 1
-        }
-      }
-    }
-  }
+  // Why no worktree.isUnread here: the Agents tab lists only agent threads, so a
+  // worktree unread would light a badge with no row to read and no way to clear it.
+  // Why the child exclusion: the badge counts exactly what Mark all read can clear;
+  // a child hidden by the default filter must not keep the badge lit forever.
+  const hiddenChildPaneKeys =
+    mode === 'sidebar-badge' && source.showChildAgents !== true
+      ? collectHiddenChildPaneKeys(source)
+      : null
 
   const countEntry = (entry: AgentStatusEntry, ackAt: number): void => {
     // Why: "Clear completed" hides events at or before the pane's cutoff from the feed,
@@ -89,17 +136,23 @@ export function countActivityUnread(
   }
 
   for (const [paneKey, entry] of Object.entries(source.agentStatusByPaneKey)) {
+    if (hiddenChildPaneKeys?.has(paneKey)) {
+      continue
+    }
     countEntry(entry, source.acknowledgedAgentsByPaneKey[paneKey] ?? 0)
   }
   for (const [paneKey, retained] of Object.entries(source.retainedAgentsByPaneKey)) {
     if (mode === 'sidebar-badge' && retained.entry.state !== 'done') {
       continue
     }
+    if (hiddenChildPaneKeys?.has(paneKey)) {
+      continue
+    }
     countEntry(retained.entry, source.acknowledgedAgentsByPaneKey[paneKey] ?? 0)
   }
   for (const unsupported of Object.values(source.migrationUnsupportedByPtyId)) {
     const entry = migrationUnsupportedToAgentStatusEntry(unsupported)
-    if (entry) {
+    if (entry && !hiddenChildPaneKeys?.has(entry.paneKey)) {
       countEntry(entry, source.acknowledgedAgentsByPaneKey[entry.paneKey] ?? 0)
     }
   }
@@ -110,11 +163,12 @@ export function countActivityUnread(
 export function useActivityUnreadCount(enabled: boolean, mode: ActivityUnreadCountMode): number {
   const {
     sortEpoch,
-    worktreesByRepo,
     migrationUnsupportedByPtyId,
     retainedAgentsByPaneKey,
     acknowledgedAgentsByPaneKey,
-    activityClearedAtByPaneKey
+    activityClearedAtByPaneKey,
+    runtimeAgentOrchestrationByPaneKey,
+    showChildAgents
   } = useAppStore(
     useShallow((state) => {
       if (!enabled) {
@@ -125,11 +179,12 @@ export function useActivityUnreadCount(enabled: boolean, mode: ActivityUnreadCou
         // cannot change unread count unless a sort-relevant state transition
         // or removal occurred. sortEpoch is the cheap invalidation signal.
         sortEpoch: state.sortEpoch,
-        worktreesByRepo: state.worktreesByRepo,
         migrationUnsupportedByPtyId: state.migrationUnsupportedByPtyId,
         retainedAgentsByPaneKey: state.retainedAgentsByPaneKey,
         acknowledgedAgentsByPaneKey: state.acknowledgedAgentsByPaneKey,
-        activityClearedAtByPaneKey: state.activityClearedAtByPaneKey
+        activityClearedAtByPaneKey: state.activityClearedAtByPaneKey,
+        runtimeAgentOrchestrationByPaneKey: state.runtimeAgentOrchestrationByPaneKey,
+        showChildAgents: state.agentsShowChildAgents
       }
     })
   )
@@ -144,9 +199,10 @@ export function useActivityUnreadCount(enabled: boolean, mode: ActivityUnreadCou
         agentStatusByPaneKey: useAppStore.getState().agentStatusByPaneKey,
         migrationUnsupportedByPtyId,
         retainedAgentsByPaneKey,
-        worktreesByRepo,
         acknowledgedAgentsByPaneKey,
-        activityClearedAtByPaneKey
+        activityClearedAtByPaneKey,
+        runtimeAgentOrchestrationByPaneKey,
+        showChildAgents
       },
       mode
     )
@@ -157,7 +213,8 @@ export function useActivityUnreadCount(enabled: boolean, mode: ActivityUnreadCou
     migrationUnsupportedByPtyId,
     mode,
     retainedAgentsByPaneKey,
-    sortEpoch,
-    worktreesByRepo
+    runtimeAgentOrchestrationByPaneKey,
+    showChildAgents,
+    sortEpoch
   ])
 }

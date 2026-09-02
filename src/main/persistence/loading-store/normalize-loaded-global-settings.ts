@@ -88,15 +88,16 @@ export function normalizeLoadedGlobalSettings(
     // The dashboard graduated from Experimental; default every profile to the new
     // left-sidebar tab. An Agents-view opt-in always graduates; only an explicit
     // popout opt-out (without that opt-in) stays hidden.
+    // Why migrated, not raw: a pre-stamp profile's stored true is the old forced default,
+    // not an opt-in (see prepareLoadedProfileSettings).
     showAgentsSidebar:
       parsed.settings?.showAgentsSidebar ??
-      (parsed.settings?.experimentalActivity === true ||
-        parsed.settings?.experimentalAgentDashboardPopout !== false),
+      (migratedExperimentalActivity || parsed.settings?.experimentalAgentDashboardPopout !== false),
     // Preserve the legacy opt-in before the experimental setting is normalized away. This
     // drives the migration-specific introduction copy without changing runtime behavior.
     agentsSidebarMigratedFromExperimental:
       parsed.settings?.agentsSidebarMigratedFromExperimental === true ||
-      parsed.settings?.experimentalActivity === true,
+      migratedExperimentalActivity,
     // Why: compact worktree cards graduated from Experimental; preserve the old opt-in for rollout-era profiles.
     compactWorktreeCards: loadedCompactWorktreeCards,
     experimentalCompactWorktreeCards: undefined,

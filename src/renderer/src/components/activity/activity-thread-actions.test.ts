@@ -63,7 +63,7 @@ describe('activity thread host routing', () => {
 
   it('selects the matching host when the same workspace id is active elsewhere', () => {
     const actions = createActivityThreadActions({
-      getVisibleThreads: () => [thread],
+      getMarkAllReadThreads: () => [thread],
       acknowledgeAgents,
       unacknowledgeAgents: vi.fn(),
       setSelectedPaneKey
@@ -83,7 +83,7 @@ describe('activity thread host routing', () => {
   it('jumps to and probes the matching host-qualified workspace', () => {
     expect(hasActivityThreadWorkspace(thread)).toBe(true)
     const actions = createActivityThreadActions({
-      getVisibleThreads: () => [thread],
+      getMarkAllReadThreads: () => [thread],
       acknowledgeAgents,
       unacknowledgeAgents: vi.fn(),
       setSelectedPaneKey
@@ -97,11 +97,11 @@ describe('activity thread host routing', () => {
     })
   })
 
-  it('marks all currently visible unread threads read, reading the set at call time', () => {
+  it('marks all unread threads in the mark-all set, reading it at call time', () => {
     const readThread = { ...makeRemoteThread(), paneKey: 'tab-2:read', unread: false }
-    let visible = [readThread]
+    let markAllSet = [readThread]
     const actions = createActivityThreadActions({
-      getVisibleThreads: () => visible,
+      getMarkAllReadThreads: () => markAllSet,
       acknowledgeAgents,
       unacknowledgeAgents: vi.fn(),
       setSelectedPaneKey
@@ -110,8 +110,8 @@ describe('activity thread host routing', () => {
     actions.markAllThreadsRead()
     expect(acknowledgeAgents).not.toHaveBeenCalled()
 
-    // The handler keeps one identity while the visible set changes underneath it.
-    visible = [thread, readThread]
+    // The handler keeps one identity while the set changes underneath it.
+    markAllSet = [thread, readThread]
     actions.markAllThreadsRead()
     expect(acknowledgeAgents).toHaveBeenCalledWith([thread.paneKey])
   })

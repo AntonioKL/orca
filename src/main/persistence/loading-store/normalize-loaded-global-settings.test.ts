@@ -57,6 +57,16 @@ describe('showAgentsSidebar graduation migration', () => {
     ).toBe(false)
   })
 
+  it('ignores a pre-stamp forced-default experimentalActivity true (not an opt-in)', () => {
+    const normalized = normalizeLegacyProfile({
+      experimentalActivity: true,
+      experimentalActivityDefaultedOffForAllUsers: undefined
+    })
+    expect(normalized.experimentalActivity).toBe(false)
+    expect(normalized.showAgentsSidebar).toBe(true)
+    expect(normalized.agentsSidebarMigratedFromExperimental).toBe(false)
+  })
+
   it('preserves a stored showAgentsSidebar choice over legacy flags', () => {
     expect(
       normalizeLegacyProfile({ showAgentsSidebar: false, experimentalActivity: true })

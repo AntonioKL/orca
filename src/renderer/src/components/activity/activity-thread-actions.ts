@@ -17,14 +17,16 @@ export function hasActivityThreadWorkspace(thread: AgentPaneThread): boolean {
 }
 
 export function createActivityThreadActions({
-  getVisibleThreads,
+  getMarkAllReadThreads,
   acknowledgeAgents,
   unacknowledgeAgents,
   setSelectedPaneKey
 }: {
   /** Getter (not a snapshot) so the handlers keep one identity for the row memo
-   *  bail-outs while bulk actions still see the currently rendered thread set. */
-  getVisibleThreads: () => AgentPaneThread[]
+   *  bail-outs while bulk actions still see the current thread set. This is the
+   *  badge-coherent set (child-filter only), not the search/scope-narrowed one,
+   *  so Mark all read always drives the Agents badge to zero. */
+  getMarkAllReadThreads: () => AgentPaneThread[]
   acknowledgeAgents: (paneKeys: string[]) => void
   unacknowledgeAgents: (paneKeys: string[]) => void
   setSelectedPaneKey: (paneKey: string | null) => void
@@ -90,7 +92,7 @@ export function createActivityThreadActions({
   }
 
   const markAllThreadsRead = (): void => {
-    const unreadKeys = getVisibleThreads()
+    const unreadKeys = getMarkAllReadThreads()
       .filter((t) => t.unread)
       .map((t) => t.paneKey)
     if (unreadKeys.length === 0) {

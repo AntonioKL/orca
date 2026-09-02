@@ -5,6 +5,10 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ActivityThreadListPane } from './activity-thread-list-pane'
+import {
+  ActivityThreadCollapseContext,
+  type ActivityThreadCollapseState
+} from './activity-thread-collapse-context'
 import type { ActivityThreadGroup, AgentPaneThread } from './activity-thread-types'
 import { makeTab, makeWorktree } from './ActivityPrototypePage-test-fixtures'
 
@@ -44,35 +48,38 @@ function renderPane(
     threads: AgentPaneThread[]
     selectedPaneKey?: string | null
     scrollTopRef?: MutableRefObject<number>
+    collapseState?: ActivityThreadCollapseState
   }
 ): void {
   act(() => {
     root.render(
       <TooltipProvider>
-        <ActivityThreadListPane
-          activityFilterInputRef={{ current: null }}
-          query=""
-          onQueryChange={vi.fn()}
-          groupBy="status"
-          onGroupByChange={vi.fn()}
-          readFilter="all"
-          onReadFilterChange={vi.fn()}
-          compactMode={true}
-          hasUnreadThreads={false}
-          onCompactModeChange={vi.fn()}
-          onMarkAllThreadsRead={vi.fn()}
-          visibleThreadGroups={makeGroups(args.threads)}
-          visibleThreadCount={args.threads.length}
-          selectedPaneKey={args.selectedPaneKey ?? null}
-          onSelectThread={vi.fn()}
-          onJumpToWorkspace={vi.fn()}
-          onMarkThreadRead={vi.fn()}
-          onMarkThreadUnread={vi.fn()}
-          canJumpToWorkspace={() => true}
-          showFilterControls={false}
-          showOptionsMenu={false}
-          scrollTopRef={args.scrollTopRef}
-        />
+        <ActivityThreadCollapseContext.Provider value={args.collapseState ?? null}>
+          <ActivityThreadListPane
+            activityFilterInputRef={{ current: null }}
+            query=""
+            onQueryChange={vi.fn()}
+            groupBy="status"
+            onGroupByChange={vi.fn()}
+            readFilter="all"
+            onReadFilterChange={vi.fn()}
+            compactMode={true}
+            hasUnreadThreads={false}
+            onCompactModeChange={vi.fn()}
+            onMarkAllThreadsRead={vi.fn()}
+            visibleThreadGroups={makeGroups(args.threads)}
+            visibleThreadCount={args.threads.length}
+            selectedPaneKey={args.selectedPaneKey ?? null}
+            onSelectThread={vi.fn()}
+            onJumpToWorkspace={vi.fn()}
+            onMarkThreadRead={vi.fn()}
+            onMarkThreadUnread={vi.fn()}
+            canJumpToWorkspace={() => true}
+            showFilterControls={false}
+            showOptionsMenu={false}
+            scrollTopRef={args.scrollTopRef}
+          />
+        </ActivityThreadCollapseContext.Provider>
       </TooltipProvider>
     )
   })
@@ -157,20 +164,55 @@ describe('ActivityThreadListPane virtualization', () => {
     expect(container.querySelector<HTMLElement>('.overflow-y-auto')?.scrollTop).toBe(360)
   })
 
-  it('restores collapse state saved alongside the scroll ref across remounts', () => {
-    const scrollTopRef = { current: 0 }
-    renderPane(root, { threads: makeManyThreads(), scrollTopRef })
+  it('restores caller-held collapse state across remounts', () => {
+    // Models the sidebar: the caller owns the Set and provides it via context.
+    let collapsed: ReadonlySet<string> = new Set<string>()
+    const collapseState = (): ActivityThreadCollapseState => ({
+      collapsedGroupKeys: collapsed,
+      onToggleGroupCollapse: (groupKey: string) => {
+        const next = new Set(collapsed)
+        if (next.has(groupKey)) {
+          next.delete(groupKey)
+        } else {
+          next.add(groupKey)
+        }
+        collapsed = next
+      }
+    })
+    renderPane(root, { threads: makeManyThreads(), collapseState: collapseState() })
     const header = container.querySelector('[role="button"]') as HTMLElement
     act(() => {
       header.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
-    expect(header.getAttribute('aria-expanded')).toBe('false')
+    renderPane(root, { threads: makeManyThreads(), collapseState: collapseState() })
+    expect(container.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('false')
 
     act(() => root.unmount())
     root = createRoot(container)
-    renderPane(root, { threads: makeManyThreads(), scrollTopRef })
+    renderPane(root, { threads: makeManyThreads(), collapseState: collapseState() })
     const remountedHeader = container.querySelector('[role="button"]')
     expect(remountedHeader?.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('disarms a stale deferred restore instead of yanking the viewport on late growth', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    try {
+      const scrollTopRef = { current: 360 }
+      // Mounts with a list too small to contain the saved offset (it shrank).
+      renderPane(root, { threads: [makeThread(0)], scrollTopRef })
+      const scrollContainer = container.querySelector<HTMLElement>('.overflow-y-auto')
+      expect(scrollContainer?.scrollTop).toBe(0)
+
+      // Well past the restore window, the list grows beyond the saved offset.
+      vi.setSystemTime(1_010_000)
+      renderPane(root, { threads: makeManyThreads(), scrollTopRef })
+
+      expect(container.querySelector<HTMLElement>('.overflow-y-auto')?.scrollTop).toBe(0)
+      expect(scrollTopRef.current).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('restores the Agents scroll position without storing it in React state', () => {

@@ -22,8 +22,7 @@ function makeSource(entry: AgentStatusEntry, ackAt = 0) {
     acknowledgedAgentsByPaneKey: { [PANE]: ackAt },
     agentStatusByPaneKey: { [PANE]: entry },
     migrationUnsupportedByPtyId: {},
-    retainedAgentsByPaneKey: {},
-    worktreesByRepo: {}
+    retainedAgentsByPaneKey: {}
   }
 }
 
@@ -61,6 +60,40 @@ describe('countActivityUnread session-boundary rows (STA-3386)', () => {
 
   it('still counts an ordinary unacknowledged done in sidebar-badge mode', () => {
     const source = makeSource(makeEntry({}))
+    expect(countActivityUnread(source, 'sidebar-badge')).toBe(1)
+  })
+})
+
+describe('countActivityUnread child-agent filtering (sidebar-badge)', () => {
+  const PARENT_PANE = 'tab-2:22222222-2222-4222-8222-222222222222'
+
+  function makeChildSource(parentPaneKey: string) {
+    const parent = makeEntry({ state: 'working', paneKey: PARENT_PANE })
+    const child = makeEntry({
+      orchestration: { taskId: 'task-1', dispatchId: 'dispatch-1', parentPaneKey }
+    })
+    return {
+      acknowledgedAgentsByPaneKey: {},
+      agentStatusByPaneKey: { [PARENT_PANE]: parent, [PANE]: child },
+      migrationUnsupportedByPtyId: {},
+      retainedAgentsByPaneKey: {}
+    }
+  }
+
+  it('excludes a child of a listed parent so the badge matches what Mark all read clears', () => {
+    const source = makeChildSource(PARENT_PANE)
+    expect(countActivityUnread(source, 'sidebar-badge')).toBe(0)
+    // The full-page event badge keeps counting every event.
+    expect(countActivityUnread(source, 'agent-events')).toBe(1)
+  })
+
+  it('counts the child when child agents are shown', () => {
+    const source = { ...makeChildSource(PARENT_PANE), showChildAgents: true }
+    expect(countActivityUnread(source, 'sidebar-badge')).toBe(1)
+  })
+
+  it('counts an orphaned child whose parent pane is gone (promoted to top level)', () => {
+    const source = makeChildSource('tab-9:99999999-9999-4999-8999-999999999999')
     expect(countActivityUnread(source, 'sidebar-badge')).toBe(1)
   })
 })

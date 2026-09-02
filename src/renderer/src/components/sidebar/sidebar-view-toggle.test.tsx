@@ -76,4 +76,40 @@ describe('SidebarViewToggle', () => {
     const projectsTab = container.querySelector('[data-sidebar-section-title="projects"]')
     expect(projectsTab?.textContent).toBe('ProjectsProjects')
   })
+
+  it('overlays the badge outside layout flow and clamps large counts', () => {
+    const renderWithCount = (badgeCount: number) =>
+      act(() => {
+        root.render(
+          <SidebarViewToggle
+            ariaLabel="Sidebar view"
+            value="workspaces"
+            onSelect={() => undefined}
+            options={[
+              { value: 'workspaces', label: 'Projects', sectionTitle: 'projects' },
+              { value: 'agents', label: 'Agents', sectionTitle: 'agents', badgeCount }
+            ]}
+          />
+        )
+      })
+
+    renderWithCount(99)
+    const agentsTab = container.querySelector('[data-sidebar-section-title="agents"]')
+    const badge = [...(agentsTab?.querySelectorAll('span') ?? [])].find(
+      (span) => span.textContent === '9+'
+    )
+    // Absolute overlay: the frozen-width contract holds as the count appears and grows.
+    expect(badge?.className).toContain('absolute')
+    expect(badge?.getAttribute('aria-hidden')).not.toBeNull()
+
+    // The visible label stays the sole in-flow content at any count.
+    const inFlowText = (): string | undefined =>
+      [...(container.querySelectorAll('[data-sidebar-section-title="agents"] span') ?? [])]
+        .filter((span) => !span.className.includes('absolute'))
+        .map((span) => span.textContent)
+        .join('')
+    const withBadge = inFlowText()
+    renderWithCount(0)
+    expect(inFlowText()).toBe(withBadge)
+  })
 })

@@ -80,6 +80,16 @@ describe('worktree jump navigation', () => {
     expect(mocks.warning).not.toHaveBeenCalled()
   })
 
+  it('passes the target execution host to the filter check so a local twin cannot vouch', () => {
+    mocks.getVisibleWorktreeShortcutTargets.mockReturnValue([])
+    mocks.worktreePassesSidebarFilters.mockReturnValue(false)
+
+    expect(jumpToWorktreeFromSidebar('repo::/target', { executionHostId: 'ssh:beta' })).toBe(true)
+
+    expect(mocks.worktreePassesSidebarFilters).toHaveBeenCalledWith('repo::/target', 'ssh:beta')
+    expect(mocks.warning).toHaveBeenCalledOnce()
+  })
+
   it('routes folder workspaces through the path-status-gated folder activation', () => {
     const state = mocks.getState()
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   defaultRangeExtractor,
   measureElement as measureVirtualElementSize,
@@ -23,6 +23,7 @@ import {
   getActivityHeaderItemIndexes,
   getActivityVirtualItemKey
 } from './activity-thread-virtual-items'
+import { ActivityThreadCollapseContext } from './activity-thread-collapse-context'
 import type {
   ActivityGroupBy,
   ActivityThreadGroup,
@@ -36,9 +37,9 @@ const observeActivityListRect: typeof observeElementRect = (instance, cb) =>
     cb(rect.height > 0 ? rect : ZERO_RECT_FALLBACK_VIEWPORT)
   })
 
-// Uncontrolled collapse state must survive remounts alongside the caller's scroll
-// ref, or a restored scrollTop lands on a different (all-expanded) layout.
-const collapsedGroupsByScrollRef = new WeakMap<React.MutableRefObject<number>, Set<string>>()
+// A saved offset the content cannot contain yet is restored once it can; past
+// this window it is stale (the list shrank) and restoring would yank the viewport.
+const DEFERRED_SCROLL_RESTORE_WINDOW_MS = 3000
 
 export function ActivityThreadListPane({
   threadListRef,
@@ -116,13 +117,19 @@ export function ActivityThreadListPane({
   scrollTopRef?: React.MutableRefObject<number>
 }): React.JSX.Element {
   const [internalCollapsedGroupKeys, setInternalCollapsedGroupKeys] = useState<Set<string>>(
-    () => (scrollTopRef ? collapsedGroupsByScrollRef.get(scrollTopRef) : undefined) ?? new Set()
+    () => new Set()
   )
+  // Precedence: explicit props, then a caller-owned context (hosts that unmount
+  // the pane on body switches), then pane-local state.
+  const contextCollapse = useContext(ActivityThreadCollapseContext)
   const isControlled = collapsedGroupKeys !== undefined && onToggleGroupCollapse !== undefined
-  const effectiveCollapsedGroupKeys = isControlled ? collapsedGroupKeys : internalCollapsedGroupKeys
+  const effectiveCollapsedGroupKeys = isControlled
+    ? collapsedGroupKeys
+    : (contextCollapse?.collapsedGroupKeys ?? internalCollapsedGroupKeys)
   const handleToggleGroup = isControlled
     ? onToggleGroupCollapse
-    : (groupKey: string) => {
+    : (contextCollapse?.onToggleGroupCollapse ??
+      ((groupKey: string) => {
         setInternalCollapsedGroupKeys((prev) => {
           const next = new Set(prev)
           if (next.has(groupKey)) {
@@ -130,12 +137,9 @@ export function ActivityThreadListPane({
           } else {
             next.add(groupKey)
           }
-          if (scrollTopRef) {
-            collapsedGroupsByScrollRef.set(scrollTopRef, next)
-          }
           return next
         })
-      }
+      }))
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const hasRestoredScrollRef = useRef(false)
@@ -230,8 +234,18 @@ export function ActivityThreadListPane({
   // Restore only once the (estimated) content can contain the saved offset, so a
   // pre-hydration mount doesn't clamp the restore to 0.
   const totalSize = virtualizer.getTotalSize()
+  const restoreArmedAtRef = useRef<number | null>(null)
   useEffect(() => {
     if (!scrollTopRef || hasRestoredScrollRef.current) {
+      return
+    }
+    if (restoreArmedAtRef.current === null) {
+      restoreArmedAtRef.current = Date.now()
+    } else if (Date.now() - restoreArmedAtRef.current > DEFERRED_SCROLL_RESTORE_WINDOW_MS) {
+      // The list stayed too small for the saved offset (it shrank); firing the
+      // restore on some later growth would yank the viewport out from the user.
+      hasRestoredScrollRef.current = true
+      scrollTopRef.current = 0
       return
     }
     if (scrollTopRef.current > 0 && scrollTopRef.current >= totalSize) {
