@@ -1,11 +1,12 @@
 import { collectAgentTitleEvidence } from './agent-title-evidence'
+import { PANE_AGENT_EVIDENCE_SOURCES } from './pane-agent-evidence-sources'
 import type {
   PaneAgentEvidence,
-  PaneAgentEvidenceSource,
   PaneAgentIdentity,
   PaneAgentIdentityInput,
   PaneAgentRunKey
 } from './pane-agent-identity-resolver'
+import type { PaneAgentEvidenceSource } from './pane-agent-evidence-sources'
 import type { TuiAgent } from './tui-agent'
 
 /**
@@ -115,15 +116,10 @@ export type CanonicalPaneAgentIdentity = {
 }
 
 /** Authority order, strongest first. This is the only place precedence is expressed. */
-const SOURCE_RANK: readonly PaneAgentEvidenceSource[] = [
-  'live-hook',
-  'process',
-  'launch',
-  'completed-hook',
-  'sleeping-session',
-  'sibling',
-  'title'
-]
+const SOURCE_RANK: readonly PaneAgentEvidenceSource[] = PANE_AGENT_EVIDENCE_SOURCES
+
+/** Exported for the source/rank drift ratchet; the rank is the canonical source list itself. */
+export const PANE_AGENT_SOURCE_RANK = SOURCE_RANK
 
 /** Run keys only supersede evidence from the same authority; unknown authorities stay eligible. */
 function isPaneAgentRunEligible(

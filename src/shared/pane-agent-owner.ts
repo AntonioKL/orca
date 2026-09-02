@@ -1,5 +1,4 @@
 import type { AgentType } from './agent-status-types'
-import { resolveCanonicalPaneAgentEvidence } from './pane-agent-identity-adapter'
 
 /**
  * The owner-evidence signals a terminal pane can carry, strongest launch intent
@@ -33,10 +32,26 @@ export type ResolvedPaneAgentOwner = {
   ownerIsLaunch: boolean
 }
 
+const PANE_OWNER_RANK: readonly {
+  key: keyof PaneAgentOwnerSignals
+  ownerIsLaunch: boolean
+}[] = [
+  { key: 'launchAgent', ownerIsLaunch: true },
+  { key: 'startupLaunchAgent', ownerIsLaunch: true },
+  { key: 'initialStatusAgent', ownerIsLaunch: true },
+  { key: 'commandInferredAgent', ownerIsLaunch: true },
+  { key: 'hookAgent', ownerIsLaunch: false },
+  { key: 'siblingHookAgent', ownerIsLaunch: false },
+  { key: 'completedHookAgent', ownerIsLaunch: false },
+  { key: 'siblingCompletedHookAgent', ownerIsLaunch: false },
+  { key: 'sleepingSessionAgent', ownerIsLaunch: false }
+]
+
 /**
- * The single authoritative resolver for "which agent owns this pane", shared by
- * the tab-icon resolver, the terminal-pane display/renderer owner, and the
- * mirrored-tab title owner so they cannot drift apart.
+ * Compatibility owner lookup shared by the existing consumer surfaces.
+ *
+ * Tranche 0 intentionally preserves this pre-migration precedence byte-for-byte; switching
+ * these consumers to canonical evidence belongs to tranche 1.
  *
  * Why this precedence: launch intent is the authoritative bootstrap before any
  * process signal exists, so it leads. Once launch metadata is gone — a mirrored
@@ -52,38 +67,13 @@ export type ResolvedPaneAgentOwner = {
 export function resolvePaneAgentOwnerRecord(
   signals: PaneAgentOwnerSignals
 ): ResolvedPaneAgentOwner | null {
-  const evidence = [] as {
-    source: 'launch' | 'completed-hook' | 'sleeping-session' | 'sibling'
-    agent: AgentType
-  }[]
-  const launchAgent =
-    signals.launchAgent ??
-    signals.startupLaunchAgent ??
-    signals.initialStatusAgent ??
-    signals.commandInferredAgent
-  if (launchAgent) {
-    evidence.push({ source: 'launch', agent: launchAgent })
-  }
-  // This compatibility signal has no liveness bit; treat it as the durable completed-hook rung.
-  if (signals.hookAgent) {
-    evidence.push({ source: 'completed-hook', agent: signals.hookAgent })
-  }
-  if (signals.completedHookAgent) {
-    evidence.push({ source: 'completed-hook', agent: signals.completedHookAgent })
-  }
-  if (signals.sleepingSessionAgent) {
-    evidence.push({ source: 'sleeping-session', agent: signals.sleepingSessionAgent })
-  }
-  for (const agent of [signals.siblingHookAgent, signals.siblingCompletedHookAgent]) {
+  for (const { key, ownerIsLaunch } of PANE_OWNER_RANK) {
+    const agent = signals[key]
     if (agent) {
-      evidence.push({ source: 'sibling', agent })
+      return { agent, ownerIsLaunch }
     }
   }
-  const identity = resolveCanonicalPaneAgentEvidence({ evidence, allowSibling: true })
-  if (!identity.agent) {
-    return null
-  }
-  return { agent: identity.agent, ownerIsLaunch: identity.source === 'launch' }
+  return null
 }
 
 export function resolvePaneAgentOwner(signals: PaneAgentOwnerSignals): AgentType | null {
