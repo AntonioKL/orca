@@ -156,6 +156,11 @@ export function useAutomationRunsDashboard({
             nextCursors.set(row.key, result.value.nextCursor)
           }
         } else {
+          // Only a successful terminal page retires a cursor; keeping it here
+          // leaves the row's remaining history reachable through `loadMore`.
+          if (cursor) {
+            nextCursors.set(row.key, cursor)
+          }
           failures.push({ row, scope: getAutomationRunsScope(row), notice: result.notice })
         }
       }

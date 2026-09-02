@@ -13,7 +13,10 @@ import {
   nextAutomationRunNumber,
   pruneAutomationRuns
 } from '../../../shared/automation-run-retention'
-import { paginateAutomationRuns } from '../../../shared/automation-run-cursor'
+import {
+  compareAutomationRunsNewestFirst,
+  paginateAutomationRuns
+} from '../../../shared/automation-run-cursor'
 import {
   normalizeAutomationPrecheckResult,
   normalizeAutomationRunOutputSnapshot,
@@ -45,7 +48,7 @@ function sortedAutomationRuns(state: PersistedState, automationId?: string): Aut
       ...run,
       precheckResult: normalizeAutomationPrecheckResult(run.precheckResult)
     }))
-    .sort((left, right) => right.createdAt - left.createdAt)
+    .sort(compareAutomationRunsNewestFirst)
 }
 
 export function listAutomationRuns(state: PersistedState, automationId?: string): AutomationRun[] {

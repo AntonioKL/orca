@@ -84,6 +84,23 @@ describe('useAutomationRunsDashboard', () => {
     expect(historySpy.mock.calls.at(-1)?.[2].cursor).toBe('2:run-2')
   })
 
+  it('keeps the cursor when a load more fails so the page stays retryable', async () => {
+    await render(true)
+    historySpy.mockImplementationOnce(async () => ({
+      ok: false,
+      notice: { message: 'offline', recovery: null, severity: 'failure' }
+    }))
+
+    await act(async () => latest?.loadMore())
+    expect(latest?.entries.map((entry) => entry.run.id)).toEqual(['run-2'])
+    expect(latest?.hasMore).toBe(true)
+
+    await act(async () => latest?.loadMore())
+
+    expect(historySpy.mock.calls.at(-1)?.[2].cursor).toBe('2:run-2')
+    expect(latest?.entries.map((entry) => entry.run.id)).toEqual(['run-2', 'run-1'])
+  })
+
   it('refetches the head when the view is re-entered after a load more', async () => {
     await render(true)
     await act(async () => latest?.loadMore())

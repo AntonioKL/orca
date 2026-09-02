@@ -23,6 +23,15 @@ function decodeAutomationRunCursor(cursor: string | undefined): AutomationRunCur
   return Number.isFinite(createdAt) && id ? { kind: 'key', createdAt, id } : null
 }
 
+/** The single total order pages and cursors agree on. Ties on `createdAt` fall
+ *  back to `id`, so a pruned boundary cannot take the runs tied with it. */
+export function compareAutomationRunsNewestFirst(
+  left: Pick<AutomationRun, 'createdAt' | 'id'>,
+  right: Pick<AutomationRun, 'createdAt' | 'id'>
+): number {
+  return right.createdAt - left.createdAt || left.id.localeCompare(right.id)
+}
+
 function pageStartIndex(
   runs: readonly AutomationRun[],
   cursor: AutomationRunCursor | null
@@ -39,13 +48,14 @@ function pageStartIndex(
   if (boundary !== -1) {
     return boundary + 1
   }
-  // Boundary run pruned between pages: resume at the first strictly older run.
-  const older = runs.findIndex((run) => run.createdAt < cursor.createdAt)
+  // Boundary run pruned between pages: resume at the first run the total order
+  // places after it, so runs tied on `createdAt` are not dropped with it.
+  const older = runs.findIndex((run) => compareAutomationRunsNewestFirst(cursor, run) < 0)
   return older === -1 ? runs.length : older
 }
 
 /**
- * Pages `runs`, which must already be sorted newest-first by `createdAt`.
+ * Pages `runs`, which must already be sorted by `compareAutomationRunsNewestFirst`.
  * The cursor names the previous page's last run rather than an index, so runs
  * created between two page requests cannot shift the window and drop a run.
  */

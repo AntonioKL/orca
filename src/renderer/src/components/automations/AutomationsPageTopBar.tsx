@@ -3,6 +3,7 @@ import { translate } from '@/i18n/i18n'
 import { AutomationOwnerConflictNotice } from './AutomationOwnerConflictNotice'
 import { AutomationsPageBreadcrumb } from './AutomationsPageBreadcrumb'
 import type { AutomationHostRecoveryAction } from './automation-host-status-descriptors'
+import type { AutomationActionNotice } from './automation-row-action-dispatch'
 
 export function AutomationsPageTopBar({
   pageView,
@@ -20,7 +21,7 @@ export function AutomationsPageTopBar({
   isDetailOpen: boolean
   selectedAutomationName?: string
   runPageOrigin: 'automation' | 'runs'
-  ownerNotice: string | null
+  ownerNotice: AutomationActionNotice | null
   recoverOwnerAction: (action: AutomationHostRecoveryAction) => void
   dismissOwnerAction: () => void
   showAutomationsList: () => void

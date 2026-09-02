@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react'
+import { translate } from '@/i18n/i18n'
 import { AutomationEditorDialog } from './AutomationEditorDialog'
 import { AutomationsDetailPane } from './AutomationsDetailPane'
 import { AutomationsListPanel } from './AutomationsListPanel'
@@ -11,7 +12,6 @@ import type { AutomationsPageController } from './use-automations-page-controlle
 import { AutomationRunsDashboardSurface } from './AutomationRunsDashboardSurface'
 import { AutomationRunDetailsPage } from './AutomationRunDetailsPage'
 import { AutomationsPageDeleteDialogs } from './AutomationsPageDeleteDialogs'
-/** Renders the page from controller state; host/query side effects stay in hooks. */
 export function AutomationsPageSurface({
   controller
 }: {
@@ -135,7 +135,6 @@ export function AutomationsPageSurface({
   const onListFilterChange = (next: typeof listFilter): void => {
     setListFilter(next)
     if ((next.hostStableKeys?.length ?? 0) > 0 && hostCatalog.resolution.effective.kind !== 'all') {
-      // Host narrowing now lives in the Filters menu; clear the old single-host scope.
       hostCatalog.selectHost({ kind: 'all' })
     }
   }

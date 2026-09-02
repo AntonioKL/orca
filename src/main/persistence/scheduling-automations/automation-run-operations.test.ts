@@ -65,6 +65,24 @@ describe('listAutomationRunsPage', () => {
     ).toEqual(['r1'])
   })
 
+  it('keeps runs tied on createdAt when the boundary run is pruned', () => {
+    const state = stateWithRuns([
+      { id: 'r2', createdAt: 10 },
+      { id: 'r1', createdAt: 10 },
+      { id: 'r0', createdAt: 5 }
+    ])
+    const first = listAutomationRunsPage(state, 'a1', 1)
+    expect(first.runs.map((run) => run.id)).toEqual(['r1'])
+
+    state.automationRuns = state.automationRuns.filter((run) => run.id !== 'r1')
+
+    expect(
+      listAutomationRunsPage(state, 'a1', 2, first.nextCursor ?? undefined).runs.map(
+        (run) => run.id
+      )
+    ).toEqual(['r2', 'r0'])
+  })
+
   it('still honours a legacy offset cursor issued before the upgrade', () => {
     const state = stateWithRuns([
       { id: 'r1', createdAt: 1 },
