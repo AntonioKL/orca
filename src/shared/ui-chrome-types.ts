@@ -49,8 +49,9 @@ export type WorktreeCardMode = 'Default' | 'Compact'
 
 export type AgentActivityDisplayMode = 'compact' | 'full'
 
-export type ThreadReadFilter = 'all' | 'unread'
-export type ActivityGroupBy = 'none' | 'status' | 'project' | 'worktree' | 'agent'
+// Re-exported so existing importers keep one home for UI chrome types; the
+// value domain lives with the normalizers that police it.
+export type { ActivityGroupBy, ThreadReadFilter } from './agents-view-thread-filters'
 
 export type StatusBarItem =
   | 'claude'
