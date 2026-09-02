@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 const require = createRequire(import.meta.url)
 const {
   readElfMachine,
+  declaredArchFromPath,
   findArchViolation,
   ELF_MACHINE_BY_ARCH,
   parseGlibcVersion,
@@ -348,6 +349,32 @@ describe('bundled native binary architecture', () => {
 
   // The observed failure: cross-building arm64 on an x64 host packed an x86-64 pty.node, whose
   // symbol versions are valid, so every other gate here passed it.
+  // Real CI hit: @parcel/watcher ships every architecture and its loader picks the match, so the
+  // arm64 copy is present in an x64 build on purpose.
+  it('accepts a per-arch vendored package that matches its own path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orca-elf-arch-'))
+    const pkg = join(dir, '@parcel', 'watcher-linux-arm64-glibc')
+    await mkdir(pkg, { recursive: true })
+    const file = join(pkg, 'watcher.node')
+    await writeFile(file, elfHeader(ELF_MACHINE_BY_ARCH.arm64))
+    expect(declaredArchFromPath(file)).toBe('arm64')
+    expect(findArchViolation(file, 'x64')).toBeNull()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  // But a path that names an arch must actually hold it — this is the Pi 5 failure.
+  it('flags a binary that contradicts the architecture its own path names', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orca-elf-arch-'))
+    const nested = join(dir, 'bin', 'linux-arm64-148')
+    await mkdir(nested, { recursive: true })
+    const file = join(nested, 'node-pty.node')
+    await writeFile(file, elfHeader(ELF_MACHINE_BY_ARCH.x64))
+    expect(findArchViolation(file, 'arm64')).toMatchObject({ actual: 'x64', expectedArch: 'arm64' })
+    // Still caught even when the slice being built is x64.
+    expect(findArchViolation(file, 'x64')).toMatchObject({ actual: 'x64', expectedArch: 'arm64' })
+    await rm(dir, { recursive: true, force: true })
+  })
+
   it('flags an x86-64 binary in an arm64 slice', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'orca-elf-arch-'))
     const file = join(dir, 'pty.node')

@@ -199,8 +199,28 @@ function readElfMachine(filePath) {
   }
 }
 
+// Arch tokens that appear in vendored per-architecture package/directory names.
+const ARCH_TOKEN_PATTERN = /(?:^|[^a-z0-9])(arm64|aarch64|x64|x86_64)(?:[^a-z0-9]|$)/i
+const ARCH_BY_TOKEN = Object.freeze({ arm64: 'arm64', aarch64: 'arm64', x64: 'x64', x86_64: 'x64' })
+
+/**
+ * The architecture a path advertises, or null when it advertises none.
+ *
+ * Why this matters: some dependencies ship every architecture and let their loader pick
+ * (`@parcel/watcher-linux-arm64-glibc/watcher.node` is arm64 on purpose inside an x64 build). Those
+ * must be judged against the arch their own path declares, not against the slice.
+ */
+function declaredArchFromPath(filePath) {
+  const match = ARCH_TOKEN_PATTERN.exec(filePath)
+  return match ? ARCH_BY_TOKEN[match[1].toLowerCase()] : null
+}
+
 function findArchViolation(filePath, targetArch) {
-  const expected = ELF_MACHINE_BY_ARCH[targetArch]
+  // A path that names an architecture is judged against that name, so a per-arch vendored package
+  // is fine while `bin/linux-arm64-.../node-pty.node` holding an x86-64 binary is still caught.
+  const declared = declaredArchFromPath(filePath)
+  const expectedArch = declared ?? targetArch
+  const expected = ELF_MACHINE_BY_ARCH[expectedArch]
   if (expected === undefined) {
     return null
   }
@@ -208,7 +228,12 @@ function findArchViolation(filePath, targetArch) {
   if (machine === null || machine === expected) {
     return null
   }
-  return { machine, actual: ARCH_BY_ELF_MACHINE[machine] ?? `0x${machine.toString(16)}` }
+  return {
+    machine,
+    actual: ARCH_BY_ELF_MACHINE[machine] ?? `0x${machine.toString(16)}`,
+    expectedArch,
+    declared: declared !== null
+  }
 }
 
 function isElfFile(filePath) {
@@ -384,7 +409,8 @@ function verifyLinuxGlibcFloor(rootDir, options = {}) {
     const detail = archOffenders
       .map(
         ({ filePath, violation }) =>
-          `  ${relative(rootDir, filePath) || filePath} is ${violation.actual}`
+          `  ${relative(rootDir, filePath) || filePath} is ${violation.actual}, expected ` +
+          `${violation.expectedArch}${violation.declared ? ' (from its own path)' : ''}`
       )
       .join('\n')
     throw new Error(
@@ -446,6 +472,7 @@ module.exports = {
   MIN_GLIBC,
   ELF_MACHINE_BY_ARCH,
   readElfMachine,
+  declaredArchFromPath,
   findArchViolation,
   VERSION_FLOORS,
   FLOOR_LABEL,
