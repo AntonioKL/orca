@@ -107,7 +107,23 @@ export function ensureWindowsProcessTreeCommandLinePatch(
     try {
       execFileSync(
         'git',
-        ['apply', '--include=src/process_commandline.cc', WINDOWS_PROCESS_TREE_PATCH_PATH],
+        [
+          // Why force the line-ending mode: the patch is stored LF (a contract
+          // test forbids CR bytes in it), but upstream ships this source CRLF,
+          // so its pre-image lines and the file's differ by a CR. Under
+          // `core.autocrlf=false` -- Git's own built-in default, and what
+          // "checkout as-is" selects in the Git for Windows installer -- git
+          // compares them literally, the hunk does not match, and the repair
+          // throws. `input` normalizes line endings for that comparison and
+          // nothing else, so a hunk whose real content drifted is still
+          // rejected. Measured: without it, apply exits 1 at autocrlf=false and
+          // 0 at true/input; with it, 0 for CRLF and LF sources under all three.
+          '-c',
+          'core.autocrlf=input',
+          'apply',
+          '--include=src/process_commandline.cc',
+          WINDOWS_PROCESS_TREE_PATCH_PATH
+        ],
         {
           cwd: realpathSync(packageDir),
           stdio: 'pipe',

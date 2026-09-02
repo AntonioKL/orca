@@ -28,12 +28,17 @@ const sourceWindowsProcessTreePatchPath = fileURLToPath(
 
 /**
  * The command-line reader as it is *before* the patch, taken from the patch's
- * own pre-image so no upstream copy has to be vendored, and the bytes are
- * exactly what `git apply` will look for.
+ * own pre-image so no upstream copy has to be vendored.
+ *
+ * Written back as **CRLF**, which is what `@vscode/windows-process-tree@0.8.0`
+ * actually ships: all 67 pre-image lines of this file carried a CR before the
+ * patch was normalized to LF. Rebuilding it with the patch's current newline
+ * instead would make fixture and patch agree by construction, on any encoding —
+ * which is exactly how a repair that cannot apply to the real package passed
+ * this suite.
  */
 function unpatchedWindowsProcessTreeCommandLineSource() {
-  const newline = '\n'
-  const lines = readFileSync(sourceWindowsProcessTreePatchPath, 'utf8').split(newline)
+  const lines = readFileSync(sourceWindowsProcessTreePatchPath, 'utf8').split('\n')
   const start = lines.findIndex((line) =>
     line.startsWith('diff --git a/src/process_commandline.cc ')
   )
@@ -42,11 +47,27 @@ function unpatchedWindowsProcessTreeCommandLineSource() {
   const preImage = (end === -1 ? rest : rest.slice(0, end))
     .filter((line) => line.startsWith(' ') || line.startsWith('-'))
     .filter((line) => !line.startsWith('---'))
-    .map((line) => line.slice(1))
-    .join(newline)
+    .map((line) => line.slice(1).replace(/\r$/, ''))
+    .join('\r\n')
   // Splitting drops the file's own trailing newline as an empty element, and
   // `git apply` needs the bytes exact.
-  return `${preImage}${newline}`
+  return `${preImage}\r\n`
+}
+
+/**
+ * Pin `core.autocrlf` for a spawned repair, whatever the host is set to.
+ *
+ * The repair blinds git to the surrounding repo with `GIT_DIR`, so the value it
+ * sees comes from global/system config — on a Git for Windows box that is
+ * whichever line-ending option the installer wrote, and `false` (Git's built-in
+ * default, "checkout as-is") is the one the repair used to fail under. A global
+ * config in a temp HOME outranks the system file, so this is deterministic
+ * rather than whatever the developer happens to have.
+ */
+export function gitLineEndingEnv(autocrlf) {
+  const home = mkdtempSync(join(tmpdir(), `orca-git-home-${autocrlf}-`))
+  writeFileSync(join(home, '.gitconfig'), `[core]\n\tautocrlf = ${autocrlf}\n`)
+  return { HOME: home, USERPROFILE: home }
 }
 
 /** Production always runs the repair from inside a work tree; `git apply` behaves differently there. */

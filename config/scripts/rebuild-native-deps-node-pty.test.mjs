@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
+  gitLineEndingEnv,
   initGitWorkTree,
   mkTempProject,
   runRebuildScript,
@@ -101,31 +102,46 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
   // with the cwd-relative prefix, silently skips what does not match, and still
   // exits 0. The package dir is always under the project root in production, so
   // a fixture in %TEMP% alone would pass while the real repair did nothing.
-  it('repairs an un-applied command-line patch inside a git work tree', () => {
-    const projectDir = mkTempProject()
+  //
+  // Why both line-ending modes: the patch is stored LF while upstream ships this
+  // source CRLF, so whether the pre-image matches depends on `core.autocrlf` --
+  // and under `false`, Git's own built-in default, it did not. The repair blinds
+  // git to the repo, so that value comes from global config, i.e. from whichever
+  // option the developer's installer wrote. Pinning both makes the case cover the
+  // host that breaks rather than the host that happens to run it.
+  for (const autocrlf of ['false', 'true']) {
+    it(`repairs an un-applied command-line patch in a work tree (autocrlf=${autocrlf})`, () => {
+      const projectDir = mkTempProject()
 
-    try {
-      initGitWorkTree(projectDir)
-      writeFakeUsableElectronPackage(projectDir, { platform: 'win32' })
-      writeFakeElectronRebuild(projectDir)
-      writeFakeNodePtyConptyPayload(projectDir, 'x64')
-      writeFakeWindowsProcessTreeWithNodeAddonApi(projectDir, { commandLinePatchApplied: false })
-      writeWindowsProcessTreePatchFile(projectDir)
+      try {
+        initGitWorkTree(projectDir)
+        writeFakeUsableElectronPackage(projectDir, { platform: 'win32' })
+        writeFakeElectronRebuild(projectDir)
+        writeFakeNodePtyConptyPayload(projectDir, 'x64')
+        writeFakeWindowsProcessTreeWithNodeAddonApi(projectDir, {
+          commandLinePatchApplied: false
+        })
+        writeWindowsProcessTreePatchFile(projectDir)
 
-      const result = runRebuildScript(
-        projectDir,
-        { npm_config_platform: 'win32', npm_config_arch: 'x64' },
-        ['--platform=win32', '--arch=x64', '--force']
-      )
+        const result = runRebuildScript(
+          projectDir,
+          {
+            npm_config_platform: 'win32',
+            npm_config_arch: 'x64',
+            ...gitLineEndingEnv(autocrlf)
+          },
+          ['--platform=win32', '--arch=x64', '--force']
+        )
 
-      expect(result.status, result.stderr).toBe(0)
-      expect(readFileSync(commandLineSourcePath(projectDir), 'utf8')).toContain(
-        'kProcessCommandLineInformation'
-      )
-    } finally {
-      removeTreeSync(projectDir)
-    }
-  })
+        expect(result.status, result.stderr).toBe(0)
+        expect(readFileSync(commandLineSourcePath(projectDir), 'utf8')).toContain(
+          'kProcessCommandLineInformation'
+        )
+      } finally {
+        removeTreeSync(projectDir)
+      }
+    })
+  }
 
   // Why fail rather than build: an unpatched command-line reader compiles fine
   // and then opens every process with PROCESS_VM_READ to walk its PEB, which is
