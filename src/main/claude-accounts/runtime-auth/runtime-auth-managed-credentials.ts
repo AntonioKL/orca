@@ -5,7 +5,6 @@ import {
   type ClaudeManagedAuthVerdict
 } from '../claude-managed-auth-ownership'
 import {
-  readClaudeManagedAuthFile,
   readClaudeManagedAuthFileResult,
   resolveClaudeManagedAuthVerdict,
   writeClaudeManagedAuthFile,
@@ -18,6 +17,18 @@ import {
   writeManagedClaudeKeychainCredentials
 } from '../keychain'
 import { ClaudeRuntimeAuthCredentialIdentity } from './runtime-auth-credential-identity'
+
+/**
+ * Why this needs a result too: the null it replaces is the third disjunct of the
+ * decision that restores the user's system default before Orca clears a managed
+ * selection. A failed read made that disjunct false, so no restore ran and the
+ * selection was cleared anyway -- the runtime kept holding managed credentials
+ * for an account Orca had forgotten.
+ */
+export type ClaudeManagedOauthRead =
+  | { kind: 'present'; value: unknown }
+  | { kind: 'absent' }
+  | { kind: 'indeterminate'; error: unknown }
 
 export class ClaudeRuntimeAuthManagedCredentials extends ClaudeRuntimeAuthCredentialIdentity {
   protected async readManagedCredentials(account: ClaudeManagedAccount): Promise<string | null> {
@@ -103,15 +114,30 @@ export class ClaudeRuntimeAuthManagedCredentials extends ClaudeRuntimeAuthCreden
   }
 
   protected async readManagedOauthAccount(account: ClaudeManagedAccount): Promise<unknown> {
-    const managedAuthPath = await this.getOwnedManagedAuthPath(account)
-    if (!managedAuthPath) {
-      return null
+    const read = await this.readManagedOauthAccountResult(account)
+    return read.kind === 'present' ? read.value : null
+  }
+
+  protected async readManagedOauthAccountResult(
+    account: ClaudeManagedAccount
+  ): Promise<ClaudeManagedOauthRead> {
+    const verdict = await this.resolveManagedAuthVerdict(account)
+    if (verdict.kind === 'indeterminate') {
+      return { kind: 'indeterminate', error: verdict.error }
+    }
+    if (verdict.kind === 'untrusted') {
+      return { kind: 'absent' }
+    }
+    const read = readClaudeManagedAuthFileResult(verdict.authPath, 'oauth-account.json')
+    if (read.kind !== 'present') {
+      return read
     }
     try {
-      const contents = readClaudeManagedAuthFile(managedAuthPath, 'oauth-account.json')
-      return contents ? (JSON.parse(contents) as unknown) : null
+      return { kind: 'present', value: JSON.parse(read.contents) as unknown }
     } catch {
-      return null
+      // Malformed JSON is a completed observation of the file, not a failure to
+      // read it.
+      return { kind: 'absent' }
     }
   }
 

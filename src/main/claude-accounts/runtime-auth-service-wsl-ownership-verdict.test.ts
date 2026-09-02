@@ -20,7 +20,9 @@ import {
 
 const fsFaults = vi.hoisted(() => ({
   lockedRealpathSuffix: null as string | null,
-  lockedReadSuffix: null as string | null
+  lockedReadSuffix: null as string | null,
+  lockedReadHits: 0,
+  lockedRealpathHits: 0
 }))
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -30,6 +32,7 @@ vi.mock('node:fs', async (importOriginal) => {
       fsFaults.lockedRealpathSuffix !== null &&
       String(path).endsWith(fsFaults.lockedRealpathSuffix)
     ) {
+      fsFaults.lockedRealpathHits += 1
       const error = new Error(`EBUSY: resource busy or locked, realpath`) as NodeJS.ErrnoException
       error.code = 'EBUSY'
       throw error
@@ -39,6 +42,7 @@ vi.mock('node:fs', async (importOriginal) => {
   realpathSync.native = original.realpathSync.native
   const readFileSync = ((path: never, options: never) => {
     if (fsFaults.lockedReadSuffix !== null && String(path).endsWith(fsFaults.lockedReadSuffix)) {
+      fsFaults.lockedReadHits += 1
       const error = new Error('EBUSY: resource busy or locked, read') as NodeJS.ErrnoException
       error.code = 'EBUSY'
       throw error
@@ -237,6 +241,8 @@ describe('runtime-auth host ownership probe', () => {
     resetRuntimeAuthTestState()
     fsFaults.lockedRealpathSuffix = null
     fsFaults.lockedReadSuffix = null
+    fsFaults.lockedReadHits = 0
+    fsFaults.lockedRealpathHits = 0
     setPlatform('linux')
   })
 
@@ -292,6 +298,97 @@ describe('runtime-auth host ownership probe', () => {
         read.mockImplementation(original)
       }
     }
+  })
+
+  it('keeps the active host account when the outgoing oauth identity cannot be read', async () => {
+    // Reaching the teardown needs the credentials gone (a dispositive absence);
+    // the oauth read is then the only thing deciding whether the user's default
+    // gets restored before the selection is dropped.
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'host-account',
+      createClaudeCredentialsJson('alice@example.com', 'alice-token')
+    )
+    rmSync(join(managedAuthPath, '.credentials.json'))
+    fsFaults.lockedReadSuffix = 'oauth-account.json'
+    const settings = createSettings({
+      claudeManagedAccounts: [createClaudeAccount('host-account', managedAuthPath)],
+      activeClaudeManagedAccountId: 'host-account',
+      activeClaudeManagedAccountIdsByRuntime: { host: 'host-account', wsl: {} }
+    })
+    const store = createStore(settings)
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    await new ClaudeRuntimeAuthService(store as never).syncForCurrentSelection()
+
+    // Prove the injected fault was actually consumed, not merely armed.
+    expect(fsFaults.lockedReadHits).toBeGreaterThan(0)
+    // Clearing here without restoring would leave the runtime holding this
+    // account's credentials with nothing in Orca pointing at them.
+    expect(store.getSettings().activeClaudeManagedAccountId).toBe('host-account')
+  })
+
+  it('clears the active host account when the outgoing oauth file is malformed', async () => {
+    // Control for the case above: malformed JSON is a completed observation, so
+    // the teardown must proceed rather than defer forever on a corrupt file.
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'host-account',
+      createClaudeCredentialsJson('alice@example.com', 'alice-token')
+    )
+    rmSync(join(managedAuthPath, '.credentials.json'))
+    writeFileSync(join(managedAuthPath, 'oauth-account.json'), '{ not json')
+    const settings = createSettings({
+      claudeManagedAccounts: [createClaudeAccount('host-account', managedAuthPath)],
+      activeClaudeManagedAccountId: 'host-account',
+      activeClaudeManagedAccountIdsByRuntime: { host: 'host-account', wsl: {} }
+    })
+    const store = createStore(settings)
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    await new ClaudeRuntimeAuthService(store as never).syncForCurrentSelection()
+
+    expect(store.getSettings().activeClaudeManagedAccountId).toBeNull()
+  })
+
+  it('keeps the selection when the OUTGOING account directory cannot be read during a switch', async () => {
+    // Switching away: the outgoing account is not the active one, so the restore
+    // is warranted -- but it consumes the outgoing oauth identity, so an
+    // unreadable directory means the restore cannot be run safely either.
+    const outgoing = createManagedClaudeAuth(
+      testState.userDataDir,
+      'outgoing-account',
+      createClaudeCredentialsJson('alice@example.com', 'alice-token')
+    )
+    const incoming = createManagedClaudeAuth(
+      testState.userDataDir,
+      'incoming-account',
+      createClaudeCredentialsJson('bob@example.com', 'bob-token')
+    )
+    let settings = createSettings({
+      claudeManagedAccounts: [
+        createClaudeAccount('outgoing-account', outgoing),
+        createClaudeAccount('incoming-account', incoming)
+      ],
+      activeClaudeManagedAccountId: 'outgoing-account',
+      activeClaudeManagedAccountIdsByRuntime: { host: 'outgoing-account', wsl: {} }
+    })
+    const store = createStore(settings)
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    await service.syncForCurrentSelection()
+
+    // Now select the incoming account and make it dispositively unusable, so the
+    // teardown runs with the outgoing account as `previousAccount`.
+    settings = store.updateSettings({
+      activeClaudeManagedAccountId: 'incoming-account',
+      activeClaudeManagedAccountIdsByRuntime: { host: 'incoming-account', wsl: {} }
+    }) as typeof settings
+    rmSync(incoming, { recursive: true, force: true })
+    fsFaults.lockedRealpathSuffix = join('outgoing-account', 'auth')
+
+    await service.syncForCurrentSelection()
+
+    expect(fsFaults.lockedRealpathHits).toBeGreaterThan(0)
+    expect(store.getSettings().activeClaudeManagedAccountId).toBe('incoming-account')
   })
 
   it('still clears the active host account when its directory is proven gone', async () => {
