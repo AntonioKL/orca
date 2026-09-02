@@ -35,6 +35,10 @@ export async function assertHostedIosScreenshotParity({
   const result = {
     ...measurements,
     landmarkDelta,
+    // Why: a delta alone cannot say which side moved, and the two landmarks come
+    // from different sources (native accessibility frame vs hosted DOM rect).
+    landmarks:
+      nativeLandmark && hostedLandmark ? { native: nativeLandmark, hosted: hostedLandmark } : null,
     budgets: {
       changedPixelRatio: MAX_CHANGED_PIXEL_RATIO,
       meanChannelDifference: MAX_MEAN_CHANNEL_DIFFERENCE,
