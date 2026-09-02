@@ -164,7 +164,8 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     }
   }
 
-  let worktreeId: string
+  let worktreeId: string,
+    worktreePath = ''
   let primaryTabId: string | null
   let startupPlan = null as ReturnType<typeof buildDirectWorkItemAgentStartupPlan>['startupPlan']
   let effectiveAgent: TuiAgent | null = null
@@ -201,7 +202,7 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
       resolvedCompareBaseRef
     )
     worktreeId = result.worktree.id
-    const worktreePath = result.worktree.path
+    worktreePath = result.worktree.path
 
     const createdConnectionId = getConnectionId(worktreeId)
     // Why: newly-created SSH worktrees can be activated before the store
@@ -314,6 +315,8 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     structuredLaunch,
     agent: effectiveAgent,
     worktreeId,
+    workspacePath: worktreePath,
+    connectionId: repoConnectionId,
     draftContent,
     promptDelivery,
     primaryTabId,

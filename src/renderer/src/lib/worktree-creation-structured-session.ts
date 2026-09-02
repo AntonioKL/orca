@@ -4,6 +4,7 @@ import { activateAndRevealWorktree, type ActivateAndRevealResult } from '@/lib/w
 import { startStructuredCodexLaunch } from '@/lib/structured-agent-session-launch'
 import { StructuredAgentSessionCreateRefusalError } from '@/lib/launch-structured-codex-session'
 import { activateStructuredAgentSessionById } from '@/lib/structured-agent-session-tab-activation'
+import { preflightAgentTrust } from '@/lib/agent-trust-preflight'
 import type { WorktreeCreationRequest } from '@/lib/pending-worktree-creation'
 import type { WorktreeStartupPayload } from '@/lib/worktree-startup-payload'
 
@@ -37,6 +38,20 @@ export async function launchStructuredWorktreeSession(args: {
         .getState()
         .updateWorktreeMeta(args.worktreeId, { pendingFirstAgentMessageRename: true })
         .catch(() => undefined)
+    }
+    const worktree = useAppStore
+      .getState()
+      .allWorktrees?.()
+      .find((candidate) => candidate.id === args.worktreeId)
+    if (args.request.agent && worktree?.path) {
+      const repoConnectionId = useAppStore
+        .getState()
+        .repos.find((repo) => repo.id === args.request.repoId)?.connectionId
+      await preflightAgentTrust({
+        agent: args.request.agent,
+        workspacePath: worktree.path,
+        connectionId: repoConnectionId
+      })
     }
     if (args.shouldActivateOnCompletion) {
       const fallbackActivation = activateAndRevealWorktree(args.worktreeId, {

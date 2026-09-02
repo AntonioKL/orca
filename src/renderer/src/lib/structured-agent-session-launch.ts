@@ -43,6 +43,11 @@ type StructuredLaunchState = StructuredLaunchRecoveryState & {
   }
 }
 
+type StructuredLaunchStateResult = {
+  state: StructuredLaunchState
+  promptDeliveryResult?: Promise<StructuredPromptDeliveryResult>
+}
+
 export type StructuredCodexLaunchOptions = {
   prompt?: string
   promptDelivery?: 'auto-submit' | 'submit-after-ready'
@@ -159,7 +164,7 @@ function trackLaunchFailureToast(state: StructuredLaunchState): void {
 function structuredCodexLaunchState(
   worktreeId: string,
   options: StructuredCodexLaunchOptions
-): StructuredLaunchState {
+): StructuredLaunchStateResult {
   const identity = launchIdentity(worktreeId)
   const existing = pendingStructuredLaunchesByIdentity.get(identity)
   if (existing) {
@@ -168,7 +173,32 @@ function structuredCodexLaunchState(
       trackLaunchSettlement(existing, existing.promise)
       trackLaunchFailureToast(existing)
     }
-    return existing
+    const text = options.prompt?.trim() ?? ''
+    const stagedPrompt = text
+      ? enqueueStructuredAgentSessionLaunchPrompt(existing.intent.sessionId, text)
+      : null
+    const promptDeliveryResult = settleStructuredCodexLaunchPrompt({
+      launchResult: existing.promise,
+      options,
+      stagedEntry: stagedPrompt
+    })
+    const recoveredPromptDeliveryResult = promptDeliveryResult?.catch(async (error) => {
+      if (error instanceof StructuredAgentSessionCreateRefusalError) {
+        return (
+          (await existing.refusalFallback.promptDeliveryPromise) ?? {
+            delivered: false,
+            failureNotified: true
+          }
+        )
+      }
+      return { delivered: false, failureNotified: true }
+    })
+    return {
+      state: existing,
+      ...(recoveredPromptDeliveryResult
+        ? { promptDeliveryResult: recoveredPromptDeliveryResult }
+        : {})
+    }
   }
 
   const fallback = Promise.withResolvers<boolean>()
@@ -222,7 +252,10 @@ function structuredCodexLaunchState(
   pendingStructuredLaunchesByIdentity.set(identity, state)
   trackLaunchSettlement(state, state.promise)
   trackLaunchFailureToast(state)
-  return state
+  return {
+    state,
+    ...(state.promptDeliveryResult ? { promptDeliveryResult: state.promptDeliveryResult } : {})
+  }
 }
 
 export function cancelStructuredCodexLaunch(worktreeId: string, sessionId: string): boolean {
@@ -244,11 +277,11 @@ export function startStructuredCodexLaunch(
   worktreeId: string,
   options: StructuredCodexLaunchOptions = {}
 ): StructuredCodexLaunchResult {
-  const state = structuredCodexLaunchState(worktreeId, options)
+  const { state, promptDeliveryResult } = structuredCodexLaunchState(worktreeId, options)
   return {
     sessionId: state.intent.sessionId,
     launchResult: state.promise,
-    ...(state.promptDeliveryResult ? { promptDeliveryResult: state.promptDeliveryResult } : {}),
+    ...(promptDeliveryResult ? { promptDeliveryResult } : {}),
     claimDefinitiveRefusalFallback: (fallback) => {
       state.refusalFallback.callback ??= fallback
       return state.refusalFallback.promise

@@ -116,6 +116,10 @@ describe('startStructuredCodexLaunch', () => {
     vi.mocked(refreshLocalStructuredSessionTabs).mockResolvedValue([
       publishedSnapshot(worktreeId, intent.sessionId)
     ])
+    mocks.callStructuredAgentSession.mockResolvedValue({
+      ok: true,
+      value: { submission: { dispatchState: 'accepted' } }
+    })
 
     startStructuredCodexLaunch(worktreeId)
     await flushLaunchSettlement()
@@ -138,6 +142,10 @@ describe('startStructuredCodexLaunch', () => {
     vi.mocked(refreshLocalStructuredSessionTabs).mockResolvedValue([
       publishedSnapshot(worktreeId, intent.sessionId)
     ])
+    mocks.callStructuredAgentSession.mockResolvedValue({
+      ok: true,
+      value: { submission: { dispatchState: 'accepted' } }
+    })
 
     startStructuredCodexLaunch(worktreeId)
     startStructuredCodexLaunch(worktreeId)
@@ -147,6 +155,44 @@ describe('startStructuredCodexLaunch', () => {
     resolveLaunch({ sessionId: intent.sessionId, fence: 1 })
     await flushLaunchSettlement()
     expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('delivers a prompt from a coalesced caller after the shared launch settles', async () => {
+    const worktreeId = 'wt-coalesced-prompt'
+    const intent = launchIntent(worktreeId)
+    let resolveLaunch: (receipt: { sessionId: string; fence: number }) => void = () => {}
+    mocks.createIntent.mockReturnValueOnce(intent)
+    mocks.launch.mockImplementation(
+      () =>
+        new Promise<{ sessionId: string; fence: number }>((resolve) => (resolveLaunch = resolve))
+    )
+    vi.mocked(refreshLocalStructuredSessionTabs).mockResolvedValue([
+      publishedSnapshot(worktreeId, intent.sessionId)
+    ])
+
+    mocks.callStructuredAgentSession.mockResolvedValue({
+      ok: true,
+      value: { submission: { dispatchState: 'accepted' } }
+    })
+    startStructuredCodexLaunch(worktreeId)
+    const second = startStructuredCodexLaunch(worktreeId, { prompt: 'second prompt' })
+
+    resolveLaunch({ sessionId: intent.sessionId, fence: 1 })
+    await expect(second.promptDeliveryResult).resolves.toEqual({
+      delivered: true,
+      failureNotified: false
+    })
+    await flushLaunchSettlement()
+
+    expect(mocks.callStructuredAgentSession).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'agentSession.send',
+      expect.objectContaining({
+        body: expect.objectContaining({
+          blocks: [{ type: 'text', text: 'second prompt' }]
+        })
+      })
+    )
   })
 
   it('keeps one launch identity per worktree while the outcome is unknown', async () => {

@@ -13,6 +13,7 @@ import { startStructuredCodexLaunch } from '@/lib/structured-agent-session-launc
 import { StructuredAgentSessionCreateRefusalError } from '@/lib/launch-structured-codex-session'
 import { isNativeChatTranscriptLocalReadable } from '@/lib/native-chat-transcript-readability'
 import { resolveSourceControlLaunchPlatform } from '@/lib/source-control-launch-platform'
+import { preflightAgentTrust } from '@/lib/agent-trust-preflight'
 
 export function buildDirectWorkItemStartup(args: {
   agent: TuiAgent | null
@@ -112,6 +113,8 @@ export async function settleDirectWorkItemStructuredLaunch(args: {
   structuredLaunch: boolean
   agent: TuiAgent | null
   worktreeId: string
+  workspacePath: string
+  connectionId: string | null
   draftContent: string
   promptDelivery: PromptDelivery
   primaryTabId: string | null
@@ -131,8 +134,13 @@ export async function settleDirectWorkItemStructuredLaunch(args: {
     prompt: args.draftContent,
     ...(args.promptDelivery === 'submit-after-ready' ? { promptDelivery: args.promptDelivery } : {})
   })
-  const refusalFallback = launch.claimDefinitiveRefusalFallback(() => {
+  const refusalFallback = launch.claimDefinitiveRefusalFallback(async () => {
     structuredLaunch = false
+    await preflightAgentTrust({
+      agent: args.agent,
+      workspacePath: args.workspacePath,
+      connectionId: args.connectionId
+    })
     const fallbackActivation = activateAndRevealWorktree(args.worktreeId, {
       sidebarRevealBehavior: 'auto',
       createNewTerminalForStartup: true,
