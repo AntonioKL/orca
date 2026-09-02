@@ -4,7 +4,7 @@ import type { RelayDispatcher } from './dispatcher'
 import { FsHandler } from './fs-handler'
 
 describe('mobile relay filesystem extensions', () => {
-  it('registers every bounded operation used by the SSH provider', () => {
+  it('registers every mobile filesystem operation used by the SSH provider', () => {
     const requests = new Set<string>()
     const dispatcher = {
       onRequest: (method: string) => requests.add(method),
@@ -16,12 +16,7 @@ describe('mobile relay filesystem extensions', () => {
     const handler = new FsHandler(dispatcher as unknown as RelayDispatcher, new RelayContext())
 
     try {
-      for (const method of [
-        'fs.readDirBounded',
-        'fs.readFileChunk',
-        'fs.readTerminalArtifactChunk',
-        'fs.listMarkdownDocuments'
-      ]) {
+      for (const method of ['fs.readFileChunk', 'fs.readTerminalArtifactChunk']) {
         expect(requests).toContain(method)
       }
     } finally {

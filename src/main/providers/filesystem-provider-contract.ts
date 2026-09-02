@@ -34,11 +34,6 @@ export type FileReadLimits = {
   maxTextBytes?: number
 }
 
-export type FilesystemDirectoryReadOptions = {
-  maxEntries?: number
-  maxRetainedBytes?: number
-}
-
 export type FileRangeReadResult = {
   /** Raw bytes for `[position, position + bytesRead)`. `bytesRead < length`
    *  always means end of file: the host loops until the window is filled, and
@@ -61,7 +56,7 @@ export class FileRangeReadUnsupportedError extends Error {
 }
 
 export type IFilesystemProvider = {
-  readDir(dirPath: string, options?: FilesystemDirectoryReadOptions): Promise<DirEntry[]>
+  readDir(dirPath: string): Promise<DirEntry[]>
   readFile(filePath: string, limits?: FileReadLimits): Promise<FileReadResult>
   readFileChunk?(filePath: string, offset: number, length: number): Promise<FileChunkReadResult>
   readDocPreviewFile?(request: DocPreviewFileAccessRequest): Promise<DocPreviewFileAccessResult>
@@ -124,7 +119,6 @@ export type IFilesystemProvider = {
       searchQuery?: string
     }
   ): Promise<string[]>
-  listMarkdownDocuments?(rootPath: string): Promise<string[]>
   supportsQuickOpenSearch?(options?: { signal?: AbortSignal }): Promise<boolean>
   scanWorkspaceSpace?(
     rootPath: string,
