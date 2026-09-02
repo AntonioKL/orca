@@ -199,7 +199,8 @@ export function makeExecResponses(opts: {
   }
   // Publication is gated on the probe: only a tree this host actually loaded is shared.
   if (loadable) {
-    // The cloexec patch runs first, so what gets published is already patched.
+    // The cloexec patch runs first, and publication is gated on its status, so `patched` is what
+    // makes the promote exec below reachable at all.
     slots.push(`${NODE_PTY_CLOEXEC_STATUS_PREFIX}patched\n`)
     slots.push('') // promote the private tree into the shared native-deps cache
   }

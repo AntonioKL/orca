@@ -26,7 +26,9 @@
  *
  * Linux's `node-pty-1.1.0-master-cloexec-patch.cjs` also mutates in place, but it stays inside rule
  * 1: the deploy path runs it before promotion, and returns early on a linked entry, so it only ever
- * touches a private tree. Its bytes are in the key, so a patched build never links a pre-patch entry.
+ * touches a private tree. Its bytes are in the key, so a patched build never links a pre-patch
+ * entry -- and a tree whose patch was refused or rolled back is not promoted at all, because under
+ * that same key it would publish the leak to every later host on the machine.
  */
 import { createHash } from 'node:crypto'
 import { RELAY_REMOTE_DIR } from './relay-protocol'

@@ -131,6 +131,34 @@ describe('relay pty-master close-on-exec patch on the install path', () => {
       .filter((command) => command.includes(PATCH_ASSET))
   }
 
+  /** Whether this deploy elected itself publisher of the shared entry. */
+  function promoted(): boolean {
+    return vi
+      .mocked(execCommand)
+      .mock.calls.some(([, command]) => command.includes('mkdir "$cache"'))
+  }
+
+  /**
+   * A cache-miss first install whose patch reports `status`. The promote slot is fed either way,
+   * so a run that wrongly promotes reads a valid response rather than falling off the end -- the
+   * assertion has to be the absence of the command itself, not a downstream crash.
+   */
+  function firstInstallReporting(status: string): ExecResponse[] {
+    return [
+      ...makeStagedFirstInstallExecPrefix(),
+      '', // npm install native deps
+      '', // chmod prebuilds
+      'ORCA-NPTY-PROBE-OK\n',
+      '', // rm probe stderr
+      `ORCA-NPTY-CLOEXEC:${status}\n`,
+      '', // promote into the shared native-deps cache, if this deploy still gets that far
+      '', // clean stage root
+      'DEAD',
+      '', // publish the per-launch credential
+      'READY'
+    ]
+  }
+
   it('runs the patch on a Linux relay once node-pty is proven loadable', async () => {
     const conn = makeMockConnection(sftpCapture)
     feed(makeExecResponses({ npmInstall: 'ok', probe: 'ok' }))
@@ -158,6 +186,61 @@ describe('relay pty-master close-on-exec patch on the install path', () => {
     expect(patchAt).toBeGreaterThan(-1)
     expect(promoteAt).toBeGreaterThan(-1)
     expect(patchAt).toBeLessThan(promoteAt)
+  })
+
+  it('does not publish a tree whose patch failed and rolled back', async () => {
+    // The script rolls `pty.cc` and `build/Release` back to the pre-patch, still-leaky build and
+    // reports `failed:` with exit 0, so nothing throws. Publishing that tree would be worse than
+    // the leak this PR closes: the key hashes the patch's bytes, so every later host on the
+    // machine links the entry, probes it loadable, and skips patching. Stay private instead.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const conn = makeMockConnection(sftpCapture)
+      feed(firstInstallReporting('failed:npm rebuild node-pty failed: gyp ERR! not found: make'))
+
+      await deployAndLaunchRelay(conn)
+
+      expect(patchCommands()).toHaveLength(1)
+      expect(promoted()).toBe(false)
+      expect(warn.mock.calls.map((args) => String(args[0] ?? '')).join('\n')).toContain(
+        '[ssh-relay][NPTY-CLOEXEC-UNSHARED]'
+      )
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('does not publish a tree the patch refused to touch', async () => {
+    // `skipped:` is not one verdict. Every form except `skipped:not-linux` means the patch was
+    // declined and the leaky build is still on disk, which is indistinguishable from `failed:`
+    // as far as what would get published.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const conn = makeMockConnection(sftpCapture)
+      feed(firstInstallReporting('skipped:earlier-attempt-failed'))
+
+      await deployAndLaunchRelay(conn)
+
+      expect(promoted()).toBe(false)
+      // A refusal exits 0, so the warn is the only signal that this host stayed leaky.
+      expect(warn.mock.calls.map((args) => String(args[0] ?? '')).join('\n')).toContain(
+        '[ssh-relay][NPTY-CLOEXEC-UNFIXED]'
+      )
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('still publishes a tree that was patched but whose isolation check could not run', async () => {
+    // `patched-unverified` rebuilt from patched source; only the check that watches a later child
+    // could not observe the result. An unobservable check is not a failed patch, and refusing to
+    // publish here would disable the shared cache on every host without `lsof`.
+    const conn = makeMockConnection(sftpCapture)
+    feed(firstInstallReporting('patched-unverified'))
+
+    await deployAndLaunchRelay(conn)
+
+    expect(promoted()).toBe(true)
   })
 
   it('never patches through a symlink into an entry another relay already published', async () => {
