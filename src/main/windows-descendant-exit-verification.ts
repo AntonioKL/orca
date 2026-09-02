@@ -1,5 +1,5 @@
 import type { DescendantTreeVerdict } from './pty-descendant-exit-verification'
-import { queryWindowsProcessDescendants } from './providers/windows-foreground-process-rows'
+import { windowsDescendantsFromRows } from './providers/windows-foreground-process-rows'
 import { readWindowsProcessTableFresh } from './windows/windows-process-table'
 
 export const WINDOWS_DESCENDANT_KILL_VERIFY_MS = 3_500
@@ -17,8 +17,7 @@ export type WindowsDescendantSnapshot = {
 }
 
 export type WindowsDescendantVerificationDeps = {
-  readDescendants?: (rootPid: number) => Promise<{ pid: number }[] | null>
-  readTable?: () => Promise<{ pid: number; creationTimeMs?: number }[]>
+  readTable?: () => Promise<{ pid: number; ppid: number; creationTimeMs?: number }[]>
   now?: () => number
   wait?: (ms: number) => Promise<void>
   verifyMs?: number
@@ -44,35 +43,23 @@ export async function captureWindowsDescendantSnapshot(
     return null
   }
   const capturedAtMs = (deps.now ?? Date.now)()
-  const descendants = await (
-    deps.readDescendants ?? ((pid: number) => queryWindowsProcessDescendants(pid, { fresh: true }))
-  )(rootPid).catch(() => null)
+  // One table read, not a walk plus an identity read: each is bounded in
+  // seconds, and this runs inside the close ladder's budget.
+  const table = await (deps.readTable ?? readWindowsProcessTableFresh)().catch(() => null)
+  const descendants = table && windowsDescendantsFromRows(table, rootPid)
   if (!descendants) {
     return null
   }
-  const rows = await readIdentifiedRows(descendants, deps)
-  return rows && { descendants: rows, capturedAtMs }
-}
-
-async function readIdentifiedRows(
-  descendants: { pid: number }[],
-  deps: WindowsDescendantVerificationDeps
-): Promise<{ pid: number; creationTimeMs: number }[] | null> {
-  const wanted = new Set(descendants.map((row) => row.pid))
-  if (wanted.size === 0) {
-    return []
+  return {
+    descendants: descendants.flatMap((row) =>
+      // A descendant that denied a creation-time query cannot be told from a
+      // recycled pid later, so it is never signalled on a bare pid.
+      typeof row.creationTimeMs === 'number'
+        ? [{ pid: row.pid, creationTimeMs: row.creationTimeMs }]
+        : []
+    ),
+    capturedAtMs
   }
-  const table = await (deps.readTable ?? readWindowsProcessTableFresh)().catch(() => null)
-  if (!table) {
-    return null
-  }
-  const identified: { pid: number; creationTimeMs: number }[] = []
-  for (const row of table) {
-    if (wanted.has(row.pid) && typeof row.creationTimeMs === 'number') {
-      identified.push({ pid: row.pid, creationTimeMs: row.creationTimeMs })
-    }
-  }
-  return identified
 }
 
 /**

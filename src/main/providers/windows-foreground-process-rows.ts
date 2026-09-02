@@ -81,6 +81,25 @@ export async function queryWindowsPaneProcessInventory(
   }
 }
 
+/**
+ * The descendant walk over rows the caller already read.
+ *
+ * Why exported: a caller that needs a field this module's projection drops —
+ * process creation time, for a PID-reuse-safe teardown snapshot — would
+ * otherwise read the whole table a second time to get it.
+ * Null when the root is absent, which is a stale or filtered snapshot rather
+ * than a root with no descendants.
+ */
+export function windowsDescendantsFromRows<Row extends { pid: number; ppid: number }>(
+  rows: Row[],
+  rootPid: number
+): (Row & { depth: number })[] | null {
+  if (!rows.some((row) => row.pid === rootPid)) {
+    return null
+  }
+  return collectDescendants(rows, rootPid).sort((a, b) => b.depth - a.depth)
+}
+
 /** Test-only: clear the shared snapshot so one case's rows never serve the next. */
 export function resetWindowsProcessRowsSnapshotForTests(): void {
   resetWindowsProcessTableForTests()
