@@ -144,6 +144,36 @@ describe('mobile web native chat operations', () => {
     })
   })
 
+  // An unreachable SSH host strips agentStatus from a terminal that still exists. Revoking the
+  // grant there reported the session as gone; the read must surface the host failure instead.
+  it('keeps the grant when the host stops reporting agent status', async () => {
+    const context = operationContext()
+    const sendRequest = vi
+      .fn<RpcClient['sendRequest']>()
+      .mockResolvedValueOnce(success(sessionSnapshot({ unreachable: true })))
+      .mockResolvedValueOnce(success({ error: 'Transcript unavailable' }))
+
+    await expect(
+      executeMobileWebNativeChatOperation({
+        operation: 'read',
+        payload: {
+          workspaceId: context.pageWorkspaceId,
+          sessionId: context.pageSessionId,
+          limit: 40
+        },
+        client: { sendRequest } as unknown as RpcClient,
+        workspaceAuthority: context.workspaceAuthority,
+        nativeChatAuthority: context.nativeChatAuthority,
+        nativeAuthority: {},
+        ...OPERATION_RUNTIME
+      })
+    ).rejects.toMatchObject({ code: 'host_error' })
+    expect(sendRequest).toHaveBeenCalledTimes(2)
+    expect(context.nativeChatAuthority.resolve('workspace-1', context.pageSessionId)).toMatchObject(
+      { providerSessionId: 'provider-session-secret' }
+    )
+  })
+
   it('persists pending delivery through stable hidden chat authority', async () => {
     const context = operationContext()
     const sendRequest = vi
@@ -216,7 +246,7 @@ function operationContext() {
   }
 }
 
-function sessionSnapshot(overrides: { providerSessionId?: string } = {}) {
+function sessionSnapshot(overrides: { providerSessionId?: string; unreachable?: boolean } = {}) {
   return {
     worktree: 'workspace-1',
     tabs: [
@@ -225,14 +255,18 @@ function sessionSnapshot(overrides: { providerSessionId?: string } = {}) {
         id: 'tab-1',
         terminal: 'terminal-secret',
         launchAgent: 'claude',
-        agentStatus: {
-          state: 'waiting',
-          agentType: 'claude',
-          providerSession: {
-            id: overrides.providerSessionId ?? 'provider-session-secret',
-            transcriptPath: '/private/transcript.jsonl'
-          }
-        }
+        ...(overrides.unreachable
+          ? {}
+          : {
+              agentStatus: {
+                state: 'waiting',
+                agentType: 'claude',
+                providerSession: {
+                  id: overrides.providerSessionId ?? 'provider-session-secret',
+                  transcriptPath: '/private/transcript.jsonl'
+                }
+              }
+            })
       }
     ]
   }

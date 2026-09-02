@@ -23,7 +23,14 @@ export async function resolveFreshMobileWebNativeChatBinding(args: {
           (value) => isRecord(value) && value.type === 'terminal' && value.id === binding.hostTabId
         )
       : undefined
-  if (!isCurrentBinding(tab, binding) || (args.requireTerminal && !binding.hostTerminalId)) {
+  // Why not revoke when the host reports no agent status: an unreachable SSH host strips it from a
+  // terminal that still exists, and loss of contact is never evidence the session is gone. Only a
+  // vanished tab, a different terminal, or a tab rebound to another session ends the grant.
+  const gone =
+    tab === undefined ||
+    !isSameTerminal(tab, binding) ||
+    (hasProviderSession(tab) && !isCurrentBinding(tab, binding))
+  if (gone || (args.requireTerminal && !binding.hostTerminalId)) {
     args.nativeChatAuthority.revoke(args.sessionId)
     throw new MobileWebBrokerError('not_found')
   }
@@ -61,6 +68,22 @@ export function assertCurrentMobileWebNativeChatPageBinding(
 ): void {
   args.workspaceAuthority.assertHostWorkspaceBinding(pageWorkspaceId, binding.hostWorkspaceId)
   args.nativeChatAuthority.assertBinding(binding.hostWorkspaceId, sessionId, binding)
+}
+
+function hasProviderSession(value: unknown): boolean {
+  return (
+    isRecord(value) && isRecord(value.agentStatus) && isRecord(value.agentStatus.providerSession)
+  )
+}
+
+function isSameTerminal(
+  value: unknown,
+  binding: Readonly<MobileWebHostNativeChatBinding>
+): boolean {
+  return (
+    isRecord(value) &&
+    (typeof value.terminal === 'string' ? value.terminal : null) === binding.hostTerminalId
+  )
 }
 
 function isCurrentBinding(
