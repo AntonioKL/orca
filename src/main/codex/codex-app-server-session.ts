@@ -73,7 +73,11 @@ export function killCodexAppServerProcessTree(
   child: Pick<ChildProcessHandle, 'pid' | 'kill'>,
   options: {
     platform?: NodeJS.Platform
-    spawnImpl?: (program: string, args: string[], options: Record<string, unknown>) => ChildProcessHandle
+    spawnImpl?: (
+      program: string,
+      args: string[],
+      options: Record<string, unknown>
+    ) => ChildProcessHandle
   } = {}
 ): void {
   const platform = options.platform ?? process.platform
@@ -147,8 +151,12 @@ export function isCodexMethodNotFoundError(error: unknown): boolean {
 export async function runCodexAppServerSession<T>(
   invocation: CodexAppServerInvocation,
   body: (rpc: CodexAppServerRpc) => Promise<T>,
-  spawnImpl: (program: string, args: string[], options: Record<string, unknown>) => ChildProcessHandle =
-    (program, args, options) => spawnProcess({ program, args, ...options } as ProcessSpec)
+  spawnImpl: (
+    program: string,
+    args: string[],
+    options: Record<string, unknown>
+  ) => ChildProcessHandle = (program, args, options) =>
+    spawnProcess({ program, args, ...options } as ProcessSpec)
 ): Promise<T> {
   // Why: a default-home grant must run against the real ~/.codex, so strip an
   // inherited CODEX_HOME (envToDelete) after applying the overlay, not before.
