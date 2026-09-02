@@ -4,6 +4,10 @@ import type {
   HistoryRecoveryContext,
   PendingDaemonSpawnOperation
 } from './daemon-pty-runtime-state'
+import {
+  classifyDaemonAdoptionOrigin,
+  trackDaemonPtyCwdDeniedIfDiverged
+} from './daemon-adoption-telemetry-event'
 import { STABLE_PANE_ATTACH_ONLY_DAEMON_PROTOCOL_VERSION } from './daemon-protocol-version'
 import { TerminalKilledError } from './daemon-pty-lifecycle-errors'
 import { DaemonPtySpawnResult } from './daemon-pty-spawn-result'
@@ -246,6 +250,13 @@ export abstract class DaemonPtySessionSpawn extends DaemonPtySpawnResult {
     }
     activeSpawnContext = context
     const result = await this.createOrAttachSpawn(context, context.historySeedSegments)
+    if (result.isNew && !attachOnly) {
+      trackDaemonPtyCwdDeniedIfDiverged(
+        effectiveCwd,
+        result.cwdReadableByDaemon,
+        classifyDaemonAdoptionOrigin(this.pidRecord)
+      )
+    }
     return this.finishSpawn(context, result)
   }
 
