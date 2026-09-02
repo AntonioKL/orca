@@ -8,10 +8,12 @@ import { selectForegroundProcessCandidate } from '../../shared/foreground-proces
 import type { ForegroundProcessEvidence } from '../../shared/foreground-process-evidence'
 import {
   buildProcessTableIndex,
-  getStrictProcessTableSnapshot,
   lookupProcessTableIndex,
   type ProcessTableIndex,
-  type ProcessTableIndexStats,
+  type ProcessTableIndexStats
+} from '../../shared/process-table-index'
+import {
+  getStrictProcessTableSnapshot,
   type ProcessTableRow
 } from '../../shared/process-table-snapshot'
 

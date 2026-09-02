@@ -1,9 +1,8 @@
 import { recognizeAgentProcessFromCommandLine } from '../../shared/agent-process-recognition'
 import { resolveOuterWrapperForegroundProcess } from '../../shared/foreground-wrapper-agent'
+import { collectDescendantsFromIndex, getProcessTableIndex } from '../../shared/process-table-index'
 import {
-  collectDescendantsFromIndex,
   getFreshProcessTableSnapshot,
-  getProcessTableIndex,
   getProcessTableSnapshot,
   type ProcessTableRow
 } from '../../shared/process-table-snapshot'

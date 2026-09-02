@@ -8,16 +8,18 @@ vi.mock('node:child_process', () => ({ execFile: execFileMock }))
 
 import {
   buildProcessTableIndex,
-  createProcessTableSnapshotReader,
   getProcessTableIndex,
+  type ProcessTableIndexStats
+} from './process-table-index'
+import {
+  createProcessTableSnapshotReader,
   getProcessTableSnapshot,
   getStrictProcessTableSnapshot,
   parseProcessTableRows,
   parseStrictProcessTableRows,
   ProcessTableCaptureError,
   PS_MAX_BUFFER_BYTES,
-  resetProcessTableSnapshotForTests,
-  type ProcessTableIndexStats
+  resetProcessTableSnapshotForTests
 } from './process-table-snapshot'
 
 function deferred<T>(): {
