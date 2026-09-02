@@ -2246,11 +2246,39 @@ export class PtyHandler {
     managed.physicalExit?.markExited()
     this.releaseRelayIngress(managed)
     this.flushPtyOutput(managed.id)
+    this.publishReapedExit(managed)
     this.notifyExitListener(managed)
     this.agentSessionOwners.release(managed.id)
     disposeManagedPty(managed)
     this.removePty(managed.id)
     this.clearPtyFlowState(managed.id)
+  }
+
+  /**
+   * A reap is an exit the client has to hear about. `notifyExitListener` is
+   * relay-internal, so a retirement that stops there leaves the pane mounted
+   * against a session the relay has already forgotten — the next attach answers
+   * `PTY "<id>" not found` and nothing before it said why. `resize` made that
+   * user-triggered.
+   *
+   * `-1` is this wire's "gone, status unrecoverable": the pid is proven absent
+   * (ESRCH from the host that owns it) but nothing waited on the shell, so no
+   * status exists. `ssh-relay-session` already publishes the same code for a
+   * dropped lease.
+   */
+  private publishReapedExit(managed: ManagedPty): void {
+    // Why the guard: node-pty's own `onExit` already queued and published this
+    // pty's real exit code before reaching here, and the sweep also reaps
+    // entries that path left behind.
+    if (managed.exitListenerNotified || this.pendingExitByPty.has(managed.id)) {
+      return
+    }
+    this.pendingExitByPty.set(managed.id, {
+      id: managed.id,
+      code: -1,
+      incarnationId: managed.incarnationId
+    })
+    this.publishPendingExit(managed.id)
   }
 
   /**
@@ -2410,7 +2438,12 @@ export class PtyHandler {
     if (!managed || managed.disposed) {
       return false
     }
-    return await processHasChildren(managed.pty.pid)
+    // Fresh, not TTL-cached: this RPC exists to gate destructive decisions (the
+    // window-close confirmation, workspace cleanup's idle evidence), which act
+    // on the answer once. `pty.inspectProcess` below stays on the shared
+    // snapshot because it is the polled path, where a scan per pane per tick is
+    // the fork storm the cache removed.
+    return await processHasChildren(managed.pty.pid, { fresh: true })
   }
 
   private async getForegroundProcess(params: Record<string, unknown>): Promise<string | null> {

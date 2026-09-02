@@ -10,6 +10,7 @@ import {
 } from '../shared/agent-process-recognition'
 import { getFirstCommandToken } from '../shared/command-token-scanner'
 import {
+  getFreshProcessTableSnapshot,
   getProcessTableSnapshot,
   type ProcessTableIndex,
   type ProcessTableRow
@@ -180,15 +181,26 @@ export async function resolveProcessCwd(pid: number, fallbackCwd: string): Promi
  * ~4k opens per pgrep on a 690-process host, at up to 8 forks/sec (#13537).
  * `getForegroundProcessName` in the same RPC already captured the TTL-cached
  * `ps` table, whose index carries the parent/child map, so the answer is free.
+ *
+ * `fresh` opts out of that TTL. A poll can read a 500ms-old table because its
+ * next tick corrects it, but a close or cleanup decision acts on the answer
+ * once and destructively — a child that started inside the TTL would be killed
+ * with no confirmation. `pgrep` scanned per call, so anything that decides
+ * has to keep scanning per call.
  */
-export async function processHasChildren(pid: number): Promise<boolean> {
+export async function processHasChildren(
+  pid: number,
+  options?: { fresh?: boolean }
+): Promise<boolean> {
   // Windows has no `ps`; the previous `pgrep` fork always failed here too, so
   // this keeps the same answer without spawning anything to reach it.
   if (process.platform === 'win32') {
     return false
   }
   try {
-    const rows = await getProcessTableSnapshot()
+    const rows = options?.fresh
+      ? await getFreshProcessTableSnapshot()
+      : await getProcessTableSnapshot()
     return (getProcessTableIndex(rows).childrenByPpid.get(pid)?.length ?? 0) > 0
   } catch {
     return false

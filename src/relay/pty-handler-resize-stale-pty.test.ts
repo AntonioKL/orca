@@ -130,6 +130,40 @@ describe('PtyHandler.resize against a stale PTY handle', () => {
     expect(stderr).not.toHaveBeenCalled()
   })
 
+  it('publishes the exit so the client stops holding a pane on a retired session', () => {
+    vi.spyOn(ptyShellUtils, 'isProcessAlive').mockReturnValue(false)
+
+    dispatcher.callNotification('pty.resize', { id: PTY_1, cols: 120, rows: 40 })
+
+    // Retiring the record without this leaves the pane mounted against a
+    // session the relay has already forgotten: the next attach answers
+    // `PTY "<id>" not found` and nothing before it explained why.
+    expect(dispatcher._notifications).toContainEqual({
+      method: 'pty.exit',
+      params: { id: PTY_1, code: -1, incarnationId: expect.any(String) }
+    })
+  })
+
+  it('does not republish an exit node-pty already reported', async () => {
+    // The listing sweep also reaps entries the natural `onExit` left behind; a
+    // second `pty.exit` would hand the client a duplicate carrying -1 in place
+    // of the real status.
+    const onExit = mockPtyInstance.onExit.mock.calls.at(-1)?.[0] as (e: {
+      exitCode: number
+    }) => void
+    onExit({ exitCode: 7 })
+    await vi.runAllTimersAsync()
+    vi.spyOn(ptyShellUtils, 'isProcessAlive').mockReturnValue(false)
+
+    await dispatcher.callRequest('pty.listProcesses', {})
+
+    const exits = dispatcher._notifications.filter(
+      (notification) => notification.method === 'pty.exit'
+    )
+    expect(exits).toHaveLength(1)
+    expect(exits[0]?.params).toMatchObject({ id: PTY_1, code: 7 })
+  })
+
   it('still resizes a live PTY, with the clamped geometry', () => {
     vi.spyOn(ptyShellUtils, 'isProcessAlive').mockReturnValue(true)
 

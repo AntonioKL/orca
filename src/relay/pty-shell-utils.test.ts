@@ -571,6 +571,29 @@ describe('processHasChildren', () => {
     })
   })
 
+  it('rescans for a close decision rather than serving a table from inside the TTL', async () => {
+    await withProcessPlatform('linux', async () => {
+      let table = PS_TABLE
+      mockExecFile((_command, args) => {
+        if (args[0] === '-axo') {
+          return { stdout: table }
+        }
+        return new Error('unexpected command')
+      })
+
+      // The poll answers from the cache, which is the whole point of the memo.
+      await expect(processHasChildren(200)).resolves.toBe(false)
+      table = [PS_TABLE, '201 200 S+ npm run build'].join('\n')
+      await expect(processHasChildren(200)).resolves.toBe(false)
+      expect(execFileMock).toHaveBeenCalledTimes(1)
+
+      // A close or cleanup acts on the answer once and destructively, so a
+      // child started inside the 500ms window has to be visible to it.
+      await expect(processHasChildren(200, { fresh: true })).resolves.toBe(true)
+      expect(execFileMock).toHaveBeenCalledTimes(2)
+    })
+  })
+
   it('reports no children when the process table is unreadable', async () => {
     await withProcessPlatform('linux', async () => {
       mockExecFile(() => new Error('ps table unavailable'))
