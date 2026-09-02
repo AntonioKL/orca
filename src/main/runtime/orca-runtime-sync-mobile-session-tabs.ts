@@ -28,46 +28,36 @@ export class OrcaRuntimeWithSyncMobileSessionTabs extends OrcaRuntimeWithWriteOr
       if (!fence) {
         return true
       }
+      const reject = (): false => {
+        blockedRecreatedWorktreeIds.add(snapshot.worktree)
+        fence.rejectedPublication = true
+        return false
+      }
       const currentMeta = this.store?.getWorktreeMeta(snapshot.worktree)
       if (!currentMeta) {
-        return false
+        return reject()
       }
       if (snapshot.worktreeInstanceId !== undefined) {
-        if (
-          fence.removedInstanceId !== undefined &&
-          snapshot.worktreeInstanceId === fence.removedInstanceId
-        ) {
-          blockedRecreatedWorktreeIds.add(snapshot.worktree)
-          return false
+        // Why: every catalog row carries an instanceId, so a mismatch against the
+        // live meta is exactly "not the current occupant" — no removed-id memory needed.
+        if (snapshot.worktreeInstanceId !== currentMeta.instanceId) {
+          return reject()
         }
-        if (
-          currentMeta.instanceId !== undefined &&
-          snapshot.worktreeInstanceId !== currentMeta.instanceId
-        ) {
-          blockedRecreatedWorktreeIds.add(snapshot.worktree)
-          return false
-        }
+        // Why: the successor's identity proves the race window closed; the
+        // instanceId mismatch alone fences any later frame from the old occupant.
+        this.removedMobileSessionWorktreeIds.delete(snapshot.worktree)
         return true
       }
+      // Identity-less frame: only the live renderer generation can speak for the
+      // successor, and the generation that published the removed occupant never
+      // can — a same-generation recreate stays fenced until the renderer reloads.
       if (
-        rendererGeneration !== undefined &&
-        rendererGeneration !== null &&
-        snapshot.publicationEpoch !== rendererGeneration
+        (typeof rendererGeneration === 'string' &&
+          snapshot.publicationEpoch !== rendererGeneration) ||
+        snapshot.publicationEpoch === fence.removedPublicationEpoch
       ) {
-        blockedRecreatedWorktreeIds.add(snapshot.worktree)
-        return false
+        return reject()
       }
-      if (fence.blockedPublicationEpochs.has(snapshot.publicationEpoch)) {
-        blockedRecreatedWorktreeIds.add(snapshot.worktree)
-        return false
-      }
-      if (fence.acceptedPublicationEpoch === snapshot.publicationEpoch) {
-        return true
-      }
-      if (fence.acceptedPublicationEpoch !== undefined) {
-        fence.blockedPublicationEpochs.add(fence.acceptedPublicationEpoch)
-      }
-      fence.acceptedPublicationEpoch = snapshot.publicationEpoch
       return true
     })
     const before = new Map(this.mobileSessionTabsByWorktree)
@@ -108,6 +98,12 @@ export class OrcaRuntimeWithSyncMobileSessionTabs extends OrcaRuntimeWithWriteOr
       const accepted = this.acceptedRendererMobileSnapshotByWorktree.get(worktreeId)
       if (existing) {
         nextWorktrees.add(worktreeId)
+      }
+      // Why: a fenced frame stays "published" renderer-side; asking for a
+      // republish would only be fenced again on every sync.
+      if (!existing && this.removedMobileSessionWorktreeIds.get(worktreeId)?.rejectedPublication) {
+        nextWorktrees.add(worktreeId)
+        continue
       }
       if (
         existing &&

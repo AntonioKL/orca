@@ -105,6 +105,14 @@ export function buildMobileSessionAgentStatusByWorktree(
   return byWorktreeId
 }
 
+// Why: a bare id can name one workspace per host (STA-4343); with two owners no
+// single identity is correct, so publish without one and let main fall back to
+// its generation fence rather than blank the mobile session.
+function resolveWorktreeInstanceId(state: AppState, worktreeId: string): string | undefined {
+  const rows = getIndexedWorktreesById(state.worktreesByRepo ?? {}, worktreeId)
+  return rows.length === 1 ? rows[0]?.instanceId : undefined
+}
+
 export function buildMobileSessionWorktreeInputs(
   state: AppState,
   worktreeId: string,
@@ -147,9 +155,7 @@ export function buildMobileSessionWorktreeInputs(
   const activeTabId = state.activeTabId
   return {
     worktreeId,
-    worktreeInstanceId: getIndexedWorktreesById(state.worktreesByRepo ?? {}, worktreeId).find(
-      (worktree) => worktree.instanceId !== undefined
-    )?.instanceId,
+    worktreeInstanceId: resolveWorktreeInstanceId(state, worktreeId),
     terminalTabs,
     browserWorkspaces,
     unifiedTabs: state.unifiedTabsByWorktree[worktreeId] ?? EMPTY_WORKTREE_UNIFIED_TABS,

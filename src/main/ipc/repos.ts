@@ -18,7 +18,7 @@ import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 export function registerRepoHandlers(
   mainWindow: BrowserWindow,
   store: Store,
-  runtime?: OrcaRuntimeService
+  runtime: OrcaRuntimeService
 ): void {
   // Remove previously registered handlers so we can re-register on macOS app re-activation (new window).
   ipcMain.removeHandler('repos:list')

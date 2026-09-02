@@ -217,12 +217,19 @@ export class RuntimeProjectGroupController {
     }
     const workspace = store.getFolderWorkspaces?.().find((entry) => entry.id === folderWorkspaceId)
     if (workspace) {
-      const connectionId = this.deps.resolveFolderConnectionId(workspace)
-      await this.deps.teardownFolderWorkspacePtys(
-        folderWorkspaceKey(folderWorkspaceId),
-        connectionId
-      )
-      this.deps.cleanupRemovedFolderWorkspaceState(folderWorkspaceKey(folderWorkspaceId))
+      const worktreeId = folderWorkspaceKey(folderWorkspaceId)
+      // Why: a mixed-host group has no single PTY target; forgetting the
+      // workspace must still succeed, so skip the sweep instead of failing.
+      let connectionId: string | null | undefined
+      try {
+        connectionId = this.deps.resolveFolderConnectionId(workspace)
+      } catch (error) {
+        console.warn(`[folder-workspace] skipping PTY teardown for ${worktreeId}:`, error)
+      }
+      if (connectionId !== undefined) {
+        await this.deps.teardownFolderWorkspacePtys(worktreeId, connectionId)
+      }
+      this.deps.cleanupRemovedFolderWorkspaceState(worktreeId)
     }
     const deleted = store.removeFolderWorkspace(folderWorkspaceId)
     if (deleted) {

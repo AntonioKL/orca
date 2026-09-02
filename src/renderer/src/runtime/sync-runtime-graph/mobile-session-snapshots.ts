@@ -1,6 +1,5 @@
 import { getSystemPrefersDark } from '@/lib/terminal-theme'
 import type { AppState } from '@/store/types'
-import { getIndexedWorktreesById } from '@/store/worktree-repo-index'
 import type {
   RuntimeMobileSessionSnapshotTab,
   RuntimeMobileSessionTabsSnapshot
@@ -68,11 +67,6 @@ export function buildMobileSessionTabSnapshots(
   const snapshots: RuntimeMobileSessionTabsSnapshot[] = []
 
   for (const worktreeId of worktreeIds) {
-    // A bare id cannot identify the host when local and remote rows collide; fail closed.
-    if (getIndexedWorktreesById(state.worktreesByRepo ?? {}, worktreeId).length > 1) {
-      graphState.mobileSessionSnapshotCacheByWorktree.delete(worktreeId)
-      continue
-    }
     const workspaceScope = parseWorkspaceKey(worktreeId)
     if (
       workspaceScope?.type === 'folder' &&

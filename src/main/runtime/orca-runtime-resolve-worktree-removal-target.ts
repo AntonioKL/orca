@@ -53,7 +53,6 @@ export class OrcaRuntimeWithResolveWorktreeRemovalTarget extends OrcaRuntimeWith
       ((persistedHostId && persistedHostId !== hostId) ||
         (repoId && hasWorktreeRemovalRepoOwnerOnOtherHost(store, repoId, hostId)))
     )
-    const removedMeta = store.getWorktreeMeta(worktreeId)
     const acceptedRendererSnapshot = this.acceptedRendererMobileSnapshotByWorktree.get(worktreeId)
     const storedSnapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
     if (hostId) {
@@ -75,13 +74,10 @@ export class OrcaRuntimeWithResolveWorktreeRemovalTarget extends OrcaRuntimeWith
         storedSnapshot?.publicationEpoch ??
         this.rendererGeneration ??
         undefined
-      this.removedMobileSessionWorktreeIds.set(worktreeId, {
-        ...(removedMeta?.instanceId ? { removedInstanceId: removedMeta.instanceId } : {}),
-        ...(removedPublicationEpoch ? { removedPublicationEpoch } : {}),
-        blockedPublicationEpochs: removedPublicationEpoch
-          ? new Set([removedPublicationEpoch])
-          : new Set()
-      })
+      this.removedMobileSessionWorktreeIds.set(
+        worktreeId,
+        removedPublicationEpoch ? { removedPublicationEpoch } : {}
+      )
       this.mobileSessionTabsByWorktree.delete(worktreeId)
       this.mobileSessionTabsAgentStatusHeartbeat.removeWorktree(worktreeId)
       this.acceptedRendererMobileSnapshotByWorktree.delete(worktreeId)

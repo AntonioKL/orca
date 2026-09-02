@@ -79,7 +79,7 @@ describe('buildMobileSessionTabSnapshots', () => {
     expect(next.snapshotVersion).toBeGreaterThan(initial.snapshotVersion)
   })
 
-  it('does not publish an ambiguous worktree id across hosts', () => {
+  it('publishes a cross-host id collision without an instance identity', () => {
     const state = makeState({
       worktreesByRepo: {
         'repo-1': [
@@ -97,7 +97,10 @@ describe('buildMobileSessionTabSnapshots', () => {
       } as unknown as AppState['tabsByWorktree']
     })
 
-    expect(buildMobileSessionTabSnapshots(state)).toEqual([])
+    const snapshots = buildMobileSessionTabSnapshots(state)
+    expect(snapshots).toHaveLength(1)
+    expect(snapshots[0]?.worktree).toBe('wt-duplicate')
+    expect(snapshots[0]?.worktreeInstanceId).toBeUndefined()
   })
 
   it('publishes browser and editor color + pin state from unified tabs', () => {

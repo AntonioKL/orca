@@ -22,7 +22,7 @@ import {
 export function registerFolderWorkspaceHandlers(
   mainWindow: BrowserWindow,
   store: Store,
-  runtime?: OrcaRuntimeService
+  runtime: OrcaRuntimeService
 ): void {
   ipcMain.handle('folderWorkspaces:list', (): FolderWorkspace[] => store.getFolderWorkspaces())
 
@@ -118,12 +118,7 @@ export function registerFolderWorkspaceHandlers(
       rawArgs,
       'invalid_folder_workspace_delete_args'
     )
-    const deleted = runtime
-      ? (await runtime.deleteFolderWorkspace(args.folderWorkspaceId)).deleted
-      : store.removeFolderWorkspace(args.folderWorkspaceId)
-    if (deleted && !runtime) {
-      notifyReposChanged(mainWindow)
-    }
-    return deleted
+    // Why: the runtime owns PTY/browser/session teardown and notifies on success.
+    return (await runtime.deleteFolderWorkspace(args.folderWorkspaceId)).deleted
   })
 }
