@@ -74,7 +74,8 @@ export async function cleanupStalePreparations(
   }
 }
 
-export function hasStaleCleanupInFlight(): boolean {
+/** True while a crash-recovery scan is running, which means a create is in flight or imminent. */
+export function hasPendingStalePreparationCleanup(): boolean {
   return staleCleanupInFlight.size > 0
 }
 
