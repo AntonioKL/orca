@@ -22,7 +22,6 @@ type FaultSnapshot = {
 }
 
 type FaultWindow = Window & {
-  __heldBrowserCreate?: Promise<string | null>
   __webRuntimeBrowserCreationFault?: {
     arm: () => void
     armCapabilityRejection: () => void
@@ -32,23 +31,13 @@ type FaultWindow = Window & {
   }
 }
 
-async function startBrowserCreate(page: Page, worktreeId: string): Promise<void> {
-  await page.evaluate((targetWorktreeId) => {
-    const state = window.__store?.getState()
-    const groupId = state?.activeGroupIdByWorktree[targetWorktreeId]
-    if (!state || !groupId) {
-      throw new Error('Paired client active group unavailable')
-    }
-    state.setBrowserDefaultUrl('about:blank')
-    ;(window as FaultWindow).__heldBrowserCreate = state
-      .openNewBrowserTabInActiveWorkspace(groupId)
-      .then(() => null)
-      .catch((error: unknown) => (error instanceof Error ? error.message : String(error)))
-  }, worktreeId)
-}
-
-async function waitForBrowserCreate(page: Page): Promise<string | null> {
-  return page.evaluate(() => (window as FaultWindow).__heldBrowserCreate ?? null)
+// Drives the real create menu so the failure surfaces through handleNewBrowserTab's toast.
+async function startBrowserCreate(page: Page): Promise<void> {
+  await page.evaluate(() => window.__store?.getState().setBrowserDefaultUrl('about:blank'))
+  await page.getByRole('button', { name: 'New tab' }).first().click()
+  const newBrowserTab = page.getByRole('menuitem', { name: /New Browser Tab/i })
+  await expect(newBrowserTab).toBeVisible({ timeout: 30_000 })
+  await newBrowserTab.click()
 }
 
 async function readStableHostTabs(hostClient: RuntimeClient, repoPath: string) {
@@ -148,7 +137,7 @@ async function runReconciliationFailureJourney(args: {
       }
       fault.arm()
     })
-    await startBrowserCreate(page, worktreeId)
+    await startBrowserCreate(page)
 
     const faultSnapshot = await expect
       .poll(
@@ -195,9 +184,9 @@ async function runReconciliationFailureJourney(args: {
       )
     ).toBe(true)
 
-    expect(await waitForBrowserCreate(page)).toBe(
-      'The paired runtime could not create a managed browser tab.'
-    )
+    await expect(
+      page.getByText('The paired runtime could not create a managed browser tab.')
+    ).toBeVisible({ timeout: 30_000 })
     await expect
       .poll(() => readHostBrowserPageIds(args.hostClient, args.repoPath), {
         timeout: 30_000,
@@ -285,9 +274,11 @@ async function runCapabilityFailureJourney(args: {
       }
       fault.armCapabilityRejection()
     })
-    await startBrowserCreate(page, worktreeId)
+    await startBrowserCreate(page)
 
-    expect(await waitForBrowserCreate(page)).toContain('E2E forced browser capability rejection')
+    await expect(page.getByText(/E2E forced browser capability rejection/)).toBeVisible({
+      timeout: 30_000
+    })
     await expect
       .poll(() => readClientTabs(page, worktreeId), {
         timeout: 30_000,
