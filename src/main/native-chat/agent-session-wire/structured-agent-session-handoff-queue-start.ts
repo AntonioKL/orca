@@ -1,8 +1,10 @@
 import type { AgentSessionHandoffRequest } from '../../../shared/agent-session-wire'
 import { activeStructuredAgentSessionTurnId } from '../../../shared/structured-agent-session-projection'
 import type { StructuredAgentSessionHandoffQueue } from './structured-agent-session-handoff-queue'
-import type { StructuredTuiOwner } from './structured-agent-session-handoff-types'
-import type { StructuredAgentSessionHandoffDeps } from './structured-agent-session-handoff-types'
+import type {
+  StructuredAgentSessionHandoffDeps,
+  StructuredTuiOwner
+} from './structured-agent-session-handoff-types'
 
 export function queueStructuredHandoffAfterTurn(input: {
   callerKey: string
