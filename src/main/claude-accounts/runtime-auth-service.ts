@@ -88,12 +88,13 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
           // below repair any stale Keychain item left by the previous login.
           this.skipNextReadBackForAccountId = null
         }
+        // Both stores in the managed home are real credential sources: the CLI reads the
+        // Keychain first and falls back to the file, and persists rotations to whichever it
+        // can write.
+        const runtimeOauthAccount = this.readRuntimeOauthAccount(preparation.configDir)
+        const fileCandidate = await this.readManagedCredentialsFileCandidate(selected)
         if (!skipScopedReadBack) {
-          // Both stores in the managed home are real credential sources: the CLI reads the
-          // Keychain first and falls back to the file, and persists rotations to whichever it
-          // can write. Adopt the freshest that proves it belongs to this account.
-          const runtimeOauthAccount = this.readRuntimeOauthAccount(preparation.configDir)
-          const fileCandidate = await this.readManagedCredentialsFileCandidate(selected)
+          // Adopt the freshest candidate that proves it belongs to this account.
           for (const candidate of [scoped, fileCandidate]) {
             if (!candidate || !this.isValidCredentialsJsonObject(candidate)) {
               continue
@@ -121,19 +122,38 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
           }
         }
         const managed = await this.readManagedCredentials(selected)
-        // Why: a scoped credential we could not positively match may still be the CLI's newer
-        // rotation; overwriting it would hand the next reader an already-consumed refresh token.
-        const wouldOverwriteFresherScoped =
-          scoped !== null &&
-          scoped !== managed &&
-          this.isValidCredentialsJsonObject(scoped) &&
+        // A login the home's own identity record proves belongs to someone else is not a rotation
+        // to preserve: discarding it replays nothing, and the selected account must win.
+        const foreignLogin = [scoped, fileCandidate].some(
+          (candidate) =>
+            candidate !== null &&
+            this.isValidCredentialsJsonObject(candidate) &&
+            candidate !== managed &&
+            this.runtimeIdentityIsProvablyForeign(runtimeOauthAccount, selected, candidate)
+        )
+        // Otherwise an unadopted candidate may be the CLI's newer rotation, in either store.
+        // Overwriting it would hand the next reader an already-consumed refresh token, and the
+        // CLI reads the Keychain first, so seeding an empty item shadows a live file too.
+        const unadoptedFresher =
           managed !== null &&
-          this.runtimeCredentialsAreFresher(scoped, managed)
-        if (managed && !wouldOverwriteFresherScoped && this.isValidCredentialsJsonObject(managed)) {
+          [scoped, fileCandidate].some(
+            (candidate) =>
+              candidate !== null &&
+              candidate !== managed &&
+              this.isValidCredentialsJsonObject(candidate) &&
+              this.runtimeCredentialsAreFresher(candidate, managed)
+          )
+        const wouldShadowLiveFile =
+          scoped === null &&
+          fileCandidate !== null &&
+          fileCandidate !== managed &&
+          this.isValidCredentialsJsonObject(fileCandidate)
+        const refuseManagedWrite = !foreignLogin && (unadoptedFresher || wouldShadowLiveFile)
+        if (managed && !refuseManagedWrite && this.isValidCredentialsJsonObject(managed)) {
           await writeActiveClaudeKeychainCredentials(managed, preparation.configDir)
-        } else if (wouldOverwriteFresherScoped) {
+        } else if (refuseManagedWrite) {
           console.warn(
-            '[claude-runtime-auth] Refusing to overwrite a fresher scoped Claude credential'
+            '[claude-runtime-auth] Refusing to overwrite an unadopted Claude credential rotation'
           )
         }
         if (this.managedKeychainUnavailable?.accountId === selected.id) {

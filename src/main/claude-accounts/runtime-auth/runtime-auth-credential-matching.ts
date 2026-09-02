@@ -1,6 +1,6 @@
 import type { ClaudeManagedAccount } from '../../../shared/managed-account-types'
 import { ClaudeRuntimeAuthRuntimeState } from './runtime-auth-runtime-state'
-import type { ClaudeReadBackMatch } from './runtime-auth-types'
+import { RUNTIME_OAUTH_ACCOUNT_PARSE_ERROR, type ClaudeReadBackMatch } from './runtime-auth-types'
 
 export class ClaudeRuntimeAuthCredentialMatching extends ClaudeRuntimeAuthRuntimeState {
   protected async findManagedAccountForRuntimeCredentials(
@@ -115,6 +115,39 @@ export class ClaudeRuntimeAuthCredentialMatching extends ClaudeRuntimeAuthRuntim
     }
 
     return 'match'
+  }
+
+  // Why: an unreadable identity record and one naming another account demand opposite responses —
+  // hold off when we cannot tell, revert when we can.
+  // Why: an unreadable identity record and one naming another account demand opposite responses —
+  // hold off when we cannot tell, revert when we can. Identity may be provable from the credential
+  // blob or from the home's own record, so consult both.
+  protected runtimeIdentityIsProvablyForeign(
+    runtimeOauthAccount: unknown,
+    account: ClaudeManagedAccount,
+    credentialsJson: string | null = null
+  ): boolean {
+    const accountEmail = this.normalizeField(account.email)
+    const accountOrganizationUuid = this.normalizeField(account.organizationUuid)
+    const identities = [
+      credentialsJson === null ? null : this.readIdentityFromCredentials(credentialsJson),
+      runtimeOauthAccount === RUNTIME_OAUTH_ACCOUNT_PARSE_ERROR || !runtimeOauthAccount
+        ? null
+        : this.readIdentityFromOauthAccount(runtimeOauthAccount)
+    ]
+    return identities.some((identity) => {
+      if (identity === null) {
+        return false
+      }
+      if (identity.email !== null && accountEmail !== null && identity.email !== accountEmail) {
+        return true
+      }
+      return (
+        identity.organizationUuid !== null &&
+        accountOrganizationUuid !== null &&
+        identity.organizationUuid !== accountOrganizationUuid
+      )
+    })
   }
 
   protected liveRuntimeCredentialsCanUpdateActiveAccount(

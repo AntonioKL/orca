@@ -88,13 +88,15 @@ describe('ClaudeRuntimeAuthService', () => {
 
     await service.prepareForClaudeLaunch()
     testState.managedKeychainCredentials.set('account-1', freshCredentials)
-    testState.scopedKeychainCredentials = staleCredentials
+    setScopedKeychainCredentialsForManagedPath(managedAuthPath, staleCredentials)
     service.clearLastWrittenCredentialsJson('account-1')
 
     await service.prepareForClaudeLaunch()
 
     expect(testState.managedKeychainCredentials.get('account-1')).toBe(freshCredentials)
-    expect(testState.scopedKeychainCredentials).toBe(freshCredentials)
+    expect(testState.scopedKeychainCredentialsByConfigDir.get(realpathSync(managedAuthPath))).toBe(
+      freshCredentials
+    )
   })
 
   it('does not import a different identity from the scoped Keychain item', async () => {
@@ -134,7 +136,9 @@ describe('ClaudeRuntimeAuthService', () => {
     await service.prepareForClaudeLaunch()
 
     expect(testState.managedKeychainCredentials.get('account-1')).toBe(managedCredentials)
-    expect(testState.scopedKeychainCredentials).toBe(managedCredentials)
+    expect(testState.scopedKeychainCredentialsByConfigDir.get(realpathSync(managedAuthPath))).toBe(
+      managedCredentials
+    )
   })
 
   it('does not import an older same-identity scoped Keychain credential', async () => {
@@ -344,6 +348,102 @@ describe('ClaudeRuntimeAuthService', () => {
     )
     // Keychain is authoritative again; the fallback file must not linger.
     expect(existsSync(join(managedAuthPath, '.credentials.json'))).toBe(false)
+  })
+
+  // Why: an outage leaves the primary empty and the rotation in the file; seeding the primary with
+  // the pre-outage copy would shadow the live file, and the CLI reads the primary first.
+  it('does not seed an empty scoped item while a fresher file rotation is live', async () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+    const staleCredentials = createClaudeCredentialsWithoutEmail('stale', null, {
+      expiresAt: 2_000,
+      refreshToken: 'stale-refresh'
+    })
+    const rotatedCredentials = createClaudeCredentialsWithoutEmail('rotated', null, {
+      expiresAt: 3_000,
+      refreshToken: 'rotated-refresh'
+    })
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      staleCredentials
+    )
+    const store = createStore(
+      createSettings({
+        claudeManagedAccounts: [
+          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
+        ],
+        activeClaudeManagedAccountId: 'account-1'
+      })
+    )
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+
+    await service.prepareForClaudeLaunch()
+    // Outage: the CLI dropped the Keychain item and rotated into the file, and its identity
+    // record is mid-rewrite so the rotation cannot yet be proven to belong to this account.
+    testState.scopedKeychainCredentialsByConfigDir.delete(realpathSync(managedAuthPath))
+    writeFileSync(join(managedAuthPath, '.credentials.json'), rotatedCredentials, 'utf-8')
+    writeFileSync(join(managedAuthPath, '.claude.json'), '{"oauthAccount":', 'utf-8')
+
+    await service.prepareForClaudeLaunch()
+
+    expect(
+      testState.scopedKeychainCredentialsByConfigDir.get(realpathSync(managedAuthPath))
+    ).toBeUndefined()
+    expect(readFileSync(join(managedAuthPath, '.credentials.json'), 'utf-8')).toBe(
+      rotatedCredentials
+    )
+  })
+
+  // Why: a login the home's identity record proves is someone else's is not a rotation to keep —
+  // the selected account must win, and discarding a foreign token replays nothing.
+  it('re-imposes the account credential over a provably foreign in-pane login', async () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+    const managedCredentials = createClaudeCredentialsWithoutEmail('managed', null, {
+      expiresAt: 2_000,
+      refreshToken: 'managed-refresh'
+    })
+    const foreignCredentials = createClaudeCredentialsWithoutEmail('foreign', null, {
+      expiresAt: 5_000,
+      refreshToken: 'foreign-refresh'
+    })
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      managedCredentials
+    )
+    const store = createStore(
+      createSettings({
+        claudeManagedAccounts: [
+          createClaudeAccount('account-1', managedAuthPath, { managedAuthRuntime: 'host' })
+        ],
+        activeClaudeManagedAccountId: 'account-1'
+      })
+    )
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+
+    await service.prepareForClaudeLaunch()
+    // A different identity logged in inside the managed pane, and said so in the home's record.
+    setScopedKeychainCredentialsForManagedPath(managedAuthPath, foreignCredentials)
+    writeFileSync(
+      join(managedAuthPath, '.claude.json'),
+      JSON.stringify({
+        oauthAccount: { accountUuid: 'account-2', emailAddress: 'other@example.com' }
+      }),
+      'utf-8'
+    )
+
+    await service.prepareForClaudeLaunch()
+
+    expect(testState.managedKeychainCredentials.get('account-1')).toBe(managedCredentials)
+    expect(testState.scopedKeychainCredentialsByConfigDir.get(realpathSync(managedAuthPath))).toBe(
+      managedCredentials
+    )
   })
 
   // Why: a torn .claude.json makes identity unprovable; the CLI's newer rotation must still not be
