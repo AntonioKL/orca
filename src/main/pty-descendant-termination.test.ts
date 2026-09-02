@@ -336,13 +336,40 @@ describe('terminateDescendantSnapshotAndWait', () => {
 
   it('does not claim exit when the verification table is unavailable', async () => {
     const sendSignal = vi.fn()
-    const result = await terminateDescendantSnapshotAndWait(snapshot([row(20, 10, 20)]), {
+    const pending = terminateDescendantSnapshotAndWait(snapshot([row(20, 10, 20)]), {
       sendSignal,
-      readTable: vi.fn().mockRejectedValue(new Error('ps exploded'))
+      readTable: vi.fn().mockRejectedValue(new Error('ps exploded')),
+      verifyMs: 200
     })
+    await vi.advanceTimersByTimeAsync(400)
 
-    expect(result).toBe(false)
+    await expect(pending).resolves.toBe(false)
     expect(sendSignal).toHaveBeenCalledWith(20, 'SIGTERM')
+  })
+
+  it('keeps polling past a read that missed its deadline rather than surrendering', async () => {
+    const survivor = row(20, 10, 20)
+    const readTable = vi
+      .fn()
+      // A loaded host can miss one read's deadline with the window still open.
+      .mockRejectedValueOnce(new Error('ps timed out'))
+      .mockResolvedValueOnce(tableCapture([survivor]))
+      .mockResolvedValueOnce(tableCapture([]))
+    const sendSignal = vi.fn()
+
+    const pending = terminateDescendantSnapshotWithVerdict(snapshot([survivor]), {
+      sendSignal,
+      readTable,
+      graceMs: 0,
+      verifyMs: 2_000
+    })
+    await vi.advanceTimersByTimeAsync(500)
+
+    await expect(pending).resolves.toBe('exited')
+    expect(sendSignal.mock.calls).toEqual([
+      [20, 'SIGTERM'],
+      [20, 'SIGKILL']
+    ])
   })
 
   it('names a survivor seen at the deadline live, never unverifiable', async () => {
@@ -359,12 +386,14 @@ describe('terminateDescendantSnapshotAndWait', () => {
   })
 
   it('names an unreadable verification table unverifiable', async () => {
-    await expect(
-      terminateDescendantSnapshotWithVerdict(snapshot([row(20, 10, 20)]), {
-        sendSignal: vi.fn(),
-        readTable: vi.fn().mockRejectedValue(new Error('ps exploded'))
-      })
-    ).resolves.toBe('unverifiable')
+    const pending = terminateDescendantSnapshotWithVerdict(snapshot([row(20, 10, 20)]), {
+      sendSignal: vi.fn(),
+      readTable: vi.fn().mockRejectedValue(new Error('ps exploded')),
+      verifyMs: 200
+    })
+    await vi.advanceTimersByTimeAsync(400)
+
+    await expect(pending).resolves.toBe('unverifiable')
   })
 })
 

@@ -68,18 +68,20 @@ export async function terminateDescendantSnapshotWithVerdict(
       readTable,
       deps.timeoutMs ?? DESCENDANT_SNAPSHOT_TIMEOUT_MS
     )
-    if (!capture) {
-      return 'unverifiable'
-    }
-    const live = matchingSnapshotRows(snapshot, capture.rows)
-    if (live.length === 0) {
-      return 'exited'
-    }
-    if (!forced && Date.now() >= deadline - verifyMs + graceMs) {
-      forced = true
-      for (const row of live) {
-        if (hasUnambiguousStartIdentity(row, snapshot.capturedAtMs)) {
-          sendSignal(row.pid, 'SIGKILL')
+    // A read that missed its own deadline is not an answer, and surrendering on
+    // the first slow one spends none of the window this verification was given:
+    // on a loaded host that reported a tree unverifiable without ever seeing it.
+    if (capture) {
+      const live = matchingSnapshotRows(snapshot, capture.rows)
+      if (live.length === 0) {
+        return 'exited'
+      }
+      if (!forced && Date.now() >= deadline - verifyMs + graceMs) {
+        forced = true
+        for (const row of live) {
+          if (hasUnambiguousStartIdentity(row, snapshot.capturedAtMs)) {
+            sendSignal(row.pid, 'SIGKILL')
+          }
         }
       }
     }
