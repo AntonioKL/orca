@@ -370,9 +370,8 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
     configuration.websiteDataStore = .nonPersistent()
     configuration.defaultWebpagePreferences.allowsContentJavaScript = true
     configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
-    if #available(iOS 14.0, *) {
-      configuration.limitsNavigationsToAppBoundDomains = true
-    }
+    // Why: no app-bound domain list is declared, so WebKit's app-bound navigation limit would be
+    // inert; the navigation delegate is the fence (hosted-ios-app-bound-navigation-probe).
     configuration.setURLSchemeHandler(schemeHandler, forURLScheme: mobileWebScheme)
     messageHandler.target = self
     configuration.userContentController.add(messageHandler, name: mobileWebBridgeHandler)

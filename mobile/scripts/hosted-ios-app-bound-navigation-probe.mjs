@@ -9,11 +9,11 @@ const EXTERNAL_ORIGIN = 'https://example.com/'
 const LOG_PREDICATE =
   'senderImagePath CONTAINS "WebKit" OR process == "Orca" OR process CONTAINS "com.apple.WebKit"'
 
-// The Swift shell sets limitsNavigationsToAppBoundDomains while app.json declares no
-// WKAppBoundDomains key. The shell's own navigation delegate cancels the same navigations, so the
-// only way to tell which mechanism fires is to watch who reports the refusal: the delegate raises
-// onNavigationBlocked (a native warning banner), while an app-bound refusal fails the provisional
-// navigation inside WebKit with no delegate decision.
+// The shell once set limitsNavigationsToAppBoundDomains with no WKAppBoundDomains key; an A/B
+// rebuild showed it inert and the flag was removed. This probe stays as the regression check that
+// the shell's own navigation delegate is what refuses external navigation: the delegate raises
+// onNavigationBlocked (a native warning banner), while an app-bound refusal would fail the
+// provisional navigation inside WebKit with no delegate decision.
 export async function probeHostedIosAppBoundNavigation(
   { deviceUdid, emulator, sessionDocument, timeoutMs },
   operations = {}

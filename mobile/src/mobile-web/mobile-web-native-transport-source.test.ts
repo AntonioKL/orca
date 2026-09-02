@@ -94,7 +94,7 @@ describe('mobile web native bridge transport', () => {
     expect(iosSource).toContain('installMobileWebNetworkBlocker(')
     expect(iosSource).toContain('networkBlockReady')
     expect(iosSource).toContain('networkBlockFailed')
-    expect(iosSource).toContain('configuration.limitsNavigationsToAppBoundDomains = true')
+    expect(iosSource).not.toContain('limitsNavigationsToAppBoundDomains')
     expect(iosSource).toContain('Object.defineProperties(globalThis')
     expect(iosSource).toContain('var restrictedNavigator=new Proxy(nativeNavigator')
     expect(iosSource).toContain("if(property==='serviceWorker') return undefined")
