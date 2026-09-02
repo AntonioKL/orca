@@ -14,6 +14,9 @@ export type ClaudeMessageEnvelope = {
   uuid: string
   role: 'assistant' | 'user'
   content: unknown[]
+  /** Messages API id shared by every frame of one streamed assistant message. */
+  messageId: string | null
+  parentToolUseId: string | null
 }
 
 export type ClaudeToolUse = { id: string; name: string; input: unknown }
@@ -44,9 +47,20 @@ export function readClaudeMessageEnvelope(
         sessionId,
         uuid,
         role,
-        content: Array.isArray(message?.content) ? message.content : []
+        content: messageContent(message?.content),
+        messageId: claudeText(message?.id),
+        parentToolUseId: claudeText(frame.parent_tool_use_id)
       }
     : null
+}
+
+// A user replay may carry its text as a bare string (MessageParam), not blocks.
+function messageContent(content: unknown): unknown[] {
+  if (Array.isArray(content)) {
+    return content
+  }
+  const text = claudeText(content)
+  return text ? [{ type: 'text', text }] : []
 }
 
 export function claudeMessageIdentity(

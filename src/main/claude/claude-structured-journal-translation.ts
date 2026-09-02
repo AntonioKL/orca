@@ -35,8 +35,10 @@ import type { ClaudePromptRegistry } from './claude-structured-prompt-replies'
 import {
   claudeProviderFrameKind,
   createClaudeProviderFrameFallback,
-  isModeledClaudeContent
+  isModeledClaudeContent,
+  isSettledClaudeResultKind
 } from './claude-structured-provider-fallback'
+import { createClaudeStreamedBlockRegistry } from './claude-streamed-block-identity'
 
 export type ClaudeJournalTranslatorDeps = {
   sink: StructuredAgentSessionEventSink
@@ -76,27 +78,13 @@ function lifecycleIdentity(sessionId: string, turnId: string): AgentJournalItemI
   }
 }
 
-function streamDelta(message: Record<string, unknown>): string | null {
-  if (message.type !== 'stream_event') {
-    return null
-  }
-  const event = claudeRecord(message.event)
-  if (event?.type === 'content_block_start') {
-    return claudeText(claudeRecord(event.content_block)?.text)
-  }
-  if (event?.type !== 'content_block_delta') {
-    return null
-  }
-  const delta = claudeRecord(event.delta)
-  return delta?.type === 'text_delta' ? claudeText(delta.text) : null
-}
-
 export function createClaudeJournalTranslator(
   deps: ClaudeJournalTranslatorDeps
 ): ClaudeJournalTranslator {
   const tools = new Map<string, ClaudeToolUse>()
   const promptItems = new Map<string, AgentJournalItemIdentity[]>()
   const streamIdentities = new Map<string, AgentJournalItemIdentity>()
+  const streamedBlocks = createClaudeStreamedBlockRegistry()
   const latestStreamText = new Map<string, string>()
   const checkpointLengths = new Map<string, number>()
   let currentTurn: { sessionId: string; turnId: string } | null = null
@@ -151,15 +139,13 @@ export function createClaudeJournalTranslator(
   }
 
   const handleStream = (message: Record<string, unknown>): boolean => {
-    const delta = streamDelta(message)
-    const sessionId = claudeText(message.session_id)
-    const uuid = claudeText(message.uuid)
-    if (!delta || !sessionId || !uuid) {
+    const delta = streamedBlocks.observe(message)
+    if (!delta) {
       return false
     }
-    const key = agentJournalItemKey({ provider: 'claude', sessionId, uuid })
-    streamIdentities.set(key, { provider: 'claude', sessionId, uuid })
-    coalescer.append(key, delta)
+    const key = agentJournalItemKey(delta.identity)
+    streamIdentities.set(key, delta.identity)
+    coalescer.append(key, delta.text)
     return true
   }
 
@@ -168,14 +154,17 @@ export function createClaudeJournalTranslator(
     if (!envelope) {
       return false
     }
-    const identity = claudeMessageIdentity(envelope)
+    let changed = false
+    const body = claudeMessageBody(envelope)
+    // The final frame of a streamed block lands on the block's identity, not its own uuid.
+    const identity =
+      (body && envelope.role === 'assistant' ? streamedBlocks.reconcile(envelope) : null) ??
+      claudeMessageIdentity(envelope)
     const key = agentJournalItemKey(identity)
     coalescer.forget(key)
     latestStreamText.delete(key)
     checkpointLengths.delete(key)
     streamIdentities.delete(key)
-    let changed = false
-    const body = claudeMessageBody(envelope)
     if (body) {
       deps.sink.appendItem(identity, body)
       changed = true
@@ -216,7 +205,8 @@ export function createClaudeJournalTranslator(
       providerFallback.append(`message:${envelope.role}:content:${partType}`, part)
       changed = true
     }
-    if (envelope.content.length === 0) {
+    // An empty user frame is a replay with nothing to show, not an unknown kind.
+    if (envelope.content.length === 0 && envelope.role === 'assistant') {
       providerFallback.append(`message:${envelope.role}:empty`, message)
       changed = true
     }
@@ -288,7 +278,12 @@ export function createClaudeJournalTranslator(
           publishLifecycle(currentTurn.sessionId, currentTurn.turnId, false)
           currentTurn = null
         }
-        providerFallback.append(claudeProviderFrameKind(event.message), event.message)
+        // The turn is over: a block still awaiting its final keeps its flushed text.
+        streamedBlocks.clear()
+        const kind = claudeProviderFrameKind(event.message)
+        if (!isSettledClaudeResultKind(kind)) {
+          providerFallback.append(kind, event.message)
+        }
       } else if (event.type === 'message') {
         if (!handleMessage(event.message)) {
           providerFallback.append(claudeProviderFrameKind(event.message), event.message)
@@ -303,6 +298,7 @@ export function createClaudeJournalTranslator(
       tools.clear()
       promptItems.clear()
       streamIdentities.clear()
+      streamedBlocks.clear()
       latestStreamText.clear()
       checkpointLengths.clear()
     }

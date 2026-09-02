@@ -10,7 +10,10 @@ import {
   type ClaudeStreamJsonConnection,
   type ClaudeStreamJsonLaunch
 } from './claude-stream-json-connection'
+import { openAgentSessionJournal } from '../native-chat/agent-session-journal/journal-store-factory'
+import { createDeferredStructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import { claudeAuthDiagnostic } from './claude-structured-init-proof'
+import { createClaudeJournalTranslator } from './claude-structured-journal-translation'
 import { readClaudeStructuredSessionOptions } from './claude-structured-session-options'
 import type { ClaudeSession } from './claude-structured-session-state'
 import { CLAUDE_STRUCTURED_BASE_OPTIONS } from './claude-structured-launch-resolution'
@@ -234,6 +237,110 @@ describe('Claude stream-json connection', () => {
 
     await until(() => messages.find((message) => message.uuid === 'uuid-unknown-1'), 'the frame')
     expect(messages.find((message) => message.uuid === 'uuid-unknown-1')).toEqual(unknown)
+  })
+
+  it('commits the real partial-message cadence as one assistant item through the translator', async () => {
+    // The frame order and per-frame uuids are the ones Claude Code 2.1.258 emits
+    // under --include-partial-messages: every stream_event and the block's final
+    // assistant frame each carry their own uuid; only message.id ties them.
+    const stream = (uuid: string, event: Record<string, unknown>) => ({
+      type: 'stream_event',
+      uuid,
+      session_id: SESSION_ID,
+      parent_tool_use_id: null,
+      event
+    })
+    const frames = [
+      stream('uuid-message-start', {
+        type: 'message_start',
+        message: { id: 'msg_01', role: 'assistant', content: [] }
+      }),
+      stream('uuid-block-start', {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'text', text: '' }
+      }),
+      stream('uuid-delta-1', {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'text_delta', text: 'ST' }
+      }),
+      stream('uuid-delta-2', {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'text_delta', text: 'REAMOK_ELEC_64E632' }
+      }),
+      {
+        type: 'assistant',
+        uuid: 'uuid-assistant-final',
+        session_id: SESSION_ID,
+        parent_tool_use_id: null,
+        message: {
+          id: 'msg_01',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'STREAMOK_ELEC_64E632' }],
+          stop_reason: null
+        }
+      },
+      stream('uuid-block-stop', { type: 'content_block_stop', index: 0 }),
+      stream('uuid-message-delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+      stream('uuid-message-stop', { type: 'message_stop' }),
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        duration_ms: 1,
+        duration_api_ms: 1,
+        num_turns: 1,
+        result: 'STREAMOK_ELEC_64E632',
+        stop_reason: 'end_turn',
+        session_id: SESSION_ID,
+        uuid: 'uuid-result'
+      }
+    ]
+    const scenario = scriptScenario([...frames.map((frame) => ({ emit: frame })), HOLD_OPEN])
+    const journal = await openAgentSessionJournal({
+      identity: {
+        sessionId: 'session-1',
+        workspaceId: 'workspace-1',
+        hostId: 'host-1',
+        agent: 'claude',
+        providerHandle: { kind: 'claude', sessionId: SESSION_ID, leafUuid: 'leaf-1' }
+      },
+      journalDir: join(scenario.cwd, 'journal'),
+      now: () => 1_700_000_000_000,
+      mintEpoch: () => 'epoch-1'
+    })
+    const deferred = createDeferredStructuredAgentSessionEventSink()
+    deferred.bind({ journal, fence: 1, publish: vi.fn() })
+    const translator = createClaudeJournalTranslator({ sink: deferred.sink })
+    let settled = false
+    await open(launchFor(scenario), {
+      onMessage: (message) => {
+        translator.handle({ type: 'message', sessionId: 'session-1', message })
+        settled ||= message.type === 'result'
+      }
+    })
+
+    await until(() => (settled ? true : null), 'the result frame')
+    await deferred.drained()
+    const items = journal.snapshot().items
+    const assistant = items.filter(
+      (item) => item.body.kind === 'message' && item.body.role === 'assistant'
+    )
+    expect(assistant.map((item) => item.body)).toEqual([
+      {
+        kind: 'message',
+        role: 'assistant',
+        blocks: [{ type: 'text', text: 'STREAMOK_ELEC_64E632' }]
+      }
+    ])
+    expect(assistant.map((item) => item.itemId)).toEqual([`claude:${SESSION_ID}:uuid-block-start`])
+    expect(
+      items.flatMap((item) =>
+        item.body.kind === 'status' && item.body.providerFrame ? [item.body.providerFrame.kind] : []
+      )
+    ).toEqual([])
   })
 
   it('routes an inbound permission request and writes the answer back on its own id', async () => {

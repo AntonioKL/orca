@@ -1,10 +1,19 @@
-import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   AgentJournalItemBody,
-  AgentJournalItemIdentity
+  AgentJournalItemIdentity,
+  AgentJournalRenderItem,
+  AgentSessionJournalIdentity
 } from '../../shared/agent-session-journal-types'
 import { agentJournalItemKey } from '../../shared/agent-session-journal-item-key'
-import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
+import { openAgentSessionJournal } from '../native-chat/agent-session-journal/journal-store-factory'
+import {
+  createDeferredStructuredAgentSessionEventSink,
+  type StructuredAgentSessionEventSink
+} from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import {
   boundInlineText,
   DEFAULT_JOURNAL_PAYLOAD_LIMITS
@@ -42,8 +51,134 @@ function message(
   }
 }
 
+// Frames below follow the Claude Code 2.1.258 / SDK 0.3.251 partial-message
+// cadence captured from the real CLI: every stream_event carries its own uuid,
+// the final assistant frame for a block carries yet another, and only
+// message.id ties them together.
+function streamEvent(uuid: string, event: Record<string, unknown>) {
+  return {
+    type: 'message' as const,
+    sessionId: 'orca-session',
+    message: {
+      type: 'stream_event',
+      uuid,
+      session_id: 'claude-session',
+      parent_tool_use_id: null,
+      event
+    }
+  }
+}
+
+function resultFrame(subtype: string, fields: Record<string, unknown>) {
+  return {
+    type: 'message' as const,
+    sessionId: 'orca-session',
+    message: {
+      type: 'result',
+      subtype,
+      duration_ms: 1200,
+      duration_api_ms: 1100,
+      num_turns: 1,
+      session_id: 'claude-session',
+      uuid: `result-${subtype}`,
+      ...fields
+    }
+  }
+}
+
+/** One streamed text turn in wire order: message_start, the block's start frame,
+ *  one delta per chunk, the block's final assistant frame, the stop frames and
+ *  the success result. */
+function streamedTextTurn(input: {
+  messageId: string
+  startUuid: string
+  finalUuid: string
+  chunks: string[]
+}) {
+  const text = input.chunks.join('')
+  return {
+    start: [
+      streamEvent(`${input.messageId}-message-start`, {
+        type: 'message_start',
+        message: { id: input.messageId, role: 'assistant', content: [] }
+      }),
+      streamEvent(input.startUuid, {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'text', text: '' }
+      })
+    ],
+    deltas: input.chunks.map((chunk, index) =>
+      streamEvent(`${input.messageId}-delta-${index}`, {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'text_delta', text: chunk }
+      })
+    ),
+    final: {
+      type: 'message' as const,
+      sessionId: 'orca-session',
+      message: {
+        type: 'assistant',
+        uuid: input.finalUuid,
+        session_id: 'claude-session',
+        parent_tool_use_id: null,
+        message: {
+          id: input.messageId,
+          role: 'assistant',
+          content: [{ type: 'text', text }],
+          stop_reason: null
+        }
+      }
+    },
+    stop: [
+      streamEvent(`${input.messageId}-block-stop`, { type: 'content_block_stop', index: 0 }),
+      streamEvent(`${input.messageId}-message-delta`, {
+        type: 'message_delta',
+        delta: { stop_reason: 'end_turn' }
+      }),
+      streamEvent(`${input.messageId}-message-stop`, { type: 'message_stop' }),
+      resultFrame('success', {
+        is_error: false,
+        result: text,
+        stop_reason: 'end_turn',
+        terminal_reason: 'completed'
+      })
+    ],
+    text
+  }
+}
+
+function assistantMessages<T extends { body: AgentJournalItemBody }>(items: T[]): T[] {
+  return items.filter((item) => item.body.kind === 'message' && item.body.role === 'assistant')
+}
+
+function providerFrameKinds(items: { body: AgentJournalItemBody }[]): string[] {
+  return items.flatMap((item) =>
+    item.body.kind === 'status' && item.body.providerFrame ? [item.body.providerFrame.kind] : []
+  )
+}
+
+const JOURNAL_IDENTITY: AgentSessionJournalIdentity = {
+  sessionId: 'session-1',
+  workspaceId: 'workspace-1',
+  hostId: 'host-1',
+  agent: 'claude',
+  providerHandle: { kind: 'claude', sessionId: 'claude-session', leafUuid: 'leaf-1' }
+}
+
+let journalRoot = ''
+
+beforeEach(async () => {
+  journalRoot = await mkdtemp(join(tmpdir(), 'orca-claude-journal-translation-'))
+})
+
+afterEach(async () => {
+  await rm(journalRoot, { recursive: true, force: true })
+})
+
 describe('Claude structured journal translation', () => {
-  it('reuses the shared coalescer and finalizes the provider-keyed message row', () => {
+  it('coalesces partial deltas onto the block identity and reconciles the final frame onto it', () => {
     const state = sinkState()
     let scheduled: (() => void) | null = null
     const translator = createClaudeJournalTranslator({
@@ -56,41 +191,177 @@ describe('Claude structured journal translation', () => {
         }
       }
     })
+    const turn = streamedTextTurn({
+      messageId: 'msg_01',
+      startUuid: 'block-start-1',
+      finalUuid: 'assistant-final-1',
+      chunks: ['ST', 'REAMOK_ELEC_64E632']
+    })
+    const streamedIdentity = {
+      provider: 'claude',
+      sessionId: 'claude-session',
+      uuid: 'block-start-1'
+    }
 
-    translator.handle({
-      type: 'message',
-      sessionId: 'orca-session',
-      message: {
-        type: 'stream_event',
-        uuid: 'assistant-1',
-        session_id: 'claude-session',
-        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hel' } }
-      }
-    })
-    translator.handle({
-      type: 'message',
-      sessionId: 'orca-session',
-      message: {
-        type: 'stream_event',
-        uuid: 'assistant-1',
-        session_id: 'claude-session',
-        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'lo' } }
-      }
-    })
+    for (const event of turn.start) {
+      translator.handle(event)
+    }
+    for (const delta of turn.deltas) {
+      translator.handle(delta)
+    }
     expect(state.items).toEqual([])
 
     const run = scheduled as (() => void) | null
     run?.()
     expect(state.items.at(-1)).toEqual({
-      identity: { provider: 'claude', sessionId: 'claude-session', uuid: 'assistant-1' },
-      body: { kind: 'message', role: 'assistant', blocks: [{ type: 'text', text: 'Hello' }] }
+      identity: streamedIdentity,
+      body: { kind: 'message', role: 'assistant', blocks: [{ type: 'text', text: turn.text }] }
     })
 
-    translator.handle(message('assistant', 'assistant-1', [{ type: 'text', text: 'Hello!' }]))
-    expect(state.items.at(-1)).toEqual({
-      identity: { provider: 'claude', sessionId: 'claude-session', uuid: 'assistant-1' },
-      body: { kind: 'message', role: 'assistant', blocks: [{ type: 'text', text: 'Hello!' }] }
+    translator.handle(turn.final)
+    for (const event of turn.stop) {
+      translator.handle(event)
+    }
+    const assistant = assistantMessages(state.items)
+    expect(assistant.at(-1)).toEqual({
+      identity: streamedIdentity,
+      body: { kind: 'message', role: 'assistant', blocks: [{ type: 'text', text: turn.text }] }
     })
+    expect(new Set(assistant.map((item) => agentJournalItemKey(item.identity))).size).toBe(1)
+    expect(providerFrameKinds(state.items)).toEqual([])
+  })
+
+  it('journals a count-to-200 stream as one assistant item carrying the complete reply', async () => {
+    const journal = await openAgentSessionJournal({
+      identity: JOURNAL_IDENTITY,
+      journalDir: journalRoot,
+      now: () => 1_700_000_000_000,
+      mintEpoch: () => 'epoch-1'
+    })
+    const deferred = createDeferredStructuredAgentSessionEventSink()
+    deferred.bind({ journal, fence: 1, publish: vi.fn() })
+    let scheduled: (() => void) | null = null
+    const translator = createClaudeJournalTranslator({
+      sink: deferred.sink,
+      schedule: (run) => {
+        scheduled = run
+        return () => {
+          scheduled = null
+        }
+      }
+    })
+    const numbers = Array.from({ length: 200 }, (_, index) => String(index + 1))
+    // The chunk boundaries the real CLI produced for this prompt.
+    const boundaries = [0, 1, 45, 93, 141, 189, 200]
+    const chunks = boundaries.slice(1).map((end, index) => {
+      const slice = numbers.slice(boundaries[index], end).join('\n')
+      return index === 0 ? slice : `\n${slice}`
+    })
+    const turn = streamedTextTurn({
+      messageId: 'msg_count',
+      startUuid: 'count-start',
+      finalUuid: 'count-final',
+      chunks
+    })
+
+    for (const event of turn.start) {
+      translator.handle(event)
+    }
+    for (const delta of turn.deltas) {
+      translator.handle(delta)
+      // Each chunk lands in its own coalescing window, as it did on the wire.
+      const run = scheduled as (() => void) | null
+      run?.()
+    }
+    translator.handle(turn.final)
+    for (const event of turn.stop) {
+      translator.handle(event)
+    }
+    await deferred.drained()
+
+    const items: AgentJournalRenderItem[] = journal.snapshot().items
+    const assistant = assistantMessages(items)
+    expect(assistant.map((item) => item.itemId)).toEqual(['claude:claude-session:count-start'])
+    expect(assistant[0]?.body).toEqual({
+      kind: 'message',
+      role: 'assistant',
+      blocks: [{ type: 'text', text: numbers.join('\n') }]
+    })
+    expect(providerFrameKinds(items)).toEqual([])
+  })
+
+  it('settles result frames, empty thinking and string user replays without painting a row', () => {
+    const state = sinkState()
+    const translator = createClaudeJournalTranslator({ sink: state.sink })
+
+    translator.handle({
+      type: 'message',
+      sessionId: 'orca-session',
+      message: {
+        type: 'user',
+        uuid: 'user-replay-1',
+        session_id: 'claude-session',
+        parent_tool_use_id: null,
+        isReplay: true,
+        timestamp: '2026-09-01T00:00:00.000Z',
+        message: { role: 'user', content: 'Reply with exactly PROBE_OK_1 and nothing else.' }
+      }
+    })
+    translator.handle(
+      message('assistant', 'assistant-thinking-empty', [
+        { type: 'thinking', thinking: '', signature: 'CAQS6QcKEAgRGAI4AUIIdGhpbmtpbmc' }
+      ])
+    )
+    translator.handle(
+      resultFrame('success', {
+        is_error: false,
+        result: 'PROBE_OK_1',
+        stop_reason: 'end_turn',
+        terminal_reason: 'completed'
+      })
+    )
+    translator.handle(
+      message('user', 'user-interrupt', [{ type: 'text', text: '[Request interrupted by user]' }])
+    )
+    translator.handle(
+      resultFrame('error_during_execution', {
+        is_error: true,
+        errors: ['[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null'],
+        stop_reason: null,
+        terminal_reason: 'aborted_streaming',
+        permission_denials: []
+      })
+    )
+    translator.handle(message('user', 'control-only', []))
+
+    expect(providerFrameKinds(state.items)).toEqual([])
+    expect(
+      state.items.flatMap((item) =>
+        item.body.kind === 'message' && item.body.role === 'user' ? [item.body.blocks] : []
+      )
+    ).toEqual([
+      [{ type: 'text', text: 'Reply with exactly PROBE_OK_1 and nothing else.' }],
+      [{ type: 'text', text: '[Request interrupted by user]' }]
+    ])
+    expect(
+      state.items.some((item) => item.body.kind === 'status' && !item.body.turnLifecycle)
+    ).toBe(false)
+    expect(
+      state.tombstones.flatMap((identity) =>
+        identity.provider === 'legacy' ? [identity.recordId] : []
+      )
+    ).toEqual(['turn-lifecycle:user-replay-1', 'turn-lifecycle:user-interrupt'])
+  })
+
+  it('keeps an unmodeled result subtype on the bounded provider fallback', () => {
+    const state = sinkState()
+    const translator = createClaudeJournalTranslator({ sink: state.sink })
+
+    translator.handle(
+      resultFrame('error_from_the_future', { is_error: true, errors: ['budget exhausted'] })
+    )
+
+    expect(providerFrameKinds(state.items)).toEqual(['message:result:error_from_the_future'])
   })
 
   it('journals turn lifecycle and updates one tool row through its result', () => {
@@ -213,22 +484,14 @@ describe('Claude structured journal translation', () => {
     ).toBe(false)
   })
 
-  it('renders empty user frames through the provider fallback', () => {
+  it('paints nothing for a user frame that carries no content', () => {
     const state = sinkState()
     const translator = createClaudeJournalTranslator({ sink: state.sink })
 
     translator.handle(message('user', 'control-only', []))
 
-    expect(state.items).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          body: expect.objectContaining({
-            kind: 'status',
-            providerFrame: expect.objectContaining({ kind: 'message:user:empty' })
-          })
-        })
-      ])
-    )
+    expect(state.items).toEqual([])
+    expect(state.tombstones).toEqual([])
   })
 
   it('renders unmodeled substantive Claude frames as bounded provider rows', () => {

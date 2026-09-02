@@ -1,4 +1,5 @@
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
+import { CLAUDE_STREAM_JSON_FRAME_KINDS } from '../native-chat/agent-session-wire/claude-stream-json-frame-schema'
 import { unhandledProviderFrameJournalItem } from '../native-chat/agent-session-wire/unhandled-provider-frame'
 import { claudeRecord, claudeText } from './claude-structured-item-translation'
 
@@ -7,6 +8,16 @@ export function claudeProviderFrameKind(message: Record<string, unknown>): strin
   const subtype = claudeText(message.subtype)
   const eventType = claudeText(claudeRecord(message.event)?.type)
   return ['message', type, subtype ?? eventType].filter(Boolean).join(':')
+}
+
+const SETTLED_RESULT_KINDS: ReadonlySet<string> = new Set(
+  CLAUDE_STREAM_JSON_FRAME_KINDS.filter((kind) => kind.startsWith('message:result:'))
+)
+
+/** A catalogued result subtype is the turn-complete signal the translator settles
+ *  itself; only an unmodeled subtype still needs the provider-fallback row. */
+export function isSettledClaudeResultKind(kind: string): boolean {
+  return SETTLED_RESULT_KINDS.has(kind)
 }
 
 export function isModeledClaudeContent(value: unknown): boolean {
@@ -27,7 +38,8 @@ export function isModeledClaudeContent(value: unknown): boolean {
   if (part.type === 'tool_result') {
     return claudeText(part.tool_use_id) !== null
   }
-  return part.type === 'thinking' && claudeText(part.thinking) !== null
+  // Redacted thinking arrives as an empty string plus a signature.
+  return part.type === 'thinking' || part.type === 'redacted_thinking'
 }
 
 export function createClaudeProviderFrameFallback(
