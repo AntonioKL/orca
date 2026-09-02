@@ -168,6 +168,93 @@ describe('OrcaRuntimeService', () => {
     })
   })
 
+  it('uses the worktree host when repository connection metadata is stale', async () => {
+    const targetConnectionId = 'conn-target'
+    const targetHostId = `ssh:${targetConnectionId}`
+    const targetPtyId = `${targetHostId}@@pty-target`
+    const session = makeWorkspaceSessionWithHeadlessTerminal({
+      tabsByWorktree: {
+        [TEST_WORKTREE_ID]: [
+          {
+            id: 'host-tab',
+            ptyId: targetPtyId,
+            worktreeId: TEST_WORKTREE_ID,
+            title: 'Persisted Terminal',
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 1
+          }
+        ]
+      },
+      terminalLayoutsByTabId: {
+        'host-tab': makeHeadlessTerminalLayout({ [HEADLESS_LEAF_ID]: targetPtyId })
+      }
+    })
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(session)
+    const repo = { ...store.getRepo(TEST_REPO_ID)!, connectionId: 'conn-stale' }
+    runtimeStore.getRepos = () => [repo]
+    runtimeStore.getRepo = (id: string) => (id === TEST_REPO_ID ? repo : undefined)
+    runtimeStore.getWorktreeMeta = () => ({ hostId: targetHostId }) as never
+    runtimeStore.getAllWorktreeMeta = () =>
+      ({ [TEST_WORKTREE_ID]: { hostId: targetHostId } }) as never
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+    const stopAndWait = vi.fn(async () => true)
+    runtime.setPtyController({
+      write: () => true,
+      kill: vi.fn(() => false),
+      stopAndWait,
+      getForegroundProcess: async () => null
+    })
+    runtime.registerPty(targetPtyId, TEST_WORKTREE_ID, targetConnectionId, {
+      tabId: 'host-tab',
+      leafId: HEADLESS_LEAF_ID
+    })
+
+    await expect(runtime.stopTerminalsForWorktree(`id:${TEST_WORKTREE_ID}`)).resolves.toEqual({
+      stopped: 1
+    })
+    expect(stopAndWait).toHaveBeenCalledWith(targetPtyId)
+  })
+
+  it('reports disconnected SSH PTYs as unverifiable during workspace close', async () => {
+    const ptyId = 'ssh:conn-1@@disconnected'
+    const session = makeWorkspaceSessionWithHeadlessTerminal({
+      tabsByWorktree: { [TEST_WORKTREE_ID]: [] },
+      terminalLayoutsByTabId: {}
+    })
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(session)
+    const repo = { ...store.getRepo(TEST_REPO_ID)!, connectionId: 'conn-1' }
+    runtimeStore.getRepos = () => [repo]
+    runtimeStore.getRepo = (id: string) => (id === TEST_REPO_ID ? repo : undefined)
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+    runtime.setPtyController({
+      write: () => true,
+      kill: vi.fn(() => false),
+      stopAndWait: vi.fn(async () => false),
+      getForegroundProcess: async () => null
+    })
+    runtime['recordPtyWorktree'](ptyId, TEST_WORKTREE_ID, {
+      connected: false,
+      connectionId: 'conn-1',
+      tabId: 'host-tab'
+    })
+    runtime.markPtyLivenessUnverifiable(ptyId, 'relay disconnected')
+
+    await expect(
+      runtime.closeTerminalsForWorktree(`id:${TEST_WORKTREE_ID}`)
+    ).resolves.toMatchObject({
+      closed: 0,
+      stopped: 0,
+      ptyStopVerdict: 'unverifiable',
+      ptyStopReason: 'relay disconnected'
+    })
+  })
+
   it('shows worktree.ps working when the current pane supersedes a Claude agents OSC title', async () => {
     const runtime = new OrcaRuntimeService(store)
 

@@ -235,6 +235,18 @@ describe('terminal close CLI', () => {
     expect(help).toContain('close')
     expect(help).not.toContain('stop')
   })
+
+  it('keeps root help aligned with the canonical close command', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    printHelp(COMMAND_SPECS)
+
+    const help = String(log.mock.calls[0]?.[0])
+    expect(help).toContain(
+      'terminal close            Close one terminal, its whole tab with --tab, or all in a worktree'
+    )
+    expect(help).not.toContain('terminal stop')
+  })
 })
 
 describe('terminal send CLI', () => {

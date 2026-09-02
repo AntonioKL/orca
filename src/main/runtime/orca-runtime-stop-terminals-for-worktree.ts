@@ -12,14 +12,15 @@ import type {
 import type { WorktreeTerminalMutationKind } from './worktree-terminal-mutation-lock'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { rollbackWorkspaceSessionAfterFailedAsyncWrite } from './workspace-session-failed-write-rollback'
-import { parseExecutionHostId } from '../../shared/execution-host'
+import { getWorktreeExecutionHostId, parseExecutionHostId } from '../../shared/execution-host'
 import { worktreePtyBelongsToHost, type WorktreePtyHostFence } from './worktree-pty-host-fence'
 import { summarizeWorktreePtyStopVerdict } from './worktree-pty-stop-verdict'
 
 export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithResolveTerminalSplitSourceAuthority {
-  private collectConnectedWorktreePtyIds(
+  private collectWorktreePtyIds(
     worktreeId: string,
-    hostFence: WorktreePtyHostFence
+    hostFence: WorktreePtyHostFence,
+    includeDisconnected = false
   ): Set<string> {
     const ptyIds = new Set<string>()
     for (const leaf of this.leaves.values()) {
@@ -34,7 +35,7 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
     for (const pty of this.ptysById.values()) {
       if (
         runtimeWorktreeIdsEqual(pty.worktreeId, worktreeId) &&
-        pty.connected &&
+        (includeDisconnected || pty.connected) &&
         worktreePtyBelongsToHost(pty.ptyId, pty.connectionId, hostFence)
       ) {
         ptyIds.add(pty.ptyId)
@@ -43,25 +44,25 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
     return ptyIds
   }
 
+  private getWorktreeHostFence(worktree: { id: string; repoId?: string }): WorktreePtyHostFence {
+    const repo = worktree.repoId ? this.store?.getRepo?.(worktree.repoId) : undefined
+    const parsedHost = parseExecutionHostId(getWorktreeExecutionHostId(worktree, repo))
+    return parsedHost?.kind === 'runtime'
+      ? { resolvedRuntimeEnvironmentId: parsedHost.environmentId }
+      : { resolvedConnectionId: parsedHost?.kind === 'ssh' ? parsedHost.targetId : null }
+  }
+
   async closeTerminalsForWorktree(
     worktreeSelector: string
   ): Promise<RuntimeWorktreeTerminalCloseResult> {
     const graphEpoch = this.captureReadyGraphEpoch()
     const worktree = await this.resolveWorktreeSelector(worktreeSelector)
     this.assertStableReadyGraph(graphEpoch)
-    const repo = this.store?.getRepo?.(worktree.repoId)
-    const parsedHost = parseExecutionHostId(worktree.hostId)
-    const hostFence =
-      parsedHost?.kind === 'runtime'
-        ? { resolvedRuntimeEnvironmentId: parsedHost.environmentId }
-        : {
-            resolvedConnectionId:
-              repo?.connectionId ?? (parsedHost?.kind === 'ssh' ? parsedHost.targetId : null)
-          }
+    const hostFence = this.getWorktreeHostFence(worktree)
 
     return await this.runWorktreeTerminalMutation(worktree.id, async () => {
       const snapshot = await this.listMobileSessionTabs(`id:${worktree.id}`)
-      const targetPtyIds = this.collectConnectedWorktreePtyIds(worktree.id, hostFence)
+      const targetPtyIds = this.collectWorktreePtyIds(worktree.id, hostFence, true)
       const parentTabIds = [
         ...new Set(
           snapshot.tabs.flatMap((tab) => (tab.type === 'terminal' ? [tab.parentTabId] : []))
@@ -87,7 +88,9 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
       const ptyStop = summarizeWorktreePtyStopVerdict(
         targetPtyIds,
         (ptyId) => this.getPtyLivenessVerdict(ptyId),
-        (ptyId) => this.ptysById.get(ptyId)?.connected === true
+        (ptyId) =>
+          this.ptysById.get(ptyId)?.connected === true ||
+          (this.isSshOwnedPtyId(ptyId) && this.ptysById.has(ptyId))
       )
       return {
         closed,
@@ -179,7 +182,13 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
       return { stopped: 0 }
     }
     // Preserve folder-instance suffixes while normalizing cross-platform path spelling.
-    const ptyIds = this.collectConnectedWorktreePtyIds(worktree.id, options)
+    const hostFence =
+      options.resolvedWorktreeId ||
+      options.resolvedConnectionId !== undefined ||
+      options.resolvedRuntimeEnvironmentId !== undefined
+        ? options
+        : this.getWorktreeHostFence(worktree)
+    const ptyIds = this.collectWorktreePtyIds(worktree.id, hostFence)
 
     let stopped = 0
     for (const ptyId of ptyIds) {
