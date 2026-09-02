@@ -413,6 +413,27 @@ describe('claude child tree reaper', () => {
     expect(tree.treeVerdict).toBe('exited')
   })
 
+  it('keeps an observed live descendant when a later re-read cannot see the table', async () => {
+    const child = mockChild()
+    // Reap #1 completed and saw a descendant alive at its deadline; the root then
+    // left on its own and the re-verification on a loaded host could not read the
+    // table. "Could not look" must not erase "was seen alive": the lease release
+    // gate is exactly the pair this distinguishes.
+    const terminateDescendants = vi
+      .fn()
+      .mockResolvedValueOnce('live')
+      .mockResolvedValueOnce('unverifiable')
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'linux',
+      captureDescendants: vi.fn(async () => snapshotOf(4243)),
+      terminateDescendants
+    })
+
+    await expect(tree.reap()).resolves.toBe('live')
+    await expect(tree.reap()).resolves.toBe('unverifiable')
+    expect(tree.treeVerdict).toBe('live')
+  })
+
   it('treats an unreadable process table as unproven and re-walks the live root', async () => {
     const child = mockChild()
     // A loaded host can miss the table's deadline; while the root still lives

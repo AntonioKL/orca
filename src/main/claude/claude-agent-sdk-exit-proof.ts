@@ -15,6 +15,17 @@ import { terminateWindowsProcessTree } from '../windows-process-tree-kill'
 const GRACEFUL_EXIT_MS = 1_500
 const FORCED_EXIT_MS = 1_000
 
+/**
+ * A later reap may only raise the latched verdict. An observed exit is final, and
+ * a descendant seen alive at a deadline is never forgotten by a later look that
+ * could not read the table: the lease gate discriminates on exactly that pair.
+ */
+const TREE_VERDICT_TRUST: Record<DescendantTreeVerdict, number> = {
+  unverifiable: 0,
+  live: 1,
+  exited: 2
+}
+
 type ReapableChild = Pick<SpawnedProcess, 'pid' | 'kill'>
 
 /** One platform's descendant tree, tagged so neither verifier can be handed the other's rows. */
@@ -191,8 +202,8 @@ export function createClaudeChildTreeReaper(
       const attempt = judgeTree()
         .catch((): DescendantTreeVerdict => 'unverifiable')
         .then((verdict) => {
-          // An observed exit is final; anything later can only be a stale re-read.
-          treeVerdict = treeVerdict === 'exited' ? 'exited' : verdict
+          treeVerdict =
+            TREE_VERDICT_TRUST[verdict] > TREE_VERDICT_TRUST[treeVerdict] ? verdict : treeVerdict
           return verdict
         })
       inFlight = attempt
