@@ -301,6 +301,7 @@ export function useFullCreationExecution(input: FullCreationExecutionInput) {
       persistSetupAgentStartupPolicy,
       prepareFullSubmit,
       resolvedInitialWorkspaceStatus,
+      selectedRepoAgentLaunchPlatform,
       selectedRepoExecutionHostId,
       selectedRepoIsGit,
       selectedRepoIsRemote,
