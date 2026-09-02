@@ -49,6 +49,9 @@ export type WorktreeCardMode = 'Default' | 'Compact'
 
 export type AgentActivityDisplayMode = 'compact' | 'full'
 
+export type ThreadReadFilter = 'all' | 'unread'
+export type ActivityGroupBy = 'none' | 'status' | 'project' | 'worktree' | 'agent'
+
 export type StatusBarItem =
   | 'claude'
   | 'codex'
