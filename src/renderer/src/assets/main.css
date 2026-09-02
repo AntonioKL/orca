@@ -913,6 +913,14 @@ html.native-shell .app-layout {
   -webkit-app-region: drag;
 }
 
+/* Why: an empty tab strip's only control is the "+", a 28px no-drag island in a
+   drag region — the one strip state no terminal focus can ever lift to no-drag
+   (see the rule below), which leaves the macOS window-drag hit test owning the
+   click. Populated strips keep their draggable empty space. */
+[data-terminal-focus-release-surface='true'][data-tab-strip-empty='true'] {
+  -webkit-app-region: no-drag;
+}
+
 /* Why: Electron drag regions swallow renderer pointer events. While regular
    xterm owns focus, make the next top-chrome click observable so it can release
    terminal zoom ownership; after release these surfaces become draggable again. */
