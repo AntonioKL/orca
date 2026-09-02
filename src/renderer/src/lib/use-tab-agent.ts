@@ -19,7 +19,6 @@ import {
 import { resolveCompatibleAgentTypeForOwner } from '../../../shared/agent-title-owner'
 import { isOpenCodeNativeTitle } from '../../../shared/opencode-terminal-title'
 import { resolvePaneAgentOwner } from '../../../shared/pane-agent-owner'
-import { useTabAgentLadderComparison } from './tab-agent-identity-comparison'
 import type { TerminalTab } from '../../../shared/terminal-tab-types'
 import type { TuiAgent } from '../../../shared/tui-agent'
 
@@ -338,7 +337,7 @@ export function useTabAgent(tab: TerminalTab): TuiAgent | null {
     tab.title
   ])
 
-  const signals = {
+  return resolveTabAgentFromSignals({
     hasObservedAgentSignal,
     isRemote: isRemoteLike,
     title: tab.title,
@@ -351,10 +350,5 @@ export function useTabAgent(tab: TerminalTab): TuiAgent | null {
     processShellForeground,
     sleepingSessionAgent,
     launchAgent: tab.launchAgent
-  }
-  const renderedAgent = resolveTabAgentFromSignals(signals)
-  // Identity-ladder comparison window (post-render): counts canonical-vs-rendered disagreement;
-  // the rendered icon stays untouched.
-  useTabAgentLadderComparison(tab.id, tab.worktreeId, signals, renderedAgent)
-  return renderedAgent
+  })
 }

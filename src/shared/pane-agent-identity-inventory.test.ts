@@ -24,10 +24,7 @@ const HELPERS = [
   'resolveAgentTypeFromTerminalTitle',
   'resolvePaneAgentIdentity',
   'resolveCanonicalPaneAgentIdentity',
-  'resolvePublishedPaneAgentIdentity',
-  'comparePublishedPaneAgentIdentity',
-  'recordTabAgentLadderComparison',
-  'useTabAgentLadderComparison'
+  'resolvePublishedPaneAgentIdentity'
 ] as const
 
 const TEST_SUPPORT_PATHS = new Set([
@@ -301,7 +298,14 @@ const INVENTORY: readonly InventoryGroup[] = [
     helper: 'detectAgentStatusFromTitle',
     classification: 'evidence-producer',
     paths: [
-      ['src/main/runtime/orca-runtime.ts', 12],
+      ['src/main/runtime/orca-runtime-apply-tracked-pty-title.ts', 2],
+      ['src/main/runtime/orca-runtime-get-pty-record-for-pane-key.ts', 2],
+      ['src/main/runtime/orca-runtime-get-unpersisted-tracked-title-for-pty.ts', 2],
+      ['src/main/runtime/orca-runtime-maybe-hydrate-headless-from-renderer.ts', 2],
+      ['src/main/runtime/orca-runtime-record-agent-prompt-lifecycle-state.ts', 2],
+      ['src/main/runtime/runtime-terminal-agent-status-query.ts', 3],
+      ['src/main/runtime/runtime-worktree-status-projection.ts', 4],
+      ['src/main/runtime/terminal-wait-detection.ts', 2],
       ['src/renderer/src/components/terminal-pane/agent-completion-title-observer.ts', 2],
       ['src/renderer/src/components/terminal-pane/pty-connection/shell-command-inference.ts', 4],
       ['src/renderer/src/components/terminal-pane/pty-output-title-observer.ts', 2],
@@ -345,10 +349,7 @@ const INVENTORY: readonly InventoryGroup[] = [
   {
     helper: 'resolvePaneAgentIdentity',
     classification: 'parser-implementation',
-    paths: [
-      ['src/shared/pane-agent-identity-adapter.ts', 2],
-      'src/shared/pane-agent-identity-resolver.ts'
-    ]
+    paths: ['src/shared/pane-agent-identity-resolver.ts']
   },
   {
     helper: 'resolvePaneAgentIdentity',
@@ -363,45 +364,20 @@ const INVENTORY: readonly InventoryGroup[] = [
   {
     helper: 'resolveCanonicalPaneAgentIdentity',
     classification: 'identity-consumer',
+    paths: [['src/shared/agent-status-identity.ts', 2]]
+  },
+  {
+    helper: 'resolveCanonicalPaneAgentIdentity',
+    classification: 'identity-consumer',
+    paths: [['src/shared/terminal-title-agent-type.ts', 2]]
+  },
+  {
+    helper: 'resolvePublishedPaneAgentIdentity',
+    classification: 'parser-implementation',
     paths: [
-      ['src/renderer/src/lib/tab-agent-identity-comparison.ts', 2],
-      ['src/shared/published-pane-agent-identity-comparison.ts', 2]
+      'src/shared/published-pane-agent-identity.ts',
+      ['src/main/runtime/orca-runtime-write-orchestration-pointer-pty.ts', 2]
     ]
-  },
-  {
-    helper: 'resolvePublishedPaneAgentIdentity',
-    classification: 'parser-implementation',
-    paths: ['src/shared/published-pane-agent-identity.ts']
-  },
-  {
-    helper: 'resolvePublishedPaneAgentIdentity',
-    classification: 'identity-consumer',
-    paths: [['src/shared/published-pane-agent-identity-comparison.ts', 2]]
-  },
-  {
-    helper: 'comparePublishedPaneAgentIdentity',
-    classification: 'parser-implementation',
-    paths: ['src/shared/published-pane-agent-identity-comparison.ts']
-  },
-  {
-    helper: 'comparePublishedPaneAgentIdentity',
-    classification: 'identity-consumer',
-    paths: [['src/main/runtime/orca-runtime.ts', 2]]
-  },
-  {
-    helper: 'recordTabAgentLadderComparison',
-    classification: 'parser-implementation',
-    paths: [['src/renderer/src/lib/tab-agent-identity-comparison.ts', 2]]
-  },
-  {
-    helper: 'useTabAgentLadderComparison',
-    classification: 'parser-implementation',
-    paths: ['src/renderer/src/lib/tab-agent-identity-comparison.ts']
-  },
-  {
-    helper: 'useTabAgentLadderComparison',
-    classification: 'identity-consumer',
-    paths: [['src/renderer/src/lib/use-tab-agent.ts', 2]]
   }
 ]
 

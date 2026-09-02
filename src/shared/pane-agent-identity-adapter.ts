@@ -1,20 +1,16 @@
 import { collectAgentTitleEvidence } from './agent-title-evidence'
-import {
-  resolvePaneAgentIdentity,
-  type PaneAgentEvidence,
-  type PaneAgentEvidenceSource,
-  type PaneAgentRunKey
+import type {
+  PaneAgentEvidence,
+  PaneAgentEvidenceSource,
+  PaneAgentIdentity,
+  PaneAgentIdentityInput,
+  PaneAgentRunKey
 } from './pane-agent-identity-resolver'
 import type { TuiAgent } from './tui-agent'
 
 /**
- * The parallel adapter entry point around `resolvePaneAgentIdentity`.
- *
- * The frozen host adapter (`published-pane-agent-identity.ts`) stays untouched and keeps
- * publishing exactly what it publishes today. This adapter computes the CANONICAL answer the
- * migration will eventually ship — per-pane coverage, provenance sidecar, process-proof gating —
- * so comparison telemetry can log where the two disagree on real sessions BEFORE any surface
- * changes what it displays. Nothing user-visible reads this module's answer yet.
+ * Canonical pane identity ranking. All adapters, including the compatibility resolver, delegate to
+ * this implementation so source precedence, ambiguity, and run eligibility cannot drift.
  */
 
 /**
@@ -94,6 +90,8 @@ export type CanonicalPaneAgentIdentityInput = {
   sleepingRun?: PaneAgentRunKey
   /** Tab-level display fallback only; ignored unless `allowSibling` opts in. */
   siblingAgent?: TuiAgent | null
+  /** Additional tab-level sibling observations retained for ambiguity checking. */
+  siblingAgents?: readonly TuiAgent[]
   allowSibling?: boolean
   title?: string | null
   currentRun?: PaneAgentRunKey
@@ -114,6 +112,66 @@ export type CanonicalPaneAgentIdentity = {
   titleOnly: boolean
   ambiguousAt?: PaneAgentEvidenceSource
   supersededSources: readonly PaneAgentEvidenceSource[]
+}
+
+/** Authority order, strongest first. This is the only place precedence is expressed. */
+const SOURCE_RANK: readonly PaneAgentEvidenceSource[] = [
+  'live-hook',
+  'process',
+  'launch',
+  'completed-hook',
+  'sleeping-session',
+  'sibling',
+  'title'
+]
+
+/** Run keys only supersede evidence from the same authority; unknown authorities stay eligible. */
+function isPaneAgentRunEligible(
+  run: PaneAgentRunKey | undefined,
+  currentRun: PaneAgentRunKey | undefined
+): boolean {
+  return (
+    run === undefined ||
+    currentRun === undefined ||
+    run.authorityId !== currentRun.authorityId ||
+    run.incarnation === currentRun.incarnation
+  )
+}
+
+/** Shared evidence ranking primitive used by every pane-identity adapter. */
+export function resolveCanonicalPaneAgentEvidence<A extends string = TuiAgent>(
+  input: PaneAgentIdentityInput<A>
+): PaneAgentIdentity<A> {
+  const superseded: PaneAgentEvidenceSource[] = []
+  const floor = input.minimumSource
+    ? SOURCE_RANK.indexOf(input.minimumSource)
+    : Number.MAX_SAFE_INTEGER
+  const eligible = input.evidence.filter((item) => {
+    if (item.source === 'sibling' && input.allowSibling !== true) {
+      return false
+    }
+    if (SOURCE_RANK.indexOf(item.source) > floor) {
+      return false
+    }
+    if (isPaneAgentRunEligible(item.run, input.currentRun)) {
+      return true
+    }
+    superseded.push(item.source)
+    return false
+  })
+
+  for (const source of SOURCE_RANK) {
+    const matches = eligible.filter((item) => item.source === source)
+    if (matches.length === 0) {
+      continue
+    }
+    const agents = new Set(matches.map((item) => item.agent))
+    if (agents.size > 1) {
+      return { agent: null, source: null, ambiguousAt: source, supersededSources: superseded }
+    }
+    return { agent: matches[0].agent, source, supersededSources: superseded }
+  }
+  return { agent: null, source: null, supersededSources: superseded }
 }
 
 /** Freshness is judged on the authority's own clock: age at capture against its TTL. */
@@ -148,17 +206,13 @@ export function resolveCanonicalPaneAgentIdentity(
   // Coverage comes from authority-bearing sources that are still eligible for this run. A stale
   // hook/launch row can remain in the input after a pane is replaced; it must not make a title-only
   // answer look covered to a future action consumer.
-  const runIsEligible = (run: PaneAgentRunKey | undefined): boolean =>
-    run === undefined ||
-    input.currentRun === undefined ||
-    run.authorityId !== input.currentRun.authorityId ||
-    run.incarnation === input.currentRun.incarnation
   const covered = Boolean(
-    (input.hookAgent && runIsEligible(input.hookRun)) ||
-    (input.completedHookAgent && runIsEligible(input.completedHookRun)) ||
+    (input.hookAgent && isPaneAgentRunEligible(input.hookRun, input.currentRun)) ||
+    (input.completedHookAgent &&
+      isPaneAgentRunEligible(input.completedHookRun, input.currentRun)) ||
     processEvidence ||
-    (input.launchAgent && runIsEligible(input.launchRun)) ||
-    (input.sleepingSessionAgent && runIsEligible(input.sleepingRun))
+    (input.launchAgent && isPaneAgentRunEligible(input.launchRun, input.currentRun)) ||
+    (input.sleepingSessionAgent && isPaneAgentRunEligible(input.sleepingRun, input.currentRun))
   )
   // Keep stale evidence in the resolver so diagnostics still report which source was superseded,
   // even when it no longer qualifies the pane as covered.
@@ -184,16 +238,27 @@ export function resolveCanonicalPaneAgentIdentity(
         supersededSources: []
       }
     }
+    const siblingEvidence = [
+      ...(input.siblingAgent ? [{ source: 'sibling' as const, agent: input.siblingAgent }] : []),
+      ...(input.siblingAgents?.map((agent) => ({ source: 'sibling' as const, agent })) ?? []),
+      ...(titleAgent ? [{ source: 'title' as const, agent: titleAgent }] : [])
+    ]
+    const siblingResolved = resolveCanonicalPaneAgentEvidence<TuiAgent>({
+      evidence: siblingEvidence,
+      allowSibling: input.allowSibling,
+      minimumSource: input.minimumSource
+    })
     return {
-      agent: titleAgent,
-      source: titleAgent ? 'title' : null,
+      agent: siblingResolved.agent,
+      source: siblingResolved.source,
       coverage: 'uncovered',
-      titleOnly: titleAgent !== null,
-      supersededSources: []
+      titleOnly: siblingResolved.source === 'title',
+      ...(siblingResolved.ambiguousAt ? { ambiguousAt: siblingResolved.ambiguousAt } : {}),
+      supersededSources: siblingResolved.supersededSources
     }
   }
 
-  const resolved = resolvePaneAgentIdentity<TuiAgent>({
+  const resolved = resolveCanonicalPaneAgentEvidence<TuiAgent>({
     evidence: [
       ...(input.hookAgent
         ? [
@@ -233,6 +298,7 @@ export function resolveCanonicalPaneAgentIdentity(
           ]
         : []),
       ...(input.siblingAgent ? [{ source: 'sibling' as const, agent: input.siblingAgent }] : []),
+      ...(input.siblingAgents?.map((agent) => ({ source: 'sibling' as const, agent })) ?? []),
       ...(titleAgent ? [{ source: 'title' as const, agent: titleAgent }] : [])
     ],
     currentRun: input.currentRun,

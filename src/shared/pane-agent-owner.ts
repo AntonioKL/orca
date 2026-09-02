@@ -1,4 +1,5 @@
 import type { AgentType } from './agent-status-types'
+import { resolveCanonicalPaneAgentEvidence } from './pane-agent-identity-adapter'
 
 /**
  * The owner-evidence signals a terminal pane can carry, strongest launch intent
@@ -32,21 +33,6 @@ export type ResolvedPaneAgentOwner = {
   ownerIsLaunch: boolean
 }
 
-const PANE_OWNER_RANK: readonly {
-  key: keyof PaneAgentOwnerSignals
-  ownerIsLaunch: boolean
-}[] = [
-  { key: 'launchAgent', ownerIsLaunch: true },
-  { key: 'startupLaunchAgent', ownerIsLaunch: true },
-  { key: 'initialStatusAgent', ownerIsLaunch: true },
-  { key: 'commandInferredAgent', ownerIsLaunch: true },
-  { key: 'hookAgent', ownerIsLaunch: false },
-  { key: 'siblingHookAgent', ownerIsLaunch: false },
-  { key: 'completedHookAgent', ownerIsLaunch: false },
-  { key: 'siblingCompletedHookAgent', ownerIsLaunch: false },
-  { key: 'sleepingSessionAgent', ownerIsLaunch: false }
-]
-
 /**
  * The single authoritative resolver for "which agent owns this pane", shared by
  * the tab-icon resolver, the terminal-pane display/renderer owner, and the
@@ -66,13 +52,38 @@ const PANE_OWNER_RANK: readonly {
 export function resolvePaneAgentOwnerRecord(
   signals: PaneAgentOwnerSignals
 ): ResolvedPaneAgentOwner | null {
-  for (const { key, ownerIsLaunch } of PANE_OWNER_RANK) {
-    const agent = signals[key]
+  const evidence = [] as {
+    source: 'launch' | 'completed-hook' | 'sleeping-session' | 'sibling'
+    agent: AgentType
+  }[]
+  const launchAgent =
+    signals.launchAgent ??
+    signals.startupLaunchAgent ??
+    signals.initialStatusAgent ??
+    signals.commandInferredAgent
+  if (launchAgent) {
+    evidence.push({ source: 'launch', agent: launchAgent })
+  }
+  // This compatibility signal has no liveness bit; treat it as the durable completed-hook rung.
+  if (signals.hookAgent) {
+    evidence.push({ source: 'completed-hook', agent: signals.hookAgent })
+  }
+  if (signals.completedHookAgent) {
+    evidence.push({ source: 'completed-hook', agent: signals.completedHookAgent })
+  }
+  if (signals.sleepingSessionAgent) {
+    evidence.push({ source: 'sleeping-session', agent: signals.sleepingSessionAgent })
+  }
+  for (const agent of [signals.siblingHookAgent, signals.siblingCompletedHookAgent]) {
     if (agent) {
-      return { agent, ownerIsLaunch }
+      evidence.push({ source: 'sibling', agent })
     }
   }
-  return null
+  const identity = resolveCanonicalPaneAgentEvidence({ evidence, allowSibling: true })
+  if (!identity.agent) {
+    return null
+  }
+  return { agent: identity.agent, ownerIsLaunch: identity.source === 'launch' }
 }
 
 export function resolvePaneAgentOwner(signals: PaneAgentOwnerSignals): AgentType | null {

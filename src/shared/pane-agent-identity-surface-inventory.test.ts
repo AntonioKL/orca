@@ -29,7 +29,7 @@ const SURFACE_ROWS: readonly SurfaceRow[] = [
   },
   {
     row: 32,
-    path: 'src/renderer/src/components/terminal-pane/TerminalPane.tsx',
+    path: 'src/renderer/src/components/terminal-pane/use-terminal-pane-chat-state.ts',
     marker: 'resolveNativeChatLeafTitleAgent'
   },
   {
@@ -111,7 +111,7 @@ const SURFACE_ROWS: readonly SurfaceRow[] = [
   },
   {
     row: 47,
-    path: 'src/renderer/src/components/terminal-pane/use-terminal-pane-lifecycle.ts',
+    path: 'src/renderer/src/components/terminal-pane/terminal-pane-manager-options.ts',
     marker: 'resolvePaneKeyboardProtocolAgent'
   },
   {
@@ -174,8 +174,16 @@ const SURFACE_ROWS: readonly SurfaceRow[] = [
     path: 'src/renderer/src/components/terminal-pane/pty-connection/cold-restore-resume-startup.ts',
     marker: 'bindBuildColdRestoreAgentResumeStartup'
   },
-  { row: 59, path: 'src/main/agent-hooks/server.ts', marker: 'recordCurrentAuthorityObservation' },
-  { row: 59, path: 'src/main/runtime/orca-runtime.ts', marker: 'resolvePaneAgentIdentityField' },
+  {
+    row: 59,
+    path: 'src/main/agent-hooks/server/server-authority-evidence.ts',
+    marker: 'recordCurrentAuthorityObservation'
+  },
+  {
+    row: 59,
+    path: 'src/main/runtime/orca-runtime-write-orchestration-pointer-pty.ts',
+    marker: 'resolvePaneAgentIdentityField'
+  },
   {
     row: 59,
     path: 'src/renderer/src/hooks/ipc-events/agent-status-event-applicator.ts',
@@ -183,7 +191,7 @@ const SURFACE_ROWS: readonly SurfaceRow[] = [
   },
   {
     row: 59,
-    path: 'src/renderer/src/store/slices/agent-status.ts',
+    path: 'src/renderer/src/store/slices/agent-status-authority-actions.ts',
     marker: 'transferAgentPaneAuthority'
   },
   {
@@ -202,7 +210,11 @@ const SURFACE_ROWS: readonly SurfaceRow[] = [
     marker: 'installTitleSpawnBell'
   },
   { row: 61, path: 'src/renderer/src/lib/worktree-status.ts', marker: 'getWorktreeStatus' },
-  { row: 62, path: 'src/main/runtime/orca-runtime.ts', marker: 'getLeafWorktreeStatus' },
+  {
+    row: 62,
+    path: 'src/main/runtime/runtime-worktree-status-projection.ts',
+    marker: 'getLeafWorktreeStatus'
+  },
   {
     row: 63,
     path: 'src/renderer/src/components/sidebar/smart-attention.ts',
@@ -245,8 +257,10 @@ describe('pane agent identity surface inventory (rows 6, 32–65)', () => {
 const IDENTITY_SEQUENCER_REBIND_RE = /\b(?:observations|rendererAgentStatusObservations)\.rebind\(/g
 
 const EXPECTED_REBIND_SITES: readonly (readonly [path: string, occurrences: number])[] = [
-  ['src/main/agent-hooks/server.ts', 3],
-  ['src/renderer/src/store/slices/agent-status.ts', 1]
+  ['src/main/agent-hooks/server/server-ingest-normalization.ts', 1],
+  ['src/main/agent-hooks/server/server-ingest-remote.ts', 1],
+  ['src/main/agent-hooks/server/server-lifecycle.ts', 1],
+  ['src/renderer/src/store/slices/agent-status-authority-actions.ts', 1]
 ]
 
 describe('identity observation rebind audit', () => {
