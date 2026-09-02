@@ -302,6 +302,25 @@ describe('createBrowserSlice annotations', () => {
     expect(store.getState().browserTabsByWorktree).toBe(browserTabsByWorktree)
   })
 
+  it('persists a captured favicon with history and refreshes it with the page state', () => {
+    const store = createTestStore()
+    const tab = store.getState().createBrowserTab('wt-1', 'https://example.com', {
+      title: 'Example'
+    })
+    const pageId = tab.activePageId
+    if (!pageId) {
+      throw new Error('Expected a new browser page')
+    }
+    const initialFavicon = 'https://example.com/favicon.ico'
+    const refreshedFavicon = 'https://cdn.example.com/favicon.png'
+
+    store.getState().addBrowserHistoryEntry('https://example.com', 'Example', initialFavicon)
+    expect(store.getState().browserUrlHistory[0]?.faviconUrl).toBe(initialFavicon)
+
+    store.getState().updateBrowserPageState(pageId, { faviconUrl: refreshedFavicon })
+    expect(store.getState().browserUrlHistory[0]?.faviconUrl).toBe(refreshedFavicon)
+  })
+
   it('repairs a stale active browser unified-tab label on an otherwise unchanged title update', () => {
     const store = createTestStore()
     const tab = store.getState().createBrowserTab('wt-1', 'https://example.com', {
