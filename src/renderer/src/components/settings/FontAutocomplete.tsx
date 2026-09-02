@@ -38,7 +38,9 @@ export function FontAutocomplete({
   const previewFontFamilyRef = useRef(onPreviewFontFamily)
   const listboxId = useId()
 
-  previewFontFamilyRef.current = onPreviewFontFamily
+  useEffect(() => {
+    previewFontFamilyRef.current = onPreviewFontFamily
+  }, [onPreviewFontFamily])
 
   const setRootNode = useCallback((element: HTMLDivElement | null): void => {
     rootRef.current = element

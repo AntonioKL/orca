@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
 import { toast } from 'sonner'
 import { getDefaultVoiceSettings } from '../../../../shared/constants'
 import {
@@ -65,7 +65,9 @@ export default function FeatureTipsModal(): JSX.Element | null {
     settings
   })
 
-  activeModalRef.current = activeModal
+  useEffect(() => {
+    activeModalRef.current = activeModal
+  }, [activeModal])
 
   const markCurrentTipSeen = (): void => {
     if (currentTip) {

@@ -96,7 +96,9 @@ export default function FolderWorkspacePrChecksPanel({
   )
   const refreshCandidatesRef = useRef(refreshCandidates)
 
-  refreshCandidatesRef.current = refreshCandidates
+  useEffect(() => {
+    refreshCandidatesRef.current = refreshCandidates
+  }, [refreshCandidates])
 
   useEffect(() => {
     const candidates = refreshCandidatesRef.current

@@ -169,9 +169,12 @@ export default function SortableTab({
   }, [])
 
   // Why the ref: keeps the listener subscribed to tab.id alone, so OSC title churn can't
-  // resubscribe it mid-edit.
+  // resubscribe it mid-edit. Written from an Effect, not in render -- a render React discards
+  // must not leave a stale handler behind for the next commit to fire.
   const handleRenameOpenRef = useRef(handleRenameOpen)
-  handleRenameOpenRef.current = handleRenameOpen
+  useEffect(() => {
+    handleRenameOpenRef.current = handleRenameOpen
+  }, [handleRenameOpen])
 
   useEffect(() => {
     const onRenameRequest = (event: Event): void => {

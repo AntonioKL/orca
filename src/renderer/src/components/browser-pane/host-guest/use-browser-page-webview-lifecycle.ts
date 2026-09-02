@@ -170,19 +170,23 @@ export function useBrowserPageWebviewLifecycle({
     }
   }, [inputLocked, webviewRef])
 
-  // Mirrored during render: every one of these copies a value verbatim and is only read back from
-  // guest event handlers, so a commit-phase callback per browser page bought nothing.
-  initialBrowserUrlRef.current = browserTabUrl
-  browserTabUrlRef.current = browserTabUrl
-  onUpdatePageStateRef.current = onUpdatePageState
-  onSetUrlRef.current = onSetUrl
-  addBrowserHistoryEntryRef.current = addBrowserHistoryEntry
+  useEffect(() => {
+    initialBrowserUrlRef.current = browserTabUrl
+  }, [browserTabId, browserTabUrl])
 
-  // Why this one stays an Effect: the attach path resolves activeLoadFailureRef against the live
-  // guest URL, so this write has to keep landing after that commit rather than before it.
+  useEffect(() => {
+    browserTabUrlRef.current = browserTabUrl
+  }, [browserTabUrl, browserTabUrlRef])
+
   useEffect(() => {
     activeLoadFailureRef.current = browserTabLoadError
   }, [activeLoadFailureRef, browserTabLoadError])
+
+  useEffect(() => {
+    onUpdatePageStateRef.current = onUpdatePageState
+    onSetUrlRef.current = onSetUrl
+    addBrowserHistoryEntryRef.current = addBrowserHistoryEntry
+  }, [onSetUrl, onUpdatePageState, addBrowserHistoryEntry, onSetUrlRef, onUpdatePageStateRef])
 
   const syncNavigationState = useCallback(
     (webview: Electron.WebviewTag): void => {

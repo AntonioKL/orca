@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type React from 'react'
 import type { VirtualizedScrollAnchor } from '@/hooks/useVirtualizedScrollAnchor'
 import type { GitStatusEntry } from '../../../../../../shared/git-status-types'
@@ -65,18 +65,16 @@ export function useCombinedDiffViewRestore({
     sectionLoadTokensRef
   } = registry
 
-  // Why the seed flag: `useRef(expr)` re-reads all three caches on every render and throws the
-  // result away, and an anchor seeds legitimately to null so a nullish guard would keep re-reading.
-  const scrollOffsetRef = useRef(0)
-  const scrollAnchorRef = useRef<VirtualizedScrollAnchor>(null)
-  const latestDomScrollAnchorRef = useRef<VirtualizedScrollAnchor>(null)
-  const restoreSeedAppliedRef = useRef(false)
-  if (!restoreSeedAppliedRef.current) {
-    restoreSeedAppliedRef.current = true
-    scrollOffsetRef.current = combinedDiffScrollTopCache.get(viewStateKey) ?? 0
-    scrollAnchorRef.current = combinedDiffScrollAnchorCache.get(viewStateKey) ?? null
-    latestDomScrollAnchorRef.current = scrollAnchorRef.current
-  }
+  // Why useState and not `useRef(expr)`: the latter re-reads all three caches on every render and
+  // throws the result away, and an anchor seeds legitimately to null so a nullish guard would keep
+  // re-reading. useState's initializer runs once without writing a ref during render.
+  const [restoreSeed] = useState<{ offset: number; anchor: VirtualizedScrollAnchor }>(() => ({
+    offset: combinedDiffScrollTopCache.get(viewStateKey) ?? 0,
+    anchor: combinedDiffScrollAnchorCache.get(viewStateKey) ?? null
+  }))
+  const scrollOffsetRef = useRef(restoreSeed.offset)
+  const scrollAnchorRef = useRef<VirtualizedScrollAnchor>(restoreSeed.anchor)
+  const latestDomScrollAnchorRef = useRef<VirtualizedScrollAnchor>(restoreSeed.anchor)
 
   // Why: tab/worktree switches unmount this viewer; cache by pane key so remount restores sections+scroll before repaint.
   const initializedEntryStateRef = useRef<{

@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import type {
   DashboardCard,
@@ -85,7 +85,9 @@ export function AgentMap({
     () => selectAgentMapRecentFlareStatuses(visibleCards),
     [visibleCards]
   )
-  layoutCacheRef.current = layoutResult.cache
+  useEffect(() => {
+    layoutCacheRef.current = layoutResult.cache
+  }, [layoutResult.cache])
   const layout = layoutResult.layout
 
   return (

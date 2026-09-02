@@ -33,7 +33,9 @@ export function useRepositoryHookSettingsDraft({
   const persistRef = useRef(onUpdateHookSettings)
   const localCommandsPersistForRepoRef = useRef(onUpdateHookSettings)
 
-  persistRef.current = onUpdateHookSettings
+  useEffect(() => {
+    persistRef.current = onUpdateHookSettings
+  }, [onUpdateHookSettings])
 
   const syncHookSettingsDraft = useCallback((next: RepoHookSettings) => {
     if (!areHookSettingsDraftsEqual(hookSettingsDraftRef.current, next)) {

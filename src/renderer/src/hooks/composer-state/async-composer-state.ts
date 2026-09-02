@@ -81,7 +81,10 @@ export function useComposerAsyncState(input: ComposerAsyncStateInput) {
   )
 
   const setupAgentStartupPolicyRef = useRef(setupAgentStartupPolicy)
-  setupAgentStartupPolicyRef.current = setupAgentStartupPolicy
+
+  useEffect(() => {
+    setupAgentStartupPolicyRef.current = setupAgentStartupPolicy
+  }, [setupAgentStartupPolicy])
 
   const setupAgentStartupPolicySaveRef = useRef<{
     repoId: string
@@ -143,22 +146,25 @@ export function useComposerAsyncState(input: ComposerAsyncStateInput) {
   // Why: let handleBaseBranchPrSelect read the latest note without adding it to deps (would rebuild the callback on every keystroke).
   const noteRef = useRef<string>(note)
 
-  // Mirrored during render, not from an Effect: both are verbatim copies read only from the
-  // once-mounted drop listener and submit callbacks, never during another component's render.
-  nameRef.current = name
-  noteRef.current = note
+  useEffect(() => {
+    nameRef.current = name
+    noteRef.current = note
+  }, [name, note])
 
   // Why: PR checkout refs resolve async, so submit can still see the linked PR as a checkout source if Create fires before the resolver settles.
-  const smartGitHubPrStartPointSelectionRef = useRef<SmartGitHubPrStartPointSelection | null>(null)
-  const smartGitHubPrStartPointSelectionSeededRef = useRef(false)
-  if (!smartGitHubPrStartPointSelectionSeededRef.current) {
-    smartGitHubPrStartPointSelectionSeededRef.current = true
-    smartGitHubPrStartPointSelectionRef.current = getInitialGitHubPrStartPointSelection({
-      item: initialGitHubWorkItem,
-      linkedWorkItem: initialLinkedWorkItemSeed,
-      repoId: selectedRepo?.id ?? initialRepoId
-    })
-  }
+  // Why useState and not `useRef(expr)`: the seed legitimately resolves to null, so a nullish
+  // guard would keep re-running it; useState's initializer runs once without writing in render.
+  const [initialSmartGitHubPrStartPointSelection] =
+    useState<SmartGitHubPrStartPointSelection | null>(() =>
+      getInitialGitHubPrStartPointSelection({
+        item: initialGitHubWorkItem,
+        linkedWorkItem: initialLinkedWorkItemSeed,
+        repoId: selectedRepo?.id ?? initialRepoId
+      })
+    )
+  const smartGitHubPrStartPointSelectionRef = useRef<SmartGitHubPrStartPointSelection | null>(
+    initialSmartGitHubPrStartPointSelection
+  )
 
   useEffect(() => {
     const clearAutoManagedName = (): void => {
@@ -202,11 +208,13 @@ export function useComposerAsyncState(input: ComposerAsyncStateInput) {
 
   const selectedRepoSettingsRef = useRef(selectedRepoSettings)
 
-  agentPromptRef.current = agentPrompt
-  connectionIdRef.current = connectionId
-  selectedRepoConnectionIdRef.current = selectedRepoConnectionId
-  selectedRepoPathRef.current = selectedRepoPath
-  selectedRepoSettingsRef.current = selectedRepoSettings
+  useEffect(() => {
+    agentPromptRef.current = agentPrompt
+    connectionIdRef.current = connectionId
+    selectedRepoConnectionIdRef.current = selectedRepoConnectionId
+    selectedRepoPathRef.current = selectedRepoPath
+    selectedRepoSettingsRef.current = selectedRepoSettings
+  }, [agentPrompt, connectionId, selectedRepoConnectionId, selectedRepoPath, selectedRepoSettings])
 
   return {
     yamlHooks,
