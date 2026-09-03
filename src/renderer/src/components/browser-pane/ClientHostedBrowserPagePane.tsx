@@ -7,7 +7,7 @@ import type {
 } from '../../../../shared/browser-workspace-types'
 import { toHttpsRecoveryUrl } from '../../../../shared/browser-url'
 import type { RuntimeBrowserClientPlacement } from '../../../../shared/runtime-browser-placement'
-import { readBrowserClientPageGuestMetadata } from './browser-client-page-guest-metadata'
+import { readBrowserClientPageGuestMetadataIfLive } from './browser-client-page-guest-metadata'
 import {
   forgetBrowserClientPageMetadataReports,
   startBrowserClientPageMetadataPublisher
@@ -200,6 +200,14 @@ export function ClientHostedBrowserPagePane({
       return
     }
     const webview = attachment.webview
+    // Why: main can destroy the guest while the tag stays in the DOM holding its id, and every
+    // read below then throws — that is page unavailability, which this pane already has a state for.
+    const attachedMetadata = readBrowserClientPageGuestMetadataIfLive(webview)
+    if (!attachedMetadata) {
+      attachment.detach()
+      setAttachmentError('browser_client_page_guest_unavailable')
+      return
+    }
     const publisher = startBrowserClientPageMetadataPublisher({
       browserPageId: browserTab.id,
       environmentId: runtimeEnvironmentId,
@@ -219,11 +227,14 @@ export function ClientHostedBrowserPagePane({
     // navigation that fails outright often never commits and leaves the guest on the old URL.
     activeLoadFailureRef.current = resolveActiveBrowserLoadFailure(
       activeLoadFailureRef.current,
-      readBrowserClientPageGuestMetadata(webview).url
+      attachedMetadata.url
     )
     const syncNavigation = (event?: Event): void => {
       const eventUrl = (event as (Event & { url?: string }) | undefined)?.url
-      const metadata = readBrowserClientPageGuestMetadata(webview, eventUrl)
+      const metadata = readBrowserClientPageGuestMetadataIfLive(webview, eventUrl)
+      if (!metadata) {
+        return
+      }
       // Why: did-stop-loading fires after did-fail-load, so an unconditional null here would
       // wipe the failure the overlay is about to show.
       const activeLoadFailure = activeLoadFailureRef.current
@@ -251,11 +262,14 @@ export function ClientHostedBrowserPagePane({
     const onStart = (): void => {
       activeLoadFailureRef.current = null
       updatePageStateFromGuest(browserTab.id, { loading: true, loadError: null })
-      publisher.publish(readBrowserClientPageGuestMetadata(webview, undefined, true))
+      const startMetadata = readBrowserClientPageGuestMetadataIfLive(webview, undefined, true)
+      if (startMetadata) {
+        publisher.publish(startMetadata)
+      }
     }
     const onFailLoad = (event: Event): void => {
       const loadError = resolveBrowserWebviewLoadFailure(event as BrowserPageFailLoadEvent, {
-        fallbackUrl: webview.getURL()
+        fallbackUrl: readBrowserClientPageGuestMetadataIfLive(webview)?.url ?? null
       })
       if (!loadError) {
         return
@@ -299,7 +313,7 @@ export function ClientHostedBrowserPagePane({
     setAddressBarValueFromPage
   ])
 
-  useClientHostedGuestActivationFocus({ isActive, webviewRef, keepAddressBarFocusRef })
+  useClientHostedGuestActivationFocus({ isActive, guestFocus, keepAddressBarFocusRef })
 
   const showFailureOverlay = !attachmentError && Boolean(browserTab.loadError)
   // Why: the failure is about the URL that failed, not whatever page is still loaded — feeding
