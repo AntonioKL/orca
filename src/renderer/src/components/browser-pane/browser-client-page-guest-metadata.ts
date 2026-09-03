@@ -27,7 +27,10 @@ export function readBrowserClientPageGuestMetadataIfLive(
       canGoBack: webview.canGoBack(),
       canGoForward: webview.canGoForward()
     }
-  } catch {
+  } catch (error) {
+    // Why logged: the tag reporting a live guest id for a destroyed guest is an unfixed defect,
+    // and this is the only place the field can see it happen (or see a different read failure).
+    console.warn('[browser-client-page] guest read failed, treating the page as gone:', error)
     return null
   }
 }

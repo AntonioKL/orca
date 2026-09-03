@@ -3,10 +3,17 @@ import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserPage } from '../../../../shared/browser-workspace-types'
 
-const mocks = vi.hoisted(() => ({ attach: vi.fn(), detach: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  attach: vi.fn(),
+  detach: vi.fn(),
+  recordBreadcrumb: vi.fn()
+}))
 
 vi.mock('./browser-client-page-renderer-installation', () => ({
   attachBrowserClientPageToViewport: mocks.attach
+}))
+vi.mock('@/lib/crash-breadcrumb-recorder', () => ({
+  recordRendererCrashBreadcrumb: mocks.recordBreadcrumb
 }))
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn(), loading: vi.fn(), message: vi.fn() }
@@ -33,7 +40,7 @@ function nullContentWindowFocus(): TypeError {
   return new TypeError("Cannot read properties of null (reading 'focus')")
 }
 
-function page(): BrowserPage {
+function page(overrides?: Partial<BrowserPage>): BrowserPage {
   return {
     id: 'page-a',
     workspaceId: 'workspace-a',
@@ -45,7 +52,8 @@ function page(): BrowserPage {
     canGoBack: false,
     canGoForward: false,
     loadError: null,
-    createdAt: 1
+    createdAt: 1,
+    ...overrides
   }
 }
 
@@ -74,18 +82,21 @@ function createGuest(): Electron.WebviewTag & { getURL: ReturnType<typeof vi.fn>
   return webview
 }
 
-function paneElement(isActive: boolean): React.JSX.Element {
+function paneElement(
+  isActive: boolean,
+  options?: { browserTab?: BrowserPage; onUpdatePageState?: (id: string, state: unknown) => void }
+): React.JSX.Element {
   return (
     <TooltipProvider>
       <ClientHostedBrowserPagePane
-        browserTab={page()}
+        browserTab={options?.browserTab ?? page()}
         workspaceId="workspace-a"
         chromeShortcutScope="focused"
         runtimeEnvironmentId="environment-a"
         worktreeId="worktree-a"
         placement={PLACEMENT}
         isActive={isActive}
-        onUpdatePageState={vi.fn()}
+        onUpdatePageState={options?.onUpdatePageState ?? vi.fn()}
         onSetUrl={vi.fn()}
       />
     </TooltipProvider>
@@ -97,6 +108,7 @@ let webview: ReturnType<typeof createGuest>
 beforeEach(() => {
   mocks.attach.mockReset()
   mocks.detach.mockReset()
+  mocks.recordBreadcrumb.mockReset()
   installClientHostedPaneApi()
   webview = createGuest()
 })
@@ -115,6 +127,21 @@ describe('client-hosted browser pane over a dead guest', () => {
     expect(() => render(paneElement(true))).not.toThrow()
     expect(screen.getByText('Client-hosted browser unavailable')).toBeTruthy()
     expect(mocks.detach).toHaveBeenCalled()
+    expect(mocks.recordBreadcrumb).toHaveBeenCalledWith('browser_client_page_guest_unavailable', {
+      browserPageId: 'page-a',
+      pageHostGeneration: PLACEMENT.pageHostGeneration
+    })
+  })
+
+  it('stops the spinner it inherited from a page that died mid-load', () => {
+    webview.getURL.mockImplementation(() => {
+      throw invalidGuestInstanceId()
+    })
+    const onUpdatePageState = vi.fn()
+
+    render(paneElement(true, { browserTab: page({ loading: true }), onUpdatePageState }))
+
+    expect(onUpdatePageState).toHaveBeenCalledWith('page-a', { loading: false })
   })
 
   it('survives activation focus after the retained tag left the DOM', () => {

@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { recordRendererCrashBreadcrumb } from '@/lib/crash-breadcrumb-recorder'
 import { useAppStore } from '@/store'
 import type {
   BrowserLoadError,
@@ -205,7 +206,14 @@ export function ClientHostedBrowserPagePane({
     const attachedMetadata = readBrowserClientPageGuestMetadataIfLive(webview)
     if (!attachedMetadata) {
       attachment.detach()
+      // Why the loading write: nothing is left to report progress, and a spinner beside the
+      // unavailable notice is the one state this pane must not sit in (as at retryGuestRecovery).
+      updatePageStateFromGuest(browserTab.id, { loading: false })
       setAttachmentError('browser_client_page_guest_unavailable')
+      recordRendererCrashBreadcrumb('browser_client_page_guest_unavailable', {
+        browserPageId: browserTab.id,
+        pageHostGeneration
+      })
       return
     }
     const publisher = startBrowserClientPageMetadataPublisher({
@@ -269,7 +277,9 @@ export function ClientHostedBrowserPagePane({
     }
     const onFailLoad = (event: Event): void => {
       const loadError = resolveBrowserWebviewLoadFailure(event as BrowserPageFailLoadEvent, {
-        fallbackUrl: readBrowserClientPageGuestMetadataIfLive(webview)?.url ?? null
+        // Lazy: the guest read is five sync IPCs, and ERR_ABORTED/subframe events are discarded
+        // before any fallback is needed.
+        fallbackUrl: () => readBrowserClientPageGuestMetadataIfLive(webview)?.url ?? null
       })
       if (!loadError) {
         return
