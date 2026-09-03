@@ -156,7 +156,7 @@ describe('workspace session validation work', () => {
   let parse: typeof parseWorkspaceSessionSalvaging
 
   beforeAll(async () => {
-    parse = (await import('./workspace-session-salvage')).parseWorkspaceSessionSalvaging
+    parse = (await import('./workspace-session-salvage.js')).parseWorkspaceSessionSalvaging
   })
 
   it('validates the session without a redundant traversal of every map, array and union branch', () => {

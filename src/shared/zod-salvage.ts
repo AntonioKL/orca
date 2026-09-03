@@ -82,8 +82,10 @@ function recordEntryKeys(raw: unknown): string[] | null {
 }
 
 /** Array that drops the elements it cannot parse instead of failing.
- *  Both containers build on z.unknown(), so an object shape must keep wrapping them in
- *  salvagedField/salvagedOptional for a missing key to stay an error rather than an absence. */
+ *  Absence stays fatal on its own: both containers issue on `undefined` and, being bare transforms,
+ *  set neither optin nor optout, and zod only swallows an absent key's issues when a field is both.
+ *  salvagedField/salvagedOptional wrap them for fallback semantics, not for absence detection.
+ *  Pinned by zod-salvage-absence.test.ts. */
 export function salvagingArray<T extends z.ZodType>(item: T): z.ZodType<z.output<T>[], unknown> {
   return z.unknown().transform((raw, ctx) => {
     if (!Array.isArray(raw)) {

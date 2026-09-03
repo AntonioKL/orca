@@ -441,7 +441,7 @@ describe('salvage equivalence with the pre-optimization implementation', () => {
       }
     })
     vi.resetModules()
-    legacyParse = (await import('./workspace-session-salvage')).parseWorkspaceSessionSalvaging
+    legacyParse = (await import('./workspace-session-salvage.js')).parseWorkspaceSessionSalvaging
     // Why: the recursive layout unions are lazy, so force them to build before the mock is dropped.
     legacyParse(session({ tabGroupLayouts: { [WT]: GROUP_SPLIT } }))
     legacyParse(session({ terminalLayoutsByTabId: { 'tab-1': layout(SPLIT) } }))
