@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type {
   AgentSessionCancelResult,
   AgentSessionPromptResult,
@@ -27,7 +27,7 @@ import {
 } from './mobile-structured-agent-prompts'
 import {
   requestStructuredAgentSessionMutation,
-  structuredSessionOperationId,
+  retainStructuredSessionOperationId as retainStructuredOpId,
   timeoutForDeadline,
   type StructuredAgentSessionMutationResult
 } from './mobile-structured-agent-session-rpc'
@@ -76,6 +76,9 @@ export function useMobileStructuredAgentSession(args: {
   const { agent, client, connected, sessionId, sourceIdentity = '', enabled, onSendError } = args
   const sessionKey = encodeNativeChatTranscriptIdentity([sourceIdentity, agent, sessionId])
   const operationIdsRef = useRef(new Map<string, string>())
+  useEffect(() => () => operationIdsRef.current.clear(), [])
+  const retainOperationId = (key: string, operationId?: string): string =>
+    retainStructuredOpId(operationIdsRef.current, key, operationId)
   const stateArgs = { client, sessionId, sessionKey, enabled, connected }
   const { state, stateRef, loadingOlder, loadEarlier } = useMobileStructuredAgentState(stateArgs)
 
@@ -91,8 +94,7 @@ export function useMobileStructuredAgentSession(args: {
       }
       const targetFence = current.fence
       const key = `${sessionKey}:${fingerprintMethod}:${JSON.stringify(fields)}`
-      const clientOperationId = operationIdsRef.current.get(key) ?? structuredSessionOperationId()
-      operationIdsRef.current.set(key, clientOperationId)
+      const clientOperationId = retainOperationId(key, operationIdsRef.current.get(key))
       const result = await requestStructuredAgentSessionMutation<TValue>({
         client,
         method,
@@ -168,8 +170,7 @@ export function useMobileStructuredAgentSession(args: {
       const fields = { body }
       const key = `${sessionKey}:agentSession.send:${JSON.stringify(fields)}`
       const priorOperationId = operationIdsRef.current.get(key)
-      const clientOperationId = priorOperationId ?? structuredSessionOperationId()
-      operationIdsRef.current.set(key, clientOperationId)
+      const clientOperationId = retainOperationId(key, priorOperationId)
       const result = await requestStructuredAgentSessionMutation<AgentSessionSendResult>({
         client,
         method: 'agentSession.send',
@@ -250,8 +251,7 @@ export function useMobileStructuredAgentSession(args: {
     }
     const fields = { turnId }
     const key = `${sessionKey}:agentSession.cancel:${JSON.stringify(fields)}`
-    const clientOperationId = operationIdsRef.current.get(key) ?? structuredSessionOperationId()
-    operationIdsRef.current.set(key, clientOperationId)
+    const clientOperationId = retainOperationId(key, operationIdsRef.current.get(key))
     void requestStructuredAgentSessionMutation<AgentSessionCancelResult>({
       client,
       method: 'agentSession.cancel',

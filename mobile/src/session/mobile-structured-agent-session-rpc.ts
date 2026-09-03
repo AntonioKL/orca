@@ -57,6 +57,25 @@ export function structuredSessionOperationId(): string {
   return createStructuredAgentSessionOperationId(randomUuid)
 }
 
+const MAX_RETAINED_OPERATION_IDS = 128
+
+export function retainStructuredSessionOperationId(
+  operationIds: Map<string, string>,
+  key: string,
+  operationId = structuredSessionOperationId()
+): string {
+  operationIds.delete(key)
+  operationIds.set(key, operationId)
+  while (operationIds.size > MAX_RETAINED_OPERATION_IDS) {
+    const oldest = operationIds.keys().next().value
+    if (oldest === undefined) {
+      break
+    }
+    operationIds.delete(oldest)
+  }
+  return operationId
+}
+
 export function timeoutForDeadline(deadline: number | undefined): number | null {
   if (deadline === undefined) {
     return STRUCTURED_SEND_TIMEOUT_MS

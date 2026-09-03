@@ -20,6 +20,7 @@ import {
 
 export const LOCAL_STRUCTURED_SESSION_OWNER = 'local-structured-session'
 let localStructuredSessionTabsRestorePromise: Promise<void> | null = null
+let localStructuredSessionSyncGeneration = 0
 const localStructuredSessionVersionByWorktree = new Map<
   string,
   StructuredSessionTabPublicationVersion
@@ -30,6 +31,7 @@ const localStructuredSessionEpochHistoryByWorktree = new Map<
 >()
 
 export function resetLocalStructuredSessionVersionForTests(): void {
+  localStructuredSessionSyncGeneration += 1
   localStructuredSessionVersionByWorktree.clear()
   localStructuredSessionEpochHistoryByWorktree.clear()
 }
@@ -96,7 +98,9 @@ export function removeLocalStructuredSessionTabs<
   )
 }
 
-function clearLocalStructuredSessionTabs(): void {
+export function clearLocalStructuredSessionTabs(): void {
+  // Fence responses from the previous enabled instance before clearing its mirror.
+  localStructuredSessionSyncGeneration += 1
   const settle = applyWebSessionTabsStorePatch((state) => removeLocalStructuredSessionTabs(state), {
     frames: []
   })
@@ -164,9 +168,11 @@ export function applyLocalStructuredSessionTabSnapshots<
   return next
 }
 
-export function restoreLocalStructuredSessionTabsOnce(): Promise<void> {
+export function restoreLocalStructuredSessionTabsOnce(
+  expectedGeneration = localStructuredSessionSyncGeneration
+): Promise<void> {
   localStructuredSessionTabsRestorePromise ??= refreshLocalRuntimeCapabilities()
-    .then(() => refreshLocalStructuredSessionTabs())
+    .then(() => refreshLocalStructuredSessionTabs(expectedGeneration))
     .then(() => undefined)
     .catch((error) => {
       localStructuredSessionTabsRestorePromise = null
@@ -176,7 +182,9 @@ export function restoreLocalStructuredSessionTabsOnce(): Promise<void> {
 }
 
 /** Fetch the current host inventory even after the startup restore has settled. */
-export function refreshLocalStructuredSessionTabs(): Promise<RuntimeMobileSessionTabsResult[]> {
+export function refreshLocalStructuredSessionTabs(
+  expectedGeneration = localStructuredSessionSyncGeneration
+): Promise<RuntimeMobileSessionTabsResult[]> {
   return window.api.runtime
     .call({ method: 'session.tabs.listAll', params: {} })
     .then((response) => {
@@ -185,7 +193,9 @@ export function refreshLocalStructuredSessionTabs(): Promise<RuntimeMobileSessio
       }
       const result = response.result as { snapshots?: RuntimeMobileSessionTabsResult[] }
       const snapshots = result.snapshots ?? []
-      applyStructuredSessionTabSnapshots(snapshots)
+      if (expectedGeneration === localStructuredSessionSyncGeneration) {
+        applyStructuredSessionTabSnapshots(snapshots)
+      }
       return snapshots
     })
 }
@@ -194,13 +204,16 @@ export async function startLocalStructuredSessionTabsSync(args: {
   isDisposed: () => boolean
   setUnsubscribe: (unsubscribe: () => void) => void
 }): Promise<void> {
+  const syncGeneration = localStructuredSessionSyncGeneration
+  const isCurrent = (): boolean =>
+    !args.isDisposed() && syncGeneration === localStructuredSessionSyncGeneration
   const capabilities = await refreshLocalRuntimeCapabilities()
-  if (args.isDisposed()) {
+  if (!isCurrent()) {
     return
   }
   const supported = capabilities.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
-  await restoreLocalStructuredSessionTabsOnce()
-  if (args.isDisposed()) {
+  await restoreLocalStructuredSessionTabsOnce(syncGeneration)
+  if (!isCurrent()) {
     return
   }
   if (!supported) {
@@ -211,17 +224,17 @@ export async function startLocalStructuredSessionTabsSync(args: {
   let reconnectAttempt = 0
   let activeHandle: { unsubscribe: () => void } | null = null
   const scheduleSubscribeRetry = (): void => {
-    if (args.isDisposed() || reconnectTimer !== null) {
+    if (!isCurrent() || reconnectTimer !== null) {
       return
     }
     const reconnectDelay = Math.min(250 * 2 ** reconnectAttempt, 5000)
     reconnectAttempt += 1
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null
-      void refreshLocalStructuredSessionTabs()
+      void refreshLocalStructuredSessionTabs(syncGeneration)
         .catch((error) => console.warn('[structured-session-tabs] resync failed', error))
         .finally(() => {
-          if (!args.isDisposed()) {
+          if (isCurrent()) {
             void subscribeCurrent().catch((error) => {
               console.warn('[structured-session-tabs] resubscribe failed', error)
               scheduleSubscribeRetry()
@@ -231,7 +244,7 @@ export async function startLocalStructuredSessionTabsSync(args: {
     }, reconnectDelay)
   }
   const subscribeCurrent = async (): Promise<void> => {
-    if (args.isDisposed()) {
+    if (!isCurrent()) {
       return
     }
     const generation = ++subscriptionGeneration
@@ -239,7 +252,7 @@ export async function startLocalStructuredSessionTabsSync(args: {
     handle = await window.api.runtime.subscribe(
       { method: 'session.tabs.subscribeAll', params: {} },
       (response) => {
-        if (args.isDisposed() || generation !== subscriptionGeneration) {
+        if (!isCurrent() || generation !== subscriptionGeneration) {
           return
         }
         if (!response.ok) {
@@ -272,7 +285,7 @@ export async function startLocalStructuredSessionTabsSync(args: {
         }
       }
     )
-    if (args.isDisposed() || generation !== subscriptionGeneration) {
+    if (!isCurrent() || generation !== subscriptionGeneration) {
       handle.unsubscribe()
     } else {
       activeHandle = handle
