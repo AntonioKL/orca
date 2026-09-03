@@ -98,18 +98,8 @@ export function getProviderUsageStatusLabel(p: ProviderRateLimits): string {
         return translate('auto.components.status.bar.tooltip.f8f0f9d8cc', 'Network issue')
       case 'keychain-unavailable':
         return translate('auto.components.status.bar.tooltip.bf2e739f18', 'Sign-in unavailable')
-      case 'managed-keychain-unavailable':
-        return translate(
-          'auto.components.status.bar.tooltip.7fe52bf9dc',
-          'Managed sign-in unavailable'
-        )
       case 'managed-auth-unowned':
         return translate('auto.components.status.bar.tooltip.3ac91d7e42', 'Account files missing')
-      case 'managed-foreign-login':
-        return translate(
-          'auto.components.status.bar.tooltip.c47a1e90b3',
-          'Signed in as another account'
-        )
       case 'token_expired':
         return translate('auto.components.status.bar.tooltip.b1f47ac902', 'Sign-in expired')
       case 'cli-unavailable':
@@ -177,16 +167,6 @@ export function getProviderUsageErrorMessage(p: ProviderRateLimits): string {
         return translate(
           'auto.components.status.bar.tooltip.cabdc2a9e0',
           'Claude sign-in credentials could not be read.'
-        )
-      case 'managed-keychain-unavailable':
-        return translate(
-          'auto.components.status.bar.tooltip.9195af66c1',
-          'Claude could not load the selected managed sign-in. This session is using your personal Claude sign-in.'
-        )
-      case 'managed-foreign-login':
-        return translate(
-          'auto.components.status.bar.tooltip.8b2f4c6d19',
-          'This Claude account\u2019s home is signed in as a different account. Run /login in its terminal to sign back in.'
         )
       case 'managed-auth-unowned':
         return translate(
