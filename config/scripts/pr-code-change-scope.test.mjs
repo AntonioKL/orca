@@ -370,9 +370,13 @@ describe('per-job path classification', () => {
     ).toBe(true)
     // Why false: a mobile-only diff skips every desktop job, so the install step's own
     // job never runs and claiming the install is needed contradicts should_run.
-    expect(classifyPrJobs(['mobile/package.json']).mobile_dependencies).toBe(false)
-    expect(classifyPrJobs(['mobile/package.json']).should_run).toBe(false)
+    expect(classifyPrJobs(['mobile/src/a.ts']).mobile_dependencies).toBe(false)
+    expect(classifyPrJobs(['mobile/src/a.ts']).should_run).toBe(false)
     expect(classifyPrJobs(['README.md', 'mobile/src/a.ts']).mobile_dependencies).toBe(false)
+    // The hosted page's dependency manifest is packaged by the desktop runtime, so
+    // its diff keeps desktop jobs (and the install they lint with) enabled.
+    expect(classifyPrJobs(['mobile/package.json']).should_run).toBe(true)
+    expect(classifyPrJobs(['mobile/package.json']).mobile_dependencies).toBe(true)
   })
 
   it('keeps unit-test-only diffs out of packaging', () => {
