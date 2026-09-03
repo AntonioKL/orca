@@ -167,10 +167,11 @@ describe('terminal search inside one very long wrapped line', () => {
     async (_mode, options) => {
       const { terminal, search } = openTerminalWithSearch()
       // `_highlightAllMatches` calls `SearchEngine.find` once per match, and each call resumes
-      // deep inside the line: it rewinds to the line start, re-folds the line's text and converts
-      // the resume column to a string offset cell by cell. All three were O(line) per match, so
-      // this shape stayed quadratic after the no-match scan was bounded: measured at 117s for a
-      // line this long, a hard renderer freeze rather than a RangeError the boundary recovered from.
+      // deep inside the line. Converting the resume column to a string offset walked every cell
+      // before it, O(line) per match, so this shape stayed quadratic after the no-match scan was
+      // bounded: ~11s for a line this long, a renderer freeze rather than a RangeError the
+      // boundary recovered from. The per-match rewind and case fold are O(rows) and O(chars)
+      // but measured at well under 1s combined, so they stay simple.
       const block = ` ${NEEDLE} ${'x'.repeat(COLS * MATCH_ROW_STRIDE - NEEDLE.length - 2)}`
       await write(terminal, block.repeat(MATCHES_IN_LINE))
 
@@ -233,21 +234,24 @@ describe('terminal search inside one very long wrapped line', () => {
     }
     expect(matchRows.length).toBe(2)
 
-    // Cycle far enough to come back round: the surviving rows must stay
-    // reachable, not be visited once and then stranded.
-    const visits = new Map<number, number>()
-    for (let i = 0; i < 12; i++) {
-      safeFind((term, options) => search.findNext(term, options), NEEDLE, {
-        decorations: SEARCH_DECORATIONS
-      })
-      const row = terminal.getSelectionPosition()?.start.y
-      if (row !== undefined) {
-        visits.set(row, (visits.get(row) ?? 0) + 1)
+    // Cycle far enough to come back round in both directions: the surviving rows must stay
+    // reachable, not be visited once and then stranded. Reverse search used to return for any
+    // wrapped row including row 0, so a trimmed-head line was never searched backwards at all.
+    for (const direction of ['findNext', 'findPrevious'] as const) {
+      const visits = new Map<number, number>()
+      for (let i = 0; i < 12; i++) {
+        safeFind((term, options) => search[direction](term, options), NEEDLE, {
+          decorations: SEARCH_DECORATIONS
+        })
+        const row = terminal.getSelectionPosition()?.start.y
+        if (row !== undefined) {
+          visits.set(row, (visits.get(row) ?? 0) + 1)
+        }
       }
-    }
 
-    for (const row of matchRows) {
-      expect(visits.get(row) ?? 0).toBeGreaterThan(1)
+      for (const row of matchRows) {
+        expect(visits.get(row) ?? 0, direction).toBeGreaterThan(1)
+      }
     }
   })
 
