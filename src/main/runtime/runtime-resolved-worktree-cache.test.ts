@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { RuntimeResolvedWorktreeCache } from './runtime-resolved-worktree-cache'
 import type { ResolvedWorktreeSnapshot } from './runtime-resolved-worktree-cache'
+import {
+  bumpLocalWorktreeScanGeneration,
+  getLocalWorktreeScanGeneration,
+  getWorktreeScanMutationRevision
+} from '../local-worktree-scan-generation'
 
 function snapshotOf(ids: string[]): ResolvedWorktreeSnapshot {
   return {
@@ -66,5 +71,42 @@ describe('RuntimeResolvedWorktreeCache', () => {
     expect(cache.isFresh(8)).toBe(false)
     cache.invalidateResolved()
     expect(cache.isFresh(7)).toBe(false)
+  })
+
+  it('keeps a primed snapshot servable when nothing mutated', async () => {
+    // Why: the headless-reattach fixtures prime this cache once and then resolve a selector off it
+    // without any git available. Losing freshness for a reason other than a mutation strands them
+    // on a real scan, which is the failure this pairs with — a lookup that finds nothing because
+    // the snapshot was dropped, not because the worktree is gone.
+    const cache = new RuntimeResolvedWorktreeCache()
+    let computes = 0
+    const prime = async (): Promise<ResolvedWorktreeSnapshot> => {
+      computes += 1
+      return snapshotOf(['repo-restore::/tmp/restore-records'])
+    }
+    await cache.getSnapshot(prime, 60_000, getWorktreeScanMutationRevision())
+
+    // A read that mints a scan generation for a repo nothing has scanned yet is not a mutation.
+    getLocalWorktreeScanGeneration(`repo-never-scanned-${Math.random()}`)
+
+    expect(cache.isFresh(getWorktreeScanMutationRevision())).toBe(true)
+    const served = await cache.getSnapshot(prime, 60_000, getWorktreeScanMutationRevision())
+    expect(computes).toBe(1)
+    expect(served.worktrees.map((worktree) => worktree.id)).toEqual([
+      'repo-restore::/tmp/restore-records'
+    ])
+  })
+})
+
+describe('getWorktreeScanMutationRevision', () => {
+  it('advances on a repo mutation and not on a first-seen generation read', () => {
+    const repoId = `repo-${Math.random()}`
+    const before = getWorktreeScanMutationRevision()
+
+    getLocalWorktreeScanGeneration(repoId)
+    expect(getWorktreeScanMutationRevision()).toBe(before)
+
+    bumpLocalWorktreeScanGeneration(repoId)
+    expect(getWorktreeScanMutationRevision()).toBe(before + 1)
   })
 })

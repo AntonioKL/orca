@@ -1,5 +1,6 @@
 const generationByRepoId = new Map<string, number>()
 let generationSequence = 0
+let mutationRevision = 0
 
 export function getLocalWorktreeScanGeneration(repoId: string): number {
   const existing = generationByRepoId.get(repoId)
@@ -13,16 +14,22 @@ export function getLocalWorktreeScanGeneration(repoId: string): number {
 
 export function bumpLocalWorktreeScanGeneration(repoId: string): void {
   generationByRepoId.set(repoId, ++generationSequence)
+  mutationRevision += 1
 }
 
 /**
- * The shared counter behind every per-repo generation above. It advances on each repo add, removal
- * and update, and on the first key handed out for a repo id nothing has scanned yet — so a cache
- * that must not answer for a repo it never saw can compare it in O(1) instead of walking the repo
- * list. Ordering-only: the value itself means nothing outside a same-process comparison.
+ * Advances on every event above that can change what a worktree scan would find — repo add,
+ * removal, update, and scan-cache invalidation — and on nothing else. A cache that must not answer
+ * for repos it never saw compares this in O(1) instead of walking the repo list.
+ *
+ * Why not `generationSequence`: that also advances when `getLocalWorktreeScanGeneration` mints a key
+ * for a repo id nothing has scanned yet, which is a read. Keying a snapshot on it would let a read
+ * path discard a snapshot that is still perfectly valid.
+ *
+ * Ordering-only: the value means nothing outside a same-process comparison.
  */
-export function getWorktreeScanGenerationSequence(): number {
-  return generationSequence
+export function getWorktreeScanMutationRevision(): number {
+  return mutationRevision
 }
 
 export function isLocalWorktreeScanGenerationCurrent(repoId: string, generation: number): boolean {
@@ -31,5 +38,6 @@ export function isLocalWorktreeScanGenerationCurrent(repoId: string, generation:
 
 export function resetLocalWorktreeScanGenerationsForTests(): void {
   generationSequence += 1
+  mutationRevision += 1
   generationByRepoId.clear()
 }
