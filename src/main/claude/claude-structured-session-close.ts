@@ -98,18 +98,6 @@ async function finalizeClaudePublishedSession(
         fence: session.fence
       })
     })())
-  try {
-    await persistence
-  } catch (error) {
-    // Keep the closed session indexed so a retry can persist the same cursor.
-    // Removing it first would turn a durable-write failure into a no-op retry.
-    if (session.closePersistence === persistence) {
-      session.closePersistence = undefined
-    }
-    throw error
-  }
-  session.closeFinalized = true
-  input.sessions.delete(input.sessionId)
   const ended = {
     type: 'ended',
     sessionId: input.sessionId,
@@ -125,7 +113,11 @@ async function finalizeClaudePublishedSession(
       callbackError ??= error
     }
   }
+  let persistenceError: unknown
   try {
+    await persistence
+    session.closeFinalized = true
+    input.sessions.delete(input.sessionId)
     deliver({
       type: 'handle',
       sessionId: input.sessionId,
@@ -133,15 +125,33 @@ async function finalizeClaudePublishedSession(
       leafUuid: session.leafUuid,
       fence: session.fence
     })
-    try {
-      session.translator?.handle(ended)
-    } catch (error) {
-      callbackThrew = true
-      callbackError ??= error
+  } catch (error) {
+    // Keep the closed session indexed so a retry can persist the same cursor.
+    // Removing it first would turn a durable-write failure into a no-op retry.
+    if (session.closePersistence === persistence) {
+      session.closePersistence = undefined
     }
-    deliver(ended)
-  } finally {
-    session.translator?.dispose()
+    persistenceError = error
+  }
+  // The connection already proved the child dead, so the session has ended
+  // whatever the durable write did: withholding it would strand the renderer on
+  // a session nothing re-drives. Emitted once, so a retry only re-persists.
+  if (!session.closeEnded) {
+    session.closeEnded = true
+    try {
+      try {
+        session.translator?.handle(ended)
+      } catch (error) {
+        callbackThrew = true
+        callbackError ??= error
+      }
+      deliver(ended)
+    } finally {
+      session.translator?.dispose()
+    }
+  }
+  if (persistenceError) {
+    throw persistenceError
   }
   if (callbackThrew) {
     throw callbackError

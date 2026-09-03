@@ -126,6 +126,8 @@ export type ClaudeSession = {
   closeFinalization?: Promise<boolean>
   /** Set only after the durable close write succeeds, before lifecycle emission. */
   closeFinalized?: boolean
+  /** Set once `ended` has been emitted, so a persistence retry cannot repeat it. */
+  closeEnded?: boolean
   translator: ClaudeJournalTranslator | null
   events: StructuredAgentSessionEventSink | undefined
 }

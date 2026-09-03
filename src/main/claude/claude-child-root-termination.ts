@@ -1,47 +1,28 @@
 import type { SpawnedProcess } from '../../shared/child-process/run-process'
 import type { PosixProcessIdentity } from '../pty-descendant-termination'
-import { verifyPosixProcessIdentity } from '../pty-posix-root-identity'
 import type {
   WindowsDescendantSnapshot,
   WindowsProcessIdentity
 } from '../windows-descendant-exit-verification'
-import { verifyWindowsProcessIdentity } from '../windows-descendant-exit-verification'
 
 export type ClaudeRootIdentity = PosixProcessIdentity | WindowsProcessIdentity
 
-export function createClaudeRootIdentityVerifier(
-  platform: NodeJS.Platform,
-  captureBoundary: () => number | undefined
-): (root: ClaudeRootIdentity) => Promise<boolean> {
-  return (root) =>
-    platform === 'win32'
-      ? verifyWindowsProcessIdentity(root as WindowsProcessIdentity)
-      : verifyPosixProcessIdentity(root as PosixProcessIdentity, {
-          capturedAtMs: captureBoundary()
-        })
-}
-
 type RootTerminationInput = {
-  child: Pick<SpawnedProcess, 'pid' | 'kill'>
-  root: ClaudeRootIdentity | undefined
+  child: Pick<SpawnedProcess, 'kill'>
   exited: () => boolean
-  identityUnsafe: boolean
-  verifyRoot: (root: ClaudeRootIdentity) => Promise<boolean>
 }
 
-/** Identity-gated direct root kill; false means no signal was sent. */
-export async function terminateClaudeRootIfLive(input: RootTerminationInput): Promise<boolean> {
-  const { child, root, exited, identityUnsafe, verifyRoot } = input
-  if (exited() || identityUnsafe || !root || root.pid !== child.pid) {
-    return false
-  }
-  const identityMatches = await verifyRoot(root).catch(() => false)
-  // Re-check JS ownership after the async identity read: exit may land meanwhile.
-  if (!identityMatches || exited() || identityUnsafe) {
-    return false
-  }
-  child.kill('SIGKILL')
-  return true
+/**
+ * Kills the root through the handle Node owns rather than through its pid, which
+ * is why no identity probe gates it: libuv drops that handle in the same turn it
+ * reaps, so the signal either reaches the process Orca spawned or reaches
+ * nothing. A probe here could only let an unreadable process table cost the tree
+ * the one fallback that still works once every table read has failed.
+ *
+ * False means no signal was sent, because the root had already left.
+ */
+export function terminateClaudeRoot(input: RootTerminationInput): boolean {
+  return input.exited() ? false : input.child.kill('SIGKILL')
 }
 
 type WindowsRootTerminationInput = {
@@ -49,12 +30,17 @@ type WindowsRootTerminationInput = {
   exited: () => boolean
   verifyRoot: (root: WindowsProcessIdentity) => Promise<boolean>
   terminateTree: (root: WindowsProcessIdentity) => Promise<void>
-  killRoot: (root: WindowsProcessIdentity | undefined) => Promise<boolean>
+  killRoot: () => boolean
 }
 
+/**
+ * `taskkill /T /F` addresses a bare pid, so a dead root's pid may already belong
+ * to a stranger whose whole tree it would take down: that one is identity-gated.
+ * The direct root kill after it runs however the probe decided.
+ */
 export async function terminateClaudeWindowsRoot(
   input: WindowsRootTerminationInput
-): Promise<{ rootVerified: boolean; rootKilled: boolean }> {
+): Promise<{ rootVerified: boolean }> {
   const { snapshot, exited, verifyRoot, terminateTree, killRoot } = input
   let rootVerified = false
   if (!exited() && snapshot) {
@@ -63,6 +49,6 @@ export async function terminateClaudeWindowsRoot(
       await terminateTree(snapshot.root).catch(() => {})
     }
   }
-  const rootKilled = await killRoot(rootVerified && snapshot ? snapshot.root : undefined)
-  return { rootVerified, rootKilled }
+  killRoot()
+  return { rootVerified }
 }

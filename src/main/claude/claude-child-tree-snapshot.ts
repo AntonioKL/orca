@@ -105,8 +105,8 @@ export function mergeClaudeCapturedTrees(
       previous.tree.descendants,
       next.tree.descendants,
       (left, right) => left.creationTimeMs === right.creationTimeMs,
-      () => previous.tree.capturedAtMs,
-      () => next.tree.capturedAtMs,
+      (row) => previous.tree.capturedAtMsByPid?.[String(row.pid)] ?? previous.tree.capturedAtMs,
+      (row) => next.tree.capturedAtMsByPid?.[String(row.pid)] ?? next.tree.capturedAtMs,
       next.tree.capturedAtMs
     )
     if (!descendants) {
