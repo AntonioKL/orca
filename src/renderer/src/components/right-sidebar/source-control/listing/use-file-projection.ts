@@ -63,6 +63,10 @@ export type SourceControlFileProjection = {
 
 // Why: only one view mode is ever rendered, so building the other mode's projection is pure dead
 // work (precedent: the combined-diff file tree short-circuits the same way while collapsed).
+// The gates below and both branching consumers (section-file-list.tsx, branch-section.tsx) read the
+// same sourceControlViewMode prop within one synchronous render, so a mode switch can never show
+// these. Keep that single source: deriving the mode from a separate store read would let a consumer
+// switch a render before the memos do, and only then could one of these reach the screen.
 const EMPTY_TREE_ROOTS_BY_SECTION: Readonly<
   Partial<Record<SourceControlDisplaySectionId, GitStatusSourceControlTreeNode[]>>
 > = Object.freeze({})
@@ -141,8 +145,11 @@ export function useSourceControlFileProjection({
     [unfilteredDisplaySections]
   )
 
-  // Why: sorting before filtering keeps the collator off the keystroke path; Array#filter preserves
-  // order and compareFileNames is a total order, so filter(sort(x)) === sort(filter(x)).
+  // Why: sorting before filtering keeps the collator off the keystroke path, and is order-identical
+  // to the old filter-then-sort for any self-consistent comparator (a total order is not required):
+  // a stable sort fixes each element's position by (comparator result, original index), and
+  // Array#filter drops elements without disturbing either, so re-sorting the survivors would
+  // reproduce the same relative order. filter(sort(x)) === sort(filter(x)).
   const sortedBranchEntries = useMemo(
     () => [...branchEntries].sort((a, b) => compareFileNames(a.path, b.path)),
     [branchEntries]

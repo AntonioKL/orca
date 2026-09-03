@@ -18,13 +18,20 @@ const counters = vi.hoisted(() => ({
   injectExpandedSubmoduleEntries: 0
 }))
 
+/** Lets a test swap in a comparator that is deliberately not a total order. */
+const comparatorOverride = vi.hoisted(() => ({
+  current: null as ((a: string, b: string) => number) | null
+}))
+
 vi.mock('../../../../../../shared/file-name-sort', async (importOriginal) => {
   const actual = await importOriginal<typeof FileNameSortModule>()
   return {
     ...actual,
     compareFileNames: (a: string, b: string) => {
       counters.compareFileNames += 1
-      return actual.compareFileNames(a, b)
+      return comparatorOverride.current
+        ? comparatorOverride.current(a, b)
+        : actual.compareFileNames(a, b)
     }
   }
 })
@@ -148,7 +155,27 @@ function makeStatusEntries(count: number): GitStatusEntry[] {
   }))
 }
 
+/**
+ * Deliberately not a total order: every path under the same top-level directory compares equal, so
+ * distinct paths tie. Sort-before-filter must still match filter-before-sort under it.
+ */
+function compareTopLevelDirOnly(a: string, b: string): number {
+  const dirA = a.slice(0, a.indexOf('/'))
+  const dirB = b.slice(0, b.indexOf('/'))
+  return dirA < dirB ? -1 : dirA > dirB ? 1 : 0
+}
+
+/** Big enough that V8 leaves binary insertion sort for TimSort, where instability would show. */
+function makeTieHeavyEntries(count: number): GitBranchChangeEntry[] {
+  return Array.from({ length: count }, (_, index) => ({
+    // Scrambled so the tie order is not already the sorted order.
+    path: `dir-${(index * 7) % 3}/file-${(index * 31) % count}.ts`,
+    status: 'modified' as const
+  }))
+}
+
 beforeEach(() => {
+  comparatorOverride.current = null
   for (const key of Object.keys(counters) as (keyof typeof counters)[]) {
     counters[key] = 0
   }
@@ -191,6 +218,27 @@ describe('useSourceControlFileProjection branch entry ordering', () => {
       })
       expect(result.current.filteredBranchEntries).toEqual(
         legacyFilterThenSort(ORDERING_FIXTURE, filterQuery)
+      )
+    }
+  })
+
+  // Guards the invariant the sort-before-filter swap actually rests on: a stable sort, not a total
+  // order. If sortedBranchEntries ever stops preserving the original order of tied paths, this
+  // diverges from filter-then-sort even though every total-order fixture above still passes.
+  it('matches filter-then-sort under a comparator that is not a total order', () => {
+    comparatorOverride.current = compareTopLevelDirOnly
+    const branchEntries = makeTieHeavyEntries(300)
+    const { result, rerender } = renderProjection({
+      entries: NO_ENTRIES,
+      branchEntries,
+      filterQuery: '',
+      sourceControlViewMode: 'list'
+    })
+
+    for (const filterQuery of ['', 'dir-1', 'file-1', 'file-12', '7.ts', 'no-match']) {
+      rerender({ entries: NO_ENTRIES, branchEntries, filterQuery, sourceControlViewMode: 'list' })
+      expect(result.current.filteredBranchEntries.map((entry) => entry.path)).toEqual(
+        legacyFilterThenSort(branchEntries, filterQuery).map((entry) => entry.path)
       )
     }
   })
