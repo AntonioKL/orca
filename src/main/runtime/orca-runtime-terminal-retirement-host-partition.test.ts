@@ -268,7 +268,17 @@ describe('OrcaRuntimeService terminal retirement host partitioning (STA-3463)', 
             }
           },
           sleepingAgentSessionsByPaneKey: {
-            'local-tab:leaf': { worktreeId: SSH_WORKTREE_ID, agentType: 'claude', sessionId: 's' }
+            'local-tab:leaf': {
+              paneKey: 'local-tab:leaf',
+              tabId: 'local-tab',
+              worktreeId: SSH_WORKTREE_ID,
+              agent: 'codex',
+              providerSession: { key: 'session_id', id: 'resume-target' },
+              prompt: '',
+              state: 'working',
+              capturedAt: 1,
+              updatedAt: 1
+            }
           }
         }
       ],
