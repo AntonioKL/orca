@@ -12,6 +12,7 @@ import {
   type AddRemoteHostMode
 } from '@/components/sidebar/AddRemoteHostDialog'
 import { lazyWithRetry } from '@/lib/lazy-with-retry'
+import type * as SetProjectLocationDialogModule from '@/components/new-workspace/SetProjectLocationDialog'
 import { unwrapRuntimeRpcResult } from '@/runtime/runtime-rpc-client'
 import { withUiConnectTimeout } from '@/ssh/ssh-connect-ui-timeout'
 import { isSshConnectInFlight, trackSshConnect } from '@/ssh/ssh-connect-in-flight'
@@ -38,10 +39,14 @@ import { getSshStatusLabel } from './new-workspace/new-workspace-composer-ssh-st
 import { useComposerFileDragOver } from './new-workspace/use-composer-file-drag-over'
 
 // Why lazy: this pulls the ~41 KB project-location browser onto the boot graph, and nothing
-// reaches it without an explicit "Set location" click.
+// reaches it without an explicit "Set location" click. Shared with the warm below so both hit
+// the same module-map entry.
+const loadSetProjectLocationDialog = (): Promise<typeof SetProjectLocationDialogModule> =>
+  import('@/components/new-workspace/SetProjectLocationDialog')
+
 const SetProjectLocationDialog = lazyWithRetry(
   () =>
-    import('@/components/new-workspace/SetProjectLocationDialog').then((module) => ({
+    loadSetProjectLocationDialog().then((module) => ({
       default: module.SetProjectLocationDialog
     })),
   { reloadKey: 'set-project-location-dialog' }
@@ -112,6 +117,16 @@ export default function NewWorkspaceComposerCard(
   const needsSetupProjectHostSetupOptions = projectHostSetupOptions.filter(
     (option) => option.kind === 'needs-setup'
   )
+  // Warm on the precursor: the "Set location" row only renders for a needs-setup host that can
+  // still take one, so the chunk resolves while the picker is being read rather than on the click.
+  const hasSetLocationOption = needsSetupProjectHostSetupOptions.some(
+    (option) => option.canSetLocation
+  )
+  React.useEffect(() => {
+    if (hasSetLocationOption) {
+      void loadSetProjectLocationDialog().catch(() => {})
+    }
+  }, [hasSetLocationOption])
   const shouldShowRunTargetPicker =
     readyProjectHostSetupOptions.length > 0 ||
     ephemeralVmRecipes.length > 0 ||

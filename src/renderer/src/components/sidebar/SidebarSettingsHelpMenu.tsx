@@ -32,16 +32,18 @@ import { showOnboardingFromRenderer } from '../onboarding/show-onboarding-event'
 import { SetupGuideProgressRing } from '../setup-guide/SetupGuideProgressRing'
 import { useSetupGuideProgress } from '../setup-guide/use-setup-guide-progress'
 import { lazyWithRetry } from '@/lib/lazy-with-retry'
+import type * as SidebarFeedbackDialogModule from './SidebarFeedbackDialog'
 import { translate } from '@/i18n/i18n'
 import { getUpdateCheckClickOptions, getUpdateCheckHint } from '@/lib/update-check-click-options'
 
 // Why lazy: the feedback form is only reachable from this menu's own item, so it does not
-// belong on the renderer boot graph.
+// belong on the renderer boot graph. Shared with the menu-open warm below so both hit the
+// same module-map entry.
+const loadSidebarFeedbackDialog = (): Promise<typeof SidebarFeedbackDialogModule> =>
+  import('./SidebarFeedbackDialog')
+
 const SidebarFeedbackDialog = lazyWithRetry(
-  () =>
-    import('./SidebarFeedbackDialog').then((module) => ({
-      default: module.SidebarFeedbackDialog
-    })),
+  () => loadSidebarFeedbackDialog().then((module) => ({ default: module.SidebarFeedbackDialog })),
   { reloadKey: 'sidebar-feedback-dialog' }
 )
 
@@ -122,6 +124,11 @@ export function SidebarSettingsHelpMenu(): React.JSX.Element {
   const handleMenuOpenChange = (open: boolean): void => {
     setMenuOpen(open)
     updateCheckModifiersRef.current = NO_UPDATE_CHECK_MODIFIERS
+    if (open) {
+      // Warm on the precursor: reading the menu and clicking Send Feedback takes hundreds of ms,
+      // so the chunk is already in the module map by the time the item is selected.
+      void loadSidebarFeedbackDialog().catch(() => {})
+    }
   }
 
   const handleShowOnboarding = (): void => {
