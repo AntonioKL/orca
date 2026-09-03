@@ -93,6 +93,8 @@ export type ClaudeSession = {
   reportedOptions: { model?: string; effort?: string }
   /** CLI-advertised protocol capabilities from init; gates interrupt-receipt handling. */
   capabilities: readonly string[]
+  /** Provider uuid of the most recently admitted turn, if one is active. */
+  activeTurnId?: string
   translator: ClaudeJournalTranslator | null
   events: StructuredAgentSessionEventSink | undefined
 }

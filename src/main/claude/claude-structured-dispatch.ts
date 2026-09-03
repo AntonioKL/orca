@@ -189,6 +189,11 @@ export async function dispatchClaudeTurn(
     return { state: 'unknown', reason: (error as Error).message }
   }
   const uuid = await replayed
+  if (uuid) {
+    // Claude's interrupt API is session-scoped, so retain the provider turn
+    // identity and let cancellation reject a stale request for an older turn.
+    session.activeTurnId = uuid
+  }
   return uuid
     ? {
         state: 'accepted',

@@ -4,6 +4,8 @@ import type { ClaudeSession } from './claude-structured-session-state'
 
 const INTERRUPT_CANCEL_QUEUED_CAPABILITY = 'interrupt_cancel_queued_v1'
 
+export type ClaudeTurnCancellationGuard = () => boolean
+
 /**
  * Interrupt the running turn, then make sure no queued async user message survives to spawn a
  * later unexpected turn. On a CLI advertising `interrupt_cancel_queued_v1` one round trip
@@ -13,8 +15,14 @@ const INTERRUPT_CANCEL_QUEUED_CAPABILITY = 'interrupt_cancel_queued_v1'
  */
 export async function cancelClaudeTurn(
   session: ClaudeSession,
-  timeoutMs: number | undefined
+  timeoutMs: number | undefined,
+  isCurrent: ClaudeTurnCancellationGuard = () => true
 ): Promise<{ cancelled: boolean }> {
+  // The SDK interrupt is session-scoped. Re-check the caller's turn/fence
+  // immediately before issuing it so a delayed request cannot stop a later turn.
+  if (!isCurrent()) {
+    return { cancelled: false }
+  }
   const cancelQueued = session.capabilities.includes(INTERRUPT_CANCEL_QUEUED_CAPABILITY)
   try {
     const receipt = await session.connection.interrupt({

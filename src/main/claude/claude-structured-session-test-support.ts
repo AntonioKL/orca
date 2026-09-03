@@ -56,6 +56,7 @@ export function fakeClaude(
     exitBeforeInit?: string
     settings?: unknown
     replayUuid?: string | null
+    replayUuids?: string[]
     capabilities?: string[]
     unprovenCloseVerdict?: ClaudeStreamJsonConnection['exitVerdict']
     routes?: Record<string, Route>
@@ -67,6 +68,7 @@ export function fakeClaude(
 } {
   const connections: FakeConnection[] = []
   const routes = options.routes ?? {}
+  let replayIndex = 0
   const routed = (subtype: string, params?: Record<string, unknown>): unknown => {
     const route = routes[subtype]
     return route ? route(params) : undefined
@@ -147,9 +149,12 @@ export function fakeClaude(
       send: async (message) => {
         connection.sent.push(message)
         if (message.type === 'user' && options.replayUuid !== null) {
+          const replayUuid = options.replayUuids
+            ? (options.replayUuids[replayIndex++] ?? `user-uuid-${replayIndex}`)
+            : (options.replayUuid ?? 'user-uuid')
           handlers.onMessage?.({
             ...message,
-            uuid: options.replayUuid ?? 'user-uuid'
+            uuid: replayUuid
           })
         }
       },

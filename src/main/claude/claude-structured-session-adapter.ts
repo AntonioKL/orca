@@ -144,8 +144,21 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       this.deps.dispatchAckTimeoutMs ?? DISPATCH_ACK_TIMEOUT_MS
     )
 
-  cancelTurn: StructuredAgentSessionAdapter['cancelTurn'] = (input) =>
-    cancelClaudeTurn(this.session(input.sessionId), this.deps.requestTimeoutMs)
+  cancelTurn: StructuredAgentSessionAdapter['cancelTurn'] = (input) => {
+    const session = this.session(input.sessionId)
+    const acquisitionGeneration = session.acquisitionGeneration
+    return cancelClaudeTurn(session, this.deps.requestTimeoutMs, () => {
+      // Keep every ownership check adjacent to the provider interrupt. The
+      // session map check fences a replaced child; the turn check fences a
+      // delayed cancel after a newer turn was admitted on the same child.
+      return (
+        this.sessions.get(input.sessionId) === session &&
+        session.fence === input.fence &&
+        session.acquisitionGeneration === acquisitionGeneration &&
+        (session.activeTurnId === undefined || session.activeTurnId === input.turnId)
+      )
+    })
+  }
   answerPrompt: StructuredAgentSessionAdapter['answerPrompt'] = (input) =>
     answerClaudePrompt(this.session(input.sessionId), input)
   setOption: StructuredAgentSessionAdapter['setOption'] = (input) =>

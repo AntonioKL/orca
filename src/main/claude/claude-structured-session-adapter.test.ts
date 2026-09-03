@@ -322,6 +322,42 @@ describe('ClaudeStructuredSessionAdapter turns and controls', () => {
     ).rejects.toThrow('timed out')
   })
 
+  it('does not let a delayed cancellation for an earlier turn interrupt the later turn', async () => {
+    const claude = fakeClaude({ replayUuids: ['turn-T', 'turn-U'] })
+    const adapter = await acquired(claude)
+
+    await adapter.dispatch({
+      sessionId: 'session-1',
+      clientMessageId: 'client-T',
+      body: USER_MESSAGE,
+      fence: 7
+    })
+    await adapter.dispatch({
+      sessionId: 'session-1',
+      clientMessageId: 'client-U',
+      body: USER_MESSAGE,
+      fence: 7
+    })
+
+    await expect(
+      adapter.cancelTurn({ sessionId: 'session-1', turnId: 'turn-T', fence: 7 })
+    ).resolves.toEqual({ cancelled: false })
+    expect(claude.connections[0].calls.filter((call) => call.subtype === 'interrupt')).toHaveLength(
+      0
+    )
+
+    await expect(
+      adapter.cancelTurn({ sessionId: 'session-1', turnId: 'turn-U', fence: 6 })
+    ).resolves.toEqual({ cancelled: false })
+
+    await expect(
+      adapter.cancelTurn({ sessionId: 'session-1', turnId: 'turn-U', fence: 7 })
+    ).resolves.toEqual({ cancelled: true })
+    expect(claude.connections[0].calls.filter((call) => call.subtype === 'interrupt')).toHaveLength(
+      1
+    )
+  })
+
   it('classifies provider-declined options without treating timeouts as settled', async () => {
     const claude = fakeClaude({
       routes: {
