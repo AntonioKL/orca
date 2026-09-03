@@ -70,6 +70,8 @@ describe('setTabPaneExpanded', () => {
     const store = createTestStore()
     store.getState().setTabPaneExpanded(TAB_ID, false)
     const before = store.getState().expandedPaneByTabId
+    // Root identity too: returning `{}` keeps the map but allocates a new root, so zustand still walks every listener.
+    const rootBefore = store.getState()
     const published = recordPublishedMapKeys(store)
 
     for (let i = 0; i < NO_OP_WRITES; i += 1) {
@@ -78,6 +80,7 @@ describe('setTabPaneExpanded', () => {
 
     expect(published).toEqual([])
     expect(store.getState().expandedPaneByTabId).toBe(before)
+    expect(store.getState()).toBe(rootBefore)
   })
 
   it('costs no React commit in a map subscriber when the value is unchanged', () => {
@@ -117,6 +120,7 @@ describe('setTabCanExpandPane', () => {
     const store = createTestStore()
     store.getState().setTabCanExpandPane(TAB_ID, false)
     const before = store.getState().canExpandPaneByTabId
+    const rootBefore = store.getState()
     const published = recordPublishedMapKeys(store)
 
     for (let i = 0; i < NO_OP_WRITES; i += 1) {
@@ -125,6 +129,7 @@ describe('setTabCanExpandPane', () => {
 
     expect(published).toEqual([])
     expect(store.getState().canExpandPaneByTabId).toBe(before)
+    expect(store.getState()).toBe(rootBefore)
   })
 
   it('costs no React commit in a map subscriber when the value is unchanged', () => {
