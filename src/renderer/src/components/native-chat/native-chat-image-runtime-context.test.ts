@@ -66,4 +66,31 @@ describe('resolveNativeChatImageRuntimeContext', () => {
     expect(second?.settings).toBe(first?.settings)
     expect(shallow(second, first)).toBe(true)
   })
+
+  it('derives a runtime host from an owner-only route during paired hydration', () => {
+    const storeState = state()
+    const ownerOnlyWorktree = {
+      id: 'wt-1',
+      repoId: 'repo',
+      path: '/repo/worktree',
+      runtimeOwnerEnvironmentId: 'owner-a'
+    }
+    const ownerState = {
+      ...storeState,
+      activeWorktreeId: null,
+      activeWorkspaceExecutionHostId: null,
+      getKnownWorktreeById: () => ownerOnlyWorktree,
+      worktreesByRepo: { repo: [ownerOnlyWorktree] },
+      runtimeEnvironments: [{ id: 'owner-a' }]
+    } as unknown as AppState
+
+    const context = resolveNativeChatImageRuntimeContext(ownerState, 'tab-1')
+
+    expect(context).toMatchObject({
+      worktreeId: 'wt-1',
+      worktreePath: '/repo/worktree',
+      expectedExecutionHostId: 'local',
+      settings: { activeRuntimeEnvironmentId: 'owner-a' }
+    })
+  })
 })

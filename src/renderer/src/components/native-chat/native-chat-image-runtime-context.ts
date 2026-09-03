@@ -7,7 +7,11 @@ import {
 } from '@/lib/worktree-operation-route'
 import { resolveNativeChatFileLinkContext } from './native-chat-file-link'
 import { captureDirectSshMutationExpectation } from '@/lib/ssh-mutation-expectation'
-import { parseExecutionHostId, type ExecutionHostId } from '../../../../shared/execution-host'
+import {
+  parseExecutionHostId,
+  toRuntimeExecutionHostId,
+  type ExecutionHostId
+} from '../../../../shared/execution-host'
 import { parseWorkspaceKey } from '../../../../shared/workspace-scope'
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -130,15 +134,21 @@ export function resolveNativeChatImageRuntimeContext(
     return null
   }
   const routeResolution = resolveWorktreeOperationRouteResult(state, linkContext.worktreeId)
-  if (routeResolution.kind !== 'resolved' || !routeResolution.route.executionHostId) {
+  if (routeResolution.kind !== 'resolved') {
     return null
   }
   const route = routeResolution.route
-  const worktreePath = resolvePath(state, linkContext.worktreeId, route.executionHostId)
+  const executionHostId =
+    route.executionHostId ??
+    (route.runtimeEnvironmentId ? toRuntimeExecutionHostId(route.runtimeEnvironmentId) : null)
+  if (!executionHostId) {
+    return null
+  }
+  const worktreePath = resolvePath(state, linkContext.worktreeId, executionHostId)
   if (!worktreePath) {
     return null
   }
-  const host = parseExecutionHostId(route.executionHostId)
+  const host = parseExecutionHostId(executionHostId)
   if (!host) {
     return null
   }
