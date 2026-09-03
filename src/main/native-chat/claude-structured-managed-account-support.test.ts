@@ -70,6 +70,20 @@ describe('structuredClaudeMatchesActiveManagedAccount', () => {
     ).toBe(false)
   })
 
+  /** Absent is not empty. An empty array is a real answer — the user has no managed accounts, so
+   *  nothing claims an identity and the ambient path is legitimate. Settings with no accounts field
+   *  are settings we failed to parse, which is the same epistemic state as unreadable. */
+  it('separates an empty account list from an absent one', () => {
+    expect(
+      structuredClaudeMatchesActiveManagedAccount(settings({ claudeManagedAccounts: [] }))
+    ).toBe(true)
+    expect(
+      structuredClaudeMatchesActiveManagedAccount({
+        activeClaudeManagedAccountId: null
+      } as unknown as ClaudeManagedAccountGateSettings)
+    ).toBe(false)
+  })
+
   it('fails closed when the settings cannot be read at all', () => {
     expect(structuredClaudeMatchesActiveManagedAccount(null)).toBe(false)
     expect(structuredClaudeMatchesActiveManagedAccount(undefined)).toBe(false)
