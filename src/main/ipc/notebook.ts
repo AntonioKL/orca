@@ -54,7 +54,8 @@ function appendBounded(capture: BoundedCapture, chunk: Buffer): void {
   capture.truncated = true
 }
 
-function terminateNotebookProcessTree(
+/** Exported for the refusal-fallback test; the timeout path is otherwise unreachable. */
+export function terminateNotebookProcessTree(
   child: ChildProcessWithoutNullStreams
 ): ReturnType<typeof setTimeout> | null {
   if (!child.pid) {
@@ -70,6 +71,9 @@ function terminateNotebookProcessTree(
         scope: 'win-taskkill-tree'
       })
     ) {
+      // Refusal blocks the tree walk, not the termination: killing the root by
+      // handle cannot reach a recycled pid, and a timed-out cell must still stop.
+      child.kill()
       return null
     }
     try {

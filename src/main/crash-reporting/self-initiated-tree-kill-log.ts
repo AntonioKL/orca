@@ -88,6 +88,25 @@ function isPidAddressedTreeKill(scope: SelfInitiatedTreeKillScope): boolean {
   return scope === 'win-taskkill-tree'
 }
 
+/**
+ * Drop one entry, newest-first-preserving.
+ *
+ * Two rules, in order. The entry just recorded is never a candidate: it is the
+ * one closest to any death that follows, and evicting it leaves a detail
+ * byte-identical to the external-kill arm. Among the rest, routine group/job
+ * teardown goes before a pid-addressed kill — a window-close burst is 30+ group
+ * kills and plain FIFO would drop the one entry that can explain the death —
+ * falling back to plain FIFO once every candidate is pid-addressed, which is
+ * what an ordinary session saturates the ring with.
+ */
+function evictOneSelfInitiatedTreeKill(): void {
+  const lastCandidate = selfInitiatedKills.length - 1
+  const oldestGroupKill = selfInitiatedKills.findIndex(
+    (kill, index) => index < lastCandidate && !isPidAddressedTreeKill(kill.scope)
+  )
+  selfInitiatedKills.splice(Math.max(oldestGroupKill, 0), 1)
+}
+
 export function recordSelfInitiatedTreeKill({
   pid,
   site,
@@ -104,18 +123,14 @@ export function recordSelfInitiatedTreeKill({
   }
   selfInitiatedKills.push({ pid, site, scope, at })
   while (selfInitiatedKills.length > MAX_TRACKED_SELF_KILLS) {
-    // Evict routine group/job teardown before a pid-addressed kill: a window-close
-    // burst is 30+ group kills, and plain FIFO would drop the one entry that can
-    // explain the death, leaving a detail byte-identical to the external-kill arm.
-    const oldestGroupKill = selfInitiatedKills.findIndex(
-      (kill) => !isPidAddressedTreeKill(kill.scope)
-    )
-    selfInitiatedKills.splice(Math.max(oldestGroupKill, 0), 1)
+    evictOneSelfInitiatedTreeKill()
   }
   // Durable so it survives into the diagnostic bundle even when the kill takes
   // the reporting renderer with it; coalesced because the crash detail above is
   // the primary record and a teardown burst must not cost 30 ring slots plus a
-  // forced disk flush each. The newest pid still rides the emitted crumb.
+  // forced disk flush each. The retained ring crumb carries the newest pid, but
+  // the span trail emits only the first of a coalesced burst — read
+  // `selfInitiatedKills` for the rest.
   recordCoalescedDurableCrashBreadcrumb({
     name: 'self_tree_kill',
     data: { pid, site, scope },

@@ -16,7 +16,9 @@ import { setProcessTreeKillGate } from '../shared/child-process/process-tree-kil
  * `src/shared` and reach this through `process-tree-kill-gate`, so a guard that
  * only lived in the tree-kill helper would cover one of nine.
  * `main-process-tree-kill-gate.test.ts` holds that set closed. Returns false
- * when the caller must not kill.
+ * when the caller must not walk that pid's tree; the caller still kills its own
+ * root through the child handle (`refused-tree-kill-root-termination.test.ts`),
+ * so a refusal is never a process leak.
  *
  * Electron main only, by construction. `terminateWindowsProcessTree` also runs
  * in the standalone daemon (the `pty-descendant-sweep` site), where

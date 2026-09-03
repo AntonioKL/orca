@@ -12,6 +12,9 @@ export function killSpawnedCommandTree(child: ChildProcess): Promise<void> {
   if (
     !admitSelfInitiatedTreeKill({ pid, site: 'git-command-tree-kill', scope: 'win-taskkill-tree' })
   ) {
+    // Refusal blocks the pid-addressed tree walk, never the termination: the
+    // handle-addressed root kill cannot reach a recycled pid.
+    child.kill()
     return Promise.resolve()
   }
   return new Promise((resolve) => {

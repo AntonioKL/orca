@@ -74,7 +74,10 @@ function failedPrecheckResult(
   })
 }
 
-function killLocalPrecheckProcessTree(child: ChildProcess): ReturnType<typeof setTimeout> | null {
+/** Exported for the refusal-fallback test; the timeout path is otherwise unreachable. */
+export function killLocalPrecheckProcessTree(
+  child: ChildProcess
+): ReturnType<typeof setTimeout> | null {
   const pid = child.pid
   if (!pid) {
     child.kill()
@@ -89,6 +92,9 @@ function killLocalPrecheckProcessTree(child: ChildProcess): ReturnType<typeof se
         scope: 'win-taskkill-tree'
       })
     ) {
+      // Refusal blocks the tree walk, not the termination: killing the root by
+      // handle cannot reach a recycled pid, and a timed-out precheck must stop.
+      child.kill()
       return null
     }
     try {

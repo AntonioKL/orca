@@ -281,6 +281,53 @@ describe('self-initiated tree kill breadcrumb', () => {
     )
   })
 
+  it('keeps the newest teardown when a session has saturated the ring with pid kills', () => {
+    // Review probe, the mirror of the case above: 32 session-old taskkills (six
+    // routine families feed them) then the Job Object teardown 50ms before the
+    // death. A scope-preference eviction with no floor splices the entry it just
+    // pushed, and `{}` is byte-identical to the external-kill arm.
+    const goneAt = 5_000_000
+    for (let index = 0; index < 32; index += 1) {
+      recordSelfInitiatedTreeKill({
+        pid: 6000 + index,
+        site: 'pty-descendant-sweep',
+        scope: 'win-taskkill-tree',
+        at: goneAt - 600_000 + index * 1_000
+      })
+    }
+    recordSelfInitiatedTreeKill({
+      pid: 7777,
+      site: 'windows-pty-job-teardown',
+      scope: 'win-pty-job',
+      at: goneAt - 50
+    })
+
+    const details = selfInitiatedTreeKillDetails(goneAt)
+
+    expect(details.selfInitiatedGroupKillCount).toBe(1)
+    expect(String(details.selfInitiatedKills)).toContain(
+      'win-pty-job/windows-pty-job-teardown/pid7777 -50ms'
+    )
+  })
+
+  it('evicts the oldest pid kill, not the newest, once every candidate is pid-addressed', () => {
+    const goneAt = 5_000_000
+    for (let index = 0; index < 33; index += 1) {
+      recordSelfInitiatedTreeKill({
+        pid: 6000 + index,
+        site: 'git-command-tree-kill',
+        scope: 'win-taskkill-tree',
+        at: goneAt - 1_000
+      })
+    }
+
+    const pids = findSelfInitiatedTreeKills(goneAt).map((kill) => kill.pid)
+
+    expect(pids).toHaveLength(32)
+    expect(pids).toContain(6032)
+    expect(pids).not.toContain(6000)
+  })
+
   it('records a kill issued through the shared runProcess choke point', () => {
     installMainProcessTreeKillGate()
 

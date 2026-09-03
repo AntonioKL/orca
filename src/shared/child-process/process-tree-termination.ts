@@ -17,8 +17,10 @@ const MAX_PS_OUTPUT_BYTES = 8 * 1024 * 1024
  * installs and every other host leaves admitting. The exit check below is what
  * keeps the Windows branch off a pid that is no longer ours on those hosts.
  *
- * Both arms ask before killing, so a refused pid is never signalled; that also
- * means the recorded crumb says "about to kill", not "killed".
+ * Both arms ask before walking the tree, so a refused pid never gets a
+ * pid-addressed kill; that also means the recorded crumb says "about to kill",
+ * not "killed". The root is still killed through its handle, which cannot reach
+ * the recycled pid the refusal was about, so a refusal is never a leak.
  */
 export function signalProcessTree(child: ChildProcess, signal?: NodeJS.Signals): Promise<boolean> {
   if (!child.pid) {
@@ -50,6 +52,9 @@ export function signalProcessTree(child: ChildProcess, signal?: NodeJS.Signals):
       scope: 'posix-process-group'
     })
   ) {
+    // Same shape as the reaped-pid skip above: refuse the group, still kill the
+    // root by handle, and report unverified.
+    killRoot(child, signal)
     return Promise.resolve(false)
   }
   try {
@@ -85,6 +90,7 @@ function taskkillTree(
   if (
     !admitProcessTreeKill({ pid: rootPid, site: 'run-process-tree', scope: 'win-taskkill-tree' })
   ) {
+    killRoot(child, signal)
     return Promise.resolve(false)
   }
   return new Promise((resolve) => {

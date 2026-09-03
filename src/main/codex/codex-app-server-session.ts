@@ -82,6 +82,9 @@ export function killCodexAppServerProcessTree(
         scope: 'win-taskkill-tree'
       })
     ) {
+      // Refusal blocks the tree walk, not the termination: the root kill is
+      // handle-addressed, so it cannot reach the recycled pid we refused.
+      child.kill('SIGKILL')
       return
     }
     try {

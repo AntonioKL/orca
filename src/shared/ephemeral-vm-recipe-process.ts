@@ -133,7 +133,8 @@ export async function runRecipeCommand(args: {
   })
 }
 
-function killRecipeProcess(child: ChildProcessWithoutNullStreams, force = false): void {
+/** Exported for the refusal-fallback test; the abort path is otherwise unreachable. */
+export function killRecipeProcess(child: ChildProcessWithoutNullStreams, force = false): void {
   const signal = force ? 'SIGKILL' : 'SIGTERM'
   if (process.platform === 'win32') {
     // Recipes run through `cmd.exe /c` (shell: true), so child.kill() would only
@@ -147,6 +148,9 @@ function killRecipeProcess(child: ChildProcessWithoutNullStreams, force = false)
           scope: 'win-taskkill-tree'
         })
       ) {
+        // Refusal blocks the tree walk, not the termination: the root kill is
+        // handle-addressed, so it cannot reach the recycled pid we refused.
+        child.kill(signal)
         return
       }
       const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {

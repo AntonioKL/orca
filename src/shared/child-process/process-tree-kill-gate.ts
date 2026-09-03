@@ -22,7 +22,9 @@ export type ProcessTreeKill = {
   scope: ProcessTreeKillScope
 }
 
-/** False means the caller must not kill: main is currently accounting for that pid. */
+/** False means the caller must not walk that pid's tree — main is accounting for
+ *  it. Killing the root through its own child handle stays correct and required:
+ *  a handle cannot land on the recycled pid the refusal is about. */
 type ProcessTreeKillGate = (kill: ProcessTreeKill) => boolean
 
 let gate: ProcessTreeKillGate | null = null
