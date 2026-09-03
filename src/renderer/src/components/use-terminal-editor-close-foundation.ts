@@ -29,7 +29,7 @@ export function useTerminalEditorCloseFoundation(
   const [windowCloseDialogOpen, setWindowCloseDialogOpen] = useState(false)
   const windowCloseAfterDirtyRef = useRef<{ isQuitting: boolean; requestId?: number } | null>(null)
 
-  const confirmNativeWindowClose = useCallback(() => {
+  const confirmNativeWindowClose = useCallback((requestId?: number) => {
     // Why: capture only after every close guard has committed. A canceled child-
     // process prompt must not consume App's synthetic/native unload guard.
     const accepted = runWithWindowCloseCheckpointScope(() =>
@@ -38,6 +38,9 @@ export function useTerminalEditorCloseFoundation(
     if (!accepted) {
       // Why: a checkpoint-vetoed quit used to die here with no dialog and no log,
       // leaving SIGKILL as the only exit (#15352). Dirty-file vetoes publish no reason.
+      // The close was abandoned, so release main's outstanding request and any relaunch armed for
+      // the quit; otherwise a later unrelated quit can resurrect the restart.
+      window.api.ui.cancelWindowClose(requestId)
       showShutdownCheckpointFailureToast()
       return
     }
@@ -45,7 +48,7 @@ export function useTerminalEditorCloseFoundation(
   }, [])
 
   const proceedToNativeWindowClose = useCallback(
-    (isQuitting: boolean) => {
+    (isQuitting: boolean, requestId?: number) => {
       if (!isQuitting) {
         const state = useAppStore.getState()
         const localPtyIds = Object.entries(state.tabsByWorktree).flatMap(
@@ -65,14 +68,14 @@ export function useTerminalEditorCloseFoundation(
               if (results.some(Boolean)) {
                 setWindowCloseDialogOpen(true)
               } else {
-                confirmNativeWindowClose()
+                confirmNativeWindowClose(requestId)
               }
             }
           )
           return
         }
       }
-      confirmNativeWindowClose()
+      confirmNativeWindowClose(requestId)
     },
     [confirmNativeWindowClose]
   )
