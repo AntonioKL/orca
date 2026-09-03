@@ -4,6 +4,7 @@ import type { AgentSessionOwnerBinding } from '../../shared/agent-session-host-a
 import { agentSessionOwnerBindingsEqual } from '../../shared/claimed-agent-pty-owner-snapshot'
 import { resolvePinnedCodexRolloutProof } from '../codex/codex-tui-rollout-proof'
 import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
+import { structuredClaudeMatchesActiveManagedAccount } from '../native-chat/claude-structured-managed-account-support'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { AgentStatusIpcPayload } from '../../shared/agent-status-types'
 import { getLocalProjectWorktreeGitOptions } from '../project-runtime-git-options'
@@ -49,9 +50,16 @@ export class OrcaRuntimeWithResolveRecoveredStructuredTuiTranscript extends Orca
     worktreeSelector: string,
     agent: 'claude' | 'codex'
   ): Promise<{ supported: boolean; reason?: 'agent' | 'remote' | 'wsl' }> {
+    const accountState = agent === 'claude' ? this.accounts.readClaudeManagedAccounts() : null
     const location = await this.resolveStructuredAgentSessionLocation(worktreeSelector)
     await this.ensureStructuredAgentSessionHost()
     if (getStructuredAgentSessionHost()?.supportsCreate(location, agent)) {
+      // Claude only: Codex resolves its account through a different path, so its answer is
+      // untouched here. `wsl` is the closest existing reason — the cause is a WSL-bound account
+      // rather than a WSL workspace — and no client reads the field, so it stays as-is.
+      if (agent === 'claude' && !structuredClaudeMatchesActiveManagedAccount(accountState)) {
+        return { supported: false, reason: 'wsl' }
+      }
       return { supported: true }
     }
     return {
