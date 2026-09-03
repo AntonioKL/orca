@@ -14,10 +14,9 @@ import { useMobileWebPackageCapability } from './use-mobile-web-package-capabili
 import { useMobileWebPackageRecovery } from './use-mobile-web-package-recovery'
 import { useMobileWebPackageRefresh } from './use-mobile-web-package-refresh'
 import type { MobileWebPackageSession } from './mobile-web-package-session-state'
+import { mobileWebShellHostName, type MobileWebShellNotice } from './mobile-web-shell-notice'
 
 export type { MobileWebPackageSession } from './mobile-web-package-session-state'
-const MOBILE_WEB_PACKAGE_UPDATE_REQUIRED_WARNING =
-  'Update Orca on this desktop to use its workspace interface.'
 export function useMobileWebPackageSession({
   client,
   host,
@@ -42,7 +41,7 @@ export function useMobileWebPackageSession({
   const [viewEpoch, setViewEpoch] = useState(0)
   const [packageLoading, setPackageLoading] = useState(false)
   const [packageProgress, setPackageProgress] = useState<MobileWebPackageDownloadProgress>()
-  const [packageWarning, setPackageWarning] = useState<string>()
+  const [packageWarning, setPackageWarning] = useState<MobileWebShellNotice>()
   const [refreshEpoch, setRefreshEpoch] = useState(0)
   const packageCapability = useMobileWebPackageCapability({
     client,
@@ -58,7 +57,10 @@ export function useMobileWebPackageSession({
   const effectivePackageWarning =
     packageWarning ??
     (packageCapability.status === 'update-required'
-      ? MOBILE_WEB_PACKAGE_UPDATE_REQUIRED_WARNING
+      ? {
+          message: `Update Orca on ${mobileWebShellHostName(host?.name)} to continue.`,
+          code: 'host_update_required'
+        }
       : undefined)
 
   const publishSession = useCallback(
@@ -152,7 +154,9 @@ export function useMobileWebPackageSession({
             setPackageLoading(false)
             setPackageWarning(
               (current) =>
-                current ?? 'Connect to this desktop once to cache its verified workspace UI.'
+                current ?? {
+                  message: `Connect to ${mobileWebShellHostName(host.name)} to finish setting up.`
+                }
             )
           }
         }
@@ -200,6 +204,11 @@ export function useMobileWebPackageSession({
     setPackageProgress
   })
 
+  const showWarning = useCallback(
+    (message: string, code?: string) => setPackageWarning({ message, code }),
+    []
+  )
+
   const {
     markHealthy,
     handleHealthTimeout,
@@ -236,6 +245,6 @@ export function useMobileWebPackageSession({
     retryPackage,
     recoverPrevious,
     clearCache,
-    showWarning: setPackageWarning
+    showWarning
   }
 }

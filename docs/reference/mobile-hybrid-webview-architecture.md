@@ -210,9 +210,10 @@ rather than reused.
 Repeated WebView process loss or a health timeout can promote the compatible
 verified previous generation. The recovery UI exposes:
 
-- **Retry** — request the current package from the authenticated Desktop.
-- **Use previous** — promote this host's verified prior generation.
-- **Clear cache** — remove this host's package cache and require a verified
+- **Retry** — request the current package from the authenticated Desktop. This
+  is the only primary button; the rest render as demoted text links.
+- **Use last version** — promote this host's verified prior generation.
+- **Reset** — remove this host's package cache and require a verified
   redownload.
 - **Switch hosts** — leave the affected host without changing another host's
   cache or credentials.
@@ -302,11 +303,11 @@ result persists after reconnect, restart, or switching hosts.
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | No paired Desktop                                                         | Confirm Desktop is running and pairing completed                               | Scan a new QR code; never copy the encoded credential into a ticket        |
 | Desktop unreachable                                                       | Check LAN/Tailscale state, firewall port 6768, sleep state, and Connection Log | Reconnect, wake Desktop, or switch hosts                                   |
-| “Connect once to cache”                                                   | No compatible verified generation exists for that host                         | Connect to the paired Desktop and choose **Retry**                         |
+| “Connect to … to finish setting up.”                                      | No compatible verified generation exists for that host                         | Connect to the paired Desktop and choose **Retry**                         |
 | Refresh warning while UI still works                                      | Healthy cached generation is active but the new package failed                 | Keep using the cache; correct Desktop delivery, then **Retry**             |
 | Interface fails after one Desktop update                                  | Regression follows the Desktop package                                         | Stop that Desktop rollout and use the rollback runbook                     |
-| Repeated WebView termination                                              | Health/crash-loop recovery should select a compatible previous generation      | Choose **Use previous** if offered; otherwise switch hosts                 |
-| Corrupt or unreadable host cache                                          | Package fails native verification or open                                      | Choose **Clear cache**, then redownload from the authenticated Desktop     |
+| Repeated WebView termination                                              | Health/crash-loop recovery should select a compatible previous generation      | Choose **Use last version** if offered; otherwise switch hosts             |
+| Corrupt or unreadable host cache                                          | Package fails native verification or open                                      | Choose **Reset**, then redownload from the authenticated Desktop           |
 | Incompatible bridge                                                       | Desktop package does not support the installed shell                           | Restore a compatible Desktop package or install the required store release |
 | Pairing, origin, bridge, picker, audio, notification, or recovery failure | Native-owned boundary is affected                                              | Halt the native rollout and ship a corrected store build                   |
 

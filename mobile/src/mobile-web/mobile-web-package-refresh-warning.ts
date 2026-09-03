@@ -1,13 +1,23 @@
+import { mobileWebShellHostName, type MobileWebShellNotice } from './mobile-web-shell-notice'
+
 export function mobileWebPackageRefreshWarning(
   failureCode: string,
-  hasHealthyInterface: boolean
-): string {
+  hasHealthyInterface: boolean,
+  hostName?: string
+): MobileWebShellNotice {
+  const host = mobileWebShellHostName(hostName)
   if (failureCode === 'incompatible_bridge') {
-    return hasHealthyInterface
-      ? 'Using the last healthy interface because the refreshed interface is not compatible with this Orca Mobile version.'
-      : 'This desktop’s workspace interface is not compatible with this Orca Mobile version.'
+    return {
+      message: hasHealthyInterface
+        ? `Update Orca Mobile to get the latest from ${host}.`
+        : `Update Orca Mobile to open ${host}.`,
+      code: failureCode
+    }
   }
-  return hasHealthyInterface
-    ? 'Using the last healthy interface because the desktop package could not be refreshed.'
-    : 'The desktop did not provide a valid workspace interface.'
+  return {
+    message: hasHealthyInterface
+      ? `Couldn’t update from ${host}. Showing the last version that worked.`
+      : `Couldn’t load ${host}.`,
+    code: failureCode
+  }
 }

@@ -12,6 +12,7 @@ import {
 import { mobileWebDiagnosticsStore } from './mobile-web-diagnostics-store'
 import type { MobileWebCachedBuildProbe } from './mobile-web-cached-build-probe'
 import { mobileWebPackageRefreshWarning } from './mobile-web-package-refresh-warning'
+import type { MobileWebShellNotice } from './mobile-web-shell-notice'
 import type { MobileWebPackageCapability } from './use-mobile-web-package-capability'
 
 type PublishSession = (
@@ -35,7 +36,7 @@ export function useMobileWebPackageRefresh(args: {
   publishSession: PublishSession
   refreshEpoch: number
   setPackageLoading: (loading: boolean) => void
-  setPackageWarning: (warning: string | undefined) => void
+  setPackageWarning: (warning: MobileWebShellNotice | undefined) => void
   setPackageProgress: (progress: MobileWebPackageDownloadProgress | undefined) => void
 }) {
   const {
@@ -102,10 +103,7 @@ export function useMobileWebPackageRefresh(args: {
         }
         if (rejectedBuildIdsRef.current.has(downloaded.commit.buildId)) {
           mobileWebDiagnosticsStore.warning(host.id, 'rejected_build')
-          finishPackage(
-            false,
-            'Using the previous verified interface until the desktop build changes.'
-          )
+          finishPackage(false, { message: 'Showing the last version that worked.' })
           return
         }
         const activationStartedAt = Date.now()
@@ -127,7 +125,7 @@ export function useMobileWebPackageRefresh(args: {
           console.warn('[mobile-web] package refresh failed', { code: failureCode })
           finishPackage(
             false,
-            mobileWebPackageRefreshWarning(failureCode, Boolean(ownedSessionRef.current))
+            mobileWebPackageRefreshWarning(failureCode, Boolean(ownedSessionRef.current), host.name)
           )
         }
       }
@@ -148,7 +146,7 @@ export function useMobileWebPackageRefresh(args: {
       finishPackage(true)
     }
 
-    function finishPackage(success: boolean, warning?: string): void {
+    function finishPackage(success: boolean, warning?: MobileWebShellNotice): void {
       setPackageLoading(false)
       setPackageProgress(undefined)
       if (success || warning) {

@@ -18,7 +18,9 @@ describe('mobile hybrid rollback runbook', () => {
   })
 
   it('documents every native recovery action by its product label', () => {
-    for (const label of ['Retry', 'Use previous', 'Clear cache', 'Switch hosts']) {
+    expect(recoveryActions).toContain('accessibilityLabel="Retry"')
+    expect(runbook).toContain('**Retry**')
+    for (const label of ['Use last version', 'Reset', 'Switch hosts']) {
       expect(recoveryActions).toContain(`label: '${label}'`)
       expect(runbook).toContain(`**${label}**`)
     }
