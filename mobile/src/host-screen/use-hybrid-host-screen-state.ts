@@ -23,6 +23,9 @@ export function useHybridHostScreenState(
   const fetchWorktreesInFlightRef = useRef(false)
   const fetchRepoMetadataInFlightRef = useRef(new WeakSet<HostWorkspaceOperations>())
   const fetchRepoMetadataPendingRef = useRef(new WeakSet<HostWorkspaceOperations>())
+  // Why: one silent catalog retry per relayed-transport binding, so a first attempt that raced
+  // the shell's socket stays in the loading state instead of rendering a failure.
+  const catalogWarmupSpentRef = useRef(new WeakSet<HostWorkspaceOperations>())
   const repoMetadataFetchedAtRef = useRef(0)
   const newWorktreeModalRef = useRef<{ open: () => void }>(null)
   const newWorktreeModalVisibleRef = useRef(false)
@@ -86,6 +89,7 @@ export function useHybridHostScreenState(
   return {
     actionTarget,
     catalogError,
+    catalogWarmupSpentRef,
     collapsedGroups,
     confirmDelete,
     confirmRemoveHost,
