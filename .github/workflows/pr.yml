@@ -28,6 +28,7 @@ jobs:
     outputs:
       should_run: ${{ steps.filter.outputs.should_run }}
       native_cache_changed: ${{ steps.filter.outputs.native_cache_changed }}
+      mobile_dependencies: ${{ steps.filter.outputs.mobile_dependencies }}
       static_analysis: ${{ steps.filter.outputs.static_analysis }}
       typecheck: ${{ steps.filter.outputs.typecheck }}
       git_compatibility: ${{ steps.filter.outputs.git_compatibility }}
@@ -94,6 +95,15 @@ jobs:
 
       - name: Enforce type-aware code-quality baseline
         run: pnpm run audit:code-quality:type-aware
+
+      # Why: the changed-code gate lints mobile files too, and its type-aware pass
+      # resolves types from mobile/node_modules. Mobile is a separate pnpm project,
+      # so the root install above leaves it empty and every mobile type degrades to
+      # an `error` type — reported as phantom findings against the changed lines.
+      - name: Install mobile dependencies
+        if: needs.code_paths.outputs.mobile_dependencies == 'true'
+        working-directory: mobile
+        run: pnpm install --frozen-lockfile
 
       - name: Enforce changed-code quality
         run: pnpm run check:code-quality:changed -- "${{ github.event.pull_request.base.sha }}"
