@@ -7,11 +7,13 @@ import type {
 import { makePaneKey } from '../../../../shared/stable-pane-id'
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import {
-  _getRuntimeAgentOrchestrationBatchCountersForTest,
   EMPTY_WORKTREE_AGENT_ORCHESTRATION,
-  releaseRuntimeAgentOrchestrationBatchCache,
   selectRuntimeAgentOrchestrationBatch
 } from './worktree-agent-orchestration-batch'
+import {
+  _getWorktreeAgentOrchestrationIndexBuildCountForTest,
+  releaseWorktreeAgentOrchestrationIndexCache
+} from './worktree-agent-orchestration-index'
 import { selectRuntimeAgentOrchestrationForWorktree } from './worktree-agent-row-selectors'
 
 type BatchState = Parameters<typeof selectRuntimeAgentOrchestrationBatch>[0]
@@ -287,7 +289,9 @@ describe('selectRuntimeAgentOrchestrationBatch', () => {
     expect(getBatchRecord(replacedBatch, 'wt-2')).toBe(firstWt2)
   })
 
-  it('releases raw and derived caches for empty requests and empty runtime', () => {
+  // Why this matters now that the batch is a view of the shared index: an empty dashboard must
+  // not drop a cache that every mounted sidebar card is still reading through.
+  it('leaves the shared index intact for an empty request and rebuilds after an empty runtime', () => {
     let tabIdReads = 0
     const state = {
       tabsByWorktree: {
@@ -307,14 +311,15 @@ describe('selectRuntimeAgentOrchestrationBatch', () => {
     const first = getBatchRecord(selectRuntimeAgentOrchestrationBatch(state, ['target']), 'target')
     expect(tabIdReads).toBe(1)
 
-    selectRuntimeAgentOrchestrationBatch(state, [])
+    expect(selectRuntimeAgentOrchestrationBatch(state, []).size).toBe(0)
     const afterEmptyRequest = getBatchRecord(
       selectRuntimeAgentOrchestrationBatch(state, ['target']),
       'target'
     )
-    expect(tabIdReads).toBe(2)
-    expect(afterEmptyRequest).not.toBe(first)
+    expect(tabIdReads).toBe(1)
+    expect(afterEmptyRequest).toBe(first)
 
+    // An emptied orchestration map is a real change of the index's own domain, so it does drop.
     selectRuntimeAgentOrchestrationBatch({ ...state, runtimeAgentOrchestrationByPaneKey: {} }, [
       'target'
     ])
@@ -322,11 +327,11 @@ describe('selectRuntimeAgentOrchestrationBatch', () => {
       selectRuntimeAgentOrchestrationBatch(state, ['target']),
       'target'
     )
-    expect(tabIdReads).toBe(3)
-    expect(afterEmptyRuntime).not.toBe(afterEmptyRequest)
+    expect(tabIdReads).toBe(2)
+    expect(afterEmptyRuntime).not.toBe(first)
   })
 
-  it('keeps singleton tab work target-local', () => {
+  it('matches the per-worktree selector for a single requested worktree', () => {
     const tabCount = 10
     const contextCount = 8
     const makeCountedState = () => {
@@ -405,22 +410,17 @@ describe('selectRuntimeAgentOrchestrationBatch', () => {
     )
 
     expect(Object.keys(actual)).toEqual(Object.keys(expected))
-    // Why the batch stays tighter: it knows which worktrees are on screen. The
-    // shared index covers all of them, so it saves per *card*, not per worktree.
-    expect(batched.counts()).toEqual({
-      runtimeEnumerations: 1,
-      runtimeValueReads: contextCount,
-      contextVisits: contextCount,
-      targetTabIdReads: 1,
-      unrelatedTabIdReads: 0
-    })
-    expect(reference.counts()).toEqual({
+    // Why identical: the batch is the shared index, which walks every worktree's tabs once per
+    // tabs-slice identity — not once per request — so a one-worktree request costs the same.
+    const singleWorktreeCounts = {
       runtimeEnumerations: 1,
       runtimeValueReads: contextCount,
       contextVisits: contextCount,
       targetTabIdReads: 1,
       unrelatedTabIdReads: tabCount - 1
-    })
+    }
+    expect(batched.counts()).toEqual(singleWorktreeCounts)
+    expect(reference.counts()).toEqual(singleWorktreeCounts)
   })
 
   it('collapses multi-worktree runtime scans and caches unchanged publications', () => {
@@ -533,7 +533,9 @@ describe('selectRuntimeAgentOrchestrationBatch', () => {
     })
 
     // Publications that change nothing the index reads cost nothing, however
-    // many cards call in.
+    // many cards call in. The warm-up pass is the cost of the batch loop above having left the
+    // one cache slot on a different fixture store; production has a single store.
+    selectRuntimeAgentOrchestrationForWorktree(reference.state, requested[0])
     const referenceBefore = reference.counts()
     for (let publication = 0; publication < publicationCount; publication += 1) {
       for (const worktreeId of requested) {
@@ -542,11 +544,9 @@ describe('selectRuntimeAgentOrchestrationBatch', () => {
     }
     expect(reference.counts()).toEqual(referenceBefore)
 
-    // Why this is the honest claim: a real live-status ping replaces
-    // agentStatusByPaneKey, so the index does rebuild once per publication. What
-    // the shared index removes is the mounted-card multiplier, not the
-    // per-publication rebuild. Tab reads stay flat because tab membership is
-    // keyed on the tabs slice, which a live-status ping does not replace.
+    // A real live-status ping replaces agentStatusByPaneKey wholesale. The index is keyed on
+    // what it reads out of that map, not on its identity, so an unrelated pane's ping costs
+    // nothing: no rebuild, no context revisit, however many cards call in.
     const churn = makeCountedState()
     for (const worktreeId of requested) {
       selectRuntimeAgentOrchestrationForWorktree(churn.state, worktreeId)
@@ -565,7 +565,7 @@ describe('selectRuntimeAgentOrchestrationBatch', () => {
     expect(churn.counts()).toEqual({
       runtimeEnumerations: 1,
       runtimeValueReads: contextCount,
-      contextVisits: contextCount * (publicationCount + 1),
+      contextVisits: contextCount,
       tabIdReads: worktreeCount
     })
   })
@@ -597,11 +597,11 @@ describe('selectRuntimeAgentOrchestrationBatch live-map churn', () => {
   }
 
   function builds(): number {
-    return _getRuntimeAgentOrchestrationBatchCountersForTest().builds
+    return _getWorktreeAgentOrchestrationIndexBuildCountForTest()
   }
 
   it('rebuilds once across repeated agentStatus:set identity churn on unrelated panes', () => {
-    releaseRuntimeAgentOrchestrationBatchCache()
+    releaseWorktreeAgentOrchestrationIndexCache()
     const first = selectRuntimeAgentOrchestrationBatch(
       makeChurnState({ [CHILD_KEY]: makeEntry(CHILD_KEY, 'wt-1') }),
       requested
@@ -627,7 +627,7 @@ describe('selectRuntimeAgentOrchestrationBatch live-map churn', () => {
   // reads straight out of the live/retained maps is unkeyed and can go stale. The build no
   // longer receives those maps at all, which shows up here as exactly one read per pane.
   it('reads each orchestrated pane out of the live and retained maps once per build', () => {
-    releaseRuntimeAgentOrchestrationBatchCache()
+    releaseWorktreeAgentOrchestrationIndexCache()
     const liveReads: string[] = []
     const retainedReads: string[] = []
     const countReads = <Value extends object>(target: Value, reads: string[]): Value =>
@@ -666,7 +666,7 @@ describe('selectRuntimeAgentOrchestrationBatch live-map churn', () => {
   })
 
   it('rebuilds when an orchestrated pane changes worktree or the entry set changes', () => {
-    releaseRuntimeAgentOrchestrationBatchCache()
+    releaseWorktreeAgentOrchestrationIndexCache()
     const first = selectRuntimeAgentOrchestrationBatch(
       makeChurnState({ [CHILD_KEY]: makeEntry(CHILD_KEY, 'wt-1') }),
       requested
@@ -708,25 +708,5 @@ describe('selectRuntimeAgentOrchestrationBatch live-map churn', () => {
     )
     expect(builds()).toBe(removedBuilds + 1)
     expect(removed.has('wt-1')).toBe(false)
-  })
-
-  it('does not re-derive the requested id list for an unchanged input identity', () => {
-    releaseRuntimeAgentOrchestrationBatchCache()
-    const stableIds = ['wt-1', 'wt-2']
-    selectRuntimeAgentOrchestrationBatch(
-      makeChurnState({ [CHILD_KEY]: makeEntry(CHILD_KEY, 'wt-1') }),
-      stableIds
-    )
-    const after = _getRuntimeAgentOrchestrationBatchCountersForTest().uniqueIdComputations
-    for (let index = 0; index < 25; index += 1) {
-      selectRuntimeAgentOrchestrationBatch(
-        makeChurnState({
-          [CHILD_KEY]: makeEntry(CHILD_KEY, 'wt-1'),
-          [`unrelated-${index}`]: makeEntry(`unrelated-${index}`, 'wt-9')
-        }),
-        stableIds
-      )
-    }
-    expect(_getRuntimeAgentOrchestrationBatchCountersForTest().uniqueIdComputations).toBe(after)
   })
 })
