@@ -169,6 +169,7 @@ async function startLocalStructuredSessionTabsSync(args: {
   }
   let subscriptionGeneration = 0
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let reconnectAttempt = 0
   const subscribeCurrent = async (): Promise<void> => {
     if (args.isDisposed()) {
       return
@@ -193,6 +194,8 @@ async function startLocalStructuredSessionTabsSync(args: {
           if (reconnectTimer !== null) {
             clearTimeout(reconnectTimer)
           }
+          const reconnectDelay = Math.min(250 * 2 ** reconnectAttempt, 5000)
+          reconnectAttempt += 1
           reconnectTimer = setTimeout(() => {
             reconnectTimer = null
             void refreshLocalStructuredSessionTabs()
@@ -204,10 +207,10 @@ async function startLocalStructuredSessionTabsSync(args: {
                     void subscribeCurrent().catch((error) =>
                       console.warn('[structured-session-tabs] resubscribe failed', error)
                     )
-                  }, 250)
+                  }, reconnectDelay)
                 }
               })
-          }, 250)
+          }, reconnectDelay)
         }
       }
     )
