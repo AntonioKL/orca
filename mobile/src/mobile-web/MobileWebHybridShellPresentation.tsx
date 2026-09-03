@@ -112,7 +112,9 @@ export function MobileWebHybridShellPresentation({
       {presentationState === 'hosted-interface' && session ? (
         <View style={styles.webContainer}>
           {packageLoading && packageProgress ? (
-            <MobileWebPackageProgress progress={packageProgress} />
+            <View style={styles.packageProgressBanner}>
+              <MobileWebPackageProgress progress={packageProgress} />
+            </View>
           ) : null}
           {packageWarning ? (
             <View style={styles.noticeBanner}>

@@ -81,6 +81,16 @@ export const hybridShellStyles = StyleSheet.create({
     textAlign: 'center'
   },
   packageProgress: { width: '100%', maxWidth: 320, gap: spacing.sm },
+  // Above a live hosted page the bar reads as a banner: centered, on the panel surface,
+  // separated from the page below instead of floating at the left edge.
+  packageProgressBanner: {
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.bgPanel,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.borderSubtle
+  },
   packageProgressLabel: {
     color: colors.textSecondary,
     fontSize: typography.metaSize,
