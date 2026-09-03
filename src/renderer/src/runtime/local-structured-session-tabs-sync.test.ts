@@ -241,6 +241,34 @@ describe('local structured session tab projection', () => {
     )
   })
 
+  it('forgets publisher versions when a folder workspace is removed', () => {
+    type OwnerState = WebSessionTabsSyncState & WorktreeRuntimeOwnerState
+    const folderKey = 'folder:folder-1'
+    const folder = { id: 'folder-1' } as NonNullable<OwnerState['folderWorkspaces']>[number]
+    let state = {
+      ...createSnapshot(),
+      activeWorktreeId: folderKey,
+      unifiedTabsByWorktree: { [folderKey]: [] },
+      folderWorkspaces: [folder]
+    } as OwnerState
+    const folderSnapshot = (version: number, sessionId: string) => ({
+      ...structuredInventory('epoch-1', version, sessionId),
+      worktree: folderKey
+    })
+    state = applyLocalStructuredSessionTabSnapshots(state, [folderSnapshot(10, 'session-old')])
+    state = applyLocalStructuredSessionTabSnapshots(
+      { ...state, folderWorkspaces: [], unifiedTabsByWorktree: {} },
+      []
+    )
+    state = applyLocalStructuredSessionTabSnapshots(
+      { ...state, folderWorkspaces: [folder], unifiedTabsByWorktree: { [folderKey]: [] } },
+      [folderSnapshot(1, 'session-new')]
+    )
+    expect(state.unifiedTabsByWorktree[folderKey]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ entityId: 'session-new' })])
+    )
+  })
+
   it('drops terminal topology while retaining structured tabs', () => {
     const snapshot = {
       worktree: 'workspace-1',
