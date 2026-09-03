@@ -8,7 +8,7 @@ import {
 } from '../../protected-secret-persistence'
 import { stripRetiredGlobalSettings } from '../applying-settings/terminal-settings-migrations'
 import { omitDefaultWorktreeMetaFieldsInMap } from '../../../shared/worktree/meta-persisted-defaults'
-import { projectWorktreeMetaOntoAliases } from './worktree-meta-alias-projection'
+import { projectWorktreeMetaByIdentityOntoLocators } from './worktree-meta-alias-projection'
 import { withoutRedundantPartitionGlobals } from '../../../shared/workspace-session-host-field-ownership'
 
 import {
@@ -70,28 +70,29 @@ export class StateSerializationSecretHandlingOperations {
       return encrypted || null
     }
     // Ordered before the default omission on purpose: the two maps hold the SAME row object, so
-    // the projection settles almost every locator on a reference check. Omitting first would
-    // rebuild each row twice into two distinct objects and force a deep compare per row (~18 ms
-    // per save on a 1,349-row profile). Omission is a pure function of the value, so a pair equal
-    // here is equal after it too.
-    const aliasProjection = projectWorktreeMetaOntoAliases(this.runtime.state.worktreeMeta, {
-      worktreeIdentityAliases: this.runtime.state.worktreeIdentityAliases,
-      worktreeMetaByIdentity: this.runtime.state.worktreeMetaByIdentity
-    })
-    // Default-valued metadata slots are re-filled at load (normalizeWorktreeLinkedItemMetadata),
-    // so omitting them here is lossless and drops ~12% of the file on a heavy install.
-    const compactWorktreeMetaByIdentity =
+    // the projection settles almost every row on a reference check. Omitting first rebuilds each
+    // row twice into two distinct objects and forces a deep compare per row instead. Omission is
+    // a pure function of the value, so a pair equal here is equal after it too -- and it never
+    // touches `hostId`/`instanceId`, which is what the reader re-derives the omitted key from.
+    const projectedWorktreeMetaByIdentity =
       this.runtime.state.worktreeMetaByIdentity === undefined
         ? undefined
-        : omitDefaultWorktreeMetaFieldsInMap(this.runtime.state.worktreeMetaByIdentity)
+        : projectWorktreeMetaByIdentityOntoLocators(
+            this.runtime.state.worktreeMetaByIdentity,
+            this.runtime.state
+          )
     // Why: clone before encrypting secrets so in-memory this.state stays plaintext.
     const stateToSave = {
       ...this.getDurableState(),
-      worktreeMeta: omitDefaultWorktreeMetaFieldsInMap(aliasProjection.worktreeMeta),
-      // Recomputed every save, so a stale list loaded off disk can never survive one.
-      worktreeMetaAliasesWithoutLegacyRow: aliasProjection.worktreeMetaAliasesWithoutLegacyRow,
-      ...(compactWorktreeMetaByIdentity !== undefined
-        ? { worktreeMetaByIdentity: compactWorktreeMetaByIdentity }
+      // Default-valued metadata slots are re-filled at load (normalizeWorktreeLinkedItemMetadata),
+      // so omitting them here is lossless and drops ~12% of the file on a heavy install.
+      worktreeMeta: omitDefaultWorktreeMetaFieldsInMap(this.runtime.state.worktreeMeta),
+      ...(projectedWorktreeMetaByIdentity !== undefined
+        ? {
+            worktreeMetaByIdentity: omitDefaultWorktreeMetaFieldsInMap(
+              projectedWorktreeMetaByIdentity
+            )
+          }
         : {}),
       // 'local' owns these globals and is the only slice any read takes them from; the load path
       // re-seeds each partition's default, so writing them per host is pure file weight.

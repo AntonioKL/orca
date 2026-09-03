@@ -1,12 +1,9 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { getDefaultPersistedState } from '../../shared/constants'
 import type { PersistedState } from '../../shared/persisted-state-types'
 import type { Project, ProjectHostSetup } from '../../shared/project-types'
 import type { Repo } from '../../shared/repo-types'
-import { readProfileState, rebuildRepoBackedProjectState } from './profile-project-state-file'
+import { rebuildRepoBackedProjectState } from './profile-project-state-file'
 
 const upstreamIdentity = {
   canonicalKey: 'git.example.com/acme/app-upstream',
@@ -154,59 +151,5 @@ describe('rebuildRepoBackedProjectState', () => {
       'git:git.example.com/acme/app-upstream',
       'cloud-project'
     ])
-  })
-})
-
-/**
- * A profile transfer reads another profile's file directly, bypassing the Store's load path. The
- * serializer omits any `worktreeMeta` row the identity map can rebuild, so without the rebuild here
- * every transferred workspace would arrive at the target profile stripped of its metadata.
- */
-describe('readProfileState on a projected profile file', () => {
-  function seedProfile(state: unknown): { userDataPath: string; profileId: string } {
-    const userDataPath = realpathSync(mkdtempSync(join(tmpdir(), 'orca-profile-read-')))
-    const profileId = 'source'
-    mkdirSync(join(userDataPath, 'profiles', profileId), { recursive: true })
-    writeFileSync(
-      join(userDataPath, 'profiles', profileId, 'orca-data.json'),
-      JSON.stringify(state),
-      'utf-8'
-    )
-    return { userDataPath, profileId }
-  }
-
-  const identityRow = {
-    hostId: 'local',
-    instanceId: 'inst-1',
-    displayName: 'projected workspace',
-    linkedPR: 41
-  }
-
-  it('rebuilds the locator rows the serializer left to the identity map', () => {
-    const { userDataPath, profileId } = seedProfile({
-      repos: [makeRepo({ id: 'repo', path: '/repo' })],
-      worktreeMeta: {},
-      worktreeMetaByIdentity: { 'wt2:local:inst-1': identityRow },
-      worktreeIdentityAliases: { 'local|repo::/projected': ['wt2:local:inst-1'] },
-      worktreeMetaAliasesWithoutLegacyRow: []
-    })
-
-    const state = readProfileState(profileId, userDataPath)
-
-    expect(state.worktreeMeta['repo::/projected']).toEqual(identityRow)
-    // Serialize-only: it must never be carried into the state a transfer writes back.
-    expect(state.worktreeMetaAliasesWithoutLegacyRow).toBeUndefined()
-  })
-
-  it('leaves a genuinely removed locator removed', () => {
-    const { userDataPath, profileId } = seedProfile({
-      repos: [makeRepo({ id: 'repo', path: '/repo' })],
-      worktreeMeta: {},
-      worktreeMetaByIdentity: { 'wt2:local:inst-1': identityRow },
-      worktreeIdentityAliases: { 'local|repo::/projected': ['wt2:local:inst-1'] },
-      worktreeMetaAliasesWithoutLegacyRow: ['local|repo::/projected']
-    })
-
-    expect(readProfileState(profileId, userDataPath).worktreeMeta).toEqual({})
   })
 })
