@@ -474,6 +474,58 @@ describe('repairKnownPoisonedInstallDirBeforeWindow', () => {
     )
     expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(true)
   })
+
+  // The gate-timed-out ordering. The gate's budget is 20s while the tree grant's own cap is
+  // 120s, so icacls routinely outlives the gate: the window opens, and this launch's probe
+  // reads the tree POISONED while that repair is still in flight. When the orphaned icacls
+  // then claims success -- exit 0, and on a localized Windows no parsable failure summary to
+  // contradict it -- the claim must not outrank a reading taken after it was dispatched.
+  // Otherwise this launch deletes the poison marker that arms every later gate, un-suspects
+  // the tree so --in-process-gpu can engage, clears the safe-graphics marker, and tells the
+  // user their permissions are fixed.
+  it('does not let a timed-out gate repair outrank a poison reading taken after it', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-acl-gate-timeout-'))
+    writeInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)
+    writeGpuFallbackMarker(
+      userDataPath,
+      { engagedAt: Date.now(), crashesInWindow: 3, userConfirmed: false },
+      GPU_ENV
+    )
+
+    let releaseIcacls: () => void = () => undefined
+    const stalled = new Promise<void>((resolve) => {
+      releaseIcacls = resolve
+    })
+    let repairReported: () => void = () => undefined
+    const reported = new Promise<void>((resolve) => {
+      repairReported = resolve
+    })
+
+    const mode = await repairKnownPoisonedInstallDirBeforeWindow({
+      ...recoveryOptions(userDataPath, async (spec) => {
+        await stalled
+        return okRun(spec)
+      }),
+      recordBreadcrumb: () => {
+        setTimeout(repairReported, 0)
+        return undefined
+      },
+      timeoutMs: 20
+    })
+    expect(mode).toBe('timeout')
+
+    // The window is open now, and this launch's own probe reads the tree still poisoned.
+    startWindowsInstallDirAclRepairIfPoisoned(POISON_VERDICT, recoveryOptions(userDataPath, okRun))
+    expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(true)
+
+    releaseIcacls()
+    await reported
+
+    expect(isInstallDirAclSuspect()).toBe(true)
+    expect(describeInstallDirAclPoison()?.detail).toContain('could not repair them')
+    expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(true)
+    expect(readActiveGpuFallbackMarker(userDataPath, GPU_ENV)).not.toBeNull()
+  })
 })
 
 // The repair marker matches whatever the outcome, so on its own 'marker-hit' cannot tell a

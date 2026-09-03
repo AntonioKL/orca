@@ -40,6 +40,8 @@ let poison: { installDir: string; stage: RepairStage } | null = null
 let probePendingSince: number | null = null
 /** A positive clean DACL reading; outranks any repair verdict about a tree with nothing to fix. */
 let installDirReadClean = false
+/** A poison DACL reading taken after a repair was dispatched; outranks that repair's success claim. */
+let installDirReadPoisonedMidRepair = false
 let blockingRepairInFlight = false
 const verdictWaiters = new Set<() => void>()
 
@@ -55,6 +57,7 @@ export function resetWindowsInstallDirAclRecoveryForTest(): void {
   poison = null
   probePendingSince = null
   installDirReadClean = false
+  installDirReadPoisonedMidRepair = false
   blockingRepairInFlight = false
   settleVerdictWaiters()
 }
@@ -146,12 +149,18 @@ function startRepair(
     // stand in for a repair. `marker-hit` therefore only ever means the budget is spent.
     poisonEvidenceOutstanding: true,
     onDone: (result) => {
+      // A tree read poisoned AFTER this repair was dispatched disproves its success claim,
+      // whatever icacls exited: the gate's budget can expire while the child runs on under
+      // its own, so the probe's reading is the later evidence. A clean reading since then
+      // retires it — there was nothing left to repair.
+      const claimDisproved =
+        result.mode === 'repaired' && installDirReadPoisonedMidRepair && !installDirReadClean
       // A clean reading of the tree outranks this: there was nothing left to repair.
       if (!installDirReadClean) {
-        poison = { installDir, stage: result.mode }
+        poison = { installDir, stage: claimDisproved ? 'failed' : result.mode }
       }
       logStartupMilestone('install-dir-acl-repair-done', { mode: result.mode })
-      if (result.mode === 'repaired') {
+      if (result.mode === 'repaired' && !claimDisproved) {
         clearInstallDirAclPoisonMarker(options.userDataPath)
         // The GPU child deaths were never a driver fault, so safe graphics — and the
         // --in-process-gpu launch that hides the next crash's evidence — must not outlive the repair.
@@ -204,8 +213,10 @@ function applyInstallDirAclProbeVerdict(
     return
   }
   // The blocking pre-window gate still owns this launch's repair; restarting it would
-  // reset the verdict to 'pending' against a repair that can no longer report.
+  // reset the verdict to 'pending' against a repair that can no longer report. The reading
+  // is kept, not dropped: it is later evidence than the repair's own exit code.
   if (poison?.stage === 'pending') {
+    installDirReadPoisonedMidRepair = true
     return
   }
   // This reading was taken after the gate finished, so it outranks the gate's own verdict:
