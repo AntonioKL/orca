@@ -101,6 +101,8 @@ export type ClaudeSession = {
   dispatchWaiters: ClaudeDispatchWaiter[]
   /** Bounded identities for dispatches whose ack was unknown when they returned. */
   retiredDispatchWaiters: ClaudeDispatchWaiter[]
+  /** Once a retired waiter is evicted, legacy content-only replay matching is unsafe. */
+  replayContentFallbackBlocked: boolean
   options: Map<string, string>
   reportedOptions: { model?: string; effort?: string }
   restoreSkippedOptions: Set<string>

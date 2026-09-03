@@ -12,6 +12,7 @@ function sessionFor(setModel: ClaudeSession['connection']['setModel']): ClaudeSe
     prompts: {} as ClaudeSession['prompts'],
     dispatchWaiters: [],
     retiredDispatchWaiters: [],
+    replayContentFallbackBlocked: false,
     dispatchSequence: 0,
     optionMutationSequence: 0,
     options: new Map(),

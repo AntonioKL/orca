@@ -44,6 +44,8 @@ export function createClaudeSessionPublication(input: {
       acquisitionGeneration: input.acquisitionGeneration,
       prompts: input.prompts,
       dispatchWaiters: [],
+      retiredDispatchWaiters: [],
+      replayContentFallbackBlocked: false,
       dispatchSequence: 0,
       optionMutationSequence: 0,
       options: new Map(input.options),
@@ -52,6 +54,7 @@ export function createClaudeSessionPublication(input: {
         ...(model ? { model } : {}),
         ...(effort ? { effort } : {})
       },
+      restoreSkippedOptions: new Set(),
       translator: input.translator,
       events: input.events
     }

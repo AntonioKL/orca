@@ -74,7 +74,7 @@ export function resolveClaudeReplayWaiter(
     // candidate on one side of the timeout boundary; with active and retired
     // candidates present, identical prompts are intentionally left unknown.
     const replayContentKey = claudeDispatchContentKey(envelope.content)
-    if (session.retiredDispatchWaiters.length === 0) {
+    if (!session.replayContentFallbackBlocked && session.retiredDispatchWaiters.length === 0) {
       const compatible = session.dispatchWaiters.filter(
         (candidate) => candidate.replayContentKey === replayContentKey
       )
@@ -82,7 +82,7 @@ export function resolveClaudeReplayWaiter(
         settleWaiter(session, compatible[0]!, uuid)
         return compatible[0]!.dispatchSequence === session.dispatchSequence
       }
-    } else if (session.dispatchWaiters.length === 0) {
+    } else if (!session.replayContentFallbackBlocked && session.dispatchWaiters.length === 0) {
       const lateCompatible = session.retiredDispatchWaiters.filter(
         (candidate) => candidate.replayContentKey === replayContentKey
       )
@@ -184,6 +184,7 @@ function retireWaiter(session: ClaudeSession, waiter: ClaudeDispatchWaiter): voi
     waiter.retired = true
     session.retiredDispatchWaiters.push(waiter)
     if (session.retiredDispatchWaiters.length > MAX_RETIRED_DISPATCH_WAITERS) {
+      session.replayContentFallbackBlocked = true
       session.retiredDispatchWaiters.splice(
         0,
         session.retiredDispatchWaiters.length - MAX_RETIRED_DISPATCH_WAITERS
