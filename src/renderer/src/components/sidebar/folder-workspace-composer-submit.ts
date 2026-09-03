@@ -4,7 +4,10 @@ import {
   type LinkedWorkItemSummary
 } from '@/lib/new-workspace'
 import { seedNativeChatLaunchDraftForAgentTab } from '@/lib/agent-launch-prompt-delivery'
-import { readWindowsProcessStartTimeGate } from '@/lib/agent-launch-routing-windows-gate'
+import {
+  pathUsesWslUnc,
+  readWindowsProcessStartTimeGate
+} from '@/lib/agent-launch-routing-windows-gate'
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import { buildAgentStartupPlan } from '@/lib/tui-agent-startup'
 import { tuiAgentToAgentKind } from '@/lib/telemetry'
@@ -154,9 +157,9 @@ export async function submitFolderWorkspaceCreate({
         platform: CLIENT_PLATFORM,
         hostCapabilities: readLocalRuntimeCapabilities(),
         windowsProcessStartTime: readWindowsProcessStartTimeGate(),
-        // The workspace has no store entry until after this decision, so the
-        // WSL-UNC check cannot run yet; it applies on the next launch.
-        worktreeUsesWslPath: false,
+        // The workspace has no store entry yet, but it will be created under
+        // the group's parent, so the parent decides WSL-ness before the click.
+        worktreeUsesWslPath: pathUsesWslUnc(projectGroup.parentPath),
         workspaceKind: 'folder',
         promptDelivery: launchDraftPrompt ? 'draft' : 'auto-submit',
         launchText: launchDraftPrompt ?? note,
