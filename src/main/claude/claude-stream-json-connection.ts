@@ -125,9 +125,9 @@ export async function openClaudeStreamJsonConnection(
   }
   // This child owns the account's credentials for as long as it runs, exactly as a
   // Claude PTY does — hold the OAuth-refresh gate so a managed refresh cannot rotate
-  // the single-use token out from under it mid-turn.
+  // the single-use token out from under it mid-turn. Entered below, once a release
+  // path exists.
   const authGateKey = randomUUID()
-  markClaudeStructuredChildSpawned(authGateKey)
   const releaseAuthGate = (): void => markClaudeStructuredChildExited(authGateKey)
   let exited = false
   let exitStatus: ExitStatus | null = null
@@ -226,6 +226,13 @@ export async function openClaudeStreamJsonConnection(
       handleUnexpectedEnd(error)
     }
   })
+  // Why here and not at spawn: a structured gate entry is deliberately unpersisted, so
+  // confirmSeededClaudeLivePtys can never reconcile a stray one and a leak defers the
+  // managed OAuth refresh for the life of the process. Entering only after 'exit' and
+  // 'close' are attached makes that unreachable — any later throw still leaves a
+  // listener that releases. Nothing between spawn and here can yield, so the child
+  // cannot end before the gate is entered.
+  markClaudeStructuredChildSpawned(authGateKey)
 
   const send = (message: Record<string, unknown>): Promise<void> => {
     if (closing || exited || terminalError || child.stdin.destroyed || !child.stdin.writable) {

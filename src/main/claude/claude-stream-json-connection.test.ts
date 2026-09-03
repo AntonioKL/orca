@@ -719,4 +719,47 @@ describe('the managed-auth live gate', () => {
     await until(() => (hasLiveClaudePtys() ? null : true), 'the auth gate to drain')
     expect(hasLiveClaudePtys()).toBe(false)
   }, 30_000)
+
+  // The gate entry is deliberately unpersisted, so confirmSeededClaudeLivePtys can never
+  // reconcile a stray one: a leak here defers the managed OAuth refresh for the life of
+  // the process. Entering the gate only after the release handlers are attached makes
+  // that unreachable regardless of what the setup in between does.
+  it('leaks no gate entry when setup throws between spawn and handler attachment', async () => {
+    await until(() => (hasLiveClaudePtys() ? null : true), 'a drained auth gate')
+    const scenario = scriptScenario([
+      { emit: { type: 'system', subtype: 'init', session_id: SESSION_ID, uuid: 'init-1' } },
+      { wait: HOLD_OPEN }
+    ])
+    let started: SpawnedProcess | null = null
+
+    try {
+      await expect(
+        openClaudeStreamJsonConnection(launchFor(scenario), {}, (spec) => {
+          const child = spawnProcess(spec)
+          started = child
+          const attach = child.stderr.on.bind(child.stderr)
+          // Measured attach order: the SDK binds stderr 'data' from inside query(),
+          // before the child is even assigned. The SECOND bind is this connection's own
+          // armTreeOnOutput — the first statement that runs after the child exists and
+          // before its 'exit'/'close' release handlers. Throwing on the first is
+          // vacuous: it escapes before any gate entry could have happened.
+          let dataAttaches = 0
+          child.stderr.on = ((event: string, listener: (...args: unknown[]) => void) => {
+            if (event === 'data') {
+              dataAttaches += 1
+              if (dataAttaches === 2) {
+                throw new Error('stderr listener attach failed')
+              }
+            }
+            return attach(event, listener)
+          }) as typeof child.stderr.on
+          return child
+        })
+      ).rejects.toThrow('stderr listener attach failed')
+
+      expect(hasLiveClaudePtys()).toBe(false)
+    } finally {
+      ;(started as SpawnedProcess | null)?.kill('SIGKILL')
+    }
+  }, 30_000)
 })

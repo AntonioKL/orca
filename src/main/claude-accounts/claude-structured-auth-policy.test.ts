@@ -6,6 +6,10 @@ import {
   hasClaudeAuthEnvConflict,
   shouldStripClaudeAuthEnvForAccount
 } from './environment'
+import {
+  normalizeTuiAgentEnvRecord,
+  resolveTuiAgentLaunchEnv
+} from '../../shared/tui-agent-launch-defaults'
 import { claudeStructuredAuthPolicyForSettings } from './claude-structured-auth-policy'
 
 const HOST_ACCOUNT = { id: 'host-a', managedAuthRuntime: 'host' } as ClaudeManagedAccount
@@ -117,8 +121,29 @@ describe('hasClaudeAuthEnvConflict matches the strip it guards', () => {
     }
   })
 
-  it('refuses an override whose value is empty, because the strip deletes it anyway', () => {
-    expect(hasClaudeAuthEnvConflict({ ANTHROPIC_API_KEY: '' }, 'linux')).toBe(true)
+  // `ANTHROPIC_API_KEY=` in the agent env box is how a user blanks a variable, and the
+  // settings pipeline preserves the empty value (agent-default-env-draft.ts assigns
+  // everything after the `=`; normalizeTuiAgentEnvRecord drops empty KEYS only). An
+  // empty value cannot beat the pinned account and the strip removes the name anyway,
+  // so refusing it would break a terminal launch that works today for no security gain.
+  it('admits an override whose value is empty, the documented way to blank a variable', () => {
+    expect(hasClaudeAuthEnvConflict({ ANTHROPIC_API_KEY: '' }, 'linux')).toBe(false)
+    expect(hasClaudeAuthEnvConflict({ anthropic_api_key: '' }, 'win32')).toBe(false)
+    expect(hasClaudeAuthEnvConflict({ ANTHROPIC_CUSTOM_HEADERS: '' }, 'linux')).toBe(false)
+  })
+
+  it('still refuses the same names once they carry a value', () => {
+    expect(hasClaudeAuthEnvConflict({ ANTHROPIC_API_KEY: 'sk-ant' }, 'linux')).toBe(true)
+  })
+
+  // The end-to-end shape the regression actually took: settings text -> normalized
+  // record -> launch env -> the predicate the terminal preflight gates on.
+  it('admits a blanked variable all the way from the settings record', () => {
+    const configured = normalizeTuiAgentEnvRecord({ claude: { ANTHROPIC_API_KEY: '' } })
+    const launchEnv = resolveTuiAgentLaunchEnv('claude', configured)
+
+    expect(launchEnv).toEqual({ ANTHROPIC_API_KEY: '' })
+    expect(hasClaudeAuthEnvConflict(launchEnv, 'linux')).toBe(false)
   })
 
   it('folds case on win32, where the OS does', () => {
