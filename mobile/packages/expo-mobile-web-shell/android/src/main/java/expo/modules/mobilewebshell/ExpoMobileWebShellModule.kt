@@ -66,12 +66,15 @@ class ExpoMobileWebShellModule : Module() {
       packageStore.removeHost(hostIdentity)
     }
 
+    // The sessionId prop owns activation. A view missing from the registry is mid-commit for the
+    // same session, not a failure, and rejecting here pinned a false "Hosted session could not be
+    // restored." banner over a healthy page for the rest of the session.
     AsyncFunction("activateViewSession") { sessionId: String ->
-      requireSessionView(sessionId).activateSessionView(sessionId)
+      sessionViews[sessionId]?.activateSessionView(sessionId)
     }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("deactivateViewSession") { sessionId: String ->
-      requireSessionView(sessionId).deactivateSessionView()
+      sessionViews[sessionId]?.deactivateSessionView()
     }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("postViewMessage") { sessionId: String, message: String ->
@@ -107,6 +110,4 @@ class ExpoMobileWebShellModule : Module() {
     }
   }
 
-  private fun requireSessionView(sessionId: String): MobileWebShellView =
-    requireNotNull(sessionViews[sessionId]) { "mobile_web_shell_view_unavailable" }
 }
