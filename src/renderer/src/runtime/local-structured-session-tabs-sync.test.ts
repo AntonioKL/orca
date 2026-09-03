@@ -516,6 +516,26 @@ describe('local structured session tab projection', () => {
       expect.arrayContaining([expect.objectContaining({ entityId: 'session-b' })])
     )
   })
+
+  it('rejects delayed frames from a retired predecessor epoch', () => {
+    const initial = applyLocalStructuredSessionTabSnapshots(createSnapshot(), [
+      structuredInventory('epoch-1', 5, 'session-one')
+    ])
+    const restarted = applyLocalStructuredSessionTabSnapshots(initial, [
+      structuredInventory('epoch-2', 1, 'session-two')
+    ])
+    const delayed = applyLocalStructuredSessionTabSnapshots(restarted, [
+      structuredInventory('epoch-1', 6, 'stale-session')
+    ])
+
+    expect(delayed).toBe(restarted)
+    expect(delayed.unifiedTabsByWorktree[WORKTREE_ID]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ entityId: 'session-two' })])
+    )
+    expect(delayed.unifiedTabsByWorktree[WORKTREE_ID]).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ entityId: 'stale-session' })])
+    )
+  })
 })
 
 function structuredInventory(

@@ -6,6 +6,11 @@ import type { WorktreeRuntimeOwnerState } from '../lib/worktree-runtime-owner'
 import { getExecutionHostIdForWorktree } from '../lib/worktree-runtime-owner'
 import { applyWebSessionTabsSnapshot, applyWebSessionTabsStorePatch } from './web-session-tabs-sync'
 import type { WebSessionTabsSyncState } from './web-session-tabs-sync'
+import {
+  noteRetiredValue,
+  sameSessionTabsPublicationLineage
+} from './web-session-tabs-sync/publisher-identity-fences'
+import type { SessionTabsPublicationEpochHistory } from './web-session-tabs-sync/state'
 
 export const LOCAL_STRUCTURED_SESSION_OWNER = 'local-structured-session'
 let localStructuredSessionTabsRestorePromise: Promise<void> | null = null
@@ -13,9 +18,14 @@ const localStructuredSessionVersionByWorktree = new Map<
   string,
   { publicationEpoch: string; snapshotVersion: number }
 >()
+const localStructuredSessionEpochHistoryByWorktree = new Map<
+  string,
+  SessionTabsPublicationEpochHistory
+>()
 
 export function resetLocalStructuredSessionVersionForTests(): void {
   localStructuredSessionVersionByWorktree.clear()
+  localStructuredSessionEpochHistoryByWorktree.clear()
 }
 
 type SessionTabsEvent =
@@ -84,8 +94,14 @@ export function applyLocalStructuredSessionTabSnapshots<
       continue
     }
     const prior = localStructuredSessionVersionByWorktree.get(snapshot.worktree)
-    const isNewerPublisher = prior?.publicationEpoch !== snapshot.publicationEpoch
-    if (prior && !isNewerPublisher && snapshot.snapshotVersion <= prior.snapshotVersion) {
+    const sharesLineage = Boolean(
+      prior && sameSessionTabsPublicationLineage(prior.publicationEpoch, snapshot.publicationEpoch)
+    )
+    const epochHistory = localStructuredSessionEpochHistoryByWorktree.get(snapshot.worktree)
+    if (epochHistory?.retired.includes(snapshot.publicationEpoch) && !sharesLineage) {
+      continue
+    }
+    if (prior && sharesLineage && snapshot.snapshotVersion <= prior.snapshotVersion) {
       continue
     }
     const patch = applyWebSessionTabsSnapshot(
@@ -104,6 +120,10 @@ export function applyLocalStructuredSessionTabSnapshots<
       publicationEpoch: snapshot.publicationEpoch,
       snapshotVersion: snapshot.snapshotVersion
     })
+    localStructuredSessionEpochHistoryByWorktree.set(
+      snapshot.worktree,
+      noteRetiredValue(epochHistory, snapshot.publicationEpoch, 8)
+    )
   }
   // Drop publisher cursors for worktrees that no longer exist. Without this,
   // every deleted worktree leaves an entry for the lifetime of the renderer.
@@ -121,6 +141,7 @@ export function applyLocalStructuredSessionTabSnapshots<
   for (const worktreeId of localStructuredSessionVersionByWorktree.keys()) {
     if (!knownWorktreeIds.has(worktreeId)) {
       localStructuredSessionVersionByWorktree.delete(worktreeId)
+      localStructuredSessionEpochHistoryByWorktree.delete(worktreeId)
     }
   }
   return next
