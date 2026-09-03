@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
 import type { Tab } from '../../../shared/tab-types'
 import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
+import type { WorktreeRuntimeOwnerState } from '../lib/worktree-runtime-owner'
 import { buildPersistedUnifiedTabSessionData } from '../lib/workspace-session-unified-tabs'
 import { buildHydratedTabState } from '../store/slices/tabs-hydration'
 import {
@@ -210,6 +211,34 @@ describe('local structured session tab projection', () => {
         expect.arrayContaining([expect.objectContaining({ contentType: 'agent-session' })])
       )
     }
+  })
+
+  it('forgets publisher versions when a worktree is removed', () => {
+    type OwnerState = WebSessionTabsSyncState & WorktreeRuntimeOwnerState
+    const owner = {
+      id: WORKTREE_ID,
+      repoId: 'repo-1',
+      hostId: null,
+      runtimeOwnerEnvironmentId: null
+    }
+    let state = {
+      ...createSnapshot(),
+      worktreesByRepo: { 'repo-1': [owner] }
+    } as OwnerState
+    state = applyLocalStructuredSessionTabSnapshots(state, [
+      structuredInventory('epoch-1', 10, 'session-old')
+    ])
+    state = applyLocalStructuredSessionTabSnapshots(
+      { ...state, worktreesByRepo: {}, unifiedTabsByWorktree: {} },
+      []
+    )
+    state = applyLocalStructuredSessionTabSnapshots(
+      { ...state, worktreesByRepo: { 'repo-1': [owner] } },
+      [structuredInventory('epoch-1', 1, 'session-new')]
+    )
+    expect(state.unifiedTabsByWorktree[WORKTREE_ID]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ entityId: 'session-new' })])
+    )
   })
 
   it('drops terminal topology while retaining structured tabs', () => {

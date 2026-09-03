@@ -105,6 +105,24 @@ export function applyLocalStructuredSessionTabSnapshots<
       snapshotVersion: snapshot.snapshotVersion
     })
   }
+  // Drop publisher cursors for worktrees that no longer exist. Without this,
+  // every deleted worktree leaves an entry for the lifetime of the renderer.
+  const knownWorktreeIds = new Set<string>(Object.keys(next.unifiedTabsByWorktree))
+  for (const worktrees of Object.values(next.worktreesByRepo ?? {})) {
+    for (const worktree of worktrees) {
+      knownWorktreeIds.add(worktree.id)
+    }
+  }
+  for (const detected of Object.values(next.detectedWorktreesByRepo ?? {})) {
+    for (const worktree of detected.worktrees) {
+      knownWorktreeIds.add(worktree.id)
+    }
+  }
+  for (const worktreeId of localStructuredSessionVersionByWorktree.keys()) {
+    if (!knownWorktreeIds.has(worktreeId)) {
+      localStructuredSessionVersionByWorktree.delete(worktreeId)
+    }
+  }
   return next
 }
 
@@ -150,6 +168,7 @@ async function startLocalStructuredSessionTabsSync(args: {
     return
   }
   let subscriptionGeneration = 0
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   const subscribeCurrent = async (): Promise<void> => {
     if (args.isDisposed()) {
       return
@@ -171,20 +190,37 @@ async function startLocalStructuredSessionTabsSync(args: {
           // Reattach with one refresh so a runtime-restart boundary cannot strand stale tabs.
           subscriptionGeneration += 1
           handle?.unsubscribe()
-          void refreshLocalStructuredSessionTabs()
-            .catch((error) => console.warn('[structured-session-tabs] resync failed', error))
-            .finally(() => {
-              if (!args.isDisposed()) {
-                void subscribeCurrent()
-              }
-            })
+          if (reconnectTimer !== null) {
+            clearTimeout(reconnectTimer)
+          }
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null
+            void refreshLocalStructuredSessionTabs()
+              .catch((error) => console.warn('[structured-session-tabs] resync failed', error))
+              .finally(() => {
+                if (!args.isDisposed()) {
+                  reconnectTimer = setTimeout(() => {
+                    reconnectTimer = null
+                    void subscribeCurrent().catch((error) =>
+                      console.warn('[structured-session-tabs] resubscribe failed', error)
+                    )
+                  }, 250)
+                }
+              })
+          }, 250)
         }
       }
     )
     if (args.isDisposed() || generation !== subscriptionGeneration) {
       handle.unsubscribe()
     } else {
-      args.setUnsubscribe(handle.unsubscribe)
+      args.setUnsubscribe(() => {
+        if (reconnectTimer !== null) {
+          clearTimeout(reconnectTimer)
+          reconnectTimer = null
+        }
+        handle?.unsubscribe()
+      })
     }
   }
   await subscribeCurrent()

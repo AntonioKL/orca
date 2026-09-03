@@ -228,6 +228,9 @@ function TabBarCreateEntrySession({
       return
     }
     if (selectedOption.kind === 'agent') {
+      if (selectedOption.option.agent === 'codex' && structuredCodexLaunchStatus === 'pending') {
+        return
+      }
       onLaunchAgent?.(selectedOption.option.agent)
       onDidOpenEntry?.()
       return
