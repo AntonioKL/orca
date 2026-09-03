@@ -219,7 +219,7 @@ describe('local structured session tab projection', () => {
       id: WORKTREE_ID,
       repoId: 'repo-1',
       hostId: undefined,
-      runtimeOwnerEnvironmentId: null
+      runtimeOwnerEnvironmentId: undefined
     }
     let state = {
       ...createSnapshot(),
