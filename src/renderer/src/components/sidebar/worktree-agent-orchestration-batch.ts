@@ -20,17 +20,26 @@ type RuntimeDomainCache = {
 
 type RequestedTabMembershipCache = {
   tabsSource: RuntimeOrchestrationState['tabsByWorktree']
-  requestedWorktreeIds: string[]
+  requestedWorktreeIds: readonly string[]
   requestedIds: Set<string>
   worktreeIdsByTabId: Map<string, Set<string>>
 }
 
-type RuntimeBatchCache = {
+/**
+ * Everything `buildRuntimeBatch` is allowed to read. The live and retained maps are not in
+ * here and not in its scope; they reach it only as `paneWorktreeIds`. Anything a future build
+ * needs has to be added here, and this record is also the cache key, so the key cannot drift
+ * from the read set.
+ */
+type RuntimeBatchInputs = {
   runtimeSource: RuntimeOrchestrationMap
   tabsSource: RuntimeOrchestrationState['tabsByWorktree']
-  /** What the batch actually reads out of the live/retained maps; see projectPaneWorktreeIds. */
   paneWorktreeIds: readonly (string | undefined)[]
-  requestedWorktreeIds: string[]
+  requestedWorktreeIds: readonly string[]
+}
+
+type RuntimeBatchCache = {
+  inputs: RuntimeBatchInputs
   recordsByWorktree: ReadonlyMap<string, RuntimeOrchestrationRecord>
 }
 
@@ -111,11 +120,21 @@ function hasSameOrderedValues(previous: readonly unknown[], next: readonly unkno
   return previous.every((value, index) => value === next[index])
 }
 
+function runtimeBatchInputsEqual(previous: RuntimeBatchInputs, next: RuntimeBatchInputs): boolean {
+  return (
+    previous.runtimeSource === next.runtimeSource &&
+    previous.tabsSource === next.tabsSource &&
+    hasSameOrderedValues(previous.paneWorktreeIds, next.paneWorktreeIds) &&
+    hasSameOrderedValues(previous.requestedWorktreeIds, next.requestedWorktreeIds)
+  )
+}
+
 /**
- * The only thing `buildRuntimeBatch` reads out of the live and retained maps: the
- * `worktreeId` each orchestrated pane key resolves to, in ordered-entry order. A
- * status write for any other pane cannot change the batch, so this projection —
- * not the map identities — is the correct cache key.
+ * The batch's whole view of the live and retained maps: the `worktreeId` each orchestrated
+ * pane key resolves to, as live,retained pairs in ordered-entry order. A status write for any
+ * other pane cannot change the batch, so this projection — not the map identities — is the
+ * correct cache key. Exact runtime keys preserve early SSH attribution and ignore stale
+ * `entry.paneKey` fields carried by a live or retained row.
  */
 function projectPaneWorktreeIds(
   orderedRuntimeEntries: readonly [string, AgentStatusOrchestrationContext][],
@@ -134,7 +153,7 @@ function projectPaneWorktreeIds(
 
 function getRequestedTabMembership(
   tabsByWorktree: RuntimeOrchestrationState['tabsByWorktree'],
-  requestedWorktreeIds: string[]
+  requestedWorktreeIds: readonly string[]
 ): RequestedTabMembershipCache {
   if (
     requestedTabMembershipCache?.tabsSource === tabsByWorktree &&
@@ -190,19 +209,17 @@ function reuseRecordIfOrderedEqual(
 }
 
 function buildRuntimeBatch(
-  requestedWorktreeIds: string[],
-  orderedRuntimeEntries: [string, AgentStatusOrchestrationContext][],
-  tabsByWorktree: RuntimeOrchestrationState['tabsByWorktree'],
-  agentStatusByPaneKey: RuntimeOrchestrationState['agentStatusByPaneKey'],
-  retainedAgentsByPaneKey: RuntimeOrchestrationState['retainedAgentsByPaneKey']
+  inputs: RuntimeBatchInputs,
+  orderedRuntimeEntries: [string, AgentStatusOrchestrationContext][]
 ): ReadonlyMap<string, RuntimeOrchestrationRecord> {
   runtimeBatchBuildCount += 1
   const { requestedIds, worktreeIdsByTabId } = getRequestedTabMembership(
-    tabsByWorktree,
-    requestedWorktreeIds
+    inputs.tabsSource,
+    inputs.requestedWorktreeIds
   )
 
   const recordsByWorktree = new Map<string, RuntimeOrchestrationRecord>()
+  let projectionCursor = 0
   for (const [paneKey, orchestration] of orderedRuntimeEntries) {
     const targets = new Set<string>()
     const parsed = parsePaneKey(paneKey)
@@ -220,10 +237,9 @@ function buildRuntimeBatch(
       }
     }
 
-    // Why: exact runtime keys preserve early SSH attribution and ignore stale
-    // entry.paneKey fields carried by a live or retained row.
-    const liveWorktreeId = agentStatusByPaneKey[paneKey]?.worktreeId
-    const retainedWorktreeId = retainedAgentsByPaneKey[paneKey]?.worktreeId
+    const liveWorktreeId = inputs.paneWorktreeIds[projectionCursor]
+    const retainedWorktreeId = inputs.paneWorktreeIds[projectionCursor + 1]
+    projectionCursor += 2
     if (typeof liveWorktreeId === 'string' && requestedIds.has(liveWorktreeId)) {
       targets.add(liveWorktreeId)
     }
@@ -269,35 +285,22 @@ export function selectRuntimeAgentOrchestrationBatch(
     return EMPTY_BATCH
   }
 
-  const tabsByWorktree = state.tabsByWorktree ?? EMPTY_TABS_BY_WORKTREE
-  const agentStatusByPaneKey = state.agentStatusByPaneKey ?? EMPTY_AGENT_STATUS
-  const retainedAgentsByPaneKey = state.retainedAgentsByPaneKey ?? EMPTY_RETAINED_AGENTS
-  const paneWorktreeIds = projectPaneWorktreeIds(
-    orderedRuntimeEntries,
-    agentStatusByPaneKey,
-    retainedAgentsByPaneKey
-  )
-  if (
-    runtimeBatchCache?.runtimeSource === runtimeAgentOrchestrationByPaneKey &&
-    runtimeBatchCache.tabsSource === tabsByWorktree &&
-    hasSameOrderedValues(runtimeBatchCache.paneWorktreeIds, paneWorktreeIds) &&
-    hasSameOrderedValues(runtimeBatchCache.requestedWorktreeIds, requestedWorktreeIds)
-  ) {
+  const inputs: RuntimeBatchInputs = {
+    runtimeSource: runtimeAgentOrchestrationByPaneKey,
+    tabsSource: state.tabsByWorktree ?? EMPTY_TABS_BY_WORKTREE,
+    paneWorktreeIds: projectPaneWorktreeIds(
+      orderedRuntimeEntries,
+      state.agentStatusByPaneKey ?? EMPTY_AGENT_STATUS,
+      state.retainedAgentsByPaneKey ?? EMPTY_RETAINED_AGENTS
+    ),
+    requestedWorktreeIds
+  }
+  if (runtimeBatchCache && runtimeBatchInputsEqual(runtimeBatchCache.inputs, inputs)) {
     return runtimeBatchCache.recordsByWorktree
   }
 
-  runtimeBatchCache = {
-    runtimeSource: runtimeAgentOrchestrationByPaneKey,
-    tabsSource: tabsByWorktree,
-    paneWorktreeIds,
-    requestedWorktreeIds,
-    recordsByWorktree: buildRuntimeBatch(
-      requestedWorktreeIds,
-      orderedRuntimeEntries,
-      tabsByWorktree,
-      agentStatusByPaneKey,
-      retainedAgentsByPaneKey
-    )
-  }
-  return runtimeBatchCache.recordsByWorktree
+  // buildRuntimeBatch reuses the previous records, so publish the new cache only after it runs.
+  const recordsByWorktree = buildRuntimeBatch(inputs, orderedRuntimeEntries)
+  runtimeBatchCache = { inputs, recordsByWorktree }
+  return recordsByWorktree
 }

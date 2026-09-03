@@ -623,6 +623,48 @@ describe('selectRuntimeAgentOrchestrationBatch live-map churn', () => {
     expect(getBatchRecord(first, 'wt-1')[CHILD_KEY]).toBe(ORCHESTRATED_CONTEXT)
   })
 
+  // Why this is a structural guard: the cache key is the projection, so anything the build
+  // reads straight out of the live/retained maps is unkeyed and can go stale. The build no
+  // longer receives those maps at all, which shows up here as exactly one read per pane.
+  it('reads each orchestrated pane out of the live and retained maps once per build', () => {
+    releaseRuntimeAgentOrchestrationBatchCache()
+    const liveReads: string[] = []
+    const retainedReads: string[] = []
+    const countReads = <Value extends object>(target: Value, reads: string[]): Value =>
+      new Proxy(target, {
+        get(source, key, receiver) {
+          if (typeof key === 'string') {
+            reads.push(key)
+          }
+          return Reflect.get(source, key, receiver)
+        }
+      })
+    const state = {
+      tabsByWorktree: TABS_BY_WORKTREE,
+      runtimeAgentOrchestrationByPaneKey: RUNTIME_TWO,
+      agentStatusByPaneKey: countReads(
+        {
+          [CHILD_KEY]: makeEntry(CHILD_KEY, 'wt-1'),
+          [SECOND_CHILD_KEY]: makeEntry(SECOND_CHILD_KEY, 'wt-2')
+        },
+        liveReads
+      ),
+      retainedAgentsByPaneKey: countReads(
+        { [CHILD_KEY]: makeRetained(CHILD_KEY, 'wt-1') },
+        retainedReads
+      )
+    } as BatchState
+
+    const buildsBefore = builds()
+    const batch = selectRuntimeAgentOrchestrationBatch(state, requested)
+
+    expect(builds()).toBe(buildsBefore + 1)
+    expect(liveReads).toEqual([CHILD_KEY, SECOND_CHILD_KEY])
+    expect(retainedReads).toEqual([CHILD_KEY, SECOND_CHILD_KEY])
+    expect(getBatchRecord(batch, 'wt-1')[CHILD_KEY]).toBe(ORCHESTRATED_CONTEXT)
+    expect(getBatchRecord(batch, 'wt-2')[SECOND_CHILD_KEY]).toBe(SECOND_CONTEXT)
+  })
+
   it('rebuilds when an orchestrated pane changes worktree or the entry set changes', () => {
     releaseRuntimeAgentOrchestrationBatchCache()
     const first = selectRuntimeAgentOrchestrationBatch(
