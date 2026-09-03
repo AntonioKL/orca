@@ -21,9 +21,11 @@ import {
   type CompatibleAgentOwnerOptions
 } from '../../../../shared/agent-title-owner'
 import { resolvePaneAgentOwner } from '../../../../shared/pane-agent-owner'
-import { isClaudeIdentityFrameTitle } from '../../../../shared/terminal-title-agent-type'
+import {
+  isClaudeIdentityFrameTitle,
+  resolveExplicitTerminalTitleAgentType
+} from '../../../../shared/terminal-title-agent-type'
 import { resolveCanonicalPaneAgentIdentity } from '../../../../shared/pane-agent-identity-adapter'
-import { resolveExplicitTerminalTitleAgentType } from '../../../../shared/terminal-title-agent-type'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 
 /** Fixed, not per-process: title rows are a pure projection of the current title, so they are
