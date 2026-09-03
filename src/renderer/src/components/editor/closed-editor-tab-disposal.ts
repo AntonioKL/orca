@@ -14,9 +14,15 @@ import {
   deletePaneScopedCacheEntries,
   sweepClosedPdfViewPositions
 } from './closed-editor-tab-cache-sweep'
-import { toMonacoEditModelPath, type MonacoUriNamespace } from './monaco-edit-model-path'
+import {
+  recordUnparseableModelPathShape,
+  toMonacoEditModelPath,
+  type MonacoUriNamespace
+} from './monaco-edit-model-path'
 
-type ClosedEditorTabMonacoRegistry = MonacoModelRegistry & { Uri: MonacoUriNamespace }
+export type ClosedEditorTabMonacoRegistry = Omit<MonacoModelRegistry, 'Uri'> & {
+  Uri: MonacoUriNamespace
+}
 
 function disposeEditTabModel(
   monacoRegistry: ClosedEditorTabMonacoRegistry,
@@ -26,7 +32,8 @@ function disposeEditTabModel(
   try {
     modelUri = monacoRegistry.Uri.parse(toMonacoEditModelPath(monacoRegistry.Uri, filePath))
   } catch {
-    // Why safe: @monaco-editor/react keys the model with this identical parse, so a path that throws here never produced a model to leak.
+    // Reached only if Uri.file() itself rejects the path: no key exists, so nothing to dispose.
+    recordUnparseableModelPathShape('editor_model_dispose_path_unkeyable', filePath)
     return
   }
   monacoRegistry.editor.getModel(modelUri)?.dispose()

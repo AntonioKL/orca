@@ -6,13 +6,14 @@ import {
   scrollTopCache
 } from '@/lib/scroll-cache'
 import type { OpenFile } from '@/store/slices/editor'
-import { disposeClosedEditorTabs } from './closed-editor-tab-disposal'
+import {
+  disposeClosedEditorTabs,
+  type ClosedEditorTabMonacoRegistry
+} from './closed-editor-tab-disposal'
 import {
   getDiffViewerMonacoModelPaths,
-  getDiffViewerMonacoModelPathPrefixes,
-  type MonacoModelRegistry
+  getDiffViewerMonacoModelPathPrefixes
 } from './diff-monaco-model-disposal'
-import type { MonacoUriNamespace } from './monaco-edit-model-path'
 
 const CLOSED_DIFF_TAB_COUNT = 100
 const RETAINED_MODEL_COUNT = 320
@@ -26,8 +27,7 @@ type FakeModel = {
   uri: { toString: (skipEncoding?: boolean) => string }
 }
 
-type FakeRegistry = MonacoModelRegistry & {
-  Uri: MonacoUriNamespace
+type FakeRegistry = ClosedEditorTabMonacoRegistry & {
   models: FakeModel[]
   counters: { getModelsCalls: number; uriToStringCalls: number }
 }

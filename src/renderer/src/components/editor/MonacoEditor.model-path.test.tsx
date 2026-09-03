@@ -2,6 +2,9 @@
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Uri } from 'monaco-editor'
+import type { OpenFile } from '@/store/slices/editor'
+import { disposeClosedEditorTabs } from './closed-editor-tab-disposal'
+import { createMonacoModelRegistryWithRealUri } from './monaco-model-registry-test-fixture'
 
 const editorProps = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }))
 
@@ -71,5 +74,19 @@ describe('MonacoEditor model path', () => {
   it('hands Monaco a parseable path for a WSL/UNC file name carrying a colon', () => {
     expect(() => renderEditor(WSL_COLON_PATH)).not.toThrow()
     expect(() => Uri.parse(String(editorProps.current?.path))).not.toThrow()
+  })
+
+  // Why through the rendered prop, not the helper: this is the only assertion that fails if
+  // MonacoEditor stops routing `path` through the helper and the close-all key drifts.
+  it('keys the model on a path close-all can still dispose', () => {
+    renderEditor(WSL_COLON_PATH)
+    const renderedPath = String(editorProps.current?.path)
+    const registry = createMonacoModelRegistryWithRealUri([renderedPath])
+
+    disposeClosedEditorTabs(registry, [
+      { id: 'poisoned', mode: 'edit', filePath: WSL_COLON_PATH } as OpenFile
+    ])
+
+    expect(registry.disposed).toEqual([renderedPath])
   })
 })
