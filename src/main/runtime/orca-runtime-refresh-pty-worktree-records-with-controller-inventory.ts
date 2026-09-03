@@ -37,7 +37,10 @@ export class OrcaRuntimeWithRefreshPtyWorktreeRecordsWithControllerInventory ext
     deadline?: number,
     connectionId?: string | null,
     retryStale = false,
-    inventoryOptions?: { includeForegroundProcessEvidence?: boolean }
+    inventoryOptions?: {
+      includeForegroundProcessEvidence?: boolean
+      signal?: AbortSignal
+    }
   ): Promise<PtyControllerInventory | null> {
     if (targetWorktreeId === FLOATING_TERMINAL_WORKTREE_ID) {
       const targetedLiveness = this.refreshFloatingWorkspacePtyLiveness()
@@ -74,6 +77,7 @@ export class OrcaRuntimeWithRefreshPtyWorktreeRecordsWithControllerInventory ext
       ...(inventoryOptions?.includeForegroundProcessEvidence === undefined
         ? {}
         : { includeForegroundProcessEvidence: inventoryOptions.includeForegroundProcessEvidence })
+      ...(inventoryOptions?.signal ? { signal: inventoryOptions.signal } : {})
     }
     const processInventory =
       connectionId === undefined && this.ptyController.listProcessesWithHostScope
