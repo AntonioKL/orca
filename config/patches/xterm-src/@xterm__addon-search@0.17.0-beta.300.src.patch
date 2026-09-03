@@ -1,8 +1,58 @@
 diff --git a/src/SearchEngine.ts b/src/SearchEngine.ts
-index 1760bc2bd1fd274d23e2032fde631b39c739f0d9..f856f1f9444a13d29fcbd2f264b0c2bfbf33db1c 100644
+index 1760bc2bd1fd274d23e2032fde631b39c739f0d9..4ce664a7b913c5c19d6bbf7feba92cbdaef38c6f 100644
 --- a/src/SearchEngine.ts
 +++ b/src/SearchEngine.ts
-@@ -250,23 +250,19 @@ export class SearchEngine {
+@@ -76,6 +76,9 @@ export class SearchEngine {
+     // Search from startRow + 1 to end
+     if (!result) {
+       for (let y = startRow + 1; y < this._terminal.buffer.active.baseY + this._terminal.rows; y++) {
++        if (this._isRowCoveredByLineStart(y, searchOptions)) {
++          continue;
++        }
+         searchPosition.startRow = y;
+         searchPosition.startCol = 0;
+         result = this._findInLine(term, searchPosition, searchOptions);
+@@ -127,6 +130,9 @@ export class SearchEngine {
+     // Search from startRow + 1 to end
+     if (!result) {
+       for (let y = startRow + 1; y < this._terminal.buffer.active.baseY + this._terminal.rows; y++) {
++        if (this._isRowCoveredByLineStart(y, searchOptions)) {
++          continue;
++        }
+         searchPosition.startRow = y;
+         searchPosition.startCol = 0;
+         result = this._findInLine(term, searchPosition, searchOptions);
+@@ -138,6 +144,9 @@ export class SearchEngine {
+     // If we hit the bottom and didn't search from the very top wrap back up
+     if (!result && startRow !== 0) {
+       for (let y = 0; y < startRow; y++) {
++        if (this._isRowCoveredByLineStart(y, searchOptions)) {
++          continue;
++        }
+         searchPosition.startRow = y;
+         searchPosition.startCol = 0;
+         result = this._findInLine(term, searchPosition, searchOptions);
+@@ -237,6 +246,19 @@ export class SearchEngine {
+       (((searchIndex + term.length) === line.length) || (Constants.NON_WORD_CHARACTERS.includes(line[searchIndex + term.length])));
+   }
+ 
++  /**
++   * A wrapped row's text was already searched in full when the first row of its line was, so a
++   * full-buffer scan that visits every row does O(rows^2) work over one long line. Skipping is
++   * only sound for a plain search: wholeWord and regex can both reject at one offset and match at
++   * a later one within the same line.
++   */
++  private _isRowCoveredByLineStart(row: number, searchOptions?: ISearchOptions): boolean {
++    if (searchOptions?.regex || searchOptions?.wholeWord) {
++      return false;
++    }
++    return this._terminal.buffer.active.getLine(row)?.isWrapped === true;
++  }
++
+   /**
+    * Searches a line for a search term. Takes the provided terminal line and searches the text line,
+    * which may contain subsequent terminal lines if the text is wrapped. If the provided line number
+@@ -250,23 +272,19 @@ export class SearchEngine {
     * @returns The search result if it was found.
     */
    private _findInLine(term: string, searchPosition: ISearchPosition, searchOptions: ISearchOptions = {}, isReverseSearch: boolean = false): ISearchResult | undefined {

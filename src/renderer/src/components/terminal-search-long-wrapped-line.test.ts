@@ -4,7 +4,10 @@ import { SearchAddon } from '@xterm/addon-search'
 import { Terminal } from '@xterm/xterm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { DESKTOP_TERMINAL_SCROLLBACK_ROWS_MAX } from '../../../shared/terminal-scrollback-policy'
+import {
+  DESKTOP_TERMINAL_SCROLLBACK_ROWS_DEFAULT,
+  DESKTOP_TERMINAL_SCROLLBACK_ROWS_MAX
+} from '../../../shared/terminal-scrollback-policy'
 import { safeFind } from './terminal-search-safe-find'
 
 /**
@@ -32,6 +35,12 @@ const ROWS = 24
 /** Long enough that the wrap chain outruns V8's stack on any host. */
 const WRAPPED_ROWS = 12_000
 const NEEDLE = 'needle'
+/**
+ * A full-buffer scan runs on the renderer's main thread on every keystroke in
+ * the find bar, so anything near this is a visible freeze rather than a slow
+ * search. Unfixed it is ~18s for a default-scrollback buffer; fixed, ~6ms.
+ */
+const FULL_SCAN_BUDGET_MS = 5_000
 
 // Matches the decoration options TerminalSearch passes, so the highlight-all
 // pass (the crash's entry point) actually runs.
@@ -100,6 +109,53 @@ describe('terminal search inside one very long wrapped line', () => {
     expect(() => {
       found = find()
     }).not.toThrow()
+    expect(found).toBe(true)
+  })
+
+  it('scans a long wrapped line once, not once per wrapped row', async () => {
+    const { terminal, search } = openTerminalWithSearch()
+    await write(terminal, 'x'.repeat(COLS * DESKTOP_TERMINAL_SCROLLBACK_ROWS_DEFAULT))
+
+    // No match, so the scan visits every row: the shape that froze the pane.
+    const startedAt = performance.now()
+    safeFind((term, options) => search.findNext(term, options), NEEDLE, {
+      decorations: SEARCH_DECORATIONS
+    })
+
+    expect(performance.now() - startedAt).toBeLessThan(FULL_SCAN_BUDGET_MS)
+  })
+
+  it('reports every match inside a wrapped line', async () => {
+    const { terminal, search } = openTerminalWithSearch()
+    let resultCount = -1
+    search.onDidChangeResults((event) => {
+      resultCount = event.resultCount
+    })
+    // One logical line wrapping over three rows with a match in each, then a
+    // separate unwrapped line.
+    const paddedNeedle = NEEDLE + 'x'.repeat(COLS - NEEDLE.length)
+    await write(terminal, `${paddedNeedle.repeat(3)}\r\nplain ${NEEDLE}\r\n`)
+
+    safeFind((term, options) => search.findNext(term, options), NEEDLE, {
+      decorations: SEARCH_DECORATIONS
+    })
+
+    expect(resultCount).toBe(4)
+  })
+
+  it('still finds a whole-word match that only matches from a later wrapped row', async () => {
+    const { terminal, search } = openTerminalWithSearch()
+    // From the line start the first hit is `aneedlea`, which wholeWord rejects
+    // without looking further, so the match on the second row is only reachable
+    // by searching that row — it must not be skipped as already covered.
+    const filler = 'x'.repeat(COLS - NEEDLE.length - 2)
+    await write(terminal, `a${NEEDLE}a${filler} ${NEEDLE} ${filler}`)
+
+    const found = safeFind((term, options) => search.findNext(term, options), NEEDLE, {
+      wholeWord: true,
+      decorations: SEARCH_DECORATIONS
+    })
+
     expect(found).toBe(true)
   })
 })
