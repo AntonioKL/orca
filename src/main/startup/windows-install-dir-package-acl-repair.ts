@@ -81,7 +81,16 @@ type RepairMarker = {
   appVersion: string
   attemptedAt: number
   outcome: string
+  /** Absent on schemeVersion-1 markers written before the retry budget existed. */
+  attempts?: number
 }
+
+// Why bounded rather than one-and-done: the failure modes are not all permanent.
+// A Defender-locked file, a timeout or a contended volume fails one launch and
+// succeeds the next, and pinning on the first failure leaves the machine blank
+// forever for that version. Three is enough to stop a standard-user Program Files
+// install — which can never win — from re-spawning icacls on every launch.
+const MAX_REPAIR_ATTEMPTS = 3
 
 /**
  * The probe's verdict is the only trigger: an orphan package ACE with no
@@ -106,31 +115,43 @@ function markerPath(userDataPath: string): string {
   return join(userDataPath, WINDOWS_INSTALL_DIR_ACL_REPAIR_MARKER_FILE)
 }
 
-function hasMarkerFor(args: WindowsInstallDirAclRepairArgs): boolean {
+/** The marker for this exact install and version, or null. */
+function readMarkerFor(args: WindowsInstallDirAclRepairArgs): Partial<RepairMarker> | null {
   try {
     const parsed = JSON.parse(readFileSync(markerPath(args.userDataPath), 'utf-8')) as
       | Partial<RepairMarker>
       | undefined
-    return (
-      parsed?.schemeVersion === WINDOWS_INSTALL_DIR_ACL_REPAIR_SCHEME_VERSION &&
-      parsed.installDir === args.installDir &&
-      parsed.appVersion === args.appVersion
-    )
+    if (
+      parsed?.schemeVersion !== WINDOWS_INSTALL_DIR_ACL_REPAIR_SCHEME_VERSION ||
+      parsed.installDir !== args.installDir ||
+      parsed.appVersion !== args.appVersion
+    ) {
+      return null
+    }
+    return parsed
   } catch {
-    return false // missing or corrupt -> attempt again
+    return null // missing or corrupt -> attempt again
   }
 }
 
-// Why write it on failure too: a standard-user Program Files install can never
-// win, and re-spawning icacls on every launch forever buys nothing. Reinstall or
-// update changes the key and retries.
+function hasMarkerFor(args: WindowsInstallDirAclRepairArgs): boolean {
+  const marker = readMarkerFor(args)
+  if (!marker) {
+    return false
+  }
+  return marker.outcome === 'repaired' || (marker.attempts ?? 0) >= MAX_REPAIR_ATTEMPTS
+}
+
+// Why write it on failure too: re-spawning icacls on every launch forever buys
+// nothing, so failures spend the retry budget. Reinstall or update changes the key.
 function writeMarker(args: WindowsInstallDirAclRepairArgs, outcome: string): void {
   const marker: RepairMarker = {
     schemeVersion: WINDOWS_INSTALL_DIR_ACL_REPAIR_SCHEME_VERSION,
     installDir: args.installDir ?? '',
     appVersion: args.appVersion,
     attemptedAt: Date.now(),
-    outcome
+    outcome,
+    attempts: (readMarkerFor(args)?.attempts ?? 0) + 1
   }
   if (!existsSync(args.userDataPath)) {
     mkdirSync(args.userDataPath, { recursive: true })

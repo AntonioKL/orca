@@ -233,6 +233,38 @@ describe('repairWindowsInstallDirPackageAcl', () => {
     expect(marker.outcome).toBe('failed')
   })
 
+  // The bricking mechanism: a marker was written on failure and matched regardless of
+  // outcome, so one Defender-locked file or one timeout pinned the machine to
+  // 'marker-hit' — repair permanently skipped — for the life of that version.
+  it('retries a failed repair on later launches, then stops once the budget is spent', async () => {
+    const userDataPath = userDataDir()
+    const failing = fakeRunner(() => ({ code: 5, stderr: 'Access is denied.' }))
+    for (let attempt = 0; attempt < 3; attempt++) {
+      resetWindowsInstallDirAclRepairForTest()
+      expect((await repair({ userDataPath, run: failing.run })).result.mode).toBe('failed')
+    }
+    expect(failing.specs).toHaveLength(6)
+
+    resetWindowsInstallDirAclRepairForTest()
+    const spent = fakeRunner()
+    const { result } = await repair({ userDataPath, run: spent.run })
+    expect(result).toEqual({ mode: 'marker-hit' })
+    expect(spent.specs).toHaveLength(0)
+  })
+
+  it('stops retrying immediately once a repair has succeeded', async () => {
+    const userDataPath = userDataDir()
+    resetWindowsInstallDirAclRepairForTest()
+    await repair({ userDataPath, run: fakeRunner(() => ({ code: 5 })).run })
+    resetWindowsInstallDirAclRepairForTest()
+    expect((await repair({ userDataPath })).result).toEqual({ mode: 'repaired' })
+
+    resetWindowsInstallDirAclRepairForTest()
+    const after = fakeRunner()
+    expect((await repair({ userDataPath, run: after.run })).result).toEqual({ mode: 'marker-hit' })
+    expect(after.specs).toHaveLength(0)
+  })
+
   it('is a no-op off win32 and in serve mode', async () => {
     const off = fakeRunner()
     repairWindowsInstallDirPackageAcl({

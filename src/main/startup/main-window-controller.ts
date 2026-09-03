@@ -10,7 +10,10 @@ import { resolveConsent } from '../telemetry/consent'
 import { trackAppOpenedOnce } from '../telemetry/client'
 import { ensureWindowsUserDataAclGrant } from './windows-user-data-acl'
 import { probeWindowsInstallDirAcl } from './windows-install-dir-acl-probe'
-import { startWindowsInstallDirAclRepairIfPoisoned } from './windows-install-dir-acl-recovery'
+import {
+  noteWindowsInstallDirAclProbePending,
+  startWindowsInstallDirAclRepairIfPoisoned
+} from './windows-install-dir-acl-recovery'
 import { logStartupMilestone } from './startup-diagnostics'
 import { notifyMainWindowBecameVisible } from '../window/main-window-visibility'
 import { setTrayAttention } from '../tray/system-tray'
@@ -74,6 +77,9 @@ export function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}
     })
     // Why here: read-only, and the install DACL is the one thing a 0x80000003
     // child death cannot tell us about itself. See electron/electron#51761.
+    if (!state.isServeMode) {
+      noteWindowsInstallDirAclProbePending()
+    }
     probeWindowsInstallDirAcl({
       isServeMode: state.isServeMode,
       onDone: (data) =>

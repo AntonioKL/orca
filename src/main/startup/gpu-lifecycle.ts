@@ -16,6 +16,7 @@ import { promptForGpuFallbackRestart } from '../crash-reporting/gpu-fallback-res
 import { engageGpuFallbackAfterCrashBurst } from '../crash-reporting/gpu-fallback-engagement'
 import { recordCrashBreadcrumb } from '../crash-reporting/crash-breadcrumb-store'
 import { recordDurableCrashBreadcrumb } from '../crash-reporting/durable-crash-breadcrumb'
+import { isInstallDirAclSuspect } from './windows-install-dir-acl-recovery'
 import { mainProcessState as state, gpuFallbackEnvironment } from './main-process-state'
 import { createGpuAccelerationAboutPanelOptions } from '../menu/gpu-acceleration-about-panel'
 
@@ -122,6 +123,12 @@ export async function handleGpuChildCrash(
 ): Promise<void> {
   // Software rendering already active or shutting down: nothing more to do.
   if (state.gpuFallbackActiveThisLaunch || state.isQuitting || state.isServeMode) {
+    return
+  }
+  // Why: a poisoned install DACL kills the GPU child exactly like a bad driver, but
+  // safe graphics does not rescue it and --in-process-gpu removes the GPU child, so
+  // every later crash loses the sibling deaths that identify the real cause.
+  if (isInstallDirAclSuspect()) {
     return
   }
   const result = state.gpuCrashFallbackTracker.recordGpuCrash(crashedAt)
