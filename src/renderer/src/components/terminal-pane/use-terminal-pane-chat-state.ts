@@ -137,6 +137,8 @@ export function useTerminalPaneChatState(controller: TerminalPaneTitleController
       getNativeChatLeafIds,
       getTabWideAgentHintLeafId,
       runtimePaneTitlesByPaneId,
+      structuredSessionAgent,
+      terminalTab?.launchAgent,
       terminalTab?.title,
       unifiedTabLabel
     ]

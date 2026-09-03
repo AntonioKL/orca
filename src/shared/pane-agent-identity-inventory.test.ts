@@ -28,7 +28,8 @@ const HELPERS = [
 ] as const
 
 const TEST_SUPPORT_PATHS = new Set([
-  'src/renderer/src/components/terminal-pane/pty-connection-test-environment.ts'
+  'src/renderer/src/components/terminal-pane/pty-connection-test-environment.ts',
+  'src/renderer/src/lib/tab-agent-identity-shipping-baseline.ts'
 ])
 
 type Helper = (typeof HELPERS)[number]
@@ -363,7 +364,7 @@ const INVENTORY: readonly InventoryGroup[] = [
       ['src/renderer/src/components/tab-bar/tab-agent-types-by-tab-id.ts', 3],
       ['src/renderer/src/components/terminal-pane/native-chat-leaf-title-agent.ts', 2],
       ['src/renderer/src/components/terminal-pane/pty-connection/pane-agent-identity.ts', 2],
-      ['src/renderer/src/components/terminal-pane/terminal-tab-agent-type-index.ts', 3],
+      ['src/renderer/src/components/terminal-pane/terminal-tab-agent-type-index.ts', 2],
       ['src/renderer/src/lib/tab-agent-from-signals.ts', 2],
       ['src/renderer/src/lib/tab-agent-status-index.ts', 2],
       ['src/renderer/src/lib/worktree-status.ts', 2],

@@ -6,7 +6,7 @@ import {
   resolveCanonicalPaneAgentIdentity,
   type CanonicalPaneAgentIdentity
 } from '../../../shared/pane-agent-identity-adapter'
-import { resolveShippingTabAgentBaseline } from './tab-agent-identity-shipping-baseline.test'
+import { resolveShippingTabAgentBaseline } from './tab-agent-identity-shipping-baseline'
 import type { TuiAgent } from '../../../shared/tui-agent'
 
 const AGENTS: readonly TuiAgent[] = ['claude', 'codex']
@@ -157,8 +157,7 @@ describe('renderer ladder decision table', () => {
       join(tmpdir(), 'orca-pane-agent-identity-decision-table-real.json'),
       `${JSON.stringify(result, null, 2)}\n`
     )
-    // Replayed against the frozen pre-tranche shipping ladder (not a hand-written model). These
-    // differ from the approved 2,520/648 totals and 396/144/72/36 breakdown; see the PR body.
+    // Replayed against the real pre-tranche shipping function (not a hand-written model).
     expect(proofFree).toMatchObject({
       disagreements: 2_622,
       flipped: 1_872,

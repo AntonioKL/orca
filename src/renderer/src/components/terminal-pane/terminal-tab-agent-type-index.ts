@@ -1,6 +1,9 @@
 import type { AgentStatusEntry, AgentType } from '../../../../shared/agent-status-types'
 import type { PaneForegroundAgentEntry } from '../../store/slices/pane-foreground-agent'
-import { resolveCanonicalPaneAgentIdentity } from '../../../../shared/pane-agent-identity-adapter'
+import {
+  resolveCanonicalPaneAgentIdentity,
+  type ForegroundProcessProof
+} from '../../../../shared/pane-agent-identity-adapter'
 import { agentTypeToIconAgent } from '@/lib/agent-status'
 
 export type TerminalTabAgentTypeState = Record<string, AgentStatusEntry>
@@ -14,6 +17,13 @@ const EMPTY_AGENT_TYPES_BY_LEAF: TerminalTabAgentTypesByLeaf = Object.freeze({})
 const EMPTY_FOREGROUND_AGENT_BY_PANE_KEY: Record<string, PaneForegroundAgentEntry> = Object.freeze(
   {}
 )
+
+type PaneAgentProjectionEvidence = {
+  hookAgent?: ReturnType<typeof agentTypeToIconAgent>
+  completedHookAgent?: ReturnType<typeof agentTypeToIconAgent>
+  processAgent?: PaneForegroundAgentEntry['agent']
+  processProof?: ForegroundProcessProof | null
+}
 
 function reuseRecordIfEqual(
   previous: TerminalTabAgentTypesByLeaf | undefined,
@@ -45,14 +55,37 @@ export function createTerminalTabAgentTypeSelector(
     // Zustand notifications skip the global scan entirely.
     if (state !== cachedState || foreground !== cachedForeground) {
       const previousByTabId = cachedByTabId
-      const nextByTabId = new Map<string, Record<string, AgentType>>()
+      const evidenceByPaneKey = new Map<string, PaneAgentProjectionEvidence>()
       for (const [paneKey, entry] of Object.entries(state)) {
         dependencies.onEntryVisited?.(paneKey)
         const entryAgent = agentTypeToIconAgent(entry.agentType)
+        if (!entryAgent) {
+          continue
+        }
+        evidenceByPaneKey.set(
+          paneKey,
+          entry.state === 'done' ? { completedHookAgent: entryAgent } : { hookAgent: entryAgent }
+        )
+      }
+      for (const [paneKey, entry] of Object.entries(foreground)) {
+        if (!entry.agent || entry.shellForeground || entry.routingRevoked) {
+          continue
+        }
+        const existing = evidenceByPaneKey.get(paneKey) ?? {}
+        evidenceByPaneKey.set(paneKey, {
+          ...existing,
+          processAgent: entry.agent,
+          processProof: entry.processProof
+        })
+      }
+      const nextByTabId = new Map<string, Record<string, AgentType>>()
+      for (const [paneKey, evidence] of evidenceByPaneKey) {
         const identity = resolveCanonicalPaneAgentIdentity({
-          hookAgent: entry.state === 'done' ? null : entryAgent,
-          hookIsLive: true,
-          completedHookAgent: entry.state === 'done' ? entryAgent : null
+          hookAgent: evidence.hookAgent,
+          hookIsLive: evidence.hookAgent != null,
+          completedHookAgent: evidence.completedHookAgent,
+          foregroundAgent: evidence.processAgent,
+          processProof: evidence.processProof
         })
         if (!identity.agent) {
           continue
@@ -66,30 +99,6 @@ export function createTerminalTabAgentTypeSelector(
         const byLeaf = nextByTabId.get(entryTabId)
         if (byLeaf) {
           byLeaf[leafId] = identity.agent
-        } else {
-          nextByTabId.set(entryTabId, { [leafId]: identity.agent })
-        }
-      }
-      for (const [paneKey, entry] of Object.entries(foreground)) {
-        if (!entry.agent || entry.shellForeground || entry.routingRevoked) {
-          continue
-        }
-        const identity = resolveCanonicalPaneAgentIdentity({
-          foregroundAgent: entry.agent,
-          processProof: entry.processProof
-        })
-        if (!identity.agent) {
-          continue
-        }
-        const separator = paneKey.indexOf(':')
-        if (separator <= 0) {
-          continue
-        }
-        const entryTabId = paneKey.slice(0, separator)
-        const leafId = paneKey.slice(separator + 1)
-        const byLeaf = nextByTabId.get(entryTabId)
-        if (byLeaf) {
-          byLeaf[leafId] ??= identity.agent
         } else {
           nextByTabId.set(entryTabId, { [leafId]: identity.agent })
         }

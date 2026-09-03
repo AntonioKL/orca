@@ -10,8 +10,8 @@ import { resolveCanonicalPaneAgentIdentity } from '../../../shared/pane-agent-id
  * `tab-agent.ts`. Without it each of ~200 mounted tabs re-scanned (and
  * re-parsed the pane key of) the whole global status map on every render.
  *
- * Panes keep the source map's insertion order because the resolvers return the
- * FIRST match — order decides which icon a split tab shows.
+ * Panes keep the source map's insertion order for stable projections; the canonical resolver
+ * fences conflicting same-rank identities instead of letting insertion order choose an icon.
  */
 export type TabAgentPane = { readonly leafId: string; readonly agent: TuiAgent }
 

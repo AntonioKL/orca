@@ -98,4 +98,23 @@ describe('createTerminalTabAgentTypeSelector', () => {
       })
     ).toEqual({})
   })
+
+  it('lets a fresh foreground proof outrank a completed hook for the same pane', () => {
+    const select = createTerminalTabAgentTypeSelector()
+    expect(
+      select({ 'tab-1:leaf-a': entry('claude', 'done') }, 'tab-1', {
+        'tab-1:leaf-a': {
+          agent: 'codex',
+          processProof: {
+            agent: 'codex',
+            processIncarnation: 'fixture-process',
+            authorityId: 'fixture-authority',
+            capturedAgeMs: 10,
+            validForMs: 1_000
+          },
+          shellForeground: false
+        }
+      })
+    ).toEqual({ 'leaf-a': 'codex' })
+  })
 })
