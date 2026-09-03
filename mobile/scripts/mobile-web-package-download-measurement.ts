@@ -6,7 +6,6 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import nacl from 'tweetnacl'
-import { WebSocketServer } from 'ws'
 import {
   downloadMobileWebPackage,
   type MobileWebPackageStager
