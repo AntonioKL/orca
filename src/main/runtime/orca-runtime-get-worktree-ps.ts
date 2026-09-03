@@ -25,6 +25,8 @@ import { resolveStartupShell, tokenizeStartupCommand } from '../../shared/tui-ag
 import { resolveCodexStructuredAppServerArgs } from '../codex/codex-structured-app-server-args'
 import type { StructuredAgentSessionHandoffTransport } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import { hostname } from 'node:os'
+import { shouldStripClaudeAuthEnvForAccount } from '../claude-accounts/environment'
+import { getSelectedClaudeAccountIdForTarget } from '../claude-accounts/runtime-selection'
 import { probeAgentSessionProcessIdentity } from './agent-session-process-identity-probe'
 import { structuredAgentSessionTabId } from '../../shared/structured-agent-session-projection'
 
@@ -156,6 +158,17 @@ export class OrcaRuntimeWithGetWorktreePs extends OrcaRuntimeWithStructuredAgent
         resolveTuiAgentLaunchEnv('codex', this.requireStore().getSettings().agentDefaultEnv),
       resolveClaudeLaunchEnv: () =>
         resolveTuiAgentLaunchEnv('claude', this.requireStore().getSettings().agentDefaultEnv),
+      // Structured Claude always spawns a native local-host child (the launch resolver
+      // refuses any WSL or remote record), so the host selection owns its auth.
+      resolveClaudeAuthPolicy: () => {
+        const settings = this.requireStore().getSettings()
+        return {
+          stripAuthEnv: shouldStripClaudeAuthEnvForAccount(
+            settings.claudeManagedAccounts,
+            getSelectedClaudeAccountIdForTarget(settings, { runtime: 'host' })
+          )
+        }
+      },
       handoffTransport: this.createStructuredAgentSessionHandoffTransport()
     })
   }

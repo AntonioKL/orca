@@ -34,6 +34,7 @@ import { readEchoedAgentSessionSpawnToken } from './agent-session-spawn-token-re
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import { resolveLoginShellEnvironment } from '../startup/login-shell-environment'
 import { recordAgentSessionProviderHandle } from './agent-session-provider-handle-transition'
+import type { ClaudeStructuredAuthPolicy } from '../claude/claude-structured-launch-resolution'
 import { createStructuredClaudeRuntimeAdapter } from './structured-claude-runtime-adapter'
 
 /** Sibling of the journal tree rather than inside it: one file adjudicates every
@@ -68,6 +69,7 @@ export type StructuredAgentSessionRuntimeDeps = {
   resolveLaunchEnv?: () => Promise<NodeJS.ProcessEnv>
   resolveLaunchEnvOverlay?: () => Promise<Record<string, string>> | Record<string, string>
   resolveClaudeLaunchEnv?: () => Promise<Record<string, string>> | Record<string, string>
+  resolveClaudeAuthPolicy?: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
   resolveEnvironment?: () => Promise<NodeJS.ProcessEnv>
   resolveCodexOverrides?: () => NodeJS.ProcessEnv
   onError?: (input: { scope: string; error: unknown }) => void
@@ -184,6 +186,9 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       ...(deps.resolveClaudeCommand ? { resolveClaudeCommand: deps.resolveClaudeCommand } : {}),
       ...(deps.resolveClaudeLaunchEnv
         ? { resolveClaudeLaunchEnv: deps.resolveClaudeLaunchEnv }
+        : {}),
+      ...(deps.resolveClaudeAuthPolicy
+        ? { resolveClaudeAuthPolicy: deps.resolveClaudeAuthPolicy }
         : {}),
       onUnexpectedExit: (event) => {
         recoveryChain = recoveryChain.then(async () => {

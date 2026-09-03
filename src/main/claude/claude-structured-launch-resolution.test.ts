@@ -49,11 +49,16 @@ function makeExecutable(path: string): void {
   }
 }
 
-function resolverFor(value: AgentSessionRecord | null, resolveEnv?: () => Record<string, string>) {
+function resolverFor(
+  value: AgentSessionRecord | null,
+  resolveEnv?: () => Record<string, string>,
+  stripAuthEnv = false
+) {
   return createClaudeStructuredLaunchResolver({
     store: { getRecord: () => value } as unknown as AgentSessionRecordStore,
     resolveWorkspacePath: async (id) => `/repos/${id}`,
     resolveCommand: () => '/usr/local/bin/claude',
+    resolveAuthPolicy: () => ({ stripAuthEnv }),
     ...(resolveEnv ? { resolveEnv } : {})
   })
 }
@@ -200,7 +205,10 @@ describe('claude structured launch resolution', () => {
     expect((await resolver({ identity: IDENTITY })).env?.ANTHROPIC_AUTH_TOKEN).toBe('rotated-token')
   })
 
-  it('strips ambient Anthropic auth from the inherited env but keeps the rest of it', async () => {
+  // Stripping is the managed-account rule the terminal preflight computes at
+  // runtime-auth-preparation.ts:72; claude-structured-auth-parity.test.ts covers
+  // the system-auth half, where the user's own key has to survive.
+  it('strips ambient Anthropic auth under a managed account but keeps the rest of the env', async () => {
     const restore = {
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
       ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
@@ -212,7 +220,7 @@ describe('claude structured launch resolution', () => {
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'oauth-SHELL-LEAK'
     process.env.ORCA_LAUNCH_RESOLUTION_MARKER = 'inherited'
     try {
-      const launch = await resolverFor(record())({ identity: IDENTITY })
+      const launch = await resolverFor(record(), undefined, true)({ identity: IDENTITY })
 
       expect(launch.env?.ANTHROPIC_API_KEY).toBeUndefined()
       expect(launch.env?.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
@@ -231,7 +239,7 @@ describe('claude structured launch resolution', () => {
     }
   })
 
-  it('lets an explicit Claude env overlay override the stripped ambient auth', async () => {
+  it('lets an explicit Claude env overlay override ambient auth under system auth', async () => {
     const restore = process.env.ANTHROPIC_API_KEY
     process.env.ANTHROPIC_API_KEY = 'sk-ant-SHELL-LEAK'
     try {

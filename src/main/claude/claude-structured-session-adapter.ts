@@ -6,10 +6,8 @@ import type {
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import { answerClaudePrompt, cancelClaudeTurn } from './claude-structured-control-actions'
 import { dispatchClaudeTurn } from './claude-structured-dispatch'
-import {
-  acquireClaudeSession,
-  releaseClaudeAcquisition
-} from './claude-structured-session-acquisition'
+import { releaseClaudeAcquisition } from './claude-structured-acquisition-release'
+import { acquireClaudeSession } from './claude-structured-session-acquisition'
 export { CLAUDE_STRUCTURED_INIT_TIMEOUT_MS } from './claude-structured-session-acquisition'
 import { supportsClaudeStructuredLocation } from './claude-structured-location-support'
 import { setClaudeStructuredOption } from './claude-structured-options'

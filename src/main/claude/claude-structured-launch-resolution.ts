@@ -4,7 +4,13 @@ import type { AgentSessionJournalIdentity } from '../../shared/agent-session-jou
 import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-provider-handle'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
-import { applyClaudeEnvPatch } from '../claude-accounts/environment'
+import {
+  CLAUDE_AUTH_ENV_CONFLICT_MESSAGE,
+  CLAUDE_AUTH_SWITCH_IN_PROGRESS_MESSAGE,
+  applyClaudeEnvPatch,
+  hasClaudeAuthEnvConflict
+} from '../claude-accounts/environment'
+import { isClaudeAuthSwitchInProgress } from '../claude-accounts/live-pty-gate'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 
@@ -110,6 +116,16 @@ export type ClaudeStructuredLaunch = {
   resumed: boolean
 }
 
+/** The structured mirror of the terminal preflight's `prepareClaudeAuth` result:
+ *  the one field a launch resolution needs from the managed-account state. */
+export type ClaudeStructuredAuthPolicy = {
+  stripAuthEnv: boolean
+}
+
+/** No policy resolver wired means no managed-account service to answer for, which
+ *  is what the terminal preflight computes when no account is selected. */
+const SYSTEM_AUTH_POLICY: ClaudeStructuredAuthPolicy = { stripAuthEnv: false }
+
 export type ClaudeStructuredLaunchResolverDeps = {
   store: AgentSessionRecordStore
   resolveWorkspacePath: (workspaceId: string) => Promise<string>
@@ -118,6 +134,13 @@ export type ClaudeStructuredLaunchResolverDeps = {
     | Promise<Record<string, string> | undefined>
     | Record<string, string>
     | undefined
+  resolveAuthPolicy?: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
+}
+
+export function assertClaudeAuthSwitchIdle(): void {
+  if (isClaudeAuthSwitchInProgress()) {
+    throw new Error(CLAUDE_AUTH_SWITCH_IN_PROGRESS_MESSAGE)
+  }
 }
 
 export function claudeSessionIdForOrcaSession(sessionId: string): string {
@@ -132,6 +155,7 @@ export function createClaudeStructuredLaunchResolver(
   deps: ClaudeStructuredLaunchResolverDeps
 ): (input: { identity: AgentSessionJournalIdentity }) => Promise<ClaudeStructuredLaunch> {
   return async ({ identity }) => {
+    assertClaudeAuthSwitchIdle()
     const record = deps.store.getRecord(identity.sessionId)
     if (!record) {
       throw new Error(`no durable agent-session record for ${identity.sessionId}`)
@@ -165,11 +189,21 @@ export function createClaudeStructuredLaunchResolver(
         : claudeSessionIdForOrcaSession(identity.sessionId)
     const durable = claudeSdkOptionsForLaunchArgs(record.launchArgs ?? [])
     const command = (deps.resolveCommand ?? resolveClaudeCommand)()
+    const auth = (await deps.resolveAuthPolicy?.()) ?? SYSTEM_AUTH_POLICY
     const overlay = await deps.resolveEnv?.()
+    // A switch can begin while the policy and overlay resolve, exactly as it can
+    // during the terminal preflight's prepareClaudeAuth — recheck after the awaits.
+    assertClaudeAuthSwitchIdle()
+    // Under a managed account the pinned credential is the only auth this launch may
+    // use, so an explicit override is refused rather than silently beating the pin.
+    if (auth.stripAuthEnv && hasClaudeAuthEnvConflict(overlay)) {
+      throw new Error(CLAUDE_AUTH_ENV_CONFLICT_MESSAGE)
+    }
     // Why the overlay merges onto the inherited env rather than replacing it: the child
     // still needs PATH and the rest of the shell environment, and withCliRuntimeOnPath
     // derives PATH from what it is handed. Ambient Anthropic auth is stripped from the
-    // inherited half only, so an explicit agentDefaultEnv override still wins.
+    // inherited half only when a managed account owns the credential; a system-auth
+    // user's own key is their sign-in and must reach the child.
     const env = withCliRuntimeOnPath(
       command,
       {
@@ -177,7 +211,7 @@ export function createClaudeStructuredLaunchResolver(
           cloneDefinedEnv(process.env),
           {},
           {
-            stripAuthEnv: true,
+            stripAuthEnv: auth.stripAuthEnv,
             platform: process.platform
           }
         ),

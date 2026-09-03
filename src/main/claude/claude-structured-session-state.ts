@@ -254,3 +254,16 @@ export async function cancelClaudeAcquisitionAttempt(
     finished: attempt.finished
   })
 }
+
+/** What an acquisition hands back to the adapter that owns the session map:
+ *  event delivery ordered against publication, and the two exit settlements. */
+export type ClaudeAcquireCallbacks = {
+  deliver: (attempt: ClaudeAcquisitionAttempt, sessionId: string, event: () => void) => void
+  emit: (
+    session: ClaudeSession | null,
+    events: StructuredAgentSessionEventSink | undefined,
+    event: ClaudeStructuredSessionEvent
+  ) => void
+  handleExit: (sessionId: string, attempt: ClaudeAcquisitionAttempt, error: Error) => void
+  settleExit: (sessionId: string, exit: ClaudeSessionExit) => Promise<void>
+}
