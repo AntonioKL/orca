@@ -35,6 +35,29 @@ export const GH_RETRY_DELAYS_MS = [250, 1000] as const
 export const GH_RETRY_AFTER_MAX_MS = 30_000
 const DEFAULT_GH_EXEC_TIMEOUT_MS = 30_000
 
+/**
+ * Thrown when a hosted-provider CLI was killed at its deadline without answering.
+ *
+ * Why a type and not a message match: the unresponsive breaker (#18234) must
+ * count *only* deadline kills. A CLI that exits non-zero answered, and an
+ * aborted call is the caller giving up — neither is evidence of a wedged binary.
+ *
+ * Why the message names the spawned binary rather than the CLI: under WSL the
+ * process that actually overran the deadline is `wsl.exe`, and callers already
+ * surface that distinction.
+ */
+export class HostedCliTimeoutError extends Error {
+  readonly cli: string
+  readonly timeoutMs: number
+
+  constructor(cli: string, spawnedBinary: string, timeoutMs: number) {
+    super(`${spawnedBinary} timed out.`)
+    this.name = 'HostedCliTimeoutError'
+    this.cli = cli
+    this.timeoutMs = timeoutMs
+  }
+}
+
 export async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
     throw createAbortError()

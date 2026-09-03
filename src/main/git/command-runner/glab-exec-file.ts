@@ -6,11 +6,19 @@ import { execFileCaptureToTermination } from './exec-file-capture'
 import type { GitExecOptions } from './git-exec-options'
 import { argsLookIdempotent } from './gh-idempotency'
 import {
+  HostedCliTimeoutError,
   isTransientGhError,
   sleep,
   GH_RETRY_AFTER_MAX_MS,
   GH_RETRY_DELAYS_MS
 } from './gh-retry-policy'
+import {
+  cliRuntimeScopeKey,
+  createCliUnresponsiveError,
+  getCliUnresponsiveBlockedUntilMs,
+  recordCliDeadlineKill,
+  recordCliResponded
+} from '../hosted-cli-unresponsive-breaker'
 
 // Why: cloned from the gh runner rather than abstracted behind a generic runner, to avoid touching the working gh path.
 const DEFAULT_GLAB_EXEC_TIMEOUT_MS = 30_000
@@ -59,9 +67,17 @@ export async function glabExecFileAsync(
 ): Promise<{ stdout: string; stderr: string }> {
   ;({ args, options } = redirectPortedHostnameToEnv(args, options))
   let resolved = resolveCommand('glab', args, options.cwd, options.wslDistro)
+  const timeoutMs = options.timeout ?? DEFAULT_GLAB_EXEC_TIMEOUT_MS
   let lastError: unknown
   let attemptedDefaultWslFallback = false
   for (let attempt = 0; attempt <= GH_RETRY_DELAYS_MS.length; attempt++) {
+    // Why outside the try: a glab wedged the way #18234's gh was must not be
+    // re-spawned every cycle, and this throw means nothing was spawned.
+    const scope = cliRuntimeScopeKey('glab', resolved.wsl?.distro)
+    const blockedUntilMs = getCliUnresponsiveBlockedUntilMs(scope)
+    if (blockedUntilMs !== null) {
+      throw createCliUnresponsiveError('glab', blockedUntilMs)
+    }
     try {
       // Why to-termination: same shim chain as gh — the deadline has to reap the
       // whole tree, not just the wrapper that spawned it (#18234).
@@ -72,15 +88,26 @@ export async function glabExecFileAsync(
           cwd: resolved.cwd,
           encoding: (options.encoding ?? 'utf-8') as BufferEncoding,
           maxBuffer: options.maxBuffer,
-          timeout: options.timeout ?? DEFAULT_GLAB_EXEC_TIMEOUT_MS,
+          timeout: timeoutMs,
           env: options.env,
-          signal: options.signal
+          signal: options.signal,
+          createTimeoutError: () => new HostedCliTimeoutError('glab', resolved.binary, timeoutMs)
         },
         resolved.termination
       )
+      recordCliResponded(scope)
       return { stdout: stdout as string, stderr: stderr as string }
     } catch (err) {
       lastError = err
+      if (err instanceof HostedCliTimeoutError) {
+        // Why no retry: each retry would pay another full deadline against a
+        // binary that has already proven it never answers (#18234).
+        recordCliDeadlineKill(scope)
+        throw err
+      }
+      if (!(err instanceof Error && err.name === 'AbortError')) {
+        recordCliResponded(scope)
+      }
       const { stderr } = extractExecError(err)
       if (
         process.platform === 'win32' &&

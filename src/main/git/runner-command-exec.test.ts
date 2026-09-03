@@ -26,8 +26,12 @@ import {
   GitAdmissionScheduler,
   _resetGitAdmissionForTests
 } from './command-runner/git-subprocess-admission'
+import { _resetCliUnresponsiveBreaker } from './hosted-cli-unresponsive-breaker'
 
 afterEach(() => _resetGitAdmissionForTests())
+// Why: the unresponsive breaker is process-global by design, so a case that
+// drives gh to its deadline would otherwise block the next case's spawn.
+afterEach(() => _resetCliUnresponsiveBreaker())
 
 type MockChildProcess = EventEmitter & {
   stdout: EventEmitter

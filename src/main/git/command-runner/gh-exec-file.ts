@@ -25,11 +25,19 @@ import { argsLookIdempotent } from './gh-idempotency'
 import { applyGhHostToArgs, explicitGhHostname, explicitGhRepoHostname } from './gh-host-args'
 import {
   defaultGhExecTimeoutMs,
+  HostedCliTimeoutError,
   isTransientGhError,
   sleep,
   GH_RETRY_AFTER_MAX_MS,
   GH_RETRY_DELAYS_MS
 } from './gh-retry-policy'
+import {
+  cliRuntimeScopeKey,
+  createCliUnresponsiveError,
+  getCliUnresponsiveBlockedUntilMs,
+  recordCliDeadlineKill,
+  recordCliResponded
+} from '../hosted-cli-unresponsive-breaker'
 
 // `cwd?` omitted for non-repo-scoped gh calls (rate_limit, listAccessibleProjects) so one WSL-aware wrapper serves both.
 // `wslDistro?` routes global cwd-less gh through `wsl.exe -d <distro>` on WSL-only Windows where gh.exe isn't on host PATH.
@@ -49,6 +57,19 @@ function nonInteractiveGhEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.Proce
   return {
     ...env,
     GH_PROMPT_DISABLED: env.GH_PROMPT_DISABLED ?? '1'
+  }
+}
+
+function ghRuntimeScope(resolved: ResolvedCommand): string {
+  return cliRuntimeScopeKey('gh', resolved.wsl?.distro)
+}
+
+// Why before every spawn and not once per call: the WSL and host fallbacks below
+// re-resolve the command, and a wedged native gh says nothing about a WSL one.
+function assertGhResponsive(resolved: ResolvedCommand): void {
+  const blockedUntilMs = getCliUnresponsiveBlockedUntilMs(ghRuntimeScope(resolved))
+  if (blockedUntilMs !== null) {
+    throw createCliUnresponsiveError('gh', blockedUntilMs)
   }
 }
 
@@ -109,11 +130,17 @@ export async function ghExecFileAsync(
   // Why: scope by runtime and host so unrelated github.com, GHES, and WSL quotas cannot block each other.
   const rateLimitBucket = classifyGhRateLimitBucket(args)
   const rateLimitProbe = isGhRateLimitProbe(args)
+  const timeoutMs = options.timeout ?? defaultGhExecTimeoutMs(options.env)
   assertGhRateLimitScopeAvailable(args, options, resolved, rateLimitBucket, rateLimitProbe)
   let lastError: unknown
   let attemptedHostFallback = false
   let attemptedDefaultWslFallback = false
   for (let attempt = 0; attempt <= GH_RETRY_DELAYS_MS.length; attempt++) {
+    // Why here and not once before the loop: a retry that waits out a transient
+    // error must not re-spawn a gh the breaker has since blocked. Why outside
+    // the try: this throw means nothing was spawned, so the catch below must not
+    // read it as gh having answered.
+    assertGhResponsive(resolved)
     try {
       // Why to-termination and not execFileCapture: `gh` on PATH is routinely a
       // shim (mise, asdf, volta, a hand-written wrapper), so the deadline below
@@ -128,15 +155,31 @@ export async function ghExecFileAsync(
           encoding: (options.encoding ?? 'utf-8') as BufferEncoding,
           maxBuffer: options.maxBuffer,
           // Why: bound gh so one stuck child fails visibly instead of wedging the IPC lane.
-          timeout: options.timeout ?? defaultGhExecTimeoutMs(options.env),
+          timeout: timeoutMs,
           env: nonInteractiveGhEnv(options.env),
-          signal: options.signal
+          signal: options.signal,
+          // Why typed: the breaker below counts deadline kills only, and a
+          // message match would also catch a `gh` that printed "timed out".
+          createTimeoutError: () => new HostedCliTimeoutError('gh', resolved.binary, timeoutMs)
         },
         resolved.termination
       )
+      recordCliResponded(ghRuntimeScope(resolved))
       return { stdout: stdout as string, stderr: stderr as string }
     } catch (err) {
       lastError = err
+      if (err instanceof HostedCliTimeoutError) {
+        // Why no retry: the two retries would each pay another full deadline of
+        // the same 100%-CPU spin before failing the call anyway (#18234).
+        recordCliDeadlineKill(ghRuntimeScope(resolved))
+        throw err
+      }
+      // Why on the error path too: a non-zero exit is gh answering, which is
+      // proof the binary is not wedged even though the call failed. An abort is
+      // the caller giving up and proves nothing either way, so it is excluded.
+      if (!(err instanceof Error && err.name === 'AbortError')) {
+        recordCliResponded(ghRuntimeScope(resolved))
+      }
       const { stderr } = extractExecError(err)
       if (isGhPrimaryRateLimitStderr(stderr)) {
         notifyGhPrimaryRateLimit(rateLimitBucket, ghRateLimitScope(args, options, resolved))
