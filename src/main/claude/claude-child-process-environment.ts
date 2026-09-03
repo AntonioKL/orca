@@ -16,9 +16,27 @@ function cloneProcessEnv(source: NodeJS.ProcessEnv): Record<string, string> {
   return env
 }
 
+function stripClaudeChildSessionStamps(
+  env: Record<string, string>,
+  platform: NodeJS.Platform
+): Record<string, string> {
+  for (const key of CLAUDE_CHILD_SESSION_STAMP_ENV_KEYS) {
+    for (const envKey of Object.keys(env)) {
+      if (envKey === key || (platform === 'win32' && envKey.toUpperCase() === key)) {
+        delete env[envKey]
+      }
+    }
+  }
+  return env
+}
+
 export function buildClaudeChildProcessEnv(
   configuredEnv: Record<string, string> = {},
-  options: { inheritedEnv?: NodeJS.ProcessEnv; platform?: NodeJS.Platform } = {}
+  options: {
+    inheritedEnv?: NodeJS.ProcessEnv
+    platform?: NodeJS.Platform
+    scrubConfiguredChildSessionStamps?: boolean
+  } = {}
 ): Record<string, string> {
   const inheritedEnv = options.inheritedEnv ?? process.env
   const platform = options.platform ?? process.platform
@@ -43,12 +61,9 @@ export function buildClaudeChildProcessEnv(
       }
     }
   }
-  for (const key of CLAUDE_CHILD_SESSION_STAMP_ENV_KEYS) {
-    for (const inheritedKey of Object.keys(env)) {
-      if (inheritedKey === key || (platform === 'win32' && inheritedKey.toUpperCase() === key)) {
-        delete env[inheritedKey]
-      }
-    }
+  if (options.scrubConfiguredChildSessionStamps) {
+    return stripClaudeChildSessionStamps({ ...env, ...configuredEnv }, platform)
   }
-  return Object.assign(env, configuredEnv)
+  stripClaudeChildSessionStamps(env, platform)
+  return { ...env, ...configuredEnv }
 }

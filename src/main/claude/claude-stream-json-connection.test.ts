@@ -150,7 +150,10 @@ describe('Claude stream-json connection', () => {
       launchFor(scenario, {
         CLAUDE_CONFIG_DIR: '/accounts/managed/home',
         ANTHROPIC_AUTH_TOKEN: 'configured-token',
-        ORCA_AGENT_SESSION_SPAWN_TOKEN: 'spawn-9'
+        ORCA_AGENT_SESSION_SPAWN_TOKEN: 'spawn-9',
+        CLAUDE_CODE_CHILD_SESSION: 'configured-child-session',
+        CLAUDE_CODE_SESSION_ID: 'configured-session',
+        CLAUDE_CODE_BRIDGE_SESSION_ID: 'configured-bridge-session'
       })
     )
 
@@ -165,6 +168,8 @@ describe('Claude stream-json connection', () => {
     expect(env.ORCA_CONNECTION_MARKER).toBe('inherited')
     expect(env.ANTHROPIC_API_KEY).toBeUndefined()
     expect(env.CLAUDE_CODE_CHILD_SESSION).toBeUndefined()
+    expect(env.CLAUDE_CODE_SESSION_ID).toBeUndefined()
+    expect(env.CLAUDE_CODE_BRIDGE_SESSION_ID).toBeUndefined()
     // Two SDK mutations of the child env, pinned so a bump cannot change them unseen.
     expect(env.CLAUDE_CODE_ENTRYPOINT).toBe('sdk-ts')
     expect(env.NODE_OPTIONS).toBeUndefined()

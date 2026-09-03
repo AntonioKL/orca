@@ -3330,7 +3330,8 @@
             "8dea9b5cdf": "No enabled agents",
             "f378201fbd": "Could not create chat session",
             "a847779775": "Start {{value0}} without a terminal",
-            "0ea6a78efb": "Chat session"
+            "0ea6a78efb": "Chat session",
+            "startingCodexChat": "Starting Codex chat…"
           },
           "RecentTabSwitcher": {
             "329638ff6f": "Switch Tab",

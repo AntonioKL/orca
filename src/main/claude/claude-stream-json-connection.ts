@@ -107,7 +107,7 @@ export async function openClaudeStreamJsonConnection(
       cwd: launch.cwd,
       // Why env is never omitted: the SDK inherits process.env when it is, which is
       // exactly the ambient ANTHROPIC_* auth leak this lane already shipped once.
-      env: buildClaudeChildProcessEnv(launch.env),
+      env: buildClaudeChildProcessEnv(launch.env, { scrubConfiguredChildSessionStamps: true }),
       pathToClaudeCodeExecutable: launch.pathToClaudeCodeExecutable,
       spawnClaudeCodeProcess: spawner.spawn,
       ...(handlers.canUseTool ? { canUseTool: handlers.canUseTool } : {}),

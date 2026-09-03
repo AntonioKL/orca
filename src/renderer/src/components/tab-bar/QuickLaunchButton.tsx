@@ -210,7 +210,12 @@ function QuickLaunchAgentMenuItemsInner({
               : null
         const isStructuredCodexPending =
           agent === 'codex' && structuredCodexLaunchStatus === 'pending'
-        const menuLabel = isStructuredCodexPending ? 'Starting Codex chat…' : label
+        const menuLabel = isStructuredCodexPending
+          ? translate(
+              'auto.components.tab.bar.QuickLaunchButton.startingCodexChat',
+              'Starting Codex chat…'
+            )
+          : label
         const showsDefaultAgentShortcut =
           newAgentShortcut !== null && defaultAgent !== 'blank' && agent === defaultAgent
         return (
@@ -221,10 +226,8 @@ function QuickLaunchAgentMenuItemsInner({
               className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
               title={translate(
                 'auto.components.tab.bar.QuickLaunchButton.ec2adf093e',
-                isStructuredCodexPending
-                  ? 'Starting Codex chat…'
-                  : 'Launch {{value0}} in a new terminal',
-                isStructuredCodexPending ? undefined : { value0: label }
+                'Launch {{value0}} in a new terminal',
+                { value0: label }
               )}
             >
               {isStructuredCodexPending ? (

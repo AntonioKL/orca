@@ -41,4 +41,23 @@ describe('Claude child process environment', () => {
       SAFE_VALUE: 'preserved'
     })
   })
+
+  it('can strip child-session stamps reintroduced by a full SDK launch overlay', () => {
+    expect(
+      buildClaudeChildProcessEnv(
+        {
+          CLAUDE_CODE_CHILD_SESSION: 'configured-child-session',
+          CLAUDE_CODE_SESSION_ID: 'configured-session',
+          CLAUDE_CODE_BRIDGE_SESSION_ID: 'configured-bridge-session'
+        },
+        {
+          scrubConfiguredChildSessionStamps: true,
+          inheritedEnv: {
+            CLAUDE_CODE_CHILD_SESSION: 'inherited-child-session',
+            SAFE_VALUE: 'preserved'
+          }
+        }
+      )
+    ).toEqual({ SAFE_VALUE: 'preserved' })
+  })
 })
