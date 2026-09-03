@@ -8,7 +8,9 @@ const mocks = vi.hoisted(() => ({
   abandonIntent: vi.fn(),
   callStructuredAgentSession: vi.fn(),
   createIntent: vi.fn(),
-  launch: vi.fn()
+  launch: vi.fn(),
+  rendererTabs: {} as Record<string, unknown[]>,
+  listeners: new Set<(state: { unifiedTabsByWorktree: Record<string, unknown[]> }) => void>()
 }))
 
 vi.mock('sonner', () => ({
@@ -34,6 +36,18 @@ vi.mock('@/runtime/local-structured-session-tabs-sync', () => ({
 
 vi.mock('@/runtime/structured-agent-session-client', () => ({
   callStructuredAgentSession: mocks.callStructuredAgentSession
+}))
+
+vi.mock('@/store', () => ({
+  useAppStore: {
+    getState: () => ({ unifiedTabsByWorktree: mocks.rendererTabs }),
+    subscribe: (
+      listener: (state: { unifiedTabsByWorktree: Record<string, unknown[]> }) => void
+    ) => {
+      mocks.listeners.add(listener)
+      return () => mocks.listeners.delete(listener)
+    }
+  }
 }))
 
 vi.mock('@/i18n/i18n', () => ({
@@ -102,6 +116,8 @@ describe('startStructuredCodexLaunch', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    mocks.rendererTabs = {}
+    mocks.listeners.clear()
     mocks.createIntent.mockImplementation((worktreeId: string) => launchIntent(worktreeId))
     mocks.callStructuredAgentSession.mockResolvedValue({
       ok: true,
@@ -128,6 +144,28 @@ describe('startStructuredCodexLaunch', () => {
     expect(mocks.launch).toHaveBeenCalledOnce()
     expect(mocks.launch).toHaveBeenCalledWith(intent)
     expect(toast.message).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('completes from the host-emitted projection without listing inventory', async () => {
+    const worktreeId = 'wt-host-frame'
+    const intent = launchIntent(worktreeId, 'session-host-frame')
+    mocks.createIntent.mockReturnValueOnce(intent)
+    mocks.launch.mockImplementationOnce(async () => {
+      mocks.rendererTabs[worktreeId] = [
+        { contentType: 'agent-session', entityId: intent.sessionId, worktreeId }
+      ]
+      for (const listener of mocks.listeners) {
+        listener({ unifiedTabsByWorktree: mocks.rendererTabs })
+      }
+      return { sessionId: intent.sessionId, fence: 1 }
+    })
+
+    startStructuredCodexLaunch(worktreeId)
+    await flushLaunchSettlement()
+
+    expect(mocks.launch).toHaveBeenCalledOnce()
+    expect(refreshLocalStructuredSessionTabs).not.toHaveBeenCalled()
     expect(toast.error).not.toHaveBeenCalled()
   })
 
@@ -302,6 +340,30 @@ describe('startStructuredCodexLaunch', () => {
     expect(mocks.createIntent).toHaveBeenCalledOnce()
     expect(mocks.launch).toHaveBeenCalledTimes(2)
     expect(toast.error).toHaveBeenCalledOnce()
+  })
+
+  it('replays the same intent after an absent unknown outcome', async () => {
+    const worktreeId = 'wt-replay-unknown'
+    const intent = launchIntent(worktreeId)
+    mocks.createIntent.mockReturnValueOnce(intent)
+    mocks.launch.mockRejectedValueOnce(new Error('offline')).mockImplementationOnce(async () => {
+      mocks.rendererTabs[worktreeId] = [
+        { contentType: 'agent-session', entityId: intent.sessionId, worktreeId }
+      ]
+      for (const listener of mocks.listeners) {
+        listener({ unifiedTabsByWorktree: mocks.rendererTabs })
+      }
+      return { sessionId: intent.sessionId, fence: 1 }
+    })
+    vi.mocked(refreshLocalStructuredSessionTabs).mockResolvedValueOnce([]).mockResolvedValueOnce([])
+
+    startStructuredCodexLaunch(worktreeId)
+    await flushLaunchSettlement()
+
+    expect(mocks.createIntent).toHaveBeenCalledOnce()
+    expect(mocks.launch).toHaveBeenCalledTimes(2)
+    expect(mocks.launch.mock.calls[1]?.[0]).toBe(intent)
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('reuses the queued prompt without a second delivery after unknown recovery', async () => {

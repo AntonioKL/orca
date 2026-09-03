@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 import { translate } from '@/i18n/i18n'
 import {
@@ -52,7 +53,37 @@ export type StructuredCodexLaunchResult = {
   claimDefinitiveRefusalFallback: (fallback: StructuredRefusalFallback) => Promise<boolean>
 }
 
+export type StructuredCodexLaunchStatus = 'idle' | 'pending' | 'unknown'
+
 const pendingStructuredLaunchesByIdentity = new Map<string, StructuredLaunchState>()
+const structuredLaunchListeners = new Set<() => void>()
+
+function notifyStructuredLaunchListeners(): void {
+  for (const listener of structuredLaunchListeners) {
+    listener()
+  }
+}
+
+export function subscribeStructuredCodexLaunchStatus(listener: () => void): () => void {
+  structuredLaunchListeners.add(listener)
+  return () => structuredLaunchListeners.delete(listener)
+}
+
+export function getStructuredCodexLaunchStatus(worktreeId: string): StructuredCodexLaunchStatus {
+  const state = pendingStructuredLaunchesByIdentity.get(worktreeId)
+  if (!state) {
+    return 'idle'
+  }
+  return state.visibilityUnknown ? 'unknown' : 'pending'
+}
+
+export function useStructuredCodexLaunchStatus(worktreeId: string): StructuredCodexLaunchStatus {
+  return useSyncExternalStore(
+    subscribeStructuredCodexLaunchStatus,
+    () => getStructuredCodexLaunchStatus(worktreeId),
+    () => 'idle'
+  )
+}
 
 function launchIdentity(worktreeId: string): string {
   return worktreeId
@@ -61,6 +92,7 @@ function launchIdentity(worktreeId: string): string {
 function cleanupLaunchState(state: StructuredLaunchState): void {
   if (pendingStructuredLaunchesByIdentity.get(state.identity) === state) {
     pendingStructuredLaunchesByIdentity.delete(state.identity)
+    notifyStructuredLaunchListeners()
   }
 }
 
@@ -103,6 +135,7 @@ function trackLaunchSettlement(
         maybeCleanupLaunchState(state)
       } else {
         state.callers.outcome = 'unknown'
+        notifyStructuredLaunchListeners()
       }
     }
   )
@@ -141,6 +174,7 @@ function structuredCodexLaunchState(
       existing.promise = reconcileUnknownLaunch(existing)
       trackLaunchSettlement(existing, existing.promise)
       trackLaunchFailureToast(existing)
+      notifyStructuredLaunchListeners()
     }
     const text = options.prompt?.trim() ?? ''
     const stagedPrompt =
@@ -170,6 +204,7 @@ function structuredCodexLaunchState(
     promise: Promise.resolve({ sessionId: '', fence: 0 }),
     visibilityUnknown: false,
     cancelled: false,
+    onVisibilityChanged: notifyStructuredLaunchListeners,
     callers
   }
   callers.onSettled = () => maybeCleanupLaunchState(state)
@@ -188,6 +223,7 @@ function structuredCodexLaunchState(
     stagedEntry: stagedPrompt
   })
   pendingStructuredLaunchesByIdentity.set(identity, state)
+  notifyStructuredLaunchListeners()
   trackLaunchSettlement(state, state.promise)
   trackLaunchFailureToast(state)
   return {
@@ -209,6 +245,7 @@ export function cancelStructuredCodexLaunch(worktreeId: string, sessionId: strin
   cleanupLaunchState(state)
   discardStructuredAgentSessionLaunchOutbox(state.intent.sessionId)
   abandonStructuredAgentSessionLaunchIntent(state.intent)
+  notifyStructuredLaunchListeners()
   return true
 }
 

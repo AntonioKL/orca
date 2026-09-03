@@ -94,7 +94,7 @@ export class OrcaRuntimeWithRestoreStructuredAgentSessionTabsOnce extends OrcaRu
         ),
         tabs: existing.tabs.map((tab) => ({ ...tab, isActive: tab.id === id }))
       }
-      this.mobileSessionTabsByWorktree.set(input.workspaceId, snapshot)
+      this.storeMobileSessionSnapshot(input.workspaceId, snapshot)
       if (input.notify !== false) {
         this.emitMobileSessionTabsSnapshot(snapshot)
       }
@@ -143,7 +143,7 @@ export class OrcaRuntimeWithRestoreStructuredAgentSessionTabsOnce extends OrcaRu
       ...(existing?.tabGroupLayout ? { tabGroupLayout: existing.tabGroupLayout } : {}),
       tabs
     }
-    this.mobileSessionTabsByWorktree.set(input.workspaceId, snapshot)
+    this.storeMobileSessionSnapshot(input.workspaceId, snapshot)
     if (input.notify !== false) {
       this.emitMobileSessionTabsSnapshot(snapshot)
     }

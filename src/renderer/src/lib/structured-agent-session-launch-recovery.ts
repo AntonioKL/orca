@@ -6,6 +6,7 @@ import {
 } from '@/lib/launch-structured-codex-session'
 import { callStructuredAgentSession } from '@/runtime/structured-agent-session-client'
 import { refreshLocalStructuredSessionTabs } from '@/runtime/local-structured-session-tabs-sync'
+import { useAppStore } from '@/store'
 
 export type StructuredCodexLaunchReceipt = { sessionId: string; fence: number }
 
@@ -14,6 +15,7 @@ export type StructuredLaunchRecoveryState = {
   promise: Promise<StructuredCodexLaunchReceipt>
   visibilityUnknown: boolean
   cancelled: boolean
+  onVisibilityChanged?: () => void
 }
 
 export class StructuredAgentSessionLaunchCancelledError extends Error {
@@ -30,6 +32,9 @@ function throwIfLaunchCancelled(state: StructuredLaunchRecoveryState): void {
 }
 
 async function verifyPublishedSession(state: StructuredLaunchRecoveryState): Promise<void> {
+  if (hasAdoptedStructuredSession(state.intent)) {
+    return
+  }
   const snapshots = await refreshLocalStructuredSessionTabs()
   throwIfLaunchCancelled(state)
   const published = snapshots.some(
@@ -39,9 +44,22 @@ async function verifyPublishedSession(state: StructuredLaunchRecoveryState): Pro
         (tab) => tab.type === 'agent-session' && tab.sessionId === state.intent.sessionId
       )
   )
-  if (!published) {
+  if (!published && !hasAdoptedStructuredSession(state.intent)) {
     throw new Error('structured session tab publication unavailable')
   }
+}
+
+function hasAdoptedStructuredSession(intent: StructuredAgentSessionLaunchIntent): boolean {
+  return Boolean(
+    useAppStore
+      .getState()
+      .unifiedTabsByWorktree[intent.worktreeId]?.some(
+        (tab) =>
+          tab.contentType === 'agent-session' &&
+          tab.entityId === intent.sessionId &&
+          tab.worktreeId === intent.worktreeId
+      )
+  )
 }
 
 async function recoverPublishedSessionReceipt(
@@ -85,6 +103,7 @@ async function retrySameIntent(
         throw new StructuredAgentSessionLaunchCancelledError()
       }
       state.visibilityUnknown = true
+      state.onVisibilityChanged?.()
       throw error ?? priorError
     }
   }
@@ -127,6 +146,7 @@ export async function reconcileUnknownLaunch(
 ): Promise<StructuredCodexLaunchReceipt> {
   throwIfLaunchCancelled(state)
   state.visibilityUnknown = false
+  state.onVisibilityChanged?.()
   try {
     return await recoverPublishedSessionReceipt(state)
   } catch (error) {
