@@ -42,8 +42,9 @@ const POSIX_VERSION_MANAGER_BIN_DIRS = [
   '"/home/linuxbrew/.linuxbrew/bin"',
   '"/nix/var/nix/profiles/default/bin"',
   '"$HOME/.nix-profile/bin"',
-  // Why: opencode's own installer default, which no version manager owns.
-  '"$HOME/.opencode/bin"'
+  // Why both: the opencode and Pi installers' own defaults, which no version manager owns (#829).
+  '"$HOME/.opencode/bin"',
+  '"$HOME/.vite-plus/bin"'
 ].join(' ')
 
 /**
