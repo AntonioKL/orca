@@ -13,6 +13,8 @@ import {
 import { readOrcaChromiumProcessPids } from './orca-chromium-process-pids'
 import { classifyWindowsTreeKillTarget } from './windows-pty-root-identity'
 import { terminateWindowsProcessTree } from './windows-process-tree-kill'
+import { admitSelfInitiatedTreeKill } from './own-chromium-tree-kill-guard'
+import { resetSelfInitiatedTreeKillLogForTest } from './crash-reporting/self-initiated-tree-kill-log'
 import {
   clearCrashBreadcrumbsForTest,
   getCrashBreadcrumbSnapshot
@@ -52,6 +54,7 @@ beforeEach(() => {
   ])
   setActiveSink({ push: () => {}, flush: () => {}, close: () => {} })
   clearCrashBreadcrumbsForTest()
+  resetSelfInitiatedTreeKillLogForTest()
 })
 
 afterEach(() => {
@@ -111,5 +114,26 @@ describe('refusing to tree-kill our own Chromium processes', () => {
       expect.anything(),
       expect.any(Function)
     )
+  })
+
+  it('refuses an own-Chromium pid at the gate the account teardowns share', () => {
+    expect(
+      admitSelfInitiatedTreeKill({
+        pid: RENDERER_PID,
+        site: 'claude-account-login-teardown',
+        scope: 'win-taskkill-tree'
+      })
+    ).toBe(false)
+    expect(
+      admitSelfInitiatedTreeKill({
+        pid: 7777,
+        site: 'codex-account-login-teardown',
+        scope: 'win-taskkill-tree'
+      })
+    ).toBe(true)
+    expect(getCrashBreadcrumbSnapshot().map((breadcrumb) => breadcrumb.name)).toEqual([
+      'self_tree_kill_refused_own_chromium',
+      'self_tree_kill'
+    ])
   })
 })

@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
+import { notifyProcessTreeKill } from './process-tree-kill-observer'
 
 const PROBE_INTERVAL_MS = 25
 const SUBPROCESS_TIMEOUT_MS = 2_000
@@ -17,10 +18,15 @@ export function signalProcessTree(child: ChildProcess, signal?: NodeJS.Signals):
     return Promise.resolve(true)
   }
   if (process.platform === 'win32') {
-    return taskkillTree(child, signal)
+    return taskkillTree(child, child.pid, signal)
   }
   try {
     process.kill(-child.pid, signal)
+    notifyProcessTreeKill({
+      pid: child.pid,
+      site: 'run-process-tree',
+      scope: 'posix-process-group'
+    })
     return Promise.resolve(true)
   } catch {
     return Promise.resolve(!processGroupExists(child.pid))
@@ -38,11 +44,15 @@ export async function forceTerminateProcessTree(child: ChildProcess): Promise<bo
   return true
 }
 
-function taskkillTree(child: ChildProcess, signal?: NodeJS.Signals): Promise<boolean> {
+function taskkillTree(
+  child: ChildProcess,
+  rootPid: number,
+  signal?: NodeJS.Signals
+): Promise<boolean> {
   return new Promise((resolve) => {
     let killer: ChildProcess
     try {
-      killer = nodeSpawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
+      killer = nodeSpawn('taskkill', ['/pid', String(rootPid), '/t', '/f'], {
         stdio: 'ignore',
         windowsHide: true,
         shell: false
@@ -52,6 +62,7 @@ function taskkillTree(child: ChildProcess, signal?: NodeJS.Signals): Promise<boo
       resolve(false)
       return
     }
+    notifyProcessTreeKill({ pid: rootPid, site: 'run-process-tree', scope: 'win-taskkill-tree' })
     let settled = false
     const finish = (fallback: boolean): void => {
       if (settled) {

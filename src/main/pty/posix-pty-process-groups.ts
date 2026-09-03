@@ -117,18 +117,21 @@ export function forceKillPosixPtyProcessGroups(
   for (const pgid of groups) {
     try {
       signalProcessGroup(pgid)
-      recordSelfInitiatedTreeKill({
-        pid: pgid,
-        site: 'posix-pty-process-group-sweep',
-        scope: 'posix-process-group'
-      })
     } catch (error) {
       // Why: the PTY exit callback may reap a group between `ps` and killpg.
       // ESRCH is proof that this captured owner is already gone, not failure.
       if (!isProcessAlreadyGone(error) && firstError === undefined) {
         firstError = error
       }
+      continue
     }
+    // Outside the try: this catch is the ESRCH contract, and a throw from the
+    // breadcrumb path would be rethrown as a failed kill.
+    recordSelfInitiatedTreeKill({
+      pid: pgid,
+      site: 'posix-pty-process-group-sweep',
+      scope: 'posix-process-group'
+    })
   }
   if (firstError !== undefined) {
     throw firstError

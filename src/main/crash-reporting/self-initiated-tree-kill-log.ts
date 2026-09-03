@@ -1,5 +1,9 @@
 import type { CrashReportDetailValue } from '../../shared/crash-reporting'
-import { recordDurableCrashBreadcrumb } from './durable-crash-breadcrumb'
+import {
+  setProcessTreeKillObserver,
+  type ProcessTreeKillScope
+} from '../../shared/child-process/process-tree-kill-observer'
+import { recordCoalescedDurableCrashBreadcrumb } from './durable-crash-breadcrumb'
 
 /**
  * Records the force-kills Orca itself issues, so a later `render-process-gone`
@@ -9,10 +13,18 @@ import { recordDurableCrashBreadcrumb } from './durable-crash-breadcrumb'
  * identical `reason=killed exitCode=1` plus the identical concurrent sibling
  * deaths — reproduced side by side on Windows 11 / Electron 43.4.1, differing in
  * zero recorded fields. This is the field that separates them.
+ *
+ * Coverage (what a zero count does and does not prove): instrumented are every
+ * main-process `taskkill /T /F` (all three families gate on
+ * `admitSelfInitiatedTreeKill`), `signalProcessTree` — the `runProcess` choke
+ * point, both platforms — the codex app-server POSIX group teardowns, the PTY
+ * process-group sweep and the Windows PTY Job Object. NOT instrumented: the
+ * direct `process.kill(-pid)` calls in the browser routes, notebooks, automation
+ * prechecks and ephemeral-VM recipes. Absence is evidence, not proof.
  */
 
 /** Which mechanism issued the kill; each has a different blast radius. */
-export type SelfInitiatedTreeKillScope = 'win-taskkill-tree' | 'posix-process-group' | 'win-pty-job'
+export type SelfInitiatedTreeKillScope = ProcessTreeKillScope | 'win-pty-job'
 
 export type SelfInitiatedTreeKill = {
   pid: number
@@ -31,11 +43,27 @@ const MAX_TRACKED_SELF_KILLS = 32
 export const SELF_TREE_KILL_LOOKBACK_MS = 5_000
 export const SELF_TREE_KILL_LOOKAHEAD_MS = 250
 
+// Why a longer window for group/job kills: those are routine teardown (three
+// process groups per terminal close), and uncoalesced they evict the whole
+// 30-slot breadcrumb ring — including this module's own refusal crumb.
+const GROUP_KILL_COALESCE_MS = 60_000
+
 // Same truncation rule as MAX_SIBLING_DEATHS_DETAIL_LENGTH: drop whole entries
 // rather than let sanitizeCrashReportDetails cut the list mid-token.
 const MAX_SELF_TREE_KILLS_DETAIL_LENGTH = 200
 
 let selfInitiatedKills: SelfInitiatedTreeKill[] = []
+
+/**
+ * Whether the kill was addressed by pid and so could have reached a process
+ * Orca did not put in its target: `taskkill /T /F` walks whatever tree the pid
+ * owns at kill time, including a recycled pid that is now our renderer. A
+ * process group or Job Object contains only what Orca placed there, so it is
+ * structurally incapable of taking a Chromium process with it.
+ */
+function isPidAddressedTreeKill(scope: SelfInitiatedTreeKillScope): boolean {
+  return scope === 'win-taskkill-tree'
+}
 
 export function recordSelfInitiatedTreeKill({
   pid,
@@ -56,8 +84,17 @@ export function recordSelfInitiatedTreeKill({
     selfInitiatedKills = selfInitiatedKills.slice(-MAX_TRACKED_SELF_KILLS)
   }
   // Durable so it survives into the diagnostic bundle even when the kill takes
-  // the reporting renderer with it; durable breadcrumbs flush immediately.
-  recordDurableCrashBreadcrumb('self_tree_kill', { pid, site, scope })
+  // the reporting renderer with it; coalesced because the crash detail above is
+  // the primary record and a teardown burst must not cost 30 ring slots plus a
+  // forced disk flush each. The newest pid still rides the emitted crumb.
+  recordCoalescedDurableCrashBreadcrumb({
+    name: 'self_tree_kill',
+    data: { pid, site, scope },
+    coalesceKey: `${scope}\u0000${site}`,
+    minIntervalMs: isPidAddressedTreeKill(scope)
+      ? SELF_TREE_KILL_LOOKBACK_MS
+      : GROUP_KILL_COALESCE_MS
+  })
 }
 
 /**
@@ -70,7 +107,19 @@ export function recordRefusedOwnChromiumTreeKill(target: {
   site: string
   scope: SelfInitiatedTreeKillScope
 }): void {
-  recordDurableCrashBreadcrumb('self_tree_kill_refused_own_chromium', target)
+  // Coalesced per pid so a retry loop cannot flood the ring, but a distinct
+  // victim pid always gets its own crumb — that pid is the whole artifact.
+  recordCoalescedDurableCrashBreadcrumb({
+    name: 'self_tree_kill_refused_own_chromium',
+    data: target,
+    coalesceKey: `${target.site}\u0000${target.pid}`,
+    minIntervalMs: SELF_TREE_KILL_LOOKBACK_MS
+  })
+}
+
+/** Routes the `runProcess` choke point's kills here; shared code cannot import us. */
+export function installProcessTreeKillBreadcrumbObserver(): void {
+  setProcessTreeKillObserver((kill) => recordSelfInitiatedTreeKill(kill))
 }
 
 export function findSelfInitiatedTreeKills(at: number): SelfInitiatedTreeKill[] {
@@ -84,10 +133,15 @@ export function findSelfInitiatedTreeKills(at: number): SelfInitiatedTreeKill[] 
 // credential URL and redacts the whole token. Mirror describeChildDeath instead.
 function describeSelfInitiatedTreeKill(kill: SelfInitiatedTreeKill, goneAt: number): string {
   const offsetMs = kill.at - goneAt
-  return `${kill.site}/pid${kill.pid} ${offsetMs >= 0 ? '+' : ''}${offsetMs}ms`
+  return `${kill.scope}/${kill.site}/pid${kill.pid} ${offsetMs >= 0 ? '+' : ''}${offsetMs}ms`
 }
 
-/** Empty when Orca issued no nearby kill — absence is the discriminating half. */
+/**
+ * Kills Orca issued near `goneAt`, split by whether the mechanism could have
+ * reached a Chromium process at all — `selfInitiatedTreeKillCount` is the
+ * discriminating one, and a pty-scoped sweep must never inflate it. Empty when
+ * no instrumented choke point fired; see the module doc for what that omits.
+ */
 export function selfInitiatedTreeKillDetails(
   goneAt: number
 ): Record<string, CrashReportDetailValue> {
@@ -95,20 +149,30 @@ export function selfInitiatedTreeKillDetails(
   if (kills.length === 0) {
     return {}
   }
+  const treeKillCount = kills.filter((kill) => isPidAddressedTreeKill(kill.scope)).length
   const described = [...kills]
-    .sort((a, b) => Math.abs(a.at - goneAt) - Math.abs(b.at - goneAt))
+    // Pid-addressed kills first: truncation must never drop the ones that could
+    // have caused the death in favour of routine teardown noise.
+    .sort((a, b) => {
+      const reach =
+        Number(isPidAddressedTreeKill(b.scope)) - Number(isPidAddressedTreeKill(a.scope))
+      return reach !== 0 ? reach : Math.abs(a.at - goneAt) - Math.abs(b.at - goneAt)
+    })
     .map((kill) => describeSelfInitiatedTreeKill(kill, goneAt))
   const kept: string[] = []
   for (const entry of described) {
     if (kept.length > 0 && [...kept, entry].join(', ').length > MAX_SELF_TREE_KILLS_DETAIL_LENGTH) {
       break
     }
-    kept.push(entry)
+    kept.push(entry.slice(0, MAX_SELF_TREE_KILLS_DETAIL_LENGTH))
   }
   const dropped = described.length - kept.length
   return {
-    selfInitiatedTreeKillCount: kills.length,
-    selfInitiatedTreeKills: dropped > 0 ? `${kept.join(', ')} (+${dropped} more)` : kept.join(', ')
+    ...(treeKillCount > 0 ? { selfInitiatedTreeKillCount: treeKillCount } : {}),
+    ...(kills.length - treeKillCount > 0
+      ? { selfInitiatedGroupKillCount: kills.length - treeKillCount }
+      : {}),
+    selfInitiatedKills: dropped > 0 ? `${kept.join(', ')} (+${dropped} more)` : kept.join(', ')
   }
 }
 
