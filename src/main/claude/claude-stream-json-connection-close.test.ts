@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => {
   const proveClaudeChildExit = vi.fn()
   const tree = {
     capture: vi.fn(async () => {}),
-    refresh: () => refresh(),
+    refresh: (...args: unknown[]) => refresh(...args),
     reap: vi.fn(async () => 'exited' as const),
     treeVerdict: 'unverifiable' as const
   }
@@ -72,6 +72,54 @@ describe('Claude stream-json close ordering', () => {
     expect(child.stdin.writableEnded).toBe(false)
 
     refreshDone.resolve()
+    await expect(closing).resolves.toBe(true)
+    expect(child.stdin.writableEnded).toBe(true)
+  })
+
+  it('requests a fresh close boundary after an output capture starts', async () => {
+    mocks.refresh.mockReset()
+    mocks.proveClaudeChildExit.mockReset()
+    const outputCapture = Promise.withResolvers<void>()
+    const closeCapture = Promise.withResolvers<void>()
+    mocks.refresh
+      .mockReturnValueOnce(outputCapture.promise)
+      .mockReturnValueOnce(closeCapture.promise)
+    mocks.proveClaudeChildExit.mockResolvedValueOnce(true)
+    const child = fakeChild()
+    const launch: ClaudeStreamJsonLaunch = {
+      pathToClaudeCodeExecutable: 'claude',
+      options: {},
+      cwd: '/work/repo'
+    }
+    const queryImpl = ((params: Parameters<typeof query>[0]) => {
+      params.options?.spawnClaudeCodeProcess?.({
+        command: 'claude',
+        args: [],
+        env: {},
+        signal: new AbortController().signal
+      })
+      void (async () => {
+        for await (const _message of params.prompt) {
+          // The SDK owns the transport write; the close test only needs its EOF boundary.
+        }
+        child.stdin.end()
+      })()
+      return (async function* () {})()
+    }) as typeof query
+    const connection = await openClaudeStreamJsonConnection(launch, {}, () => child, queryImpl)
+
+    child.stderr.emit('data', 'output')
+    await vi.waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1))
+    const closing = connection.close()
+    await Promise.resolve()
+
+    expect(mocks.refresh).toHaveBeenCalledTimes(2)
+    expect(child.stdin.writableEnded).toBe(false)
+
+    outputCapture.resolve()
+    await Promise.resolve()
+    expect(child.stdin.writableEnded).toBe(false)
+    closeCapture.resolve()
     await expect(closing).resolves.toBe(true)
     expect(child.stdin.writableEnded).toBe(true)
   })

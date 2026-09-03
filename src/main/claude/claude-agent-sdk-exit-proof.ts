@@ -12,6 +12,7 @@ import {
   type WindowsDescendantSnapshot,
   type WindowsProcessIdentity
 } from '../windows-descendant-exit-verification'
+import { mergeClaudeCapturedTrees, type ClaudeCapturedTree } from './claude-child-tree-snapshot'
 
 const GRACEFUL_EXIT_MS = 1_500
 const FORCED_EXIT_MS = 1_000
@@ -29,11 +30,6 @@ const TREE_VERDICT_TRUST: Record<DescendantTreeVerdict, number> = {
 
 type ReapableChild = Pick<SpawnedProcess, 'pid' | 'kill'>
 
-/** One platform's descendant tree, tagged so neither verifier can be handed the other's rows. */
-type CapturedTree =
-  | { platform: 'posix'; tree: DescendantSnapshot }
-  | { platform: 'win32'; tree: WindowsDescendantSnapshot }
-
 /**
  * A walk is only admissible while the root it walked was alive. A POSIX walk
  * that found no root says so with a null pgid; either platform's walk can also
@@ -44,7 +40,7 @@ function admissibleTree(
   captured: DescendantSnapshot | WindowsDescendantSnapshot | null,
   platform: NodeJS.Platform,
   exited: boolean
-): CapturedTree | null {
+): ClaudeCapturedTree | null {
   if (!captured || exited) {
     return null
   }
@@ -53,39 +49,6 @@ function admissibleTree(
   }
   const tree = captured as DescendantSnapshot
   return tree.rootPgid === null ? null : { platform: 'posix', tree }
-}
-
-function isSnapshotSuperset(previous: CapturedTree, next: CapturedTree): boolean {
-  if (previous.platform !== next.platform) {
-    return false
-  }
-  if (previous.platform === 'posix' && next.platform === 'posix') {
-    return (
-      previous.tree.rootPgid === next.tree.rootPgid &&
-      previous.tree.descendants.every((row) =>
-        next.tree.descendants.some(
-          (candidate) =>
-            candidate.pid === row.pid &&
-            candidate.pgid === row.pgid &&
-            candidate.startedAt === row.startedAt
-        )
-      )
-    )
-  }
-  if (previous.platform === 'win32' && next.platform === 'win32') {
-    return (
-      previous.tree.root.pid === next.tree.root.pid &&
-      previous.tree.root.creationTimeMs === next.tree.root.creationTimeMs &&
-      next.tree.unidentifiedCount >= previous.tree.unidentifiedCount &&
-      previous.tree.descendants.every((row) =>
-        next.tree.descendants.some(
-          (candidate) =>
-            candidate.pid === row.pid && candidate.creationTimeMs === row.creationTimeMs
-        )
-      )
-    )
-  }
-  return false
 }
 
 export type ClaudeChildTreeReaperDeps = {
@@ -142,21 +105,24 @@ export function createClaudeChildTreeReaper(
   // Undefined until captured; null when no admissible snapshot exists — the root
   // was already gone, or the table could not be read while it was alive — which
   // no later read can make up for.
-  let snapshot: CapturedTree | null | undefined
+  let snapshot: ClaudeCapturedTree | null | undefined
   let capturing: Promise<void> | null = null
   let refreshing: Promise<void> | null = null
+  let queuedRefresh: Promise<void> | null = null
   let inFlight: Promise<DescendantTreeVerdict> | null = null
   let treeVerdict: DescendantTreeVerdict = 'unverifiable'
 
   function captureOnce(): Promise<void> {
     if (refreshing) {
-      return refreshing
+      const pending = refreshing
+      return pending.then(() => queuedRefresh ?? undefined)
     }
     if (snapshot !== undefined) {
       return Promise.resolve()
     }
     if (capturing) {
-      return capturing
+      const pending = capturing
+      return pending.then(() => queuedRefresh ?? undefined)
     }
     const rootPid = child.pid
     if (!rootPid || exited()) {
@@ -197,41 +163,81 @@ export function createClaudeChildTreeReaper(
     return capturing
   }
 
-  async function refresh(): Promise<void> {
-    if (capturing || refreshing) {
-      await (capturing ?? refreshing)
-      return
-    }
+  function startRefresh(): Promise<void> {
     if (exited()) {
-      return
+      return Promise.resolve()
     }
     const rootPid = child.pid
     if (!rootPid) {
-      return
+      return Promise.resolve()
     }
     const capture =
       platform === 'win32'
         ? (deps.captureWindowsDescendants ?? captureWindowsDescendantSnapshot)
         : (deps.captureDescendants ?? captureDescendantSnapshot)
-    refreshing = (async () => {
+    const operation = (async () => {
       const captured = await capture(rootPid).catch(() => null)
       if (exited()) {
         return
       }
       const tree = admissibleTree(captured, platform, false)
-      if (
-        tree &&
-        (snapshot === undefined || (snapshot !== null && isSnapshotSuperset(snapshot, tree)))
-      ) {
+      if (!tree) {
+        return
+      }
+      if (snapshot === undefined) {
         snapshot = tree
+        return
+      }
+      if (snapshot !== null) {
+        snapshot = mergeClaudeCapturedTrees(snapshot, tree) ?? snapshot
       }
       // Keep an earlier admissible snapshot when this close-boundary read fails;
       // it remains the only identity-safe evidence after root exit.
     })()
+    refreshing = operation
+    const clearRefreshing = (): void => {
+      if (refreshing === operation) {
+        refreshing = null
+      }
+    }
+    void operation.then(clearRefreshing, clearRefreshing)
+    return operation
+  }
+
+  function queueRefreshAfter(pending: Promise<void>): Promise<void> {
+    if (queuedRefresh) {
+      return queuedRefresh
+    }
+    const operation = pending.then(() => {
+      if (exited()) {
+        return
+      }
+      return startRefresh()
+    })
+    queuedRefresh = operation
+    const clearQueuedRefresh = (): void => {
+      if (queuedRefresh === operation) {
+        queuedRefresh = null
+      }
+    }
+    void operation.then(clearQueuedRefresh, clearQueuedRefresh)
+    return operation
+  }
+
+  async function refresh(): Promise<void> {
+    const pending = capturing ?? refreshing
+    if (pending) {
+      await queueRefreshAfter(pending)
+      return
+    }
+    if (queuedRefresh) {
+      await queuedRefresh
+      return
+    }
     try {
-      await refreshing
-    } finally {
-      refreshing = null
+      await startRefresh()
+    } catch {
+      // A refresh is advisory; capture failures leave the prior proof intact.
     }
   }
 

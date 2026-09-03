@@ -500,6 +500,103 @@ describe('claude child tree reaper', () => {
     expect(child.kill).toHaveBeenCalledWith('SIGKILL')
   })
 
+  it('queues a fresh boundary behind an output-triggered capture already in flight', async () => {
+    const child = mockChild()
+    const firstDone = Promise.withResolvers<void>()
+    const first = snapshotOf(4243)
+    const second = {
+      ...first,
+      descendants: [...first.descendants, { ...first.descendants[0], pid: 4244 }]
+    }
+    const captureDescendants = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await firstDone.promise
+        return first
+      })
+      .mockResolvedValueOnce(second)
+    const terminateDescendants = vi.fn(async () => 'exited' as const)
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'linux',
+      captureDescendants,
+      terminateDescendants
+    })
+
+    const outputCapture = tree.refresh!()
+    await vi.waitFor(() => expect(captureDescendants).toHaveBeenCalledTimes(1))
+    const closeCapture = tree.refresh!()
+    await Promise.resolve()
+    expect(captureDescendants).toHaveBeenCalledTimes(1)
+
+    firstDone.resolve()
+    await closeCapture
+    await tree.reap()
+
+    expect(captureDescendants).toHaveBeenCalledTimes(2)
+    expect(terminateDescendants).toHaveBeenCalledWith(second)
+    await outputCapture
+  })
+
+  it('retains a replacement descendant when the prior identity exited', async () => {
+    const child = mockChild()
+    const first = snapshotOf(4243)
+    const replacement = snapshotOf(4244)
+    const captureDescendants = vi
+      .fn()
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(replacement)
+    const terminateDescendants = vi.fn(async (snapshot: DescendantSnapshot) =>
+      snapshot.descendants.some((row) => row.pid === 4244) ? ('live' as const) : ('exited' as const)
+    )
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'linux',
+      captureDescendants,
+      terminateDescendants
+    })
+
+    await tree.capture()
+    await tree.refresh?.()
+    await expect(tree.reap()).resolves.toBe('live')
+
+    expect(terminateDescendants).toHaveBeenCalledWith({
+      ...replacement,
+      descendants: [...first.descendants, ...replacement.descendants]
+    })
+  })
+
+  it('retains a Windows replacement descendant while preserving unidentified rows', async () => {
+    const child = mockChild()
+    const first = windowsSnapshotOf(4243)
+    const replacement = {
+      ...windowsSnapshotOf(4244),
+      unidentifiedCount: 0
+    }
+    const captureWindowsDescendants = vi
+      .fn()
+      .mockResolvedValueOnce({ ...first, unidentifiedCount: 1 })
+      .mockResolvedValueOnce(replacement)
+    const terminateWindowsTree = vi.fn(async () => {})
+    const terminateWindowsDescendants = vi.fn(async (snapshot: WindowsDescendantSnapshot) =>
+      snapshot.descendants.some((row) => row.pid === 4244) ? ('live' as const) : ('exited' as const)
+    )
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'win32',
+      captureWindowsDescendants,
+      terminateWindowsTree,
+      terminateWindowsDescendants
+    })
+
+    await tree.capture()
+    await tree.refresh?.()
+    await expect(tree.reap()).resolves.toBe('live')
+
+    expect(terminateWindowsDescendants).toHaveBeenCalledWith({
+      ...replacement,
+      descendants: [...first.descendants, ...replacement.descendants],
+      unidentifiedCount: 1
+    })
+  })
+
   it('retains the prior identity-safe snapshot when a refresh is partial', async () => {
     const child = mockChild()
     const first = {
