@@ -6,6 +6,7 @@ import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import { AgentSessionPreSpawnError } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
+import { claudeStructuredAuthPolicyForSettings } from '../claude-accounts/claude-structured-auth-policy'
 import type { ClaudeManagedAccountGateSettings } from '../native-chat/claude-structured-managed-account-support'
 import {
   CLAUDE_DEFAULT_SETTING_SOURCES,
@@ -346,7 +347,15 @@ describe('claude structured launch resolution', () => {
         store: { getRecord: () => RESUMABLE } as unknown as AgentSessionRecordStore,
         resolveWorkspacePath: async (id) => `/repos/${id}`,
         resolveCommand: () => '/usr/local/bin/claude',
-        resolveAuthPolicy: () => ({ stripAuthEnv: false }),
+        // Derived, not a literal: the gate and the policy must read the SAME account state, so a
+        // hardcoded value could assert a pairing production cannot produce.
+        resolveAuthPolicy: () => {
+          const settings = read()
+          if (!settings) {
+            throw new Error('the gate refuses before the auth policy is computed')
+          }
+          return claudeStructuredAuthPolicyForSettings(settings)
+        },
         readManagedAccountGate: read
       })
     }
