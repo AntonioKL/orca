@@ -8,7 +8,13 @@ import {
 } from '../claude-accounts/environment'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import { createClaudeStructuredLaunchResolver } from './claude-structured-launch-resolution'
-import { adapterFor, fakeClaude, identityFor } from './claude-structured-session-test-support'
+import { ClaudeStructuredSessionAdapter } from './claude-structured-session-adapter'
+import {
+  PROVIDER_SESSION_ID,
+  adapterFor,
+  fakeClaude,
+  identityFor
+} from './claude-structured-session-test-support'
 
 const SESSION_ID = 'orca-session-auth'
 const IDENTITY = { sessionId: SESSION_ID } as Parameters<
@@ -33,13 +39,45 @@ function record(): AgentSessionRecord {
 function resolverFor(options: {
   stripAuthEnv: boolean
   overlay?: Record<string, string>
+  authSwitchSettleTimeoutMs?: number
 }): ReturnType<typeof createClaudeStructuredLaunchResolver> {
   return createClaudeStructuredLaunchResolver({
     store: { getRecord: () => record() } as unknown as AgentSessionRecordStore,
     resolveWorkspacePath: async (id) => `/repos/${id}`,
     resolveCommand: () => '/usr/local/bin/claude',
     resolveAuthPolicy: () => ({ stripAuthEnv: options.stripAuthEnv }),
+    authSwitchSettleTimeoutMs: options.authSwitchSettleTimeoutMs ?? 20,
     ...(options.overlay ? { resolveEnv: () => options.overlay as Record<string, string> } : {})
+  })
+}
+
+/**
+ * An adapter driven by the REAL launch resolver, not the stub in the shared test
+ * support — the stub has no auth guard at all, so a teardown-window test built on it
+ * would pass whatever the guard did.
+ */
+function realResolverAdapter(
+  claude: ReturnType<typeof fakeClaude>,
+  authSwitchSettleTimeoutMs: number
+): ClaudeStructuredSessionAdapter {
+  const resumable = {
+    ...record(),
+    providerHandleChain: [
+      { handle: { provider: 'claude', sessionId: PROVIDER_SESSION_ID, leafUuid: null } }
+    ]
+  } as unknown as AgentSessionRecord
+  return new ClaudeStructuredSessionAdapter({
+    resolveLaunch: createClaudeStructuredLaunchResolver({
+      store: { getRecord: () => resumable } as unknown as AgentSessionRecordStore,
+      resolveWorkspacePath: async (id) => `/repos/${id}`,
+      resolveCommand: () => '/usr/local/bin/claude',
+      resolveAuthPolicy: () => ({ stripAuthEnv: false }),
+      authSwitchSettleTimeoutMs
+    }),
+    openConnection: claude.openConnection,
+    readProcessStartTime: async () => 1_700_000_000_000,
+    now: () => 1_700_000_000_500,
+    persistHandle: async () => {}
   })
 }
 
@@ -118,12 +156,24 @@ describe('claude structured auth parity with the terminal preflight', () => {
   })
 
   // Task 3 — the terminal preflight guards this at four sites; the structured path had none.
-  it('refuses launch resolution while a Claude account switch is in progress', async () => {
+  it('refuses launch resolution when an account switch never settles', async () => {
     beginClaudeAuthSwitch()
 
-    await expect(resolverFor({ stripAuthEnv: true })({ identity: IDENTITY })).rejects.toThrow(
-      CLAUDE_AUTH_SWITCH_IN_PROGRESS_MESSAGE
-    )
+    await expect(
+      resolverFor({ stripAuthEnv: true, authSwitchSettleTimeoutMs: 20 })({ identity: IDENTITY })
+    ).rejects.toThrow(CLAUDE_AUTH_SWITCH_IN_PROGRESS_MESSAGE)
+  })
+
+  it('waits a settling account switch out rather than refusing a resolved launch', async () => {
+    beginClaudeAuthSwitch()
+    setTimeout(() => endClaudeAuthSwitch(), 20)
+
+    const launch = await resolverFor({
+      stripAuthEnv: true,
+      authSwitchSettleTimeoutMs: 5_000
+    })({ identity: IDENTITY })
+
+    expect(launch.claudeConfigDir).toBe('/home/work/.claude')
   })
 
   it('refuses an acquire before it tears the previous session down', async () => {
@@ -136,5 +186,50 @@ describe('claude structured auth parity with the terminal preflight', () => {
     ).rejects.toThrow(CLAUDE_AUTH_SWITCH_IN_PROGRESS_MESSAGE)
     // Nothing was spawned, so the refusal must not have opened a connection.
     expect(claude.connections).toHaveLength(0)
+  })
+
+  // The teardown between the entry guard and launch resolution closes the live child
+  // and proves its tree — seconds, not milliseconds. A switch that begins inside it
+  // has already cost the user their session, so refusing there produces exactly the
+  // outcome the entry guard advertises against: a dead chat and no replacement.
+  it('replaces the session when a switch begins inside the acquire teardown', async () => {
+    const claude = fakeClaude()
+    const adapter = realResolverAdapter(claude, 5_000)
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+    const live = claude.connections[0]!
+    const closeWithSwitch = live.close
+    live.close = async () => {
+      beginClaudeAuthSwitch()
+      setTimeout(() => endClaudeAuthSwitch(), 20)
+      return closeWithSwitch()
+    }
+
+    await expect(
+      adapter.acquire({ identity: identityFor(), fence: 8, spawnToken: 'spawn-10' })
+    ).resolves.toMatchObject({ process: { spawnToken: 'spawn-10' } })
+    expect(live.closed).toBe(true)
+    // The replacement child exists: the user's chat came back.
+    expect(claude.connections).toHaveLength(2)
+    expect(claude.connections[1]!.closed).toBe(false)
+    await adapter.closeAll()
+  })
+
+  it('still refuses a mid-teardown switch that never settles, leaving nothing half-open', async () => {
+    const claude = fakeClaude()
+    const adapter = realResolverAdapter(claude, 20)
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+    const live = claude.connections[0]!
+    const closeWithSwitch = live.close
+    live.close = async () => {
+      beginClaudeAuthSwitch()
+      return closeWithSwitch()
+    }
+
+    await expect(
+      adapter.acquire({ identity: identityFor(), fence: 8, spawnToken: 'spawn-10' })
+    ).rejects.toThrow(CLAUDE_AUTH_SWITCH_IN_PROGRESS_MESSAGE)
+    // No replacement child was opened, so nothing is left running unowned.
+    expect(claude.connections).toHaveLength(1)
+    await adapter.closeAll()
   })
 })

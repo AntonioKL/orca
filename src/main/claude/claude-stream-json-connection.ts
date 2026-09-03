@@ -1,6 +1,11 @@
+import { randomUUID } from 'node:crypto'
 import type * as ClaudeAgentSdk from '@anthropic-ai/claude-agent-sdk'
 import type { CanUseTool, OnUserDialog, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { spawnProcess } from '../../shared/child-process/run-process'
+import {
+  markClaudeStructuredChildExited,
+  markClaudeStructuredChildSpawned
+} from '../claude-accounts/live-pty-gate'
 import { buildClaudeChildProcessEnv } from './claude-child-process-environment'
 import {
   ClaudeControlRequestError,
@@ -118,6 +123,12 @@ export async function openClaudeStreamJsonConnection(
   if (!child) {
     throw new Error('the claude agent SDK returned without spawning a child')
   }
+  // This child owns the account's credentials for as long as it runs, exactly as a
+  // Claude PTY does — hold the OAuth-refresh gate so a managed refresh cannot rotate
+  // the single-use token out from under it mid-turn.
+  const authGateKey = randomUUID()
+  markClaudeStructuredChildSpawned(authGateKey)
+  const releaseAuthGate = (): void => markClaudeStructuredChildExited(authGateKey)
   let exited = false
   let exitStatus: ExitStatus | null = null
   let closing = false
@@ -156,6 +167,7 @@ export async function openClaudeStreamJsonConnection(
   })
   const markExited = (): void => {
     exited = true
+    releaseAuthGate()
     settleExit()
   }
   child.on('exit', (code, signal) => {
@@ -200,6 +212,8 @@ export async function openClaudeStreamJsonConnection(
     handleUnexpectedEnd(error)
   })
   child.on('close', () => {
+    // Covers the spawn-failure path too, where no 'exit' ever arrives.
+    releaseAuthGate()
     if (prePidSpawnError && spawner.pid === undefined) {
       processless = true
       settleExit()

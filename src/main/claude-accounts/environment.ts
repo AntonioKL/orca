@@ -70,14 +70,62 @@ export function shouldStripClaudeAuthEnvForAccount(
   )
 }
 
-export function hasClaudeAuthEnvConflict(env: Record<string, string> | undefined): boolean {
+/**
+ * Whether a launch's explicit env carries Anthropic auth a managed account must own.
+ *
+ * The key comparison mirrors applyClaudeEnvPatch's strip exactly: case-insensitive on
+ * win32, where the OS folds env names so `anthropic_api_key` is an effective
+ * `ANTHROPIC_API_KEY`, and case-sensitive elsewhere. A refusal narrower than the strip
+ * lets an override through that the strip would have removed.
+ *
+ * Presence, not truthiness: the strip deletes these names whatever their value, so an
+ * empty override is still an override of the pinned account's credential.
+ */
+/**
+ * The inherited Anthropic auth a non-stripping launch has to carry forward explicitly.
+ *
+ * applyClaudeEnvPatch always strips the inherited half of a child env, and the
+ * configured half is what overrides it — so a system-auth user's own key only survives
+ * if the caller puts it back deliberately. Returns the exact keys present, so a
+ * win32 `anthropic_api_key` is carried under the name the OS actually has.
+ */
+export function claudeAuthEnvCarriedForward(
+  inherited: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform
+): Record<string, string> {
+  const carried: Record<string, string> = {}
+  for (const [key, value] of Object.entries(inherited)) {
+    if (value === undefined) {
+      continue
+    }
+    const normalized = platform === 'win32' ? key.toUpperCase() : key
+    if (
+      CLAUDE_AUTH_ENV_VARS.some((authKey) => authKey === normalized) ||
+      (normalized === 'ANTHROPIC_CUSTOM_HEADERS' && isAuthLikeCustomHeaders(value))
+    ) {
+      carried[key] = value
+    }
+  }
+  return carried
+}
+
+export function hasClaudeAuthEnvConflict(
+  env: Record<string, string> | undefined,
+  platform: NodeJS.Platform = process.platform
+): boolean {
   if (!env) {
     return false
   }
-  return (
-    CLAUDE_AUTH_ENV_VARS.some((key) => Boolean(env[key])) ||
-    isAuthLikeCustomHeaders(env.ANTHROPIC_CUSTOM_HEADERS)
-  )
+  for (const [key, value] of Object.entries(env)) {
+    const normalized = platform === 'win32' ? key.toUpperCase() : key
+    if (CLAUDE_AUTH_ENV_VARS.some((authKey) => authKey === normalized)) {
+      return true
+    }
+    if (normalized === 'ANTHROPIC_CUSTOM_HEADERS' && isAuthLikeCustomHeaders(value)) {
+      return true
+    }
+  }
+  return false
 }
 
 function isAuthLikeCustomHeaders(value: string | undefined): boolean {

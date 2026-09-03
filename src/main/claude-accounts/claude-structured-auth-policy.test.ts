@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { GlobalSettings } from '../../shared/global-settings-types'
 import type { ClaudeManagedAccount } from '../../shared/managed-account-types'
-import { CLAUDE_AUTH_ENV_VARS, shouldStripClaudeAuthEnvForAccount } from './environment'
+import {
+  CLAUDE_AUTH_ENV_VARS,
+  hasClaudeAuthEnvConflict,
+  shouldStripClaudeAuthEnvForAccount
+} from './environment'
 import { claudeStructuredAuthPolicyForSettings } from './claude-structured-auth-policy'
 
 const HOST_ACCOUNT = { id: 'host-a', managedAuthRuntime: 'host' } as ClaudeManagedAccount
@@ -101,5 +105,39 @@ describe('the strip vocabulary the policy governs', () => {
       'CLAUDE_CODE_OAUTH_TOKEN',
       'AWS_BEARER_TOKEN_BEDROCK'
     ])
+  })
+})
+
+// The refusal has to cover exactly what the strip removes. Anything narrower lets an
+// override reach the child that applyClaudeEnvPatch would have deleted.
+describe('hasClaudeAuthEnvConflict matches the strip it guards', () => {
+  it('refuses each Anthropic auth variable', () => {
+    for (const key of CLAUDE_AUTH_ENV_VARS) {
+      expect(hasClaudeAuthEnvConflict({ [key]: 'v' }, 'linux')).toBe(true)
+    }
+  })
+
+  it('refuses an override whose value is empty, because the strip deletes it anyway', () => {
+    expect(hasClaudeAuthEnvConflict({ ANTHROPIC_API_KEY: '' }, 'linux')).toBe(true)
+  })
+
+  it('folds case on win32, where the OS does', () => {
+    expect(hasClaudeAuthEnvConflict({ anthropic_api_key: 'sk-lower' }, 'win32')).toBe(true)
+    expect(hasClaudeAuthEnvConflict({ Anthropic_Custom_Headers: 'x-api-key: v' }, 'win32')).toBe(
+      true
+    )
+  })
+
+  it('keeps env names case-sensitive off win32', () => {
+    expect(hasClaudeAuthEnvConflict({ anthropic_api_key: 'sk-lower' }, 'linux')).toBe(false)
+  })
+
+  it('admits non-auth Anthropic settings on both platforms', () => {
+    expect(hasClaudeAuthEnvConflict({ ANTHROPIC_BASE_URL: 'https://gw.test' }, 'linux')).toBe(false)
+    expect(hasClaudeAuthEnvConflict({ ANTHROPIC_BASE_URL: 'https://gw.test' }, 'win32')).toBe(false)
+    expect(hasClaudeAuthEnvConflict({ ANTHROPIC_CUSTOM_HEADERS: 'X-Trace: 1' }, 'linux')).toBe(
+      false
+    )
+    expect(hasClaudeAuthEnvConflict(undefined, 'linux')).toBe(false)
   })
 })

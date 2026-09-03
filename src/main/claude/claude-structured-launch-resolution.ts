@@ -11,7 +11,10 @@ import {
   hasClaudeAuthEnvConflict
 } from '../claude-accounts/environment'
 import type { ClaudeStructuredAuthPolicy } from '../claude-accounts/claude-structured-auth-policy'
-import { isClaudeAuthSwitchInProgress } from '../claude-accounts/live-pty-gate'
+import {
+  CLAUDE_AUTH_SWITCH_SETTLE_TIMEOUT_MS,
+  whenClaudeAuthSwitchSettles
+} from '../claude-accounts/live-pty-gate'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 
@@ -132,10 +135,22 @@ export type ClaudeStructuredLaunchResolverDeps = {
    * inherit a guess. Build it with claudeStructuredAuthPolicyForSettings.
    */
   resolveAuthPolicy: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
+  /** How long an in-flight account switch may hold a launch before it is refused. */
+  authSwitchSettleTimeoutMs?: number
 }
 
-export function assertClaudeAuthSwitchIdle(): void {
-  if (isClaudeAuthSwitchInProgress()) {
+/**
+ * Wait a running account switch out, and refuse only if it never settles.
+ *
+ * Launch resolution is reached from `acquireClaudeSession` *after* the old child has
+ * been closed and proved, so a plain refusal here would leave the user with a dead
+ * chat and no replacement — the very harm the acquire-entry guard exists to prevent.
+ * The entry guard still refuses outright, because nothing has been torn down yet.
+ */
+export async function assertClaudeAuthSwitchSettled(
+  timeoutMs = CLAUDE_AUTH_SWITCH_SETTLE_TIMEOUT_MS
+): Promise<void> {
+  if (!(await whenClaudeAuthSwitchSettles(timeoutMs))) {
     throw new Error(CLAUDE_AUTH_SWITCH_IN_PROGRESS_MESSAGE)
   }
 }
@@ -152,7 +167,7 @@ export function createClaudeStructuredLaunchResolver(
   deps: ClaudeStructuredLaunchResolverDeps
 ): (input: { identity: AgentSessionJournalIdentity }) => Promise<ClaudeStructuredLaunch> {
   return async ({ identity }) => {
-    assertClaudeAuthSwitchIdle()
+    await assertClaudeAuthSwitchSettled(deps.authSwitchSettleTimeoutMs)
     const record = deps.store.getRecord(identity.sessionId)
     if (!record) {
       throw new Error(`no durable agent-session record for ${identity.sessionId}`)
@@ -190,7 +205,7 @@ export function createClaudeStructuredLaunchResolver(
     const overlay = await deps.resolveEnv?.()
     // A switch can begin while the policy and overlay resolve, exactly as it can
     // during the terminal preflight's prepareClaudeAuth — recheck after the awaits.
-    assertClaudeAuthSwitchIdle()
+    await assertClaudeAuthSwitchSettled(deps.authSwitchSettleTimeoutMs)
     // Under a managed account the pinned credential is the only auth this launch may
     // use, so an explicit override is refused rather than silently beating the pin.
     if (auth.stripAuthEnv && hasClaudeAuthEnvConflict(overlay)) {
