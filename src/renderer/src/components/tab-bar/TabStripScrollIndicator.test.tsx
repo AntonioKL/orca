@@ -68,6 +68,36 @@ describe('TabStripScrollIndicator', () => {
     )
     const indicator = getByTestId('tab-strip-scroll-indicator')
     expect(indicator.className).toContain('pointer-events-none')
+    expect(indicator.className).not.toContain('group-hover/tab-strip:pointer-events-auto')
+  })
+
+  it('stays hidden and unexpanded on hover when disabled', () => {
+    const { getByTestId } = render(
+      <TabStripScrollIndicator metrics={OVERFLOW_METRICS} disabled={true} />
+    )
+    const indicator = getByTestId('tab-strip-scroll-indicator')
+    fireEvent.pointerEnter(indicator)
+    expect(indicator.className).toContain('opacity-0')
+    expect(indicator.className).not.toContain('opacity-100')
+    expect(indicator.className).toContain('h-[3px]')
+  })
+
+  it('does not forward wheel events when disabled', () => {
+    const scrollContainer = document.createElement('div')
+    scrollContainer.scrollLeft = 0
+    const scrollContainerRef = createRef<HTMLElement>()
+    ;(scrollContainerRef as React.MutableRefObject<HTMLElement>).current = scrollContainer
+
+    const { getByTestId } = render(
+      <TabStripScrollIndicator
+        metrics={OVERFLOW_METRICS}
+        scrollContainerRef={scrollContainerRef}
+        disabled={true}
+      />
+    )
+    fireEvent.wheel(getByTestId('tab-strip-scroll-indicator'), { deltaX: 40, deltaY: 0 })
+
+    expect(scrollContainer.scrollLeft).toBe(0)
   })
 
   it('forwards wheel events to scrollContainer', () => {

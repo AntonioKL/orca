@@ -169,7 +169,7 @@ export function TabStripScrollIndicator({
 
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>): void => {
     const scrollContainer = scrollContainerRef?.current
-    if (!scrollContainer) {
+    if (!scrollContainer || disabled) {
       return
     }
     // Why: forward wheel events to tab container so scrolling over the indicator scrolls the strip.
@@ -181,8 +181,9 @@ export function TabStripScrollIndicator({
     return null
   }
 
-  const isExpanded = isHovered || isDragging
-  const isVisible = isHovered || isDragging || isScrolling
+  // Why: during a tab drag the indicator fully yields — no reveal, no pointer/wheel interaction.
+  const isExpanded = !disabled && (isHovered || isDragging)
+  const isVisible = !disabled && (isHovered || isDragging || isScrolling)
 
   return (
     // Why: under-tab position matches editor tab scrollbar conventions, auto-hiding when idle so it never mimics an underline.
@@ -194,10 +195,12 @@ export function TabStripScrollIndicator({
           ? 'h-[5px] bg-muted-foreground/15 cursor-pointer'
           : 'h-[3px] bg-foreground/[0.04]'
       } ${
-        isVisible
-          ? 'opacity-100 pointer-events-auto'
-          : 'opacity-0 group-hover/tab-strip:opacity-100 pointer-events-none group-hover/tab-strip:pointer-events-auto'
-      } ${disabled ? 'pointer-events-none' : ''}`}
+        disabled
+          ? 'opacity-0 pointer-events-none'
+          : isVisible
+            ? 'opacity-100 pointer-events-auto'
+            : 'opacity-0 group-hover/tab-strip:opacity-100 pointer-events-none group-hover/tab-strip:pointer-events-auto'
+      }`}
       onPointerEnter={() => setIsHovered(true)}
       onPointerLeave={() => setIsHovered(false)}
       onPointerDown={handleTrackPointerDown}
