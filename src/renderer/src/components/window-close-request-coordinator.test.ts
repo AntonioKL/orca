@@ -98,9 +98,10 @@ describe('window-close-request-coordinator', () => {
       { once: true }
     )
 
-    await dispatchWindowCloseRequest({ isQuitting: true })
+    await dispatchWindowCloseRequest({ isQuitting: true, requestId: 42 })
 
     expect(confirmWindowClose).not.toHaveBeenCalled()
+    expect(cancelWindowClose).toHaveBeenCalledWith(42)
     expect(toast.error).toHaveBeenCalledWith(
       'Quit canceled: the session snapshot could not be saved (sendSync payload rejected).'
     )

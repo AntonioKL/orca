@@ -101,5 +101,8 @@ export async function dispatchWindowCloseRequest(data: {
     window.api.ui.confirmWindowClose()
     return
   }
+  // A beforeunload veto is another abandoned close path. Without this signal, main keeps the
+  // request outstanding and any relaunch deferred to `quit` can fire on a later unrelated quit.
+  window.api.ui.cancelWindowClose(data.requestId)
   showShutdownCheckpointFailureToast()
 }
