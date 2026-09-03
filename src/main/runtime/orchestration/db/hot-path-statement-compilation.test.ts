@@ -7,7 +7,6 @@ import type { OrchestrationCompatibilityTerminalAuthority } from '../../runtime-
 import type { RuntimeLeafRecord } from '../../runtime-terminal-state-records'
 import { OrchestrationDb } from '../db'
 import { createRootDispatch } from './root-dispatch-test-fixture'
-import { prepareCachedOrchestrationRead } from './prepared-statement-cache'
 
 const COORDINATOR_HANDLE = 'term_coordinator'
 const COORDINATOR_PANE = 'tab_c:leaf_c'
@@ -15,7 +14,9 @@ const WORKER_HANDLE = 'term_worker'
 const WORKER_PANE = 'tab_w:leaf_w'
 const IDLE_HANDLE = 'term_idle'
 const IDLE_PANE = 'tab_i:leaf_i'
-const RUN_BY_ID_SQL = 'SELECT * FROM runs WHERE id = ?'
+
+// Why: mirrors SyncDatabase's `isStatementCacheable` — aggregate `(*)` is fine, any other `*` is not.
+const WILDCARD_PROJECTION = /(?<!\(\s*)\*/
 
 const openDatabases: OrchestrationDb[] = []
 const temporaryDirectories: string[] = []
@@ -40,7 +41,7 @@ function openDatabase(path: string): OrchestrationDb {
 }
 
 function temporaryDatabasePath(): string {
-  const directory = mkdtempSync(join(tmpdir(), 'orca-orchestration-cache-'))
+  const directory = mkdtempSync(join(tmpdir(), 'orca-orchestration-hot-path-'))
   temporaryDirectories.push(directory)
   return join(directory, 'orchestration.db')
 }
@@ -104,7 +105,7 @@ function buildProjection(db: OrchestrationDb): RuntimeAgentOrchestrationProjecti
   })
 }
 
-describe('orchestration prepared-statement cache', () => {
+describe('orchestration hot-path statement compilation', () => {
   it('compiles each hot-path SQL exactly once across repeated graph publishes', () => {
     const db = openDatabase(':memory:')
     seedDispatchedWorker(db)
@@ -130,26 +131,18 @@ describe('orchestration prepared-statement cache', () => {
     }
   })
 
-  it('reuses one statement object per connection', () => {
-    const db = openDatabase(':memory:')
-    expect(prepareCachedOrchestrationRead(db.db, RUN_BY_ID_SQL)).toBe(
-      prepareCachedOrchestrationRead(db.db, RUN_BY_ID_SQL)
-    )
-  })
-
-  it('does not serve a statement from the previous connection after reopen', () => {
+  // Why: `SELECT *` is what made these statements uncacheable, and a retained wildcard is the only
+  // way node:sqlite could build a row from stale column names after another connection's ALTER.
+  // Seeds on one connection and publishes on a second so every compilation here is hot-path SQL.
+  it('publishes without compiling a single wildcard projection', () => {
     const path = temporaryDatabasePath()
-    const first = openDatabase(path)
-    const beforeClose = prepareCachedOrchestrationRead(first.db, RUN_BY_ID_SQL)
-    first.close()
+    seedDispatchedWorker(openDatabase(path))
 
-    const second = openDatabase(path)
-    const afterReopen = prepareCachedOrchestrationRead(second.db, RUN_BY_ID_SQL)
+    const reader = openDatabase(path)
+    const compiled = trackCompiledSql(reader)
+    buildProjection(reader).buildByPaneKey()
 
-    // Why Object.is: the closed connection's statement throws on any property read, so vitest
-    // cannot format it as a matcher operand.
-    expect(Object.is(afterReopen, beforeClose)).toBe(false)
-    expect(() => beforeClose.get('run_missing')).toThrow()
-    expect(() => afterReopen.get('run_missing')).not.toThrow()
+    expect(compiled.length).toBeGreaterThan(0)
+    expect(compiled.filter((sql) => WILDCARD_PROJECTION.test(sql))).toEqual([])
   })
 })

@@ -5,7 +5,7 @@ import { LEGACY_RUN_ID } from '../contract-constants'
 import { generateId } from '../generated-id'
 import type { TaskRuntimeLineageRow } from '../run-list-page'
 import type { OrchestrationDb } from '../orchestration-db'
-import { prepareCachedOrchestrationRead } from '../prepared-statement-cache'
+import { selectColumns, TASK_COLUMNS } from '../row-column-lists'
 
 // ── Tasks ──
 
@@ -82,8 +82,8 @@ export function createTask(
   return this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRow
 }
 
-// Why: hoisted so the per-publish lineage lookup hits one stable cache key.
-const TASK_RUNTIME_LINEAGE_SQL = `SELECT t.*,
+// Why: hoisted and wildcard-free so the per-publish lineage lookup hits the SyncDatabase statement cache.
+const TASK_RUNTIME_LINEAGE_SQL = `SELECT ${selectColumns(TASK_COLUMNS, 't')},
          creator.id AS creator_dispatch_id,
          creator.run_id AS creator_dispatch_run_id,
          creator.assignee_pane_key AS creator_dispatch_pane_key,
@@ -115,10 +115,9 @@ export function getTask(
   if (dispatchRunId === undefined) {
     return this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRow | undefined
   }
-  return prepareCachedOrchestrationRead(this.db, TASK_RUNTIME_LINEAGE_SQL).get(
-    dispatchRunId,
-    id
-  ) as TaskRuntimeLineageRow | undefined
+  return this.db.prepare(TASK_RUNTIME_LINEAGE_SQL).get(dispatchRunId, id) as
+    | TaskRuntimeLineageRow
+    | undefined
 }
 
 export function listTasks(
