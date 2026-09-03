@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { createElement, type ReactNode } from 'react'
-import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { act, create } from 'react-test-renderer'
+
+// Why: CI's type-aware lint resolves react-test-renderer's types as any; derive the type instead.
+type Renderer = ReturnType<typeof create>
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const deviceInsets = vi.hoisted(() => ({ top: 44, bottom: 34, left: 0, right: 0 }))
@@ -70,7 +73,7 @@ function shellPaddingAboveWebView(node: RenderNode | string | null, total = 0): 
   return null
 }
 
-function renderHostedShell(renderer: { current: ReactTestRenderer | null }): RenderNode {
+function renderHostedShell(renderer: { current: Renderer | null }): RenderNode {
   act(() => {
     renderer.current = create(
       createElement(MobileWebHybridShellPresentation, {
@@ -100,7 +103,7 @@ function renderHostedShell(renderer: { current: ReactTestRenderer | null }): Ren
 }
 
 describe('hosted page top inset', () => {
-  const renderer: { current: ReactTestRenderer | null } = { current: null }
+  const renderer: { current: Renderer | null } = { current: null }
 
   afterEach(() => {
     act(() => renderer.current?.unmount())
