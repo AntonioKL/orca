@@ -263,6 +263,9 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     startupPlan,
     launchSource
   })
+  if (structuredResult.visibilityUnknown) {
+    return false
+  }
   if (structuredResult.completed) {
     return true
   }

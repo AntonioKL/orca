@@ -236,25 +236,32 @@ export function useFullCreationExecution(input: FullCreationExecutionInput) {
         ...(structuredLaunch ? { providesInitialSurface: true } : {})
       })
 
-      const { structuredLaunchAccepted, activation } = await settleFullCreationStructuredLaunch({
-        structuredLaunch,
-        agent: tuiAgent,
-        worktreeId: worktree.id,
-        prompt: startupPlan?.draftPrompt ?? submitStartupPrompt,
-        initialActivation,
-        onDefinitiveRefusal: async () => {
-          if (pendingFirstAgentMessageRename) {
-            await applyWorktreeMeta(worktree.id, { pendingFirstAgentMessageRename: true }).catch(
-              () => undefined
-            )
+      const { structuredLaunchAccepted, visibilityUnknown, activation } =
+        await settleFullCreationStructuredLaunch({
+          structuredLaunch,
+          agent: tuiAgent,
+          worktreeId: worktree.id,
+          prompt: startupPlan?.draftPrompt ?? submitStartupPrompt,
+          initialActivation,
+          onDefinitiveRefusal: async () => {
+            if (pendingFirstAgentMessageRename) {
+              await applyWorktreeMeta(worktree.id, { pendingFirstAgentMessageRename: true }).catch(
+                () => undefined
+              )
+            }
+            return activateAndRevealWorktree(worktree.id, {
+              sidebarRevealBehavior: 'auto',
+              createNewTerminalForStartup: true,
+              ...(startup ? { startup } : {})
+            })
           }
-          return activateAndRevealWorktree(worktree.id, {
-            sidebarRevealBehavior: 'auto',
-            createNewTerminalForStartup: true,
-            ...(startup ? { startup } : {})
-          })
-        }
-      })
+        })
+
+      if (visibilityUnknown) {
+        setSidebarOpen(true)
+        onCreated?.()
+        return
+      }
 
       if (!structuredLaunchAccepted && startupPlan) {
         const optionScopeKey =

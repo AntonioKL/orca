@@ -258,7 +258,7 @@ export async function submitFolderWorkspaceCreate({
         await launch.launchResult
       } catch (error) {
         if (!(error instanceof StructuredAgentSessionCreateRefusalError)) {
-          return true
+          return !launch.isVisibilityUnknown()
         }
         await refusalFallback
       }

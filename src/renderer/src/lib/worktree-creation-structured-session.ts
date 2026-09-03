@@ -17,6 +17,7 @@ import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
 export type WorktreeCreationStructuredSessionResult = {
   accepted: boolean
   cancelled: boolean
+  visibilityUnknown: boolean
   activation: ActivateAndRevealResult | false
   primaryTabId: string | null
 }
@@ -45,11 +46,12 @@ export async function launchStructuredWorktreeSession(args: {
 }): Promise<WorktreeCreationStructuredSessionResult> {
   let { activation, primaryTabId } = args
   let accepted = true
+  let visibilityUnknown = false
   if (args.request.agent !== 'codex') {
-    return { accepted, cancelled: false, activation, primaryTabId }
+    return { accepted, cancelled: false, visibilityUnknown, activation, primaryTabId }
   }
   if (!useAppStore.getState().pendingWorktreeCreations[args.creationId]) {
-    return { accepted, cancelled: true, activation, primaryTabId }
+    return { accepted, cancelled: true, visibilityUnknown, activation, primaryTabId }
   }
 
   const launch = startStructuredCodexLaunch(args.worktreeId, {
@@ -127,7 +129,7 @@ export async function launchStructuredWorktreeSession(args: {
     const receipt = await launch.launchResult
     if (cancelled) {
       await retireCancelledStructuredSession(args.worktreeId, launch.sessionId)
-      return { accepted, cancelled, activation, primaryTabId }
+      return { accepted, cancelled, visibilityUnknown, activation, primaryTabId }
     }
     if (args.shouldActivateOnCompletion) {
       activateStructuredAgentSessionById({
@@ -138,13 +140,15 @@ export async function launchStructuredWorktreeSession(args: {
   } catch (error) {
     if (cancelled) {
       await retireCancelledStructuredSession(args.worktreeId, launch.sessionId)
-      return { accepted, cancelled, activation, primaryTabId }
+      return { accepted, cancelled, visibilityUnknown, activation, primaryTabId }
     }
     if (error instanceof StructuredAgentSessionCreateRefusalError) {
       await refusalFallback
+    } else {
+      visibilityUnknown = launch.isVisibilityUnknown()
     }
   } finally {
     unsubscribe()
   }
-  return { accepted, cancelled, activation, primaryTabId }
+  return { accepted, cancelled, visibilityUnknown, activation, primaryTabId }
 }

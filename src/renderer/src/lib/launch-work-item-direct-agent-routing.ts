@@ -123,11 +123,12 @@ export async function settleDirectWorkItemStructuredLaunch(args: {
 }): Promise<{
   completed: boolean
   structuredLaunch: boolean
+  visibilityUnknown: boolean
   primaryTabId: string | null
 }> {
   let { structuredLaunch, primaryTabId } = args
   if (!structuredLaunch || args.agent !== 'codex') {
-    return { completed: false, structuredLaunch, primaryTabId }
+    return { completed: false, structuredLaunch, visibilityUnknown: false, primaryTabId }
   }
 
   const launch = startStructuredCodexLaunch(args.worktreeId, {
@@ -155,12 +156,18 @@ export async function settleDirectWorkItemStructuredLaunch(args: {
   })
   try {
     await launch.launchResult
-    return { completed: true, structuredLaunch, primaryTabId }
+    return { completed: true, structuredLaunch, visibilityUnknown: false, primaryTabId }
   } catch (error) {
     if (!(error instanceof StructuredAgentSessionCreateRefusalError)) {
-      return { completed: true, structuredLaunch, primaryTabId }
+      const visibilityUnknown = launch.isVisibilityUnknown()
+      return {
+        completed: !visibilityUnknown,
+        structuredLaunch,
+        visibilityUnknown,
+        primaryTabId
+      }
     }
     await refusalFallback
   }
-  return { completed: false, structuredLaunch, primaryTabId }
+  return { completed: false, structuredLaunch, visibilityUnknown: false, primaryTabId }
 }

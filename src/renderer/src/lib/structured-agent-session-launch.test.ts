@@ -196,6 +196,39 @@ describe('startStructuredCodexLaunch', () => {
     )
   })
 
+  it('keeps the launch reserved until every coalesced prompt delivery settles', async () => {
+    const worktreeId = 'wt-coalesced-prompt-reservation'
+    const intent = launchIntent(worktreeId)
+    let resolveLaunch!: (receipt: { sessionId: string; fence: number }) => void
+    let resolveDelivery!: (result: {
+      ok: true
+      value: { submission: { dispatchState: 'accepted' } }
+    }) => void
+    mocks.createIntent.mockReturnValue(intent)
+    mocks.launch.mockImplementationOnce(() => new Promise((resolve) => (resolveLaunch = resolve)))
+    vi.mocked(refreshLocalStructuredSessionTabs).mockResolvedValue([
+      publishedSnapshot(worktreeId, intent.sessionId)
+    ])
+    mocks.callStructuredAgentSession.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveDelivery = resolve))
+    )
+
+    startStructuredCodexLaunch(worktreeId)
+    const coalesced = startStructuredCodexLaunch(worktreeId, { prompt: 'second prompt' })
+    resolveLaunch({ sessionId: intent.sessionId, fence: 1 })
+    await vi.waitFor(() => expect(mocks.callStructuredAgentSession).toHaveBeenCalledOnce())
+
+    startStructuredCodexLaunch(worktreeId)
+    expect(mocks.createIntent).toHaveBeenCalledOnce()
+    expect(mocks.launch).toHaveBeenCalledOnce()
+
+    resolveDelivery({ ok: true, value: { submission: { dispatchState: 'accepted' } } })
+    await expect(coalesced.promptDeliveryResult).resolves.toEqual({
+      delivered: true,
+      failureNotified: false
+    })
+  })
+
   it('keeps one launch identity per worktree while the outcome is unknown', async () => {
     const worktreeId = 'wt-unknown-different-prompts'
     const intent = launchIntent(worktreeId)
@@ -315,7 +348,7 @@ describe('startStructuredCodexLaunch', () => {
     storageFailure.mockRestore()
   })
 
-  it('discards every coalesced prompt when the launch is definitively refused', async () => {
+  it('runs each caller fallback and preserves its delivery result after refusal', async () => {
     const worktreeId = 'wt-refused-coalesced-prompts'
     const intent = launchIntent(worktreeId)
     let rejectLaunch!: (error: unknown) => void
@@ -325,16 +358,36 @@ describe('startStructuredCodexLaunch', () => {
     )
 
     const first = startStructuredCodexLaunch(worktreeId, { prompt: 'first prompt' })
-    startStructuredCodexLaunch(worktreeId, { prompt: 'second prompt' })
-    const fallback = first.claimDefinitiveRefusalFallback(vi.fn())
+    const second = startStructuredCodexLaunch(worktreeId, { prompt: 'second prompt' })
+    const firstFallback = vi.fn().mockResolvedValue({
+      delivered: true,
+      failureNotified: false
+    })
+    const secondFallback = vi.fn().mockResolvedValue({
+      delivered: false,
+      failureNotified: true
+    })
+    const firstFallbackResult = first.claimDefinitiveRefusalFallback(firstFallback)
+    const secondFallbackResult = second.claimDefinitiveRefusalFallback(secondFallback)
     expect(readOutbox(intent.sessionId)).toHaveLength(2)
 
     rejectLaunch(new StructuredAgentSessionCreateRefusalError('unsupported'))
     await expect(first.launchResult).rejects.toBeInstanceOf(
       StructuredAgentSessionCreateRefusalError
     )
-    await expect(fallback).resolves.toBe(true)
+    await expect(firstFallbackResult).resolves.toBe(true)
+    await expect(secondFallbackResult).resolves.toBe(true)
+    await expect(first.promptDeliveryResult).resolves.toEqual({
+      delivered: true,
+      failureNotified: false
+    })
+    await expect(second.promptDeliveryResult).resolves.toEqual({
+      delivered: false,
+      failureNotified: true
+    })
 
+    expect(firstFallback).toHaveBeenCalledOnce()
+    expect(secondFallback).toHaveBeenCalledOnce()
     expect(readOutbox(intent.sessionId)).toEqual([])
   })
 

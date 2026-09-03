@@ -13,11 +13,15 @@ export async function settleFullCreationStructuredLaunch(args: {
   prompt: string
   initialActivation: Activation
   onDefinitiveRefusal: () => Activation | Promise<Activation>
-}): Promise<{ structuredLaunchAccepted: boolean; activation: Activation }> {
+}): Promise<{
+  structuredLaunchAccepted: boolean
+  visibilityUnknown: boolean
+  activation: Activation
+}> {
   let activation = args.initialActivation
   let structuredLaunchAccepted = args.structuredLaunch
   if (!args.structuredLaunch || args.agent !== 'codex') {
-    return { structuredLaunchAccepted, activation }
+    return { structuredLaunchAccepted, visibilityUnknown: false, activation }
   }
 
   const launch = startStructuredCodexLaunch(args.worktreeId, { prompt: args.prompt })
@@ -34,7 +38,9 @@ export async function settleFullCreationStructuredLaunch(args: {
   } catch (error) {
     if (error instanceof StructuredAgentSessionCreateRefusalError) {
       await refusalFallback
+    } else if (launch.isVisibilityUnknown()) {
+      return { structuredLaunchAccepted, visibilityUnknown: true, activation }
     }
   }
-  return { structuredLaunchAccepted, activation }
+  return { structuredLaunchAccepted, visibilityUnknown: false, activation }
 }

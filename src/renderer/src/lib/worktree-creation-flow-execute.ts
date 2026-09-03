@@ -1,4 +1,5 @@
 import { toast } from 'sonner'
+import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
 import { preflightAgentTrust as preflightWorkspaceAgentTrust } from '@/lib/agent-trust-preflight'
 import { activateAndRevealWorktree, type ActivateAndRevealResult } from '@/lib/worktree-activation'
@@ -223,6 +224,16 @@ export async function executeWorktreeCreation(
     activation = structuredSession.activation
     primaryTabId = structuredSession.primaryTabId
     if (structuredSession.cancelled) {
+      return
+    }
+    if (structuredSession.visibilityUnknown) {
+      useAppStore.getState().updatePendingWorktreeCreation(creationId, {
+        status: 'error',
+        error: translate(
+          'auto.lib.worktree.creation.flow.structured.launch.unknown',
+          'Could not confirm whether Codex chat opened. Retry to check again.'
+        )
+      })
       return
     }
   }

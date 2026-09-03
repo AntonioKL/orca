@@ -81,6 +81,7 @@ describe('launchStructuredWorktreeSession', () => {
     mocks.startStructuredCodexLaunch.mockReturnValue({
       sessionId: 'session-1',
       launchResult,
+      isVisibilityUnknown: () => false,
       claimDefinitiveRefusalFallback: vi.fn(() => Promise.resolve(false))
     })
 
@@ -111,6 +112,7 @@ describe('launchStructuredWorktreeSession', () => {
     await expect(resultPromise).resolves.toEqual({
       accepted: true,
       cancelled: true,
+      visibilityUnknown: false,
       activation: false,
       primaryTabId: null
     })
@@ -121,6 +123,46 @@ describe('launchStructuredWorktreeSession', () => {
       tabId: 'agent-session:session-1',
       reason: 'user'
     })
+    expect(mocks.activateStructuredAgentSessionById).not.toHaveBeenCalled()
+    expect(mocks.unsubscribe).toHaveBeenCalledOnce()
+  })
+
+  it('reports an unknown launch without claiming a visible surface', async () => {
+    mocks.startStructuredCodexLaunch.mockReturnValue({
+      sessionId: 'session-unknown',
+      launchResult: Promise.reject(new Error('connection lost')),
+      isVisibilityUnknown: () => true,
+      claimDefinitiveRefusalFallback: vi.fn(() => Promise.resolve(false))
+    })
+
+    await expect(
+      launchStructuredWorktreeSession({
+        creationId: 'creation-1',
+        request: {
+          repoId: 'repo-1',
+          name: 'routing-recovery',
+          setupDecision: 'run',
+          agent: 'codex',
+          pendingFirstAgentMessageRename: false,
+          note: '',
+          startupPlan: null,
+          quickPrompt: 'Fix the route',
+          quickTelemetry: null
+        },
+        worktreeId: 'worktree-1',
+        shouldActivateOnCompletion: true,
+        fallbackStartupOpt: undefined,
+        activation: false,
+        primaryTabId: null
+      })
+    ).resolves.toEqual({
+      accepted: true,
+      cancelled: false,
+      visibilityUnknown: true,
+      activation: false,
+      primaryTabId: null
+    })
+
     expect(mocks.activateStructuredAgentSessionById).not.toHaveBeenCalled()
     expect(mocks.unsubscribe).toHaveBeenCalledOnce()
   })
