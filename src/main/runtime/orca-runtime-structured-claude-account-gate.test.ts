@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from './orca-runtime'
 import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import type { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-host'
-import type { ClaudeRateLimitAccountsState } from '../../shared/managed-account-types'
+import type { ClaudeManagedAccountGateSettings } from '../native-chat/claude-structured-managed-account-support'
 
 vi.mock('electron', () => ({
   BrowserWindow: { fromId: vi.fn(() => null) },
@@ -15,6 +15,7 @@ function managedAccount(id: string, managedAuthRuntime: 'host' | 'wsl') {
   return {
     id,
     email: `${id}@example.com`,
+    managedAuthPath: `/managed/${id}`,
     managedAuthRuntime,
     authMethod: 'subscription-oauth' as const,
     createdAt: 0,
@@ -23,27 +24,23 @@ function managedAccount(id: string, managedAuthRuntime: 'host' | 'wsl') {
   }
 }
 
-const WSL_ONLY: ClaudeRateLimitAccountsState = {
-  accounts: [managedAccount('wsl-1', 'wsl')],
-  activeAccountId: null,
-  activeAccountIdsByRuntime: { host: null, wsl: { Ubuntu: 'wsl-1' } }
+const WSL_ONLY: ClaudeManagedAccountGateSettings = {
+  claudeManagedAccounts: [managedAccount('wsl-1', 'wsl')],
+  activeClaudeManagedAccountId: null,
+  activeClaudeManagedAccountIdsByRuntime: { host: null, wsl: { Ubuntu: 'wsl-1' } }
 }
 
-const HOST_SELECTED: ClaudeRateLimitAccountsState = {
-  accounts: [managedAccount('host-1', 'host')],
-  activeAccountId: 'host-1',
-  activeAccountIdsByRuntime: { host: 'host-1', wsl: {} }
+const HOST_SELECTED: ClaudeManagedAccountGateSettings = {
+  claudeManagedAccounts: [managedAccount('host-1', 'host')],
+  activeClaudeManagedAccountId: 'host-1',
+  activeClaudeManagedAccountIdsByRuntime: { host: 'host-1', wsl: {} }
 }
 
-function runtimeWithAccounts(claude: ClaudeRateLimitAccountsState | null): OrcaRuntimeService {
-  const runtime = new OrcaRuntimeService()
-  if (claude) {
-    runtime.setAccountServices({
-      claudeAccounts: { listAccounts: () => claude },
-      codexAccounts: { listAccounts: () => ({ accounts: [], activeAccountId: null }) },
-      rateLimits: { getState: () => ({}) }
-    } as never)
-  }
+function runtimeWithAccounts(claude: ClaudeManagedAccountGateSettings | null): OrcaRuntimeService {
+  // No store at all is the unreadable-settings case the gate must fail closed on.
+  const runtime = claude
+    ? new OrcaRuntimeService({ getSettings: () => claude } as never)
+    : new OrcaRuntimeService()
   const internal = runtime as unknown as {
     resolveStructuredAgentSessionLocation: (selector: string) => Promise<unknown>
     ensureStructuredAgentSessionHost: () => Promise<void>
