@@ -271,6 +271,40 @@ describe('startStructuredCodexLaunch', () => {
     }
   })
 
+  it('replays the same intent after an absent unknown outcome', async () => {
+    vi.useFakeTimers()
+    try {
+      const worktreeId = 'wt-replay-unknown'
+      const intent = launchIntent(worktreeId)
+      mocks.createIntent.mockReturnValueOnce(intent)
+      mocks.launch.mockRejectedValueOnce(new Error('offline')).mockImplementationOnce(async () => {
+        mocks.rendererTabs[worktreeId] = [
+          { contentType: 'agent-session', entityId: intent.sessionId, worktreeId }
+        ]
+        for (const listener of mocks.listeners) {
+          listener({ unifiedTabsByWorktree: mocks.rendererTabs })
+        }
+        return intent.sessionId
+      })
+      vi.mocked(refreshLocalStructuredSessionTabs).mockResolvedValue([])
+
+      startStructuredCodexLaunch(worktreeId)
+      await vi.advanceTimersByTimeAsync(3000)
+      await flushLaunchSettlement()
+
+      startStructuredCodexLaunch(worktreeId)
+      await vi.advanceTimersByTimeAsync(1000)
+      await flushLaunchSettlement()
+
+      expect(mocks.createIntent).toHaveBeenCalledOnce()
+      expect(mocks.launch).toHaveBeenCalledTimes(2)
+      expect(mocks.launch.mock.calls[1]?.[0]).toBe(intent)
+      expect(toast.error).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('releases a definitively refused intent so a new click can create a new identity', async () => {
     const worktreeId = 'wt-refused'
     const first = launchIntent(worktreeId, 'session-first')

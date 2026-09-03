@@ -10,6 +10,7 @@ import {
 import { refreshLocalStructuredSessionTabs } from '@/runtime/local-structured-session-tabs-sync'
 import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
+import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
 
 type StructuredLaunchState = {
   intent: StructuredAgentSessionLaunchIntent
@@ -167,13 +168,7 @@ async function recoverStructuredSessionFromInventory(
   try {
     const snapshots = await refreshLocalStructuredSessionTabs()
     throwIfLaunchCancelled(state)
-    const published = snapshots.some(
-      (snapshot) =>
-        snapshot.worktree === state.intent.worktreeId &&
-        snapshot.tabs.some(
-          (tab) => tab.type === 'agent-session' && tab.sessionId === state.intent.sessionId
-        )
-    )
+    const published = inventoryContainsIntent(snapshots, state.intent)
     if (published && hasAdoptedStructuredSession(state.intent)) {
       return state.intent.sessionId
     }
@@ -187,6 +182,19 @@ async function recoverStructuredSessionFromInventory(
   throw priorError instanceof Error ? priorError : new Error(String(priorError))
 }
 
+function inventoryContainsIntent(
+  snapshots: readonly RuntimeMobileSessionTabsResult[],
+  intent: StructuredAgentSessionLaunchIntent
+): boolean {
+  return snapshots.some(
+    (snapshot) =>
+      snapshot.worktree === intent.worktreeId &&
+      snapshot.tabs.some(
+        (tab) => tab.type === 'agent-session' && tab.sessionId === intent.sessionId
+      )
+  )
+}
+
 async function reconcileUnknownLaunch(state: StructuredLaunchState): Promise<string> {
   throwIfLaunchCancelled(state)
   state.visibilityUnknown = false
@@ -197,10 +205,25 @@ async function reconcileUnknownLaunch(state: StructuredLaunchState): Promise<str
     if (error instanceof StructuredAgentSessionLaunchCancelledError) {
       throw error
     }
-    return recoverStructuredSessionFromInventory(
-      state,
-      state.lastError instanceof Error ? state.lastError : error
-    )
+    try {
+      const snapshots = await refreshLocalStructuredSessionTabs()
+      if (inventoryContainsIntent(snapshots, state.intent)) {
+        return await waitForStructuredSessionAdoption(state, 1000)
+      }
+      await launchStructuredCodexSession(state.intent)
+      return await waitForStructuredSessionAdoption(state)
+    } catch (retryError) {
+      if (retryError instanceof StructuredAgentSessionLaunchCancelledError) {
+        throw retryError
+      }
+      if (retryError instanceof StructuredAgentSessionCreateRefusalError) {
+        throw retryError
+      }
+      return recoverStructuredSessionFromInventory(
+        state,
+        state.lastError instanceof Error ? state.lastError : retryError
+      )
+    }
   }
 }
 
