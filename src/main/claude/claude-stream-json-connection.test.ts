@@ -688,7 +688,9 @@ describe('Claude stream-json connection', () => {
 // structured sessions used to be invisible to it.
 describe('the managed-auth live gate', () => {
   it('holds while a structured child runs and releases when it ends', async () => {
-    expect(hasLiveClaudePtys()).toBe(false)
+    // The gate is a process-wide singleton and a sibling test's release lands on its
+    // child's 'close' event, which can settle after that test's close() resolved.
+    await until(() => (hasLiveClaudePtys() ? null : true), 'a drained auth gate')
     const scenario = scriptScenario([
       { emit: { type: 'system', subtype: 'init', session_id: SESSION_ID, uuid: 'init-1' } },
       { wait: HOLD_OPEN }
@@ -704,6 +706,7 @@ describe('the managed-auth live gate', () => {
   }, 30_000)
 
   it('releases when the child dies on its own rather than through close()', async () => {
+    await until(() => (hasLiveClaudePtys() ? null : true), 'a drained auth gate')
     const scenario = scriptScenario([
       { emit: { type: 'system', subtype: 'init', session_id: SESSION_ID, uuid: 'init-1' } },
       { wait: HOLD_OPEN }
