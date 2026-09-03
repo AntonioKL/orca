@@ -46,7 +46,12 @@ export function useMobileWebPackageRecovery({
   setRefreshEpoch
 }: PackageRecoveryState): MobileWebPackageRecoveryActions {
   const recoverSession = useCallback(
-    async (sessionId: string, warning: string, failureCode: string) => {
+    async (
+      sessionId: string,
+      warning: string,
+      failureCode: string,
+      { restartViewOnFailure }: { restartViewOnFailure: boolean }
+    ) => {
       const current = ownedSessionRef.current
       const hostEpoch = hostEpochRef.current
       const hostId = activeHostIdRef.current
@@ -72,15 +77,25 @@ export function useMobileWebPackageRecovery({
         mobileWebDiagnosticsStore.recovered(hostId, recovered.buildId, failureCode)
       } catch {
         if (
-          hostEpochRef.current === hostEpoch &&
-          ownedSessionRef.current?.sessionId === sessionId
+          hostEpochRef.current !== hostEpoch ||
+          ownedSessionRef.current?.sessionId !== sessionId
         ) {
-          setViewEpoch((value) => value + 1)
-          setPackageWarning(
-            'The workspace view restarted; no previous healthy interface is available.'
-          )
-          mobileWebDiagnosticsStore.restarted(hostId, current.buildId)
+          return
         }
+        if (!restartViewOnFailure) {
+          // Restarting the view restarts the deadline that just expired, so a page that simply
+          // needs longer than one deadline can never converge — it reloads forever.
+          setPackageWarning(
+            'The workspace interface has not reported healthy, and no previous verified version is available.'
+          )
+          mobileWebDiagnosticsStore.warning(hostId, failureCode)
+          return
+        }
+        setViewEpoch((value) => value + 1)
+        setPackageWarning(
+          'The workspace view restarted; no previous healthy interface is available.'
+        )
+        mobileWebDiagnosticsStore.restarted(hostId, current.buildId)
       }
     },
     [
@@ -139,7 +154,8 @@ export function useMobileWebPackageRecovery({
       await recoverSession(
         sessionId,
         'The refreshed interface did not become healthy; the previous verified version was restored.',
-        'health_timeout'
+        'health_timeout',
+        { restartViewOnFailure: false }
       )
     },
     [recoverSession]
@@ -163,7 +179,8 @@ export function useMobileWebPackageRecovery({
       await recoverSession(
         sessionId,
         'The workspace view stopped repeatedly; the previous verified version was restored.',
-        'webview_crash_loop'
+        'webview_crash_loop',
+        { restartViewOnFailure: true }
       )
     },
     [
@@ -194,7 +211,8 @@ export function useMobileWebPackageRecovery({
     await recoverSession(
       current.sessionId,
       'The previous verified workspace interface was restored.',
-      'manual_recovery'
+      'manual_recovery',
+      { restartViewOnFailure: true }
     )
   }, [ownedSessionRef, recoverSession, setPackageWarning])
 
