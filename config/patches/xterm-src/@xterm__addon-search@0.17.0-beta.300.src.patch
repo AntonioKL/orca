@@ -1,12 +1,12 @@
 diff --git a/src/SearchEngine.ts b/src/SearchEngine.ts
-index 1760bc2bd1fd274d23e2032fde631b39c739f0d9..4ce664a7b913c5c19d6bbf7feba92cbdaef38c6f 100644
+index 1760bc2bd1fd274d23e2032fde631b39c739f0d9..584515dd5b5f9049befbb23fa2d9c217340f6efb 100644
 --- a/src/SearchEngine.ts
 +++ b/src/SearchEngine.ts
 @@ -76,6 +76,9 @@ export class SearchEngine {
      // Search from startRow + 1 to end
      if (!result) {
        for (let y = startRow + 1; y < this._terminal.buffer.active.baseY + this._terminal.rows; y++) {
-+        if (this._isRowCoveredByLineStart(y, searchOptions)) {
++        if (this._isRowCoveredByEarlierSearch(y, searchOptions)) {
 +          continue;
 +        }
          searchPosition.startRow = y;
@@ -16,33 +16,36 @@ index 1760bc2bd1fd274d23e2032fde631b39c739f0d9..4ce664a7b913c5c19d6bbf7feba92cbd
      // Search from startRow + 1 to end
      if (!result) {
        for (let y = startRow + 1; y < this._terminal.buffer.active.baseY + this._terminal.rows; y++) {
-+        if (this._isRowCoveredByLineStart(y, searchOptions)) {
++        if (this._isRowCoveredByEarlierSearch(y, searchOptions)) {
 +          continue;
 +        }
          searchPosition.startRow = y;
          searchPosition.startCol = 0;
          result = this._findInLine(term, searchPosition, searchOptions);
-@@ -138,6 +144,9 @@ export class SearchEngine {
+@@ -138,6 +144,11 @@ export class SearchEngine {
      // If we hit the bottom and didn't search from the very top wrap back up
      if (!result && startRow !== 0) {
        for (let y = 0; y < startRow; y++) {
-+        if (this._isRowCoveredByLineStart(y, searchOptions)) {
++        // Row 0 is never skipped: it can be a continuation whose line start was trimmed from the
++        // scrollback, and nothing earlier in this loop has searched it.
++        if (y > 0 && this._isRowCoveredByEarlierSearch(y, searchOptions)) {
 +          continue;
 +        }
          searchPosition.startRow = y;
          searchPosition.startCol = 0;
          result = this._findInLine(term, searchPosition, searchOptions);
-@@ -237,6 +246,19 @@ export class SearchEngine {
+@@ -237,6 +248,20 @@ export class SearchEngine {
        (((searchIndex + term.length) === line.length) || (Constants.NON_WORD_CHARACTERS.includes(line[searchIndex + term.length])));
    }
  
 +  /**
-+   * A wrapped row's text was already searched in full when the first row of its line was, so a
-+   * full-buffer scan that visits every row does O(rows^2) work over one long line. Skipping is
-+   * only sound for a plain search: wholeWord and regex can both reject at one offset and match at
-+   * a later one within the same line.
++   * Whether an earlier `_findInLine` in this same call already scanned this row's line from an
++   * equal or lower offset, which makes rescanning it pure O(rows^2) work on one long line. Only
++   * valid once such a search has happened — the wrap-around loop starts at row 0, whose line
++   * start may have been trimmed from the scrollback. Never true for wholeWord or regex: both can
++   * reject at one offset and match at a later one within the same line.
 +   */
-+  private _isRowCoveredByLineStart(row: number, searchOptions?: ISearchOptions): boolean {
++  private _isRowCoveredByEarlierSearch(row: number, searchOptions?: ISearchOptions): boolean {
 +    if (searchOptions?.regex || searchOptions?.wholeWord) {
 +      return false;
 +    }
@@ -52,7 +55,7 @@ index 1760bc2bd1fd274d23e2032fde631b39c739f0d9..4ce664a7b913c5c19d6bbf7feba92cbd
    /**
     * Searches a line for a search term. Takes the provided terminal line and searches the text line,
     * which may contain subsequent terminal lines if the text is wrapped. If the provided line number
-@@ -250,23 +272,19 @@ export class SearchEngine {
+@@ -250,23 +275,19 @@ export class SearchEngine {
     * @returns The search result if it was found.
     */
    private _findInLine(term: string, searchPosition: ISearchPosition, searchOptions: ISearchOptions = {}, isReverseSearch: boolean = false): ISearchResult | undefined {

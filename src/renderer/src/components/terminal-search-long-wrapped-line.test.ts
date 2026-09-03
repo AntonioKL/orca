@@ -34,6 +34,9 @@ const COLS = 80
 const ROWS = 24
 /** Long enough that the wrap chain outruns V8's stack on any host. */
 const WRAPPED_ROWS = 12_000
+/** A line longer than this scrollback loses its first rows: the bug is eviction, not size. */
+const TRIMMED_HEAD_SCROLLBACK = 100
+const TRIMMED_HEAD_LINE_ROWS = 200
 const NEEDLE = 'needle'
 /**
  * A full-buffer scan runs on the renderer's main thread on every keystroke in
@@ -57,14 +60,13 @@ function write(terminal: Terminal, data: string): Promise<void> {
   return new Promise((resolve) => terminal.write(data, resolve))
 }
 
-function openTerminalWithSearch(): { terminal: Terminal; search: SearchAddon } {
+function openTerminalWithSearch(scrollback: number = DESKTOP_TERMINAL_SCROLLBACK_ROWS_MAX): {
+  terminal: Terminal
+  search: SearchAddon
+} {
   const container = document.createElement('div')
   document.body.appendChild(container)
-  const terminal = new Terminal({
-    cols: COLS,
-    rows: ROWS,
-    scrollback: DESKTOP_TERMINAL_SCROLLBACK_ROWS_MAX
-  })
+  const terminal = new Terminal({ cols: COLS, rows: ROWS, scrollback })
   terminal.open(container)
   const search = new SearchAddon()
   terminal.loadAddon(search)
@@ -141,6 +143,45 @@ describe('terminal search inside one very long wrapped line', () => {
     })
 
     expect(resultCount).toBe(4)
+  })
+
+  it('keeps reaching matches in a wrapped line whose first row was trimmed away', async () => {
+    const { terminal, search } = openTerminalWithSearch(TRIMMED_HEAD_SCROLLBACK)
+    // One long line whose head is evicted, so the surviving chain begins on a
+    // row marked isWrapped and no line start is left in the buffer to cover it.
+    const paddedNeedle = NEEDLE + 'x'.repeat(COLS - NEEDLE.length)
+    const lead = 'x'.repeat(COLS * (TRIMMED_HEAD_LINE_ROWS - 3))
+    await write(terminal, `${lead}${paddedNeedle.repeat(2)}${'x'.repeat(COLS)}\r\n`)
+    for (let i = 0; i < 60; i++) {
+      await write(terminal, `line ${i}\r\n`)
+    }
+    const buffer = terminal.buffer.active
+    expect(buffer.getLine(0)?.isWrapped).toBe(true)
+
+    const matchRows: number[] = []
+    for (let y = 0; y < buffer.length; y++) {
+      if (buffer.getLine(y)?.translateToString().includes(NEEDLE)) {
+        matchRows.push(y)
+      }
+    }
+    expect(matchRows.length).toBe(2)
+
+    // Cycle far enough to come back round: the surviving rows must stay
+    // reachable, not be visited once and then stranded.
+    const visits = new Map<number, number>()
+    for (let i = 0; i < 12; i++) {
+      safeFind((term, options) => search.findNext(term, options), NEEDLE, {
+        decorations: SEARCH_DECORATIONS
+      })
+      const row = terminal.getSelectionPosition()?.start.y
+      if (row !== undefined) {
+        visits.set(row, (visits.get(row) ?? 0) + 1)
+      }
+    }
+
+    for (const row of matchRows) {
+      expect(visits.get(row) ?? 0).toBeGreaterThan(1)
+    }
   })
 
   it('still finds a whole-word match that only matches from a later wrapped row', async () => {
