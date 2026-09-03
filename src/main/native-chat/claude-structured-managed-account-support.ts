@@ -40,3 +40,14 @@ export function structuredClaudeMatchesActiveManagedAccount(
   const active = accounts.find((candidate) => candidate.id === activeHostId)
   return active ? active.managedAuthRuntime !== 'wsl' : false
 }
+
+/** Reads the gate's settings, answering null when they cannot be read so callers refuse. */
+export function readClaudeManagedAccountGateSettings(
+  getSettings: () => ClaudeManagedAccountGateSettings
+): ClaudeManagedAccountGateSettings | null {
+  try {
+    return getSettings()
+  } catch {
+    return null
+  }
+}

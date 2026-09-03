@@ -5,8 +5,8 @@ import { agentSessionOwnerBindingsEqual } from '../../shared/claimed-agent-pty-o
 import { resolvePinnedCodexRolloutProof } from '../codex/codex-tui-rollout-proof'
 import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import {
-  structuredClaudeMatchesActiveManagedAccount,
-  type ClaudeManagedAccountGateSettings
+  readClaudeManagedAccountGateSettings,
+  structuredClaudeMatchesActiveManagedAccount
 } from '../native-chat/claude-structured-managed-account-support'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { AgentStatusIpcPayload } from '../../shared/agent-status-types'
@@ -49,21 +49,16 @@ export class OrcaRuntimeWithResolveRecoveredStructuredTuiTranscript extends Orca
     return { transcriptPath }
   }
 
-  private readClaudeAccountGateSettings(): ClaudeManagedAccountGateSettings | null {
-    try {
-      return this.requireStore().getSettings()
-    } catch {
-      return null
-    }
-  }
-
   async getStructuredAgentSessionCreateSupport(
     worktreeSelector: string,
     agent: 'claude' | 'codex'
   ): Promise<{ supported: boolean; reason?: 'agent' | 'remote' | 'wsl' }> {
     // Same settings the auth policy reads, so the gate and the policy cannot resolve different
     // accounts. Unreadable settings fail closed below.
-    const accountSettings = agent === 'claude' ? this.readClaudeAccountGateSettings() : null
+    const accountSettings =
+      agent === 'claude'
+        ? readClaudeManagedAccountGateSettings(() => this.requireStore().getSettings())
+        : null
     const location = await this.resolveStructuredAgentSessionLocation(worktreeSelector)
     await this.ensureStructuredAgentSessionHost()
     if (getStructuredAgentSessionHost()?.supportsCreate(location, agent)) {
