@@ -181,4 +181,23 @@ describe('handleGpuChildCrash vs the install-dir ACL verdict', () => {
     await handleGpuChildCrash('crashed', null, 600)
     expect(showMessageBox).toHaveBeenCalledTimes(1)
   })
+
+  // recordGpuCrash reports the threshold crossing once and latches. Withholding consumes
+  // that one report, so without a re-arm the same process could never engage again — a
+  // machine whose tree is repaired and whose driver is genuinely broken would be stuck
+  // hardware-accelerated through an unbounded crash loop.
+  it('can still engage a later burst after a withheld one, once the tree is repaired', async () => {
+    reportProbePoisoned()
+    await crashUpToThreshold()
+    await handleGpuChildCrash('crashed', null, 600)
+    expect(showMessageBox).not.toHaveBeenCalled()
+
+    // The repair lands: the tree is no longer the suspect.
+    reportProbeClean()
+
+    for (let i = 1; i <= DEFAULT_GPU_CRASH_FALLBACK_THRESHOLD; i += 1) {
+      await handleGpuChildCrash('crashed', null, 10_000 + i * 200)
+    }
+    expect(showMessageBox).toHaveBeenCalledTimes(1)
+  })
 })

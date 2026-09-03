@@ -147,6 +147,10 @@ async function installDirAclClearsGpuFallback(
   if (persisted) {
     clearGpuFallbackMarker(userDataPath)
   }
+  // Why re-arm: recordGpuCrash reports the threshold crossing once and latches. Withholding
+  // consumed that one report, so without this a later burst — including one after the repair
+  // succeeds and the tree is no longer the suspect — could never engage safe graphics again.
+  state.gpuCrashFallbackTracker.disengage()
   recordDurableCrashBreadcrumb('gpu_fallback_withheld_install_dir_acl', { crashesInWindow })
   return false
 }

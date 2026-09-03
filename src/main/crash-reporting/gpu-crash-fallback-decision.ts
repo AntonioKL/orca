@@ -73,6 +73,17 @@ export class GpuCrashFallbackTracker {
     return this.engaged
   }
 
+  /**
+   * Re-arm after an engagement the caller decided not to act on. `recordGpuCrash`
+   * latches `engaged` and reports the threshold crossing exactly once, so a caller
+   * that discards that one report would otherwise silence safe graphics for the
+   * rest of the process — including a later burst it would have acted on.
+   * Leaves the crash window intact; only the one-shot latch is released.
+   */
+  disengage(): void {
+    this.engaged = false
+  }
+
   /** Crash times currently inside the window. Exposed to assert the pruning invariant. */
   windowSnapshot(): readonly number[] {
     return [...this.recentCrashes]
