@@ -9,6 +9,6 @@ const source = readFileSync(
 describe('packaged hosted mobile WebView SSH runner', () => {
   it('builds the packaged renderer with its required E2E store bridge', () => {
     expect(source).toContain("VITE_EXPOSE_STORE: 'true'")
-    expect(source).toContain("run(pnpm, ['run', 'build:desktop'], e2eBuildEnv)")
+    expect(source).toContain("runPnpm(['run', 'build:desktop'], e2eBuildEnv)")
   })
 })
