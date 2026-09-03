@@ -124,14 +124,23 @@ export function isBlockingInstallDirAclRepairInFlight(): boolean {
 function startRepair(
   installDir: string,
   options: WindowsInstallDirAclRecoveryOptions,
-  onDone?: (result: WindowsInstallDirAclRepairResult) => void
+  {
+    probeConfirmedPoisoned = false,
+    onDone
+  }: {
+    probeConfirmedPoisoned?: boolean
+    onDone?: (result: WindowsInstallDirAclRepairResult) => void
+  } = {}
 ): boolean {
   writeInstallDirAclPoisonMarker(options.userDataPath, installDir, options.appVersion)
   const started = repairWindowsInstallDirPackageAcl({
     ...options,
     installDir,
+    probeConfirmedPoisoned,
     onDone: (result) => {
       // A marker recording a completed repair is not a failure to repair: this tree is done.
+      // `probeConfirmedPoisoned` keeps it off a tree the probe just read as poisoned:
+      // there the marker stops claiming `alreadyRepaired`, so icacls runs again.
       const stage: RepairStage =
         result.mode === 'marker-hit' && result.alreadyRepaired ? 'repaired' : result.mode
       // A clean reading of the tree outranks this: there was nothing left to repair.
@@ -196,7 +205,9 @@ function applyInstallDirAclProbeVerdict(
   if (poison) {
     return
   }
-  startRepair(options.installDir ?? dirname(process.execPath), options)
+  startRepair(options.installDir ?? dirname(process.execPath), options, {
+    probeConfirmedPoisoned: true
+  })
 }
 
 /**
@@ -227,9 +238,13 @@ export async function repairKnownPoisonedInstallDirBeforeWindow(
         options.timeoutMs ?? BLOCKING_REPAIR_BUDGET_MS
       )
       timer.unref?.()
-      const started = startRepair(installDir, options, (result) => {
-        clearTimeout(timer)
-        resolve(result.mode)
+      // No `probeConfirmedPoisoned`: the gate acts on a marker from an earlier launch,
+      // not on a DACL reading of its own, so a recorded repair still outranks it.
+      const started = startRepair(installDir, options, {
+        onDone: (result) => {
+          clearTimeout(timer)
+          resolve(result.mode)
+        }
       })
       // No dispatch means no `onDone`, so waiting out the whole budget would buy nothing.
       if (!started) {

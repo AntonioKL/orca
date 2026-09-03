@@ -67,30 +67,49 @@ function recoveryOptions(): {
   }
 }
 
-function reportProbePoisoned(): void {
+/** icacls hangs until `finishRepair` — the in-flight window is when the GPU children die. */
+function reportProbePoisoned(): { finishRepair: () => Promise<void> } {
+  let release = (): void => undefined
+  const walkingTheTree = new Promise<void>((resolve) => {
+    release = resolve
+  })
   startWindowsInstallDirAclRepairIfPoisoned(
     { status: 'ok', matchesPoisonSignature: true, wellKnownNameCheckReliable: true },
     {
       ...recoveryOptions(),
-      // Never settles: the repair is still in flight, which is when the GPU children die.
-      runProcessFn: (() => new Promise<ProcessResult>(() => undefined)) as unknown as (
-        spec: ProcessSpec
-      ) => Promise<ProcessResult>
+      runProcessFn: (async () => {
+        await walkingTheTree
+        return {
+          code: 0,
+          signal: null,
+          stdout: 'Successfully processed 3200 files; Failed processing 0 files',
+          stderr: '',
+          timedOut: false
+        }
+      }) as unknown as (spec: ProcessSpec) => Promise<ProcessResult>
     }
   )
+  return {
+    finishRepair: async () => {
+      release()
+      for (let i = 0; i < 200 && isInstallDirAclRepairPending(); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+    }
+  }
 }
 
-/** A repair that reports a terminal failure, so `poison.stage` leaves 'pending'. */
-async function reportProbePoisonedWithFailedRepair(): Promise<void> {
+/** A repair that settles, so `poison.stage` leaves 'pending' for a terminal verdict. */
+async function reportProbePoisonedWithSettledRepair(exitCode: number): Promise<void> {
   startWindowsInstallDirAclRepairIfPoisoned(
     { status: 'ok', matchesPoisonSignature: true, wellKnownNameCheckReliable: true },
     {
       ...recoveryOptions(),
       runProcessFn: (async () => ({
-        code: 1,
+        code: exitCode,
         signal: null,
-        stdout: '',
-        stderr: 'access denied',
+        stdout: 'Successfully processed 3200 files; Failed processing 0 files',
+        stderr: exitCode === 0 ? '' : 'access denied',
         timedOut: false
       })) as unknown as (spec: ProcessSpec) => Promise<ProcessResult>
     }
@@ -218,7 +237,7 @@ describe('handleGpuChildCrash vs the install-dir ACL verdict', () => {
   })
 
   it('still withdraws the marker once the verdict is terminal rather than a pending repair', async () => {
-    await reportProbePoisonedWithFailedRepair()
+    await reportProbePoisonedWithSettledRepair(1)
     await crashUpToThreshold()
     await handleGpuChildCrash('crashed', null, 600)
 
@@ -232,13 +251,14 @@ describe('handleGpuChildCrash vs the install-dir ACL verdict', () => {
   // machine whose tree is repaired and whose driver is genuinely broken would be stuck
   // hardware-accelerated through an unbounded crash loop.
   it('can still engage a later burst after a withheld one, once the tree is repaired', async () => {
-    reportProbePoisoned()
+    const repair = reportProbePoisoned()
     await crashUpToThreshold()
     await handleGpuChildCrash('crashed', null, 600)
     expect(showMessageBox).not.toHaveBeenCalled()
 
-    // The repair lands: the tree is no longer the suspect.
-    reportProbeClean()
+    // The repair itself reports 'repaired': the tree is no longer the suspect.
+    await repair.finishRepair()
+    expect(isInstallDirAclRepairPending()).toBe(false)
 
     for (let i = 1; i <= DEFAULT_GPU_CRASH_FALLBACK_THRESHOLD; i += 1) {
       await handleGpuChildCrash('crashed', null, 10_000 + i * 200)

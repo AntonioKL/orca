@@ -509,6 +509,82 @@ describe('a marker-hit on a tree a previous launch already repaired', () => {
     expect(describeInstallDirAclPoison()?.detail).toContain('Orca repaired the permissions')
     expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(false)
   })
+
+  // The opposite evidence: the probe has just READ this tree and found it poisoned, so a
+  // marker claiming success describes a tree that was re-poisoned, or an icacls run that
+  // silently no-opped. Reporting 'repaired' there runs no icacls, deletes the poison marker
+  // that arms the next launch's gate, un-suspects the tree so --in-process-gpu can engage,
+  // and tells the user their permissions are fixed.
+  it('re-runs icacls when a fresh probe verdict contradicts the repaired marker', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-acl-repoisoned-'))
+    writeInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)
+    expect(
+      await repairKnownPoisonedInstallDirBeforeWindow(recoveryOptions(userDataPath, okRun))
+    ).toBe('repaired')
+
+    // Next launch: the gate is disarmed, and the probe reads the same tree as poisoned.
+    resetWindowsInstallDirAclRecoveryForTest()
+    resetWindowsInstallDirAclRepairForTest()
+    const spent: ProcessSpec[] = []
+    const failing: Runner = async (spec) => {
+      spent.push(spec)
+      return { code: 5, signal: null, stdout: '', stderr: 'Access is denied.', timedOut: false }
+    }
+    await new Promise<void>((resolve) => {
+      startWindowsInstallDirAclRepairIfPoisoned(POISON_VERDICT, {
+        ...recoveryOptions(userDataPath, failing),
+        recordBreadcrumb: () => {
+          setTimeout(resolve, 0)
+          return undefined
+        }
+      })
+    })
+
+    expect(spent.map((spec) => spec.args?.[2])).toEqual([
+      '*S-1-15-2-2:(OI)(CI)(RX)',
+      '*S-1-15-2-2:(RX)'
+    ])
+    expect(isInstallDirAclSuspect()).toBe(true)
+    expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(true)
+    expect(describeInstallDirAclPoison()?.detail).toContain('could not repair them')
+  })
+
+  // The contradiction re-opens the budget, it does not remove it: a tree that has spent
+  // every attempt must not re-spawn icacls on every launch forever.
+  it('still stops at the attempt budget when the probe keeps reporting poison', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-acl-repoisoned-budget-'))
+    writeFileSync(
+      join(userDataPath, WINDOWS_INSTALL_DIR_ACL_REPAIR_MARKER_FILE),
+      JSON.stringify({
+        schemeVersion: WINDOWS_INSTALL_DIR_ACL_REPAIR_SCHEME_VERSION,
+        installDir: INSTALL_DIR,
+        appVersion: APP_VERSION,
+        attemptedAt: Date.now(),
+        outcome: 'repaired',
+        attempts: 3
+      })
+    )
+    const spent: ProcessSpec[] = []
+    const run: Runner = async (spec) => {
+      spent.push(spec)
+      return okRun(spec)
+    }
+    await new Promise<void>((resolve) => {
+      startWindowsInstallDirAclRepairIfPoisoned(POISON_VERDICT, {
+        ...recoveryOptions(userDataPath, run),
+        recordBreadcrumb: () => {
+          setTimeout(resolve, 0)
+          return undefined
+        }
+      })
+    })
+
+    expect(spent).toHaveLength(0)
+    // Nothing was repaired, so the user still gets the commands and the gate stays armed.
+    expect(isInstallDirAclSuspect()).toBe(true)
+    expect(describeInstallDirAclPoison()?.detail).toContain('could not repair them')
+    expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(true)
+  })
 })
 
 describe('a clean probe verdict', () => {
