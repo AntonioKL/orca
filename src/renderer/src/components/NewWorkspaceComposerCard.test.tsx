@@ -190,9 +190,18 @@ const pnpmInstallSetupConfig = {
 }
 
 const vmRecipeHostOptions: ProjectHostSetupOption[] = [
-  { kind: 'ready', id: 'setup-local', label: 'Local Mac', path: '/Users/alice/orca' },
-  { kind: 'ready', id: 'setup-builder', label: 'Builder', path: '/workspace/orca' }
-] as never
+  localReadyHostOption,
+  {
+    kind: 'ready',
+    id: 'setup-builder',
+    projectId: 'project-group:platform',
+    hostId: 'ssh:builder',
+    repoId: 'repo-a',
+    label: 'Builder',
+    detail: 'Orca',
+    path: '/workspace/orca'
+  }
+]
 
 function findConnectButton(label: string): HTMLButtonElement | undefined {
   const item = findRunTargetItem(label)
@@ -317,7 +326,7 @@ function unmountCurrent(): void {
 }
 
 function findWaitSwitch(container: HTMLElement): HTMLButtonElement | null {
-  return container.querySelector(
+  return container.querySelector<HTMLButtonElement>(
     '[role="switch"][aria-label="Wait for setup to complete before starting agent"]'
   )
 }
@@ -404,6 +413,9 @@ describe('NewWorkspaceComposerCard folder task source mode', () => {
     expect(projectTourTarget?.querySelector('[data-project-combobox-root="true"]')).toBeTruthy()
     expect(projectTourTarget?.querySelector('[data-run-target-combobox-root="true"]')).toBeNull()
     expect(projectTourTarget?.textContent).not.toContain('Run on')
+    expect(projectTourTarget?.querySelector('label')).toBeNull()
+    expect(projectTourTarget?.querySelector('[aria-label="Add project"]')).toBeNull()
+    expect(current.container.querySelector('[aria-label="Add project"]')).toBeTruthy()
 
     const runTargetPicker = current.container.querySelector(
       'div[data-run-target-combobox-root="true"]'

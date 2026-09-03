@@ -81,7 +81,7 @@ export function NewWorkspaceComposerProjectSection({
 }: NewWorkspaceComposerProjectSectionProps): React.JSX.Element {
   return (
     <div className="space-y-1">
-      <div className="space-y-1" data-contextual-tour-target="workspace-creation-project">
+      <div className="space-y-1">
         <div className="flex items-center justify-between gap-2">
           <label className="text-xs font-medium text-muted-foreground">
             {projectLabel ??
@@ -110,33 +110,35 @@ export function NewWorkspaceComposerProjectSection({
             </Tooltip>
           ) : null}
         </div>
-        <ProjectCombobox
-          options={projectOptions}
-          value={selectedProjectId}
-          onValueChange={onProjectChange}
-          onValueSelected={focusNameInput}
-          onAddProject={onAddProject}
-          placeholder={
-            projectPlaceholder ??
-            translate('auto.components.NewWorkspaceComposerCard.dccd26d4e4', 'Choose project')
-          }
-          triggerClassName="h-9 w-full border-input text-sm focus:border-ring focus:ring-[3px] focus:ring-ring/50"
-          invalid={Boolean(projectError)}
-          describedBy={projectDescriptionId}
-        />
-        {projectError ? (
-          <p id={projectDescriptionId} className="text-[11px] text-destructive">
-            {projectError}
-          </p>
-        ) : projectOptions.length === 0 ? (
-          <p id={projectDescriptionId} className="text-[11px] text-muted-foreground">
-            {emptyProjectMessage ??
-              translate(
-                'auto.components.NewWorkspaceComposerCard.addProjectBeforeWorkspace',
-                'Add a project before creating a workspace.'
-              )}
-          </p>
-        ) : null}
+        <div className="space-y-1" data-contextual-tour-target="workspace-creation-project">
+          <ProjectCombobox
+            options={projectOptions}
+            value={selectedProjectId}
+            onValueChange={onProjectChange}
+            onValueSelected={focusNameInput}
+            onAddProject={onAddProject}
+            placeholder={
+              projectPlaceholder ??
+              translate('auto.components.NewWorkspaceComposerCard.dccd26d4e4', 'Choose project')
+            }
+            triggerClassName="h-9 w-full border-input text-sm focus:border-ring focus:ring-[3px] focus:ring-ring/50"
+            invalid={Boolean(projectError)}
+            describedBy={projectDescriptionId}
+          />
+          {projectError ? (
+            <p id={projectDescriptionId} className="text-[11px] text-destructive">
+              {projectError}
+            </p>
+          ) : projectOptions.length === 0 ? (
+            <p id={projectDescriptionId} className="text-[11px] text-muted-foreground">
+              {emptyProjectMessage ??
+                translate(
+                  'auto.components.NewWorkspaceComposerCard.addProjectBeforeWorkspace',
+                  'Add a project before creating a workspace.'
+                )}
+            </p>
+          ) : null}
+        </div>
       </div>
       {shouldShowRunTargetPicker ? (
         <div className="space-y-1 pt-3">
