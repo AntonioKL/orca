@@ -14,24 +14,38 @@ export type ClaudeCapturedTree =
 function mergeRowsByPid<Row extends { pid: number }>(
   previous: readonly Row[],
   next: readonly Row[],
-  sameIdentity: (previous: Row, next: Row) => boolean
-): Row[] | null {
+  sameIdentity: (previous: Row, next: Row) => boolean,
+  previousBoundary: (row: Row) => number,
+  nextBoundary: (row: Row) => number,
+  refreshBoundary: number
+): { rows: Row[]; capturedAtMsByPid?: Readonly<Record<string, number>> } | null {
   const merged = new Map<number, Row>()
+  const capturedAtMsByPid: Record<string, number> = {}
   for (const row of previous) {
     const prior = merged.get(row.pid)
     if (prior && !sameIdentity(prior, row)) {
       return null
     }
     merged.set(row.pid, row)
+    capturedAtMsByPid[String(row.pid)] = previousBoundary(row)
   }
   for (const row of next) {
     const prior = merged.get(row.pid)
     if (prior && !sameIdentity(prior, row)) {
       return null
     }
+    if (!prior) {
+      capturedAtMsByPid[String(row.pid)] = nextBoundary(row)
+    }
     merged.set(row.pid, row)
   }
-  return [...merged.values()]
+  const boundaries = Object.values(capturedAtMsByPid)
+  const needsBoundaryMap =
+    new Set(boundaries).size > 1 || boundaries.some((boundary) => boundary !== refreshBoundary)
+  return {
+    rows: [...merged.values()],
+    ...(needsBoundaryMap ? { capturedAtMsByPid } : {})
+  }
 }
 
 export function mergeClaudeCapturedTrees(
@@ -45,10 +59,24 @@ export function mergeClaudeCapturedTrees(
     if (previous.tree.rootPgid !== next.tree.rootPgid) {
       return null
     }
+    // A refresh cannot repair an earlier capture that lacked root identity;
+    // retaining those rows would permit a later numeric-pid kill without proof.
+    if (!previous.tree.root || !next.tree.root) {
+      return null
+    }
+    if (
+      previous.tree.root.pid !== next.tree.root.pid ||
+      previous.tree.root.startedAt !== next.tree.root.startedAt
+    ) {
+      return null
+    }
     const descendants = mergeRowsByPid(
       previous.tree.descendants,
       next.tree.descendants,
-      (left, right) => left.pgid === right.pgid && left.startedAt === right.startedAt
+      (left, right) => left.pgid === right.pgid && left.startedAt === right.startedAt,
+      (row) => previous.tree.capturedAtMsByPid?.[String(row.pid)] ?? previous.tree.capturedAtMs,
+      (row) => next.tree.capturedAtMsByPid?.[String(row.pid)] ?? next.tree.capturedAtMs,
+      next.tree.capturedAtMs
     )
     if (!descendants) {
       return null
@@ -57,10 +85,12 @@ export function mergeClaudeCapturedTrees(
       platform: 'posix',
       tree: {
         ...next.tree,
-        // A retained row keeps the earlier process-table boundary. A later
-        // displayed second must not make same-second PID reuse force-killable.
-        capturedAtMs: Math.min(previous.tree.capturedAtMs, next.tree.capturedAtMs),
-        descendants
+        // Retained rows keep their earlier boundary; new rows use the refresh
+        // boundary. The scalar remains the latest scan for legacy consumers.
+        descendants: descendants.rows,
+        ...(descendants.capturedAtMsByPid
+          ? { capturedAtMsByPid: descendants.capturedAtMsByPid }
+          : {})
       }
     }
   }
@@ -74,7 +104,10 @@ export function mergeClaudeCapturedTrees(
     const descendants = mergeRowsByPid(
       previous.tree.descendants,
       next.tree.descendants,
-      (left, right) => left.creationTimeMs === right.creationTimeMs
+      (left, right) => left.creationTimeMs === right.creationTimeMs,
+      () => previous.tree.capturedAtMs,
+      () => next.tree.capturedAtMs,
+      next.tree.capturedAtMs
     )
     if (!descendants) {
       return null
@@ -83,8 +116,10 @@ export function mergeClaudeCapturedTrees(
       platform: 'win32',
       tree: {
         ...next.tree,
-        capturedAtMs: Math.min(previous.tree.capturedAtMs, next.tree.capturedAtMs),
-        descendants,
+        descendants: descendants.rows,
+        ...(descendants.capturedAtMsByPid
+          ? { capturedAtMsByPid: descendants.capturedAtMsByPid }
+          : {}),
         unidentifiedCount: Math.max(previous.tree.unidentifiedCount, next.tree.unidentifiedCount)
       }
     }

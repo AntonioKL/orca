@@ -142,7 +142,12 @@ export async function terminateDescendantSnapshotWithVerdict(
       if (!forced && Date.now() >= deadline - verifyMs + graceMs) {
         forced = true
         for (const row of live) {
-          if (hasUnambiguousStartIdentity(row, snapshot.capturedAtMs)) {
+          if (
+            hasUnambiguousStartIdentity(
+              row,
+              snapshot.capturedAtMsByPid?.[String(row.pid)] ?? snapshot.capturedAtMs
+            )
+          ) {
             sendSignal(row.pid, 'SIGKILL')
           }
         }

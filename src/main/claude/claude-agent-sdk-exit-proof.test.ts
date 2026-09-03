@@ -7,7 +7,7 @@ import type { DescendantTreeVerdict } from '../pty-descendant-exit-verification'
 import type { DescendantSnapshot } from '../pty-descendant-termination'
 import type { WindowsDescendantSnapshot } from '../windows-descendant-exit-verification'
 import {
-  createClaudeChildTreeReaper,
+  createClaudeChildTreeReaper as createClaudeChildTreeReaperImpl,
   proveClaudeChildExit,
   type ClaudeChildTreeReaper
 } from './claude-agent-sdk-exit-proof'
@@ -164,12 +164,25 @@ function windowsSnapshotOf(descendantPid: number): WindowsDescendantSnapshot {
 
 function snapshotOf(descendantPid: number): DescendantSnapshot {
   return {
+    root: { pid: 424242, startedAt: 'Mon Jan 1 00:00:00 2026' },
     rootPgid: 1,
     descendants: [
       { pid: descendantPid, ppid: 424242, pgid: 1, startedAt: 'Mon Jan 1 00:00:00 2026' }
     ],
     capturedAtMs: 1
   }
+}
+
+// Unit tests use synthetic process ids; production always supplies the fresh
+// identity probe, so the harness explicitly models a matching probe.
+function createClaudeChildTreeReaper(
+  child: Parameters<typeof createClaudeChildTreeReaperImpl>[0],
+  deps: Parameters<typeof createClaudeChildTreeReaperImpl>[1] = {}
+): ReturnType<typeof createClaudeChildTreeReaperImpl> {
+  return createClaudeChildTreeReaperImpl(child, {
+    verifyRootIdentity: async () => true,
+    ...deps
+  })
 }
 
 describe('claude child exit proof', () => {
@@ -534,9 +547,11 @@ describe('claude child tree reaper', () => {
     expect(terminateDescendants).toHaveBeenCalledWith({
       ...refreshed,
       // The retained 4243 row was first observed in the earlier displayed
-      // second. Advancing this boundary would make same-second PID reuse
-      // eligible for a delayed SIGKILL.
-      capturedAtMs: first.capturedAtMs
+      // second. Its per-row boundary must not advance with the refresh.
+      capturedAtMsByPid: {
+        '4243': first.capturedAtMs,
+        '4244': refreshed.capturedAtMs
+      }
     })
   })
 
@@ -569,7 +584,7 @@ describe('claude child tree reaper', () => {
 
     await expect(tree.reap()).resolves.toBe('unverifiable')
     expect(terminateDescendants).not.toHaveBeenCalled()
-    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+    expect(child.kill).not.toHaveBeenCalled()
   })
 
   it('fails closed when a Windows refresh reuses a PID with a new creation time', async () => {
@@ -598,7 +613,7 @@ describe('claude child tree reaper', () => {
     await expect(tree.reap()).resolves.toBe('unverifiable')
     expect(terminateWindowsTree).not.toHaveBeenCalled()
     expect(terminateWindowsDescendants).not.toHaveBeenCalled()
-    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+    expect(child.kill).not.toHaveBeenCalled()
   })
 
   it('queues a fresh boundary behind an output-triggered capture already in flight', async () => {
@@ -744,7 +759,8 @@ describe('claude child tree reaper', () => {
     await expect(tree.reap()).resolves.toBe('unverifiable')
     expect(captureDescendants).toHaveBeenCalledTimes(1)
     // The second attempt observes a dead root and must not signal a recycled pid.
-    expect(child.kill.mock.calls).toEqual([['SIGKILL']])
+    // No root identity was captured, so a stale numeric pid is never signalled.
+    expect(child.kill).not.toHaveBeenCalled()
   })
 
   it('discards a walk that found no root instead of proving an empty tree', async () => {
@@ -790,7 +806,12 @@ describe('claude child tree reaper', () => {
     const terminateDescendants = vi.fn()
     const tree = createClaudeChildTreeReaper(child, {
       platform: 'linux',
-      captureDescendants: vi.fn(async () => ({ rootPgid: 1, descendants: [], capturedAtMs: 1 })),
+      captureDescendants: vi.fn(async () => ({
+        root: { pid: 424242, startedAt: 'Mon Jan 1 00:00:00 2026' },
+        rootPgid: 1,
+        descendants: [],
+        capturedAtMs: 1
+      })),
       terminateDescendants
     })
 
@@ -895,7 +916,7 @@ describe('claude child tree reaper', () => {
 
     await expect(tree.reap()).resolves.toBe('unverifiable')
     expect(terminateWindowsDescendants).not.toHaveBeenCalled()
-    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+    expect(child.kill).not.toHaveBeenCalled()
   })
 
   it('has nothing to reap for a child that never spawned', async () => {

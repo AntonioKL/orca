@@ -56,7 +56,12 @@ function snapshot(
   rootPgid: number | null = 10,
   capturedAtMs = CAPTURED_AT_MS
 ) {
-  return { rootPgid, descendants, capturedAtMs }
+  return {
+    ...(rootPgid === null ? {} : { root: { pid: 10, startedAt: 'Mon Jul 13 12:54:47 2026' } }),
+    rootPgid,
+    descendants,
+    capturedAtMs
+  }
 }
 
 describe('parseProcessTable', () => {
@@ -301,6 +306,32 @@ describe('terminateDescendantSnapshot', () => {
     expect(sendSignal).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
   })
+
+  it("uses each row's capture boundary when escalating a merged snapshot", async () => {
+    const oldBoundary = CAPTURED_AT_MS + 900
+    const refreshBoundary = CAPTURED_AT_MS + 2_100
+    const retained = row(20, 10, 20, 'Tue Jul 14 12:00:00 2026')
+    const fresh = row(30, 10, 30, 'Tue Jul 14 12:00:01 2026')
+    const sendSignal = vi.fn()
+    terminateDescendantSnapshot(
+      {
+        ...snapshot([retained, fresh], 10, refreshBoundary),
+        capturedAtMsByPid: { '20': oldBoundary, '30': refreshBoundary }
+      },
+      {
+        sendSignal,
+        readTable: vi.fn().mockResolvedValue(tableCapture([retained, fresh]))
+      }
+    )
+    sendSignal.mockClear()
+
+    await vi.advanceTimersByTimeAsync(DESCENDANT_KILL_GRACE_MS)
+
+    // PID 20 was retained from the earlier capture and is still in its
+    // capture second; PID 30 was newly observed by the refresh and is old
+    // enough for a bounded forced cleanup.
+    expect(sendSignal.mock.calls).toEqual([[30, 'SIGKILL']])
+  })
 })
 
 describe('terminateDescendantSnapshotAndWait', () => {
@@ -412,6 +443,35 @@ describe('terminateDescendantSnapshotAndWait', () => {
     await vi.advanceTimersByTimeAsync(200)
     await expect(pending).resolves.toBe('exited')
     expect(sendSignal).not.toHaveBeenCalled()
+  })
+
+  it('uses row-scoped boundaries for forced cleanup in the exit verifier', async () => {
+    const oldBoundary = CAPTURED_AT_MS + 900
+    const refreshBoundary = CAPTURED_AT_MS + 2_100
+    const retained = row(20, 10, 20, 'Tue Jul 14 12:00:00 2026')
+    const fresh = row(30, 10, 30, 'Tue Jul 14 12:00:01 2026')
+    const sendSignal = vi.fn()
+    const pending = terminateDescendantSnapshotWithVerdict(
+      {
+        ...snapshot([retained, fresh], 10, refreshBoundary),
+        capturedAtMsByPid: { '20': oldBoundary, '30': refreshBoundary }
+      },
+      {
+        sendSignal,
+        readTable: vi.fn().mockResolvedValue(tableCapture([retained, fresh])),
+        requireIdentityBeforeSignal: true,
+        graceMs: 0,
+        verifyMs: 100
+      }
+    )
+    await vi.advanceTimersByTimeAsync(200)
+
+    await expect(pending).resolves.toBe('live')
+    expect(sendSignal.mock.calls).toEqual([
+      [20, 'SIGTERM'],
+      [30, 'SIGTERM'],
+      [30, 'SIGKILL']
+    ])
   })
 })
 

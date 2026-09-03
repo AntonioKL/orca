@@ -21,12 +21,17 @@ export type ProcessTableRow = {
   startedAt: string
 }
 
+export type PosixProcessIdentity = Pick<ProcessTableRow, 'pid' | 'startedAt'>
+
 export type DescendantSnapshot = {
+  /** Identity of the root observed in the same process-table capture. */
+  root?: PosixProcessIdentity
   rootPgid: number | null
   descendants: ProcessTableRow[]
-  /** Wall-clock boundary for deciding whether ps's second-resolution lstart
-   *  can safely distinguish this process from a later PID reuse. */
+  /** Wall-clock boundary for an unmerged snapshot (or legacy callers). */
   capturedAtMs: number
+  /** Per-PID identity boundaries for merged captures. */
+  capturedAtMsByPid?: Readonly<Record<string, number>>
 }
 
 export type ProcessTableCapture = {
@@ -191,7 +196,12 @@ export function collectDescendantRows(
       queue.push(child.pid)
     }
   }
-  return { rootPgid: rootRow.pgid, descendants, capturedAtMs }
+  return {
+    root: { pid: rootRow.pid, startedAt: rootRow.startedAt },
+    rootPgid: rootRow.pgid,
+    descendants,
+    capturedAtMs
+  }
 }
 
 type SnapshotDeps = {
@@ -325,6 +335,7 @@ export function hasUnambiguousStartIdentity(row: ProcessTableRow, capturedAtMs: 
   return startedAtMs < Math.floor(capturedAtMs / 1_000) * 1_000
 }
 
+/** Revalidate a POSIX root's PID/start-time identity immediately before a kill. */
 /**
  * Terminates a snapshotted descendant tree: SIGTERM every descendant now,
  * reaching detached-pgid children the PTY's SIGHUP cannot, then after a grace
@@ -364,7 +375,10 @@ export function terminateDescendantSnapshot(
       for (const row of snapshot.descendants) {
         const live = liveTargets.get(row.pid)
         if (
-          hasUnambiguousStartIdentity(row, snapshot.capturedAtMs) &&
+          hasUnambiguousStartIdentity(
+            row,
+            snapshot.capturedAtMsByPid?.[String(row.pid)] ?? snapshot.capturedAtMs
+          ) &&
           live?.startedAt === row.startedAt &&
           live.pgid === row.pgid
         ) {

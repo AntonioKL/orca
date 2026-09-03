@@ -22,6 +22,8 @@ export type WindowsDescendantSnapshot = {
   /** Descendants seen in the walk that denied the creation-time query. */
   unidentifiedCount: number
   capturedAtMs: number
+  /** Per-PID boundaries retained when close refreshes merge snapshots. */
+  capturedAtMsByPid?: Readonly<Record<string, number>>
 }
 
 export type WindowsDescendantVerificationDeps = {
@@ -29,6 +31,19 @@ export type WindowsDescendantVerificationDeps = {
   now?: () => number
   wait?: (ms: number) => Promise<void>
   verifyMs?: number
+}
+
+/** Revalidate a Windows PID/creation-time identity immediately before a kill. */
+export async function verifyWindowsProcessIdentity(
+  target: WindowsProcessIdentity,
+  deps: Pick<WindowsDescendantVerificationDeps, 'readTable'> = {}
+): Promise<boolean> {
+  if (!Number.isInteger(target.pid) || target.pid <= 0 || !Number.isFinite(target.creationTimeMs)) {
+    return false
+  }
+  const table = await (deps.readTable ?? readWindowsProcessTableFresh)().catch(() => null)
+  const current = table?.filter((row) => row.pid === target.pid) ?? []
+  return current.length === 1 && current[0]?.creationTimeMs === target.creationTimeMs
 }
 
 function delay(ms: number): Promise<void> {
@@ -84,13 +99,10 @@ export async function terminateIdentifiedWindowsProcessTree(
   target: WindowsProcessIdentity,
   deps: IdentifiedWindowsTreeTerminationDeps = {}
 ): Promise<boolean> {
-  const table = await (deps.readTable ?? readWindowsProcessTableFresh)().catch(() => null)
-  const current = table?.filter((row) => row.pid === target.pid) ?? []
-  if (
-    current.length !== 1 ||
-    current[0]?.creationTimeMs !== target.creationTimeMs ||
-    deps.ownsRoot?.() === false
-  ) {
+  if (!(await verifyWindowsProcessIdentity(target, { readTable: deps.readTable }))) {
+    return false
+  }
+  if (deps.ownsRoot?.() === false) {
     return false
   }
   await (
