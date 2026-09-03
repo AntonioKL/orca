@@ -101,6 +101,10 @@ export function resolveClaudeReplayWaiter(
   if (isCompletedCommand && session.retiredDispatchWaiters.some((waiter) => waiter.acceptsResult)) {
     return false
   }
+  // Once an eviction occurred, a fresh result uuid cannot be joined to a waiter by queue order.
+  if (isCompletedCommand && session.replayContentFallbackBlocked) {
+    return false
+  }
   const waiter = uuid ? session.dispatchWaiters.shift() : undefined
   if (waiter && uuid) {
     clearTimeout(waiter.timer)

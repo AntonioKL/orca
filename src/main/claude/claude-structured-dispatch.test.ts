@@ -165,6 +165,82 @@ describe('Claude structured dispatch image limits', () => {
     await expect(second).resolves.toMatchObject({ providerIdentity: { uuid: secondUuid } })
   })
 
+  it('does not let a fresh-UUID result for an evicted slash dispatch resolve active dispatch B', async () => {
+    const session = sessionFor()
+    const first = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: '/permissions' }]) },
+      100
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+    await expect(first).resolves.toMatchObject({ state: 'unknown' })
+    const firstUuid = session.retiredDispatchWaiters[0]!.sentUuid
+
+    const fillerDispatches = await Promise.all(
+      Array.from({ length: 64 }, (_, index) =>
+        dispatchClaudeTurn(
+          session,
+          {
+            clientMessageId: `filler-${index}`,
+            body: userMessage([{ type: 'text', text: '/permissions' }])
+          },
+          5
+        )
+      )
+    )
+    expect(fillerDispatches.every((outcome) => outcome.state === 'unknown')).toBe(true)
+    expect(session.retiredDispatchWaiters).toHaveLength(64)
+    expect(session.replayContentFallbackBlocked).toBe(true)
+    expect(session.retiredDispatchWaiters.some((waiter) => waiter.sentUuid === firstUuid)).toBe(
+      false
+    )
+
+    while (session.retiredDispatchWaiters.length > 0) {
+      const sentUuid = session.retiredDispatchWaiters[0]!.sentUuid
+      expect(
+        resolveClaudeReplayWaiter(session, {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'provider-session',
+          uuid: `result-${sentUuid}`,
+          user_message_uuid: sentUuid
+        })
+      ).toBe(false)
+    }
+    expect(session.retiredDispatchWaiters).toHaveLength(0)
+
+    const second = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-2', body: userMessage([{ type: 'text', text: '/permissions' }]) },
+      100
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+    const secondUuid = session.dispatchWaiters[0]!.sentUuid
+
+    expect(
+      resolveClaudeReplayWaiter(session, {
+        type: 'result',
+        subtype: 'success',
+        session_id: 'provider-session',
+        uuid: 'result-a-late'
+      })
+    ).toBe(false)
+    expect(session.dispatchWaiters[0]).toMatchObject({ sentUuid: secondUuid })
+
+    expect(
+      resolveClaudeReplayWaiter(session, {
+        type: 'result',
+        subtype: 'success',
+        session_id: 'provider-session',
+        uuid: 'result-b',
+        user_message_uuid: secondUuid
+      })
+    ).toBe(false)
+    await expect(second).resolves.toMatchObject({
+      providerIdentity: { uuid: 'result-b' }
+    })
+  })
+
   it('removes only its own waiter when a later send fails', async () => {
     const session = sessionFor()
     const first = dispatchClaudeTurn(
