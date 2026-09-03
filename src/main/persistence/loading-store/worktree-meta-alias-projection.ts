@@ -43,10 +43,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  * disagree about which key is derivable. `hostId` and `instanceId` are not in
  * `WORKTREE_META_PERSISTED_DEFAULTS`, so the answer is the same before and after default omission.
  */
-export function identityKeyDerivedFromLocatorRow(
-  alias: string,
-  locatorRow: unknown
-): string | undefined {
+function identityKeyDerivedFromLocatorRow(alias: string, locatorRow: unknown): string | undefined {
   if (!isPlainRecord(locatorRow)) {
     return undefined
   }
