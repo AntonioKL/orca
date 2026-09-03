@@ -58,6 +58,15 @@ export class RuntimeAccountController {
     return this.services?.claudeAccounts.getRuntimeConfigDir(target) ?? null
   }
 
+  /** Null when the account state cannot be read, so gates can fail closed instead of throwing. */
+  readClaudeManagedAccounts(): ClaudeRateLimitAccountsState | null {
+    try {
+      return this.services?.claudeAccounts.listAccounts() ?? null
+    } catch {
+      return null
+    }
+  }
+
   getSnapshot(): AccountsSnapshot {
     const { claudeAccounts, codexAccounts, rateLimits } = this.requireServices()
     return {

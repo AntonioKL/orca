@@ -1,0 +1,100 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { OrcaRuntimeService } from './orca-runtime'
+import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
+import type { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-host'
+import type { ClaudeRateLimitAccountsState } from '../../shared/managed-account-types'
+
+vi.mock('electron', () => ({
+  BrowserWindow: { fromId: vi.fn(() => null) },
+  webContents: { fromId: vi.fn(() => null) },
+  ipcMain: { on: vi.fn(), removeListener: vi.fn() },
+  app: { getPath: vi.fn(() => '/tmp') }
+}))
+
+function managedAccount(id: string, managedAuthRuntime: 'host' | 'wsl') {
+  return {
+    id,
+    email: `${id}@example.com`,
+    managedAuthRuntime,
+    authMethod: 'subscription-oauth' as const,
+    createdAt: 0,
+    updatedAt: 0,
+    lastAuthenticatedAt: 0
+  }
+}
+
+const WSL_ONLY: ClaudeRateLimitAccountsState = {
+  accounts: [managedAccount('wsl-1', 'wsl')],
+  activeAccountId: null,
+  activeAccountIdsByRuntime: { host: null, wsl: { Ubuntu: 'wsl-1' } }
+}
+
+const HOST_SELECTED: ClaudeRateLimitAccountsState = {
+  accounts: [managedAccount('host-1', 'host')],
+  activeAccountId: 'host-1',
+  activeAccountIdsByRuntime: { host: 'host-1', wsl: {} }
+}
+
+function runtimeWithAccounts(claude: ClaudeRateLimitAccountsState | null): OrcaRuntimeService {
+  const runtime = new OrcaRuntimeService()
+  if (claude) {
+    runtime.setAccountServices({
+      claudeAccounts: { listAccounts: () => claude },
+      codexAccounts: { listAccounts: () => ({ accounts: [], activeAccountId: null }) },
+      rateLimits: { getState: () => ({}) }
+    } as never)
+  }
+  const internal = runtime as unknown as {
+    resolveStructuredAgentSessionLocation: (selector: string) => Promise<unknown>
+    ensureStructuredAgentSessionHost: () => Promise<void>
+  }
+  internal.resolveStructuredAgentSessionLocation = vi.fn(async () => ({
+    executionHostId: 'local',
+    wslDistro: null,
+    workspaceId: 'workspace-1',
+    workspaceKind: 'git-worktree' as const
+  }))
+  // The adapter's own location answer is irrelevant here; pin it supported so only the account
+  // gate can refuse.
+  internal.ensureStructuredAgentSessionHost = vi.fn(async () => {})
+  setStructuredAgentSessionHost({
+    supportsCreate: () => true
+  } as unknown as StructuredAgentSessionHost)
+  return runtime
+}
+
+afterEach(() => {
+  setStructuredAgentSessionHost(null)
+})
+
+describe('structured Claude managed-account gate', () => {
+  it('refuses Claude under a WSL-only managed account', async () => {
+    const runtime = runtimeWithAccounts(WSL_ONLY)
+    await expect(
+      runtime.getStructuredAgentSessionCreateSupport('id:workspace-1', 'claude')
+    ).resolves.toMatchObject({ supported: false })
+  })
+
+  it('still supports Claude under a selected host managed account', async () => {
+    const runtime = runtimeWithAccounts(HOST_SELECTED)
+    await expect(
+      runtime.getStructuredAgentSessionCreateSupport('id:workspace-1', 'claude')
+    ).resolves.toMatchObject({ supported: true })
+  })
+
+  it('fails closed for Claude when the account runtime cannot be determined', async () => {
+    const runtime = runtimeWithAccounts(null)
+    await expect(
+      runtime.getStructuredAgentSessionCreateSupport('id:workspace-1', 'claude')
+    ).resolves.toMatchObject({ supported: false })
+  })
+
+  /** The gate is Claude's alone: Codex resolves its account separately and this lane must not
+   *  change any Codex answer. */
+  it('leaves Codex supported under the same WSL-only Claude account', async () => {
+    const runtime = runtimeWithAccounts(WSL_ONLY)
+    await expect(
+      runtime.getStructuredAgentSessionCreateSupport('id:workspace-1', 'codex')
+    ).resolves.toMatchObject({ supported: true })
+  })
+})
