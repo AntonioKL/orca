@@ -69,6 +69,8 @@ export const ptyStreamAndSerializationApi = {
       preserveRendererBinding?: boolean
       /** Which lifetime of `id` died; absent when the execution host predates the field. */
       incarnationId?: string
+      /** Set only when the owning relay disowned this id; never a claim that the process died. */
+      ptySourceDisowned?: true
     }) => void
   ): (() => void) => {
     const listener = (
@@ -78,6 +80,7 @@ export const ptyStreamAndSerializationApi = {
         code: number
         preserveRendererBinding?: boolean
         incarnationId?: string
+        ptySourceDisowned?: true
       }
     ) => callback(data)
     ipcRenderer.on('pty:exit', listener)
@@ -92,7 +95,7 @@ export const ptyStreamAndSerializationApi = {
     callback: (data: {
       requestId: string
       ptyId: string
-      opts?: { scrollbackRows?: number; altScreenForcesZeroRows?: boolean }
+      opts?: { scrollbackRows?: number }
     }) => void
   ): (() => void) => {
     const listener = (
@@ -100,7 +103,7 @@ export const ptyStreamAndSerializationApi = {
       data: {
         requestId: string
         ptyId: string
-        opts?: { scrollbackRows?: number; altScreenForcesZeroRows?: boolean }
+        opts?: { scrollbackRows?: number }
       }
     ) => callback(data)
     ipcRenderer.on('pty:serializeBuffer:request', listener)

@@ -7,6 +7,7 @@ import type {
 } from '../../shared/runtime-types'
 import type { RuntimeProviderSnapshotReadOptions } from './runtime-terminal-contracts'
 import { parsePaneKey } from '../../shared/stable-pane-id'
+import { sshRemotePtyLeaseAllowsReattach } from '../../shared/ssh-types'
 import {
   buildVisibleSnapshotReadFallback,
   labelTerminalReadSource,
@@ -77,10 +78,33 @@ export class OrcaRuntimeWithResolveTerminalPane extends OrcaRuntimeWithGetTermin
       }
       throw new Error('terminal_not_recoverable')
     }
-    if (
-      !this.getRecentExpiredSshLease(expectedWorktreeId, parsed.tabId, parsed.leafId, pty.ptyId)
-    ) {
+    const expiredLease = this.getRecentExpiredSshLease(
+      expectedWorktreeId,
+      parsed.tabId,
+      parsed.leafId,
+      pty.ptyId
+    )
+    if (!expiredLease) {
       // Why: an explicit close leaves a terminated lease; only relay expiry authorizes shell recreation.
+      throw new Error('terminal_not_recoverable')
+    }
+    // Why: a superseded or relay-id-recycled lease is `expired` for a reason that already names the
+    // successor — the pane's id no longer routes to the shell this lease describes, so recovering
+    // through it would adopt a stranger's process or re-race a pane that already moved on.
+    if (!sshRemotePtyLeaseAllowsReattach(expiredLease)) {
+      throw new Error('terminal_not_recoverable')
+    }
+    // Why an `expired` lease is not on its own authority to spawn a replacement: every writer of
+    // that state records that the CLIENT lost its route — a superseded sibling, a recycled relay
+    // id, a persistPtyBinding refusal, a failed reattach, a relay reset — and each says in-place
+    // that it is not evidence the shell died (`terminated` is the attested-death state, refused
+    // above). `!pty.connected` is the same inference: one dropped relay clears it for every PTY it
+    // owned. So the pair can hold over a remote shell that is still running, and createTerminal
+    // would rebind the pane away from it, leaving the original orphaned and its agent duplicated.
+    // The runtime already grades this: a host-confirmed exit leaves no verdict, while lost contact
+    // is recorded `unverifiable` (docs/reference/ssh-execution-boundary.md, shared/pty-liveness-verdict.ts).
+    const liveness = this.getPtyLivenessVerdict(pty.ptyId)
+    if (liveness?.status === 'unverifiable' || liveness?.status === 'live') {
       throw new Error('terminal_not_recoverable')
     }
     // Why: disconnected PTYs can reissue handles during graph cleanup; only a connected replacement satisfies the pane CAS.

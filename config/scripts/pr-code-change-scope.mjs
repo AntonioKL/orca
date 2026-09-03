@@ -166,6 +166,7 @@ const SHARED_PACKAGE_PREFIXES = [
   'config/scripts/smoke-packaged',
   'config/scripts/install-electron-package-binary',
   'config/scripts/verify-packaged',
+  'config/scripts/verify-skills-cli-runtime',
   'config/scripts/verify-linux-glibc',
   'config/scripts/run-electron-vite',
   'skills/',
@@ -200,6 +201,12 @@ const DESKTOP_RELEVANT_MOBILE_PREFIXES = [
 const LINUX_PACKAGE_PREFIXES = [
   ...SHARED_PACKAGE_PREFIXES,
   ...DESKTOP_RELEVANT_MOBILE_PREFIXES,
+  'config/docker/cli-launch-contract/',
+  'config/docker/headless-pairing/',
+  'config/docker/headless-serve-shutdown/',
+  'config/scripts/run-linux-cli-launch-contract',
+  'config/scripts/run-headless-linux-pairing-docker',
+  'config/scripts/static-appimage-package-contract',
   'native/computer-use-linux/',
   'resources/linux/',
   'config/scripts/run-headless-serve'
