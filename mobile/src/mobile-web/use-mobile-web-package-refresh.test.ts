@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MutableRefObject } from 'react'
 import type { RpcClient } from '../transport/rpc-client'
 import type { HostProfile } from '../transport/types'
-import type { MobileWebPackageSession } from './mobile-web-package-session-state'
 
 const native = vi.hoisted(() => ({ openSession: vi.fn(), closeSession: vi.fn() }))
 const downloadPackage = vi.hoisted(() => vi.fn())
@@ -18,9 +17,9 @@ vi.mock('./mobile-web-package-downloader', () => ({
 
 import { useMobileWebPackageRefresh } from './use-mobile-web-package-refresh'
 
-// Why: the type-aware CI lint resolves the file: shell package as `error`, so name the
-// session type through the app module instead of the package.
-type OwnedSession = NonNullable<MobileWebPackageSession['session']>
+// Why: the type-aware CI lint resolves the file: shell package as `any`, which collapses a
+// union on its session type; a structural copy keeps the ref's null branch meaningful.
+type OwnedSession = { sessionId: string; buildId: string; url: string }
 
 const HOST: HostProfile = {
   id: 'host-1',
