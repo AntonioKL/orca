@@ -225,6 +225,36 @@ describe('awaitMacUpdateInstall', () => {
     })
   })
 
+  it('does not let a dead same-millisecond marker mask a live pre-spawn writer', () => {
+    // Per-attempt files can be created in one millisecond; filesystem order may put the dead
+    // attempt first, so choosing one marker before checking liveness would reopen the race.
+    const createdAtMs = Date.now()
+    writeMarker({
+      createdAtMs,
+      requestedByPid: 111,
+      attemptId: 'ffffffffffffffff',
+      targetVersion: '1.4.195'
+    })
+    writeMarker({
+      createdAtMs,
+      requestedByPid: 222,
+      attemptId: '0000000000000000',
+      targetVersion: '1.4.196'
+    })
+    getShipItLivenessMock.mockReturnValue('exited')
+    isProcessAliveMock.mockImplementation((pid: number) => pid === 111)
+    waitForMacBundleVersionChangeMock.mockResolvedValue(true)
+
+    return awaitMacUpdateInstall('/Applications/Orca.app/Contents/MacOS/Orca').then((outcome) => {
+      expect(waitForMacBundleVersionChangeMock).toHaveBeenCalledWith(
+        '/Applications/Orca.app/Contents/MacOS/Orca',
+        '1.4.194',
+        expect.any(Number)
+      )
+      expect(outcome).toEqual({ kind: 'installed', version: '1.4.195' })
+    })
+  })
+
   it('leaves a failed attempt on disk so the app can still report it', () => {
     // Deleting here would lose install_did_not_apply and the wedged-installer heal (#14732).
     writeMarker()

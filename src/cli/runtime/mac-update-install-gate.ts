@@ -6,7 +6,7 @@ import {
   resolveMacAppBundlePath,
   isAttemptInFlight,
   isMarkerExpired,
-  selectActiveMarker,
+  selectInFlightMarker,
   type MacUpdateInstallMarker
 } from '../../shared/mac-update-install-marker'
 import { getShipItLivenessForBundle, isProcessAlive } from '../../shared/shipit-liveness'
@@ -33,7 +33,7 @@ export type MacUpdateInstallGateOutcome =
   /** ORCA_OPEN_COMMAND is set with no parseable bundle, so the launch target cannot be gated. */
   | { kind: 'untargetable-override' }
 
-function readActiveMarker(bundlePath: string): MacUpdateInstallMarker | null {
+function readActiveMarkers(bundlePath: string): MacUpdateInstallMarker[] {
   const now = Date.now()
   const markers = readMacUpdateInstallMarkers(bundlePath, {
     list: (dir) => readdirSync(dir),
@@ -47,7 +47,7 @@ function readActiveMarker(bundlePath: string): MacUpdateInstallMarker | null {
       clearMarker(bundlePath, marker)
     }
   }
-  return selectActiveMarker(markers, now)
+  return markers.filter((marker) => !isMarkerExpired(marker, now))
 }
 
 function clearMarker(bundlePath: string, marker: MacUpdateInstallMarker): void {
@@ -93,7 +93,24 @@ export async function awaitMacUpdateInstall(
   if (!bundlePath) {
     return { kind: 'proceed' }
   }
-  const marker = readActiveMarker(bundlePath)
+  const markers = readActiveMarkers(bundlePath)
+  const currentVersion = await readMacBundleVersion(bundlePath)
+  const now = Date.now()
+  let shipItLiveness: 'live' | 'unverifiable' | 'exited' | undefined
+  // Why inspect every attempt: a dead newer marker can otherwise mask an older writer that is
+  // still in the pre-spawn window and must keep this launch out of the bundle.
+  const marker = selectInFlightMarker(
+    markers,
+    now,
+    (candidate) =>
+      (currentVersion === null || candidate.targetVersion !== currentVersion) &&
+      isAttemptInFlight({
+        marker: candidate,
+        now,
+        shipItLiveness: (shipItLiveness ??= getShipItLivenessForBundle(bundlePath)),
+        writerAlive: isProcessAlive(candidate.requestedByPid)
+      })
+  )
   // Why only when a marker exists: refusing whenever the override is set would break dev and e2e
   // runs that never touch an install. The refusal is for the case that actually matters — an
   // install is pending and we cannot tell which bundle the override would open.
@@ -102,12 +119,11 @@ export async function awaitMacUpdateInstall(
   if (marker && openCommand) {
     return { kind: 'untargetable-override' }
   }
-  const currentVersion = await readMacBundleVersion(bundlePath)
   const decision = decideMacUpdateLaunch({
     marker,
     bundlePath,
     bundleVersion: currentVersion,
-    now: Date.now()
+    now
   })
   if (decision === 'open') {
     return { kind: 'proceed' }
@@ -119,9 +135,8 @@ export async function awaitMacUpdateInstall(
     return { kind: 'proceed' }
   }
 
-  // Why the shared core: this gate previously trusted an `exited` verdict with no pre-spawn
-  // phase, so in the stretch after the marker is written and before ShipIt starts it would launch
-  // straight into the install — reintroducing the exact failure it exists to prevent.
+  // Recheck after choosing a marker: a writer or installer can finish between the directory read
+  // and this decision, and uncertain evidence must not make the CLI wait unnecessarily.
   if (
     !isAttemptInFlight({
       marker,
@@ -130,7 +145,7 @@ export async function awaitMacUpdateInstall(
       writerAlive: isProcessAlive(marker!.requestedByPid)
     })
   ) {
-    // Why leave the marker: deleting it here loses the record of a failed install. After a silent
+    // Why leave the marker: deleting here loses the record of a failed install. After a silent
     // -9 the writer is dead and ShipIt has exited, so this branch is exactly the aborted-install
     // case — and unlinking it means the next app start reports no install_did_not_apply and never
     // heals the wedged installer state (#14732). Expiry reclaims it instead.

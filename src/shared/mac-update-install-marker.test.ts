@@ -8,6 +8,7 @@ import {
   getMacUpdateInstallMarkerPath,
   parseMacUpdateInstallMarker,
   selectActiveMarker,
+  selectInFlightMarker,
   type MacUpdateInstallMarker
 } from './mac-update-install-marker'
 
@@ -82,6 +83,30 @@ describe('selectActiveMarker', () => {
 
   it('reports nothing when no attempt is recorded', () => {
     expect(selectActiveMarker([], NOW)).toBeNull()
+  })
+})
+
+describe('selectInFlightMarker', () => {
+  it('skips a newer dead attempt so an older live writer still governs', () => {
+    const older = marker({
+      createdAtMs: NOW,
+      requestedByPid: 11,
+      attemptId: 'ffffffffffffffff'
+    })
+    const newer = marker({
+      createdAtMs: NOW,
+      requestedByPid: 22,
+      attemptId: '0000000000000000'
+    })
+    expect(
+      selectInFlightMarker([newer, older], NOW, (candidate) => candidate.requestedByPid === 11)
+    ).toEqual(older)
+  })
+
+  it('still prefers the newest among live attempts', () => {
+    const older = marker({ createdAtMs: NOW - 1_000, attemptId: '0000000000000001' })
+    const newer = marker({ createdAtMs: NOW, attemptId: '0000000000000002' })
+    expect(selectInFlightMarker([older, newer], NOW, () => true)).toEqual(newer)
   })
 })
 

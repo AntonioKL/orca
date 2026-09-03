@@ -19,6 +19,7 @@ import {
   createAttemptId,
   isMarkerExpired,
   selectActiveMarker,
+  selectInFlightMarker,
   type MacUpdateInstallMarker
 } from '../shared/mac-update-install-marker'
 import {
@@ -170,19 +171,24 @@ export function isMacUpdateInstallInFlight(): boolean {
     return false
   }
   try {
-    const marker = readNewestMarkerForThisBundle()
-    if (!marker) {
+    const now = Date.now()
+    const markers = readActiveMarkersForThisBundle()
+    if (markers.length === 0) {
       return false
     }
-    // Why the shared core here too: this is the third consumer, and checking liveness directly is
-    // what let it diverge — it had no pre-spawn phase, so a relaunch fired between writing the
-    // marker and ShipIt starting would restart the old build and cancel the install.
-    return isAttemptInFlight({
-      marker,
-      now: Date.now(),
-      shipItLiveness: getShipItLivenessForBundle(bundlePath),
-      writerAlive: isProcessAlive(marker.requestedByPid)
-    })
+    let shipItLiveness: 'live' | 'unverifiable' | 'exited' | undefined
+    // Why inspect every attempt: a dead newer marker can otherwise mask an older writer that is
+    // still in the pre-spawn window and must keep relaunches out of the bundle.
+    return Boolean(
+      selectInFlightMarker(markers, now, (marker) =>
+        isAttemptInFlight({
+          marker,
+          now,
+          shipItLiveness: (shipItLiveness ??= getShipItLivenessForBundle(bundlePath)),
+          writerAlive: isProcessAlive(marker.requestedByPid)
+        })
+      )
+    )
   } catch {
     return false
   }
@@ -361,11 +367,22 @@ export function shouldExitForInFlightMacUpdateInstall(): boolean {
   // Accepted limitation: a genuine same-version repair install is therefore ungated. Orca only
   // installs a strictly newer build (allowDowngrade is false), so it is unreachable through the
   // update path.
-  const marker =
-    readActiveMarkersForThisBundle().find(
-      (candidate) =>
-        candidate.fromVersion === runningVersion && candidate.targetVersion !== runningVersion
-    ) ?? null
+  const now = Date.now()
+  const markers = readActiveMarkersForThisBundle()
+  let shipItLiveness: 'live' | 'unverifiable' | 'exited' | undefined
+  const marker = selectInFlightMarker(
+    markers,
+    now,
+    (candidate) =>
+      candidate.fromVersion === runningVersion &&
+      candidate.targetVersion !== runningVersion &&
+      isAttemptInFlight({
+        marker: candidate,
+        now,
+        shipItLiveness: (shipItLiveness ??= getShipItLivenessForBundle(bundlePath)),
+        writerAlive: isProcessAlive(candidate.requestedByPid)
+      })
+  )
   const decision = decideMacUpdateLaunch({
     marker,
     bundlePath,
@@ -373,7 +390,7 @@ export function shouldExitForInFlightMacUpdateInstall(): boolean {
     // bundle, so it reports what was on disk at exec time without a synchronous plist read on
     // the startup path.
     bundleVersion: runningVersion,
-    now: Date.now()
+    now
   })
   if (decision !== 'wait') {
     return false
@@ -385,6 +402,8 @@ export function shouldExitForInFlightMacUpdateInstall(): boolean {
   }
   // RULE: one decision core for both gates. The writer pid answers the PHASE question — until it
   // exits, ShipIt cannot have spawned — which is what the wall-clock grace was standing in for.
+  // Recheck after choosing a marker: a writer or installer can finish between the directory read
+  // and this decision, and uncertain evidence must not make startup exit unnecessarily.
   if (
     !isAttemptInFlight({
       marker,

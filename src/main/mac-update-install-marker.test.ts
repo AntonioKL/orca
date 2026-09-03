@@ -272,6 +272,29 @@ describe('startup gate liveness', () => {
     expect(shouldExitForInFlightMacUpdateInstall()).toBe(true)
   })
 
+  it('does not let a dead same-millisecond marker mask a live pre-spawn writer', () => {
+    // Per-attempt files can be created in one millisecond; filesystem order may put the dead
+    // attempt first, so choosing one marker before checking liveness would reopen the race.
+    const createdAtMs = Date.now()
+    writeMarker({
+      createdAtMs,
+      requestedByPid: 111,
+      attemptId: 'ffffffffffffffff',
+      targetVersion: '1.4.195'
+    })
+    writeMarker({
+      createdAtMs,
+      requestedByPid: 222,
+      attemptId: '0000000000000000',
+      targetVersion: '1.4.196'
+    })
+    getVersionMock.mockReturnValue('1.4.194')
+    getShipItLivenessMock.mockReturnValue('exited')
+    isProcessAliveMock.mockImplementation((pid: number) => pid === 111)
+
+    expect(shouldExitForInFlightMacUpdateInstall()).toBe(true)
+  })
+
   it('starts normally when the probe could not tell — uncertainty must not exit the app', () => {
     // Taking the harmful action (exiting the app someone just launched) needs positive evidence.
     writeMarker()

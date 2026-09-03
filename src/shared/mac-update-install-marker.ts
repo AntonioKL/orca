@@ -119,6 +119,29 @@ export function selectActiveMarker(
   return active
 }
 
+/** Pick the newest marker that is both fresh and proven to be in flight. */
+export function selectInFlightMarker(
+  markers: readonly MacUpdateInstallMarker[],
+  now: number,
+  isInFlight: (marker: MacUpdateInstallMarker) => boolean,
+  maxAgeMs: number = MAC_UPDATE_INSTALL_MARKER_MAX_AGE_MS
+): MacUpdateInstallMarker | null {
+  let active: MacUpdateInstallMarker | null = null
+  for (const marker of markers) {
+    if (isMarkerExpired(marker, now, maxAgeMs) || !isInFlight(marker)) {
+      continue
+    }
+    if (
+      !active ||
+      marker.createdAtMs > active.createdAtMs ||
+      (marker.createdAtMs === active.createdAtMs && marker.attemptId > active.attemptId)
+    ) {
+      active = marker
+    }
+  }
+  return active
+}
+
 /**
  * Read every valid marker for a bundle. Unreadable or corrupt entries are skipped rather than
  * treated as absence of an install — a marker we cannot parse may belong to a live attempt.
