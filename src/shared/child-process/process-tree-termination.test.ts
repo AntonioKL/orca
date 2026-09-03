@@ -148,7 +148,10 @@ describe('process-tree-kill breadcrumb seam', () => {
       const child = mockProcess(1234) as ChildProcess & { exitCode: number }
       child.exitCode = 0
 
-      await expect(signalProcessTree(child, 'SIGKILL')).resolves.toBe(true)
+      // `false`, not `true`: a taskkill against a reaped pid already resolved to
+      // `false`, and reporting verified termination here would release the git
+      // admission grant on root exit instead of on `close`.
+      await expect(signalProcessTree(child, 'SIGKILL')).resolves.toBe(false)
 
       expect(spawnMock).not.toHaveBeenCalled()
       expect(observed).toEqual([])

@@ -26,9 +26,16 @@ export function signalProcessTree(child: ChildProcess, signal?: NodeJS.Signals):
     // reissue, and `taskkill /t /f` walks whatever tree owns it *now* — a
     // recycled pid can be one of Orca's own Chromium processes (#10680). The
     // POSIX branch below cannot hit this: killing a reaped group is ESRCH.
+    //
+    // Why `false`: this is exactly what a taskkill against a reaped pid already
+    // resolved to (non-zero exit -> killRoot + `false`), so skipping the unsafe
+    // spawn must not also flip the termination barrier to "verified". Reporting
+    // `true` here would release the git admission grant on root exit instead of
+    // on `close`, admitting the next git command while a descendant that
+    // inherited the pipes still holds the repo.
     if (hasExited(child)) {
       killRoot(child, signal)
-      return Promise.resolve(true)
+      return Promise.resolve(false)
     }
     return taskkillTree(child, child.pid, signal)
   }
