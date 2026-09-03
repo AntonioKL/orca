@@ -1,3 +1,7 @@
+import {
+  AGENT_SESSION_MAX_NEW_OPERATION_AGE_MS,
+  parseAgentSessionOperationTimestamp
+} from '../../../src/shared/agent-session-host-authority'
 import type { AgentSessionMutationResult } from '../../../src/shared/agent-session-wire'
 import {
   createStructuredAgentSessionOperationId,
@@ -57,21 +61,28 @@ export function structuredSessionOperationId(): string {
   return createStructuredAgentSessionOperationId(randomUuid)
 }
 
-const MAX_RETAINED_OPERATION_IDS = 128
-
+/**
+ * Bounded by expiry, never by count: every retained id belongs to a send whose outcome is still
+ * unknown, so dropping one turns the user's retry into a second message on the host. Only an id
+ * the host would already refuse — unparseable, or past the window in which it can be admitted —
+ * is safe to release, which matches the host's own tombstone retention.
+ */
 export function retainStructuredSessionOperationId(
   operationIds: Map<string, string>,
   key: string,
-  operationId = structuredSessionOperationId()
+  operationId = structuredSessionOperationId(),
+  now: number = Date.now()
 ): string {
   operationIds.delete(key)
   operationIds.set(key, operationId)
-  while (operationIds.size > MAX_RETAINED_OPERATION_IDS) {
-    const oldest = operationIds.keys().next().value
-    if (oldest === undefined) {
-      break
+  for (const [retainedKey, retainedId] of operationIds) {
+    if (retainedKey === key) {
+      continue
     }
-    operationIds.delete(oldest)
+    const timestamp = parseAgentSessionOperationTimestamp(retainedId)
+    if (timestamp === null || now - timestamp > AGENT_SESSION_MAX_NEW_OPERATION_AGE_MS) {
+      operationIds.delete(retainedKey)
+    }
   }
   return operationId
 }

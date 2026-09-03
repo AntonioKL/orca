@@ -132,4 +132,30 @@ describe('mobile rpc-client capabilities', () => {
 
     client.close()
   })
+
+  it('reaches connected when a slow host never answers capability negotiation', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = connect('ws://desktop.invalid', 'token', 'server-key')
+      const socket = mockSockets[0]!
+      client.subscribe('session.tabs.subscribe', { worktree: 'id:wt-1' }, () => {})
+
+      socket.open()
+      socket.receive(JSON.stringify({ type: 'e2ee_ready' }))
+      socket.receive('encrypted:{"type":"e2ee_authenticated"}')
+      sentRequest(socket, 'runtime.clientCapabilities.update')
+
+      // Why: the 5s capability deadline used to force-close the socket, so a link
+      // this slow never left 'connecting' — it just redialled forever.
+      await vi.advanceTimersByTimeAsync(5_001)
+
+      expect(client.getState()).toBe('connected')
+      expect(sentRequest(socket, 'session.tabs.subscribe')).toBeDefined()
+      expect(socket.readyState).toBe(MockWebSocket.OPEN)
+
+      client.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

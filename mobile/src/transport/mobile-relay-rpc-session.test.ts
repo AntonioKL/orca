@@ -54,7 +54,7 @@ function openSession() {
   })
 }
 
-async function authenticateSession(capabilitySupported = true) {
+async function confirmResume() {
   const session = openSession()
   fakes.linkOptions!.onHello({
     type: 'relay-hello',
@@ -99,6 +99,11 @@ async function authenticateSession(capabilitySupported = true) {
     deviceToken: string
     params: { clientCapabilities?: string[] }
   }
+  return { session, confirmationRequest: request, capabilityRequest }
+}
+
+async function authenticateSession(capabilitySupported = true) {
+  const { session, confirmationRequest, capabilityRequest } = await confirmResume()
   expect(session.getState()).toBe('handshaking')
   fakes.linkOptions!.onText(
     JSON.stringify(
@@ -119,7 +124,7 @@ async function authenticateSession(capabilitySupported = true) {
   )
   await vi.waitFor(() => expect(session.getState()).toBe('connected'))
   fakes.sendText.mockClear()
-  return { session, confirmationRequest: request, capabilityRequest }
+  return { session, confirmationRequest, capabilityRequest }
 }
 
 describe('mobile relay RPC session', () => {
@@ -159,6 +164,15 @@ describe('mobile relay RPC session', () => {
     const { session } = await authenticateSession(false)
 
     expect(session.getState()).toBe('connected')
+    expect(session.getFailure()).toBeNull()
+  })
+
+  it('connects when the relay never answers capability negotiation', async () => {
+    const { session } = await confirmResume()
+
+    // Why: the advisory's own deadline used to fail confirmResume, so a link too slow to
+    // answer within the request timeout never published 'connected' — it just redialled.
+    await vi.waitFor(() => expect(session.getState()).toBe('connected'), { timeout: 5_000 })
     expect(session.getFailure()).toBeNull()
   })
 

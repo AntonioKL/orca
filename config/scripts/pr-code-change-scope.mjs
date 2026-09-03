@@ -282,7 +282,7 @@ export function classifyPrJobs(changedFiles) {
   return {
     should_run: shouldRun,
     native_cache_changed: shouldRun && (emptyDiff || changedFiles.some(isNativeCacheInputPath)),
-    mobile_dependencies: needsMobileDependencies(changedFiles),
+    mobile_dependencies: shouldRun && needsMobileDependencies(changedFiles),
     ...jobs
   }
 }

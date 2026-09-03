@@ -10,7 +10,7 @@ import { markRpcDeliveryUnknown } from './rpc-delivery-ambiguity'
 import { openRpcRequestBudget, resolvePostConnectRequestTimeout } from './rpc-request-budget'
 import { isRpcResponse } from './rpc-response-shape'
 import { RpcSessionLivenessWatchdog } from './rpc-session-liveness-watchdog'
-import { requestMobileRuntimeCapabilities } from './mobile-runtime-capability-negotiation'
+import { settleMobileRuntimeCapabilities } from './mobile-runtime-capability-negotiation'
 import type { RpcClient } from './rpc-client'
 import type { ConnectionLogSink, ConnectionState, RpcResponse } from './types'
 
@@ -183,7 +183,8 @@ export function connectMobileRelayRpcSession(args: {
       resumeConfirmation = result.resumeConfirmation
       resumeExpiresAt = result.resumeConfirmation.resumeExpiresAt
       lastConnectedAt = Date.now()
-      await requestMobileRuntimeCapabilities((method, params) =>
+      // Why: an unanswered advisory must not keep a slow relay from ever reaching connected.
+      await settleMobileRuntimeCapabilities((method, params) =>
         sendRpc(method, params, requestTimeoutMs, true)
       )
       livenessWatchdog.start(livenessIdentity)
