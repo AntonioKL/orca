@@ -1,15 +1,19 @@
 import type { CrashReportDetailValue } from '../../shared/crash-reporting'
-import { getLiveSystemMemoryDetails, SYSTEM_MEMORY_KEY_PREFIX } from './system-memory-details'
+import { readSwapVolumeFreeSpace } from './swap-volume-free-space'
+import {
+  getSystemMemoryDetails,
+  SYSTEM_MEMORY_KEY_PREFIX,
+  withSwapVolumeFreeSpace
+} from './system-memory-details'
 
 // ─── Pre-gone host memory sampling ──────────────────────────────────
-// Why a live sample at all: the gone-time host read lands after the corpse
-// released its pages, so it reports a healthier machine than the one that
-// refused the allocation.
-// Why 10 s rather than the 60 s process-metrics cadence: the kill under
-// investigation is a transient commit refusal, and at 60 s four of five field
-// OOMs carried a ~37 s old host reading — far too stale to see it. One
-// GlobalMemoryStatusEx-class call plus one statfs is cheap enough to poll this
-// fast. A refusal shorter than the interval stays invisible; no cadence fixes that.
+// Why sample at all: the gone-time host read lands after the corpse released
+// its pages, so it reports a healthier machine than the one that refused the
+// allocation.
+// Why 10 s and not the 60 s process-metrics cadence: at 60 s, four of five
+// field OOMs carried a ~37 s old host reading — far too stale to see a
+// transient commit refusal. A refusal shorter than the interval stays
+// invisible; no cadence fixes that.
 
 export const PRE_GONE_SYSTEM_MEMORY_SAMPLE_INTERVAL_MS = 10_000
 
@@ -22,23 +26,54 @@ type PreGoneSystemMemorySample = {
 
 let preGoneSample: PreGoneSystemMemorySample | null = null
 let preGoneTimer: ReturnType<typeof setInterval> | null = null
-let sampleInFlight = false
+let swapVolumeReadInFlight = false
+let samplingGeneration = 0
 
-export async function samplePreGoneSystemMemory(nowMs: number = Date.now()): Promise<void> {
-  if (sampleInFlight) {
-    return
-  }
-  sampleInFlight = true
+function commitHostMemorySample(nowMs: number): boolean {
   try {
-    const details = await getLiveSystemMemoryDetails()
-    if (Object.keys(details).length > 0) {
-      preGoneSample = { details, sampledAtMs: nowMs }
+    const details = getSystemMemoryDetails()
+    if (Object.keys(details).length === 0) {
+      return false
     }
+    preGoneSample = { details, sampledAtMs: nowMs }
+    return true
   } catch {
     // Why: a failed read must not erase the previous good sample.
-  } finally {
-    sampleInFlight = false
+    return false
   }
+}
+
+async function mergeSwapVolumeFreeSpace(): Promise<void> {
+  if (swapVolumeReadInFlight) {
+    return
+  }
+  swapVolumeReadInFlight = true
+  const generation = samplingGeneration
+  try {
+    const volume = await readSwapVolumeFreeSpace()
+    // Why merge into whatever sample is current: volume free space moves far
+    // slower than available commit, so a tick-old value still qualifies it.
+    if (volume && preGoneSample && generation === samplingGeneration) {
+      preGoneSample = {
+        ...preGoneSample,
+        details: withSwapVolumeFreeSpace(preGoneSample.details, volume)
+      }
+    }
+  } catch {
+    // Why: the memory reading is already committed and stands on its own.
+  } finally {
+    swapVolumeReadInFlight = false
+  }
+}
+
+export async function samplePreGoneSystemMemory(nowMs: number = Date.now()): Promise<void> {
+  // Why commit before awaiting: the volume read is a statfs, and under the very
+  // paging storm this targets it is slowest — it must never delay, or (via an
+  // in-flight latch) skip, the cheap synchronous host reading.
+  if (!commitHostMemorySample(nowMs)) {
+    return
+  }
+  await mergeSwapVolumeFreeSpace()
 }
 
 export function startPreGoneSystemMemorySampling(
@@ -58,7 +93,9 @@ export function resetPreGoneSystemMemorySamplingForTest(): void {
   }
   preGoneTimer = null
   preGoneSample = null
-  sampleInFlight = false
+  swapVolumeReadInFlight = false
+  // Why bump: an already-awaited volume read must not repopulate a reset sample.
+  samplingGeneration += 1
 }
 
 /** Keyed as `systemMemoryPreGone*` so a scan over the `systemMemory` family sees both reads. */

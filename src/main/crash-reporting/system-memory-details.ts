@@ -1,25 +1,27 @@
 import type { CrashReportDetailValue } from '../../shared/crash-reporting'
-import { readSwapVolumeFreeSpaceMB } from './swap-volume-free-space'
+import type { SwapVolumeFreeSpace } from './swap-volume-free-space'
 
 // ─── Host system memory for crash reports ───────────────────────────
 // Why: the system outlives the crashed process, so this IS sampleable at
 // process-gone — it separates "renderer grew huge" from "machine out of
-// memory/commit", which the per-process buckets alone cannot.
-// Timing: the gone-time caller reads AFTER the crashed process's memory
-// returned to the OS, so free/swapFree read healthier than they were at kill
-// time. The pre-gone sampler exists to carry a live reading past that.
-// Platform honesty, published as `systemMemoryPressureSignal` so no report can
-// be read as a pressure verdict the platform never gave:
+// memory/commit", which the per-process buckets alone cannot. The gone-time
+// caller reads AFTER the corpse returned its pages, so free/swapFree read
+// healthier than at kill time; the pre-gone sampler carries a live reading past
+// that.
+// Every reading is labelled `systemMemoryPressureSignal` so no report can be
+// read as a pressure verdict the platform never gave:
 //   win32  — swapFree is MEMORYSTATUSEX.ullAvailPageFile, i.e. available
-//     COMMIT. Decisive only alongside swap-volume free space, because a
+//     COMMIT, decisive only next to swap-volume free space because a
 //     system-managed pagefile grows into it (a 127 MB commit floor healed to
-//     2029 MB mid-hold on the win-lowspec repro, killing nothing).
-//   linux  — `available` is MemAvailable, the real signal. `free` (MemFree) is
-//     not: it excludes page cache and other reclaimable memory.
-//   darwin — none. `free` stays low on healthy machines (file cache plus
-//     compression) and fileBacked/purgeable are only a reclaimability proxy.
-//     The real signal needs `memory_pressure -Q`, a subprocess this sampler
-//     deliberately does not spawn on a periodic timer.
+//     2029 MB mid-hold on the win-lowspec repro, killing nothing). Without that
+//     volume datum the verdict is `available-commit-unqualified`.
+//   linux  — MemAvailable is the real signal; MemFree is not (it excludes page
+//     cache and other reclaimable memory).
+//   darwin — none. `free` stays low on healthy machines and
+//     fileBacked/purgeable are only a reclaimability proxy. The real signal
+//     needs `memory_pressure -Q`; Orca's reader for it
+//     (src/main/memory/host-memory.ts) is on-demand, and spawning a subprocess
+//     on a 10 s app-lifetime timer costs more than the gap it closes.
 
 type CrashReportDetails = Record<string, CrashReportDetailValue>
 
@@ -43,7 +45,11 @@ type SystemMemoryInfoLike = {
 type SystemMemoryInfoReader = () => SystemMemoryInfoLike | null
 
 /** Which field, if any, carries a real "was the host under pressure" verdict here. */
-export type SystemMemoryPressureSignal = 'available-commit' | 'mem-available' | 'none'
+export type SystemMemoryPressureSignal =
+  | 'available-commit'
+  | 'available-commit-unqualified'
+  | 'mem-available'
+  | 'none'
 
 function readElectronSystemMemoryInfo(): SystemMemoryInfoLike | null {
   const read = (process as NodeJS.Process & { getSystemMemoryInfo?: () => SystemMemoryInfoLike })
@@ -69,7 +75,9 @@ function pressureSignal(
   details: CrashReportDetails
 ): SystemMemoryPressureSignal {
   if (platform === 'win32' && `${SYSTEM_MEMORY_KEY_PREFIX}SwapFreeMB` in details) {
-    return 'available-commit'
+    return `${SYSTEM_MEMORY_KEY_PREFIX}SwapVolumeFreeMB` in details
+      ? 'available-commit'
+      : 'available-commit-unqualified'
   }
   if (platform === 'linux' && `${SYSTEM_MEMORY_KEY_PREFIX}AvailableMB` in details) {
     return 'mem-available'
@@ -105,14 +113,19 @@ export function getSystemMemoryDetails(
 }
 
 /**
- * The pre-gone variant: adds swap-volume free space, which needs a statfs and so
- * is only reachable from the periodic sampler, never from the gone-event path.
+ * Merges the statfs-derived volume datum, which needs an await and so is only
+ * reachable from the periodic sampler, and upgrades the verdict it qualifies.
  */
-export async function getLiveSystemMemoryDetails(): Promise<CrashReportDetails> {
-  const details = getSystemMemoryDetails()
-  const swapVolumeFreeMB = await readSwapVolumeFreeSpaceMB()
-  if (swapVolumeFreeMB !== undefined) {
-    details[`${SYSTEM_MEMORY_KEY_PREFIX}SwapVolumeFreeMB`] = swapVolumeFreeMB
+export function withSwapVolumeFreeSpace(
+  details: CrashReportDetails,
+  volume: SwapVolumeFreeSpace,
+  platform: NodeJS.Platform = process.platform
+): CrashReportDetails {
+  const merged: CrashReportDetails = {
+    ...details,
+    [`${SYSTEM_MEMORY_KEY_PREFIX}SwapVolumeFreeMB`]: volume.freeMB,
+    [`${SYSTEM_MEMORY_KEY_PREFIX}SwapVolume`]: volume.volume
   }
-  return details
+  merged[`${SYSTEM_MEMORY_KEY_PREFIX}PressureSignal`] = pressureSignal(platform, merged)
+  return merged
 }
