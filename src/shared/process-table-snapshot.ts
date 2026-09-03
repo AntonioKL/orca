@@ -13,6 +13,19 @@ export type ProcessTableRow = {
   command: string
 }
 
+/** Columns used by the evidence reader. Keep command last so its spaces survive parsing. */
+export const PS_ARGS = (
+  process.platform === 'darwin'
+    ? ['-axo', 'pid=,ppid=,pgid=,tpgid=,stat=,tty=,lstart=,command=']
+    : ['-axo', 'pid=,ppid=,pgid=,tpgid=,stat=,tty=,etimes=,command=']
+) as readonly string[]
+
+// Why: execFile's 1MB default leaves ~3x headroom (326KB / 1,460 processes, and
+// a single 5KB argv row is ordinary), so a busy host overflows it and then EVERY
+// capture fails — a readable process table degrading into permanent
+// "unverifiable". Matches the sibling reader in pty-descendant-termination.ts.
+export const PS_MAX_BUFFER_BYTES = 32 * 1024 * 1024
+
 /**
  * Parse legacy or evidence-shaped `ps` output into rows. Tolerates CRLF so a
  * snapshot parsed on any host stays correct; `command` (last field) keeps its
@@ -159,16 +172,3 @@ export function parseStrictProcessTableRows(stdout: string): ProcessTableRow[] {
 export function scoreForegroundCandidateRow(row: ProcessTableRow & { depth: number }): number {
   return (row.stat.includes('+') ? 10_000 : 0) + row.depth
 }
-
-export {
-  PS_ARGS,
-  PS_MAX_BUFFER_BYTES,
-  PS_TIMEOUT_MS,
-  PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS,
-  createProcessTableSnapshotReader,
-  getFreshProcessTableSnapshot,
-  getProcessTableSnapshot,
-  getStrictProcessTableSnapshot,
-  getStrictProcessTableSnapshotWithAge,
-  resetProcessTableSnapshotForTests
-} from './process-table-snapshot-reader'

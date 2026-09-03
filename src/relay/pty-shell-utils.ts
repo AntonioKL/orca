@@ -10,12 +10,11 @@ import {
 } from '../shared/agent-process-recognition'
 import { getFirstCommandToken } from '../shared/command-token-scanner'
 import { getProcessTableIndex, type ProcessTableIndex } from '../shared/process-table-index'
+import { PS_MAX_BUFFER_BYTES, type ProcessTableRow } from '../shared/process-table-snapshot'
 import {
   getFreshProcessTableSnapshot,
-  getProcessTableSnapshot,
-  type ProcessTableRow
-} from '../shared/process-table-snapshot'
-import { PS_MAX_BUFFER_BYTES } from '../shared/process-table-snapshot-reader'
+  getProcessTableSnapshot
+} from '../shared/process-table-snapshot-reader'
 import { selectForegroundProcessCandidate } from '../shared/foreground-process-selection'
 import {
   resolveOuterWrapperForegroundProcess,

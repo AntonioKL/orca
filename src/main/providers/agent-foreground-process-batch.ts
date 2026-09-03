@@ -15,10 +15,8 @@ import {
   type ProcessTableIndex,
   type ProcessTableIndexStats
 } from '../../shared/process-table-index'
-import {
-  getStrictProcessTableSnapshot,
-  type ProcessTableRow
-} from '../../shared/process-table-snapshot'
+import type { ProcessTableRow } from '../../shared/process-table-snapshot'
+import { getStrictProcessTableSnapshot } from '../../shared/process-table-snapshot-reader'
 import { resolveRemoteForegroundEvidenceFromRows } from './agent-foreground-process-remote-evidence'
 
 export type BatchedForegroundProcessRequest = {

@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { access, readlink, realpath, stat } from 'node:fs/promises'
 import { delimiter, isAbsolute, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { PS_MAX_BUFFER_BYTES } from './process-table-snapshot-reader'
+import { PS_MAX_BUFFER_BYTES } from './process-table-snapshot'
 
 const execFile = promisify(execFileCallback)
 const PROCESS_READINESS_TIMEOUT_MS = 3000

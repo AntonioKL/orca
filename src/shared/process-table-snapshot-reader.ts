@@ -2,26 +2,20 @@ import { execFile as execFileCb } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import {
+  PS_ARGS,
+  PS_MAX_BUFFER_BYTES,
   ProcessTableCaptureError,
   parseProcessTableRows,
   parseStrictProcessTableRows,
   type ProcessTableRow
 } from './process-table-snapshot'
 
+export { PS_ARGS, PS_MAX_BUFFER_BYTES }
+
 const execFile = promisify(execFileCb)
 
 /** Columns used by the evidence reader. Keep command last so its spaces survive parsing. */
-export const PS_ARGS = (
-  process.platform === 'darwin'
-    ? ['-axo', 'pid=,ppid=,pgid=,tpgid=,stat=,tty=,lstart=,command=']
-    : ['-axo', 'pid=,ppid=,pgid=,tpgid=,stat=,tty=,etimes=,command=']
-) as readonly string[]
 export const PS_TIMEOUT_MS = 3000
-// Why: execFile's 1MB default leaves ~3x headroom (326KB / 1,460 processes, and
-// a single 5KB argv row is ordinary), so a busy host overflows it and then EVERY
-// capture fails — a readable process table degrading into permanent
-// "unverifiable". Matches the sibling reader in pty-descendant-termination.ts.
-export const PS_MAX_BUFFER_BYTES = 32 * 1024 * 1024
 const DEFAULT_SNAPSHOT_TTL_MS = 500
 
 type Snapshot<T> = { value: T; capturedAtMs: number }

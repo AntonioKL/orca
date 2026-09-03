@@ -71,8 +71,10 @@ import {
 } from '../main/providers/agent-foreground-process'
 import type { ProcessTableRow } from '../shared/process-table-snapshot'
 import { getStrictProcessTableSnapshotWithAge } from '../shared/process-table-snapshot-reader'
-import type { ForegroundProcessEvidence } from '../shared/foreground-process-evidence'
-import type { RemoteForegroundEvidence } from '../shared/foreground-process-evidence'
+import type {
+  ForegroundProcessEvidence,
+  RemoteForegroundEvidence
+} from '../shared/foreground-process-evidence'
 import { expandWindowsPathEnvironmentVariables } from '../shared/windows-environment-expansion'
 import { pruneRetiredPtyIncarnations } from '../shared/retired-pty-incarnations'
 import {
