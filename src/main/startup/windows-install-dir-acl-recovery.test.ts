@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +12,7 @@ import {
 import { hasInstallDirAclPoisonMarker } from './windows-install-dir-acl-poison-marker'
 import {
   describeInstallDirAclPoison,
+  isBlockingInstallDirAclRepairInFlight,
   isInstallDirAclSuspect,
   noteWindowsInstallDirAclProbePending,
   repairKnownPoisonedInstallDirBeforeWindow,
@@ -19,7 +20,11 @@ import {
   startWindowsInstallDirAclRepairIfPoisoned,
   type WindowsInstallDirAclRecoveryOptions
 } from './windows-install-dir-acl-recovery'
-import { resetWindowsInstallDirAclRepairForTest } from './windows-install-dir-package-acl-repair'
+import {
+  resetWindowsInstallDirAclRepairForTest,
+  WINDOWS_INSTALL_DIR_ACL_REPAIR_MARKER_FILE,
+  WINDOWS_INSTALL_DIR_ACL_REPAIR_SCHEME_VERSION
+} from './windows-install-dir-package-acl-repair'
 import {
   ALL_PACKAGES_ACE,
   fakeIcaclsSpawn,
@@ -256,6 +261,30 @@ describe('install-dir ACL repair vs the GPU safe-graphics marker', () => {
     // --in-process-gpu launch that hides the next crash's evidence — must not outlive the repair.
     expect(readActiveGpuFallbackMarker(userDataPath, GPU_ENV)).toBeNull()
   })
+
+  // "Keep safe graphics" is a durable user choice with its own reasons; the repair
+  // only retires the latch Orca engaged on its own.
+  it('leaves a user-confirmed safe-graphics marker alone', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-acl-gpu-'))
+    writeGpuFallbackMarker(
+      userDataPath,
+      { engagedAt: Date.now(), crashesInWindow: 3, userConfirmed: true },
+      GPU_ENV
+    )
+
+    await new Promise<void>((resolve) => {
+      startWindowsInstallDirAclRepairIfPoisoned(POISON_VERDICT, {
+        ...recoveryOptions(userDataPath, okRun),
+        recordBreadcrumb: () => {
+          setTimeout(resolve, 0)
+          return undefined
+        }
+      })
+    })
+
+    expect(describeInstallDirAclPoison()?.detail).toContain('repaired the permissions')
+    expect(readActiveGpuFallbackMarker(userDataPath, GPU_ENV)?.userConfirmed).toBe(true)
+  })
 })
 
 describe('isInstallDirAclSuspect', () => {
@@ -443,19 +472,170 @@ describe('repairKnownPoisonedInstallDirBeforeWindow', () => {
   })
 })
 
-/**
- * Why a source assertion: gpu-lifecycle's transitive import graph reaches the real
- * `electron` binding, so the guard cannot be driven in-process. This pins the one
- * thing that matters — the ACL verdict is consulted before the crash is counted
- * towards the burst that latches safe graphics.
- */
-describe('handleGpuChildCrash call site', () => {
-  it('consults the install-dir ACL verdict before counting the crash', () => {
-    const source = readFileSync(join(__dirname, 'gpu-lifecycle.ts'), 'utf8')
-    const start = source.indexOf('export async function handleGpuChildCrash')
-    const countIndex = source.indexOf('recordGpuCrash(', start)
-    expect(start).toBeGreaterThanOrEqual(0)
-    expect(countIndex).toBeGreaterThan(start)
-    expect(source.slice(start, countIndex)).toContain('isInstallDirAclSuspect()')
+describe('a clean probe verdict', () => {
+  beforeEach(() => {
+    resetWindowsInstallDirAclProbeForTest()
+    resetWindowsInstallDirAclRepairForTest()
+    resetWindowsInstallDirAclRecoveryForTest()
+  })
+
+  // The launch this covers: the repair budget is spent, so the gate can only report
+  // 'marker-hit' — and then the probe reads the tree and finds it healthy.
+  it('retires a verdict the gate could no longer act on', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-acl-clean-'))
+    writeFileSync(
+      join(userDataPath, WINDOWS_INSTALL_DIR_ACL_REPAIR_MARKER_FILE),
+      JSON.stringify({
+        schemeVersion: WINDOWS_INSTALL_DIR_ACL_REPAIR_SCHEME_VERSION,
+        installDir: INSTALL_DIR,
+        appVersion: APP_VERSION,
+        attemptedAt: Date.now(),
+        outcome: 'failed',
+        attempts: 3
+      })
+    )
+    startWindowsInstallDirAclRepairIfPoisoned(
+      POISON_VERDICT,
+      recoveryOptions(userDataPath, (() => new Promise<never>(() => undefined)) as Runner)
+    )
+    resetWindowsInstallDirAclRecoveryForTest()
+    resetWindowsInstallDirAclRepairForTest()
+    expect(
+      await repairKnownPoisonedInstallDirBeforeWindow(recoveryOptions(userDataPath, okRun))
+    ).toBe('marker-hit')
+    expect(isInstallDirAclSuspect()).toBe(true)
+
+    startWindowsInstallDirAclRepairIfPoisoned(
+      { status: 'ok', matchesPoisonSignature: false },
+      recoveryOptions(userDataPath, okRun)
+    )
+    // Neither the driver fallback stays suppressed nor does the dialog accuse a healthy folder.
+    expect(isInstallDirAclSuspect()).toBe(false)
+    expect(describeInstallDirAclPoison()).toBeNull()
+  })
+
+  // The probe answers while the repair is still walking the tree: 'failed' from a
+  // repair with nothing left to fix must not re-accuse an install just read clean.
+  it('outranks a repair verdict that lands after it', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-acl-clean-'))
+    const failing: Runner = async () => ({
+      code: 5,
+      signal: null,
+      stdout: '',
+      stderr: 'Access is denied.',
+      timedOut: false
+    })
+    let repairSettled = false
+    startWindowsInstallDirAclRepairIfPoisoned(POISON_VERDICT, {
+      ...recoveryOptions(userDataPath, failing),
+      recordBreadcrumb: () => {
+        repairSettled = true
+        return undefined
+      }
+    })
+    startWindowsInstallDirAclRepairIfPoisoned(
+      { status: 'ok', matchesPoisonSignature: false },
+      recoveryOptions(userDataPath, okRun)
+    )
+    await vi.waitFor(() => expect(repairSettled).toBe(true))
+    expect(isInstallDirAclSuspect()).toBe(false)
+    expect(describeInstallDirAclPoison()).toBeNull()
+  })
+})
+
+describe('the probe-pending grace window', () => {
+  beforeEach(() => {
+    resetWindowsInstallDirAclProbeForTest()
+    resetWindowsInstallDirAclRepairForTest()
+    resetWindowsInstallDirAclRecoveryForTest()
+  })
+
+  // openMainWindow re-runs on every tray/second-instance reopen while the probe is
+  // once-per-process, so a re-arm would wait 15s on a verdict that already landed
+  // and drop every GPU child crash in between.
+  it('is armed by a dispatched probe only, so a reopen cannot re-arm it', async () => {
+    const probeArgs = {
+      platform: 'win32' as const,
+      installDir: INSTALL_DIR,
+      fileExists: () => false,
+      spawnFn: fakeIcaclsSpawn((target) => icaclsDacl(target, [RESTRICTED_PACKAGES_ACE])).spawnFn,
+      recordBreadcrumb: () => undefined
+    }
+    let settleVerdict: () => void = () => undefined
+    const verdict = new Promise<void>((resolve) => (settleVerdict = resolve))
+    // Launch, wired exactly as main-window-controller wires it.
+    const dispatched = probeWindowsInstallDirAcl({
+      ...probeArgs,
+      onDone: (data) => {
+        startWindowsInstallDirAclRepairIfPoisoned(
+          data,
+          recoveryOptions(mkdtempSync(join(tmpdir(), 'orca-acl-rearm-')), okRun)
+        )
+        settleVerdict()
+      }
+    })
+    if (dispatched) {
+      noteWindowsInstallDirAclProbePending()
+    }
+    expect(dispatched).toBe(true)
+    expect(isInstallDirAclSuspect()).toBe(true)
+    await verdict
+    expect(isInstallDirAclSuspect()).toBe(false)
+
+    // Reopen: the probe declines, so nothing arms the grace window again.
+    const reopened = probeWindowsInstallDirAcl({ ...probeArgs, onDone: () => undefined })
+    if (reopened) {
+      noteWindowsInstallDirAclProbePending()
+    }
+    expect(reopened).toBe(false)
+    expect(isInstallDirAclSuspect()).toBe(false)
+    expect(isInstallDirAclSuspect(Date.now() + 14_000)).toBe(false)
+  })
+})
+
+describe('isBlockingInstallDirAclRepairInFlight', () => {
+  beforeEach(() => {
+    resetWindowsInstallDirAclProbeForTest()
+    resetWindowsInstallDirAclRepairForTest()
+    resetWindowsInstallDirAclRecoveryForTest()
+  })
+
+  it('is false on a healthy machine and clears once the gate returns', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-acl-inflight-'))
+    expect(isBlockingInstallDirAclRepairInFlight()).toBe(false)
+
+    startWindowsInstallDirAclRepairIfPoisoned(
+      POISON_VERDICT,
+      recoveryOptions(userDataPath, (() => new Promise<never>(() => undefined)) as Runner)
+    )
+    resetWindowsInstallDirAclRecoveryForTest()
+    resetWindowsInstallDirAclRepairForTest()
+
+    let inFlightDuringRepair = false
+    const gate = repairKnownPoisonedInstallDirBeforeWindow({
+      ...recoveryOptions(userDataPath, async (spec) => {
+        inFlightDuringRepair = isBlockingInstallDirAclRepairInFlight()
+        return okRun(spec)
+      }),
+      timeoutMs: 5_000
+    })
+    expect(await gate).toBe('repaired')
+    expect(inFlightDuringRepair).toBe(true)
+    expect(isBlockingInstallDirAclRepairInFlight()).toBe(false)
+  })
+
+  // A second entry has no `onDone` coming, so waiting out the 20s budget for it
+  // would hold the window closed for nothing.
+  it('returns immediately when the once-per-process repair already ran', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-acl-inflight-'))
+    startWindowsInstallDirAclRepairIfPoisoned(POISON_VERDICT, recoveryOptions(userDataPath, okRun))
+    resetWindowsInstallDirAclRecoveryForTest()
+
+    const mode = await repairKnownPoisonedInstallDirBeforeWindow({
+      ...recoveryOptions(userDataPath, okRun),
+      timeoutMs: 30_000
+    })
+    expect(mode).toBe('skipped')
+    expect(isBlockingInstallDirAclRepairInFlight()).toBe(false)
   })
 })

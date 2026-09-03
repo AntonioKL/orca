@@ -278,13 +278,16 @@ export function resetWindowsInstallDirAclRepairForTest(): void {
  * Fire-and-forget; returns before any spawn. Call only when the probe reported
  * `matchesPoisonSignature`. win32 only, exempt in serve mode, and it must never
  * throw into window creation.
+ *
+ * Returns whether THIS call dispatched the repair. A caller that waits on `onDone`
+ * would otherwise wait forever on the once-per-process latch.
  */
-export function repairWindowsInstallDirPackageAcl(args: WindowsInstallDirAclRepairArgs): void {
+export function repairWindowsInstallDirPackageAcl(args: WindowsInstallDirAclRepairArgs): boolean {
   if ((args.platform ?? process.platform) !== 'win32' || args.isServeMode === true) {
-    return
+    return false
   }
   if (repairStarted) {
-    return
+    return false
   }
   repairStarted = true
   try {
@@ -294,4 +297,5 @@ export function repairWindowsInstallDirPackageAcl(args: WindowsInstallDirAclRepa
   } catch {
     // Nothing left to report to that would not throw again.
   }
+  return true
 }

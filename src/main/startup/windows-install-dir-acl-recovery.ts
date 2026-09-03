@@ -1,7 +1,7 @@
 import { dirname } from 'node:path'
 import type { CrashReportBreadcrumbData } from '../../shared/crash-reporting'
 import { logStartupMilestone } from './startup-diagnostics'
-import { clearGpuFallbackMarker } from './gpu-fallback-marker'
+import { clearGpuFallbackMarker, readGpuFallbackMarker } from './gpu-fallback-marker'
 import {
   clearInstallDirAclPoisonMarker,
   hasInstallDirAclPoisonMarker,
@@ -38,10 +38,15 @@ const PROBE_VERDICT_GRACE_MS = 15_000
 
 let poison: { installDir: string; stage: RepairStage } | null = null
 let probePendingSince: number | null = null
+/** A positive clean DACL reading; outranks any repair verdict about a tree with nothing to fix. */
+let installDirReadClean = false
+let blockingRepairInFlight = false
 
 export function resetWindowsInstallDirAclRecoveryForTest(): void {
   poison = null
   probePendingSince = null
+  installDirReadClean = false
+  blockingRepairInFlight = false
 }
 
 /** Call when the install-DACL probe is dispatched: its verdict is not in yet. */
@@ -56,30 +61,44 @@ export function noteWindowsInstallDirAclProbePending(): void {
  * that is the only way to recognise the shape in a crash report.
  */
 export function isInstallDirAclSuspect(now: number = Date.now()): boolean {
+  if (installDirReadClean) {
+    return false
+  }
   if (poison) {
     return poison.stage !== 'repaired'
   }
   return probePendingSince !== null && now - probePendingSince < PROBE_VERDICT_GRACE_MS
 }
 
+/** True while the pre-window gate is rewriting the very files a new renderer would load. */
+export function isBlockingInstallDirAclRepairInFlight(): boolean {
+  return blockingRepairInFlight
+}
+
+/** False when the once-per-process repair had already been dispatched, so no `onDone` is coming. */
 function startRepair(
   installDir: string,
   options: WindowsInstallDirAclRecoveryOptions,
   onDone?: (result: WindowsInstallDirAclRepairResult) => void
-): void {
-  poison = { installDir, stage: 'pending' }
+): boolean {
   writeInstallDirAclPoisonMarker(options.userDataPath, installDir, options.appVersion)
-  repairWindowsInstallDirPackageAcl({
+  const started = repairWindowsInstallDirPackageAcl({
     ...options,
     installDir,
     onDone: (result) => {
-      poison = { installDir, stage: result.mode }
+      // A clean reading of the tree outranks this: there was nothing left to repair.
+      if (!installDirReadClean) {
+        poison = { installDir, stage: result.mode }
+      }
       logStartupMilestone('install-dir-acl-repair-done', { mode: result.mode })
       if (result.mode === 'repaired') {
         clearInstallDirAclPoisonMarker(options.userDataPath)
         // The GPU child deaths were never a driver fault, so safe graphics — and the
         // --in-process-gpu launch that hides the next crash's evidence — must not outlive the repair.
-        clearGpuFallbackMarker(options.userDataPath)
+        // Never a user-confirmed marker: "keep safe graphics" is a choice, not Orca's latch.
+        if (readGpuFallbackMarker(options.userDataPath)?.userConfirmed === false) {
+          clearGpuFallbackMarker(options.userDataPath)
+        }
       }
       if (result.mode === 'failed') {
         console.warn('[win32-acl] install dir package ACL repair failed:', result.reason)
@@ -87,6 +106,10 @@ function startRepair(
       onDone?.(result)
     }
   })
+  if (started) {
+    poison = { installDir, stage: 'pending' }
+  }
+  return started
 }
 
 /** The probe's `onDone`: no-op unless the machine is in the reproduced state. */
@@ -96,9 +119,15 @@ export function startWindowsInstallDirAclRepairIfPoisoned(
 ): void {
   probePendingSince = null
   if (!isInstallDirAclPoisonVerdict(data)) {
-    // Only a positive clean reading retires the marker; an unreadable DACL proves nothing.
+    // Only a positive clean reading retires the verdict; an unreadable DACL proves nothing.
     if (data.matchesPoisonSignature === false) {
       clearInstallDirAclPoisonMarker(options.userDataPath)
+      installDirReadClean = true
+      // Keeping 'repaired' costs nothing and is what tells the user to reload; anything
+      // else would go on suppressing the driver fallback and accusing a healthy folder.
+      if (poison?.stage !== 'repaired') {
+        poison = null
+      }
     }
     return
   }
@@ -130,17 +159,31 @@ export async function repairKnownPoisonedInstallDirBeforeWindow(
     return 'not-marked'
   }
   logStartupMilestone('install-dir-acl-repair-blocking-start')
-  return await new Promise((resolve) => {
-    const timer = setTimeout(
-      () => resolve('timeout'),
-      options.timeoutMs ?? BLOCKING_REPAIR_BUDGET_MS
-    )
-    timer.unref?.()
-    startRepair(installDir, options, (result) => {
-      clearTimeout(timer)
-      resolve(result.mode)
+  blockingRepairInFlight = true
+  try {
+    return await new Promise((resolve) => {
+      const timer = setTimeout(
+        () => resolve('timeout'),
+        options.timeoutMs ?? BLOCKING_REPAIR_BUDGET_MS
+      )
+      timer.unref?.()
+      const started = startRepair(installDir, options, (result) => {
+        clearTimeout(timer)
+        resolve(result.mode)
+      })
+      // No dispatch means no `onDone`, so waiting out the whole budget would buy nothing.
+      if (!started) {
+        clearTimeout(timer)
+        resolve('skipped')
+      }
     })
-  })
+  } catch (error) {
+    // This sits in the critical path ahead of window creation; it must never throw into it.
+    console.warn('[win32-acl] blocking install dir ACL repair faulted:', error)
+    return 'skipped'
+  } finally {
+    blockingRepairInFlight = false
+  }
 }
 
 const CAUSE =
