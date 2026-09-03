@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react'
-import { MessageSquare, Settings as SettingsIcon } from 'lucide-react'
+import { Loader2, MessageSquare, Settings as SettingsIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { DropdownMenuItem, DropdownMenuShortcut } from '@/components/ui/dropdown-menu'
 import { getAgentCatalog, AgentIcon } from '@/lib/agent-catalog'
@@ -16,6 +16,7 @@ import {
 } from '../../../../shared/tui-agent-selection'
 import { translate } from '@/i18n/i18n'
 import { useStructuredAgentSessionCreate } from '../native-chat/use-structured-agent-session-create'
+import { useStructuredCodexLaunchStatus } from '@/lib/structured-agent-session-launch'
 
 export type QuickLaunchAgentMenuItemsProps = {
   worktreeId: string
@@ -119,6 +120,7 @@ function QuickLaunchAgentMenuItemsInner({
   const newAgentShortcut = useOptionalShortcutLabel('tab.newAgent')
   const claudeStructuredSession = useStructuredAgentSessionCreate(worktreeId, 'claude')
   const codexStructuredSession = useStructuredAgentSessionCreate(worktreeId, 'codex')
+  const structuredCodexLaunchStatus = useStructuredCodexLaunchStatus(worktreeId)
 
   const openAgentSettings = useCallback(() => {
     openSettingsTarget({ pane: 'agents', repoId: null })
@@ -206,21 +208,31 @@ function QuickLaunchAgentMenuItemsInner({
             : agent === 'codex'
               ? codexStructuredSession
               : null
+        const isStructuredCodexPending =
+          agent === 'codex' && structuredCodexLaunchStatus === 'pending'
+        const menuLabel = isStructuredCodexPending ? 'Starting Codex chat…' : label
         const showsDefaultAgentShortcut =
           newAgentShortcut !== null && defaultAgent !== 'blank' && agent === defaultAgent
         return (
           <React.Fragment key={agent}>
             <DropdownMenuItem
+              disabled={isStructuredCodexPending}
               onSelect={() => runLaunch(agent)}
               className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
               title={translate(
                 'auto.components.tab.bar.QuickLaunchButton.ec2adf093e',
-                'Launch {{value0}} in a new terminal',
-                { value0: label }
+                isStructuredCodexPending
+                  ? 'Starting Codex chat…'
+                  : 'Launch {{value0}} in a new terminal',
+                isStructuredCodexPending ? undefined : { value0: label }
               )}
             >
-              <AgentIcon agent={agent} size={14} />
-              <span className="flex-1">{label}</span>
+              {isStructuredCodexPending ? (
+                <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+              ) : (
+                <AgentIcon agent={agent} size={14} />
+              )}
+              <span className="flex-1">{menuLabel}</span>
               {showsDefaultAgentShortcut ? (
                 <DropdownMenuShortcut>{newAgentShortcut}</DropdownMenuShortcut>
               ) : null}
