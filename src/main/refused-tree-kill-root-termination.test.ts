@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
+const { spawnMock, execFileMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+  execFileMock: vi.fn()
+}))
 
 vi.mock('node:child_process', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  spawn: spawnMock
+  spawn: spawnMock,
+  execFile: execFileMock
 }))
 vi.mock('electron', () => ({ ipcMain: { handle: vi.fn(), on: vi.fn() } }))
 
@@ -25,6 +29,7 @@ import { killRecipeProcess } from '../shared/ephemeral-vm-recipe-process'
 import { killSpawnedCommandTree } from './git/command-runner/spawned-command-tree-kill'
 import { killCodexAppServerProcessTree } from './codex/codex-app-server-session'
 import { signalProcessTree } from '../shared/child-process/process-tree-termination'
+import { killSourceControlAgentProcess } from './text-generation/source-control-local-process'
 
 /** A pid Electron reports as one of ours: every gate below must refuse it. */
 const RENDERER_PID = 1001
@@ -59,6 +64,7 @@ beforeEach(() => {
   resetSelfInitiatedTreeKillLogForTest()
   installMainProcessTreeKillGate()
   spawnMock.mockReset()
+  execFileMock.mockReset()
   spawnMock.mockReturnValue({ on: vi.fn(), once: vi.fn(), unref: vi.fn(), kill: vi.fn() })
 })
 
@@ -129,6 +135,16 @@ describe('a refused tree-kill still terminates the root it owns', () => {
     })
 
     expect(spawnMock).not.toHaveBeenCalled()
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+  })
+
+  it('kills the commit-message agent root when the tree walk is refused', async () => {
+    setPlatform('win32')
+    const child = { pid: RENDERER_PID, kill: vi.fn() }
+
+    await killSourceControlAgentProcess(child as never)
+
+    expect(execFileMock).not.toHaveBeenCalled()
     expect(child.kill).toHaveBeenCalledWith('SIGKILL')
   })
 

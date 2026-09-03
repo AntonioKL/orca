@@ -11,6 +11,15 @@ import { describe, expect, it } from 'vitest'
  * processes (#10680), and an ungated one is also invisible to
  * `selfInitiatedTreeKillCount`, which makes a zero read as exculpatory when it
  * is not. A new family fails here rather than in the field.
+ *
+ * Exactly what is enforced, so no comment elsewhere claims more: per file, the
+ * number of gate admissions must be at least the number of `/pid` call sites.
+ * Counting sites rather than files is the point — a file-granular scan would let
+ * a second, ungated taskkill land inside a family that already mentions the gate,
+ * which is the shape the six highest-risk files now have. What it still cannot
+ * see: a site that pairs an ungated kill with a second admission of an already
+ * gated one in the same file, and a kill whose `/pid` argument is itself built
+ * from a variable.
  */
 const REPOSITORY_ROOT = resolve(__dirname, '..', '..')
 const MAIN_DIRECTORY = 'src/main/'
@@ -24,12 +33,33 @@ const IGNORED_DIRECTORIES = new Set([
   '__fixtures__'
 ])
 
-/** Pid-addressed: `/pid <n>` walks whatever tree owns that pid *now*. */
-const PID_ADDRESSED_TASKKILL = /['"]taskkill(?:\.exe)?['"][\s\S]{0,120}?['"]\/pid['"]/i
+/**
+ * One match per call site. Keyed on the `/pid` argument rather than the program
+ * name because `/pid <n>` is what makes the kill pid-addressed — it walks
+ * whatever tree owns that pid *now* — and because the literal survives a
+ * `taskkill` spawned through a constant or a variable, which a quoted-program
+ * pattern misses entirely.
+ */
+const PID_ADDRESSED_KILL_SITE = /['"]\/pid['"]/gi
 
-const GATE = 'admitSelfInitiatedTreeKill'
-/** The `src/shared` seam main installs the same gate into; shared code cannot import it directly. */
-const SEAM = 'admitProcessTreeKill'
+/**
+ * A call, not an import or a comment: `admitSelfInitiatedTreeKill` in main, and
+ * `admitProcessTreeKill` for the `src/shared` seam main installs the same gate
+ * into, which shared code cannot import directly.
+ */
+const GATE_ADMISSION = /\badmit(?:SelfInitiatedTreeKill|ProcessTreeKill)\s*\(/g
+
+function countMatches(source: string, pattern: RegExp): number {
+  return source.match(pattern)?.length ?? 0
+}
+
+/** Sites left over once each admission in the file has claimed one. */
+function ungatedKillSiteCount(source: string): number {
+  return Math.max(
+    countMatches(source, PID_ADDRESSED_KILL_SITE) - countMatches(source, GATE_ADMISSION),
+    0
+  )
+}
 
 /**
  * Only ever shrinks. Each entry states why the gate cannot reach it — never
@@ -79,31 +109,31 @@ function scanSourceFiles(directory: string, found: string[] = []): string[] {
 const SCANNED_HOSTS = ['src/main', 'src/shared', 'src/cli', 'src/relay']
 
 /** Scanned once at import: 10k files is seconds, and every case below reuses it. */
-const PID_ADDRESSED_TASKKILL_FILES = SCANNED_HOSTS.flatMap((host) =>
+const PID_ADDRESSED_KILL_FILES = SCANNED_HOSTS.flatMap((host) =>
   scanSourceFiles(join(REPOSITORY_ROOT, host))
     .map((path) => ({
       path: relative(REPOSITORY_ROOT, path).split('\\').join('/'),
       source: readFileSync(path, 'utf8')
     }))
-    .filter((file) => PID_ADDRESSED_TASKKILL.test(file.source))
+    .filter((file) => countMatches(file.source, PID_ADDRESSED_KILL_SITE) > 0)
 )
 
-function pidAddressedTaskkillFiles(): { path: string; source: string }[] {
-  return PID_ADDRESSED_TASKKILL_FILES
+function pidAddressedKillFiles(): { path: string; source: string }[] {
+  return PID_ADDRESSED_KILL_FILES
 }
 
 describe('main-process tree-kill gate', () => {
   it('finds the taskkill families it is meant to police', () => {
     // Falsifiable: a scanner that matched nothing would pass every case below.
-    expect(pidAddressedTaskkillFiles().map((file) => file.path)).toContain(
+    expect(pidAddressedKillFiles().map((file) => file.path)).toContain(
       'src/main/windows-process-tree-kill.ts'
     )
   })
 
   it('routes every pid-addressed taskkill in Electron main through the gate', () => {
-    const ungated = pidAddressedTaskkillFiles()
+    const ungated = pidAddressedKillFiles()
       .filter((file) => file.path.startsWith(MAIN_DIRECTORY))
-      .filter((file) => !file.source.includes(GATE) && !file.source.includes(SEAM))
+      .filter((file) => ungatedKillSiteCount(file.source) > 0)
       .map((file) => file.path)
       .filter((path) => !UNGATED_TASKKILL_ALLOWLIST.has(path))
 
@@ -111,17 +141,43 @@ describe('main-process tree-kill gate', () => {
   })
 
   it('leaves no pid-addressed taskkill outside main unaccounted for', () => {
-    const unaccounted = pidAddressedTaskkillFiles()
+    const unaccounted = pidAddressedKillFiles()
       .filter((file) => !file.path.startsWith(MAIN_DIRECTORY))
-      .filter((file) => !file.source.includes(GATE) && !file.source.includes(SEAM))
+      .filter((file) => ungatedKillSiteCount(file.source) > 0)
       .map((file) => file.path)
       .filter((path) => !UNGATED_TASKKILL_ALLOWLIST.has(path))
 
     expect(unaccounted).toEqual([])
   })
 
+  it('counts call sites, not files: a second ungated kill in a gated file is caught', () => {
+    // The failure a file-granular scan let through: one gate mention exempting
+    // every taskkill in the file.
+    const gated = `
+      import { admitSelfInitiatedTreeKill } from './own-chromium-tree-kill-guard'
+      if (admitSelfInitiatedTreeKill({ pid, site: 's', scope: 'win-taskkill-tree' })) {
+        spawn('taskkill', ['/pid', String(pid), '/t', '/f'])
+      }
+    `
+
+    expect(ungatedKillSiteCount(gated)).toBe(0)
+    expect(
+      ungatedKillSiteCount(`${gated}\nspawn('taskkill', ['/pid', String(other), '/t', '/f'])`)
+    ).toBe(1)
+  })
+
+  it('sees a kill whose program name comes from a constant', () => {
+    // A quoted-program pattern misses this shape; the `/pid` argument does not.
+    expect(
+      ungatedKillSiteCount(`
+        const KILLER = 'taskkill'
+        spawn(KILLER, ['/pid', String(pid), '/t', '/f'])
+      `)
+    ).toBe(1)
+  })
+
   it('keeps the allowlist honest: every entry still spawns a taskkill', () => {
-    const spawning = new Set(pidAddressedTaskkillFiles().map((file) => file.path))
+    const spawning = new Set(pidAddressedKillFiles().map((file) => file.path))
 
     expect([...UNGATED_TASKKILL_ALLOWLIST.keys()].filter((path) => !spawning.has(path))).toEqual([])
   })

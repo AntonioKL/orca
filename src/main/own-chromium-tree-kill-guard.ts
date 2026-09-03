@@ -15,7 +15,8 @@ import { setProcessTreeKillGate } from '../shared/child-process/process-tree-kil
  * lifetimes (sync, fire-and-forget, timeout ladder), and three more live in
  * `src/shared` and reach this through `process-tree-kill-gate`, so a guard that
  * only lived in the tree-kill helper would cover one of nine.
- * `main-process-tree-kill-gate.test.ts` holds that set closed. Returns false
+ * `main-process-tree-kill-gate.test.ts` holds that set closed by counting `/pid`
+ * call sites against gate admissions per file, not by file. Returns false
  * when the caller must not walk that pid's tree; the caller still kills its own
  * root through the child handle (`refused-tree-kill-root-termination.test.ts`),
  * so a refusal is never a process leak.
@@ -36,12 +37,18 @@ export function admitSelfInitiatedTreeKill(target: {
   // Why: no PTY root, codex root or git child is ever one of our own Chromium
   // processes, so a pid that is means the caller is about to kill a renderer,
   // the GPU or the browser itself (#10680).
-  if (readOrcaChromiumProcessPids().has(target.pid)) {
-    recordRefusedOwnChromiumTreeKill(target)
-    return false
+  const isOwnChromiumPid = readOrcaChromiumProcessPids().has(target.pid)
+  try {
+    if (isOwnChromiumPid) {
+      recordRefusedOwnChromiumTreeKill(target)
+    } else {
+      recordSelfInitiatedTreeKill(target)
+    }
+  } catch {
+    // Recording must never turn a successful termination into a failed one, and
+    // never flip the decision: it is taken above, before anything can throw.
   }
-  recordSelfInitiatedTreeKill(target)
-  return true
+  return !isOwnChromiumPid
 }
 
 /** Hands the gate to the shared choke points, which cannot import main. */
