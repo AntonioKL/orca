@@ -120,6 +120,10 @@ export type ClaudeSession = {
   activeTurnSequence?: number
   /** Fences overlapping option writes so a late completion cannot restore stale state. */
   optionMutationSequence: number
+  /** Shared durable-close write; a failed write clears this for a retry. */
+  closePersistence?: Promise<void>
+  /** Set only after the durable close write succeeds, before lifecycle emission. */
+  closeFinalized?: boolean
   translator: ClaudeJournalTranslator | null
   events: StructuredAgentSessionEventSink | undefined
 }

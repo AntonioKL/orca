@@ -75,6 +75,8 @@ export type ClaudeChildTreeReaper = {
    * gives the root a reason to leave. Held once; later calls are no-ops.
    */
   capture(): Promise<void>
+  /** Refresh a live root's snapshot at the close boundary; a failed refresh keeps the prior proof. */
+  refresh?: () => Promise<void>
   /**
    * Kill the child's whole tree and report what the bounded verification
    * observed. Concurrent calls share one reap, and a later call re-verifies the
@@ -109,10 +111,14 @@ export function createClaudeChildTreeReaper(
   // no later read can make up for.
   let snapshot: CapturedTree | null | undefined
   let capturing: Promise<void> | null = null
+  let refreshing: Promise<void> | null = null
   let inFlight: Promise<DescendantTreeVerdict> | null = null
   let treeVerdict: DescendantTreeVerdict = 'unverifiable'
 
   function captureOnce(): Promise<void> {
+    if (refreshing) {
+      return refreshing
+    }
     if (snapshot !== undefined) {
       return Promise.resolve()
     }
@@ -138,8 +144,19 @@ export function createClaudeChildTreeReaper(
         // could not be read in time is not an answer at all: while the root
         // still lives the walk is simply retried, rather than latching a failed
         // read as proof that there was nothing to find.
-        const tree = admissibleTree(captured, platform, exited())
-        snapshot = captured === null && tree === null && !exited() ? undefined : tree
+        const rootExited = exited()
+        const tree = admissibleTree(captured, platform, rootExited)
+        if (tree) {
+          snapshot = tree
+        } else if (rootExited) {
+          // Once the root has exited its descendants may have reparented; no
+          // later table read can make an absent snapshot safe to signal.
+          snapshot = null
+        } else {
+          // A failed read or a walk that did not observe the live root is
+          // retryable while the root remains alive. Never latch a vacuous null.
+          snapshot = undefined
+        }
       })
       .finally(() => {
         capturing = null
@@ -147,8 +164,50 @@ export function createClaudeChildTreeReaper(
     return capturing
   }
 
+  async function refresh(): Promise<void> {
+    if (capturing || refreshing) {
+      await (capturing ?? refreshing)
+      return
+    }
+    if (exited()) {
+      return
+    }
+    const rootPid = child.pid
+    if (!rootPid) {
+      return
+    }
+    const capture =
+      platform === 'win32'
+        ? (deps.captureWindowsDescendants ?? captureWindowsDescendantSnapshot)
+        : (deps.captureDescendants ?? captureDescendantSnapshot)
+    refreshing = (async () => {
+      const captured = await capture(rootPid).catch(() => null)
+      if (exited()) {
+        return
+      }
+      const tree = admissibleTree(captured, platform, false)
+      if (tree) {
+        snapshot = tree
+      }
+      // Keep an earlier admissible snapshot when this close-boundary read fails;
+      // it remains the only identity-safe evidence after root exit.
+    })()
+    try {
+      await refreshing
+    } finally {
+      refreshing = null
+    }
+  }
+
   /** The only source of a tree verdict: every `exited` here is an observation. */
   async function judgeTree(): Promise<DescendantTreeVerdict> {
+    const killRootIfLive = (): void => {
+      // Once the child handle reported exit, its numeric pid may already belong
+      // to another process; never issue a late root signal through that pid.
+      if (!exited()) {
+        child.kill('SIGKILL')
+      }
+    }
     const rootPid = child.pid
     if (!rootPid) {
       // Never spawned, so the OS never created a tree to orphan.
@@ -170,19 +229,19 @@ export function createClaudeChildTreeReaper(
         ).catch(() => {})
       }
       // taskkill owns the tree; this preserves the direct-child fallback when it fails.
-      child.kill('SIGKILL')
+      killRootIfLive()
       return snapshot?.platform === 'win32'
         ? (deps.terminateWindowsDescendants ?? verifyWindowsDescendantSnapshotExit)(snapshot.tree)
         : 'unverifiable'
     }
     if (snapshot?.platform !== 'posix') {
-      child.kill('SIGKILL')
+      killRootIfLive()
       return 'unverifiable'
     }
     if (snapshot.tree.descendants.length === 0) {
       // Read while the root was alive and childless: a later table read has no
       // row it could match, so it would add nothing to this observation.
-      child.kill('SIGKILL')
+      killRootIfLive()
       return 'exited'
     }
     // Why the root is killed while verification is already running, and never
@@ -193,15 +252,18 @@ export function createClaudeChildTreeReaper(
     // parent links are still real; the root's death then reparents any zombies
     // to init, which reaps them. After a root exit the kill is a no-op: Node
     // drops the handle on exit and never signals a possibly recycled pid.
-    const verdict = (deps.terminateDescendants ?? terminateDescendantSnapshotWithVerdict)(
-      snapshot.tree
-    )
-    child.kill('SIGKILL')
+    const verdict = deps.terminateDescendants
+      ? deps.terminateDescendants(snapshot.tree)
+      : terminateDescendantSnapshotWithVerdict(snapshot.tree, {
+          requireIdentityBeforeSignal: true
+        })
+    killRootIfLive()
     return verdict
   }
 
   return {
     capture: captureOnce,
+    refresh,
     reap() {
       if (inFlight) {
         return inFlight
@@ -256,6 +318,10 @@ export async function proveClaudeChildExit(input: {
     await waitForProcessExitUntil(input.exitPromise, GRACEFUL_EXIT_MS)
     if (!input.exited()) {
       reaped = true
+      // A child may have spawned descendants after the first close-boundary
+      // read. Refresh once while the root is still live, then hold that bounded
+      // snapshot through termination and verification.
+      await tree.refresh?.()
       await tree.reap()
       await waitForProcessExitUntil(input.exitPromise, FORCED_EXIT_MS)
     }

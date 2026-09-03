@@ -170,6 +170,50 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     ).resolves.toEqual({ cancelled: true })
   })
 
+  it('quarantines SDK frames without the acquired session identity', async () => {
+    const claude = fakeClaude({ replayUuid: null })
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = await acquired(claude, {}, events)
+    const connection = claude.connections[0]!
+
+    connection.handlers.onMessage?.({
+      type: 'assistant',
+      uuid: 'foreign-leaf',
+      session_id: 'foreign-provider-session',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'do not admit' }] }
+    })
+    connection.handlers.onMessage?.({
+      type: 'assistant',
+      uuid: 'missing-session-leaf',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'do not admit' }] }
+    })
+
+    const dispatch = adapter.dispatch({
+      sessionId: 'session-1',
+      clientMessageId: 'client-1',
+      body: USER_MESSAGE,
+      fence: 7
+    })
+    await Promise.resolve()
+    expect(connection.sent).toHaveLength(1)
+    connection.handlers.onMessage?.({
+      ...connection.sent[0],
+      uuid: 'foreign-replay',
+      session_id: 'foreign-provider-session'
+    })
+    await Promise.resolve()
+    expect(events.filter((event) => event.type === 'message')).toHaveLength(1)
+
+    connection.handlers.onMessage?.({
+      ...connection.sent[0],
+      session_id: PROVIDER_SESSION_ID
+    })
+    await expect(dispatch).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: connection.sent[0]!.uuid }
+    })
+  })
+
   it('forwards configured launch environment while keeping ownership pins authoritative', async () => {
     const claude = fakeClaude()
     const adapter = adapterFor(claude, {

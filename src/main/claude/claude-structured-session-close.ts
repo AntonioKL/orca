@@ -62,6 +62,9 @@ export async function closeClaudePublishedSession(input: {
   if (!session) {
     return true
   }
+  if (session.closeFinalized) {
+    return true
+  }
   settleClaudeDispatchWaiters(session)
   // Settle every in-flight permission callback so closing leaves no dangling promise; `null`
   // writes no response, and the SDK ignores any post-cleanup answer regardless.
@@ -87,15 +90,34 @@ export async function closeClaudePublishedSession(input: {
     // Keep the last observed main-transcript frame when the durable tail is
     // unavailable or proves a stale/divergent branch.
   }
-  input.sessions.delete(input.sessionId)
-  let persistenceError: unknown
+  const persistence =
+    session.closePersistence ??
+    (session.closePersistence = (async () => {
+      await input.persistHandle?.({
+        sessionId: input.sessionId,
+        providerSessionId: session.providerSessionId,
+        leafUuid: session.leafUuid,
+        fence: session.fence
+      })
+    })())
   try {
-    await input.persistHandle?.({
-      sessionId: input.sessionId,
-      providerSessionId: session.providerSessionId,
-      leafUuid: session.leafUuid,
-      fence: session.fence
-    })
+    await persistence
+  } catch (error) {
+    // Keep the closed session indexed so a retry can persist the same cursor.
+    // Removing it first would turn a durable-write failure into a no-op retry.
+    if (session.closePersistence === persistence) {
+      session.closePersistence = undefined
+    }
+    throw error
+  }
+  session.closeFinalized = true
+  input.sessions.delete(input.sessionId)
+  const ended = {
+    type: 'ended',
+    sessionId: input.sessionId,
+    reason: 'claude session closed'
+  } as const
+  try {
     input.onEvent?.({
       type: 'handle',
       sessionId: input.sessionId,
@@ -103,20 +125,10 @@ export async function closeClaudePublishedSession(input: {
       leafUuid: session.leafUuid,
       fence: session.fence
     })
-  } catch (error) {
-    persistenceError = error
-  } finally {
-    const ended = {
-      type: 'ended',
-      sessionId: input.sessionId,
-      reason: 'claude session closed'
-    } as const
     session.translator?.handle(ended)
     input.onEvent?.(ended)
+  } finally {
     session.translator?.dispose()
-  }
-  if (persistenceError) {
-    throw persistenceError
   }
   return true
 }

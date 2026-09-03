@@ -395,6 +395,24 @@ describe('terminateDescendantSnapshotAndWait', () => {
 
     await expect(pending).resolves.toBe('unverifiable')
   })
+
+  it('does not signal a recycled descendant when identity validation is required', async () => {
+    const sendSignal = vi.fn()
+    const recycled = row(20, 10, 20, 'Tue Jul 14 13:00:00 2026')
+    const pending = terminateDescendantSnapshotWithVerdict(
+      snapshot([row(20, 10, 20, 'Tue Jul 14 12:00:00 2026')]),
+      {
+        sendSignal,
+        readTable: vi.fn().mockResolvedValue(tableCapture([recycled])),
+        requireIdentityBeforeSignal: true,
+        verifyMs: 100
+      }
+    )
+
+    await vi.advanceTimersByTimeAsync(200)
+    await expect(pending).resolves.toBe('exited')
+    expect(sendSignal).not.toHaveBeenCalled()
+  })
 })
 
 describe('createProcessTableSnapshotReader', () => {

@@ -13,6 +13,7 @@ import { resolveClaudeReplayWaiter } from './claude-structured-dispatch'
 import {
   claudeAuthDiagnostic,
   readClaudeCapabilities,
+  readClaudeFrameString,
   readClaudeInit,
   readClaudeModels
 } from './claude-structured-init-proof'
@@ -83,12 +84,23 @@ export async function acquireClaudeSession({
   )
   const { previous, attempt } = acquisitions.start(sessionId, prompts)
   let liveSession: ClaudeSession | null = null
-  let observedLeafUuid: string | null = null
+  let observedLeafUuid: string | null = null,
+    expectedProviderSessionId: string | null = null
+  // Frames are admitted only after launch resolution proves the provider session
+  // this acquisition owns. Keep the check ahead of every stateful consumer.
   const initTimeoutMs = deps.initTimeoutMs ?? CLAUDE_STRUCTURED_INIT_TIMEOUT_MS
   const initDeadline = createClaudeInitDeadline(sessionId, initTimeoutMs)
 
   const onMessage = (message: Record<string, unknown>): void => {
     const init = readClaudeInit(message)
+    if (readClaudeFrameString(message, 'session_id') !== expectedProviderSessionId) {
+      // An init proof for another (or unnamed) provider must fail acquisition
+      // promptly, while ordinary foreign frames stay quarantined silently.
+      if (init || (message.type === 'system' && message.subtype === 'init')) {
+        initDeadline.reject(new Error('claude provider session expected'))
+      }
+      return
+    }
     if (init) {
       initDeadline.resolve(init)
     }
@@ -122,13 +134,7 @@ export async function acquireClaudeSession({
     }
     acquisitions.assertCurrent(sessionId, attempt)
     let resumeSession = sessions.get(sessionId)
-    if (
-      !(await closeClaudePublishedSessionForDeps(sessions, sessionId, {
-        ...(deps.persistHandle ? { persistHandle: deps.persistHandle } : {}),
-        ...(deps.readTranscriptLeaf ? { readTranscriptLeaf: deps.readTranscriptLeaf } : {}),
-        ...(deps.onEvent ? { onEvent: deps.onEvent } : {})
-      }))
-    ) {
+    if (!(await closeClaudePublishedSessionForDeps(sessions, sessionId, deps))) {
       throw new AgentSessionAcquisitionExitUnprovenError(
         new Error(`claude session ${sessionId} could not be stopped`)
       )
@@ -167,6 +173,7 @@ export async function acquireClaudeSession({
           ? error
           : new AgentSessionPreSpawnError(error)
       })
+    expectedProviderSessionId = launch.providerSessionId
     observedLeafUuid = launch.resumeLeafUuid
     acquisitions.assertCurrent(sessionId, attempt)
     const open = deps.openConnection ?? openClaudeStreamJsonConnection

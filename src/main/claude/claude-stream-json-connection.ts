@@ -131,6 +131,25 @@ export async function openClaudeStreamJsonConnection(
   const rootSettled = (): boolean => exited || processless
   const tree = createClaudeChildTreeReaper(child, { exited: rootSettled })
 
+  // Arm lazily on actual child output instead of issuing a process-table scan for
+  // every session at startup. A natural SDK exit can race a later close, while
+  // output-triggered observation still catches the usual live-child window.
+  let outputObservationArmed = false
+  const armTreeOnOutput = (): void => {
+    if (outputObservationArmed) {
+      return
+    }
+    outputObservationArmed = true
+    void (tree.refresh?.() ?? tree.capture())
+  }
+  child.stderr.on('data', armTreeOnOutput)
+  // The SDK may synchronously spawn the CLI and consume an early stderr chunk
+  // before this connection can attach its listener; the bounded tail preserves
+  // that observation for the same lazy arm.
+  if (spawner.stderrTail.length > 0) {
+    armTreeOnOutput()
+  }
+
   let settleExit = (): void => {}
   const exitPromise = new Promise<void>((resolve) => {
     settleExit = resolve
@@ -204,7 +223,11 @@ export async function openClaudeStreamJsonConnection(
   const close = (): Promise<boolean> => {
     closePromise ??= (async () => {
       closing = true
+      // Arm the descendant proof before ending stdin. The SDK may exit the root
+      // immediately; a post-exit walk cannot recover descendants that reparented.
+      const treeCapture = tree.refresh?.() ?? tree.capture()
       inbox.end()
+      await treeCapture
       const proven = await proveClaudeChildExit({
         child,
         exitPromise,

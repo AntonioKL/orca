@@ -16,6 +16,22 @@ import {
 } from './claude-structured-session-test-support'
 
 describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
+  it('retains a closed session until its durable cursor persistence succeeds', async () => {
+    const claude = fakeClaude()
+    const persistenceError = new Error('store unavailable')
+    const persistHandle = vi
+      .fn<NonNullable<ClaudeStructuredSessionAdapterDeps['persistHandle']>>()
+      .mockRejectedValueOnce(persistenceError)
+      .mockResolvedValueOnce(undefined)
+    const adapter = adapterFor(claude, {}, [], [], undefined, undefined, persistHandle)
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+
+    await expect(adapter.closeSession('session-1')).rejects.toBe(persistenceError)
+    expect(persistHandle).toHaveBeenCalledTimes(1)
+    await expect(adapter.closeSession('session-1')).resolves.toBe(true)
+    expect(persistHandle).toHaveBeenCalledTimes(2)
+  })
+
   it('persists only the last transcript-entry uuid before graceful close', async () => {
     const claude = fakeClaude()
     const events: ClaudeStructuredSessionEvent[] = []

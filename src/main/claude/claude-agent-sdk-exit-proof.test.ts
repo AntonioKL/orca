@@ -457,6 +457,49 @@ describe('claude child tree reaper', () => {
     expect(captureDescendants).toHaveBeenCalledTimes(2)
   })
 
+  it('does not latch a missing root while it is still live', async () => {
+    const child = mockChild()
+    const captureDescendants = vi
+      .fn()
+      .mockResolvedValueOnce({ rootPgid: null, descendants: [], capturedAtMs: 1 })
+      .mockResolvedValueOnce(snapshotOf(4243))
+    const terminateDescendants = vi.fn(async () => 'exited' as const)
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'linux',
+      captureDescendants,
+      terminateDescendants
+    })
+
+    await tree.capture()
+    await expect(tree.reap()).resolves.toBe('exited')
+    expect(captureDescendants).toHaveBeenCalledTimes(2)
+    expect(terminateDescendants).toHaveBeenCalledWith(snapshotOf(4243))
+  })
+
+  it('refreshes the live snapshot at close time so late descendants are included', async () => {
+    const child = mockChild()
+    const first = snapshotOf(4243)
+    const second = {
+      ...first,
+      descendants: [...first.descendants, { ...first.descendants[0], pid: 4244 }]
+    }
+    const captureDescendants = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second)
+    const terminateDescendants = vi.fn(async () => 'exited' as const)
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'linux',
+      captureDescendants,
+      terminateDescendants
+    })
+
+    await tree.capture()
+    await tree.refresh?.()
+    await tree.reap()
+
+    expect(captureDescendants).toHaveBeenCalledTimes(2)
+    expect(terminateDescendants).toHaveBeenCalledWith(second)
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+  })
+
   it('stops re-walking once the root is gone, however the table behaved', async () => {
     const child = mockChild()
     let exited = false
@@ -472,7 +515,8 @@ describe('claude child tree reaper', () => {
     exited = true
     await expect(tree.reap()).resolves.toBe('unverifiable')
     expect(captureDescendants).toHaveBeenCalledTimes(1)
-    expect(child.kill.mock.calls).toEqual([['SIGKILL'], ['SIGKILL']])
+    // The second attempt observes a dead root and must not signal a recycled pid.
+    expect(child.kill.mock.calls).toEqual([['SIGKILL']])
   })
 
   it('discards a walk that found no root instead of proving an empty tree', async () => {
@@ -490,7 +534,9 @@ describe('claude child tree reaper', () => {
 
     await tree.capture()
     await expect(tree.reap()).resolves.toBe('unverifiable')
-    expect(captureDescendants).toHaveBeenCalledTimes(1)
+    // A vacuous walk remains retryable while the root is live; no empty-tree
+    // verdict is latched from a missing root row.
+    expect(captureDescendants).toHaveBeenCalledTimes(2)
   })
 
   it('discards a walk that raced the root exit instead of proving an empty tree', async () => {

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -29,6 +30,7 @@ type ScriptedCliReport = {
   controlRequests: { request_id: string; request: { subtype: string } }[]
   controlResponses: { response: { request_id: string; response?: unknown } }[]
   userMessages: Record<string, unknown>[]
+  descendantPid: number | null
 }
 
 const scratchDirs: string[] = []
@@ -123,6 +125,21 @@ function readReportSafely(scenario: { readReport: () => ScriptedCliReport }) {
     return scenario.readReport()
   } catch {
     return null
+  }
+}
+
+function processState(pid: number): 'running' | 'exited' {
+  try {
+    const state = execFileSync('ps', ['-o', 'state=', '-p', String(pid)], {
+      encoding: 'utf8',
+      env: { ...process.env, LANG: 'C', LC_ALL: 'C' }
+    }).trim()
+    return state.startsWith('Z') ? 'exited' : 'running'
+  } catch (error) {
+    if ((error as { status?: number }).status === 1) {
+      return 'exited'
+    }
+    throw error
   }
 }
 
@@ -563,6 +580,42 @@ describe('Claude stream-json connection', () => {
     await expect(connection.close()).resolves.toBe(false)
     expect(connection.exitVerdict).toEqual({ root: 'exited', tree: 'unverifiable' })
   })
+
+  it.runIf(process.platform !== 'win32')(
+    'proves a natural SDK exit and cleans up its descendant before recovery',
+    async () => {
+      const scenario = scriptScenario([
+        { stderr: 'claude: natural exit\n' },
+        { delayMs: 500 },
+        { exit: 1 }
+      ])
+      let exit: Error | null = null
+      const connection = await open(
+        {
+          ...launchFor(scenario),
+          env: { ...launchFor(scenario).env, ORCA_SDK_CONTRACT_DESCENDANT: '1' }
+        },
+        { onExit: (error) => (exit = error) }
+      )
+      const report = await until(() => {
+        const current = readReportSafely(scenario)
+        return current?.descendantPid ? current : null
+      }, 'the descendant report')
+      await until(() => exit, 'the natural exit error')
+      try {
+        await expect(connection.close()).resolves.toBe(true)
+        expect(connection.exitVerdict).toEqual({ root: 'exited', tree: 'exited' })
+        expect(processState(report.descendantPid as number)).toBe('exited')
+      } finally {
+        try {
+          process.kill(report.descendantPid as number, 'SIGKILL')
+        } catch {
+          // Already gone.
+        }
+      }
+    },
+    20_000
+  )
 
   it('settles a spawn error followed by close as processless and closes idempotently', async () => {
     const scenario = scriptScenario([HOLD_OPEN])
