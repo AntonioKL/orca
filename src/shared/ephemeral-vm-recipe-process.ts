@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { EphemeralVmRecipeContext } from './ephemeral-vm-recipe-runner'
+import { admitProcessTreeKill } from './child-process/process-tree-kill-gate'
 
 const DEFAULT_MAX_CAPTURE_BYTES = 1024 * 1024
 const CANCEL_FORCE_KILL_DELAY_MS = 5_000
@@ -139,6 +140,15 @@ function killRecipeProcess(child: ChildProcessWithoutNullStreams, force = false)
     // terminate the wrapper and orphan the actual recipe subprocess (e.g. a cloud
     // CLI mid-provision). taskkill /T walks and kills the whole tree.
     if (child.pid) {
+      if (
+        !admitProcessTreeKill({
+          pid: child.pid,
+          site: 'ephemeral-vm-recipe',
+          scope: 'win-taskkill-tree'
+        })
+      ) {
+        return
+      }
       const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
         windowsHide: true,
         stdio: 'ignore'
