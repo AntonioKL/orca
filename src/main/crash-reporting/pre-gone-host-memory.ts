@@ -30,6 +30,7 @@ let preGoneSample: PreGoneSystemMemorySample | null = null
 let preGoneTimer: ReturnType<typeof setInterval> | null = null
 let swapVolumeReadInFlight = false
 let samplingGeneration = 0
+let sampleTick = 0
 
 const PRESSURE_SIGNAL_KEY = `${SYSTEM_MEMORY_KEY_PREFIX}PressureSignal`
 
@@ -74,7 +75,7 @@ function commitHostMemorySample(nowMs: number): boolean {
   }
 }
 
-async function mergeSwapVolumeFreeSpace(): Promise<void> {
+async function mergeSwapVolumeFreeSpace(issuedOnTick: number): Promise<void> {
   if (swapVolumeReadInFlight) {
     return
   }
@@ -87,7 +88,9 @@ async function mergeSwapVolumeFreeSpace(): Promise<void> {
       // Why only its own tick qualifies: a statfs that outlived its tick carries a
       // pre-storm volume number, and the latch makes that lag unbounded. It still
       // ships beside its age, but it may not decide the verdict.
-      const coTimed = preGoneSample === issuedFor
+      // Why the tick counter and not sample identity: a tick whose host read fails
+      // leaves the sample object in place, so identity alone reads as co-timed.
+      const coTimed = issuedOnTick === sampleTick
       preGoneSample = {
         ...preGoneSample,
         details: withSwapVolumeFreeSpace(preGoneSample.details, volume, process.platform, coTimed),
@@ -105,10 +108,11 @@ export async function samplePreGoneSystemMemory(nowMs: number = Date.now()): Pro
   // Why commit before awaiting: the volume read is a statfs, and under the very
   // paging storm this targets it is slowest — it must never delay, or (via an
   // in-flight latch) skip, the cheap synchronous host reading.
+  const tick = ++sampleTick
   if (!commitHostMemorySample(nowMs)) {
     return
   }
-  await mergeSwapVolumeFreeSpace()
+  await mergeSwapVolumeFreeSpace(tick)
 }
 
 export function startPreGoneSystemMemorySampling(

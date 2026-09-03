@@ -241,6 +241,43 @@ describe('pre-gone host memory', () => {
     }
   })
 
+  // Round 5: sample identity alone could not see these ticks. A host read that
+  // returns nothing leaves the sample object in place, so `sample === issuedFor`
+  // still held 25 s and two ticks later and the statfs re-qualified the verdict.
+  it('will not let ticks with a failed host read pass a stale statfs off as co-timed', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    vi.useFakeTimers()
+    let resolveVolume: (value: SwapVolumeFreeSpace) => void = () => {}
+    try {
+      setSystemMemoryInfoReaderForTest(() => BEFORE_THE_STORM)
+      setSwapVolumeFreeSpaceReaderForTest(
+        () =>
+          new Promise<SwapVolumeFreeSpace>((resolve) => {
+            resolveVolume = resolve
+          })
+      )
+      void samplePreGoneSystemMemory(0)
+
+      // GlobalMemoryStatusEx starts failing: the sample is neither replaced nor erased.
+      setSystemMemoryInfoReaderForTest(() => null)
+      await samplePreGoneSystemMemory(10_000)
+      await samplePreGoneSystemMemory(20_000)
+
+      resolveVolume({ freeMB: 40_000, volume: 'C:' })
+      await vi.advanceTimersByTimeAsync(0)
+
+      vi.setSystemTime(25_000)
+      const details = buildProcessGoneCrashDetails({}, 'renderer')
+      // 25 s of lag: the label must not say co-timed beside that age.
+      expect(details.systemMemoryPreGoneSwapVolumeAgeMs).toBe(25_000)
+      expect(details.systemMemoryPreGonePressureSignal).toBe('available-commit-unqualified')
+    } finally {
+      vi.useRealTimers()
+      Object.defineProperty(process, 'platform', platform)
+    }
+  })
+
   it("arms the host sampler on its own unref'd 10 s timer, not the metric sweep's", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(0)
