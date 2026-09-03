@@ -156,3 +156,62 @@ describe('relay pty spawn cwd (#15296)', () => {
     expect(spawnCwd()).toBe(process.env.HOME || homedir())
   })
 })
+
+describe('relay pty spawn cwd when the relay is not the execution host', () => {
+  let dispatcher: MockDispatcher
+  let handler: PtyHandler
+  let originalPlatform: PropertyDescriptor | undefined
+  let root: string
+
+  beforeEach(() => {
+    ;({ dispatcher, handler, originalPlatform } = beginPtyHandlerTest({
+      mockPtySpawn,
+      mockPtyInstance,
+      mockCreateShellPromptReadinessProbe
+    }))
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    root = mkdtempSync(join(tmpdir(), 'orca-relay-wsl-cwd-'))
+  })
+
+  afterEach(async () => {
+    await endPtyHandlerTest(handler, originalPlatform)
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  // The relay supports WSL shells, and relayHostDirectoryExists stats the relay's own filesystem.
+  // A guest path never stats on a Windows relay, so refusing there would fail an agent launch the
+  // launch wrapper would have cd'd into fine -- the same host pair the worktree branch already
+  // treats as a miss rather than a refusal.
+  it('does not refuse an agent whose folder-workspace root lives in the WSL guest', async () => {
+    await dispatcher.callRequest('pty.spawn', {
+      cols: 80,
+      rows: 24,
+      launchAgent: 'claude',
+      shellOverride: 'wsl.exe',
+      env: {
+        ORCA_WORKSPACE_ID: 'folder:b1706d92-9d05-4932-8360-01e00b54305a',
+        ORCA_WORKTREE_ID: 'folder:b1706d92-9d05-4932-8360-01e00b54305a',
+        ORCA_WORKSPACE_ROOT: '/home/u/guest-only-project'
+      }
+    })
+
+    expect(mockPtySpawn).toHaveBeenCalled()
+  })
+
+  it('still refuses when the same spawn runs on the relay filesystem itself', async () => {
+    await expect(
+      dispatcher.callRequest('pty.spawn', {
+        cols: 80,
+        rows: 24,
+        launchAgent: 'claude',
+        shellOverride: 'powershell.exe',
+        env: {
+          ORCA_WORKSPACE_ID: 'folder:b1706d92-9d05-4932-8360-01e00b54305a',
+          ORCA_WORKTREE_ID: 'folder:b1706d92-9d05-4932-8360-01e00b54305a',
+          ORCA_WORKSPACE_ROOT: join(root, 'gone')
+        }
+      })
+    ).rejects.toThrow(/Cannot determine the working directory/)
+    expect(mockPtySpawn).not.toHaveBeenCalled()
+  })
+})

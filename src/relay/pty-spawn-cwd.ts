@@ -30,10 +30,15 @@ function trimmedString(value: unknown): string | undefined {
  * the worktree-id split yields nothing and the host default silently won (#15296). The client
  * already delivers the configured root as `ORCA_WORKSPACE_ROOT`; read it before falling back.
  *
- * Existence is checked on the relay host because the relay *is* the execution host. A worktree path
- * absent here (a Windows relay launching into WSL) stays a miss, not a refusal — the launch wrapper
- * owns that cd. A declared-but-absent folder root is different: we know exactly which directory was
- * meant, so substituting `$HOME` for an agent is the damage this refuses to do.
+ * Existence is checked on the relay host only when the relay is itself the execution host. A
+ * worktree path absent here (a Windows relay launching into WSL) stays a miss, not a refusal — the
+ * launch wrapper owns that cd. A declared-but-absent folder root is different: we know exactly which
+ * directory was meant, so substituting `$HOME` for an agent is the damage this refuses to do.
+ *
+ * That refusal is only sound when the relay's own filesystem is the one the spawn will use. A WSL
+ * shell hands execution to a guest, and a guest path never stats on the Windows relay, so
+ * `executesOnRelayFilesystem: false` demotes the refusal back to a miss — the same treatment the
+ * worktree branch already gives that host pair.
  */
 export function resolveRelaySpawnCwd(args: {
   requestedCwd?: unknown
@@ -42,6 +47,8 @@ export function resolveRelaySpawnCwd(args: {
   launchAgent?: unknown
   directoryExists?: (path: string) => boolean
   hostDefaultCwd?: () => string
+  /** Defaults to true: absent better knowledge, the relay is the execution host. */
+  executesOnRelayFilesystem?: boolean
 }): RelaySpawnCwdResolution {
   const directoryExists = args.directoryExists ?? relayHostDirectoryExists
   const requested = trimmedString(args.requestedCwd)
@@ -67,7 +74,11 @@ export function resolveRelaySpawnCwd(args: {
 
   // A folder workspace named a root we could not resolve. For an agent that is
   // "cannot determine", not permission to pick one.
-  if (args.launchAgent !== undefined && (workspaceRoot !== undefined || scope?.type === 'folder')) {
+  if (
+    args.launchAgent !== undefined &&
+    args.executesOnRelayFilesystem !== false &&
+    (workspaceRoot !== undefined || scope?.type === 'folder')
+  ) {
     return { kind: 'unresolved', workspaceId: workspaceId ?? 'unknown' }
   }
 

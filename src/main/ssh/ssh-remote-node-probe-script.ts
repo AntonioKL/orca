@@ -20,6 +20,7 @@ orca_dotfile_dirs() {
       *) orca_dir_from_file=\${orca_dir_from_file%%[[:space:]]*} ;;
     esac
     case "$orca_dir_from_file" in
+      '$XDG_DATA_HOME'*) orca_dir_from_file="\${XDG_DATA_HOME:-$HOME/.local/share}\${orca_dir_from_file#'$XDG_DATA_HOME'}" ;;
       '$HOME'*) orca_dir_from_file="$HOME\${orca_dir_from_file#'$HOME'}" ;;
       "~/"*) orca_dir_from_file="$HOME/\${orca_dir_from_file#\\~/}" ;;
     esac

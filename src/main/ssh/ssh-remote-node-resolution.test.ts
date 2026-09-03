@@ -312,6 +312,67 @@ describe('resolveRemoteNodePath', () => {
     }
   })
 
+  it('expands an $XDG_DATA_HOME-relative MISE_DATA_DIR assignment from shell dotfiles', async () => {
+    execCommandMock
+      .mockResolvedValueOnce('/home/u/.local/share/mise/shims/node\n')
+      .mockResolvedValueOnce('v20.11.0\n')
+
+    await resolveRemoteNodePath(conn)
+
+    const callScript = execCommandMock.mock.calls[0]![1] as string
+    const home = mkdtempSync(path.join(os.tmpdir(), 'orca-xdg-probe-'))
+    try {
+      // A name the seeded `${XDG_DATA_HOME:-$HOME/.local/share}/mise` default cannot reach, so
+      // only the dotfile arm can find it.
+      const nodePath = path.join(home, 'xdg-data/custom-mise/installs/node/20.11.0/bin/node')
+      mkdirSync(path.dirname(nodePath), { recursive: true })
+      writeFileSync(nodePath, '#!/bin/sh\nprintf "v20.11.0\\n"\n')
+      chmodSync(nodePath, 0o755)
+      writeFileSync(path.join(home, '.zshrc'), 'export MISE_DATA_DIR=$XDG_DATA_HOME/custom-mise\n')
+
+      const output = execFileSync('/bin/sh', ['-c', callScript], {
+        encoding: 'utf8',
+        env: {
+          HOME: home,
+          PATH: '/usr/bin:/bin',
+          XDG_DATA_HOME: path.join(home, 'xdg-data')
+        }
+      })
+
+      expect(output.split('\n')).toContain(nodePath)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to the POSIX default when an $XDG_DATA_HOME assignment has no env value', async () => {
+    execCommandMock
+      .mockResolvedValueOnce('/home/u/.local/share/mise/shims/node\n')
+      .mockResolvedValueOnce('v20.11.0\n')
+
+    await resolveRemoteNodePath(conn)
+
+    const callScript = execCommandMock.mock.calls[0]![1] as string
+    const home = mkdtempSync(path.join(os.tmpdir(), 'orca-xdg-default-probe-'))
+    try {
+      // sshd's exec channel runs without the profile, so XDG_DATA_HOME is often simply absent.
+      const nodePath = path.join(home, '.local/share/custom-mise/installs/node/20.11.0/bin/node')
+      mkdirSync(path.dirname(nodePath), { recursive: true })
+      writeFileSync(nodePath, '#!/bin/sh\nprintf "v20.11.0\\n"\n')
+      chmodSync(nodePath, 0o755)
+      writeFileSync(path.join(home, '.zshrc'), 'export MISE_DATA_DIR=$XDG_DATA_HOME/custom-mise\n')
+
+      const output = execFileSync('/bin/sh', ['-c', callScript], {
+        encoding: 'utf8',
+        env: { HOME: home, PATH: '/usr/bin:/bin' }
+      })
+
+      expect(output.split('\n')).toContain(nodePath)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it('joins probes with newlines, not ||, so a missing dir does not mask later probes', async () => {
     execCommandMock
       .mockResolvedValueOnce('/usr/local/bin/node\n')
