@@ -42,6 +42,7 @@ import { readGpuFallbackMarker } from './gpu-fallback-marker'
 import { handleGpuChildCrash } from './gpu-lifecycle'
 import { mainProcessState as state } from './main-process-state'
 import {
+  isInstallDirAclRepairPending,
   noteWindowsInstallDirAclProbePending,
   resetWindowsInstallDirAclRecoveryForTest,
   startWindowsInstallDirAclRepairIfPoisoned
@@ -77,6 +78,26 @@ function reportProbePoisoned(): void {
       ) => Promise<ProcessResult>
     }
   )
+}
+
+/** A repair that reports a terminal failure, so `poison.stage` leaves 'pending'. */
+async function reportProbePoisonedWithFailedRepair(): Promise<void> {
+  startWindowsInstallDirAclRepairIfPoisoned(
+    { status: 'ok', matchesPoisonSignature: true, wellKnownNameCheckReliable: true },
+    {
+      ...recoveryOptions(),
+      runProcessFn: (async () => ({
+        code: 1,
+        signal: null,
+        stdout: '',
+        stderr: 'access denied',
+        timedOut: false
+      })) as unknown as (spec: ProcessSpec) => Promise<ProcessResult>
+    }
+  )
+  for (let i = 0; i < 200 && isInstallDirAclRepairPending(); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
 }
 
 function reportProbeClean(): void {
@@ -171,7 +192,8 @@ describe('handleGpuChildCrash vs the install-dir ACL verdict', () => {
     expect(readGpuFallbackMarker(userData.path)?.userConfirmed).toBe(false)
     reportProbePoisoned()
     await decisive
-    expect(readGpuFallbackMarker(userData.path)).toBeNull()
+    // The verdict dispatched a repair, so the marker stays for the launch that repair rescues.
+    expect(readGpuFallbackMarker(userData.path)?.userConfirmed).toBe(false)
   })
 
   it('engages immediately once the probe has already reported the install clean', async () => {
@@ -180,6 +202,29 @@ describe('handleGpuChildCrash vs the install-dir ACL verdict', () => {
     await crashUpToThreshold()
     await handleGpuChildCrash('crashed', null, 600)
     expect(showMessageBox).toHaveBeenCalledTimes(1)
+  })
+
+  // Both from the re-run adversarial round. The gate dispatches a repair without arming the
+  // probe clock, so `waitForInstallDirAclVerdict` returns immediately and the withdrawal used
+  // to delete the marker inside Chromium's ~1.3s FATAL window — leaving the machine to
+  // relaunch hardware accelerated into the same 20s gate, forever.
+  it('keeps the safe-graphics marker on disk while a repair is still in flight', async () => {
+    reportProbePoisoned()
+    await crashUpToThreshold()
+    await handleGpuChildCrash('crashed', null, 600)
+
+    expect(showMessageBox).not.toHaveBeenCalled()
+    expect(readGpuFallbackMarker(userData.path)?.userConfirmed).toBe(false)
+  })
+
+  it('still withdraws the marker once the verdict is terminal rather than a pending repair', async () => {
+    await reportProbePoisonedWithFailedRepair()
+    await crashUpToThreshold()
+    await handleGpuChildCrash('crashed', null, 600)
+
+    expect(showMessageBox).not.toHaveBeenCalled()
+    // No repair is in flight to rescue a later launch, so the marker is not held.
+    expect(readGpuFallbackMarker(userData.path)).toBeNull()
   })
 
   // recordGpuCrash reports the threshold crossing once and latches. Withholding consumes

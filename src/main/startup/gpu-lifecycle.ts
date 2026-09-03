@@ -17,6 +17,7 @@ import { engageGpuFallbackAfterCrashBurst } from '../crash-reporting/gpu-fallbac
 import { recordCrashBreadcrumb } from '../crash-reporting/crash-breadcrumb-store'
 import { recordDurableCrashBreadcrumb } from '../crash-reporting/durable-crash-breadcrumb'
 import {
+  isInstallDirAclRepairPending,
   isInstallDirAclSuspect,
   waitForInstallDirAclVerdict
 } from './windows-install-dir-acl-recovery'
@@ -144,14 +145,25 @@ async function installDirAclClearsGpuFallback(
   if (!isInstallDirAclSuspect()) {
     return true
   }
-  if (persisted) {
+  // Why the marker survives a pending repair: withdrawing it here left a machine that
+  // Chromium FATALs mid-repair (crash 6 lands ~1.3s after crash 3, well inside the gate)
+  // relaunching hardware accelerated into the same 20s gate, spawning the same GPU children,
+  // FATALing again — with no attempt spent, so the loop never advances. Keeping it costs a
+  // healthy machine nothing: a successful repair clears an unconfirmed marker itself, and a
+  // clean probe reading means we never reach here. It is still not *engaged* this launch, so
+  // --in-process-gpu does not erase the sibling-death evidence on the launch that is running.
+  const repairPending = isInstallDirAclRepairPending()
+  if (persisted && !repairPending) {
     clearGpuFallbackMarker(userDataPath)
   }
   // Why re-arm: recordGpuCrash reports the threshold crossing once and latches. Withholding
   // consumed that one report, so without this a later burst — including one after the repair
   // succeeds and the tree is no longer the suspect — could never engage safe graphics again.
   state.gpuCrashFallbackTracker.disengage()
-  recordDurableCrashBreadcrumb('gpu_fallback_withheld_install_dir_acl', { crashesInWindow })
+  recordDurableCrashBreadcrumb('gpu_fallback_withheld_install_dir_acl', {
+    crashesInWindow,
+    markerHeldForPendingRepair: repairPending
+  })
   return false
 }
 

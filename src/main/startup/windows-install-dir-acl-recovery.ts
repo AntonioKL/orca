@@ -102,6 +102,19 @@ export function isInstallDirAclSuspect(now: number = Date.now()): boolean {
   return probePendingSince !== null && now - probePendingSince < PROBE_VERDICT_GRACE_MS
 }
 
+/**
+ * True while a repair for this tree is dispatched and has not reported yet.
+ *
+ * Why it is not the same question as `isInstallDirAclSuspect`: a suspect tree we are
+ * actively repairing is one a *future* launch can still be rescued on, so the safe-graphics
+ * marker earns its keep there — a launch Chromium FATALs mid-repair comes back software
+ * rendered, stops spawning the GPU children that trigger the FATAL, and lets the next gate
+ * run to completion. A terminal verdict has no such next step.
+ */
+export function isInstallDirAclRepairPending(): boolean {
+  return poison?.stage === 'pending'
+}
+
 /** True while the pre-window gate is rewriting the very files a new renderer would load. */
 export function isBlockingInstallDirAclRepairInFlight(): boolean {
   return blockingRepairInFlight
