@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import * as ptyShellUtils from './pty-shell-utils'
+import * as processTableSnapshotReader from '../shared/process-table-snapshot-reader'
 
 const { mockPtySpawn, mockPtyInstance, mockCreateShellPromptReadinessProbe } = vi.hoisted(() => ({
   mockPtySpawn: vi.fn(),
@@ -89,12 +90,31 @@ describe('PtyHandler', () => {
 
   it('rescans the process table for a close decision but not for a poll', async () => {
     const hasChildren = vi.mocked(ptyShellUtils.processHasChildren)
+    const snapshot = vi
+      .spyOn(processTableSnapshotReader, 'getStrictProcessTableSnapshotWithAge')
+      .mockResolvedValue({
+        rows: [
+          {
+            pid: mockPtyInstance.pid,
+            ppid: 1,
+            pgid: mockPtyInstance.pid,
+            tpgid: mockPtyInstance.pid,
+            stat: 'S+',
+            tty: '/dev/pts/1',
+            startTime: '1',
+            command: 'bash'
+          }
+        ],
+        capturedAgeMs: 0
+      })
     const { id } = (await spawnPty({ cols: 80, rows: 24 })) as { id: string }
     hasChildren.mockClear()
 
     await dispatcher.callRequest('pty.inspectProcess', { id })
-    // The poll shares the TTL-cached table the foreground lookup already took.
-    expect(hasChildren).toHaveBeenLastCalledWith(mockPtyInstance.pid)
+    // The poll shares the TTL-cached process table used for the foreground lookup,
+    // so it does not fork a separate child-process probe.
+    expect(snapshot).toHaveBeenCalledOnce()
+    expect(hasChildren).not.toHaveBeenCalled()
 
     await dispatcher.callRequest('pty.hasChildProcesses', { id })
     // This RPC only ever gates a destructive decision (window close, workspace
