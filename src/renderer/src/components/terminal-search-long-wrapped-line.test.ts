@@ -45,6 +45,14 @@ const TRIMMED_HEAD_SCROLLBACK = 100
 const TRIMMED_HEAD_LINE_ROWS = 200
 const NEEDLE = 'needle'
 /**
+ * Rows of one wrapped line per match, and how many matches that line holds. Enough matches to make
+ * the highlight-all pass — which re-enters the line once per match — the dominant cost, and enough
+ * rows that a per-match walk of the line is a freeze rather than a slow search. Kept under the
+ * addon's 1 000-decoration limit so the match count is exact.
+ */
+const MATCH_ROW_STRIDE = 40
+const MATCHES_IN_LINE = 750
+/**
  * A full-buffer scan runs on the renderer's main thread on every keystroke in
  * the find bar, so anything near this is a visible freeze rather than a slow
  * search. Unfixed it is ~18s for a default-scrollback buffer; fixed, ~6ms.
@@ -151,6 +159,38 @@ describe('terminal search inside one very long wrapped line', () => {
       })
 
       expect(performance.now() - startedAt).toBeLessThan(FULL_SCAN_BUDGET_MS)
+    }
+  )
+
+  it.each(SEARCH_MODES)(
+    'highlights many matches in one wrapped line without re-walking it per match (%s)',
+    async (_mode, options) => {
+      const { terminal, search } = openTerminalWithSearch()
+      // `_highlightAllMatches` calls `SearchEngine.find` once per match, and each call resumes
+      // deep inside the line: it rewinds to the line start, re-folds the line's text and converts
+      // the resume column to a string offset cell by cell. All three were O(line) per match, so
+      // this shape stayed quadratic after the no-match scan was bounded: measured at 117s for a
+      // line this long, a hard renderer freeze rather than a RangeError the boundary recovered from.
+      const block = ` ${NEEDLE} ${'x'.repeat(COLS * MATCH_ROW_STRIDE - NEEDLE.length - 2)}`
+      await write(terminal, block.repeat(MATCHES_IN_LINE))
+
+      let resultCount = -1
+      search.onDidChangeResults((event) => {
+        resultCount = event.resultCount
+      })
+      const startedAt = performance.now()
+      const found = safeFind(
+        (term, searchOptions) => search.findNext(term, searchOptions),
+        NEEDLE,
+        {
+          ...options,
+          decorations: SEARCH_DECORATIONS
+        }
+      )
+
+      expect(performance.now() - startedAt).toBeLessThan(FULL_SCAN_BUDGET_MS)
+      expect(found).toBe(true)
+      expect(resultCount).toBe(MATCHES_IN_LINE)
     }
   )
 
