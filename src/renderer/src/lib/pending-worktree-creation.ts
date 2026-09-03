@@ -135,6 +135,8 @@ export type PendingWorktreeCreation = {
   loaderVisible: boolean
   error?: string
   provisioningLog?: string
+  /** Existing worktree whose uncertain structured launch must be reconciled instead of recreated. */
+  structuredLaunchRecoveryWorktreeId?: string
   request: WorktreeCreationRequest
 }
 

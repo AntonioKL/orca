@@ -26,9 +26,21 @@ const store = {
   pendingWorktreeCreations: {} as Record<string, PendingWorktreeCreation>,
   repos: [],
   createWorktree: vi.fn(),
-  updatePendingWorktreeCreation: vi.fn(),
-  removePendingWorktreeCreation: vi.fn(),
-  updateWorktreeMeta: vi.fn()
+  updatePendingWorktreeCreation: vi.fn(
+    (creationId: string, patch: Partial<PendingWorktreeCreation>) => {
+      const entry = store.pendingWorktreeCreations[creationId]
+      if (entry) {
+        store.pendingWorktreeCreations[creationId] = { ...entry, ...patch }
+      }
+    }
+  ),
+  removePendingWorktreeCreation: vi.fn((creationId: string) => {
+    delete store.pendingWorktreeCreations[creationId]
+  }),
+  updateWorktreeMeta: vi.fn(),
+  setActivePendingWorktreeCreation: vi.fn(),
+  setActiveView: vi.fn(),
+  setSidebarOpen: vi.fn()
 }
 
 vi.mock('@/store', () => ({
@@ -86,6 +98,7 @@ vi.mock('@/i18n/i18n', () => ({
 }))
 
 import { executeWorktreeCreation } from './worktree-creation-flow-execute'
+import { retryBackgroundWorktreeCreation } from './worktree-creation-flow'
 
 describe('structured worktree creation unknown outcome', () => {
   beforeEach(() => {
@@ -119,9 +132,44 @@ describe('structured worktree creation unknown outcome', () => {
 
     expect(store.updatePendingWorktreeCreation).toHaveBeenCalledWith('creation-1', {
       status: 'error',
-      error: 'Could not confirm whether Codex chat opened. Retry to check again.'
+      error: 'Could not confirm whether Codex chat opened. Retry to check again.',
+      structuredLaunchRecoveryWorktreeId: 'worktree-1'
     })
     expect(store.removePendingWorktreeCreation).not.toHaveBeenCalled()
     expect(mocks.ensureWorktreeHasInitialTerminal).not.toHaveBeenCalled()
+  })
+
+  it('reconciles the created worktree on retry without creating another one', async () => {
+    mocks.launchStructuredWorktreeSession
+      .mockResolvedValueOnce({
+        accepted: true,
+        cancelled: false,
+        visibilityUnknown: true,
+        activation: false,
+        primaryTabId: null
+      })
+      .mockResolvedValueOnce({
+        accepted: true,
+        cancelled: false,
+        visibilityUnknown: false,
+        activation: false,
+        primaryTabId: null
+      })
+
+    await executeWorktreeCreation('creation-1', request)
+    retryBackgroundWorktreeCreation('creation-1')
+
+    await vi.waitFor(() => expect(mocks.launchStructuredWorktreeSession).toHaveBeenCalledTimes(2))
+    expect(store.createWorktree).toHaveBeenCalledTimes(1)
+    expect(mocks.launchStructuredWorktreeSession).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        creationId: 'creation-1',
+        request,
+        worktreeId: 'worktree-1'
+      })
+    )
+    expect(store.removePendingWorktreeCreation).toHaveBeenCalledWith('creation-1', {
+      cleanupVm: false
+    })
   })
 })

@@ -1,11 +1,8 @@
 import { toast } from 'sonner'
-import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
 import { preflightAgentTrust as preflightWorkspaceAgentTrust } from '@/lib/agent-trust-preflight'
 import { activateAndRevealWorktree, type ActivateAndRevealResult } from '@/lib/worktree-activation'
 import { ensureWorktreeHasInitialTerminal } from '@/lib/worktree-initial-terminal-seeding'
-import { ensureAgentStartupInTerminal } from '@/lib/new-workspace'
-import { queueWorkspaceActivationTerminalFocus } from '@/lib/workspace-activation-terminal-focus'
 import {
   attachEphemeralVmRuntimeToWorkspace,
   cleanupEphemeralVmRuntimeForFailedCreate,
@@ -19,10 +16,11 @@ import {
 import type { CreateWorktreeResult } from '../../../shared/worktree/create-types'
 import type { WorktreeCreationRequest } from '@/lib/pending-worktree-creation'
 import { createBrowserUuid } from '@/lib/browser-uuid'
-import { seedAgentTabStateAfterWorktreeCreate } from '@/lib/worktree-creation-agent-seeds'
 import { resolveBackendDraftStartup } from '@/lib/worktree-draft-startup-view-mode'
 import { buildWorktreeCreationStartupOpt } from '@/lib/worktree-creation-flow-startup'
 import { launchStructuredWorktreeSession } from '@/lib/worktree-creation-structured-session'
+import { completeWorktreeCreation } from '@/lib/worktree-creation-completion'
+import { markStructuredWorktreeLaunchUnconfirmed } from '@/lib/worktree-creation-structured-recovery'
 
 // Why: activePendingCreationId can outlive the terminal route when the user
 // switches app views; only the terminal route renders the creation panel.
@@ -227,53 +225,20 @@ export async function executeWorktreeCreation(
       return
     }
     if (structuredSession.visibilityUnknown) {
-      useAppStore.getState().updatePendingWorktreeCreation(creationId, {
-        status: 'error',
-        error: translate(
-          'auto.lib.worktree.creation.flow.structured.launch.unknown',
-          'Could not confirm whether Codex chat opened. Retry to check again.'
-        )
-      })
+      markStructuredWorktreeLaunchUnconfirmed(creationId, worktree.id)
       return
     }
   }
 
-  // Why: clearing synchronously right after activation lets React commit the
-  // panel→terminal swap in one frame — no two-row flicker, no empty-terminal flash.
-  useAppStore.getState().removePendingWorktreeCreation(creationId, { cleanupVm: false })
-  if (!structuredLaunchAccepted) {
-    seedAgentTabStateAfterWorktreeCreate({
-      request: preparedRequest,
-      worktreeId: worktree.id,
-      primaryTabId,
-      startupTerminalTabId: result.startupTerminal?.tabId,
-      backendSpawned
-    })
-  }
-  if (!structuredLaunchAccepted && preparedRequest.startupPlan && !backendSpawned) {
-    void ensureAgentStartupInTerminal({
-      worktreeId: worktree.id,
-      primaryTabId,
-      startup: preparedRequest.startupPlan
-    })
-  }
-  if (
-    !structuredLaunchAccepted &&
-    shouldActivateOnCompletion &&
-    !preparedRequest.suppressTerminalFocusOnCompletion
-  ) {
-    queueWorkspaceActivationTerminalFocus(worktree.id, activation)
-  }
-
-  // Why: awaiting the note IPC before the swap would add a visible round-trip to
-  // the panel→terminal transition; it's cosmetic, so it runs last.
-  if (preparedRequest.note) {
-    try {
-      await useAppStore.getState().updateWorktreeMeta(worktree.id, {
-        comment: preparedRequest.note
-      })
-    } catch {
-      console.error('Failed to update worktree meta after creation')
-    }
-  }
+  await completeWorktreeCreation({
+    creationId,
+    request: preparedRequest,
+    worktreeId: worktree.id,
+    structuredLaunchAccepted,
+    activation,
+    primaryTabId,
+    startupTerminalTabId: result.startupTerminal?.tabId,
+    backendSpawned,
+    focusOnCompletion: shouldActivateOnCompletion
+  })
 }
