@@ -207,7 +207,6 @@ describe('githubAvatarSlug', () => {
 
 describe('repo icon source validation memo', () => {
   const HYDRATIONS = 25
-  const MAX_MEMOIZED_ICON_SOURCES = 64
 
   function uploadIcon(width: number): { type: 'image'; src: string; source: 'upload' } {
     return { type: 'image', src: `data:image/png;base64,${pngBase64(width, 1)}`, source: 'upload' }
@@ -250,15 +249,39 @@ describe('repo icon source validation memo', () => {
     expect(sanitizeRepoIcon({ type: 'image', src, source: 'upload' })).toBeUndefined()
   })
 
-  it('evicts oldest entries instead of growing without bound', () => {
-    const overflow = MAX_MEMOIZED_ICON_SOURCES + 6
-    for (let index = 1; index <= overflow; index += 1) {
-      sanitizeRepoIcon(uploadIcon(1000 + index))
+  // Guard for the removed cap: the memo hangs off the persisted icon object, so it holds a verdict
+  // for every live icon no matter how many there are. A fixed-size map would evict the earliest
+  // entries here and re-decode them on the next hydration.
+  it('keeps a verdict for every live icon, however many repos have one', () => {
+    const LIVE_ICONS = 200
+    const icons = Array.from({ length: LIVE_ICONS }, (_, index) => uploadIcon(1000 + index))
+    for (const icon of icons) {
+      sanitizeRepoIcon(icon)
     }
     dataUriValidations.count = 0
-    sanitizeRepoIcon(uploadIcon(1000 + overflow))
+
+    for (const icon of icons) {
+      expect(sanitizeRepoIcon(icon)).toEqual(icon)
+    }
+
     expect(dataUriValidations.count).toBe(0)
-    sanitizeRepoIcon(uploadIcon(1001))
+  })
+
+  // Guard for the hazard object keying introduces: the stored src/source are re-checked on a hit,
+  // so a persisted icon edited in place can never be served its previous verdict.
+  it('re-validates an icon object whose src or source is mutated in place', () => {
+    const icon = { type: 'image', src: `data:image/png;base64,${pngBase64(7, 1)}`, source: 'file' }
+    expect(sanitizeRepoIcon(icon)).toEqual(icon)
+
+    icon.src = `data:image/png;base64,${pngBase64(8, 1)}`
+    dataUriValidations.count = 0
+    expect(sanitizeRepoIcon(icon)).toEqual(icon)
     expect(dataUriValidations.count).toBe(1)
+
+    // WebP is a `file` icon but not an `upload` icon, so the same object must flip verdicts.
+    icon.src = `data:image/webp;base64,${WEBP_1X1_BASE64}`
+    expect(sanitizeRepoIcon(icon)).toEqual(icon)
+    icon.source = 'upload'
+    expect(sanitizeRepoIcon(icon)).toBeUndefined()
   })
 })
