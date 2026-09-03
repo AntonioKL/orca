@@ -1,6 +1,9 @@
 import type { EffortLevel, PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import { ClaudeControlRequestError } from './claude-stream-json-connection'
-import { AgentSessionOptionRejectedError } from '../native-chat/agent-session-wire/structured-agent-session-option-error'
+import {
+  AgentSessionOptionRejectedError,
+  isAgentSessionOptionRejectedError
+} from '../native-chat/agent-session-wire/structured-agent-session-option-error'
 import type { ClaudeSession } from './claude-structured-session-state'
 
 const OPTION_ORDER = ['model', 'effort', 'permissionMode'] as const
@@ -38,6 +41,7 @@ export async function setClaudeStructuredOption(
       `claude stream-json has no session option named ${input.key}`
     )
   }
+  const mutationSequence = ++session.optionMutationSequence
   try {
     await apply()
   } catch (error) {
@@ -45,6 +49,9 @@ export async function setClaudeStructuredOption(
       throw new AgentSessionOptionRejectedError(error)
     }
     throw error
+  }
+  if (mutationSequence !== session.optionMutationSequence) {
+    return Object.fromEntries(session.options)
   }
   session.options.set(input.key, input.value)
   return Object.fromEntries(session.options)
@@ -54,9 +61,21 @@ export async function restoreClaudeStructuredSessionOptions(
   session: ClaudeSession,
   timeoutMs: number | undefined
 ): Promise<void> {
+  // Any write that was already in flight belongs to the previous acquisition
+  // state and must not repopulate this map after restore starts.
+  session.optionMutationSequence += 1
   const options = [...session.options.entries()]
   session.options.clear()
   for (const [key, value] of options) {
-    await setClaudeStructuredOption(session, { key, value }, timeoutMs)
+    try {
+      await setClaudeStructuredOption(session, { key, value }, timeoutMs)
+    } catch (error) {
+      if (!isAgentSessionOptionRejectedError(error)) {
+        throw error
+      }
+      // A stale or unavailable preference must not poison every future acquire;
+      // the provider's current value remains authoritative and is re-persisted.
+      session.restoreSkippedOptions.add(key)
+    }
   }
 }

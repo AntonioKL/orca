@@ -1,58 +1,18 @@
-import { extname } from 'node:path'
-import { open } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import type { AgentJournalMessageItem } from '../../shared/agent-session-journal-types'
-import type { NativeChatBlock } from '../../shared/native-chat-types'
 import type { AgentSessionDispatchOutcome } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import {
   claudeHasReplayContent,
   readClaudeMessageEnvelope
 } from './claude-structured-item-translation'
-import type { ClaudeSession } from './claude-structured-session-state'
+import type { ClaudeDispatchWaiter, ClaudeSession } from './claude-structured-session-state'
 import { readClaudeFrameString } from './claude-structured-init-proof'
+import {
+  claudeDispatchContentKey,
+  claudeDispatchMessageContent
+} from './claude-structured-dispatch-content'
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024
-const MAX_IMAGE_COUNT = 20
-const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024
-
-type ImageBudget = {
-  count: number
-  localBytes: number
-}
-
-async function readClaudeImage(path: string): Promise<Buffer> {
-  const file = await open(path, 'r')
-  try {
-    const info = await file.stat()
-    if (!info.isFile()) {
-      throw new Error('Claude image must be a file')
-    }
-    const buffer = Buffer.allocUnsafe(MAX_IMAGE_BYTES + 1)
-    let bytesRead = 0
-    while (bytesRead < buffer.length) {
-      const result = await file.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead)
-      if (result.bytesRead === 0) {
-        break
-      }
-      bytesRead += result.bytesRead
-    }
-    if (bytesRead === 0 || bytesRead > MAX_IMAGE_BYTES) {
-      throw new Error(
-        `Claude image must be a non-empty file no larger than ${MAX_IMAGE_BYTES} bytes`
-      )
-    }
-    return buffer.subarray(0, bytesRead)
-  } finally {
-    await file.close()
-  }
-}
-
-const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
-  '.gif': 'image/gif',
-  '.jpeg': 'image/jpeg',
-  '.jpg': 'image/jpeg',
-  '.png': 'image/png',
-  '.webp': 'image/webp'
-}
+const MAX_RETIRED_DISPATCH_WAITERS = 64
 
 export function resolveClaudeReplayWaiter(
   session: ClaudeSession,
@@ -71,91 +31,165 @@ export function resolveClaudeReplayWaiter(
     return false
   }
   const uuid = readClaudeFrameString(message, 'uuid')
+  if (!uuid) {
+    return false
+  }
+
+  // Newer SDK frames carry the client uuid that caused a turn. A correlation
+  // value is authoritative: never fall back to queue order or content, since
+  // identical prompts may be in flight across a timeout boundary.
+  const userMessageUuid = readClaudeFrameString(message, 'user_message_uuid')
+  if (userMessageUuid) {
+    const exact = session.dispatchWaiters.find(
+      (candidate) => candidate.sentUuid === userMessageUuid
+    )
+    if (exact) {
+      settleWaiter(session, exact, uuid)
+      return isUserReplay && exact.dispatchSequence === session.dispatchSequence
+    }
+    const retired = session.retiredDispatchWaiters.find(
+      (candidate) => candidate.sentUuid === userMessageUuid
+    )
+    if (retired) {
+      forgetRetiredWaiter(session, retired)
+      return recoverLateIdentity(session, retired, uuid, isUserReplay)
+    }
+    return false
+  }
+
+  const exact = session.dispatchWaiters.find((candidate) => candidate.sentUuid === uuid)
+  if (exact) {
+    settleWaiter(session, exact, uuid)
+    return isUserReplay && exact.dispatchSequence === session.dispatchSequence
+  }
+  const retired = session.retiredDispatchWaiters.find((candidate) => candidate.sentUuid === uuid)
+  if (retired) {
+    forgetRetiredWaiter(session, retired)
+    return recoverLateIdentity(session, retired, uuid, isUserReplay)
+  }
+
+  if (isUserReplay) {
+    // Compatibility CLIs may mint a new replay uuid instead of echoing the
+    // client uuid. Content is an acceptable join only when it is the sole
+    // candidate on one side of the timeout boundary; with active and retired
+    // candidates present, identical prompts are intentionally left unknown.
+    const replayContentKey = claudeDispatchContentKey(envelope.content)
+    if (session.retiredDispatchWaiters.length === 0) {
+      const compatible = session.dispatchWaiters.filter(
+        (candidate) => candidate.replayContentKey === replayContentKey
+      )
+      if (compatible.length === 1) {
+        settleWaiter(session, compatible[0]!, uuid)
+        return compatible[0]!.dispatchSequence === session.dispatchSequence
+      }
+    } else if (session.dispatchWaiters.length === 0) {
+      const lateCompatible = session.retiredDispatchWaiters.filter(
+        (candidate) => candidate.replayContentKey === replayContentKey
+      )
+      if (lateCompatible.length === 1) {
+        const [candidate] = lateCompatible
+        forgetRetiredWaiter(session, candidate!)
+        return recoverLateIdentity(session, candidate!, uuid, true)
+      }
+    }
+    return false
+  }
   const current = session.dispatchWaiters[0]
   if (isCompletedCommand && !current?.acceptsResult) {
+    return false
+  }
+  if (isCompletedCommand && session.retiredDispatchWaiters.some((waiter) => waiter.acceptsResult)) {
     return false
   }
   const waiter = uuid ? session.dispatchWaiters.shift() : undefined
   if (waiter && uuid) {
     clearTimeout(waiter.timer)
+    waiter.settledUuid = uuid
     waiter.resolve(uuid)
     return isUserReplay
   }
   return false
 }
 
-async function imageContent(
-  block: Extract<NativeChatBlock, { type: 'image-ref' }>,
-  budget: ImageBudget
-): Promise<unknown> {
-  budget.count += 1
-  if (budget.count > MAX_IMAGE_COUNT) {
-    throw new Error(`Claude messages support at most ${MAX_IMAGE_COUNT} images`)
+function settleWaiter(session: ClaudeSession, waiter: ClaudeDispatchWaiter, uuid: string): void {
+  const index = session.dispatchWaiters.indexOf(waiter)
+  if (index !== -1) {
+    session.dispatchWaiters.splice(index, 1)
   }
-  if (block.url) {
-    return { type: 'image', source: { type: 'url', url: block.url } }
-  }
-  if (!block.path) {
-    throw new Error('image reference has neither a path nor a URL')
-  }
-  const data = await readClaudeImage(block.path)
-  budget.localBytes += data.byteLength
-  if (budget.localBytes > MAX_TOTAL_IMAGE_BYTES) {
-    throw new Error(`Claude images must total no more than ${MAX_TOTAL_IMAGE_BYTES} bytes`)
-  }
-  const mediaType = IMAGE_MIME_BY_EXTENSION[extname(block.path).toLowerCase()]
-  if (!mediaType) {
-    throw new Error(`Claude does not support the image type ${extname(block.path)}`)
-  }
-  return {
-    type: 'image',
-    source: {
-      type: 'base64',
-      media_type: mediaType,
-      data: data.toString('base64')
-    }
+  clearTimeout(waiter.timer)
+  waiter.settledUuid = uuid
+  waiter.resolve(uuid)
+}
+
+function forgetRetiredWaiter(session: ClaudeSession, waiter: ClaudeDispatchWaiter): void {
+  const index = session.retiredDispatchWaiters.indexOf(waiter)
+  if (index !== -1) {
+    session.retiredDispatchWaiters.splice(index, 1)
   }
 }
 
-async function messageContent(body: AgentJournalMessageItem): Promise<unknown[]> {
-  if (body.role !== 'user') {
-    throw new Error('Claude dispatch accepts only user messages')
+function recoverLateIdentity(
+  session: ClaudeSession,
+  waiter: ClaudeDispatchWaiter,
+  uuid: string,
+  isUserReplay: boolean
+): boolean {
+  if (!isUserReplay && !waiter.acceptsResult) {
+    return false
   }
-  const content: unknown[] = []
-  const imageBudget: ImageBudget = { count: 0, localBytes: 0 }
-  for (const block of body.blocks as NativeChatBlock[]) {
-    if (block.type === 'text' && block.text.length > 0) {
-      content.push({ type: 'text', text: block.text })
-    } else if (block.type === 'image-ref') {
-      content.push(await imageContent(block, imageBudget))
-    }
+  if (waiter.dispatchSequence === session.dispatchSequence) {
+    session.activeTurnId = uuid
+    session.activeTurnSequence = waiter.dispatchSequence
   }
-  if (content.length === 0) {
-    throw new Error('Claude dispatch requires text or an image')
-  }
-  return content
+  return isUserReplay && waiter.dispatchSequence === session.dispatchSequence
 }
 
 function waitForReplay(
   session: ClaudeSession,
   timeoutMs: number,
-  acceptsResult: boolean
-): Promise<string | null> {
-  return new Promise((resolve) => {
-    const waiter = {
+  acceptsResult: boolean,
+  sentUuid: string,
+  replayContentKey: string
+): { waiter: ClaudeDispatchWaiter; promise: Promise<string | null> } {
+  let waiter!: ClaudeDispatchWaiter
+  const promise = new Promise<string | null>((resolve) => {
+    waiter = {
       acceptsResult,
+      sentUuid,
+      dispatchSequence: session.dispatchSequence,
+      replayContentKey,
       resolve,
       timer: setTimeout(() => {
         const index = session.dispatchWaiters.indexOf(waiter)
         if (index !== -1) {
           session.dispatchWaiters.splice(index, 1)
         }
+        retireWaiter(session, waiter)
         resolve(null)
       }, timeoutMs)
     }
     waiter.timer.unref?.()
     session.dispatchWaiters.push(waiter)
   })
+  return { waiter, promise }
+}
+
+function retireWaiter(session: ClaudeSession, waiter: ClaudeDispatchWaiter): void {
+  const index = session.dispatchWaiters.indexOf(waiter)
+  if (index !== -1) {
+    session.dispatchWaiters.splice(index, 1)
+  }
+  clearTimeout(waiter.timer)
+  if (!waiter.retired) {
+    waiter.retired = true
+    session.retiredDispatchWaiters.push(waiter)
+    if (session.retiredDispatchWaiters.length > MAX_RETIRED_DISPATCH_WAITERS) {
+      session.retiredDispatchWaiters.splice(
+        0,
+        session.retiredDispatchWaiters.length - MAX_RETIRED_DISPATCH_WAITERS
+      )
+    }
+  }
 }
 
 export async function dispatchClaudeTurn(
@@ -165,36 +199,52 @@ export async function dispatchClaudeTurn(
 ): Promise<AgentSessionDispatchOutcome> {
   let content: unknown[]
   try {
-    content = await messageContent(input.body)
+    content = await claudeDispatchMessageContent(input.body)
   } catch (error) {
     return { state: 'rejected', reason: (error as Error).message }
   }
-  // Advance before writing so an unknown/late replay still fences cancellation
-  // of the previously acknowledged turn on this session-scoped connection.
   const dispatchSequence = ++session.dispatchSequence
   const acceptsResult = input.body.blocks.some(
     (block) => block.type === 'text' && block.text.trimStart().startsWith('/')
   )
-  const replayed = waitForReplay(session, timeoutMs, acceptsResult)
+  const sentUuid = randomUUID()
+  const replay = waitForReplay(
+    session,
+    timeoutMs,
+    acceptsResult,
+    sentUuid,
+    claudeDispatchContentKey(content)
+  )
+  const replayed = replay.promise
   try {
     await session.connection.send({
       type: 'user',
+      uuid: sentUuid,
       message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: session.providerSessionId
     })
   } catch (error) {
-    const waiter = session.dispatchWaiters.shift()
-    if (waiter) {
-      clearTimeout(waiter.timer)
+    const waiter = replay.waiter
+    if (waiter.settledUuid) {
+      const uuid = await replayed
+      if (uuid) {
+        session.activeTurnId = uuid
+        session.activeTurnSequence = dispatchSequence
+        return {
+          state: 'accepted',
+          providerIdentity: { provider: 'claude', sessionId: session.providerSessionId, uuid }
+        }
+      }
+    }
+    if (!waiter.retired) {
+      retireWaiter(session, waiter)
       waiter.resolve(null)
     }
     return { state: 'unknown', reason: (error as Error).message }
   }
   const uuid = await replayed
   if (uuid) {
-    // Claude's interrupt API is session-scoped, so retain the provider turn
-    // identity and let cancellation reject a stale request for an older turn.
     session.activeTurnId = uuid
     session.activeTurnSequence = dispatchSequence
   }

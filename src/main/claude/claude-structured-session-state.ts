@@ -79,6 +79,16 @@ export type ClaudeDispatchWaiter = {
   resolve: (uuid: string | null) => void
   timer: ReturnType<typeof setTimeout>
   acceptsResult: boolean
+  /** Client uuid echoed by Claude so a replay is tied to its own dispatch. */
+  sentUuid: string
+  /** Sequence used to fence a late identity from a newer dispatch. */
+  dispatchSequence: number
+  /** Set when the provider replay settled this waiter before send returned. */
+  settledUuid?: string
+  /** The waiter timed out or its write failed, but its replay may still arrive. */
+  retired?: boolean
+  /** Bounded digest/summary for compatibility CLIs that mint UUIDs. */
+  replayContentKey: string
 }
 
 export type ClaudeSession = {
@@ -89,8 +99,11 @@ export type ClaudeSession = {
   acquisitionGeneration: string
   prompts: ClaudePromptRegistry
   dispatchWaiters: ClaudeDispatchWaiter[]
+  /** Bounded identities for dispatches whose ack was unknown when they returned. */
+  retiredDispatchWaiters: ClaudeDispatchWaiter[]
   options: Map<string, string>
   reportedOptions: { model?: string; effort?: string }
+  restoreSkippedOptions: Set<string>
   /** CLI-advertised protocol capabilities from init; gates interrupt-receipt handling. */
   capabilities: readonly string[]
   /** Provider uuid of the most recently admitted turn, if one is active. */
@@ -99,6 +112,8 @@ export type ClaudeSession = {
   dispatchSequence: number
   /** Dispatch sequence that admitted activeTurnId. */
   activeTurnSequence?: number
+  /** Fences overlapping option writes so a late completion cannot restore stale state. */
+  optionMutationSequence: number
   translator: ClaudeJournalTranslator | null
   events: StructuredAgentSessionEventSink | undefined
 }

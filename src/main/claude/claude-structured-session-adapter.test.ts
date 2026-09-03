@@ -91,6 +91,85 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     })
   })
 
+  it.each([
+    ['model', 'set_model', { model: 'retired-model' }],
+    ['effort', 'apply_flag_settings', { effort: 'retired-effort' }],
+    ['permissionMode', 'set_permission_mode', { permissionMode: 'retired-mode' }]
+  ] as const)(
+    'self-heals a persisted %s rejected during restore',
+    async (key, subtype, options) => {
+      const claude = fakeClaude({
+        routes: {
+          [subtype]: () => {
+            throw new ClaudeControlRequestError(subtype, 'value is no longer available')
+          }
+        }
+      })
+      const adapter = adapterFor(claude)
+
+      await expect(
+        adapter.acquire({
+          identity: identityFor(),
+          fence: 7,
+          spawnToken: 'spawn-9',
+          options
+        })
+      ).resolves.toBeDefined()
+      expect(adapter.readOptionRestoreFailures('session-1')).toEqual([key])
+    }
+  )
+
+  it('does not treat a transport timeout while restoring an option as recoverable', async () => {
+    const claude = fakeClaude({
+      routes: {
+        set_model: () => {
+          throw new Error('claude set_model request timed out')
+        }
+      }
+    })
+    const adapter = adapterFor(claude)
+    const input = {
+      identity: identityFor(),
+      fence: 7,
+      spawnToken: 'spawn-9',
+      options: { model: 'temporarily-unavailable' }
+    }
+
+    await expect(adapter.acquire(input)).rejects.toThrow('claude set_model request timed out')
+    expect(claude.connections[0]?.closeCount).toBe(1)
+  })
+
+  it('recovers a cancellable lifecycle when a timed-out replay arrives late', async () => {
+    const claude = fakeClaude({ replayUuid: null })
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = await acquired(claude, {}, events)
+
+    await expect(
+      adapter.dispatch({
+        sessionId: 'session-1',
+        clientMessageId: 'client-1',
+        body: USER_MESSAGE,
+        fence: 7
+      })
+    ).resolves.toMatchObject({ state: 'unknown' })
+    const sent = claude.connections[0]!.sent[0]!
+    claude.connections[0]!.handlers.onMessage?.({
+      ...sent,
+      uuid: 'late-turn-1'
+    })
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'message',
+        startsTurn: true,
+        message: expect.objectContaining({ uuid: 'late-turn-1' })
+      })
+    )
+    await expect(
+      adapter.cancelTurn({ sessionId: 'session-1', turnId: 'late-turn-1', fence: 7 })
+    ).resolves.toEqual({ cancelled: true })
+  })
+
   it('forwards configured launch environment while keeping ownership pins authoritative', async () => {
     const claude = fakeClaude()
     const adapter = adapterFor(claude, {
