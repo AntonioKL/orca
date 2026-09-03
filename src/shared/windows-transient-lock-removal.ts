@@ -2,8 +2,9 @@
 // antivirus, the search indexer, a just-exited child and a freshly dlopen'd DLL all keep a tree Node
 // has just emptied locked for a few milliseconds — but it is not the only one: on macOS and Linux
 // Spotlight/`mds`, a scanner, or a live process writing under the tree surface the same
-// EBUSY/ENOTEMPTY/EPERM while Node walks it. Node's own `maxRetries` absorbs exactly that, and the
-// repo settled on 8 attempts. The constant names keep the prefix the repo already ratchets on.
+// EBUSY/ENOTEMPTY/EPERM while Node walks it. The retry for that is the bounded outer loop below and
+// in `removeHostTree`; Node's own `maxRetries` stays Windows-only (see `transientLockRemovalOptions`).
+// The constant names keep the prefix the repo already ratchets on.
 
 import type { RmOptions } from 'node:fs'
 import { rmSync } from 'node:fs'
@@ -14,14 +15,17 @@ export const WINDOWS_RM_RETRY_DELAY_MS = 150
 
 /** `rm`/`rmSync` options for a recursive removal that must survive a concurrent writer. */
 export function transientLockRemovalOptions(): RmOptions {
-  // Why every platform: `maxRetries` only ever re-issues the syscall that failed, against the path
-  // the caller already chose. It cannot reach a path the one-shot removal would not have touched.
-  return {
-    recursive: true,
-    force: true,
-    maxRetries: WINDOWS_RM_MAX_RETRIES,
-    retryDelay: WINDOWS_RM_RETRY_DELAY_MS
+  const base = { recursive: true, force: true }
+  // Why Windows-only: Node's rimraf re-enters the *retrying* entry point for every child
+  // (`_rmchildren` -> `rimraf`), so `maxRetries` is applied at each directory level and multiplies —
+  // a permanently-failing leaf at depth d costs ~5.4s * 9^d. Measured on macOS with one `uchg` file
+  // at depth 2: `{recursive, force}` rejects in 1 ms, `{maxRetries: 8, retryDelay: 150}` had still
+  // not settled after 5 minutes. The cross-platform retry lives in the bounded outer loops instead,
+  // which re-issue one whole `rm` against the same path a fixed number of times.
+  if (process.platform !== 'win32') {
+    return base
   }
+  return { ...base, maxRetries: WINDOWS_RM_MAX_RETRIES, retryDelay: WINDOWS_RM_RETRY_DELAY_MS }
 }
 
 /** Whether a removal failure is a concurrent writer worth re-attempting rather than a real fault. */

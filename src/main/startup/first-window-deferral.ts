@@ -19,7 +19,15 @@ export function runAfterFirstWindowShown(task: () => void, fallbackMs: number): 
     ran = true
     clearTimeout(fallback)
     // Why setImmediate: keep the work off the event handler that reveals the window, so it paints first.
-    setImmediate(task)
+    // Why the guard: off whenReady's promise chain a synchronous throw is an uncaughtException, and
+    // installUncaughtPipeErrorGuard re-throws those fatally — deferred startup chores are never that.
+    setImmediate(() => {
+      try {
+        task()
+      } catch (error) {
+        console.warn('[startup] deferred first-window task failed', error)
+      }
+    })
   }
   const fallback = setTimeout(run, fallbackMs)
   fallback.unref?.()

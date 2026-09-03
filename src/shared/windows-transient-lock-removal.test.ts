@@ -47,10 +47,8 @@ describe('transient lock removal options', () => {
     rmSyncMock.mockReset()
   })
 
-  // Why every platform: Windows is the acute case, but Spotlight/`mds`, a scanner or a live process
-  // writing under the tree race a POSIX removal the same way, and a one-shot rm never converged.
-  it.each(['win32', 'darwin', 'linux'] as const)('retries on %s', (platform) => {
-    withPlatform(platform)
+  it('retries on Windows, where a late handle release is the whole problem', () => {
+    withPlatform('win32')
 
     expect(transientLockRemovalOptions()).toEqual({
       recursive: true,
@@ -62,6 +60,19 @@ describe('transient lock removal options', () => {
 
   it('matches the repo policy of eight attempts', () => {
     expect(WINDOWS_RM_MAX_RETRIES).toBe(8)
+  })
+
+  // Why a ratchet and not a nitpick: Node's rimraf hands every child back to the *retrying* entry
+  // point (`_rmchildren` -> `rimraf`), so `maxRetries` compounds per directory level — a
+  // permanently-failing leaf at depth d costs roughly `retryDelay * 36 * 9^(d-1)`. Measured on macOS
+  // against one `chflags uchg` file at depth 2: `{recursive, force}` rejected in 1 ms while
+  // `{maxRetries: 8, retryDelay: 150}` had not settled after 5 minutes. Off Windows the retry has to
+  // stay in the bounded outer loops, which re-issue one whole `rm` against the same path.
+  it.each(['darwin', 'linux'] as const)('never asks Node for a per-level ladder on %s', (os) => {
+    withPlatform(os)
+
+    expect(transientLockRemovalOptions()).toEqual({ recursive: true, force: true })
+    expect(transientLockRemovalOptions()).not.toHaveProperty('maxRetries')
   })
 
   it('retries a transient ENOTEMPTY off Windows too', () => {

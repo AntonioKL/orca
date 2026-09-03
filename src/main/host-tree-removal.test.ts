@@ -51,12 +51,19 @@ describe('removeHostTree', () => {
       expect(rmMock).toHaveBeenCalledTimes(3)
       // The retry may only change how many times the SAME path is attempted.
       expect(new Set(rmMock.mock.calls.map((call) => call[0]))).toEqual(new Set([TRASH_ENTRY]))
-      expect(rmMock.mock.calls[0]?.[1]).toEqual({
-        recursive: true,
-        force: true,
-        maxRetries: WINDOWS_RM_MAX_RETRIES,
-        retryDelay: expect.any(Number)
-      })
+      // Why the split: Node applies `maxRetries` at every directory level, so off Windows it
+      // compounds with depth and a permanently-failing leaf never settles. There the retry is only
+      // this loop's whole-tree re-issue.
+      expect(rmMock.mock.calls[0]?.[1]).toEqual(
+        platform === 'win32'
+          ? {
+              recursive: true,
+              force: true,
+              maxRetries: WINDOWS_RM_MAX_RETRIES,
+              retryDelay: expect.any(Number)
+            }
+          : { recursive: true, force: true }
+      )
     })
 
     it(`gives up on a non-transient failure without retrying on ${platform}`, async () => {

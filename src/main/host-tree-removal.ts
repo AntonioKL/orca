@@ -35,8 +35,8 @@ export function toHostRemovalPath(targetPath: string): string {
 /** Recursively remove a host directory tree, retrying the transient concurrent-writer failures. */
 export async function removeHostTree(targetPath: string): Promise<void> {
   const removalPath = toHostRemovalPath(targetPath)
-  // Why: large trees commonly surface transient ENOTEMPTY/EPERM while Node walks and removes nested
-  // directories; Node's own retries absorb that before the loop below has to.
+  // Why the ladder below rather than a bigger `maxRetries`: Node applies `maxRetries` per directory
+  // level, so it multiplies with depth; this loop re-issues one whole `rm` against the same path.
   const rmOptions = transientLockRemovalOptions()
   let attempt = 0
 
