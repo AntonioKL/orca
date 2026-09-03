@@ -10,6 +10,7 @@ import {
   applyClaudeEnvPatch,
   hasClaudeAuthEnvConflict
 } from '../claude-accounts/environment'
+import type { ClaudeStructuredAuthPolicy } from '../claude-accounts/claude-structured-auth-policy'
 import { isClaudeAuthSwitchInProgress } from '../claude-accounts/live-pty-gate'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
@@ -116,16 +117,6 @@ export type ClaudeStructuredLaunch = {
   resumed: boolean
 }
 
-/** The structured mirror of the terminal preflight's `prepareClaudeAuth` result:
- *  the one field a launch resolution needs from the managed-account state. */
-export type ClaudeStructuredAuthPolicy = {
-  stripAuthEnv: boolean
-}
-
-/** No policy resolver wired means no managed-account service to answer for, which
- *  is what the terminal preflight computes when no account is selected. */
-const SYSTEM_AUTH_POLICY: ClaudeStructuredAuthPolicy = { stripAuthEnv: false }
-
 export type ClaudeStructuredLaunchResolverDeps = {
   store: AgentSessionRecordStore
   resolveWorkspacePath: (workspaceId: string) => Promise<string>
@@ -134,7 +125,13 @@ export type ClaudeStructuredLaunchResolverDeps = {
     | Promise<Record<string, string> | undefined>
     | Record<string, string>
     | undefined
-  resolveAuthPolicy?: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
+  /**
+   * Required, and deliberately not defaulted. `stripAuthEnv` used to be a literal
+   * `true` here, so a missing dependency could not under-strip. Now it can, and the
+   * failure is silent — so every caller states the account's policy rather than
+   * inherit a guess. Build it with claudeStructuredAuthPolicyForSettings.
+   */
+  resolveAuthPolicy: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
 }
 
 export function assertClaudeAuthSwitchIdle(): void {
@@ -189,7 +186,7 @@ export function createClaudeStructuredLaunchResolver(
         : claudeSessionIdForOrcaSession(identity.sessionId)
     const durable = claudeSdkOptionsForLaunchArgs(record.launchArgs ?? [])
     const command = (deps.resolveCommand ?? resolveClaudeCommand)()
-    const auth = (await deps.resolveAuthPolicy?.()) ?? SYSTEM_AUTH_POLICY
+    const auth = await deps.resolveAuthPolicy()
     const overlay = await deps.resolveEnv?.()
     // A switch can begin while the policy and overlay resolve, exactly as it can
     // during the terminal preflight's prepareClaudeAuth — recheck after the awaits.

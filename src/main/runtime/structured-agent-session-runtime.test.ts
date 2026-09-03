@@ -222,6 +222,7 @@ describe('structured agent-session runtime install', () => {
         hostId: HOST_ID,
         claimKeyId: 'key-1',
         resolveWorkspacePath: async () => stateDirectory!,
+        resolveClaudeAuthPolicy: () => ({ stripAuthEnv: true }),
         resolveEnvironment: async () => ({}),
         reapOrphanChildren,
         onError
@@ -248,6 +249,7 @@ describe('structured agent-session runtime install', () => {
         hostId: HOST_ID,
         claimKeyId: 'key-1',
         resolveWorkspacePath: async () => stateDirectory!,
+        resolveClaudeAuthPolicy: () => ({ stripAuthEnv: true }),
         resolveEnvironment: async () => ({}),
         reapOrphanChildren: async () => {
           throw failure

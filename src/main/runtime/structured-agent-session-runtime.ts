@@ -34,7 +34,7 @@ import { readEchoedAgentSessionSpawnToken } from './agent-session-spawn-token-re
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import { resolveLoginShellEnvironment } from '../startup/login-shell-environment'
 import { recordAgentSessionProviderHandle } from './agent-session-provider-handle-transition'
-import type { ClaudeStructuredAuthPolicy } from '../claude/claude-structured-launch-resolution'
+import type { ClaudeStructuredAuthPolicy } from '../claude-accounts/claude-structured-auth-policy'
 import { createStructuredClaudeRuntimeAdapter } from './structured-claude-runtime-adapter'
 
 /** Sibling of the journal tree rather than inside it: one file adjudicates every
@@ -69,7 +69,9 @@ export type StructuredAgentSessionRuntimeDeps = {
   resolveLaunchEnv?: () => Promise<NodeJS.ProcessEnv>
   resolveLaunchEnvOverlay?: () => Promise<Record<string, string>> | Record<string, string>
   resolveClaudeLaunchEnv?: () => Promise<Record<string, string>> | Record<string, string>
-  resolveClaudeAuthPolicy?: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
+  /** Required. The one production wiring lives in a `@ts-nocheck` file, so this is
+   *  also asserted at install time — an absent policy must not degrade to a guess. */
+  resolveClaudeAuthPolicy: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
   resolveEnvironment?: () => Promise<NodeJS.ProcessEnv>
   resolveCodexOverrides?: () => NodeJS.ProcessEnv
   onError?: (input: { scope: string; error: unknown }) => void
@@ -85,6 +87,10 @@ type InstalledRuntime = {
 }
 
 let installing: Promise<InstalledRuntime> | null = null
+
+/** Thrown when the host is installed without a Claude auth policy resolver. */
+export const CLAUDE_STRUCTURED_AUTH_POLICY_REQUIRED =
+  'structured agent-session host requires a Claude auth policy resolver'
 
 export function ensureStructuredAgentSessionHost(
   deps: StructuredAgentSessionRuntimeDeps
@@ -125,6 +131,12 @@ export async function stopStructuredAgentSessionRuntime(): Promise<void> {
 }
 
 async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<InstalledRuntime> {
+  // Why thrown rather than defaulted: the caller is `@ts-nocheck`, so a dropped
+  // field arrives here as `undefined`. Refusing to install is loud; guessing a
+  // policy is the silent under-strip this assertion exists to prevent.
+  if (typeof deps.resolveClaudeAuthPolicy !== 'function') {
+    throw new Error(CLAUDE_STRUCTURED_AUTH_POLICY_REQUIRED)
+  }
   const bootEnvironment = (deps.resolveEnvironment ?? resolveLoginShellEnvironment)()
   const resolveCodexEnvironment = async (): Promise<NodeJS.ProcessEnv> => ({
     ...(await bootEnvironment),
@@ -187,9 +199,7 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       ...(deps.resolveClaudeLaunchEnv
         ? { resolveClaudeLaunchEnv: deps.resolveClaudeLaunchEnv }
         : {}),
-      ...(deps.resolveClaudeAuthPolicy
-        ? { resolveClaudeAuthPolicy: deps.resolveClaudeAuthPolicy }
-        : {}),
+      resolveClaudeAuthPolicy: deps.resolveClaudeAuthPolicy,
       onUnexpectedExit: (event) => {
         recoveryChain = recoveryChain.then(async () => {
           try {

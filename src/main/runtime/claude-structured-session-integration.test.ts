@@ -25,7 +25,7 @@ import type {
 } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import type { OrcaRuntimeService } from './orca-runtime'
 import type { RpcRequest, RpcResponse } from './rpc/core'
-import type { ClaudeStructuredAuthPolicy } from '../claude/claude-structured-launch-resolution'
+import type { ClaudeStructuredAuthPolicy } from '../claude-accounts/claude-structured-auth-policy'
 import { RpcDispatcher } from './rpc/dispatcher'
 import { STRUCTURED_AGENT_SESSION_METHODS } from './rpc/methods/structured-agent-session'
 import {

@@ -269,6 +269,7 @@ describe('claude structured launch resolution', () => {
       store: { getRecord: () => record() } as unknown as AgentSessionRecordStore,
       resolveWorkspacePath: async (id) => `/repos/${id}`,
       resolveCommand: () => claudeCommand,
+      resolveAuthPolicy: () => ({ stripAuthEnv: false }),
       resolveEnv: () => ({
         PATH: '/usr/bin',
         CLAUDE_CONFIG_DIR: '/accounts/selected/home'

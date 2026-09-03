@@ -31,16 +31,14 @@ function record(): AgentSessionRecord {
 }
 
 function resolverFor(options: {
-  stripAuthEnv?: boolean
+  stripAuthEnv: boolean
   overlay?: Record<string, string>
 }): ReturnType<typeof createClaudeStructuredLaunchResolver> {
   return createClaudeStructuredLaunchResolver({
     store: { getRecord: () => record() } as unknown as AgentSessionRecordStore,
     resolveWorkspacePath: async (id) => `/repos/${id}`,
     resolveCommand: () => '/usr/local/bin/claude',
-    ...(options.stripAuthEnv === undefined
-      ? {}
-      : { resolveAuthPolicy: () => ({ stripAuthEnv: options.stripAuthEnv === true }) }),
+    resolveAuthPolicy: () => ({ stripAuthEnv: options.stripAuthEnv }),
     ...(options.overlay ? { resolveEnv: () => options.overlay as Record<string, string> } : {})
   })
 }
