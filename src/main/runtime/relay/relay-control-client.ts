@@ -234,7 +234,16 @@ export class RelayControlClient {
     if (this.requests.resolveMessage(message)) {
       return
     }
-    this.failProtocol('unknown control message')
+    // Wire-compat (docs/reference/remote-wire-compatibility.md, Rule 2): a
+    // well-formed control message we do not recognize must be dropped, never
+    // fatal. It is either a newer relay's opcode this build predates, or a reply
+    // whose request already timed out and has no waiter (relay control ops run DB
+    // transactions that can exceed the request deadline under load). Self-closing
+    // here forced an orphaned relay session that answered the phone with
+    // HOST_OFFLINE for the orphan-grace window plus the director's reconnect
+    // throttle — minutes of outage from a message that could simply be ignored.
+    const messageType = typeof message.type === 'string' ? message.type : 'unknown'
+    console.warn(`[relay] ignoring unrecognized control message type=${messageType}`)
   }
 
   private handleProofMessage(message: Record<string, unknown>): void {
