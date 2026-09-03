@@ -65,7 +65,6 @@ export async function runHeadlessAutomationDispatch(
       return updated
     }
     observeHeadlessAutomationCompletion({
-      automation,
       run,
       launch,
       target: launchRunTarget,

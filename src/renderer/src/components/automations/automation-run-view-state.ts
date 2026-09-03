@@ -1,8 +1,4 @@
-import {
-  AUTOMATION_UNVERIFIABLE_WORKSPACE_ERROR,
-  type Automation,
-  type AutomationRun
-} from '../../../../shared/automations-types'
+import type { Automation, AutomationRun } from '../../../../shared/automations-types'
 
 export type AutomationRunViewAvailability = 'terminal' | 'workspace' | 'snapshot' | 'metadata'
 
@@ -43,12 +39,6 @@ export function canRerunAutomationRun({
   run: AutomationRun
 }): boolean {
   if (!automation || run.automationId !== automation.id) {
-    return false
-  }
-  if (
-    run.observationVerdict === 'unverifiable' ||
-    run.error === AUTOMATION_UNVERIFIABLE_WORKSPACE_ERROR
-  ) {
     return false
   }
   return (

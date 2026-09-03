@@ -7,8 +7,6 @@ export type AutomationExecutionTargetType = 'local' | 'ssh'
 export type AutomationSchedulerOwner = 'local_host_service' | 'ssh_bridge' | 'remote_host_service'
 export type AutomationMissedRunPolicy = 'run_once_within_grace'
 export type AutomationRunObservationVerdict = 'unverifiable'
-export const AUTOMATION_UNVERIFIABLE_WORKSPACE_ERROR =
-  'A previous automation run may still be live in this workspace.'
 export type AutomationRunStatus =
   | 'pending'
   | 'dispatching'

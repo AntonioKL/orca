@@ -95,19 +95,6 @@ describe('pruneAutomationRuns', () => {
     ])
   })
 
-  it('retains an unverifiable observation as in-flight history', () => {
-    const unverifiable = run({
-      id: 'unverifiable',
-      automationId: 'a',
-      status: 'dispatched',
-      observationVerdict: 'unverifiable',
-      createdAt: -1
-    })
-    const kept = pruneAutomationRuns([unverifiable, ...makeRuns('a', 120)])
-    expect(kept).toContainEqual(unverifiable)
-    expect(kept.filter((entry) => entry.automationId === 'a')).toHaveLength(101)
-  })
-
   it('shrinks a realistic runaway history to the cap', () => {
     const runaway = [
       ...makeRuns('a', 2796),

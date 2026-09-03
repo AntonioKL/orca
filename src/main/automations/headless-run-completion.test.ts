@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type {
-  Automation,
-  AutomationDispatchResult,
-  AutomationRun
-} from '../../shared/automations-types'
+import type { AutomationDispatchResult, AutomationRun } from '../../shared/automations-types'
 import type { HeadlessAutomationDispatchLaunch } from './headless-dispatch'
 import { observeHeadlessAutomationCompletion } from './headless-run-completion'
 
@@ -15,15 +11,11 @@ const target = {
   terminalPtyId: 'pty-1'
 }
 
-function observe(
-  workspaceMode: Automation['workspaceMode'],
-  completion: HeadlessAutomationDispatchLaunch['completion']
-) {
+function observe(completion: HeadlessAutomationDispatchLaunch['completion']) {
   const markDispatchResult = vi.fn(
     async (result: AutomationDispatchResult) => result as unknown as AutomationRun
   )
   observeHeadlessAutomationCompletion({
-    automation: { workspaceMode } as Automation,
     run: { id: 'run-1' } as AutomationRun,
     launch: { ...target, completion },
     target,
@@ -36,37 +28,25 @@ function observe(
 afterEach(() => vi.restoreAllMocks())
 
 describe('observeHeadlessAutomationCompletion', () => {
-  it('keeps an unverifiable existing-workspace run non-final', async () => {
+  it('records an unverifiable run with dispatch_failed status', async () => {
     const mark = observe(
-      'existing',
       Promise.resolve({
         status: 'dispatch_failed',
         observationVerdict: 'unverifiable'
       })
     )
     await vi.waitFor(() =>
-      expect(mark).toHaveBeenCalledWith(expect.objectContaining({ status: 'dispatched' }))
+      expect(mark).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'dispatch_failed',
+          observationVerdict: 'unverifiable'
+        })
+      )
     )
   })
 
-  it('keeps an unverifiable new-per-run failure bounded', async () => {
-    const mark = observe(
-      'new_per_run',
-      Promise.resolve({
-        status: 'dispatch_failed',
-        observationVerdict: 'unverifiable'
-      })
-    )
-    await vi.waitFor(() =>
-      expect(mark).toHaveBeenCalledWith(expect.objectContaining({ status: 'dispatch_failed' }))
-    )
-  })
-
-  it('leaves an observed existing-workspace failure final', async () => {
-    const mark = observe(
-      'existing',
-      Promise.resolve({ status: 'dispatch_failed', error: 'Exited.' })
-    )
+  it('leaves an observed failure final', async () => {
+    const mark = observe(Promise.resolve({ status: 'dispatch_failed', error: 'Exited.' }))
     await vi.waitFor(() =>
       expect(mark).toHaveBeenCalledWith(expect.objectContaining({ status: 'dispatch_failed' }))
     )
@@ -74,11 +54,11 @@ describe('observeHeadlessAutomationCompletion', () => {
 
   it('treats observer rejection as unverifiable without leaking transport tokens', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    const mark = observe('existing', Promise.reject(new Error('terminal_handle_stale')))
+    const mark = observe(Promise.reject(new Error('terminal_handle_stale')))
     await vi.waitFor(() =>
       expect(mark).toHaveBeenCalledWith(
         expect.objectContaining({
-          status: 'dispatched',
+          status: 'dispatch_failed',
           observationVerdict: 'unverifiable',
           error: 'Orca stopped watching this run before it reported completion.'
         })
@@ -87,7 +67,7 @@ describe('observeHeadlessAutomationCompletion', () => {
   })
 
   it('keeps positive terminal exit evidence final', async () => {
-    const mark = observe('existing', Promise.reject(new Error('terminal_exited')))
+    const mark = observe(Promise.reject(new Error('terminal_exited')))
     await vi.waitFor(() =>
       expect(mark).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -103,7 +83,6 @@ describe('observeHeadlessAutomationCompletion', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const markDispatchResult = vi.fn().mockRejectedValue(new Error('Automation run not found.'))
     observeHeadlessAutomationCompletion({
-      automation: { workspaceMode: 'existing' } as Automation,
       run: { id: 'run-1' } as AutomationRun,
       launch: { ...target, completion: Promise.resolve({ status: 'completed' }) },
       target,

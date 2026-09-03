@@ -1,5 +1,4 @@
 import type {
-  Automation,
   AutomationDispatchResult,
   AutomationPrecheckResult,
   AutomationRun
@@ -24,14 +23,12 @@ function persistHeadlessCompletion(
 }
 
 export function observeHeadlessAutomationCompletion({
-  automation,
   run,
   launch,
   target,
   precheckResult,
   markDispatchResult
 }: {
-  automation: Automation
   run: AutomationRun
   launch: HeadlessAutomationDispatchLaunch
   target: HeadlessAutomationRunTarget
@@ -43,11 +40,9 @@ export function observeHeadlessAutomationCompletion({
   }
   void launch.completion.then(
     (completion) => {
-      const retainPotentiallyLiveRun =
-        automation.workspaceMode === 'existing' && completion.observationVerdict === 'unverifiable'
       persistHeadlessCompletion(markDispatchResult, {
         runId: run.id,
-        status: retainPotentiallyLiveRun ? 'dispatched' : completion.status,
+        status: completion.status,
         observationVerdict: completion.observationVerdict ?? null,
         ...target,
         precheckResult,
@@ -64,10 +59,7 @@ export function observeHeadlessAutomationCompletion({
       }
       persistHeadlessCompletion(markDispatchResult, {
         runId: run.id,
-        status:
-          !observedExit && automation.workspaceMode === 'existing'
-            ? 'dispatched'
-            : 'dispatch_failed',
+        status: 'dispatch_failed',
         observationVerdict: observedExit ? null : 'unverifiable',
         ...target,
         precheckResult,

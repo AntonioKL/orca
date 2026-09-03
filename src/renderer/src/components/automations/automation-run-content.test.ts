@@ -46,7 +46,7 @@ function makePassingPrecheck(stdout: string): AutomationPrecheckResult {
 describe('getAutomationRunNotice', () => {
   it('surfaces the run error even when a passing precheck fills the body', () => {
     const run = makeRun({
-      status: 'dispatched',
+      status: 'dispatch_failed',
       observationVerdict: 'unverifiable',
       precheckResult: makePassingPrecheck('{"id":"local-status","ok":true}'),
       error: 'Orca stopped watching this run before it reported completion.'
