@@ -73,12 +73,38 @@ export function abandonStructuredAgentSessionLaunchIntent(
   )
 }
 
+/** The host refuses some launches by THROWING rather than returning a refusal
+ *  envelope -- an unsupported location, or a runtime that needs repair. Those
+ *  are still definitive refusals, but callers engage their legacy-terminal
+ *  fallback on the refusal class alone, so an unmapped throw strands the launch
+ *  with no agent pane and the prompt left in the outbox. */
+const THROWN_REFUSAL_MARKERS = [
+  'structured_agent_session_unsupported',
+  'Project runtime requires repair'
+] as const
+
+export function isThrownStructuredRefusal(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : ''
+  return THROWN_REFUSAL_MARKERS.some((marker) => message.includes(marker))
+}
+
 export async function launchStructuredCodexSession(
   intent: StructuredAgentSessionLaunchIntent
 ): Promise<Pick<AgentSessionAttachResult, 'sessionId' | 'fence'>> {
-  const result = await callStructuredAgentSession<
-    AgentSessionMutationResult<AgentSessionAttachResult>
-  >({ kind: 'local' }, 'agentSession.create', intent.params)
+  let result: AgentSessionMutationResult<AgentSessionAttachResult>
+  try {
+    result = await callStructuredAgentSession<
+      AgentSessionMutationResult<AgentSessionAttachResult>
+    >({ kind: 'local' }, 'agentSession.create', intent.params)
+  } catch (error) {
+    if (!isThrownStructuredRefusal(error)) {
+      throw error
+    }
+    abandonStructuredAgentSessionLaunchIntent(intent)
+    throw new StructuredAgentSessionCreateRefusalError(
+      error instanceof Error ? error.message : 'structured_agent_session_unsupported'
+    )
+  }
   if (!result.ok) {
     abandonStructuredAgentSessionLaunchIntent(intent)
     throw new StructuredAgentSessionCreateRefusalError(result.refusal.message)
