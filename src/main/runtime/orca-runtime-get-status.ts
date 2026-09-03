@@ -20,7 +20,6 @@ import {
   browserUnavailableMessage
 } from '../../shared/runtime-types'
 import { runtimeTerminalDegradation } from './native-terminal-availability'
-import { isWindowsProcessStartTimeAvailable } from '../windows/windows-process-table'
 import type { RuntimeWorktreeLifecycleEvent } from './orca-runtime-core'
 import { WORKTREE_CREATE_RESULT_TTL_MS } from './orca-runtime-core'
 import type { RuntimePtyController } from './runtime-pty-controller-contract'
@@ -96,11 +95,6 @@ export class OrcaRuntimeWithGetStatus extends OrcaRuntimeWithGetRuntimeId {
     if (terminalDegradation) {
       degradations.push(terminalDegradation)
     }
-    // Why the renderer needs this on the wire: the structured native-chat gate fails
-    // closed on win32 until the host proves it can read a process start time, so an
-    // absent field disables structured chat for every Windows client.
-    const windowsProcessStartTimeAvailable =
-      process.platform === 'win32' && isWindowsProcessStartTimeAvailable()
     return {
       runtimeId: this.runtimeId,
       rendererGraphEpoch: this.rendererGraphEpoch,
@@ -116,7 +110,6 @@ export class OrcaRuntimeWithGetStatus extends OrcaRuntimeWithGetRuntimeId {
       capabilities,
       ...(degradations.length > 0 ? { degradations } : {}),
       worktreeCreateIdempotency: { dedupeTtlMs: WORKTREE_CREATE_RESULT_TTL_MS },
-      ...(windowsProcessStartTimeAvailable ? { windowsProcessStartTimeAvailable } : {}),
       hostPlatform: process.platform,
       terminalWindowsShell: this.store?.getSettings?.().terminalWindowsShell ?? null,
       floatingWorkspaceEnabled: this.store?.getSettings?.().floatingTerminalEnabled !== false,

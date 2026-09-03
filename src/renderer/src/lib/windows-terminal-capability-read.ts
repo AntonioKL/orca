@@ -4,16 +4,6 @@ import type { WindowsTerminalCapabilities } from './windows-terminal-capabilitie
 
 export type WindowsTerminalCapabilityLoadTarget = RuntimeClientTarget
 
-let cachedLocalWindowsProcessStartTimeAvailable: boolean | null = null
-
-export function getCachedLocalWindowsProcessStartTimeAvailable(): boolean | null {
-  return cachedLocalWindowsProcessStartTimeAvailable
-}
-
-export function resetWindowsTerminalCapabilityReadCacheForTests(): void {
-  cachedLocalWindowsProcessStartTimeAvailable = null
-}
-
 async function reconcileWslAvailability(
   available: boolean,
   distros: string[],
@@ -59,16 +49,17 @@ export async function readWindowsTerminalCapabilities(
   }
 
   if (target.kind === 'local') {
-    const [wslAvailable, wslDistros, pwshAvailable, gitBashAvailable, runtimeStatus] =
+    const [wslAvailable, wslDistros, pwshAvailable, gitBashAvailable, hostPlatform] =
       await Promise.all([
         window.api.wsl.isAvailable().catch(() => false),
         window.api.wsl.listDistros().catch(() => []),
         window.api.pwsh.isAvailable().catch(() => false),
         window.api.gitBash.isAvailable().catch(() => false),
-        window.api.runtime.getStatus().catch(() => null)
+        window.api.runtime
+          .getStatus()
+          .then((status) => status.hostPlatform ?? null)
+          .catch(() => null)
       ])
-    cachedLocalWindowsProcessStartTimeAvailable =
-      runtimeStatus?.windowsProcessStartTimeAvailable ?? null
     const reconciledWslAvailable = await reconcileWslAvailability(wslAvailable, wslDistros, () =>
       window.api.wsl.isAvailable()
     )
@@ -77,7 +68,7 @@ export async function readWindowsTerminalCapabilities(
       wslDistros,
       pwshAvailable,
       gitBashAvailable,
-      hostPlatform: runtimeStatus?.hostPlatform ?? null,
+      hostPlatform,
       isLoading: false
     }
   }

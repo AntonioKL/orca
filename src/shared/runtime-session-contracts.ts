@@ -78,7 +78,6 @@ export type RuntimeStatus = {
   worktreeCreateIdempotency?: {
     dedupeTtlMs: number
   }
-  windowsProcessStartTimeAvailable?: boolean
   /**
    * Optional for mixed-version peers. Absence means the host predates structured
    * degradation reporting, not that the host proved every optional feature available.

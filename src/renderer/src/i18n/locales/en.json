@@ -809,6 +809,15 @@
         },
         "activation": {
           "cannotOpenFolderWorkspace": "Cannot open folder workspace"
+        },
+        "creation": {
+          "flow": {
+            "structured": {
+              "launch": {
+                "unknown": "Could not confirm whether Codex chat opened. Retry to check again."
+              }
+            }
+          }
         }
       },
       "folderWorkspacePathStatus": {
@@ -3327,11 +3336,7 @@
             "ec2adf093e": "Launch {{value0}} in a new terminal",
             "465e432ef1": "Could not build launch command for {{value0}}.",
             "e518f544b1": "No agents detected",
-            "8dea9b5cdf": "No enabled agents",
-            "f378201fbd": "Could not create chat session",
-            "a847779775": "Start {{value0}} without a terminal",
-            "0ea6a78efb": "Chat session",
-            "startingCodexChat": "Starting Codex chat…"
+            "8dea9b5cdf": "No enabled agents"
           },
           "RecentTabSwitcher": {
             "329638ff6f": "Switch Tab",

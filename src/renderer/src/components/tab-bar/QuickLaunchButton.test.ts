@@ -8,10 +8,7 @@ const {
   storeState,
   openSettingsPageMock,
   openSettingsTargetMock,
-  useDetectedAgentsMock,
-  useStructuredAgentSessionCreateMock,
-  useStructuredCodexLaunchStatusMock,
-  translateMock
+  useDetectedAgentsMock
 } = vi.hoisted(() => ({
   shortcutLabelMock: vi.fn<() => string | null>(),
   storeState: {
@@ -26,25 +23,7 @@ const {
   },
   openSettingsPageMock: vi.fn(),
   openSettingsTargetMock: vi.fn(),
-  useDetectedAgentsMock: vi.fn(() => ({ detectedIds: ['claude', 'codex', 'gemini'] })),
-  useStructuredAgentSessionCreateMock: vi.fn(() => ({
-    supported: true,
-    creating: false,
-    create: vi.fn(async () => true)
-  })),
-  useStructuredCodexLaunchStatusMock: vi.fn(() => 'idle' as 'idle' | 'pending' | 'failed'),
-  translateMock: vi.fn((key: string, fallback: string, values?: Record<string, string>): string => {
-    const template =
-      key === 'auto.components.tab.bar.QuickLaunchButton.ec2adf093e'
-        ? 'Launch {{value0}} in a new terminal'
-        : key === 'auto.components.tab.bar.QuickLaunchButton.startingCodexChat'
-          ? 'Starting Codex chat (localized)…'
-          : fallback
-    return Object.entries(values ?? {}).reduce(
-      (text, [name, value]) => text.replace(`{{${name}}}`, value),
-      template
-    )
-  })
+  useDetectedAgentsMock: vi.fn(() => ({ detectedIds: ['claude', 'codex', 'gemini'] }))
 }))
 
 vi.mock('@/hooks/useDetectedAgents', () => ({
@@ -53,14 +32,6 @@ vi.mock('@/hooks/useDetectedAgents', () => ({
 
 vi.mock('@/hooks/useShortcutLabel', () => ({
   useOptionalShortcutLabel: shortcutLabelMock
-}))
-
-vi.mock('../native-chat/use-structured-agent-session-create', () => ({
-  useStructuredAgentSessionCreate: useStructuredAgentSessionCreateMock
-}))
-
-vi.mock('@/lib/structured-agent-session-launch', () => ({
-  useStructuredCodexLaunchStatus: useStructuredCodexLaunchStatusMock
 }))
 
 vi.mock('@/store', () => {
@@ -104,7 +75,13 @@ vi.mock('@/components/ui/dropdown-menu', async () => {
   }
 })
 
-vi.mock('@/i18n/i18n', () => ({ translate: translateMock }))
+vi.mock('@/i18n/i18n', () => ({
+  translate: (_key: string, fallback: string, values?: Record<string, string>) =>
+    Object.entries(values ?? {}).reduce(
+      (text, [key, value]) => text.replace(`{{${key}}}`, value),
+      fallback
+    )
+}))
 
 vi.mock('sonner', () => ({
   toast: {
@@ -140,10 +117,6 @@ beforeEach(() => {
   shortcutLabelMock.mockReset()
   shortcutLabelMock.mockReturnValue(null)
   useDetectedAgentsMock.mockClear()
-  useStructuredAgentSessionCreateMock.mockClear()
-  useStructuredCodexLaunchStatusMock.mockReset()
-  useStructuredCodexLaunchStatusMock.mockReturnValue('idle')
-  translateMock.mockClear()
   openSettingsPageMock.mockReset()
   openSettingsTargetMock.mockReset()
   storeState.settings.defaultTuiAgent = 'codex'
@@ -232,26 +205,6 @@ describe('QuickLaunchAgentMenuItems', () => {
 
     storeState.settings.defaultTuiAgent = 'blank'
     expect(renderAgentMenuItems()).not.toContain('data-dropdown-shortcut="true"')
-  })
-
-  it('offers explicit structured chat creation for Claude and Codex', () => {
-    const html = renderAgentMenuItems()
-
-    expect(html.match(/Chat session/g) ?? []).toHaveLength(2)
-    expect(html).toContain('Start Claude without a terminal')
-    expect(html).toContain('Start Codex without a terminal')
-    expect(useStructuredAgentSessionCreateMock).toHaveBeenCalledWith('worktree-1', 'claude')
-    expect(useStructuredAgentSessionCreateMock).toHaveBeenCalledWith('worktree-1', 'codex')
-  })
-
-  it('localizes pending Codex text and interpolates the existing launch tooltip', () => {
-    useStructuredCodexLaunchStatusMock.mockReturnValue('pending')
-
-    const html = renderAgentMenuItems()
-
-    expect(html).toContain('Starting Codex chat (localized)…')
-    expect(html).toContain('title="Launch Codex in a new terminal"')
-    expect(html).not.toContain('{{value0}}')
   })
 })
 
