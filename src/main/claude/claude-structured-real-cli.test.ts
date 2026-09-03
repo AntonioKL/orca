@@ -23,17 +23,27 @@ const realClaudeAvailable =
     timeout: 5_000
   }).status === 0
 const authStatusLaunch = getSpawnArgsForWindows(command, ['auth', 'status', '--json'])
-const realClaudeAuthenticated = (() => {
+/** The CLI's own account report — the only source of truth for where it writes that
+ *  is not derived from Orca's own path expressions. */
+const realClaudeAuthStatus = (() => {
   if (!realClaudeAvailable) {
-    return false
+    return null
   }
   const result = spawnSync(authStatusLaunch.spawnCmd, authStatusLaunch.spawnArgs, {
     encoding: 'utf8',
     windowsHide: true,
     timeout: 5_000
   })
-  return result.status === 0 && /"loggedIn"\s*:\s*true/.test(result.stdout)
+  if (result.status !== 0) {
+    return null
+  }
+  try {
+    return JSON.parse(result.stdout) as { loggedIn?: boolean; projectsDirectory?: string }
+  } catch {
+    return null
+  }
 })()
+const realClaudeAuthenticated = realClaudeAuthStatus?.loggedIn === true
 
 function realAdapter(
   providerSessionId: string,
@@ -70,14 +80,12 @@ function identity(providerSessionId: string): AgentSessionJournalIdentity {
 /** The CLI flushes its transcript on its own schedule; poll rather than race it. */
 async function waitForResolvedTranscript(
   providerSessionId: string,
-  claudeProjectsDir: string,
   timeoutMs = 15_000
 ): Promise<string | null> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
-    const resolved = await resolveSessionFilePath('claude', providerSessionId, {
-      claudeProjectsDir
-    })
+    // No options: the exact call transcript-read-cache.ts makes for mobile.
+    const resolved = await resolveSessionFilePath('claude', providerSessionId)
     if (resolved || Date.now() >= deadline) {
       return resolved
     }
@@ -120,18 +128,20 @@ describe.skipIf(!realClaudeAvailable)('Claude structured real CLI handshake', ()
   )
 
   // Mobile native chat never reads the structured journal — it reads the CLI's own
-  // transcript through native-chat/session-file-resolver.ts, which is also how
-  // structured-claude-runtime-adapter.ts recovers a leaf. So the SDK-spawned CLI has
-  // to keep writing that transcript under the pinned account home; if it ever moved,
-  // mobile chat and TUI resume would both go dark with no wire-level error.
+  // transcript through native-chat/session-file-resolver.ts. So this resolves the way
+  // transcript-read-cache.ts:104 does, with NO root override, and checks the answer
+  // against the root the CLI itself reports. Deriving the expected root from Orca's own
+  // `CLAUDE_CONFIG_DIR || ~/.claude` expression — the same one the code under test uses —
+  // would move both sides together and stay green in exactly the environment that
+  // blacks mobile out.
   // The turn is what creates the file: an init-only handshake writes nothing.
-  it.skipIf(!realClaudeAuthenticated)(
+  it.skipIf(!realClaudeAuthenticated || !realClaudeAuthStatus?.projectsDirectory)(
     'writes its transcript where the mobile session-file resolver looks for it',
     async () => {
       const providerSessionId = randomUUID()
       const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
       const adapter = realAdapter(providerSessionId, claudeConfigDir)
-      const projectsDir = join(claudeConfigDir, 'projects')
+      const cliProjectsDir = realClaudeAuthStatus?.projectsDirectory as string
 
       let transcriptPath: string | null = null
       try {
@@ -146,15 +156,18 @@ describe.skipIf(!realClaudeAvailable)('Claude structured real CLI handshake', ()
           body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'hi' }] },
           fence: 1
         })
-        transcriptPath = await waitForResolvedTranscript(providerSessionId, projectsDir)
+        transcriptPath = await waitForResolvedTranscript(providerSessionId)
       } finally {
         await adapter.closeAll()
       }
 
       expect(transcriptPath).not.toBeNull()
       expect(basename(transcriptPath ?? '')).toBe(`${providerSessionId}.jsonl`)
-      // `<pinned account home>/projects/<project slug>/<provider session id>.jsonl`
-      expect(relative(projectsDir, transcriptPath ?? '').split(/[\\/]/)).toHaveLength(2)
+      // `<the root the CLI reports>/<project slug>/<provider session id>.jsonl`
+      expect(relative(cliProjectsDir, transcriptPath ?? '').split(/[\\/]/)).toHaveLength(2)
+      // And the pinned account home is that same root, so the host-side leaf recovery
+      // (structured-claude-runtime-adapter.ts:64) and mobile agree.
+      expect(join(claudeConfigDir, 'projects')).toBe(cliProjectsDir)
     },
     45_000
   )

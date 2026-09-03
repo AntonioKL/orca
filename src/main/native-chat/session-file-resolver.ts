@@ -32,7 +32,12 @@ import { proveClaudeTranscriptBranch } from '../claude/claude-transcript-branch-
 // user path — homedir()/CODEX_HOME resolution stays runtime-relative and is
 // computed per call (not at module load) so it tracks the live home.
 function claudeProjectsDir(): string {
-  return join(homedir(), '.claude', 'projects')
+  // Why CLAUDE_CONFIG_DIR and not just homedir(): a structured Claude session pins
+  // its account home to `CLAUDE_CONFIG_DIR || ~/.claude` (claude-accounts/runtime-paths.ts),
+  // and the CLI writes its transcript under whatever home it was given. Mobile native
+  // chat resolves with no root override, so a default that ignored the variable read a
+  // different tree than the CLI wrote — a silent blackout, not an error.
+  return join(process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude'), 'projects')
 }
 
 // Why: Orca launches Codex with ORCA_CODEX_HOME pointing at its own managed
