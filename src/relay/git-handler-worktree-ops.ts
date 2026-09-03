@@ -175,10 +175,9 @@ export async function commitChangesRelay(
   }
 
   try {
-    await runWithGitIndexLockRetry(
-      () => git(['commit', '-m', message], worktreePath, { signal }),
-      signal
-    )
+    // Why: the signal governs the lock wait and retry backoff only. A commit that has started
+    // must finish even if the client times out or drops (hooks can outlive the RPC timeout).
+    await runWithGitIndexLockRetry(() => git(['commit', '-m', message], worktreePath), signal)
     return { success: true }
   } catch (error) {
     // Why: surface whichever channel carries the useful message. Pre-commit/GPG

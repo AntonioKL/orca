@@ -1,8 +1,6 @@
 // A terminal or agent may briefly own the same linked-worktree index.lock.
-// Keep the UI action alive long enough for that operation to finish.
-export const GIT_INDEX_LOCK_RETRY_DELAYS_MS = [
-  250, 500, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000
-] as const
+// Cover a short-lived holder (~8s) without freezing the action on a stale lock file.
+export const GIT_INDEX_LOCK_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000, 4_000] as const
 
 export function isGitIndexLockError(error: unknown): boolean {
   if (!error || typeof error !== 'object') {

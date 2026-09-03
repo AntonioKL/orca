@@ -99,6 +99,34 @@ describe('GitHandler — canceled worktree mutations', () => {
     expect(gitSpy).toHaveBeenCalledTimes(1)
   })
 
+  it('lets an in-flight commit finish when the request is canceled', async () => {
+    let releaseCommit!: () => void
+    const commitRunning = new Promise<void>((resolve) => {
+      releaseCommit = resolve
+    })
+    const gitSpy = vi
+      .spyOn(handler as unknown as GitSpyTarget, 'git')
+      .mockImplementation(async (_args, _cwd, opts) => {
+        // Why: a started commit must not be killed by a client timeout or disconnect.
+        expect(opts?.signal).toBeUndefined()
+        await commitRunning
+        return { stdout: '', stderr: '' }
+      })
+
+    const controller = new AbortController()
+    const pending = dispatcher.callRequest(
+      'git.commit',
+      { worktreePath: tmpDir, message: 'in-flight commit' },
+      { isStale: () => controller.signal.aborted, signal: controller.signal }
+    )
+    await waitForCalls(gitSpy, 1)
+    controller.abort()
+    releaseCommit()
+
+    await expect(pending).resolves.toEqual({ success: true })
+    expect(gitSpy).toHaveBeenCalledTimes(1)
+  })
+
   it('does not run a queued commit whose request was canceled', async () => {
     let releaseFirst!: () => void
     const firstRunning = new Promise<void>((resolve) => {
