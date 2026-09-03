@@ -43,6 +43,7 @@ export async function launchStructuredWorktreeSession(args: {
   fallbackStartupOpt: WorktreeStartupPayload | undefined
   activation: ActivateAndRevealResult | false
   primaryTabId: string | null
+  recoverUnknownLaunch?: boolean
 }): Promise<WorktreeCreationStructuredSessionResult> {
   let { activation, primaryTabId } = args
   let accepted = true
@@ -54,9 +55,12 @@ export async function launchStructuredWorktreeSession(args: {
     return { accepted, cancelled: true, visibilityUnknown, activation, primaryTabId }
   }
 
-  const launch = startStructuredCodexLaunch(args.worktreeId, {
-    prompt: args.request.launchDraftPrompt ?? args.request.quickPrompt
-  })
+  const launch = startStructuredCodexLaunch(
+    args.worktreeId,
+    args.recoverUnknownLaunch
+      ? {}
+      : { prompt: args.request.launchDraftPrompt ?? args.request.quickPrompt }
+  )
   let cancelled = false
   const cancelLaunch = (): void => {
     if (cancelled) {
@@ -146,6 +150,9 @@ export async function launchStructuredWorktreeSession(args: {
       await refusalFallback
     } else {
       visibilityUnknown = launch.isVisibilityUnknown()
+      if (visibilityUnknown) {
+        launch.releaseCallerAfterUnknownOutcome()
+      }
     }
   } finally {
     unsubscribe()

@@ -165,7 +165,8 @@ describe('structured worktree creation unknown outcome', () => {
       expect.objectContaining({
         creationId: 'creation-1',
         request,
-        worktreeId: 'worktree-1'
+        worktreeId: 'worktree-1',
+        recoverUnknownLaunch: true
       })
     )
     expect(store.removePendingWorktreeCreation).toHaveBeenCalledWith('creation-1', {

@@ -304,6 +304,68 @@ describe('startStructuredCodexLaunch', () => {
     expect(toast.error).toHaveBeenCalledOnce()
   })
 
+  it('reuses the queued prompt without a second delivery after unknown recovery', async () => {
+    const worktreeId = 'wt-unknown-prompt-retry'
+    const intent = launchIntent(worktreeId)
+    const firstFallback = vi.fn()
+    mocks.createIntent.mockReturnValueOnce(intent)
+    mocks.launch.mockRejectedValue(new Error('offline'))
+    vi.mocked(refreshLocalStructuredSessionTabs).mockResolvedValue([])
+
+    const first = startStructuredCodexLaunch(worktreeId, { prompt: 'only once' })
+    const firstFallbackResult = first.claimDefinitiveRefusalFallback(firstFallback)
+    await expect(first.launchResult).rejects.toThrow('offline')
+    expect(first.releaseCallerAfterUnknownOutcome()).toBe(true)
+
+    vi.mocked(refreshLocalStructuredSessionTabs).mockResolvedValue([
+      publishedSnapshot(worktreeId, intent.sessionId)
+    ])
+    const retry = startStructuredCodexLaunch(worktreeId)
+    await expect(retry.launchResult).resolves.toEqual({ sessionId: intent.sessionId, fence: 1 })
+
+    await expect(firstFallbackResult).resolves.toBe(false)
+    expect(firstFallback).not.toHaveBeenCalled()
+    expect(readOutbox(intent.sessionId)).toEqual([
+      expect.objectContaining({
+        body: expect.objectContaining({ blocks: [{ type: 'text', text: 'only once' }] })
+      })
+    ])
+    expect(mocks.callStructuredAgentSession).not.toHaveBeenCalledWith(
+      { kind: 'local' },
+      'agentSession.send',
+      expect.anything()
+    )
+  })
+
+  it('runs only the retry fallback when unknown recovery is refused', async () => {
+    const worktreeId = 'wt-unknown-refusal-retry'
+    const intent = launchIntent(worktreeId)
+    const firstFallback = vi.fn()
+    const retryFallback = vi.fn()
+    mocks.createIntent.mockReturnValueOnce(intent)
+    mocks.launch.mockRejectedValue(new Error('offline'))
+    vi.mocked(refreshLocalStructuredSessionTabs).mockResolvedValue([])
+
+    const first = startStructuredCodexLaunch(worktreeId)
+    const firstFallbackResult = first.claimDefinitiveRefusalFallback(firstFallback)
+    await expect(first.launchResult).rejects.toThrow('offline')
+    expect(first.releaseCallerAfterUnknownOutcome()).toBe(true)
+
+    mocks.launch.mockRejectedValueOnce(
+      new StructuredAgentSessionCreateRefusalError('structured launch disabled')
+    )
+    const retry = startStructuredCodexLaunch(worktreeId)
+    const retryFallbackResult = retry.claimDefinitiveRefusalFallback(retryFallback)
+
+    await expect(retry.launchResult).rejects.toBeInstanceOf(
+      StructuredAgentSessionCreateRefusalError
+    )
+    await expect(firstFallbackResult).resolves.toBe(false)
+    await expect(retryFallbackResult).resolves.toBe(true)
+    expect(firstFallback).not.toHaveBeenCalled()
+    expect(retryFallback).toHaveBeenCalledOnce()
+  })
+
   it('releases a definitively refused intent so a new click can create a new identity', async () => {
     const worktreeId = 'wt-refused'
     const first = launchIntent(worktreeId, 'session-first')

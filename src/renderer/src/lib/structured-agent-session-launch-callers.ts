@@ -223,6 +223,18 @@ export function claimStructuredLaunchCallerFallback(
   return caller.refusalFallback.promise
 }
 
+export function releaseStructuredLaunchCallerAfterUnknownOutcome(
+  group: StructuredLaunchCallerGroup,
+  caller: StructuredLaunchCaller
+): boolean {
+  if (group.outcome !== 'unknown' || !group.entries.delete(caller)) {
+    return false
+  }
+  settleCallerWithoutFallback(caller)
+  group.onSettled()
+  return true
+}
+
 export function structuredLaunchCallersHavePendingWork(
   group: StructuredLaunchCallerGroup
 ): boolean {

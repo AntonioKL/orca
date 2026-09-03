@@ -82,6 +82,7 @@ describe('launchStructuredWorktreeSession', () => {
       sessionId: 'session-1',
       launchResult,
       isVisibilityUnknown: () => false,
+      releaseCallerAfterUnknownOutcome: vi.fn(),
       claimDefinitiveRefusalFallback: vi.fn(() => Promise.resolve(false))
     })
 
@@ -128,10 +129,12 @@ describe('launchStructuredWorktreeSession', () => {
   })
 
   it('reports an unknown launch without claiming a visible surface', async () => {
+    const releaseCallerAfterUnknownOutcome = vi.fn()
     mocks.startStructuredCodexLaunch.mockReturnValue({
       sessionId: 'session-unknown',
       launchResult: Promise.reject(new Error('connection lost')),
       isVisibilityUnknown: () => true,
+      releaseCallerAfterUnknownOutcome,
       claimDefinitiveRefusalFallback: vi.fn(() => Promise.resolve(false))
     })
 
@@ -164,6 +167,7 @@ describe('launchStructuredWorktreeSession', () => {
     })
 
     expect(mocks.activateStructuredAgentSessionById).not.toHaveBeenCalled()
+    expect(releaseCallerAfterUnknownOutcome).toHaveBeenCalledOnce()
     expect(mocks.unsubscribe).toHaveBeenCalledOnce()
   })
 })

@@ -34,7 +34,8 @@ export async function retryStructuredWorktreeLaunch(
     shouldActivateOnCompletion: true,
     fallbackStartupOpt: buildWorktreeCreationStartupOpt(request, false),
     activation: false,
-    primaryTabId: null
+    primaryTabId: null,
+    recoverUnknownLaunch: true
   })
   if (structuredSession.cancelled) {
     return

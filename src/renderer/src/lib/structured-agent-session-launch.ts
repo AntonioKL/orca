@@ -21,6 +21,7 @@ import {
   addStructuredLaunchCaller,
   claimStructuredLaunchCallerFallback,
   createStructuredLaunchCallerGroup,
+  releaseStructuredLaunchCallerAfterUnknownOutcome,
   settleStructuredLaunchCallersWithFallback,
   settleStructuredLaunchCallersWithoutFallback,
   structuredLaunchCallersHavePendingWork,
@@ -47,6 +48,7 @@ export type StructuredCodexLaunchResult = {
   launchResult: Promise<StructuredCodexLaunchReceipt>
   promptDeliveryResult?: Promise<StructuredPromptDeliveryResult>
   isVisibilityUnknown: () => boolean
+  releaseCallerAfterUnknownOutcome: () => boolean
   claimDefinitiveRefusalFallback: (fallback: StructuredRefusalFallback) => Promise<boolean>
 }
 
@@ -220,6 +222,8 @@ export function startStructuredCodexLaunch(
     launchResult: state.promise,
     ...(caller.promptDeliveryResult ? { promptDeliveryResult: caller.promptDeliveryResult } : {}),
     isVisibilityUnknown: () => state.visibilityUnknown,
+    releaseCallerAfterUnknownOutcome: () =>
+      releaseStructuredLaunchCallerAfterUnknownOutcome(state.callers, caller),
     claimDefinitiveRefusalFallback: (fallback) =>
       claimStructuredLaunchCallerFallback(state.callers, caller, fallback)
   }
