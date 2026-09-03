@@ -29,6 +29,7 @@ jobs:
       recover: ${{ steps.trigger.outputs.recover }}
     steps:
       - name: Bind recovery to the exact failed C4 job
+        working-directory: .
         id: trigger
         env:
           CONFIRMATION: ${{ inputs.confirmation }}

@@ -24,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Measure Date-header skew for every relay cell
+        working-directory: .
         run: |
           set -u
           # Date headers carry whole seconds; compare floored seconds on both

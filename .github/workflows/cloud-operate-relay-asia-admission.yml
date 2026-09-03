@@ -172,6 +172,8 @@ jobs:
           node-version: 24
 
       - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: cloud/package.json
         if: ${{ inputs.environment == 'production' && inputs.mode == 'promote' && inputs.cell-ids == 'production-gce-c27' }}
 
       - name: Install exact C27 canary dependencies

@@ -5,11 +5,13 @@ on:
     paths:
       - cloud/**
       - .github/workflows/cloud-*.yml
+      - .github/actions/cloud-sql-rollout-lease/**
   push:
     branches: [main]
     paths:
       - cloud/**
       - .github/workflows/cloud-*.yml
+      - .github/actions/cloud-sql-rollout-lease/**
 
 permissions:
   contents: read

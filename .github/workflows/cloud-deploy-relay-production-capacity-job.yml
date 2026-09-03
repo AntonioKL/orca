@@ -66,6 +66,7 @@ jobs:
       SOURCE_WAVE_RUN_ID: ${{ inputs.source-wave-run-id }}
     steps:
       - name: Require exact reusable-workflow invocation
+        working-directory: .
         run: |
           [[ "${DEPLOY_MODE}" =~ ^(verify|apply|rollback)$ ]]
           if test "${EVIDENCE_MODE}" = continuation; then
@@ -86,6 +87,7 @@ jobs:
           fi
 
       - name: Require production workflow configuration
+        working-directory: .
         env:
           DEPLOY_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.PRODUCTION_GCP_RELAY_DEPLOY_WORKLOAD_IDENTITY_PROVIDER }}
           DEPLOY_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_RELAY_DEPLOY_SERVICE_ACCOUNT }}

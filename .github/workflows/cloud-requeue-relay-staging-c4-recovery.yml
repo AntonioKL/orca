@@ -24,6 +24,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Requeue only a cancelled protected recovery job
+        working-directory: .
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}

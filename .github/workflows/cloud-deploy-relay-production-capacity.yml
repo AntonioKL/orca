@@ -119,6 +119,7 @@ jobs:
       WAVE_CELL_IDS: ${{ inputs.wave-cell-ids }}
     steps:
       - name: Require production workflow configuration
+        working-directory: .
         env:
           DEPLOY_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.PRODUCTION_GCP_RELAY_DEPLOY_WORKLOAD_IDENTITY_PROVIDER }}
           DEPLOY_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_RELAY_DEPLOY_SERVICE_ACCOUNT }}

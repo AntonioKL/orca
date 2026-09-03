@@ -85,6 +85,8 @@ jobs:
           node-version: 24
 
       - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: cloud/package.json
 
       - name: Require the exact staging director image before promotion
         env:

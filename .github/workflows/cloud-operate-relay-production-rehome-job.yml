@@ -58,6 +58,7 @@ jobs:
       OUTPUT_DIRECTORY: ${{ github.workspace }}/relay-monitor-evidence
     steps:
       - name: Require exact reusable-workflow configuration
+        working-directory: .
         env:
           DEPLOY_WIF: ${{ vars.PRODUCTION_GCP_RELAY_DEPLOY_WORKLOAD_IDENTITY_PROVIDER }}
           DEPLOY_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_RELAY_DEPLOY_SERVICE_ACCOUNT }}
