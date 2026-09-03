@@ -242,6 +242,120 @@ describe('OrcaRuntimeService terminal retirement host partitioning (STA-3463)', 
     expect(sessions.get(staleHostId)?.tabsByWorktree[SSH_WORKTREE_ID]).toEqual([])
   })
 
+  it('keeps a same-id local workspace out of an SSH workspace close', async () => {
+    const localTab = {
+      id: 'local-tab',
+      ptyId: 'local-pty',
+      worktreeId: SSH_WORKTREE_ID,
+      title: 'Local agent',
+      customTitle: null,
+      color: null,
+      sortOrder: 0,
+      createdAt: 1
+    }
+    const sessions = new Map<ExecutionHostId, WorkspaceSessionState>([
+      [
+        LOCAL_EXECUTION_HOST_ID,
+        {
+          ...getDefaultWorkspaceSession(),
+          tabsByWorktree: { [SSH_WORKTREE_ID]: [localTab] },
+          terminalLayoutsByTabId: {
+            'local-tab': {
+              root: { type: 'leaf', leafId: 'leaf' },
+              activeLeafId: 'leaf',
+              expandedLeafId: null,
+              ptyIdsByLeafId: { leaf: 'local-pty' }
+            }
+          },
+          sleepingAgentSessionsByPaneKey: {
+            'local-tab:leaf': { worktreeId: SSH_WORKTREE_ID, agentType: 'claude', sessionId: 's' }
+          }
+        }
+      ],
+      // The SSH copy of the same `repoId::path` currently has no terminals.
+      [SSH_HOST_ID, { ...getDefaultWorkspaceSession(), tabsByWorktree: { [SSH_WORKTREE_ID]: [] } }]
+    ])
+    const store = {
+      getRepos: () => [SSH_REPO],
+      getRepo: (id: string) => (id === SSH_REPO_ID ? SSH_REPO : undefined),
+      getWorktreeMeta: () => ({ hostId: SSH_HOST_ID }),
+      getAllWorktreeMeta: () => ({ [SSH_WORKTREE_ID]: { hostId: SSH_HOST_ID } }),
+      setWorktreeMeta: vi.fn(),
+      getWorkspaceSessionHostIds: () => [...sessions.keys()],
+      getWorkspaceSession: (hostId?: ExecutionHostId) =>
+        sessions.get(hostId ?? LOCAL_EXECUTION_HOST_ID) ?? getDefaultWorkspaceSession(),
+      setWorkspaceSession: (session: WorkspaceSessionState, hostId?: ExecutionHostId) =>
+        sessions.set(hostId ?? LOCAL_EXECUTION_HOST_ID, session),
+      flushOrThrow: vi.fn(),
+      persistPtyBinding: vi.fn()
+    } as never
+    const runtime = new OrcaRuntimeService(store)
+    const stopAndWait = vi.fn(async () => true)
+    runtime.setPtyController({
+      write: () => true,
+      kill: vi.fn(() => true),
+      stopAndWait,
+      getForegroundProcess: async () => null
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+    runtime.registerPty('local-pty', SSH_WORKTREE_ID, null, { tabId: 'local-tab', leafId: 'leaf' })
+
+    await expect(runtime.closeTerminalsForWorktree(`id:${SSH_WORKTREE_ID}`)).resolves.toEqual({
+      closed: 0,
+      stopped: 0,
+      retiredSurfaces: true
+    })
+    expect(stopAndWait).not.toHaveBeenCalled()
+    const local = sessions.get(LOCAL_EXECUTION_HOST_ID)!
+    expect(local.tabsByWorktree[SSH_WORKTREE_ID]).toEqual([localTab])
+    expect(Object.keys(local.sleepingAgentSessionsByPaneKey ?? {})).toEqual(['local-tab:leaf'])
+  })
+
+  it('clears resume records from the partition that owned the tabs when the catalog owner rotated', async () => {
+    const staleHostId: ExecutionHostId = 'runtime:stale-host'
+    const sessions = new Map<ExecutionHostId, WorkspaceSessionState>([
+      [
+        LOCAL_EXECUTION_HOST_ID,
+        {
+          ...makePersistedSshSession(),
+          terminalPtyIncarnationsByPaneKey: { 'tab:left': 'incarnation-1' }
+        }
+      ],
+      [staleHostId, { ...getDefaultWorkspaceSession(), tabsByWorktree: { [SSH_WORKTREE_ID]: [] } }]
+    ])
+    const store = {
+      getRepos: () => [{ ...SSH_REPO, executionHostId: staleHostId }],
+      getRepo: () => ({ ...SSH_REPO, executionHostId: staleHostId }),
+      getWorktreeMeta: () => ({}),
+      getAllWorktreeMeta: () => ({ [SSH_WORKTREE_ID]: {} }),
+      setWorktreeMeta: vi.fn(),
+      getWorkspaceSessionHostIds: () => [...sessions.keys()],
+      getWorkspaceSession: (hostId?: ExecutionHostId) =>
+        sessions.get(hostId ?? LOCAL_EXECUTION_HOST_ID) ?? getDefaultWorkspaceSession(),
+      setWorkspaceSession: (session: WorkspaceSessionState, hostId?: ExecutionHostId) =>
+        sessions.set(hostId ?? LOCAL_EXECUTION_HOST_ID, session),
+      flushOrThrow: vi.fn(),
+      persistPtyBinding: vi.fn()
+    } as never
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      write: () => true,
+      kill: vi.fn(() => true),
+      stopAndWait: vi.fn(async () => true),
+      getForegroundProcess: async () => null
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+    runtime.registerPty(SSH_PTY_LEFT, SSH_WORKTREE_ID, null, { tabId: 'tab', leafId: 'left' })
+
+    await expect(runtime.closeTerminalsForWorktree(`id:${SSH_WORKTREE_ID}`)).resolves.toMatchObject(
+      { closed: 1 }
+    )
+    expect(sessions.get(LOCAL_EXECUTION_HOST_ID)?.tabsByWorktree[SSH_WORKTREE_ID]).toEqual([])
+    expect(sessions.get(LOCAL_EXECUTION_HOST_ID)?.terminalPtyIncarnationsByPaneKey).toEqual({})
+  })
+
   it('hydrates the persisted owner when a folder host is absent from the host index', () => {
     const folderWorktreeId = 'folder:folder-1'
     const localSession = {

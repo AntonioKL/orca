@@ -12,7 +12,11 @@ import type {
 import type { WorktreeTerminalMutationKind } from './worktree-terminal-mutation-lock'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { rollbackWorkspaceSessionAfterFailedAsyncWrite } from './workspace-session-failed-write-rollback'
-import { getWorktreeExecutionHostId, parseExecutionHostId } from '../../shared/execution-host'
+import {
+  getWorktreeExecutionHostId,
+  parseExecutionHostId,
+  type ExecutionHostId
+} from '../../shared/execution-host'
 import { worktreePtyBelongsToHost, type WorktreePtyHostFence } from './worktree-pty-host-fence'
 import { summarizeWorktreePtyStopVerdict } from './worktree-pty-stop-verdict'
 
@@ -61,6 +65,9 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
     const hostFence = this.getWorktreeHostFence(worktree)
 
     return await this.runWorktreeTerminalMutation(worktree.id, async () => {
+      // Why: emptying a rotated runtime partition re-routes the session owner, so the
+      // records cleared below live in the partition that owned the tabs at the start.
+      const sessionHostId = this.getWorkspaceSessionHostIdForWorktree(worktree.id)
       const snapshot = await this.listMobileSessionTabs(`id:${worktree.id}`)
       const targetPtyIds = this.collectWorktreePtyIds(worktree.id, hostFence, true)
       const parentTabIds = [
@@ -80,7 +87,7 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
         }
         closed += 1
       }
-      this.clearWorktreeTerminalResumeRecords(worktree.id, parentTabIds)
+      this.clearWorktreeTerminalResumeRecords(worktree.id, sessionHostId, parentTabIds)
       const { stopped } = await this.stopTerminalsForWorktree(`id:${worktree.id}`, {
         resolvedWorktreeId: worktree.id,
         ...hostFence
@@ -103,12 +110,17 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
 
   private clearWorktreeTerminalResumeRecords(
     worktreeId: string,
+    hostId: ExecutionHostId,
     closedTabIds: readonly string[]
   ): void {
-    const session = this.getWorkspaceSessionForWorktree(worktreeId)
-    if (!session) {
-      return
+    if (
+      !this.store?.getWorkspaceSession ||
+      !this.store.setWorkspaceSession ||
+      !this.store.flushOrThrow
+    ) {
+      throw new Error('workspace_session_unavailable')
     }
+    const session = this.store.getWorkspaceSession(hostId)
     const sleepingAgentSessionsByPaneKey = Object.fromEntries(
       Object.entries(session.sleepingAgentSessionsByPaneKey ?? {}).filter(
         ([, record]) => record.worktreeId !== worktreeId
@@ -134,25 +146,20 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
     if (!hasChanges) {
       return
     }
-    if (!this.store?.setWorkspaceSession || !this.store.flushOrThrow) {
-      throw new Error('workspace_session_unavailable')
-    }
     const next: WorkspaceSessionState = {
       ...session,
       sleepingAgentSessionsByPaneKey,
       terminalPtyIncarnationsByPaneKey
     }
-    this.setWorkspaceSessionForWorktree(worktreeId, next)
-    const staged = this.getWorkspaceSessionForWorktree(worktreeId)
+    this.store.setWorkspaceSession(next, hostId)
+    const staged = this.store.getWorkspaceSession(hostId)
     try {
       this.store.flushOrThrow()
     } catch (error) {
-      const current = this.getWorkspaceSessionForWorktree(worktreeId)
-      if (staged && current) {
-        const rolledBack = rollbackWorkspaceSessionAfterFailedAsyncWrite(session, staged, current)
-        if (rolledBack !== current) {
-          this.setWorkspaceSessionForWorktree(worktreeId, rolledBack)
-        }
+      const current = this.store.getWorkspaceSession(hostId)
+      const rolledBack = rollbackWorkspaceSessionAfterFailedAsyncWrite(session, staged, current)
+      if (rolledBack !== current) {
+        this.store.setWorkspaceSession(rolledBack, hostId)
       }
       throw error
     }

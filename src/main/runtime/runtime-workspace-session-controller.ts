@@ -58,14 +58,18 @@ export class RuntimeWorkspaceSessionController {
   ): ExecutionHostId {
     const hasPersistedTabs = (hostId: ExecutionHostId): boolean =>
       (getWorkspaceSession(hostId).tabsByWorktree[worktreeId]?.length ?? 0) > 0
-    if (hasPersistedTabs(preferredHostId)) {
+    // Why: only runtime environment ids rotate across relay restarts. An empty SSH or
+    // local partition is the truth, and `repoId::path` repeats across hosts, so a
+    // same-id workspace elsewhere must never be adopted as this one's owner.
+    if (
+      parseExecutionHostId(preferredHostId)?.kind !== 'runtime' ||
+      hasPersistedTabs(preferredHostId)
+    ) {
       return preferredHostId
     }
     const persistedOwners = persistedHostIds.filter(
       (hostId) => hostId !== preferredHostId && hasPersistedTabs(hostId)
     )
-    // Relay restarts can leave catalog metadata on an obsolete partition while
-    // the durable tab owner remains unique.
     return persistedOwners.length === 1 ? persistedOwners[0]! : preferredHostId
   }
 
