@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process'
 import process from 'node:process'
+import { resolvePnpmCliInvocation } from './pnpm-cli-invocation.mjs'
 
 if (process.platform !== 'darwin') {
   throw new Error('Hosted iOS WebView automation requires macOS and Xcode.')
 }
 
-const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
+const { command: pnpm, prefixArgs: pnpmPrefix, shell } = resolvePnpmCliInvocation()
 const env = { ...process.env, ORCA_E2E_SSH_DOCKER: '1' }
 const prebuildCommands =
   process.env.SKIP_BUILD === '1'
@@ -32,7 +33,12 @@ const commands = [
 ]
 
 for (const args of commands) {
-  const result = spawnSync(pnpm, args, { cwd: process.cwd(), env, stdio: 'inherit' })
+  const result = spawnSync(pnpm, [...pnpmPrefix, ...args], {
+    cwd: process.cwd(),
+    env,
+    stdio: 'inherit',
+    shell
+  })
   if (result.error) {
     throw result.error
   }

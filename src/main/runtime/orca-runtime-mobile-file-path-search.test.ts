@@ -32,7 +32,8 @@ describe('runtime mobile file path search', () => {
           id: 'worktree-1',
           repoId: 'repo-1',
           path: '/repo'
-        }
+        },
+        executionHostId: 'local'
       })
     } as never)
 

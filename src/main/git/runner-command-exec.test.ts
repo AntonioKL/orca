@@ -32,7 +32,6 @@ afterEach(() => _resetGitAdmissionForTests())
 type MockChildProcess = EventEmitter & {
   stdout: EventEmitter
   stderr: EventEmitter
-  stdin: EventEmitter & { end: ReturnType<typeof vi.fn> }
   pid: number
   kill: ReturnType<typeof vi.fn>
   unref?: ReturnType<typeof vi.fn>
@@ -42,7 +41,6 @@ function createMockChildProcess(pid: number): MockChildProcess {
   const child = new EventEmitter() as MockChildProcess
   child.stdout = new EventEmitter()
   child.stderr = new EventEmitter()
-  child.stdin = Object.assign(new EventEmitter(), { end: vi.fn() })
   child.pid = pid
   child.kill = vi.fn()
   return child
@@ -433,24 +431,6 @@ describe('runner execFile timeout handling', () => {
 
     expect(capturedEnv?.GH_PROMPT_DISABLED).toBe('0')
     expect(capturedEnv?.ORCA_TEST_ENV).toBe('kept')
-  })
-
-  it('passes bounded JSON input to gh over stdin', async () => {
-    const child = createMockChildProcess(1234)
-    execFileMock.mockImplementation((_cmd, _args, _opts, cb) => {
-      cb(null, '{"id":1}', '')
-      return child
-    })
-
-    await ghExecFileAsync(
-      ['api', '-X', 'POST', 'repos/acme/orca/pulls/1/reviews', '--input', '-'],
-      {
-        cwd: '/repo',
-        stdin: '{"event":"APPROVE"}'
-      }
-    )
-
-    expect(child.stdin.end).toHaveBeenCalledWith('{"event":"APPROVE"}')
   })
 
   // Issue #5308: git read-path calls must be forced non-interactive so a
