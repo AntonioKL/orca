@@ -9,12 +9,12 @@ import {
   recognizeAgentProcess
 } from '../shared/agent-process-recognition'
 import { getFirstCommandToken } from '../shared/command-token-scanner'
+import { getProcessTableIndex, type ProcessTableIndex } from '../shared/process-table-index'
+import { PS_MAX_BUFFER_BYTES, type ProcessTableRow } from '../shared/process-table-snapshot'
 import {
-  getProcessTableSnapshot,
-  type ProcessTableIndex,
-  type ProcessTableRow
-} from '../shared/process-table-snapshot'
-import { getProcessTableIndex } from '../shared/process-table-index'
+  getFreshProcessTableSnapshot,
+  getProcessTableSnapshot
+} from '../shared/process-table-snapshot-reader'
 import { selectForegroundProcessCandidate } from '../shared/foreground-process-selection'
 import {
   resolveOuterWrapperForegroundProcess,
@@ -170,15 +170,37 @@ export async function resolveProcessCwd(pid: number, fallbackCwd: string): Promi
 }
 
 /**
- * Check whether a process has child processes (via pgrep).
+ * Check whether a process has child processes.
+ *
+ * Why the shared snapshot and not `pgrep -P`: this answers one field of
+ * `pty.inspectProcess`, which every tracked pane polls on a 750ms/2000ms
+ * cadence, and the fork was neither cached nor coalesced. procps-ng opens six
+ * procfs files per process to resolve a ppid — including a `/proc/<pid>/ctty`
+ * that never exists on Linux — so one call cost O(host process count) syscalls,
+ * ~4k opens per pgrep on a 690-process host, at up to 8 forks/sec (#13537).
+ * `getForegroundProcessName` in the same RPC already captured the TTL-cached
+ * `ps` table, whose index carries the parent/child map, so the answer is free.
+ *
+ * `fresh` opts out of that TTL. A poll can read a 500ms-old table because its
+ * next tick corrects it, but a close or cleanup decision acts on the answer
+ * once and destructively — a child that started inside the TTL would be killed
+ * with no confirmation. `pgrep` scanned per call, so anything that decides
+ * has to keep scanning per call.
  */
-export async function processHasChildren(pid: number): Promise<boolean> {
+export async function processHasChildren(
+  pid: number,
+  options?: { fresh?: boolean }
+): Promise<boolean> {
+  // Windows has no `ps`; the previous `pgrep` fork always failed here too, so
+  // this keeps the same answer without spawning anything to reach it.
+  if (process.platform === 'win32') {
+    return false
+  }
   try {
-    const { stdout } = await execFile('pgrep', ['-P', String(pid)], {
-      encoding: 'utf-8',
-      timeout: 3000
-    })
-    return stdout.trim().length > 0
+    const rows = options?.fresh
+      ? await getFreshProcessTableSnapshot()
+      : await getProcessTableSnapshot()
+    return (getProcessTableIndex(rows).childrenByPpid.get(pid)?.length ?? 0) > 0
   } catch {
     return false
   }
@@ -319,7 +341,8 @@ export async function getForegroundProcessName(
   try {
     const { stdout } = await execFile('ps', ['-o', 'comm=', '-p', String(pid)], {
       encoding: 'utf-8',
-      timeout: 3000
+      timeout: 3000,
+      maxBuffer: PS_MAX_BUFFER_BYTES
     })
     return stdout.trim() || null
   } catch {

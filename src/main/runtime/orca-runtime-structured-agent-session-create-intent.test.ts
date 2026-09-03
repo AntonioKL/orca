@@ -61,7 +61,7 @@ describe('structured agent-session create intent', () => {
       }
       resolveRuntimeFileTarget: (selector: string) => Promise<{
         worktree: { id: string; path: string }
-        connectionId?: string
+        executionHostId: string
       }>
       resolveStructuredAgentSessionLocation: (selector: string) => Promise<{
         executionHostId: string
@@ -75,7 +75,8 @@ describe('structured agent-session create intent', () => {
       worktree: {
         id: 'folder:folder-1',
         path: String.raw`\\wsl.localhost\Ubuntu\home\dev\repo`
-      }
+      },
+      executionHostId: 'local'
     })
 
     await expect(
@@ -94,7 +95,7 @@ describe('structured agent-session create intent', () => {
       store: { getRepo: () => undefined }
       resolveRuntimeFileTarget: (selector: string) => Promise<{
         worktree: { id: string; path: string }
-        connectionId?: string
+        executionHostId: string
       }>
       resolveStructuredAgentSessionLocation: (selector: string) => Promise<unknown>
     }
@@ -104,7 +105,7 @@ describe('structured agent-session create intent', () => {
         id: 'folder:folder-2',
         path: selector === 'ssh' ? String.raw`\\wsl.localhost\Ubuntu\home\dev\repo` : 'C:\\repo'
       },
-      ...(selector === 'ssh' ? { connectionId: 'ssh-host' } : {})
+      executionHostId: selector === 'ssh' ? 'ssh:ssh-host' : 'local'
     })
 
     await expect(internal.resolveStructuredAgentSessionLocation('native')).resolves.toMatchObject({

@@ -7,7 +7,6 @@ import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { AgentStatusIpcPayload } from '../../shared/agent-status-types'
 import { getLocalProjectWorktreeGitOptions } from '../project-runtime-git-options'
-import { getRuntimeFileTargetExecutionHostId } from './orca-runtime-files'
 import type { AgentSessionAttachParams } from '../native-chat/agent-session-wire/structured-agent-session-attach'
 import { getSystemCodexHomePath } from '../codex/codex-home-paths'
 import { resolveTuiAgentLaunchEnv } from '../../shared/tui-agent-launch-defaults'
@@ -94,22 +93,23 @@ export class OrcaRuntimeWithResolveRecoveredStructuredTuiTranscript extends Orca
     const repo = this.store?.getRepo(target.worktree.repoId)
     const folderScope = parseWorkspaceKey(target.worktree.id)
     const folderWorkspace = folderScope?.type === 'folder'
+    // WSL routing describes *this* machine; no remote or runtime host may inherit
+    // it. Both branches key on executionHostId: the target no longer carries a
+    // connectionId, which used to spell remote, unresolved and local alike.
+    const isLocalHost = target.executionHostId === LOCAL_EXECUTION_HOST_ID
     const configuredWslDistro =
-      repo && !target.connectionId
+      repo && isLocalHost
         ? (getLocalProjectWorktreeGitOptions(this.requireStore(), repo).wslDistro ?? null)
         : null
     // Folder workspaces have no repo Git options, so a WSL UNC path is the only
     // durable signal that native Windows structured Codex cannot safely use it.
     const wslDistro =
       configuredWslDistro ??
-      (folderWorkspace && !target.connectionId
+      (folderWorkspace && isLocalHost
         ? (parseWslUncPath(target.worktree.path)?.distro ?? null)
         : null)
     return {
-      executionHostId: getRuntimeFileTargetExecutionHostId({
-        worktree: target.worktree,
-        connectionId: target.connectionId
-      }),
+      executionHostId: target.executionHostId,
       wslDistro,
       workspaceId: target.worktree.id,
       workspaceKind: folderWorkspace ? ('folder' as const) : ('git-worktree' as const)
