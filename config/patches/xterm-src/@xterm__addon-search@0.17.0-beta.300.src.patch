@@ -1,0 +1,35 @@
+diff --git a/src/SearchEngine.ts b/src/SearchEngine.ts
+index 1760bc2bd1fd274d23e2032fde631b39c739f0d9..f856f1f9444a13d29fcbd2f264b0c2bfbf33db1c 100644
+--- a/src/SearchEngine.ts
++++ b/src/SearchEngine.ts
+@@ -250,23 +250,19 @@ export class SearchEngine {
+    * @returns The search result if it was found.
+    */
+   private _findInLine(term: string, searchPosition: ISearchPosition, searchOptions: ISearchOptions = {}, isReverseSearch: boolean = false): ISearchResult | undefined {
+-    const row = searchPosition.startRow;
+-    const col = searchPosition.startCol;
+-
+     // Ignore wrapped lines, only consider on unwrapped line (first row of command string).
+-    const firstLine = this._terminal.buffer.active.getLine(row);
+-    if (firstLine?.isWrapped) {
++    // This walks back to the line start rather than recursing into it: one frame per wrapped
++    // row overflows the stack on a line long enough to fill the scrollback.
++    while (this._terminal.buffer.active.getLine(searchPosition.startRow)?.isWrapped) {
++      searchPosition.startCol += this._terminal.cols;
+       if (isReverseSearch) {
+-        searchPosition.startCol += this._terminal.cols;
+         return;
+       }
+-
+-      // This will iterate until we find the line start.
+-      // When we find it, we will search using the calculated start column.
+       searchPosition.startRow--;
+-      searchPosition.startCol += this._terminal.cols;
+-      return this._findInLine(term, searchPosition, searchOptions);
+     }
++    const row = searchPosition.startRow;
++    const col = searchPosition.startCol;
++
+     let cache = this._lineCache.getLineFromCache(row);
+     if (!cache) {
+       cache = this._lineCache.translateBufferLineToStringWithWrap(row, true);
