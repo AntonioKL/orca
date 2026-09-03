@@ -142,7 +142,7 @@ export class OrcaRuntimeWithPublishPtyBackedMobileSessionTerminal extends OrcaRu
       ...(existing?.tabGroupLayout ? { tabGroupLayout: existing.tabGroupLayout } : {}),
       tabs
     }
-    this.mobileSessionTabsByWorktree.set(worktreeId, next)
+    this.storeMobileSessionSnapshot(worktreeId, next)
     if (args.notify !== false) {
       this.notifyMobileSessionTabsChanged(worktreeId)
     }
