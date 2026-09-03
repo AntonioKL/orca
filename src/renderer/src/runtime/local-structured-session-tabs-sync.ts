@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
+import { folderWorkspaceKey } from '../../../shared/workspace-scope'
 import { useAppStore } from '../store'
 import type { WorktreeRuntimeOwnerState } from '../lib/worktree-runtime-owner'
 import { getExecutionHostIdForWorktree } from '../lib/worktree-runtime-owner'
@@ -138,6 +139,9 @@ export function applyLocalStructuredSessionTabSnapshots<
       knownWorktreeIds.add(worktree.id)
     }
   }
+  for (const workspace of next.folderWorkspaces ?? []) {
+    knownWorktreeIds.add(folderWorkspaceKey(workspace.id))
+  }
   for (const worktreeId of localStructuredSessionVersionByWorktree.keys()) {
     if (!knownWorktreeIds.has(worktreeId)) {
       localStructuredSessionVersionByWorktree.delete(worktreeId)
@@ -191,6 +195,21 @@ async function startLocalStructuredSessionTabsSync(args: {
   let subscriptionGeneration = 0
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let reconnectAttempt = 0
+  let activeHandle: { unsubscribe: () => void } | null = null
+  const scheduleSubscribeRetry = (): void => {
+    if (args.isDisposed() || reconnectTimer !== null) {
+      return
+    }
+    const reconnectDelay = Math.min(250 * 2 ** reconnectAttempt, 5000)
+    reconnectAttempt += 1
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      void subscribeCurrent().catch((error) => {
+        console.warn('[structured-session-tabs] resubscribe failed', error)
+        scheduleSubscribeRetry()
+      })
+    }, reconnectDelay)
+  }
   const subscribeCurrent = async (): Promise<void> => {
     if (args.isDisposed()) {
       return
@@ -215,39 +234,28 @@ async function startLocalStructuredSessionTabsSync(args: {
           if (reconnectTimer !== null) {
             clearTimeout(reconnectTimer)
           }
-          const reconnectDelay = Math.min(250 * 2 ** reconnectAttempt, 5000)
-          reconnectAttempt += 1
-          reconnectTimer = setTimeout(() => {
-            reconnectTimer = null
-            void refreshLocalStructuredSessionTabs()
-              .catch((error) => console.warn('[structured-session-tabs] resync failed', error))
-              .finally(() => {
-                if (!args.isDisposed()) {
-                  reconnectTimer = setTimeout(() => {
-                    reconnectTimer = null
-                    void subscribeCurrent().catch((error) =>
-                      console.warn('[structured-session-tabs] resubscribe failed', error)
-                    )
-                  }, reconnectDelay)
-                }
-              })
-          }, reconnectDelay)
+          scheduleSubscribeRetry()
         }
       }
     )
     if (args.isDisposed() || generation !== subscriptionGeneration) {
       handle.unsubscribe()
     } else {
-      args.setUnsubscribe(() => {
-        if (reconnectTimer !== null) {
-          clearTimeout(reconnectTimer)
-          reconnectTimer = null
-        }
-        handle?.unsubscribe()
-      })
+      activeHandle = handle
     }
   }
-  await subscribeCurrent()
+  args.setUnsubscribe(() => {
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    activeHandle?.unsubscribe()
+    activeHandle = null
+  })
+  void subscribeCurrent().catch((error) => {
+    console.warn('[structured-session-tabs] subscribe failed', error)
+    scheduleSubscribeRetry()
+  })
 }
 
 export function useLocalStructuredSessionTabsSync(): void {
