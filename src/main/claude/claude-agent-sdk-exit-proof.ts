@@ -8,17 +8,16 @@ import {
   type DescendantSnapshot,
   type PosixProcessIdentity
 } from '../pty-descendant-termination'
-import { verifyPosixProcessIdentity } from '../pty-posix-root-identity'
 import {
   captureWindowsDescendantSnapshot,
   terminateIdentifiedWindowsProcessTree,
-  verifyWindowsProcessIdentity,
   verifyWindowsDescendantSnapshotExit,
   type WindowsDescendantSnapshot,
   type WindowsProcessIdentity
 } from '../windows-descendant-exit-verification'
 import { mergeClaudeCapturedTrees, type ClaudeCapturedTree } from './claude-child-tree-snapshot'
 import {
+  createClaudeRootIdentityVerifier,
   terminateClaudeRootIfLive,
   terminateClaudeWindowsRoot
 } from './claude-child-root-termination'
@@ -121,16 +120,14 @@ export function createClaudeChildTreeReaper(
   let capturing: Promise<void> | null = null
   let refreshing: Promise<void> | null = null
   let queuedRefresh: Promise<void> | null = null
+  let rootCaptureBoundaryMs: number | undefined
   let rootIdentityUnsafe = false
   let inFlight: Promise<DescendantTreeVerdict> | null = null
   let treeVerdict: DescendantTreeVerdict = 'unverifiable'
 
   const verifyRoot =
     deps.verifyRootIdentity ??
-    ((root: PosixProcessIdentity | WindowsProcessIdentity) =>
-      platform === 'win32'
-        ? verifyWindowsProcessIdentity(root as WindowsProcessIdentity)
-        : verifyPosixProcessIdentity(root as PosixProcessIdentity))
+    createClaudeRootIdentityVerifier(platform, () => rootCaptureBoundaryMs)
 
   function captureOnce(): Promise<void> {
     if (refreshing) {
@@ -167,6 +164,9 @@ export function createClaudeChildTreeReaper(
         const tree = admissibleTree(captured, platform, rootExited)
         if (tree) {
           snapshot = tree
+          if (rootCaptureBoundaryMs === undefined && tree.platform === 'posix') {
+            rootCaptureBoundaryMs = tree.tree.capturedAtMs
+          }
         } else if (rootExited) {
           // Once the root has exited its descendants may have reparented; no
           // later table read can make an absent snapshot safe to signal.
@@ -206,6 +206,9 @@ export function createClaudeChildTreeReaper(
       }
       if (snapshot === undefined) {
         snapshot = tree
+        if (rootCaptureBoundaryMs === undefined && tree.platform === 'posix') {
+          rootCaptureBoundaryMs = tree.tree.capturedAtMs
+        }
         return
       }
       if (snapshot !== null) {

@@ -675,6 +675,8 @@ describe('Claude stream-json connection', () => {
       env: { ...launchFor(scenario).env, ORCA_SDK_CONTRACT_IGNORE_SIGTERM: '1' }
     })
 
+    // Keep the lstart capture boundary outside the child's displayed start second.
+    await new Promise((resolve) => setTimeout(resolve, 1_100))
     await expect(connection.close()).resolves.toBe(true)
   }, 20_000)
 })

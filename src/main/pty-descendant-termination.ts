@@ -161,9 +161,13 @@ export function collectDescendantRows(
 ): DescendantSnapshot {
   const childrenByPpid = new Map<number, ProcessTableRow[]>()
   let rootRow: ProcessTableRow | null = null
+  let duplicateRoot = false
   for (const row of table) {
     if (row.pid === rootPid) {
-      rootRow = row
+      // A non-atomic process-table read can contain both an old and a recycled
+      // root row. There is no safe identity to retain in that case.
+      duplicateRoot = rootRow !== null
+      rootRow ??= row
       continue
     }
     const siblings = childrenByPpid.get(row.ppid)
@@ -177,7 +181,7 @@ export function collectDescendantRows(
   // An absent root has already exited — its real descendants reparent to pid 1 and
   // become unreachable by ppid, so any rows still pointing at the vacated PID are a
   // PID-reuse coincidence. Sweeping them could signal an unrelated process, so bail.
-  if (!rootRow) {
+  if (!rootRow || duplicateRoot) {
     return { rootPgid: null, descendants: [], capturedAtMs }
   }
   const descendants: ProcessTableRow[] = []
@@ -326,7 +330,11 @@ export type TerminateDeps = {
 }
 
 export function hasUnambiguousStartIdentity(row: ProcessTableRow, capturedAtMs: number): boolean {
-  const startedAtMs = Date.parse(row.startedAt)
+  return hasUnambiguousStartTime(row.startedAt, capturedAtMs)
+}
+
+export function hasUnambiguousStartTime(startedAt: string, capturedAtMs: number): boolean {
+  const startedAtMs = Date.parse(startedAt)
   if (!Number.isFinite(startedAtMs)) {
     return false
   }

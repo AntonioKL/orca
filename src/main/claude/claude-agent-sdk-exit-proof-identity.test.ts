@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { DescendantSnapshot } from '../pty-descendant-termination'
+import type { DescendantSnapshot, PosixProcessIdentity } from '../pty-descendant-termination'
 import type { WindowsDescendantSnapshot } from '../windows-descendant-exit-verification'
+import { collectDescendantRows } from '../pty-descendant-termination'
+import { verifyPosixProcessIdentity } from '../pty-posix-root-identity'
 import { createClaudeChildTreeReaper } from './claude-agent-sdk-exit-proof'
 import { mergeClaudeCapturedTrees } from './claude-child-tree-snapshot'
 
@@ -50,6 +52,66 @@ describe('Claude child root identity', () => {
 
     await expect(tree.reap()).resolves.toBe('unverifiable')
     expect(terminateDescendants).toHaveBeenCalled()
+    expect(child.kill).not.toHaveBeenCalled()
+  })
+
+  it('does not kill a recycled POSIX root when ps reports the same second-resolution start time', async () => {
+    const child = { pid: 100, kill: vi.fn(() => true) }
+    const startedAt = 'Mon Jan 1 00:00:00 2026'
+    const captureBoundary = Date.parse(startedAt) + 900
+    const readTable = vi.fn(async () => ({
+      rows: [{ pid: 100, ppid: 1, pgid: 100, startedAt }],
+      capturedAtMs: captureBoundary
+    }))
+    const initialSnapshot = {
+      root: { pid: 100, startedAt },
+      rootPgid: 100,
+      descendants: [],
+      capturedAtMs: captureBoundary
+    }
+    const refreshedSnapshot = { ...initialSnapshot, capturedAtMs: captureBoundary + 1_200 }
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'linux',
+      captureDescendants: vi
+        .fn()
+        .mockResolvedValueOnce(initialSnapshot)
+        .mockResolvedValueOnce(refreshedSnapshot),
+      verifyRootIdentity: (root) =>
+        verifyPosixProcessIdentity(root as PosixProcessIdentity, {
+          readTable,
+          capturedAtMs: captureBoundary
+        })
+    })
+
+    await tree.capture()
+    await tree.refresh?.()
+    await expect(tree.reap()).resolves.toBe('unverifiable')
+    expect(child.kill).not.toHaveBeenCalled()
+    expect(readTable).not.toHaveBeenCalled()
+  })
+
+  it('rejects mixed old and recycled root rows instead of making the tree killable', async () => {
+    const child = { pid: 100, kill: vi.fn(() => true) }
+    const terminateDescendants = vi.fn(async () => 'exited' as const)
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'linux',
+      captureDescendants: vi.fn(async () =>
+        collectDescendantRows(
+          100,
+          [
+            { pid: 100, ppid: 1, pgid: 100, startedAt: 'Mon Jan 1 00:00:00 2026' },
+            { pid: 100, ppid: 1, pgid: 101, startedAt: 'Mon Jan 1 00:00:01 2026' },
+            { pid: 200, ppid: 100, pgid: 200, startedAt: 'Mon Jan 1 00:00:00 2026' }
+          ],
+          1
+        )
+      ),
+      terminateDescendants,
+      verifyRootIdentity: vi.fn(async () => true)
+    })
+
+    await expect(tree.reap()).resolves.toBe('unverifiable')
+    expect(terminateDescendants).not.toHaveBeenCalled()
     expect(child.kill).not.toHaveBeenCalled()
   })
 

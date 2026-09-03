@@ -1,11 +1,25 @@
 import type { SpawnedProcess } from '../../shared/child-process/run-process'
 import type { PosixProcessIdentity } from '../pty-descendant-termination'
+import { verifyPosixProcessIdentity } from '../pty-posix-root-identity'
 import type {
   WindowsDescendantSnapshot,
   WindowsProcessIdentity
 } from '../windows-descendant-exit-verification'
+import { verifyWindowsProcessIdentity } from '../windows-descendant-exit-verification'
 
 export type ClaudeRootIdentity = PosixProcessIdentity | WindowsProcessIdentity
+
+export function createClaudeRootIdentityVerifier(
+  platform: NodeJS.Platform,
+  captureBoundary: () => number | undefined
+): (root: ClaudeRootIdentity) => Promise<boolean> {
+  return (root) =>
+    platform === 'win32'
+      ? verifyWindowsProcessIdentity(root as WindowsProcessIdentity)
+      : verifyPosixProcessIdentity(root as PosixProcessIdentity, {
+          capturedAtMs: captureBoundary()
+        })
+}
 
 type RootTerminationInput = {
   child: Pick<SpawnedProcess, 'pid' | 'kill'>
