@@ -12,15 +12,12 @@ import {
   captureWindowsDescendantSnapshot,
   terminateIdentifiedWindowsProcessTree,
   verifyWindowsDescendantSnapshotExit,
+  verifyWindowsProcessIdentity,
   type WindowsDescendantSnapshot,
   type WindowsProcessIdentity
 } from '../windows-descendant-exit-verification'
 import { mergeClaudeCapturedTrees, type ClaudeCapturedTree } from './claude-child-tree-snapshot'
-import {
-  createClaudeRootIdentityVerifier,
-  terminateClaudeRootIfLive,
-  terminateClaudeWindowsRoot
-} from './claude-child-root-termination'
+import { terminateClaudeRoot, terminateClaudeWindowsRoot } from './claude-child-root-termination'
 import {
   proveClaudeChildExitWithReaper,
   type ClaudeChildExitProofInput
@@ -71,7 +68,7 @@ export type ClaudeChildTreeReaperDeps = {
   terminateWindowsDescendants?: (
     snapshot: WindowsDescendantSnapshot
   ) => Promise<DescendantTreeVerdict>
-  /** Identity probe run immediately before any root signal. */
+  /** Identity probe for the bare-pid tree kill; only Windows has one to gate. */
   verifyRootIdentity?: (root: PosixProcessIdentity | WindowsProcessIdentity) => Promise<boolean>
 }
 
@@ -120,14 +117,15 @@ export function createClaudeChildTreeReaper(
   let capturing: Promise<void> | null = null
   let refreshing: Promise<void> | null = null
   let queuedRefresh: Promise<void> | null = null
-  let rootCaptureBoundaryMs: number | undefined
-  let rootIdentityUnsafe = false
   let inFlight: Promise<DescendantTreeVerdict> | null = null
   let treeVerdict: DescendantTreeVerdict = 'unverifiable'
 
+  // Consulted only on win32: POSIX signals descendants by revalidated identity
+  // and reaches the root solely through Node's handle, so neither needs a probe.
   const verifyRoot =
     deps.verifyRootIdentity ??
-    createClaudeRootIdentityVerifier(platform, () => rootCaptureBoundaryMs)
+    ((root: PosixProcessIdentity | WindowsProcessIdentity) =>
+      verifyWindowsProcessIdentity(root as WindowsProcessIdentity))
 
   function captureOnce(): Promise<void> {
     if (refreshing) {
@@ -164,9 +162,6 @@ export function createClaudeChildTreeReaper(
         const tree = admissibleTree(captured, platform, rootExited)
         if (tree) {
           snapshot = tree
-          if (rootCaptureBoundaryMs === undefined && tree.platform === 'posix') {
-            rootCaptureBoundaryMs = tree.tree.capturedAtMs
-          }
         } else if (rootExited) {
           // Once the root has exited its descendants may have reparented; no
           // later table read can make an absent snapshot safe to signal.
@@ -206,30 +201,14 @@ export function createClaudeChildTreeReaper(
       }
       if (snapshot === undefined) {
         snapshot = tree
-        if (rootCaptureBoundaryMs === undefined && tree.platform === 'posix') {
-          rootCaptureBoundaryMs = tree.tree.capturedAtMs
-        }
         return
       }
       if (snapshot !== null) {
-        const merged = mergeClaudeCapturedTrees(snapshot, tree)
-        if (merged) {
-          snapshot = merged
-        } else {
-          // A same-PID identity change is a recycle/replace decision, not an
-          // absent descendant. Discard the proof rather than signal either
-          // identity; a root mismatch also fences the late root kill below.
-          rootIdentityUnsafe =
-            snapshot.platform !== tree.platform ||
-            (snapshot.platform === 'posix' &&
-              tree.platform === 'posix' &&
-              snapshot.tree.rootPgid !== tree.tree.rootPgid) ||
-            (snapshot.platform === 'win32' &&
-              tree.platform === 'win32' &&
-              (snapshot.tree.root.pid !== tree.tree.root.pid ||
-                snapshot.tree.root.creationTimeMs !== tree.tree.root.creationTimeMs))
-          snapshot = null
-        }
+        // A merge that returns null saw a same-PID identity change: a
+        // recycle/replace decision, not an absent descendant, so no row here may
+        // be signalled from its number. Only the descendant evidence is lost —
+        // the root still leaves through the handle no recycled pid can reach.
+        snapshot = mergeClaudeCapturedTrees(snapshot, tree)
       }
       // Keep an earlier admissible snapshot when this close-boundary read fails;
       // it remains the only identity-safe evidence after root exit.
@@ -283,14 +262,7 @@ export function createClaudeChildTreeReaper(
 
   /** The only source of a tree verdict: every `exited` here is an observation. */
   async function judgeTree(): Promise<DescendantTreeVerdict> {
-    const killRootIfLive = (root: PosixProcessIdentity | WindowsProcessIdentity | undefined) =>
-      terminateClaudeRootIfLive({
-        child,
-        root,
-        exited,
-        identityUnsafe: rootIdentityUnsafe,
-        verifyRoot
-      })
+    const killRoot = (): boolean => terminateClaudeRoot({ child, exited })
     const rootPid = child.pid
     if (!rootPid) {
       // Never spawned, so the OS never created a tree to orphan.
@@ -300,7 +272,7 @@ export function createClaudeChildTreeReaper(
     if (platform === 'win32') {
       // Why taskkill's own outcome is never the verdict: it resolves identically
       // on a timeout, an access denial, a recycled root and a real kill.
-      const { rootVerified, rootKilled } = await terminateClaudeWindowsRoot({
+      const { rootVerified } = await terminateClaudeWindowsRoot({
         snapshot: snapshot?.platform === 'win32' ? snapshot.tree : null,
         exited,
         verifyRoot: (root) => verifyRoot(root),
@@ -310,45 +282,44 @@ export function createClaudeChildTreeReaper(
             : terminateIdentifiedWindowsProcessTree(root, {
                 ownsRoot: () => !exited()
               }).then(() => undefined),
-        killRoot: (root) => killRootIfLive(root)
+        killRoot
       })
       if (!rootVerified && !exited()) {
         return 'unverifiable'
       }
-      const verdict =
-        snapshot?.platform === 'win32'
-          ? await (deps.terminateWindowsDescendants ?? verifyWindowsDescendantSnapshotExit)(
-              snapshot.tree
-            )
-          : 'unverifiable'
-      return !rootKilled && !exited() ? 'unverifiable' : verdict
+      return snapshot?.platform === 'win32'
+        ? await (deps.terminateWindowsDescendants ?? verifyWindowsDescendantSnapshotExit)(
+            snapshot.tree
+          )
+        : 'unverifiable'
     }
     if (snapshot?.platform !== 'posix') {
-      await killRootIfLive(undefined)
+      killRoot()
       return 'unverifiable'
     }
     if (snapshot.tree.descendants.length === 0) {
       // Read while the root was alive and childless: a later table read has no
       // row it could match, so it would add nothing to this observation.
-      const rootKilled = await killRootIfLive(snapshot.tree.root)
-      return rootKilled || exited() ? 'exited' : 'unverifiable'
+      killRoot()
+      return 'exited'
     }
     // Why the root is killed while verification is already running, and never
     // SIGSTOPped first the way the Codex non-group path does: measured on macOS, a
     // killed child of a stopped parent stays a zombie row in ps with its lstart
     // and pgid intact, so verification cannot pass until the root is dead. The
-    // descendants are signalled in the verifier's synchronous prefix, while their
-    // parent links are still real; the root's death then reparents any zombies
-    // to init, which reaps them. After a root exit the kill is a no-op: Node
+    // descendants are signalled by the verifier as soon as it revalidates their
+    // identities; the root's death then reparents any zombies to init, which
+    // reaps them. After a root exit the kill is a no-op: Node
     // drops the handle on exit and never signals a possibly recycled pid.
     const verdictPromise = deps.terminateDescendants
       ? deps.terminateDescendants(snapshot.tree)
       : terminateDescendantSnapshotWithVerdict(snapshot.tree, {
           requireIdentityBeforeSignal: true
         })
-    const rootKilled = await killRootIfLive(snapshot.tree.root)
-    const verdict = await verdictPromise
-    return !rootKilled && !exited() ? 'unverifiable' : verdict
+    killRoot()
+    // What the verification observed is the verdict: a kill that reports no
+    // signal means the handle was already gone, never that the tree survived.
+    return verdictPromise
   }
 
   return {

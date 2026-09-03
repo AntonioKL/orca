@@ -343,7 +343,6 @@ export function hasUnambiguousStartTime(startedAt: string, capturedAtMs: number)
   return startedAtMs < Math.floor(capturedAtMs / 1_000) * 1_000
 }
 
-/** Revalidate a POSIX root's PID/start-time identity immediately before a kill. */
 /**
  * Terminates a snapshotted descendant tree: SIGTERM every descendant now,
  * reaching detached-pgid children the PTY's SIGHUP cannot, then after a grace

@@ -583,8 +583,9 @@ describe('claude child tree reaper', () => {
     await tree.refresh?.()
 
     await expect(tree.reap()).resolves.toBe('unverifiable')
+    // The descendant evidence is discarded; the root's identity never was in doubt.
     expect(terminateDescendants).not.toHaveBeenCalled()
-    expect(child.kill).not.toHaveBeenCalled()
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
   })
 
   it('fails closed when a Windows refresh reuses a PID with a new creation time', async () => {
@@ -613,7 +614,7 @@ describe('claude child tree reaper', () => {
     await expect(tree.reap()).resolves.toBe('unverifiable')
     expect(terminateWindowsTree).not.toHaveBeenCalled()
     expect(terminateWindowsDescendants).not.toHaveBeenCalled()
-    expect(child.kill).not.toHaveBeenCalled()
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
   })
 
   it('queues a fresh boundary behind an output-triggered capture already in flight', async () => {
@@ -755,12 +756,14 @@ describe('claude child tree reaper', () => {
     })
 
     await expect(tree.reap()).resolves.toBe('unverifiable')
+    // An unreadable table costs the snapshot, never the kill on the live root.
+    expect(child.kill).toHaveBeenCalledTimes(1)
     exited = true
     await expect(tree.reap()).resolves.toBe('unverifiable')
     expect(captureDescendants).toHaveBeenCalledTimes(1)
-    // The second attempt observes a dead root and must not signal a recycled pid.
-    // No root identity was captured, so a stale numeric pid is never signalled.
-    expect(child.kill).not.toHaveBeenCalled()
+    // The second attempt observes a dead root: Node has dropped the handle, so
+    // there is nothing left to signal and no recycled pid to reach.
+    expect(child.kill).toHaveBeenCalledTimes(1)
   })
 
   it('discards a walk that found no root instead of proving an empty tree', async () => {
@@ -916,7 +919,8 @@ describe('claude child tree reaper', () => {
 
     await expect(tree.reap()).resolves.toBe('unverifiable')
     expect(terminateWindowsDescendants).not.toHaveBeenCalled()
-    expect(child.kill).not.toHaveBeenCalled()
+    // A host that cannot supply creation times blocks taskkill, not the root kill.
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
   })
 
   it('has nothing to reap for a child that never spawned', async () => {
