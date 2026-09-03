@@ -1,0 +1,118 @@
+import type { CrashReportDetailValue } from '../../shared/crash-reporting'
+import { readSwapVolumeFreeSpaceMB } from './swap-volume-free-space'
+
+// ─── Host system memory for crash reports ───────────────────────────
+// Why: the system outlives the crashed process, so this IS sampleable at
+// process-gone — it separates "renderer grew huge" from "machine out of
+// memory/commit", which the per-process buckets alone cannot.
+// Timing: the gone-time caller reads AFTER the crashed process's memory
+// returned to the OS, so free/swapFree read healthier than they were at kill
+// time. The pre-gone sampler exists to carry a live reading past that.
+// Platform honesty, published as `systemMemoryPressureSignal` so no report can
+// be read as a pressure verdict the platform never gave:
+//   win32  — swapFree is MEMORYSTATUSEX.ullAvailPageFile, i.e. available
+//     COMMIT. Decisive only alongside swap-volume free space, because a
+//     system-managed pagefile grows into it (a 127 MB commit floor healed to
+//     2029 MB mid-hold on the win-lowspec repro, killing nothing).
+//   linux  — `available` is MemAvailable, the real signal. `free` (MemFree) is
+//     not: it excludes page cache and other reclaimable memory.
+//   darwin — none. `free` stays low on healthy machines (file cache plus
+//     compression) and fileBacked/purgeable are only a reclaimability proxy.
+//     The real signal needs `memory_pressure -Q`, a subprocess this sampler
+//     deliberately does not spawn on a periodic timer.
+
+type CrashReportDetails = Record<string, CrashReportDetailValue>
+
+export const SYSTEM_MEMORY_KEY_PREFIX = 'systemMemory'
+
+export function memoryKBFieldMB(value: unknown): number | undefined {
+  const kb = typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  return kb === undefined ? undefined : Math.round(Math.max(0, kb) / 1024)
+}
+
+type SystemMemoryInfoLike = {
+  total?: unknown
+  free?: unknown
+  available?: unknown
+  swapTotal?: unknown
+  swapFree?: unknown
+  fileBacked?: unknown
+  purgeable?: unknown
+}
+
+type SystemMemoryInfoReader = () => SystemMemoryInfoLike | null
+
+/** Which field, if any, carries a real "was the host under pressure" verdict here. */
+export type SystemMemoryPressureSignal = 'available-commit' | 'mem-available' | 'none'
+
+function readElectronSystemMemoryInfo(): SystemMemoryInfoLike | null {
+  const read = (process as NodeJS.Process & { getSystemMemoryInfo?: () => SystemMemoryInfoLike })
+    .getSystemMemoryInfo
+  if (typeof read !== 'function') {
+    return null
+  }
+  try {
+    return read.call(process)
+  } catch {
+    return null
+  }
+}
+
+let systemMemoryInfoReader: SystemMemoryInfoReader = readElectronSystemMemoryInfo
+
+export function setSystemMemoryInfoReaderForTest(reader: SystemMemoryInfoReader | null): void {
+  systemMemoryInfoReader = reader ?? readElectronSystemMemoryInfo
+}
+
+function pressureSignal(
+  platform: NodeJS.Platform,
+  details: CrashReportDetails
+): SystemMemoryPressureSignal {
+  if (platform === 'win32' && `${SYSTEM_MEMORY_KEY_PREFIX}SwapFreeMB` in details) {
+    return 'available-commit'
+  }
+  if (platform === 'linux' && `${SYSTEM_MEMORY_KEY_PREFIX}AvailableMB` in details) {
+    return 'mem-available'
+  }
+  return 'none'
+}
+
+export function getSystemMemoryDetails(
+  platform: NodeJS.Platform = process.platform
+): CrashReportDetails {
+  const info = systemMemoryInfoReader()
+  if (!info) {
+    return {}
+  }
+  const details: CrashReportDetails = {}
+  const fields: readonly [keyof SystemMemoryInfoLike, string][] = [
+    ['total', 'TotalMB'],
+    ['free', 'FreeMB'],
+    ['available', 'AvailableMB'],
+    ['swapTotal', 'SwapTotalMB'],
+    ['swapFree', 'SwapFreeMB'],
+    ['fileBacked', 'FileBackedMB'],
+    ['purgeable', 'PurgeableMB']
+  ]
+  for (const [field, suffix] of fields) {
+    const mb = memoryKBFieldMB(info[field])
+    if (mb !== undefined) {
+      details[`${SYSTEM_MEMORY_KEY_PREFIX}${suffix}`] = mb
+    }
+  }
+  details[`${SYSTEM_MEMORY_KEY_PREFIX}PressureSignal`] = pressureSignal(platform, details)
+  return details
+}
+
+/**
+ * The pre-gone variant: adds swap-volume free space, which needs a statfs and so
+ * is only reachable from the periodic sampler, never from the gone-event path.
+ */
+export async function getLiveSystemMemoryDetails(): Promise<CrashReportDetails> {
+  const details = getSystemMemoryDetails()
+  const swapVolumeFreeMB = await readSwapVolumeFreeSpaceMB()
+  if (swapVolumeFreeMB !== undefined) {
+    details[`${SYSTEM_MEMORY_KEY_PREFIX}SwapVolumeFreeMB`] = swapVolumeFreeMB
+  }
+  return details
+}

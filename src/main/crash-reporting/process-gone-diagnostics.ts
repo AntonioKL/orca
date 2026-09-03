@@ -3,7 +3,13 @@ import {
   sanitizeCrashReportDetails,
   type CrashReportDetailValue
 } from '../../shared/crash-reporting'
-import { getSystemMemoryAtGoneDetails, memoryKBFieldMB } from './gone-time-system-memory'
+import { getSystemMemoryDetails, memoryKBFieldMB } from './system-memory-details'
+import {
+  PRE_GONE_SYSTEM_MEMORY_SAMPLE_INTERVAL_MS,
+  preGoneSystemMemoryDetails,
+  resetPreGoneSystemMemorySamplingForTest,
+  startPreGoneSystemMemorySampling
+} from './pre-gone-host-memory'
 
 type ProcessMetricLike = {
   pid?: unknown
@@ -195,9 +201,7 @@ export function samplePreGoneProcessMetrics(nowMs: number = Date.now()): void {
   try {
     const metrics = app.getAppMetrics()
     preGoneSample = {
-      // Why: the gone-time system read happens after the corpse released its
-      // pages, so only a live sample can show the pressure that refused the alloc.
-      details: { ...collectProcessGoneMetricDetails(metrics), ...getSystemMemoryAtGoneDetails() },
+      details: collectProcessGoneMetricDetails(metrics),
       processes: sampledProcessIdentities(metrics),
       sampledAtMs: nowMs
     }
@@ -206,8 +210,9 @@ export function samplePreGoneProcessMetrics(nowMs: number = Date.now()): void {
   }
 }
 
-export function startPreGoneProcessMetricsSampling(
-  intervalMs: number = PROCESS_METRICS_PRE_GONE_SAMPLE_INTERVAL_MS
+export function startPreGoneCrashSampling(
+  intervalMs: number = PROCESS_METRICS_PRE_GONE_SAMPLE_INTERVAL_MS,
+  systemMemoryIntervalMs: number = PRE_GONE_SYSTEM_MEMORY_SAMPLE_INTERVAL_MS
 ): void {
   if (preGoneSampleTimer) {
     return
@@ -215,26 +220,19 @@ export function startPreGoneProcessMetricsSampling(
   samplePreGoneProcessMetrics()
   preGoneSampleTimer = setInterval(() => samplePreGoneProcessMetrics(), intervalMs)
   preGoneSampleTimer.unref?.()
+  startPreGoneSystemMemorySampling(systemMemoryIntervalMs)
 }
 
-export function resetPreGoneProcessMetricsSamplingForTest(): void {
+export function resetPreGoneCrashSamplingForTest(): void {
   if (preGoneSampleTimer) {
     clearInterval(preGoneSampleTimer)
   }
   preGoneSampleTimer = null
   preGoneSample = null
+  resetPreGoneSystemMemorySamplingForTest()
 }
 
 const PROCESS_METRICS_KEY_PREFIX = 'processMetrics'
-
-// Why: the sample now mixes processMetrics* and systemMemory* keys; only the
-// former carries the prefix to strip, the latter just needs title-casing.
-function preGoneDetailKey(key: string): string {
-  const suffix = key.startsWith(PROCESS_METRICS_KEY_PREFIX)
-    ? key.slice(PROCESS_METRICS_KEY_PREFIX.length)
-    : `${key.charAt(0).toUpperCase()}${key.slice(1)}`
-  return `${PROCESS_METRICS_KEY_PREFIX}PreGone${suffix}`
-}
 
 function preGoneSampleDetails(
   sample: PreGoneProcessMetricsSample,
@@ -247,7 +245,8 @@ function preGoneSampleDetails(
     processMetricsPreGoneCrashedProcessAttributionAmbiguous: true
   }
   for (const [key, value] of Object.entries(sample.details)) {
-    details[preGoneDetailKey(key)] = value
+    details[`${PROCESS_METRICS_KEY_PREFIX}PreGone${key.slice(PROCESS_METRICS_KEY_PREFIX.length)}`] =
+      value
   }
   return details
 }
@@ -281,7 +280,7 @@ export function buildProcessGoneCrashDetails(
   const crashDetails: CrashReportDetails = {
     ...sanitizedDetails,
     ...liveMetricDetails,
-    ...getSystemMemoryAtGoneDetails()
+    ...getSystemMemoryDetails()
   }
   // Why: with the crasher gone, Largest names a survivor — flag that so the
   // live buckets are read as "everyone else", not as the crashed process.
@@ -300,8 +299,10 @@ export function buildProcessGoneCrashDetails(
   if (liveMetricDetails[crashedBucketCountKey] === 0 || sampledSameBucketProcessVanished) {
     crashDetails.processMetricsCrashedProcessAbsent = true
   }
+  const nowMs = Date.now()
   if (preGoneSample) {
-    Object.assign(crashDetails, preGoneSampleDetails(preGoneSample, Date.now()))
+    Object.assign(crashDetails, preGoneSampleDetails(preGoneSample, nowMs))
   }
+  Object.assign(crashDetails, preGoneSystemMemoryDetails(nowMs))
   return crashDetails
 }
