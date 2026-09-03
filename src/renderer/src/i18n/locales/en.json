@@ -16809,7 +16809,8 @@
         "command": "orca orchestration check"
       },
       "structuredSessionCloseFailed": "Could not close this chat session",
-      "structuredSessionLaunchFailed": "Could not open Codex chat",
+      "structuredSessionLaunchFailed": "Could not open {{value0}} chat",
+      "structuredSessionLaunchPending": "Starting {{value0}} chat…",
       "structuredSessionCloseFailedDescription": "The terminal stayed open so the provider remains recoverable.",
       "handoff": {
         "stage": {

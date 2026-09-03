@@ -10,6 +10,7 @@ import {
   agentSessionFingerprintConflict,
   computeAgentSessionPayloadFingerprint
 } from '../../../../shared/agent-session-mutation-envelope'
+import type { z } from 'zod'
 import { defineMethod, defineStreamingMethod, type RpcAnyMethod, type RpcContext } from '../core'
 import {
   ensureStructuredHostInstalled as ensureHostInstalled,
@@ -43,6 +44,29 @@ function subscriptionIdFor(ctx: RpcContext, sessionId: string): string {
   // Shared control multiplexes several streams over one socket; the frame id
   // keeps one subscriber from evicting another on the same session.
   return ctx.requestId ? `${base}:${ctx.requestId}` : base
+}
+
+/**
+ * The attach-shaped entries take the location from the client instead of resolving it from a
+ * worktree, so they never reach the worktree-resolving create-support check. Ask the executing
+ * host the same question directly: the answer includes host-measured facts the client cannot see
+ * or forge, such as whether this machine can read a provider child's process start time.
+ */
+async function attachClientSuppliedLocation(
+  params: z.infer<typeof AttachParams>,
+  ctx: RpcContext
+): Promise<unknown> {
+  await ensureHostInstalled(ctx)
+  const host = requireHost(ctx)
+  if (!host.supportsCreate(params.location, params.agent)) {
+    throw new Error('structured_agent_session_unsupported')
+  }
+  const { agent: _attachAgent, provider: _attachProvider, ...attachWithoutAgent } = params
+  return host.attach(callerFor(ctx), {
+    ...attachWithoutAgent,
+    provider: params.provider as 'claude' | 'codex',
+    agent: params.agent as 'claude' | 'codex'
+  } as AgentSessionAttachParams)
 }
 
 export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
@@ -106,27 +130,13 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
         }
         return result
       }
-      await ensureHostInstalled(ctx)
-      const { agent: _attachAgent, provider: _attachProvider, ...attachWithoutAgent } = params
-      return requireHost(ctx).attach(callerFor(ctx), {
-        ...attachWithoutAgent,
-        provider: params.provider as 'claude' | 'codex',
-        agent: params.agent as 'claude' | 'codex'
-      } as AgentSessionAttachParams)
+      return attachClientSuppliedLocation(params, ctx)
     }
   }),
   defineMethod({
     name: 'agentSession.ensure',
     params: AttachParams,
-    handler: async (params, ctx) => {
-      await ensureHostInstalled(ctx)
-      const { agent: _attachAgent, provider: _attachProvider, ...attachWithoutAgent } = params
-      return requireHost(ctx).attach(callerFor(ctx), {
-        ...attachWithoutAgent,
-        provider: params.provider as 'claude' | 'codex',
-        agent: params.agent as 'claude' | 'codex'
-      } as AgentSessionAttachParams)
-    }
+    handler: async (params, ctx) => attachClientSuppliedLocation(params, ctx)
   }),
   defineMethod({
     name: 'agentSession.send',
