@@ -31,13 +31,42 @@ let preGoneTimer: ReturnType<typeof setInterval> | null = null
 let swapVolumeReadInFlight = false
 let samplingGeneration = 0
 
+const PRESSURE_SIGNAL_KEY = `${SYSTEM_MEMORY_KEY_PREFIX}PressureSignal`
+
+/**
+ * Carries the last volume reading onto the sample that replaces its own.
+ *
+ * Why: a statfs slower than one tick would otherwise make the field vanish from
+ * the reports it exists for — the next tick replaces the sample wholesale, and
+ * the in-flight latch keeps intervening ticks from merging anything. It ships
+ * with its own (now larger) age and, not being co-timed, never names the label.
+ */
+function withCarriedSwapVolume(sample: PreGoneSystemMemorySample): PreGoneSystemMemorySample {
+  const previous = preGoneSample
+  if (!previous || previous.swapVolumeSampledAtMs === undefined) {
+    return sample
+  }
+  const freeMB = previous.details[`${SYSTEM_MEMORY_KEY_PREFIX}SwapVolumeFreeMB`]
+  const volume = previous.details[`${SYSTEM_MEMORY_KEY_PREFIX}SwapVolume`]
+  if (typeof freeMB !== 'number' || typeof volume !== 'string') {
+    return sample
+  }
+  return {
+    ...sample,
+    details: withSwapVolumeFreeSpace(sample.details, { freeMB, volume }, process.platform, false),
+    swapVolumeSampledAtMs: previous.swapVolumeSampledAtMs
+  }
+}
+
 function commitHostMemorySample(nowMs: number): boolean {
   try {
     const details = getSystemMemoryDetails()
-    if (Object.keys(details).length === 0) {
+    // Why not `length === 0`: the signal label is appended unconditionally, so a
+    // reading that resolved no memory field at all still arrives with one key.
+    if (!Object.keys(details).some((key) => key !== PRESSURE_SIGNAL_KEY)) {
       return false
     }
-    preGoneSample = { details, sampledAtMs: nowMs }
+    preGoneSample = withCarriedSwapVolume({ details, sampledAtMs: nowMs })
     return true
   } catch {
     // Why: a failed read must not erase the previous good sample.

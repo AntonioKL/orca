@@ -11,10 +11,15 @@ import type { SwapVolumeFreeSpace } from './swap-volume-free-space'
 // Every reading is labelled `systemMemoryPressureSignal` so no report can be
 // read as a pressure verdict the platform never gave:
 //   win32  — swapFree is MEMORYSTATUSEX.ullAvailPageFile, i.e. available
-//     COMMIT, decisive only next to swap-volume free space because a
-//     system-managed pagefile grows into it (a 127 MB commit floor healed to
-//     2029 MB mid-hold on the win-lowspec repro, killing nothing). Without that
-//     volume datum the verdict is `available-commit-unqualified`.
+//     COMMIT, which pagefile growth can heal (a 127 MB commit floor healed to
+//     2029 MB mid-hold on the win-lowspec repro, killing nothing). Free space on
+//     the swap volume does NOT establish that it could: a fixed-size or disabled
+//     pagefile grows into no amount of empty disk, its maximum is unreadable
+//     here (needs a registry read), and the measured volume is only the DEFAULT
+//     pagefile drive. So a co-timed volume reading is context beside the commit
+//     number — `available-commit-volume-cotimed` — never a verdict. The one
+//     decisive win32 case is a commit limit at or below RAM: no pagefile exists
+//     to grow, so the floor cannot heal (`available-commit-hard-capped`).
 //   linux  — MemAvailable is the real signal; MemFree is not (it excludes page
 //     cache and other reclaimable memory).
 //   darwin — none. `free` stays low on healthy machines and
@@ -44,9 +49,10 @@ type SystemMemoryInfoLike = {
 
 type SystemMemoryInfoReader = () => SystemMemoryInfoLike | null
 
-/** Which field, if any, carries a real "was the host under pressure" verdict here. */
+/** How far this reading may be read as a "was the host under pressure" verdict. */
 export type SystemMemoryPressureSignal =
-  | 'available-commit'
+  | 'available-commit-hard-capped'
+  | 'available-commit-volume-cotimed'
   | 'available-commit-unqualified'
   | 'mem-available'
   | 'none'
@@ -70,14 +76,29 @@ export function setSystemMemoryInfoReaderForTest(reader: SystemMemoryInfoReader 
   systemMemoryInfoReader = reader ?? readElectronSystemMemoryInfo
 }
 
+function numericDetail(details: CrashReportDetails, suffix: string): number | undefined {
+  const value = details[`${SYSTEM_MEMORY_KEY_PREFIX}${suffix}`]
+  return typeof value === 'number' ? value : undefined
+}
+
+/** Windows commit limit = RAM + pagefile, so a limit at or below RAM has no pagefile behind it. */
+function pagefileBacksCommit(details: CrashReportDetails): boolean | undefined {
+  const total = numericDetail(details, 'TotalMB')
+  const swapTotal = numericDetail(details, 'SwapTotalMB')
+  return total === undefined || swapTotal === undefined ? undefined : swapTotal > total
+}
+
 function pressureSignal(
   platform: NodeJS.Platform,
   details: CrashReportDetails,
-  volumeQualifies = true
+  volumeCoTimed = true
 ): SystemMemoryPressureSignal {
   if (platform === 'win32' && `${SYSTEM_MEMORY_KEY_PREFIX}SwapFreeMB` in details) {
-    return volumeQualifies && `${SYSTEM_MEMORY_KEY_PREFIX}SwapVolumeFreeMB` in details
-      ? 'available-commit'
+    if (pagefileBacksCommit(details) === false) {
+      return 'available-commit-hard-capped'
+    }
+    return volumeCoTimed && `${SYSTEM_MEMORY_KEY_PREFIX}SwapVolumeFreeMB` in details
+      ? 'available-commit-volume-cotimed'
       : 'available-commit-unqualified'
   }
   if (platform === 'linux' && `${SYSTEM_MEMORY_KEY_PREFIX}AvailableMB` in details) {
@@ -115,14 +136,14 @@ export function getSystemMemoryDetails(
 
 /**
  * Merges the statfs-derived volume datum, which needs an await and so is only
- * reachable from the periodic sampler, and upgrades the verdict it qualifies.
+ * reachable from the periodic sampler, and relabels the reading it sits beside.
  *
  * `coTimed` false means the statfs outlived the tick that issued it, so this
  * volume number and the commit number beside it describe different moments —
  * during a pagefile-growth storm that is exactly when they diverge, and a
  * pre-storm 40 GB printed next to 200 MB of commit reads as "the pagefile had
  * room", the opposite conclusion. The datum still ships (with its own age), but
- * it may not qualify the verdict.
+ * only a co-timed one is named in the label.
  */
 export function withSwapVolumeFreeSpace(
   details: CrashReportDetails,

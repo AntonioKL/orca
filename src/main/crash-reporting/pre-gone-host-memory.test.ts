@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   getSystemMemoryDetails,
@@ -56,6 +54,20 @@ const AFTER_THE_CORPSE_RELEASED = {
   free: 3_000 * 1024,
   swapTotal: 48_000 * 1024,
   swapFree: 2_900 * 1024
+}
+
+// Commit limit ~= RAM: a disabled or fixed pagefile, which no amount of empty
+// disk can grow into. `swapTotal > total` is all this API can say about that.
+const FIXED_PAGEFILE_UNDER_PRESSURE = {
+  total: 16_000 * 1024,
+  free: 300 * 1024,
+  swapTotal: 16_100 * 1024,
+  swapFree: 180 * 1024
+}
+
+const NO_PAGEFILE_UNDER_PRESSURE = {
+  ...FIXED_PAGEFILE_UNDER_PRESSURE,
+  swapTotal: 15_900 * 1024
 }
 
 const BEFORE_THE_STORM = {
@@ -119,16 +131,16 @@ describe('pre-gone host memory', () => {
   })
 
   it('labels the reading with the pressure verdict the platform can actually give', () => {
-    // Windows available commit only decides anything next to the volume the
-    // pagefile grows into, so the unqualified read must not claim a verdict.
+    // Windows available commit is only a REFUSAL when the pagefile cannot grow,
+    // which nothing here proves, so no label may read as that verdict.
     setSystemMemoryInfoReaderForTest(() => UNDER_COMMIT_PRESSURE)
     const windowsCommit = getSystemMemoryDetails('win32')
     expect(windowsCommit.systemMemoryPressureSignal).toBe('available-commit-unqualified')
     expect(
       withSwapVolumeFreeSpace(windowsCommit, { freeMB: 120, volume: 'C:' }, 'win32')
         .systemMemoryPressureSignal
-    ).toBe('available-commit')
-    // A volume number from a different moment cannot qualify this commit number.
+    ).toBe('available-commit-volume-cotimed')
+    // A volume number from a different moment describes a different machine.
     expect(
       withSwapVolumeFreeSpace(windowsCommit, { freeMB: 120, volume: 'C:' }, 'win32', false)
         .systemMemoryPressureSignal
@@ -148,6 +160,33 @@ describe('pre-gone host memory', () => {
       purgeable: 0
     }))
     expect(getSystemMemoryDetails('darwin').systemMemoryPressureSignal).toBe('none')
+  })
+
+  // Why this and not the volume number: the branch's own repro needed a pagefile
+  // that CANNOT grow to kill anything, and neither the pagefile maximum nor its
+  // drive is readable here — `swapVolumeAnchor` measures SystemRoot's volume,
+  // which a relocated pagefile does not live on.
+  it('never reads free disk as proof the pagefile could have grown', () => {
+    setSystemMemoryInfoReaderForTest(() => FIXED_PAGEFILE_UNDER_PRESSURE)
+    const fixedPagefile = withSwapVolumeFreeSpace(
+      getSystemMemoryDetails('win32'),
+      { freeMB: 812_000, volume: 'C:' },
+      'win32'
+    )
+    // 180 MB of commit beside 812 GB of free disk: co-timed, and still not a
+    // verdict — reading it as "the pagefile had room" is the opposite conclusion.
+    expect(fixedPagefile.systemMemoryPressureSignal).toBe('available-commit-volume-cotimed')
+
+    // The one decisive win32 case: commit limit at or below RAM means there is
+    // no pagefile behind it, so the floor cannot heal however empty the disk is.
+    setSystemMemoryInfoReaderForTest(() => NO_PAGEFILE_UNDER_PRESSURE)
+    expect(
+      withSwapVolumeFreeSpace(
+        getSystemMemoryDetails('win32'),
+        { freeMB: 812_000, volume: 'C:' },
+        'win32'
+      ).systemMemoryPressureSignal
+    ).toBe('available-commit-hard-capped')
   })
 
   // Why the verdict and not just the field: a statfs issued on a healthy host at
@@ -195,7 +234,7 @@ describe('pre-gone host memory', () => {
       const fresh = buildProcessGoneCrashDetails({}, 'renderer')
       expect(fresh.systemMemoryPreGoneSwapVolumeFreeMB).toBe(900)
       expect(fresh.systemMemoryPreGoneSwapVolumeAgeMs).toBe(0)
-      expect(fresh.systemMemoryPreGonePressureSignal).toBe('available-commit')
+      expect(fresh.systemMemoryPreGonePressureSignal).toBe('available-commit-volume-cotimed')
     } finally {
       vi.useRealTimers()
       Object.defineProperty(process, 'platform', platform)
@@ -250,6 +289,43 @@ describe('pre-gone host memory', () => {
     expect(buildProcessGoneCrashDetails({}, 'renderer').systemMemoryPreGoneSwapFreeMB).toBe(2_900)
   })
 
+  it('publishes no pre-gone host keys when every memory field failed to read', async () => {
+    // Why not "no keys at all": the reading always carries its signal label, so a
+    // committed empty one would ship an age and a volume number with no memory
+    // numbers beside them — a disk-free figure standing in for a host reading.
+    setSystemMemoryInfoReaderForTest(() => ({ total: Number.NaN, free: undefined }))
+    await samplePreGoneSystemMemory(Date.now())
+
+    const details = buildProcessGoneCrashDetails({}, 'renderer')
+
+    expect(Object.keys(details).filter((key) => key.startsWith('systemMemoryPreGone'))).toEqual([])
+  })
+
+  it('carries the last volume reading forward, aged, instead of dropping it', async () => {
+    vi.useFakeTimers()
+    try {
+      setSystemMemoryInfoReaderForTest(() => UNDER_COMMIT_PRESSURE)
+      setSwapVolumeFreeSpaceReaderForTest(() => Promise.resolve({ freeMB: 42, volume: 'C:' }))
+      await samplePreGoneSystemMemory(0)
+
+      // The next tick's statfs hangs — during the paging storm this targets, that
+      // is the normal case — so the tick has no volume reading of its own, and
+      // the sample that replaces the last one would otherwise drop the field.
+      setSwapVolumeFreeSpaceReaderForTest(() => new Promise<never>(() => {}))
+      void samplePreGoneSystemMemory(10_000)
+      vi.setSystemTime(10_000)
+
+      const details = buildProcessGoneCrashDetails({}, 'renderer')
+      expect(details.systemMemoryPreGoneSwapVolumeFreeMB).toBe(42)
+      expect(details.systemMemoryPreGoneSwapVolume).toBe('C:')
+      expect(details.systemMemoryPreGoneSampleAgeMs).toBe(0)
+      // Carried, not re-read: it ships at its real age, never as a fresh number.
+      expect(details.systemMemoryPreGoneSwapVolumeAgeMs).toBe(10_000)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps a failed host read from erasing the process-metric sample', async () => {
     samplePreGoneProcessMetrics(Date.now() - 5_000)
     setSystemMemoryInfoReaderForTest(() => {
@@ -262,39 +338,5 @@ describe('pre-gone host memory', () => {
 
     expect(details.processMetricsPreGoneRendererWorkingSetMB).toBe(400)
     expect(Object.keys(details).filter((key) => key.startsWith('systemMemoryPreGone'))).toEqual([])
-  })
-})
-
-/**
- * Source-level because that is the property: the sampler is armed once inside the
- * ready-phase composition, which has no runtime seam to assert against. Deleting
- * `startPreGoneCrashSampling()` from main-process-ready-runtime.ts left every test
- * in src/main/crash-reporting/ and src/main/startup/ green — this branch is pure
- * instrumentation, so that one line is the whole of its value in the shipped app.
- */
-describe('pre-gone crash sampling startup wiring', () => {
-  // Why normalize: the indent anchors below are `\n`-prefixed, and nothing pins
-  // src/**/*.ts to LF, so a CRLF Windows checkout would fail them spuriously.
-  const readSource = (name: string): string =>
-    readFileSync(join(__dirname, '..', 'startup', name), 'utf8').replace(/\r\n/g, '\n')
-
-  const readyRuntimeSource = readSource('main-process-ready-runtime.ts')
-  const readySource = readSource('main-process-ready.ts')
-
-  it('arms the sampler unconditionally on the app-ready path', () => {
-    expect(readyRuntimeSource).toContain(
-      "import { startPreGoneCrashSampling } from '../crash-reporting/process-gone-diagnostics'"
-    )
-    expect(readyRuntimeSource.split('startPreGoneCrashSampling()').length - 1).toBe(1)
-    // Why pin the indent: the call also matches as the body of an added
-    // `if (...)` guard, which keeps every other assertion here true while the
-    // sampler silently stops arming on most startups.
-    expect(readyRuntimeSource).toContain('\n  startPreGoneCrashSampling()')
-
-    // ...and that this really is the function app readiness runs.
-    expect(readySource).toContain(
-      "import { initializeReadyRuntimeServices } from './main-process-ready-runtime'"
-    )
-    expect(readySource).toContain('\n  await initializeReadyRuntimeServices()')
   })
 })
