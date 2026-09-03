@@ -1,9 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runProcess } from '../../shared/child-process/run-process'
 import { getIcaclsExePath } from '../win32-utils'
+import { removeTreeSync } from '../../shared/windows-transient-lock-removal'
 import {
   probeWindowsInstallDirAcl,
   resetWindowsInstallDirAclProbeForTest
@@ -64,8 +65,11 @@ describeOnWindows('install-dir package ACL repair against the real icacls', () =
   })
 
   afterAll(() => {
-    rmSync(installDir, { recursive: true, force: true })
-    rmSync(userDataPath, { recursive: true, force: true })
+    // Why removeTreeSync: two icacls.exe children just rewrote DACLs on this tree, so a
+    // raw rmSync races handles Windows has not released and throws EPERM after the
+    // assertions already passed.
+    removeTreeSync(installDir)
+    removeTreeSync(userDataPath)
   })
 
   function probeVerdict(): Promise<Record<string, unknown>> {
