@@ -241,6 +241,34 @@ describe('Claude structured dispatch image limits', () => {
     })
   })
 
+  it('does not let a legacy result for timed-out ordinary dispatch A resolve slash dispatch B', async () => {
+    const session = sessionFor()
+    const first = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'ordinary' }]) },
+      100
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+    await expect(first).resolves.toMatchObject({ state: 'unknown' })
+
+    const second = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-2', body: userMessage([{ type: 'text', text: '/permissions' }]) },
+      100
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+
+    expect(
+      resolveClaudeReplayWaiter(session, {
+        type: 'result',
+        subtype: 'success',
+        session_id: 'provider-session',
+        uuid: 'legacy-result-a'
+      })
+    ).toBe(false)
+    await expect(second).resolves.toMatchObject({ state: 'unknown' })
+  })
+
   it('removes only its own waiter when a later send fails', async () => {
     const session = sessionFor()
     const first = dispatchClaudeTurn(

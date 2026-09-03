@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   ClaudeTranscriptTailIncompleteError,
@@ -347,6 +347,28 @@ describe('resolveSessionFilePath', () => {
         previousLeafUuid: 'old'
       })
     ).rejects.toThrow('sibling branch')
+    expect(calls).toEqual(['old'])
+  })
+
+  it('does not accept a divergent sibling after a truncated-tail reproof', async () => {
+    const calls: (string | null)[] = []
+    const readTranscriptLeaf = vi.fn(
+      async ({ previousLeafUuid }: { previousLeafUuid: string | null }) => {
+        calls.push(previousLeafUuid)
+        if (calls.length === 1) {
+          throw new ClaudeTranscriptTailIncompleteError()
+        }
+        return 'divergent-sibling'
+      }
+    )
+
+    await expect(
+      readClaudeTranscriptLeafWithReproof({
+        readTranscriptLeaf,
+        providerSessionId: 'session-1',
+        previousLeafUuid: 'old'
+      })
+    ).rejects.toBeInstanceOf(ClaudeTranscriptTailIncompleteError)
     expect(calls).toEqual(['old'])
   })
 

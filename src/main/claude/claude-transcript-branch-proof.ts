@@ -203,10 +203,11 @@ export async function readClaudeTranscriptLeafWithReproof(input: {
       previousLeafUuid: input.previousLeafUuid
     })
   } catch (error) {
+    // A missing cursor can be stale after compaction and is safe to re-prove from the root. A torn
+    // tail is still being written; dropping the cursor would make a later sibling look admissible.
     if (
       input.previousLeafUuid === null ||
-      (!(error instanceof ClaudeTranscriptTailIncompleteError) &&
-        !(error instanceof ClaudeTranscriptPreviousCursorMissingError))
+      !(error instanceof ClaudeTranscriptPreviousCursorMissingError)
     ) {
       throw error
     }

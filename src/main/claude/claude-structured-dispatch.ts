@@ -98,7 +98,9 @@ export function resolveClaudeReplayWaiter(
   if (isCompletedCommand && !current?.acceptsResult) {
     return false
   }
-  if (isCompletedCommand && session.retiredDispatchWaiters.some((waiter) => waiter.acceptsResult)) {
+  // A legacy result has no dispatch correlation. Any retired waiter makes queue order ambiguous,
+  // even when the retired dispatch was an ordinary turn rather than a slash command.
+  if (isCompletedCommand && session.retiredDispatchWaiters.length > 0) {
     return false
   }
   // Once an eviction occurred, a fresh result uuid cannot be joined to a waiter by queue order.

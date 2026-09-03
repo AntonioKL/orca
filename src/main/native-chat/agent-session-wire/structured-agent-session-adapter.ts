@@ -149,6 +149,8 @@ export type StructuredAgentSessionAdapter = {
     input: StructuredAgentSessionSetOptionInput
   ): Promise<void | Readonly<Record<string, string>>>
   readOptions?(input: { sessionId: string; fence: number }): Promise<AgentSessionOptionsResult>
+  /** Option keys skipped after a provider rejected their persisted restore value. */
+  readOptionRestoreFailures?(sessionId: string): readonly string[]
   /** Transcript path for journal recovery. Omit to let the existing session-file
    *  resolver discover it from the provider session id. */
   historyFilePath?(input: { identity: AgentSessionJournalIdentity }): Promise<string | null>
