@@ -309,8 +309,8 @@ export function createClaudeChildTreeReaper(
     // and pgid intact, so verification cannot pass until the root is dead. The
     // descendants are signalled by the verifier as soon as it revalidates their
     // identities; the root's death then reparents any zombies to init, which
-    // reaps them. After a root exit the kill is a no-op: Node
-    // drops the handle on exit and never signals a possibly recycled pid.
+    // reaps them. After a root exit the kill is a no-op: Node drops the handle
+    // on exit and never signals a possibly recycled pid.
     const verdictPromise = deps.terminateDescendants
       ? deps.terminateDescendants(snapshot.tree)
       : terminateDescendantSnapshotWithVerdict(snapshot.tree, {
