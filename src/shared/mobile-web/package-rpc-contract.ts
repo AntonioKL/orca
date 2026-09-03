@@ -7,12 +7,18 @@ import {
 import { isMobileWebBase64, isMobileWebSha256 } from './protocol-token-contract'
 
 export const MOBILE_WEB_PACKAGE_MAX_CONCURRENT_READS = 4
+// A ranged gzip read answers this many 48 KiB chunks in one round trip. 384 KiB of
+// incompressible bytes still fits the relay's 1 MiB control-lane frame after gzip,
+// base64, and the E2EE layer's own base64 (a ~1.78x expansion in total).
+export const MOBILE_WEB_PACKAGE_RANGE_CHUNKS = 8
+export const MOBILE_WEB_PACKAGE_MAX_RANGE_BYTES =
+  MOBILE_WEB_PACKAGE_RANGE_CHUNKS * MOBILE_WEB_PACKAGE_CHUNK_BYTES
 export const MOBILE_WEB_PACKAGE_MAX_IN_FLIGHT_BYTES =
-  MOBILE_WEB_PACKAGE_MAX_CONCURRENT_READS * MOBILE_WEB_PACKAGE_CHUNK_BYTES
+  MOBILE_WEB_PACKAGE_MAX_CONCURRENT_READS * MOBILE_WEB_PACKAGE_MAX_RANGE_BYTES
 export const MOBILE_WEB_PACKAGE_CHUNK_BASE64_CHARS =
   Math.ceil(MOBILE_WEB_PACKAGE_CHUNK_BYTES / 3) * 4
 // Deflate can add a small stored-block header to incompressible chunks.
-export const MOBILE_WEB_PACKAGE_GZIP_CHUNK_BYTES = MOBILE_WEB_PACKAGE_CHUNK_BYTES + 64
+export const MOBILE_WEB_PACKAGE_GZIP_CHUNK_BYTES = MOBILE_WEB_PACKAGE_MAX_RANGE_BYTES + 64
 export const MOBILE_WEB_PACKAGE_GZIP_CHUNK_BASE64_CHARS =
   Math.ceil(MOBILE_WEB_PACKAGE_GZIP_CHUNK_BYTES / 3) * 4
 
@@ -45,7 +51,17 @@ export const MobileWebPackageAssetParamsSchema = z
   .object({
     buildId: z.string().refine(isMobileWebSha256),
     path: AssetPathSchema,
-    offset: z.number().int().nonnegative()
+    offset: z.number().int().nonnegative(),
+    // Optional, and only on mobileWeb.package.asset.gzip: hosts predating
+    // MOBILE_WEB_PACKAGE_RANGE_RUNTIME_CAPABILITY reject it (the schema is strict), so
+    // clients must not send it before the capability probe reports the host supports it.
+    length: z
+      .number()
+      .int()
+      .positive()
+      .max(MOBILE_WEB_PACKAGE_MAX_RANGE_BYTES)
+      .refine((length) => length % MOBILE_WEB_PACKAGE_CHUNK_BYTES === 0)
+      .optional()
   })
   .strict()
 
@@ -75,7 +91,7 @@ export const MobileWebPackageGzipAssetChunkSchema = z
     buildId: z.string().refine(isMobileWebSha256),
     path: AssetPathSchema,
     offset: z.number().int().nonnegative(),
-    sourceByteLength: z.number().int().positive().max(MOBILE_WEB_PACKAGE_CHUNK_BYTES),
+    sourceByteLength: z.number().int().positive().max(MOBILE_WEB_PACKAGE_MAX_RANGE_BYTES),
     byteLength: z.number().int().positive().max(MOBILE_WEB_PACKAGE_GZIP_CHUNK_BYTES),
     sha256: z.string().refine(isMobileWebSha256),
     dataBase64: z

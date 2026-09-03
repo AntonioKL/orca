@@ -2,6 +2,10 @@ import { Text, View } from 'react-native'
 import { hybridShellStyles as styles } from './hybrid-shell-styles'
 import type { MobileWebPackageDownloadProgress } from './mobile-web-package-downloader'
 
+// Backgrounding suspends the connection after MobileRelayBackgroundGrace's window and the
+// staged download is discarded, so the transfer restarts from zero on return.
+const STAY_OPEN_HINT = 'Keep Orca open until this finishes.'
+
 export function MobileWebPackageProgress({
   progress
 }: {
@@ -34,6 +38,9 @@ export function MobileWebPackageProgress({
       <Text style={styles.packageProgressBytes}>
         {formatBytes(progress.completedBytes)} of {formatBytes(progress.totalBytes)}
       </Text>
+      {progress.phase === 'downloading' ? (
+        <Text style={styles.packageProgressBytes}>{STAY_OPEN_HINT}</Text>
+      ) : null}
     </View>
   )
 }

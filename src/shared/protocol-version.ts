@@ -110,6 +110,10 @@ export const CODEX_RESET_CREDIT_RUNTIME_CAPABILITY = 'accounts.codex-reset-credi
 export const ACCOUNT_IMPORT_RUNTIME_CAPABILITY = 'accounts.import-host-credentials.v1' as const
 export const MOBILE_WEB_PACKAGE_RUNTIME_CAPABILITY = 'mobileWeb.package.v1' as const
 export const MOBILE_WEB_PACKAGE_GZIP_RUNTIME_CAPABILITY = 'mobileWeb.package.gzip.v1' as const
+// Why: mobileWeb.package.asset.gzip's params schema is strict, so an optional `length`
+// reaches older hosts as invalid_argument. Clients may only request a multi-chunk range
+// once the host advertises it.
+export const MOBILE_WEB_PACKAGE_RANGE_RUNTIME_CAPABILITY = 'mobileWeb.package.range.v1' as const
 // Why: older hosts cannot reconcile terminal.create's mutation after losing the reply, so clients may only retry unknown outcomes when advertised.
 export const TERMINAL_CREATE_IDEMPOTENCY_RUNTIME_CAPABILITY =
   'terminal.create-idempotency.v2' as const
@@ -238,6 +242,7 @@ export const RUNTIME_CAPABILITIES = [
   CODEX_RESET_CREDIT_RUNTIME_CAPABILITY,
   MOBILE_WEB_PACKAGE_RUNTIME_CAPABILITY,
   MOBILE_WEB_PACKAGE_GZIP_RUNTIME_CAPABILITY,
+  MOBILE_WEB_PACKAGE_RANGE_RUNTIME_CAPABILITY,
   SKILL_INSTALL_CAPABILITY,
   SKILL_BUNDLE_INSTALL_CAPABILITY,
   SKILL_INSTALL_CANCEL_CAPABILITY,
