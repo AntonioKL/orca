@@ -31,8 +31,8 @@ class MobileWebPackageStoreTest {
     val asset = store.readAsset(sessionId, "index.html")
 
     assertEquals(fixture.buildId, session["buildId"])
-    assertEquals(52, sessionId.length)
-    assertEquals(true, Regex("[a-z2-7]{52}").matches(sessionId))
+    assertEquals(43, sessionId.length)
+    assertEquals(true, Regex("[A-Za-z0-9_-]{43}").matches(sessionId))
     assertEquals("${mobileWebOriginForSession(sessionId)}/#$sessionId", session["url"])
     assertEquals("text/html; charset=utf-8", asset.contentType)
     assertArrayEquals(fixture.bytes, asset.bytes)

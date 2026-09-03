@@ -37,7 +37,7 @@ class MobileWebPackageStoreGeneratedMutationTest {
     }
 
     val stageId = store.beginStage("generated-host", fixture.manifest, fixture.canonical)
-    assertTrue(stageId.matches(Regex("^[a-z2-7]{52}$")))
+    assertTrue(stageId.matches(Regex("^[A-Za-z0-9_-]{43}$")))
     val encoded = Base64.getEncoder().encodeToString(fixture.bytes)
     repeat(256) { iteration ->
       val characters = encoded.toCharArray()
