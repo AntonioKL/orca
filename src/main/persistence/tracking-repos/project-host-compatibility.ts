@@ -10,9 +10,51 @@ export function projectHostSetupCompatibilityStateEqual(
   nextState: Pick<PersistedState, 'projects' | 'projectHostSetups'>
 ): boolean {
   return (
-    JSON.stringify(state.projects ?? []) === JSON.stringify(nextState.projects) &&
-    JSON.stringify(state.projectHostSetups ?? []) === JSON.stringify(nextState.projectHostSetups)
+    projectsEqual(state.projects ?? [], nextState.projects ?? []) &&
+    setupsEqual(state.projectHostSetups ?? [], nextState.projectHostSetups ?? [])
   )
+}
+
+function projectsEqual(
+  a: NonNullable<PersistedState['projects']>,
+  b: NonNullable<PersistedState['projects']>
+): boolean {
+  if (a === b) {
+    return true
+  }
+  if (a.length !== b.length) {
+    return false
+  }
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === b[i]) {
+      continue
+    }
+    if (JSON.stringify(a[i]) !== JSON.stringify(b[i])) {
+      return false
+    }
+  }
+  return true
+}
+
+function setupsEqual(
+  a: NonNullable<PersistedState['projectHostSetups']>,
+  b: NonNullable<PersistedState['projectHostSetups']>
+): boolean {
+  if (a === b) {
+    return true
+  }
+  if (a.length !== b.length) {
+    return false
+  }
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === b[i]) {
+      continue
+    }
+    if (JSON.stringify(a[i]) !== JSON.stringify(b[i])) {
+      return false
+    }
+  }
+  return true
 }
 
 export function isRepoBackedProjectHostSetup(

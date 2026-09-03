@@ -21,13 +21,19 @@ function snapshotsAreIdentical(
   previous: RemoteWorkspaceObservedSnapshot,
   next: RemoteWorkspaceSnapshot
 ): boolean {
-  return (
-    previous.namespace === next.namespace &&
-    previous.revision === next.revision &&
-    previous.updatedAt === next.updatedAt &&
-    previous.schemaVersion === next.schemaVersion &&
-    isDeepStrictEqual(previous.session, next.session)
-  )
+  if (
+    previous.namespace !== next.namespace ||
+    previous.revision !== next.revision ||
+    previous.updatedAt !== next.updatedAt ||
+    previous.schemaVersion !== next.schemaVersion
+  ) {
+    return false
+  }
+  // Why: revision is the host's monotonic version — same revision is the same observation, skip the deep walk.
+  if (previous.revision === next.revision) {
+    return true
+  }
+  return isDeepStrictEqual(previous.session, next.session)
 }
 
 function rememberRemoteWorkspaceSnapshotEntry(
