@@ -57,7 +57,8 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       callbacks: {
         deliver: (attempt, sessionId, event) => this.deliver(attempt, sessionId, event),
         emit: (session, events, event) => this.emit(session, events, event),
-        handleExit: (sessionId, attempt, error) => this.handleExit(sessionId, attempt, error)
+        handleExit: (sessionId, attempt, error) => this.handleExit(sessionId, attempt, error),
+        settleExit: (sessionId, exit) => this.settleUnexpectedExit(sessionId, exit)
       }
     })
 

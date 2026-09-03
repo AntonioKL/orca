@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import type { ClaudeStructuredSessionEvent } from './claude-structured-session-adapter'
 import { ClaudeTranscriptPreviousCursorMissingError } from './claude-transcript-branch-proof'
 import {
@@ -344,5 +345,112 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
     await tick()
 
     expect(events.filter((event) => event.type === 'ended')).toHaveLength(1)
+  })
+
+  it('settles a retained exit before reacquisition replaces its provider session', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const persistedHandles: unknown[] = []
+    const journalSink: StructuredAgentSessionEventSink = {
+      appendItem: () => {},
+      appendTombstone: () => {},
+      publish: () => {}
+    }
+    const readTranscriptLeaf = vi
+      .fn()
+      .mockRejectedValue(new Error('latest marker is on a sibling branch'))
+    let persisted = false
+    const adapter = adapterFor(
+      claude,
+      { resumed: true, resumeLeafUuid: 'replacement-leaf' },
+      events,
+      persistedHandles,
+      undefined,
+      readTranscriptLeaf,
+      async (handle) => {
+        persisted = true
+        persistedHandles.push(handle)
+      }
+    )
+    const firstAcquisition = await adapter.acquire({
+      identity: identityFor(),
+      fence: 7,
+      spawnToken: 'spawn-9',
+      events: journalSink
+    })
+    const first = claude.connections[0]
+    const oldPrompt = invokeCanUseTool(first, 'Bash', 'permission-retained', 'tool-retained')
+    const oldSession = (
+      adapter as unknown as {
+        sessions: Map<string, { translator: { dispose: () => void } | null }>
+      }
+    ).sessions.get('session-1')
+    expect(oldSession?.translator).not.toBeNull()
+    const disposeTranslator = vi.spyOn(oldSession!.translator!, 'dispose')
+    first.handlers.onMessage?.({
+      type: 'assistant',
+      session_id: PROVIDER_SESSION_ID,
+      uuid: 'observed-retained-leaf'
+    })
+    first.close = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true) as unknown as (typeof first)['close']
+    first.handlers.onExit?.(new Error('crashed before replacement'))
+    await tick()
+
+    expect(oldPrompt.settled()).toBe(false)
+    expect(events.filter((event) => event.type === 'ended')).toEqual([])
+
+    const replacement = await adapter.acquire({
+      identity: {
+        ...identityFor(),
+        providerHandle: {
+          kind: 'claude',
+          sessionId: PROVIDER_SESSION_ID,
+          leafUuid: 'observed-retained-leaf'
+        }
+      },
+      fence: 8,
+      spawnToken: 'spawn-10',
+      events: journalSink
+    })
+
+    expect(persisted).toBe(true)
+    expect(disposeTranslator).toHaveBeenCalledOnce()
+    expect(persistedHandles).toEqual([
+      {
+        sessionId: 'session-1',
+        providerSessionId: PROVIDER_SESSION_ID,
+        leafUuid: 'observed-retained-leaf',
+        fence: 7
+      }
+    ])
+    expect(readTranscriptLeaf).toHaveBeenCalledWith({
+      providerSessionId: PROVIDER_SESSION_ID,
+      previousLeafUuid: 'observed-retained-leaf',
+      claudeConfigDir: '/accounts/claude'
+    })
+    expect(oldPrompt.settled()).toBe(true)
+    expect(events.filter((event) => event.type === 'ended')).toEqual([
+      {
+        type: 'ended',
+        sessionId: 'session-1',
+        reason: 'crashed before replacement',
+        cause: 'unexpected-exit',
+        fence: 7,
+        acquisitionGeneration: firstAcquisition.acquisitionGeneration
+      }
+    ])
+    expect(replacement.link).toMatchObject({
+      handle: {
+        provider: 'claude',
+        sessionId: PROVIDER_SESSION_ID,
+        leafUuid: 'replacement-leaf'
+      },
+      origin: 'resumed',
+      mintedAtFence: 8
+    })
+    expect(claude.connections).toHaveLength(2)
   })
 })

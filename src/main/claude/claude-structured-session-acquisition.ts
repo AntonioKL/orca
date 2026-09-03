@@ -56,6 +56,7 @@ type AcquireCallbacks = {
     event: ClaudeStructuredSessionEvent
   ) => void
   handleExit: (sessionId: string, attempt: ClaudeAcquisitionAttempt, error: Error) => void
+  settleExit: (sessionId: string, exit: ClaudeSessionExit) => Promise<void>
 }
 
 export async function acquireClaudeSession({
@@ -141,9 +142,10 @@ export async function acquireClaudeSession({
       if (!proven) {
         throw claudeAcquisitionCleanupError(retainedExit.connection, retainedExit.error)
       }
-      // The old child is superseded by this acquisition. It has a true proof,
-      // so discard its lifecycle evidence without publishing a stale recovery.
-      exits.delete(sessionId)
+      // The old child is superseded by this acquisition. Settle its lifecycle
+      // before discarding the retained proof so its cursor and callbacks are
+      // cleaned up exactly once.
+      await callbacks.settleExit(sessionId, retainedExit)
     }
     acquisitions.assertCurrent(sessionId, attempt)
     // Closing persists the prior connection's final leaf, so launch validates that durable head.
