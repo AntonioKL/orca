@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
-import { folderWorkspaceKey } from '../../../shared/workspace-scope'
 import { useAppStore } from '../store'
 import type { WorktreeRuntimeOwnerState } from '../lib/worktree-runtime-owner'
 import { getExecutionHostIdForWorktree } from '../lib/worktree-runtime-owner'
@@ -13,12 +12,17 @@ import {
 } from './web-session-tabs-sync/publisher-identity-fences'
 import type { SessionTabsPublicationEpochHistory } from './web-session-tabs-sync/state'
 import { refreshLocalRuntimeCapabilities } from './local-runtime-capabilities'
+import {
+  knownStructuredSessionWorktreeIds,
+  removeStructuredSessionTabsForVersions,
+  type StructuredSessionTabPublicationVersion
+} from './local-structured-session-tab-retirement'
 
 export const LOCAL_STRUCTURED_SESSION_OWNER = 'local-structured-session'
 let localStructuredSessionTabsRestorePromise: Promise<void> | null = null
 const localStructuredSessionVersionByWorktree = new Map<
   string,
-  { publicationEpoch: string; snapshotVersion: number }
+  StructuredSessionTabPublicationVersion
 >()
 const localStructuredSessionEpochHistoryByWorktree = new Map<
   string,
@@ -81,6 +85,27 @@ export function applyStructuredSessionTabSnapshots(
   settleStructuredSessionMirror()
 }
 
+export function removeLocalStructuredSessionTabs<
+  State extends WebSessionTabsSyncState & WorktreeRuntimeOwnerState
+>(state: State, owner = LOCAL_STRUCTURED_SESSION_OWNER, now = Date.now()): State {
+  return removeStructuredSessionTabsForVersions(
+    state,
+    localStructuredSessionVersionByWorktree,
+    owner,
+    now
+  )
+}
+
+function clearLocalStructuredSessionTabs(): void {
+  const settle = applyWebSessionTabsStorePatch((state) => removeLocalStructuredSessionTabs(state), {
+    frames: []
+  })
+  settle()
+  localStructuredSessionTabsRestorePromise = null
+  localStructuredSessionVersionByWorktree.clear()
+  localStructuredSessionEpochHistoryByWorktree.clear()
+}
+
 export function applyLocalStructuredSessionTabSnapshots<
   State extends WebSessionTabsSyncState & WorktreeRuntimeOwnerState
 >(
@@ -129,20 +154,7 @@ export function applyLocalStructuredSessionTabSnapshots<
   }
   // Drop publisher cursors for worktrees that no longer exist. Without this,
   // every deleted worktree leaves an entry for the lifetime of the renderer.
-  const knownWorktreeIds = new Set<string>(Object.keys(next.unifiedTabsByWorktree))
-  for (const worktrees of Object.values(next.worktreesByRepo ?? {})) {
-    for (const worktree of worktrees) {
-      knownWorktreeIds.add(worktree.id)
-    }
-  }
-  for (const detected of Object.values(next.detectedWorktreesByRepo ?? {})) {
-    for (const worktree of detected.worktrees) {
-      knownWorktreeIds.add(worktree.id)
-    }
-  }
-  for (const workspace of next.folderWorkspaces ?? []) {
-    knownWorktreeIds.add(folderWorkspaceKey(workspace.id))
-  }
+  const knownWorktreeIds = knownStructuredSessionWorktreeIds(next)
   for (const worktreeId of localStructuredSessionVersionByWorktree.keys()) {
     if (!knownWorktreeIds.has(worktreeId)) {
       localStructuredSessionVersionByWorktree.delete(worktreeId)
@@ -282,13 +294,15 @@ export async function startLocalStructuredSessionTabsSync(args: {
 
 export function useLocalStructuredSessionTabsSync(): void {
   const ready = useAppStore(
-    (state) =>
-      state.workspaceSessionReady &&
-      state.terminalStartupRestorationReady &&
-      state.settings?.experimentalStructuredNativeChat === true
+    (state) => state.workspaceSessionReady && state.terminalStartupRestorationReady
   )
+  const enabled = useAppStore((state) => state.settings?.experimentalStructuredNativeChat === true)
   useEffect(() => {
     if (!ready) {
+      return
+    }
+    if (!enabled) {
+      clearLocalStructuredSessionTabs()
       return
     }
     let disposed = false
@@ -303,5 +317,5 @@ export function useLocalStructuredSessionTabsSync(): void {
       disposed = true
       unsubscribe()
     }
-  }, [ready])
+  }, [enabled, ready])
 }

@@ -110,6 +110,25 @@ describe('mobile structured Codex launch', () => {
     })
   })
 
+  it('never creates a legacy sibling after an unclassified create exception', async () => {
+    const client = clientReturning({ ok: true, result: { supported: true } })
+    client.sendRequest.mockImplementationOnce(async () => ({
+      ok: true,
+      result: { supported: true }
+    }))
+    client.sendRequest.mockRejectedValue(new Error('internal error after commit'))
+
+    await expect(createMobileStructuredCodexSession(client, 'workspace-1')).resolves.toMatchObject({
+      kind: 'unknown'
+    })
+    expect(client.sendRequest.mock.calls.map(([method]) => method)).toEqual([
+      'agentSession.createSupport',
+      'agentSession.create',
+      'agentSession.create'
+    ])
+    expect(client.sendRequest.mock.calls[1]?.[1]).toBe(client.sendRequest.mock.calls[2]?.[1])
+  })
+
   it('treats malformed structured responses as unknown', async () => {
     const client = clientReturning(
       { ok: true, result: { supported: true } },

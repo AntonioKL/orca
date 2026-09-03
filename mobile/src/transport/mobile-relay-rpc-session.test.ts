@@ -54,7 +54,7 @@ function openSession() {
   })
 }
 
-async function authenticateSession() {
+async function authenticateSession(capabilitySupported = true) {
   const session = openSession()
   fakes.linkOptions!.onHello({
     type: 'relay-hello',
@@ -92,7 +92,6 @@ async function authenticateSession() {
       _meta: { runtimeId: 'runtime-1' }
     })
   )
-  await vi.waitFor(() => expect(session.getState()).toBe('connected'))
   await vi.waitFor(() => expect(fakes.sendText).toHaveBeenCalledTimes(2))
   const capabilityRequest = JSON.parse(fakes.sendText.mock.calls[1]![0] as string) as {
     id: string
@@ -100,6 +99,25 @@ async function authenticateSession() {
     deviceToken: string
     params: { clientCapabilities?: string[] }
   }
+  expect(session.getState()).toBe('handshaking')
+  fakes.linkOptions!.onText(
+    JSON.stringify(
+      capabilitySupported
+        ? {
+            id: capabilityRequest.id,
+            ok: true,
+            result: capabilityRequest.params,
+            _meta: { runtimeId: 'runtime-1' }
+          }
+        : {
+            id: capabilityRequest.id,
+            ok: false,
+            error: { code: 'method_not_found', message: 'Unknown method' },
+            _meta: { runtimeId: 'runtime-1' }
+          }
+    )
+  )
+  await vi.waitFor(() => expect(session.getState()).toBe('connected'))
   fakes.sendText.mockClear()
   return { session, confirmationRequest: request, capabilityRequest }
 }
@@ -135,6 +153,13 @@ describe('mobile relay RPC session', () => {
       deviceToken: 'device-token'
     })
     expect(session.getAttachDeadlineAt()).toEqual(expect.any(Number))
+  })
+
+  it('connects when an older runtime rejects capability negotiation', async () => {
+    const { session } = await authenticateSession(false)
+
+    expect(session.getState()).toBe('connected')
+    expect(session.getFailure()).toBeNull()
   })
 
   it('rejects a mismatched outer credential version and closes the physical link', () => {

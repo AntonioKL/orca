@@ -22,11 +22,6 @@ export class OrcaRuntimeWithCloseStructuredAgentSessionTab extends OrcaRuntimeWi
   ): Promise<void> {
     const host = getStructuredAgentSessionHost()
     if (host) {
-      // Closing the mobile tab is the structured-session view close: stop the
-      // provider child before removing the durable tab reference.
-      if (typeof host.close === 'function') {
-        await host.close(tab.sessionId)
-      }
       if (typeof host.setSessionTabVisibility === 'function') {
         await host.setSessionTabVisibility(tab.sessionId, false)
       }
@@ -48,6 +43,10 @@ export class OrcaRuntimeWithCloseStructuredAgentSessionTab extends OrcaRuntimeWi
     }
     this.storeMobileSessionSnapshot(worktreeId, nextSnapshot)
     this.emitMobileSessionTabsSnapshot(nextSnapshot)
+    // Retire durable visibility and the runtime snapshot before stopping the provider.
+    if (typeof host?.close === 'function') {
+      await host.close(tab.sessionId)
+    }
   }
 
   // Why: a refused echoed close means the echoing client already pruned its

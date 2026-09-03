@@ -3,9 +3,7 @@ import type {
   AgentSessionMutationResult
 } from '../../../src/shared/agent-session-wire'
 import { structuredAgentSessionPayloadFingerprint } from '../../../src/shared/structured-agent-session-mutation'
-import { isRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
 import type { RpcClient } from '../transport/rpc-client'
-import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import { structuredSessionOperationId } from './mobile-structured-agent-session-rpc'
 
 type StructuredCreateSupport = {
@@ -68,10 +66,6 @@ function unknownCreateResult(error: unknown): MobileStructuredCodexLaunchResult 
   }
 }
 
-function isUnknownCreateError(error: unknown): boolean {
-  return isRpcDeliveryUnknown(error) || isLogicalClientCutoverError(error)
-}
-
 export async function createMobileStructuredCodexSession(
   client: RpcClient,
   worktreeId: string
@@ -107,13 +101,7 @@ export async function createMobileStructuredCodexSession(
       timeoutMs: 15_000,
       budgetSpansConnect: true
     })
-  } catch (error) {
-    if (!isUnknownCreateError(error)) {
-      return {
-        kind: 'failed',
-        message: error instanceof Error ? error.message : 'Could not open Codex chat.'
-      }
-    }
+  } catch {
     // Replay the durable envelope once so a lost acknowledgement cannot create a sibling.
     try {
       response = await client.sendRequest('agentSession.create', params, {

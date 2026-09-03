@@ -79,7 +79,7 @@ describe('mobile rpc-client capabilities', () => {
     globalThis.WebSocket = originalWebSocket
   })
 
-  it('advertises mobile runtime capabilities after auth and before replayed streams', () => {
+  it('waits for mobile capability acknowledgement before replaying streams', async () => {
     const client = connect('ws://desktop.invalid', 'token', 'server-key')
     const socket = mockSockets[0]!
     client.subscribe('session.tabs.subscribe', { worktree: 'id:wt-1' }, () => {})
@@ -92,11 +92,43 @@ describe('mobile rpc-client capabilities', () => {
     expect(capabilityRequest.params).toMatchObject({
       clientCapabilities: expect.arrayContaining(['agent-session.structured.v1'])
     })
-    expect(socket.sent.findIndex((payload) => payload.includes(capabilityRequest.id))).toBeLessThan(
-      socket.sent.findIndex((payload) =>
-        payload.includes(sentRequest(socket, 'session.tabs.subscribe').id)
-      )
+    expect(socket.sent.some((payload) => payload.includes('session.tabs.subscribe'))).toBe(false)
+
+    socket.receive(
+      `encrypted:${JSON.stringify({
+        id: capabilityRequest.id,
+        ok: true,
+        result: capabilityRequest.params,
+        _meta: { runtimeId: 'runtime-1' }
+      })}`
     )
+
+    await vi.waitFor(() => expect(sentRequest(socket, 'session.tabs.subscribe')).toBeDefined())
+
+    client.close()
+  })
+
+  it('replays streams when an older runtime rejects capability negotiation', async () => {
+    const client = connect('ws://desktop.invalid', 'token', 'server-key')
+    const socket = mockSockets[0]!
+    client.subscribe('session.tabs.subscribe', { worktree: 'id:wt-1' }, () => {})
+
+    socket.open()
+    socket.receive(JSON.stringify({ type: 'e2ee_ready' }))
+    socket.receive('encrypted:{"type":"e2ee_authenticated"}')
+
+    const capabilityRequest = sentRequest(socket, 'runtime.clientCapabilities.update')
+    socket.receive(
+      `encrypted:${JSON.stringify({
+        id: capabilityRequest.id,
+        ok: false,
+        error: { code: 'method_not_found', message: 'Unknown method' },
+        _meta: { runtimeId: 'runtime-1' }
+      })}`
+    )
+
+    await vi.waitFor(() => expect(sentRequest(socket, 'session.tabs.subscribe')).toBeDefined())
+    expect(client.getState()).toBe('connected')
 
     client.close()
   })

@@ -13,6 +13,7 @@ import {
   structuredAgentSessionSendBody,
   type StructuredAgentSessionAttachment
 } from '../../../src/shared/structured-agent-session-outbox'
+import { encodeNativeChatTranscriptIdentity } from '../../../src/shared/native-chat-transcript-retention'
 import type { MobileNativeChatSendOutcome } from './mobile-native-chat-send'
 import { projectStructuredAgentSessionMessages } from '../../../src/shared/structured-agent-session-message-projection'
 import { activeStructuredAgentSessionTurnId } from '../../../src/shared/structured-agent-session-projection'
@@ -64,20 +65,19 @@ type StructuredMobileSession = {
 export function useMobileStructuredAgentSession(args: {
   client: RpcClient | null
   sessionId: string | null
+  /** Host/workspace scope used to keep same provider ids isolated. */
+  sourceIdentity?: string
   enabled: boolean
   /** Live transport only; gates the connection-scoped hold, nothing else. */
   connected: boolean
   agent: string | null
   onSendError: (message: string) => void
 }): StructuredMobileSession {
-  const { agent, client, connected, sessionId, enabled, onSendError } = args
+  const { agent, client, connected, sessionId, sourceIdentity = '', enabled, onSendError } = args
+  const sessionKey = encodeNativeChatTranscriptIdentity([sourceIdentity, agent, sessionId])
   const operationIdsRef = useRef(new Map<string, string>())
-  const { state, stateRef, loadingOlder, loadEarlier } = useMobileStructuredAgentState({
-    client,
-    sessionId,
-    enabled,
-    connected
-  })
+  const stateArgs = { client, sessionId, sessionKey, enabled, connected }
+  const { state, stateRef, loadingOlder, loadEarlier } = useMobileStructuredAgentState(stateArgs)
 
   const mutate = useCallback(
     async <TValue>(
@@ -90,7 +90,7 @@ export function useMobileStructuredAgentSession(args: {
         return { status: 'rejected' }
       }
       const targetFence = current.fence
-      const key = `${sessionId}:${fingerprintMethod}:${JSON.stringify(fields)}`
+      const key = `${sessionKey}:${fingerprintMethod}:${JSON.stringify(fields)}`
       const clientOperationId = operationIdsRef.current.get(key) ?? structuredSessionOperationId()
       operationIdsRef.current.set(key, clientOperationId)
       const result = await requestStructuredAgentSessionMutation<TValue>({
@@ -121,7 +121,7 @@ export function useMobileStructuredAgentSession(args: {
       onSendError(result.message)
       return { status: 'rejected' }
     },
-    [client, enabled, onSendError, sessionId]
+    [client, enabled, onSendError, sessionId, sessionKey]
   )
 
   const {
@@ -166,7 +166,7 @@ export function useMobileStructuredAgentSession(args: {
         return 'rejected'
       }
       const fields = { body }
-      const key = `${sessionId}:agentSession.send:${JSON.stringify(fields)}`
+      const key = `${sessionKey}:agentSession.send:${JSON.stringify(fields)}`
       const priorOperationId = operationIdsRef.current.get(key)
       const clientOperationId = priorOperationId ?? structuredSessionOperationId()
       operationIdsRef.current.set(key, clientOperationId)
@@ -192,7 +192,7 @@ export function useMobileStructuredAgentSession(args: {
       onSendError(result.message === 'Request not sent' ? 'Message not sent' : result.message)
       return 'rejected'
     },
-    [client, enabled, onSendError, sessionId]
+    [client, enabled, onSendError, sessionId, sessionKey]
   )
 
   const respondPermission = useCallback(
@@ -249,7 +249,7 @@ export function useMobileStructuredAgentSession(args: {
       return
     }
     const fields = { turnId }
-    const key = `${sessionId}:agentSession.cancel:${JSON.stringify(fields)}`
+    const key = `${sessionKey}:agentSession.cancel:${JSON.stringify(fields)}`
     const clientOperationId = operationIdsRef.current.get(key) ?? structuredSessionOperationId()
     operationIdsRef.current.set(key, clientOperationId)
     void requestStructuredAgentSessionMutation<AgentSessionCancelResult>({
@@ -272,7 +272,7 @@ export function useMobileStructuredAgentSession(args: {
         onSendError(result.message === 'Request not sent' ? 'Stop not sent' : result.message)
       }
     })
-  }, [client, enabled, onSendError, sessionId])
+  }, [client, enabled, onSendError, sessionId, sessionKey])
 
   const messages = useMemo(
     () => projectStructuredAgentSessionMessages(state.items, [], state.submissions),

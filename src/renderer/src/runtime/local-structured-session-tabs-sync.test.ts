@@ -11,6 +11,7 @@ import { buildHydratedTabState } from '../store/slices/tabs-hydration'
 import {
   applyLocalStructuredSessionTabSnapshots,
   projectLocalStructuredSessionTabs,
+  removeLocalStructuredSessionTabs,
   resetLocalStructuredSessionVersionForTests,
   startLocalStructuredSessionTabsSync
 } from './local-structured-session-tabs-sync'
@@ -160,6 +161,19 @@ function expectExactSplit(state: {
 }
 
 describe('local structured session tab projection', () => {
+  it('removes only locally mirrored structured tabs when the feature is disabled', () => {
+    const mirrored = applyLocalStructuredSessionTabSnapshots(createSnapshot(), [
+      structuredInventory('epoch-1', 1, 'codex-1')
+    ])
+
+    const disabled = removeLocalStructuredSessionTabs(mirrored)
+
+    expect(disabled.unifiedTabsByWorktree[WORKTREE_ID]).toEqual([
+      expect.objectContaining({ id: TERMINAL_ID, contentType: 'terminal' })
+    ])
+    expect(disabled.activeTabTypeByWorktree[WORKTREE_ID]).toBe('terminal')
+  })
+
   it('reconnects after a streaming subscription reports an error', async () => {
     vi.useFakeTimers()
     const priorApi = window.api

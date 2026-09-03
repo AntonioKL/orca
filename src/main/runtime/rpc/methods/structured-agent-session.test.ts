@@ -192,6 +192,18 @@ describe('capability gating', () => {
     expect(response).toMatchObject({ ok: true, result: { ok: true } })
     expect(hostCalls.close).toHaveBeenCalledWith(SESSION)
     expect(hostCalls.setSessionTabVisibility).toHaveBeenCalledWith(SESSION, false)
+    expect(hostCalls.setSessionTabVisibility.mock.invocationCallOrder[0]).toBeLessThan(
+      hostCalls.close.mock.invocationCallOrder[0]!
+    )
+  })
+
+  it('does not stop the provider when durable tab retirement fails', async () => {
+    hostCalls.setSessionTabVisibility.mockRejectedValueOnce(new Error('visibility write failed'))
+
+    const response = await call('agentSession.close', { sessionId: SESSION }, STRUCTURED_CLIENT)
+
+    expect(response).toMatchObject({ ok: false })
+    expect(hostCalls.close).not.toHaveBeenCalled()
   })
 
   it('advertises the capability without bumping the protocol version', () => {
@@ -315,6 +327,37 @@ describe('method routing', () => {
     expect(runtimeCalls.publishStructuredAgentSessionTab).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: SESSION, activate: true })
     )
+  })
+
+  it('reports an unknown create outcome when attach commits before tab publication fails', async () => {
+    const worktree = 'id:workspace-1'
+    const params = {
+      envelope: envelope({
+        expectedRuntimeFence: null,
+        payloadFingerprint: computeAgentSessionPayloadFingerprint({
+          method: 'agentSession.create',
+          sessionId: SESSION,
+          fields: { worktree, agent: 'codex' }
+        })
+      }),
+      worktree,
+      agent: 'codex'
+    }
+
+    const response = await call('agentSession.create', params, STRUCTURED_CLIENT, {
+      publishStructuredAgentSessionTab: vi.fn(async () => {
+        throw new Error('publish failed')
+      })
+    })
+
+    expect(hostCalls.attach).toHaveBeenCalledOnce()
+    expect(response).toMatchObject({
+      ok: true,
+      result: {
+        ok: false,
+        refusal: { code: 'agent_session_operation_unknown' }
+      }
+    })
   })
 
   it('separates create from ensure by the fence the client may declare', async () => {

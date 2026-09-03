@@ -10,7 +10,7 @@ import { markRpcDeliveryUnknown } from './rpc-delivery-ambiguity'
 import { openRpcRequestBudget, resolvePostConnectRequestTimeout } from './rpc-request-budget'
 import { isRpcResponse } from './rpc-response-shape'
 import { RpcSessionLivenessWatchdog } from './rpc-session-liveness-watchdog'
-import { mobileRuntimeClientCapabilityUpdateRequest } from './mobile-runtime-client-capabilities'
+import { requestMobileRuntimeCapabilities } from './mobile-runtime-capability-negotiation'
 import type { RpcClient } from './rpc-client'
 import type { ConnectionLogSink, ConnectionState, RpcResponse } from './types'
 
@@ -183,8 +183,8 @@ export function connectMobileRelayRpcSession(args: {
       resumeConfirmation = result.resumeConfirmation
       resumeExpiresAt = result.resumeConfirmation.resumeExpiresAt
       lastConnectedAt = Date.now()
-      sendFrame(
-        mobileRuntimeClientCapabilityUpdateRequest({ id: nextId(), deviceToken: args.deviceToken })
+      await requestMobileRuntimeCapabilities((method, params) =>
+        sendRpc(method, params, requestTimeoutMs, true)
       )
       livenessWatchdog.start(livenessIdentity)
       publishState('connected')
