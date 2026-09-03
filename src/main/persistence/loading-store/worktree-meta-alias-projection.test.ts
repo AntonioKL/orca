@@ -310,6 +310,43 @@ describe('worktree meta alias projection', () => {
     )
   })
 
+  // The rebuild must not materialize a `worktreeMeta` key the file did not have: an explicit
+  // `undefined` outranks the defaults spread, and `normalizeWorktreeLinkedItemMetadata` reads a
+  // non-object `worktreeMeta` as corruption and wipes the lineage maps with it — then persists it.
+  it('keeps the lineage maps when the file carries no worktreeMeta key at all', () => {
+    const dataFile = tempDataFile()
+    writeFileSync(
+      dataFile,
+      JSON.stringify({
+        repos: [{ id: REPO_ID, name: REPO_ID, path: '/tmp/repo-1', worktreesPath: '/tmp' }],
+        worktreeLineageById: {
+          [`${REPO_ID}::/tmp/child`]: {
+            parentWorktreeId: `${REPO_ID}::/tmp/parent`,
+            createdAt: RECENTLY
+          }
+        },
+        workspaceLineageByChildKey: {
+          [`worktree:${REPO_ID}::/tmp/child`]: {
+            parentWorkspaceKey: `worktree:${REPO_ID}::/tmp/parent`,
+            createdAt: RECENTLY
+          }
+        }
+      }),
+      'utf-8'
+    )
+
+    const store = openStore(dataFile)
+
+    expect(Object.keys(store.getAllWorktreeLineage())).toEqual([`${REPO_ID}::/tmp/child`])
+    expect(store.getAllWorktreeMeta()).toEqual({})
+    store.flush()
+    const onDisk = JSON.parse(readFileSync(dataFile, 'utf-8')) as PersistedState
+    expect(Object.keys(onDisk.worktreeLineageById)).toEqual([`${REPO_ID}::/tmp/child`])
+    expect(Object.keys(onDisk.workspaceLineageByChildKey)).toEqual([
+      `worktree:${REPO_ID}::/tmp/child`
+    ])
+  })
+
   it('keeps every row when the alias map is missing or unreadable', () => {
     for (const aliases of [undefined, null, [], { 'local|x': 'not-an-array' }]) {
       const fixture = buildFixture()

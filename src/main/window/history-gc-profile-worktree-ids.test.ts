@@ -75,6 +75,30 @@ describe('getOtherProfileWorktreeIdsForHistoryGc', () => {
     )
   })
 
+  // The serializer omits any `worktreeMeta` row the identity map can rebuild, so on a projected
+  // file the alias keys are the only place those ids appear — and this reader is what stands
+  // between them and a delete of shell history the workspace is still using.
+  it('recovers the ids of locator rows the serializer projected onto the identity map', () => {
+    const root = userDataWithProfiles('active', [
+      { id: 'active', state: { worktreeMeta: {} } },
+      {
+        id: 'other',
+        state: {
+          // Exactly what a projected save writes: the twin row left the locator map entirely.
+          worktreeMeta: { 'repo::/kept': {} },
+          worktreeMetaByIdentity: { 'wt2:local:inst-1': { hostId: 'local', instanceId: 'inst-1' } },
+          worktreeIdentityAliases: { 'local|repo::/projected': ['wt2:local:inst-1'] },
+          worktreeMetaAliasesWithoutLegacyRow: []
+        }
+      }
+    ])
+
+    const result = getOtherProfileWorktreeIdsForHistoryGc(root)
+
+    expect(result.unreadableProfiles).toBe(0)
+    expect(result.ids).toEqual(new Set(['repo::/kept', 'repo::/projected']))
+  })
+
   // The active profile's ids come from the live Store, which is authoritative;
   // re-reading its file would only race a write in progress.
   it('skips the active profile', () => {

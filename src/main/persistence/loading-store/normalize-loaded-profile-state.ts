@@ -56,7 +56,13 @@ export function normalizeLoadedProfileState(
     ),
     // Rebuilds the locator rows the serializer left to the identity map, and restores the shared
     // object reference JSON.parse splits. Not `markNeedsSave`: this IS the canonical on-disk shape.
-    worktreeMeta: hydrateWorktreeMetaAliasProjection(parsed),
+    // Conditional so an absent key stays absent and the defaults spread still supplies `{}`: an
+    // explicit `worktreeMeta: undefined` outranks the spread and sends
+    // `normalizeWorktreeLinkedItemMetadata` down its corrupt-value branch, which wipes the file's
+    // `worktreeLineageById` / `workspaceLineageByChildKey` and persists the wipe.
+    ...(parsed.worktreeMeta === undefined
+      ? {}
+      : { worktreeMeta: hydrateWorktreeMetaAliasProjection(parsed) }),
     worktreeMetaAliasesWithoutLegacyRow: undefined,
     worktreeLineageById: parsed.worktreeLineageById ?? {},
     mobileClientTabSelectionsByDeviceId: normalizePersistedMobileClientTabSelections(
