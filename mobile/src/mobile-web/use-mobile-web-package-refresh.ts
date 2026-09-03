@@ -1,6 +1,7 @@
 import { useEffect, type MutableRefObject } from 'react'
 import ExpoMobileWebShell, { type MobileWebShellSession } from '@orca/expo-mobile-web-shell'
 import { MOBILE_WEB_BRIDGE_PROTOCOL_VERSION } from '../../../src/shared/mobile-web/bridge-contract'
+import { MOBILE_WEB_PACKAGE_MAX_RANGE_BYTES } from '../../../src/shared/mobile-web/package-rpc-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState, HostProfile } from '../transport/types'
 import { createMobileWebNativeStager } from './mobile-web-native-stager'
@@ -76,6 +77,7 @@ export function useMobileWebPackageRefresh(args: {
           {
             shellBridgeVersion: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
             useGzip: packageCapability.gzip,
+            ...(packageCapability.range ? { rangeBytes: MOBILE_WEB_PACKAGE_MAX_RANGE_BYTES } : {}),
             signal: controller.signal,
             onProgress: setPackageProgress,
             reuseVerifiedBuild: async (buildId) => {

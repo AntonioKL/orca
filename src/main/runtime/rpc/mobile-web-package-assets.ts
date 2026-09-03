@@ -1,7 +1,5 @@
-import { createHash } from 'node:crypto'
-import { open, readFile, stat } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { gzipSync } from 'node:zlib'
-import { isAbsolute, relative, resolve } from 'node:path'
 import {
   MOBILE_WEB_PACKAGE_MAX_CONCURRENT_READS,
   MOBILE_WEB_PACKAGE_MAX_IN_FLIGHT_BYTES,
@@ -15,20 +13,19 @@ import {
 } from '../../../shared/mobile-web/package-rpc-contract'
 import {
   MOBILE_WEB_PACKAGE_CHUNK_BYTES,
-  MobileWebManifestSchema,
-  serializeMobileWebManifestForBuildId,
-  type MobileWebAsset,
-  type MobileWebManifest
+  type MobileWebAsset
 } from '../../../shared/mobile-web/manifest-contract'
 import { resolveMobileWebPackageRoot } from './mobile-web-package-root'
-
-type VerifiedMobileWebPackage = {
-  root: string
-  manifestFingerprint: string
-  manifest: MobileWebManifest
-  assetsByPath: ReadonlyMap<string, MobileWebAsset>
-  fileStatsByPath: ReadonlyMap<string, { size: number; mtimeMs: number }>
-}
+import {
+  assertManifestFingerprint,
+  readAssetRange,
+  readManifestBytes,
+  resolveDeclaredAssetPath,
+  sha256,
+  throwIfAborted,
+  verifyPackage,
+  type VerifiedMobileWebPackage
+} from './mobile-web-package-verification'
 
 type PackageReadState = { count: number; bytes: number }
 type AssetRangeReader = (path: string, offset: number, length: number) => Promise<Buffer>
@@ -67,10 +64,31 @@ export class MobileWebPackageAssets {
     params: MobileWebPackageAssetParams,
     options: { connectionId?: string; signal?: AbortSignal } = {}
   ): Promise<MobileWebPackageAssetChunk> {
+    // Ranged reads exist only on the gzip method; the raw chunk schema caps at one chunk.
+    if (params.length !== undefined && params.length !== MOBILE_WEB_PACKAGE_CHUNK_BYTES) {
+      throw new Error('mobile_web_package_offset_invalid')
+    }
+    const read = await this.readVerifiedRange(params, options, MOBILE_WEB_PACKAGE_CHUNK_BYTES)
+    return MobileWebPackageAssetChunkSchema.parse({
+      buildId: read.buildId,
+      path: read.asset.path,
+      offset: params.offset,
+      byteLength: read.bytes.byteLength,
+      sha256: sha256(read.bytes),
+      dataBase64: read.bytes.toString('base64'),
+      eof: read.eof
+    })
+  }
+
+  private async readVerifiedRange(
+    params: MobileWebPackageAssetParams,
+    options: { connectionId?: string; signal?: AbortSignal },
+    requestedLength: number
+  ): Promise<{ buildId: string; asset: MobileWebAsset; bytes: Buffer; eof: boolean }> {
     throwIfAborted(options.signal)
     const verified = await this.getVerifiedPackage()
     const asset = this.validateAssetParams(verified, params)
-    const byteLength = Math.min(MOBILE_WEB_PACKAGE_CHUNK_BYTES, asset.byteLength - params.offset)
+    const byteLength = Math.min(requestedLength, asset.byteLength - params.offset)
     const release = this.acquireRead(options.connectionId ?? 'in-process', byteLength)
     try {
       const path = resolveDeclaredAssetPath(verified.root, asset.path)
@@ -87,15 +105,12 @@ export class MobileWebPackageAssets {
       }
       await assertManifestFingerprint(verified.root, verified.manifestFingerprint)
       throwIfAborted(options.signal)
-      return MobileWebPackageAssetChunkSchema.parse({
+      return {
         buildId: verified.manifest.buildId,
-        path: asset.path,
-        offset: params.offset,
-        byteLength,
-        sha256: sha256(bytes),
-        dataBase64: bytes.toString('base64'),
+        asset,
+        bytes,
         eof: params.offset + byteLength === asset.byteLength
-      })
+      }
     } finally {
       release()
     }
@@ -129,50 +144,67 @@ export class MobileWebPackageAssets {
     params: MobileWebPackageAssetParams,
     options: { connectionId?: string; signal?: AbortSignal } = {}
   ): Promise<MobileWebPackageGzipAssetChunk> {
-    throwIfAborted(options.signal)
-    const verified = await this.getVerifiedPackage()
-    const asset = this.validateAssetParams(verified, params)
-    const key = `${params.buildId}:${params.path}:${params.offset}`
-    let compressed = this.gzipChunks.get(key)
-    let raw: MobileWebPackageAssetChunk
-    if (!compressed) {
-      raw = await this.getAssetChunk(params, options)
-      compressed = gzipSync(Buffer.from(raw.dataBase64, 'base64'), { level: 6 })
-      this.gzipChunks.set(key, compressed)
-    } else {
-      const path = resolveDeclaredAssetPath(verified.root, asset.path)
-      const expectedStat = verified.fileStatsByPath.get(asset.path)!
-      const currentStat = await stat(path)
-      if (currentStat.size !== expectedStat.size || currentStat.mtimeMs !== expectedStat.mtimeMs) {
-        this.cached = null
-        throw new Error('mobile_web_package_asset_changed')
-      }
-      await assertManifestFingerprint(verified.root, verified.manifestFingerprint)
-      const rawByteLength = Math.min(
-        MOBILE_WEB_PACKAGE_CHUNK_BYTES,
-        asset.byteLength - params.offset
+    const requestedLength = params.length ?? MOBILE_WEB_PACKAGE_CHUNK_BYTES
+    const key = `${params.buildId}:${params.path}:${params.offset}:${requestedLength}`
+    const cached = this.gzipChunks.get(key)
+    if (cached) {
+      throwIfAborted(options.signal)
+      const verified = await this.getVerifiedPackage()
+      const asset = this.validateAssetParams(verified, params)
+      await this.assertAssetUnchanged(verified, asset)
+      const sourceByteLength = Math.min(requestedLength, asset.byteLength - params.offset)
+      return this.gzipResponse(
+        verified.manifest.buildId,
+        asset,
+        params.offset,
+        sourceByteLength,
+        cached
       )
-      raw = {
-        buildId: verified.manifest.buildId,
-        path: asset.path,
-        offset: params.offset,
-        byteLength: rawByteLength,
-        sha256: '',
-        dataBase64: '',
-        eof: params.offset + rawByteLength === asset.byteLength
-      }
     }
+    const read = await this.readVerifiedRange(params, options, requestedLength)
+    const compressed = gzipSync(read.bytes, { level: 6 })
+    this.gzipChunks.set(key, compressed)
+    return this.gzipResponse(
+      read.buildId,
+      read.asset,
+      params.offset,
+      read.bytes.byteLength,
+      compressed
+    )
+  }
+
+  private gzipResponse(
+    buildId: string,
+    asset: MobileWebAsset,
+    offset: number,
+    sourceByteLength: number,
+    compressed: Buffer
+  ): MobileWebPackageGzipAssetChunk {
     return MobileWebPackageGzipAssetChunkSchema.parse({
-      buildId: raw.buildId,
-      path: raw.path,
-      offset: raw.offset,
-      sourceByteLength: raw.byteLength,
+      buildId,
+      path: asset.path,
+      offset,
+      sourceByteLength,
       byteLength: compressed.byteLength,
       sha256: sha256(compressed),
       dataBase64: compressed.toString('base64'),
-      eof: raw.eof,
+      eof: offset + sourceByteLength === asset.byteLength,
       encoding: 'gzip'
     })
+  }
+
+  private async assertAssetUnchanged(
+    verified: VerifiedMobileWebPackage,
+    asset: MobileWebAsset
+  ): Promise<void> {
+    const path = resolveDeclaredAssetPath(verified.root, asset.path)
+    const expectedStat = verified.fileStatsByPath.get(asset.path)!
+    const currentStat = await stat(path)
+    if (currentStat.size !== expectedStat.size || currentStat.mtimeMs !== expectedStat.mtimeMs) {
+      this.cached = null
+      throw new Error('mobile_web_package_asset_changed')
+    }
+    await assertManifestFingerprint(verified.root, verified.manifestFingerprint)
   }
 
   private validateAssetParams(
@@ -211,91 +243,6 @@ export class MobileWebPackageAssets {
       }
     }
   }
-}
-
-async function verifyPackage(
-  root: string,
-  manifestBytes: Buffer,
-  manifestFingerprint: string
-): Promise<VerifiedMobileWebPackage> {
-  const manifest = parseManifest(manifestBytes)
-  if (sha256(serializeMobileWebManifestForBuildId(manifest)) !== manifest.buildId) {
-    throw new Error('mobile_web_package_build_invalid')
-  }
-  const fileStatsByPath = new Map<string, { size: number; mtimeMs: number }>()
-  for (const asset of manifest.assets) {
-    const path = resolveDeclaredAssetPath(root, asset.path)
-    const beforeRead = await stat(path)
-    const bytes = await readFile(path)
-    const afterRead = await stat(path)
-    if (bytes.byteLength !== asset.byteLength || sha256(bytes) !== asset.sha256) {
-      throw new Error('mobile_web_package_asset_invalid')
-    }
-    if (beforeRead.size !== afterRead.size || beforeRead.mtimeMs !== afterRead.mtimeMs) {
-      throw new Error('mobile_web_package_asset_changed')
-    }
-    fileStatsByPath.set(asset.path, { size: afterRead.size, mtimeMs: afterRead.mtimeMs })
-  }
-  await assertManifestFingerprint(root, manifestFingerprint)
-  return {
-    root,
-    manifestFingerprint,
-    manifest,
-    assetsByPath: new Map(manifest.assets.map((asset) => [asset.path, asset])),
-    fileStatsByPath
-  }
-}
-
-function parseManifest(manifestBytes: Buffer): MobileWebManifest {
-  try {
-    return MobileWebManifestSchema.parse(JSON.parse(manifestBytes.toString('utf8')))
-  } catch {
-    throw new Error('mobile_web_package_build_invalid')
-  }
-}
-
-async function readManifestBytes(root: string): Promise<Buffer> {
-  try {
-    return await readFile(resolve(root, 'manifest.json'))
-  } catch {
-    throw new Error('mobile_web_package_unavailable')
-  }
-}
-
-async function assertManifestFingerprint(root: string, expected: string): Promise<void> {
-  if (sha256(await readManifestBytes(root)) !== expected) {
-    throw new Error('mobile_web_package_build_changed')
-  }
-}
-
-function resolveDeclaredAssetPath(root: string, assetPath: string): string {
-  const candidate = resolve(root, ...assetPath.split('/'))
-  const child = relative(root, candidate)
-  if (child.startsWith('..') || isAbsolute(child)) {
-    throw new Error('mobile_web_package_asset_path_invalid')
-  }
-  return candidate
-}
-
-async function readAssetRange(path: string, offset: number, length: number): Promise<Buffer> {
-  const file = await open(path, 'r')
-  try {
-    const buffer = Buffer.alloc(length)
-    const { bytesRead } = await file.read(buffer, 0, length, offset)
-    return buffer.subarray(0, bytesRead)
-  } finally {
-    await file.close()
-  }
-}
-
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) {
-    throw new Error('mobile_web_package_cancelled')
-  }
-}
-
-function sha256(value: string | Uint8Array): string {
-  return createHash('sha256').update(value).digest('hex')
 }
 
 export const mobileWebPackageAssets = new MobileWebPackageAssets()

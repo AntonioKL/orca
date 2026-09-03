@@ -96,5 +96,10 @@ export const hybridShellStyles = StyleSheet.create({
     height: '100%',
     borderRadius: radii.button,
     backgroundColor: colors.textSecondary
+  },
+  packageProgressHint: {
+    color: colors.textMuted,
+    fontSize: typography.metaSize,
+    textAlign: 'center'
   }
 })

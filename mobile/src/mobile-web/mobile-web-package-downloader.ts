@@ -1,6 +1,8 @@
 import { Buffer } from 'buffer/'
 import { sha256 } from '@noble/hashes/sha256'
 import {
+  MOBILE_WEB_PACKAGE_MAX_CONCURRENT_READS,
+  MOBILE_WEB_PACKAGE_MAX_RANGE_BYTES,
   MobileWebPackageManifestResponseSchema,
   isMobileWebPackageErrorCode,
   type MobileWebPackageErrorCode
@@ -18,6 +20,9 @@ import {
   decodeGzipMobileWebPackageChunk,
   decodeRawMobileWebPackageChunk
 } from './mobile-web-package-chunk-decoder'
+
+const MOBILE_WEB_PACKAGE_READ_LIMITED_RETRIES = 4
+const MOBILE_WEB_PACKAGE_READ_LIMITED_BACKOFF_MS = 50
 
 export const MOBILE_WEB_PACKAGE_DOWNLOAD_ERROR_CODES = [
   'cancelled',
@@ -68,6 +73,10 @@ type DownloadMobileWebPackageOptions = {
   shellBridgeVersion: number
   signal?: AbortSignal
   useGzip?: boolean
+  /** Chunk reads kept in flight at once. One round trip per 48 KiB otherwise caps throughput. */
+  maxConcurrentRequests?: number
+  /** Bytes per gzip read. Only send above chunkBytes when the host advertises range reads. */
+  rangeBytes?: number
   onProgress?: (progress: MobileWebPackageDownloadProgress) => void
 }
 
@@ -138,25 +147,25 @@ export async function downloadMobileWebPackage<TCommit>(
     await stager.begin(manifest)
     stagingStarted = true
     let completedBytes = 0
-    for (const asset of manifest.assets) {
-      await downloadAsset(
-        request,
-        stager,
-        manifest,
-        asset,
-        chunkBytes,
-        options.signal,
-        options.useGzip,
-        (writtenBytes) => {
-          completedBytes += writtenBytes
-          options.onProgress?.({
-            phase: 'downloading',
-            completedBytes,
-            totalBytes: manifest.totalBytes
-          })
-        }
-      )
-    }
+    await downloadAssetChunks({
+      request,
+      stager,
+      manifest,
+      chunkBytes,
+      signal: options.signal,
+      useGzip: options.useGzip ?? false,
+      rangeBytes: options.useGzip ? clampRangeBytes(chunkBytes, options.rangeBytes) : chunkBytes,
+      maxConcurrentRequests:
+        options.maxConcurrentRequests ?? MOBILE_WEB_PACKAGE_MAX_CONCURRENT_READS,
+      onChunkWritten: (writtenBytes) => {
+        completedBytes += writtenBytes
+        options.onProgress?.({
+          phase: 'downloading',
+          completedBytes,
+          totalBytes: manifest.totalBytes
+        })
+      }
+    })
     throwIfAborted(options.signal)
     options.onProgress?.({
       phase: 'verifying',
@@ -182,58 +191,149 @@ export async function downloadMobileWebPackage<TCommit>(
   }
 }
 
-async function downloadAsset<TCommit>(
-  request: MobileWebPackageRequest,
-  stager: MobileWebPackageStager<TCommit>,
-  manifest: MobileWebManifest,
-  asset: MobileWebAsset,
-  chunkBytes: number,
-  signal: AbortSignal | undefined,
-  useGzip = false,
-  onChunkWritten?: (bytes: number) => void
-): Promise<void> {
-  const assetHash = sha256.create()
-  for (let offset = 0; offset < asset.byteLength; offset += chunkBytes) {
-    throwIfAborted(signal)
-    const result = await requestResult(
-      request,
-      useGzip ? 'mobileWeb.package.asset.gzip' : 'mobileWeb.package.asset',
-      {
-        buildId: manifest.buildId,
-        path: asset.path,
-        offset
-      }
-    )
-    throwIfAborted(signal)
-    const expectedLength = Math.min(chunkBytes, asset.byteLength - offset)
-    const bytes = useGzip
-      ? decodeGzipMobileWebPackageChunk(
-          result,
-          manifest.buildId,
-          asset.path,
-          offset,
-          expectedLength,
-          asset.byteLength
-        )
-      : decodeRawMobileWebPackageChunk(
-          result,
-          manifest.buildId,
-          asset.path,
-          offset,
-          expectedLength,
-          asset.byteLength
-        )
-    if (!bytes) {
-      throw new MobileWebPackageDownloadError('invalid_chunk')
+type ChunkTask = { asset: MobileWebAsset; offset: number; expectedLength: number }
+type SettledChunk = { bytes: Uint8Array } | { failure: unknown }
+
+// The native stage appends each asset chunk at the file's current length, so chunks must reach
+// the stager in offset order even though the reads themselves overlap.
+async function downloadAssetChunks<TCommit>(args: {
+  request: MobileWebPackageRequest
+  stager: MobileWebPackageStager<TCommit>
+  manifest: MobileWebManifest
+  chunkBytes: number
+  signal: AbortSignal | undefined
+  useGzip: boolean
+  rangeBytes: number
+  maxConcurrentRequests: number
+  onChunkWritten: (bytes: number) => void
+}): Promise<void> {
+  const tasks = planChunkTasks(args.manifest, args.rangeBytes)
+  const inFlight = new Map<number, Promise<SettledChunk>>()
+  let window = clampWindow(args.maxConcurrentRequests)
+  let issued = 0
+  let assetHash = sha256.create()
+
+  const shrinkWindow = (): void => {
+    window = Math.max(1, window - 1)
+  }
+  for (let drained = 0; drained < tasks.length; drained += 1) {
+    while (issued < tasks.length && issued - drained < window) {
+      const task = tasks[issued]!
+      inFlight.set(issued, fetchChunk(args, task, shrinkWindow))
+      issued += 1
     }
-    assetHash.update(bytes)
-    await stager.writeAssetChunk(asset, offset, bytes)
-    onChunkWritten?.(bytes.byteLength)
+    const settled = await inFlight.get(drained)!
+    inFlight.delete(drained)
+    if ('failure' in settled) {
+      throw settled.failure
+    }
+    throwIfAborted(args.signal)
+    const task = tasks[drained]!
+    assetHash.update(settled.bytes)
+    // A ranged read answers several stage chunks at once; the native stage still appends
+    // one 48 KiB chunk at a time.
+    for (let written = 0; written < settled.bytes.byteLength; written += args.chunkBytes) {
+      const slice = settled.bytes.subarray(written, written + args.chunkBytes)
+      await args.stager.writeAssetChunk(task.asset, task.offset + written, slice)
+      args.onChunkWritten(slice.byteLength)
+    }
+    if (task.offset + task.expectedLength === task.asset.byteLength) {
+      if (Buffer.from(assetHash.digest()).toString('hex') !== task.asset.sha256) {
+        throw new MobileWebPackageDownloadError('asset_integrity_failed')
+      }
+      assetHash = sha256.create()
+      await args.stager.finishAsset(task.asset)
+    }
   }
-  if (Buffer.from(assetHash.digest()).toString('hex') !== asset.sha256) {
-    throw new MobileWebPackageDownloadError('asset_integrity_failed')
+}
+
+function planChunkTasks(manifest: MobileWebManifest, rangeBytes: number): ChunkTask[] {
+  const tasks: ChunkTask[] = []
+  for (const asset of manifest.assets) {
+    for (let offset = 0; offset < asset.byteLength; offset += rangeBytes) {
+      tasks.push({
+        asset,
+        offset,
+        expectedLength: Math.min(rangeBytes, asset.byteLength - offset)
+      })
+    }
   }
-  await stager.finishAsset(asset)
+  return tasks
+}
+
+// Ranged reads ride mobileWeb.package.asset.gzip's optional `length`, which strict-schema
+// hosts predating MOBILE_WEB_PACKAGE_RANGE_RUNTIME_CAPABILITY reject.
+function clampRangeBytes(chunkBytes: number, rangeBytes: number | undefined): number {
+  if (rangeBytes === undefined || rangeBytes <= chunkBytes) {
+    return chunkBytes
+  }
+  const chunks = Math.min(
+    Math.floor(MOBILE_WEB_PACKAGE_MAX_RANGE_BYTES / chunkBytes),
+    Math.floor(rangeBytes / chunkBytes)
+  )
+  return Math.max(1, chunks) * chunkBytes
+}
+
+function clampWindow(maxConcurrentRequests: number): number {
+  return Number.isInteger(maxConcurrentRequests)
+    ? Math.min(MOBILE_WEB_PACKAGE_MAX_CONCURRENT_READS, Math.max(1, maxConcurrentRequests))
+    : 1
+}
+
+// Never rejects: a queued read that fails while an earlier one is still draining would
+// otherwise surface as an unhandled rejection before the drain loop reaches it.
+async function fetchChunk<TCommit>(
+  args: {
+    request: MobileWebPackageRequest
+    stager: MobileWebPackageStager<TCommit>
+    manifest: MobileWebManifest
+    signal: AbortSignal | undefined
+    useGzip: boolean
+    chunkBytes: number
+    rangeBytes: number
+  },
+  task: ChunkTask,
+  onReadLimited: () => void
+): Promise<SettledChunk> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      throwIfAborted(args.signal)
+      const result = await requestResult(
+        args.request,
+        args.useGzip ? 'mobileWeb.package.asset.gzip' : 'mobileWeb.package.asset',
+        {
+          buildId: args.manifest.buildId,
+          path: task.asset.path,
+          offset: task.offset,
+          ...(args.rangeBytes > args.chunkBytes ? { length: args.rangeBytes } : {})
+        }
+      )
+      throwIfAborted(args.signal)
+      const decode = args.useGzip ? decodeGzipMobileWebPackageChunk : decodeRawMobileWebPackageChunk
+      const bytes = decode(
+        result,
+        args.manifest.buildId,
+        task.asset.path,
+        task.offset,
+        task.expectedLength,
+        task.asset.byteLength
+      )
+      return bytes ? { bytes } : { failure: new MobileWebPackageDownloadError('invalid_chunk') }
+    } catch (error) {
+      // Why: a host whose per-connection read budget is narrower than ours must slow the
+      // pipeline down, not fail the whole package.
+      if (
+        error instanceof MobileWebPackageDownloadError &&
+        error.code === 'mobile_web_package_read_limited' &&
+        attempt < MOBILE_WEB_PACKAGE_READ_LIMITED_RETRIES
+      ) {
+        onReadLimited()
+        await sleep(MOBILE_WEB_PACKAGE_READ_LIMITED_BACKOFF_MS * (attempt + 1))
+        continue
+      }
+      return { failure: error }
+    }
+  }
 }
 
 async function requestResult(
@@ -277,6 +377,10 @@ function mobileWebPackageHostFailureCode(code: string): MobileWebPackageDownload
     default:
       return 'host_error'
   }
+}
+
+function sleep(durationMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, durationMs))
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

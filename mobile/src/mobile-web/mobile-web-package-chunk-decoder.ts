@@ -2,10 +2,10 @@ import { Buffer } from 'buffer/'
 import { sha256 } from '@noble/hashes/sha256'
 import { gunzipSync } from 'fflate'
 import {
+  MOBILE_WEB_PACKAGE_MAX_RANGE_BYTES,
   MobileWebPackageAssetChunkSchema,
   MobileWebPackageGzipAssetChunkSchema
 } from '../../../src/shared/mobile-web/package-rpc-contract'
-import { MOBILE_WEB_PACKAGE_CHUNK_BYTES } from '../../../src/shared/mobile-web/manifest-contract'
 
 export function decodeRawMobileWebPackageChunk(
   result: unknown,
@@ -52,7 +52,7 @@ export function decodeGzipMobileWebPackageChunk(
   ) {
     return null
   }
-  if (expectedLength > MOBILE_WEB_PACKAGE_CHUNK_BYTES) {
+  if (expectedLength > MOBILE_WEB_PACKAGE_MAX_RANGE_BYTES) {
     return null
   }
   const compressed = decodeCanonicalBase64(chunk.data.dataBase64)

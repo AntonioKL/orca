@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   MOBILE_WEB_PACKAGE_GZIP_RUNTIME_CAPABILITY,
+  MOBILE_WEB_PACKAGE_RANGE_RUNTIME_CAPABILITY,
   MOBILE_WEB_PACKAGE_RUNTIME_CAPABILITY
 } from '../../../src/shared/protocol-version'
 import type { RpcClient } from '../transport/rpc-client'
@@ -16,6 +17,7 @@ export type MobileWebPackageCapabilityStatus =
 export type MobileWebPackageCapability = {
   status: MobileWebPackageCapabilityStatus
   gzip: boolean
+  range: boolean
 }
 
 type ResolvedPackageCapability = {
@@ -24,6 +26,7 @@ type ResolvedPackageCapability = {
   connectionId: number | null
   supported: boolean
   gzip: boolean
+  range: boolean
 }
 
 function currentConnectionId(client: RpcClient | null): number | null {
@@ -54,23 +57,25 @@ export function useMobileWebPackageCapability(args: {
         hostId: requestHostId,
         connectionId: requestConnectionId,
         supported: capabilities.includes(MOBILE_WEB_PACKAGE_RUNTIME_CAPABILITY),
-        gzip: capabilities.includes(MOBILE_WEB_PACKAGE_GZIP_RUNTIME_CAPABILITY)
+        gzip: capabilities.includes(MOBILE_WEB_PACKAGE_GZIP_RUNTIME_CAPABILITY),
+        range: capabilities.includes(MOBILE_WEB_PACKAGE_RANGE_RUNTIME_CAPABILITY)
       })
     })
   }, [client, connectionId, hostId, state])
 
   const capability =
     state !== 'connected'
-      ? { status: 'offline' as const, gzip: false }
+      ? { status: 'offline' as const, gzip: false, range: false }
       : !client ||
           !hostId ||
           resolved?.client !== client ||
           resolved.hostId !== hostId ||
           resolved.connectionId !== connectionId
-        ? { status: 'pending' as const, gzip: false }
+        ? { status: 'pending' as const, gzip: false, range: false }
         : {
             status: resolved.supported ? ('supported' as const) : ('update-required' as const),
-            gzip: resolved.gzip
+            gzip: resolved.gzip,
+            range: resolved.range
           }
-  return useMemo(() => capability, [capability.gzip, capability.status])
+  return useMemo(() => capability, [capability.gzip, capability.range, capability.status])
 }
