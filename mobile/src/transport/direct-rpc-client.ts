@@ -18,6 +18,7 @@ import {
 import { RpcSessionLivenessWatchdog } from './rpc-session-liveness-watchdog'
 import { isStaleForegroundDial } from './rpc-stale-dial'
 import type { ConnectionState, ForegroundNudgeReason, RpcResponse } from './types'
+import { advertiseMobileRuntimeClientCapabilities } from './mobile-runtime-client-capabilities'
 
 const LIVENESS_REQUEST_ID_PREFIX = 'mobile-liveness-'
 
@@ -232,6 +233,11 @@ export class DirectRpcClient implements RpcClient {
     this.authenticationGeneration++
     this.reconnect.authenticated()
     this.authenticationRetry.accepted()
+    advertiseMobileRuntimeClientCapabilities(
+      (request) => this.sendEncrypted(request),
+      `mobile-capabilities-${this.nextId()}`,
+      this.deviceToken
+    )
     this.connectionState.publish('connected')
     this.connectionLog.emit('success', 'Authenticated', 'Channel ready for RPC', {
       code: 'direct-connected'

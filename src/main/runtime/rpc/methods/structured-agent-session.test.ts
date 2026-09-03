@@ -111,7 +111,7 @@ function hostStub(): StructuredAgentSessionHost {
   return hostCalls as unknown as StructuredAgentSessionHost
 }
 
-function dispatcher(): RpcDispatcher {
+function dispatcher(runtimeOverrides: Record<string, unknown> = {}): RpcDispatcher {
   runtimeCalls = {
     getStructuredAgentSessionCreateSupport: vi.fn(async () => ({ supported: true })),
     resolveStructuredAgentSessionCreateIntent: vi.fn(async (params) => ({
@@ -134,7 +134,8 @@ function dispatcher(): RpcDispatcher {
     registerSubscriptionCleanup: vi.fn(),
     cleanupSubscription: vi.fn(),
     cleanupSubscriptionsByPrefix: vi.fn(),
-    ...runtimeCalls
+    ...runtimeCalls,
+    ...runtimeOverrides
   }
   return new RpcDispatcher({
     runtime: runtime as unknown as OrcaRuntimeService,
@@ -151,10 +152,11 @@ async function call(
     clientId?: string
     clientKind?: 'mobile' | 'runtime'
     clientCapabilities?: string[]
-  }
+  },
+  runtimeOverrides: Record<string, unknown> = {}
 ): Promise<RpcResponse> {
   const replies: RpcResponse[] = []
-  await dispatcher().dispatchStreaming(
+  await dispatcher(runtimeOverrides).dispatchStreaming(
     request(method, params),
     (raw) => replies.push(JSON.parse(raw) as RpcResponse),
     client
@@ -168,6 +170,10 @@ async function call(
 
 const STRUCTURED_CLIENT = {
   clientKind: 'runtime' as const,
+  clientCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY]
+}
+const STRUCTURED_MOBILE_CLIENT = {
+  clientKind: 'mobile' as const,
   clientCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY]
 }
 
@@ -246,6 +252,25 @@ describe('capability gating', () => {
 
   it('serves a client that advertised it', async () => {
     const response = await call('agentSession.send', sendParams(), STRUCTURED_CLIENT)
+    expect(response).toMatchObject({ ok: true })
+    expect(hostCalls.send).toHaveBeenCalledTimes(1)
+  })
+
+  it('requires the host structured-chat setting for mobile clients', async () => {
+    const response = await call('agentSession.send', sendParams(), STRUCTURED_MOBILE_CLIENT, {
+      getClientSettings: () => ({ experimentalStructuredNativeChat: false })
+    })
+    expect(response).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining('structured_agent_session_unsupported') }
+    })
+    expect(hostCalls.send).not.toHaveBeenCalled()
+  })
+
+  it('serves mobile clients only after capability and setting negotiation', async () => {
+    const response = await call('agentSession.send', sendParams(), STRUCTURED_MOBILE_CLIENT, {
+      getClientSettings: () => ({ experimentalStructuredNativeChat: true })
+    })
     expect(response).toMatchObject({ ok: true })
     expect(hostCalls.send).toHaveBeenCalledTimes(1)
   })

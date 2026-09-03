@@ -282,7 +282,10 @@ export async function startLocalStructuredSessionTabsSync(args: {
 
 export function useLocalStructuredSessionTabsSync(): void {
   const ready = useAppStore(
-    (state) => state.workspaceSessionReady && state.terminalStartupRestorationReady
+    (state) =>
+      state.workspaceSessionReady &&
+      state.terminalStartupRestorationReady &&
+      state.settings?.experimentalStructuredNativeChat === true
   )
   useEffect(() => {
     if (!ready) {
