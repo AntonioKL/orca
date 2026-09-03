@@ -266,16 +266,6 @@ module.exports = {
     }
   },
   afterPack: async (context) => {
-    // Why: a Linux runner-image glibc bump silently shipped a node-pty pty.node
-    // requiring GLIBC_2.34, crashing the app on startup on Ubuntu 20.04 (#9902).
-    // Fail packaging if any bundled native binary exceeds the supported floor.
-    if (context.electronPlatformName === 'linux') {
-      // Why the arch is passed: symbol-version checks pass happily on a wrong-architecture binary,
-      // so a cross-built slice could ship the host's pty.node and only fail at runtime.
-      verifyLinuxGlibcFloor(context.appOutDir, {
-        targetArch: { 1: 'x64', 3: 'arm64' }[context.arch]
-      })
-    }
     const resourcesDir =
       context.electronPlatformName === 'darwin'
         ? join(
@@ -313,6 +303,13 @@ module.exports = {
     }
     stampPackagedCliVersion(resourcesDir, context.packager.appInfo.version)
     prunePackagedRuntimeNodeModules(resourcesDir, context.electronPlatformName, context.arch)
+    // Prune optional native variants before checking the glibc/architecture
+    // floor; cross-builds intentionally install all optional packages.
+    if (context.electronPlatformName === 'linux') {
+      verifyLinuxGlibcFloor(context.appOutDir, {
+        targetArch: { 1: 'x64', 3: 'arm64' }[context.arch]
+      })
+    }
     verifyPackagedMainRuntimeDeps(resourcesDir)
     // Why: boot the packaged daemon-entry under plain Node, but only for the
     // slice matching the packaging host's arch — daemon-entry.js is JS, yet it
