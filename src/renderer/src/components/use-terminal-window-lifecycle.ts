@@ -54,7 +54,7 @@ export function useTerminalWindowLifecycle(controller: TerminalActivationControl
         )
         return
       }
-      proceedToNativeWindowClose(isQuitting)
+      proceedToNativeWindowClose(isQuitting, requestId)
     })
     return () => setWindowCloseRequestHandler(null)
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- controller refs preserve their original stable identities.
