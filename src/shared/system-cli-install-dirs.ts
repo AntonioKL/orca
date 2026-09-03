@@ -6,13 +6,19 @@ import { join } from 'node:path'
  * (#829 named `~/.opencode/bin` as the motivating case, but only for the
  * login-shell probe; the fallback used when that probe fails never gained it).
  *
- * Ordered to match what `patchPackagedProcessPath` appends to PATH, so a CLI
- * present in two of these dirs resolves to the same binary here, in the packaged
- * PATH scan, and in `POSIX_VERSION_MANAGER_BIN_DIRS`. Three deliberate gaps vs
- * that seed: the `sbin` dirs and the generic `~/bin` / `~/.local/bin` (no agent
- * CLI installer targets those, and `~/.local/bin` is already a version-manager
- * dir here); `~/.vite-plus/bin`, which no probed agent command maps to; and
- * `/opt/homebrew` off darwin, since a Linux box's brew prefix is Linuxbrew's.
+ * Ordered to match the system block `patchPackagedProcessPath` appends to PATH,
+ * so a CLI present in two of *these* dirs resolves to the same binary here, in
+ * the packaged PATH scan, and in `POSIX_VERSION_MANAGER_BIN_DIRS`. That parity
+ * stops at the block boundary and is not claimed across it: the seed appends
+ * `~/.local/bin` after this block, while here it arrives ahead of it from
+ * `getBaseVersionManagerDirectories`, so a `claude` installed in both
+ * `~/.local/bin` and `/opt/homebrew/bin` resolves to the former via this
+ * fallback and the latter via the seeded PATH. Pre-existing, and left alone
+ * because closing it means hoisting a system dir over a version-manager one.
+ *
+ * Deliberate gaps vs that seed: the `sbin` dirs and the generic `~/bin`;
+ * `~/.vite-plus/bin`, which no probed agent command maps to; and `/opt/homebrew`
+ * off darwin, since a Linux box's brew prefix is Linuxbrew's.
  *
  * Lookup-only, deliberately outside `getBaseVersionManagerDirectories`: that
  * list is PREPENDED to PATH by `getVersionManagerBinPaths` callers, and hoisting

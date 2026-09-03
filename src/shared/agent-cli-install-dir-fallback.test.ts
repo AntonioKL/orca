@@ -163,9 +163,24 @@ describe('agent CLI install-dir fallback', () => {
   // patchPackagedProcessPath and the CLI's addAgentNodePaths, so a system dir
   // leaking into it would re-rank binaries the user already has (#18234).
   it('keeps system install dirs out of the PATH seed list', () => {
-    const seeded = getVersionManagerBinPaths({ platform: 'darwin', homePath: '/Users/tester' })
-    expect(seeded).not.toContain('/opt/homebrew/bin')
-    expect(seeded).not.toContain('/usr/local/bin')
+    for (const platform of ['darwin', 'linux'] as const) {
+      const home = platform === 'darwin' ? '/Users/tester' : '/home/tester'
+      const seeded = getVersionManagerBinPaths({ platform, homePath: home })
+      // Spelled out, not derived from the list under test: a guard that iterates
+      // getSystemCliInstallDirectories passes vacuously if that list is emptied
+      // into getBaseVersionManagerDirectories, which is the leak it guards.
+      for (const directory of [
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+        '/snap/bin',
+        '/home/linuxbrew/.linuxbrew/bin',
+        '/nix/var/nix/profiles/default/bin',
+        join(home, '.nix-profile', 'bin'),
+        join(home, '.opencode', 'bin')
+      ]) {
+        expect(seeded).not.toContain(directory)
+      }
+    }
   })
 
   // Why through this entry point: it is what the `orca` CLI's agent detection
