@@ -121,12 +121,7 @@ jobs:
   deploy:
     if: >-
       ${{ vars.ORCA_CLOUD_OPERATIONS_ENABLED == 'true' &&
-      github.ref == 'refs/heads/main' &&
-      vars.PRODUCTION_GCP_REGION != '' &&
-      (inputs.mode == 'supersede-target' ||
-      (inputs.mode != 'supersede-target' &&
-      vars.PRODUCTION_GCP_RELAY_DEPLOY_WORKLOAD_IDENTITY_PROVIDER != '' &&
-      vars.PRODUCTION_GCP_RELAY_DEPLOY_SERVICE_ACCOUNT != '')) }}
+      github.ref == 'refs/heads/main' }}
     runs-on: blacksmith-2vcpu-ubuntu-2204
     environment: production
     env:

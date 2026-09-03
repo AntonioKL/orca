@@ -39,10 +39,7 @@ defaults:
 
 jobs:
   monitor:
-    if: >-
-      ${{ github.ref == 'refs/heads/main' &&
-      vars.PRODUCTION_GCP_RELAY_MONITOR_WORKLOAD_IDENTITY_PROVIDER != '' &&
-      vars.PRODUCTION_GCP_RELAY_MONITOR_SERVICE_ACCOUNT != '' }}
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: blacksmith-2vcpu-ubuntu-2204
     timeout-minutes: 100
     environment: production
