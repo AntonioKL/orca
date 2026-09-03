@@ -121,6 +121,15 @@ const SOURCE_RANK: readonly PaneAgentEvidenceSource[] = PANE_AGENT_EVIDENCE_SOUR
 /** Exported for the source/rank drift ratchet; the rank is the canonical source list itself. */
 export const PANE_AGENT_SOURCE_RANK = SOURCE_RANK
 
+/** Reject an unrecognised source instead of silently dropping it from the ranking loop. */
+function sourceRankIndex(source: PaneAgentEvidenceSource): number {
+  const index = SOURCE_RANK.indexOf(source)
+  if (index === -1) {
+    throw new Error(`Unknown pane-agent evidence source: ${String(source)}`)
+  }
+  return index
+}
+
 /** Run keys only supersede evidence from the same authority; unknown authorities stay eligible. */
 function isPaneAgentRunEligible(
   run: PaneAgentRunKey | undefined,
@@ -139,14 +148,12 @@ export function resolveCanonicalPaneAgentEvidence<A extends string = TuiAgent>(
   input: PaneAgentIdentityInput<A>
 ): PaneAgentIdentity<A> {
   const superseded: PaneAgentEvidenceSource[] = []
-  const floor = input.minimumSource
-    ? SOURCE_RANK.indexOf(input.minimumSource)
-    : Number.MAX_SAFE_INTEGER
+  const floor = input.minimumSource ? sourceRankIndex(input.minimumSource) : Number.MAX_SAFE_INTEGER
   const eligible = input.evidence.filter((item) => {
     if (item.source === 'sibling' && input.allowSibling !== true) {
       return false
     }
-    if (SOURCE_RANK.indexOf(item.source) > floor) {
+    if (sourceRankIndex(item.source) > floor) {
       return false
     }
     if (isPaneAgentRunEligible(item.run, input.currentRun)) {
@@ -219,11 +226,31 @@ export function resolveCanonicalPaneAgentIdentity(
     input.launchAgent ||
     input.sleepingSessionAgent
   )
-  const titleAgent = input.title ? collectAgentTitleEvidence(input.title).agent : null
+  const titleEvidence = input.title ? collectAgentTitleEvidence(input.title) : null
+  const titleAgent = titleEvidence?.agent ?? null
 
   if (!hasAuthorityEvidence) {
     if (input.uncoveredFallback) {
       const agent = input.uncoveredFallback.agent
+      // A legacy title parser may have picked the first token from an ambiguous or
+      // free-text-only title. Do not let that compatibility value bypass the canonical
+      // ambiguity fence when the caller marks it as title-only evidence.
+      const rejectTitleFallback =
+        input.uncoveredFallback.titleOnly === true &&
+        ((titleEvidence?.reason === 'free-text-only' &&
+          (titleEvidence.freeTextNames?.length ?? 0) > 1) ||
+          titleEvidence?.reason === 'conflicting-anchored-names' ||
+          titleEvidence?.reason === 'conflicting-vendor-markers')
+      if (rejectTitleFallback) {
+        return {
+          agent: null,
+          source: null,
+          coverage: 'uncovered',
+          titleOnly: false,
+          ...(titleEvidence?.reason === 'free-text-only' ? {} : { ambiguousAt: 'title' as const }),
+          supersededSources: []
+        }
+      }
       const titleOnly =
         input.uncoveredFallback.titleOnly ?? (agent !== null && agent === titleAgent)
       return {

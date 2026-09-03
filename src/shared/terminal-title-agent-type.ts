@@ -266,7 +266,9 @@ export function resolveTerminalTitleAgentType(title: string): TuiAgent | null {
   const parsed = label ? (TITLE_LABEL_TO_AGENT[label] ?? null) : null
   return resolveCanonicalPaneAgentIdentity({
     title,
-    uncoveredFallback: { agent: parsed, titleOnly: parsed !== null }
+    // Preserve this public title-parser adapter's historical answer; pane identity
+    // consumers pass raw titles to the canonical resolver and enforce its fence.
+    uncoveredFallback: { agent: parsed, titleOnly: false }
   }).agent
 }
 

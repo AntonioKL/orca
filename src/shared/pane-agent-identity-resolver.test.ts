@@ -162,6 +162,17 @@ describe('resolvePaneAgentIdentity', () => {
     })
   })
 
+  it('fails loudly when an evidence source is missing from the rank', () => {
+    expect(() =>
+      resolve([
+        {
+          source: 'future-source' as PaneAgentEvidence['source'],
+          agent: 'codex'
+        }
+      ])
+    ).toThrow('Unknown pane-agent evidence source')
+  })
+
   describe('input order does not decide the answer', () => {
     it('resolves the same regardless of how evidence is listed', () => {
       const evidence: PaneAgentEvidence[] = [

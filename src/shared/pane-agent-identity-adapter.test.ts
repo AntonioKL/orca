@@ -121,6 +121,21 @@ describe('uncovered compatibility lane', () => {
     expect(identity).toMatchObject({ agent: null, source: null, coverage: 'uncovered' })
   })
 
+  it('does not let a legacy title fallback bypass the ambiguity fence', () => {
+    expect(
+      resolveCanonicalPaneAgentIdentity({
+        title: 'OC | something - grok',
+        uncoveredFallback: { agent: 'opencode', titleOnly: true }
+      })
+    ).toMatchObject({ agent: null, source: null, ambiguousAt: 'title' })
+    expect(
+      resolveCanonicalPaneAgentIdentity({
+        title: 'compare codex with grok',
+        uncoveredFallback: { agent: 'codex', titleOnly: true }
+      })
+    ).toMatchObject({ agent: null, source: null, coverage: 'uncovered' })
+  })
+
   it('does not label a foreground-only compatibility answer as title-only', () => {
     const identity = resolveCanonicalPaneAgentIdentity({
       foregroundAgent: 'codex',
