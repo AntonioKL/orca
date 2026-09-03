@@ -78,8 +78,11 @@ export function shouldStripClaudeAuthEnvForAccount(
  * `ANTHROPIC_API_KEY`, and case-sensitive elsewhere. A refusal narrower than the strip
  * lets an override through that the strip would have removed.
  *
- * Presence, not truthiness: the strip deletes these names whatever their value, so an
- * empty override is still an override of the pinned account's credential.
+ * A non-empty value is what makes it a conflict. `ANTHROPIC_API_KEY=` in the agent env
+ * box is how a user blanks a variable — the settings pipeline preserves that empty value
+ * (normalizeTuiAgentEnvRecord drops empty KEYS only) — and an empty override can neither
+ * authenticate nor beat the pinned account, while the strip removes the name regardless.
+ * Refusing it would break a terminal launch that works today for no security gain.
  */
 /**
  * The inherited Anthropic auth a non-stripping launch has to carry forward explicitly.
@@ -118,7 +121,7 @@ export function hasClaudeAuthEnvConflict(
   }
   for (const [key, value] of Object.entries(env)) {
     const normalized = platform === 'win32' ? key.toUpperCase() : key
-    if (CLAUDE_AUTH_ENV_VARS.some((authKey) => authKey === normalized)) {
+    if (value && CLAUDE_AUTH_ENV_VARS.some((authKey) => authKey === normalized)) {
       return true
     }
     if (normalized === 'ANTHROPIC_CUSTOM_HEADERS' && isAuthLikeCustomHeaders(value)) {
