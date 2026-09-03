@@ -14,6 +14,14 @@ import { readOrcaChromiumProcessPids } from './orca-chromium-process-pids'
  * with different lifetimes (one sync, one with its own timeout ladder), so a
  * guard that only lived in the tree-kill helper would cover one of three
  * families. Returns false when the caller must not kill.
+ *
+ * Electron main only, by construction. `terminateWindowsProcessTree` also runs
+ * in the standalone daemon (the `pty-descendant-sweep` site), where
+ * `readOrcaChromiumProcessPids()` is empty and this always admits. That is not
+ * the gap it looks like: the daemon reaches that taskkill only through
+ * `classifyWindowsTreeKillTarget`, whose ancestry walk ends at the daemon's own
+ * pid, and no Chromium process descends from the daemon. See
+ * `orca-chromium-process-pids.ts`.
  */
 export function admitSelfInitiatedTreeKill(target: {
   pid: number

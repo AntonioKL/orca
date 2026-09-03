@@ -23,6 +23,8 @@ import { _resetTracerForTests, setActiveSink } from './observability/tracer'
 
 const ORCA_MAIN_PID = 1000
 const RENDERER_PID = 1001
+/** The standalone daemon is a sibling of the renderers, spawned by main. */
+const DAEMON_PID = 1500
 
 /** Orca's renderer is a direct child of the main process, so the ppid walk says `own`. */
 const PROCESS_ROWS = [
@@ -73,6 +75,31 @@ describe('refusing to tree-kill our own Chromium processes', () => {
 
   it('classifies a live renderer as foreign even though its ancestry reaches us', () => {
     expect(classifyWindowsTreeKillTarget(RENDERER_PID, PROCESS_ROWS, ORCA_MAIN_PID)).toBe('foreign')
+  })
+
+  it.each([
+    ['an empty pid set', new Set<number>()],
+    ['the live pid set', undefined]
+  ])(
+    'refuses an Orca renderer from a daemon host with %s, because no Chromium descends from it',
+    (_case, ownChromiumPids) => {
+      // The standalone daemon and orcad install no Chromium-backed AppEnvironment,
+      // so this set is empty there. The ancestry walk is what refuses instead: it
+      // ends at the *killing* process's pid, and the renderer's chain reaches main.
+      const rows = [...PROCESS_ROWS, { pid: DAEMON_PID, ppid: ORCA_MAIN_PID }]
+
+      expect(classifyWindowsTreeKillTarget(RENDERER_PID, rows, DAEMON_PID, ownChromiumPids)).toBe(
+        'foreign'
+      )
+    }
+  )
+
+  it('is the only thing standing between Electron main and its own renderer', () => {
+    // Falsifiable counterpart to the daemon case above: in main the ancestry walk
+    // says `own`, so the pid set is load-bearing here and nowhere else.
+    expect(
+      classifyWindowsTreeKillTarget(RENDERER_PID, PROCESS_ROWS, ORCA_MAIN_PID, new Set())
+    ).toBe('own')
   })
 
   it('still classifies a real PTY child of ours as own', () => {

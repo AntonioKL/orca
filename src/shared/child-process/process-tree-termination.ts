@@ -11,6 +11,10 @@ const MAX_PS_OUTPUT_BYTES = 8 * 1024 * 1024
  * POSIX precondition: the child must have been spawned `detached`. The signal
  * goes to the process group `-child.pid`, so a child that is not its own group
  * leader would hand it to whatever group it inherited instead.
+ *
+ * Runs in every host — Electron main, the daemon, the relay, the CLI — so the
+ * main-process own-Chromium guard cannot reach here; the exit check below is
+ * what keeps the Windows branch off a pid that is no longer ours.
  */
 export function signalProcessTree(child: ChildProcess, signal?: NodeJS.Signals): Promise<boolean> {
   if (!child.pid) {
@@ -18,6 +22,14 @@ export function signalProcessTree(child: ChildProcess, signal?: NodeJS.Signals):
     return Promise.resolve(true)
   }
   if (process.platform === 'win32') {
+    // Why the exit check: once the child is reaped its pid is Windows' to
+    // reissue, and `taskkill /t /f` walks whatever tree owns it *now* — a
+    // recycled pid can be one of Orca's own Chromium processes (#10680). The
+    // POSIX branch below cannot hit this: killing a reaped group is ESRCH.
+    if (hasExited(child)) {
+      killRoot(child, signal)
+      return Promise.resolve(true)
+    }
     return taskkillTree(child, child.pid, signal)
   }
   try {
@@ -42,6 +54,11 @@ export async function forceTerminateProcessTree(child: ChildProcess): Promise<bo
     return waitForPosixProcessGroupQuiescence(child.pid)
   }
   return true
+}
+
+/** A stubbed child leaves both undefined; only a real code or signal proves exit. */
+function hasExited(child: ChildProcess): boolean {
+  return (child.exitCode ?? null) !== null || (child.signalCode ?? null) !== null
 }
 
 function taskkillTree(

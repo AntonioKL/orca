@@ -14,13 +14,29 @@ import { recordCoalescedDurableCrashBreadcrumb } from './durable-crash-breadcrum
  * deaths — reproduced side by side on Windows 11 / Electron 43.4.1, differing in
  * zero recorded fields. This is the field that separates them.
  *
- * Coverage (what a zero count does and does not prove): instrumented are every
- * main-process `taskkill /T /F` (all three families gate on
- * `admitSelfInitiatedTreeKill`), `signalProcessTree` — the `runProcess` choke
- * point, both platforms — the codex app-server POSIX group teardowns, the PTY
- * process-group sweep and the Windows PTY Job Object. NOT instrumented: the
- * direct `process.kill(-pid)` calls in the browser routes, notebooks, automation
- * prechecks and ephemeral-VM recipes. Absence is evidence, not proof.
+ * Coverage — read this before drawing a conclusion from a zero count.
+ *
+ * The ring is per-process and its only reader is `process-gone-recorder`, which
+ * exists in Electron main. So a count reported on a `render-process-gone` covers
+ * kills issued *from Electron main*, and nothing else:
+ * - Main only: the three `taskkill /T /F` families that gate on
+ *   `admitSelfInitiatedTreeKill` (`terminateWindowsProcessTree` and the codex /
+ *   claude account-login teardowns) and the codex app-server POSIX group
+ *   teardowns.
+ * - Main *and* other hosts: `signalProcessTree` (the `runProcess` choke point,
+ *   reached from the CLI, relay and daemon too — a fourth pid-addressed
+ *   `taskkill` family, gated on the child not being reaped rather than on the
+ *   Chromium set it cannot read), the POSIX PTY process-group sweep and the
+ *   Windows PTY Job Object (relay `pty-handler`, daemon
+ *   `subprocess-handle`). When those run outside main they record into that
+ *   process's own ring, which nothing reads — no observer is installed there,
+ *   and the tracer sink is a no-op.
+ * - Never instrumented: the direct `process.kill(-pid)` calls in the browser
+ *   routes, notebooks, automation prechecks and ephemeral-VM recipes.
+ *
+ * A daemon or relay kill missing from the count is a diagnostics gap, not a
+ * missed suspect: those hosts cannot reach a Chromium pid in the first place
+ * (see `orca-chromium-process-pids.ts`). Absence is evidence, not proof.
  */
 
 /** Which mechanism issued the kill; each has a different blast radius. */
