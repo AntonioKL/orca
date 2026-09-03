@@ -12,6 +12,7 @@ import {
   getDiffViewerMonacoModelPathPrefixes,
   type MonacoModelRegistry
 } from './diff-monaco-model-disposal'
+import type { MonacoUriNamespace } from './monaco-edit-model-path'
 
 const CLOSED_DIFF_TAB_COUNT = 100
 const RETAINED_MODEL_COUNT = 320
@@ -26,6 +27,7 @@ type FakeModel = {
 }
 
 type FakeRegistry = MonacoModelRegistry & {
+  Uri: MonacoUriNamespace
   models: FakeModel[]
   counters: { getModelsCalls: number; uriToStringCalls: number }
 }
@@ -42,7 +44,7 @@ function createRegistry(models: FakeModel[]): FakeRegistry {
   return {
     models,
     counters,
-    Uri: { parse: (value: string) => value },
+    Uri: { parse: (value: string) => value, file: (value: string) => ({ toString: () => value }) },
     editor: {
       getModel: (uri: unknown) => byPath.get(String(uri)) ?? null,
       getModels: () => {

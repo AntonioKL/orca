@@ -14,6 +14,23 @@ import {
   deletePaneScopedCacheEntries,
   sweepClosedPdfViewPositions
 } from './closed-editor-tab-cache-sweep'
+import { toMonacoEditModelPath, type MonacoUriNamespace } from './monaco-edit-model-path'
+
+type ClosedEditorTabMonacoRegistry = MonacoModelRegistry & { Uri: MonacoUriNamespace }
+
+function disposeEditTabModel(
+  monacoRegistry: ClosedEditorTabMonacoRegistry,
+  filePath: string
+): void {
+  let modelUri: unknown
+  try {
+    modelUri = monacoRegistry.Uri.parse(toMonacoEditModelPath(monacoRegistry.Uri, filePath))
+  } catch {
+    // Why safe: @monaco-editor/react keys the model with this identical parse, so a path that throws here never produced a model to leak.
+    return
+  }
+  monacoRegistry.editor.getModel(modelUri)?.dispose()
+}
 
 /**
  * Releases the Monaco models and view-state cache entries owned by a batch of closed tabs.
@@ -23,7 +40,7 @@ import {
  * the monaco namespace as an argument so it stays testable without importing `monaco-editor`.
  */
 export function disposeClosedEditorTabs(
-  monacoRegistry: MonacoModelRegistry,
+  monacoRegistry: ClosedEditorTabMonacoRegistry,
   closedFiles: readonly OpenFile[]
 ): void {
   if (closedFiles.length === 0) {
@@ -39,9 +56,9 @@ export function disposeClosedEditorTabs(
   for (const closedFile of closedFiles) {
     switch (closedFile.mode) {
       case 'edit':
-        // Why: the edit model URI is constructed via monaco.Uri.parse(filePath)
-        // to match @monaco-editor/react's `path` prop convention.
-        monacoRegistry.editor.getModel(monacoRegistry.Uri.parse(closedFile.filePath))?.dispose()
+        // Why: the edit model URI is keyed by the same path @monaco-editor/react
+        // hands Monaco, so create and dispose stay on one key.
+        disposeEditTabModel(monacoRegistry, closedFile.filePath)
         scrollTopCache.delete(closedFile.filePath)
         // Why: markdown and mermaid surfaces keep mode-scoped scroll positions.
         scrollTopCache.delete(`${closedFile.filePath}:rich`)
