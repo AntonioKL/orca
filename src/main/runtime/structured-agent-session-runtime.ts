@@ -21,7 +21,10 @@ import { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/st
 import { StructuredAgentSessionAdapterRouter } from '../native-chat/agent-session-wire/structured-agent-session-adapter-router'
 import type { StructuredAgentSessionHandoffTransport } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
-import type { ClaudeManagedAccountGateSettings } from '../native-chat/claude-structured-managed-account-support'
+import {
+  readClaudeManagedAccountGateSettings,
+  type ClaudeManagedAccountGateSettings
+} from '../native-chat/claude-structured-managed-account-support'
 import { AgentSessionRecordStore } from './agent-session-record-store'
 import { agentSessionStorePath } from './agent-session-record-store-file'
 import { stopOrphanAgentSessionChildren } from './agent-session-orphan-child-reaper'
@@ -69,7 +72,8 @@ export type StructuredAgentSessionRuntimeDeps = {
   resolveLaunchEnv?: () => Promise<NodeJS.ProcessEnv>
   resolveLaunchEnvOverlay?: () => Promise<Record<string, string>> | Record<string, string>
   resolveClaudeLaunchEnv?: () => Promise<Record<string, string>> | Record<string, string>
-  readClaudeManagedAccountGate?: () => ClaudeManagedAccountGateSettings | null
+  /** Raw settings getter; the reader that fails closed around it is built here, in checked code. */
+  getClaudeManagedAccountGateSettings?: () => ClaudeManagedAccountGateSettings
   resolveEnvironment?: () => Promise<NodeJS.ProcessEnv>
   resolveCodexOverrides?: () => NodeJS.ProcessEnv
   onError?: (input: { scope: string; error: unknown }) => void
@@ -187,8 +191,11 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       ...(deps.resolveClaudeLaunchEnv
         ? { resolveClaudeLaunchEnv: deps.resolveClaudeLaunchEnv }
         : {}),
-      ...(deps.readClaudeManagedAccountGate
-        ? { readClaudeManagedAccountGate: deps.readClaudeManagedAccountGate }
+      ...(deps.getClaudeManagedAccountGateSettings
+        ? {
+            readClaudeManagedAccountGate: () =>
+              readClaudeManagedAccountGateSettings(deps.getClaudeManagedAccountGateSettings!)
+          }
         : {}),
       onUnexpectedExit: (event) => {
         recoveryChain = recoveryChain.then(async () => {
