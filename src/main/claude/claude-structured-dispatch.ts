@@ -169,6 +169,9 @@ export async function dispatchClaudeTurn(
   } catch (error) {
     return { state: 'rejected', reason: (error as Error).message }
   }
+  // Advance before writing so an unknown/late replay still fences cancellation
+  // of the previously acknowledged turn on this session-scoped connection.
+  const dispatchSequence = ++session.dispatchSequence
   const acceptsResult = input.body.blocks.some(
     (block) => block.type === 'text' && block.text.trimStart().startsWith('/')
   )
@@ -193,6 +196,7 @@ export async function dispatchClaudeTurn(
     // Claude's interrupt API is session-scoped, so retain the provider turn
     // identity and let cancellation reject a stale request for an older turn.
     session.activeTurnId = uuid
+    session.activeTurnSequence = dispatchSequence
   }
   return uuid
     ? {

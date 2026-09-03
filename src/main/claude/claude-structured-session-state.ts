@@ -95,6 +95,10 @@ export type ClaudeSession = {
   capabilities: readonly string[]
   /** Provider uuid of the most recently admitted turn, if one is active. */
   activeTurnId?: string
+  /** Monotonic fence advanced when a dispatch starts, including unresolved dispatches. */
+  dispatchSequence: number
+  /** Dispatch sequence that admitted activeTurnId. */
+  activeTurnSequence?: number
   translator: ClaudeJournalTranslator | null
   events: StructuredAgentSessionEventSink | undefined
 }

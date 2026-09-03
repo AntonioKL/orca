@@ -44,6 +44,7 @@ export function createClaudeSessionPublication(input: {
       acquisitionGeneration: input.acquisitionGeneration,
       prompts: input.prompts,
       dispatchWaiters: [],
+      dispatchSequence: 0,
       options: new Map(input.options),
       capabilities: input.capabilities,
       reportedOptions: {

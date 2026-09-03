@@ -15,6 +15,7 @@ function sessionFor(send = vi.fn().mockResolvedValue(undefined)): ClaudeSession 
     acquisitionGeneration: 'generation-1',
     prompts: {} as ClaudeSession['prompts'],
     dispatchWaiters: [],
+    dispatchSequence: 0,
     options: new Map(),
     reportedOptions: {},
     capabilities: [],

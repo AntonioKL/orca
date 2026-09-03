@@ -155,7 +155,10 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
         this.sessions.get(input.sessionId) === session &&
         session.fence === input.fence &&
         session.acquisitionGeneration === acquisitionGeneration &&
-        (session.activeTurnId === undefined || session.activeTurnId === input.turnId)
+        (session.activeTurnId === undefined
+          ? session.dispatchSequence === 0
+          : session.activeTurnId === input.turnId &&
+            session.activeTurnSequence === session.dispatchSequence)
       )
     })
   }

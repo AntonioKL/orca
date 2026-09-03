@@ -358,6 +358,39 @@ describe('ClaudeStructuredSessionAdapter turns and controls', () => {
     )
   })
 
+  it('does not cancel an acknowledged turn after a later dispatch returns unknown', async () => {
+    const claude = fakeClaude({ replayUuids: ['turn-T', null] })
+    const adapter = await acquired(claude)
+
+    await expect(
+      adapter.dispatch({
+        sessionId: 'session-1',
+        clientMessageId: 'client-T',
+        body: USER_MESSAGE,
+        fence: 7
+      })
+    ).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: 'turn-T' }
+    })
+    await expect(
+      adapter.dispatch({
+        sessionId: 'session-1',
+        clientMessageId: 'client-U',
+        body: USER_MESSAGE,
+        fence: 7
+      })
+    ).resolves.toMatchObject({ state: 'unknown' })
+    expect(claude.connections[0].sent).toHaveLength(2)
+
+    await expect(
+      adapter.cancelTurn({ sessionId: 'session-1', turnId: 'turn-T', fence: 7 })
+    ).resolves.toEqual({ cancelled: false })
+    expect(claude.connections[0].calls.filter((call) => call.subtype === 'interrupt')).toHaveLength(
+      0
+    )
+  })
+
   it('classifies provider-declined options without treating timeouts as settled', async () => {
     const claude = fakeClaude({
       routes: {
