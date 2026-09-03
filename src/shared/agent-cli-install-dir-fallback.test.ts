@@ -1,5 +1,5 @@
 import { delimiter, join } from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { detectCommandsInInstallDirs } from './local-agent-install-dir-detection'
 import { getVersionManagerBinPaths, resolveCliCommands } from './node-cli-command-resolution'
 import { buildPosixFallbackPathPrelude } from './posix-version-manager-bin-dirs'
@@ -63,6 +63,13 @@ function resolveAll(
 
 beforeEach(() => {
   fsFixture.executables.clear()
+  // Why: the no-options entry point reads the ambient PATH, where a dev box's
+  // real /usr/local/bin would answer before the fallback ever runs.
+  vi.stubEnv('PATH', GUI_LAUNCH_PATH)
+})
+
+afterEach(() => {
+  vi.unstubAllEnvs()
 })
 
 describe('agent CLI install-dir fallback', () => {
@@ -118,6 +125,28 @@ describe('agent CLI install-dir fallback', () => {
     })
   })
 
+  // Why pinned: patchPackagedProcessPath seeds these onto PATH in this order and
+  // the POSIX guest prelude appends them in it, so a divergence here would spawn
+  // a different binary than the packaged PATH scan for the same install.
+  it('ranks system install dirs in the same order as the PATH seed', () => {
+    const home = '/home/tester'
+    const dirs = [
+      '/usr/local/bin',
+      '/snap/bin',
+      '/home/linuxbrew/.linuxbrew/bin',
+      '/nix/var/nix/profiles/default/bin',
+      join(home, '.nix-profile', 'bin'),
+      join(home, '.opencode', 'bin')
+    ]
+    stage(...dirs.map((dir) => join(dir, 'opencode')))
+    for (const expected of dirs) {
+      expect(resolveAll(['opencode'], { platform: 'linux', homePath: home })).toEqual({
+        opencode: join(expected, 'opencode')
+      })
+      fsFixture.executables.delete(join(expected, 'opencode'))
+    }
+  })
+
   it('still lets a version-manager install outrank a system one', () => {
     const home = '/Users/tester'
     stage(
@@ -145,6 +174,7 @@ describe('agent CLI install-dir fallback', () => {
     'reports a system-installed CLI as detected, not just resolved',
     () => {
       stage(join('/usr/local/bin', 'codex'), join(MOCK_HOME, '.opencode', 'bin', 'opencode'))
+      // Both come from the fallback: the stubbed PATH holds no system dir.
       expect(detectCommandsInInstallDirs(['codex', 'opencode', 'cursor-agent'])).toEqual(
         new Set(['codex', 'opencode'])
       )
@@ -153,15 +183,19 @@ describe('agent CLI install-dir fallback', () => {
 
   it('carries the system install dirs into the POSIX guest fallback prelude', () => {
     const prelude = buildPosixFallbackPathPrelude()
-    for (const dir of [
-      '"$HOME/.opencode/bin"',
-      '"$HOME/.nix-profile/bin"',
-      '"/home/linuxbrew/.linuxbrew/bin"',
+    const systemDirs = [
+      '"/usr/local/bin"',
       '"/snap/bin"',
-      '"/nix/var/nix/profiles/default/bin"'
-    ]) {
-      expect(prelude).toContain(dir)
-    }
+      '"/home/linuxbrew/.linuxbrew/bin"',
+      '"/nix/var/nix/profiles/default/bin"',
+      '"$HOME/.nix-profile/bin"',
+      '"$HOME/.opencode/bin"'
+    ]
+    const offsets = systemDirs.map((dir) => prelude.indexOf(dir))
+    expect(offsets.every((offset) => offset >= 0)).toBe(true)
+    expect([...offsets].sort((a, b) => a - b)).toEqual(offsets)
+    // Why after: the guest prelude appends, so a version manager must still win.
+    expect(prelude.indexOf('.nvm/versions/node/*/bin')).toBeLessThan(offsets[0])
     // Why absent: a WSL guest is Linux, so /opt/homebrew is never its brew prefix.
     expect(prelude).not.toContain('/opt/homebrew')
   })

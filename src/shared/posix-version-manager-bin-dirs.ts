@@ -7,12 +7,16 @@
  * establish the login PATH reports an nvm-installed claude/codex as not
  * installed, which is #9725.
  *
- * Kept in step with `getBaseVersionManagerDirectories` and
- * `getSystemCliInstallDirectories` in node-cli-command-resolution.ts: a WSL user
- * on asdf, mise, volta or fnm -- or on Linuxbrew, snap or nix -- would otherwise
- * still hit #9725 while the same user on native does not. `/opt/homebrew` stays
- * out because a WSL guest is Linux, where Homebrew installs to the Linuxbrew
- * prefix below.
+ * Kept in step with `getBaseVersionManagerDirectories` in
+ * node-cli-command-resolution.ts and `getSystemCliInstallDirectories` in
+ * system-cli-install-dirs.ts: a WSL user on asdf, mise, volta or fnm -- or on
+ * Linuxbrew, snap or nix -- would otherwise still hit #9725 while the same user
+ * on native does not. `/opt/homebrew` stays out because a WSL guest is Linux,
+ * where Homebrew installs to the Linuxbrew prefix below.
+ *
+ * Version-manager dirs lead and the system block trails, in the same relative
+ * order as the other two lists, so a CLI present in two of them resolves to the
+ * same binary in the guest as it does natively.
  *
  * Each entry is quoted so a `$HOME` containing a space cannot word-split into
  * a relative path -- except the nvm glob, where only the prefix is quoted so
@@ -27,14 +31,14 @@ const POSIX_VERSION_MANAGER_BIN_DIRS = [
   '"$HOME/.asdf/shims"',
   '"$HOME/.fnm/aliases/default/bin"',
   '"$HOME/.local/share/mise/shims"',
-  // Why: opencode's own installer default, which no version manager owns.
-  '"$HOME/.opencode/bin"',
-  '"$HOME/.nix-profile/bin"',
+  '"$HOME"/.nvm/versions/node/*/bin',
   '"/usr/local/bin"',
-  '"/home/linuxbrew/.linuxbrew/bin"',
   '"/snap/bin"',
+  '"/home/linuxbrew/.linuxbrew/bin"',
   '"/nix/var/nix/profiles/default/bin"',
-  '"$HOME"/.nvm/versions/node/*/bin'
+  '"$HOME/.nix-profile/bin"',
+  // Why: opencode's own installer default, which no version manager owns.
+  '"$HOME/.opencode/bin"'
 ].join(' ')
 
 /**
