@@ -114,6 +114,7 @@ function hostStub(): StructuredAgentSessionHost {
         }
       }
     })),
+    supportsCreate: vi.fn(() => true),
     handoffStatus: vi.fn(async () => ({ owner: 'native' })),
     readOptions: vi.fn(async () => ({
       models: [{ id: 'gpt-live', label: 'GPT Live', isDefault: true, efforts: [] }],
@@ -363,6 +364,25 @@ describe('method routing', () => {
     const ensured = await call('agentSession.ensure', attachParams({ envelope: envelope() }))
     expect(ensured).toMatchObject({ ok: true })
   })
+
+  /** A client-supplied location skips the worktree-resolving support check, so both attach-shaped
+   *  entries must ask the executing host directly or a host that cannot fence a provider child
+   *  would create one anyway. */
+  it.each(['agentSession.create', 'agentSession.ensure'])(
+    'refuses %s for a client-supplied location the executing host does not support',
+    async (method) => {
+      hostCalls.supportsCreate.mockReturnValue(false)
+
+      const refused = await call(method, attachParams())
+
+      expect(refused).toMatchObject({
+        ok: false,
+        error: { message: expect.stringContaining('structured_agent_session_unsupported') }
+      })
+      expect(hostCalls.attach).not.toHaveBeenCalled()
+      expect(hostCalls.supportsCreate).toHaveBeenCalledWith(attachParams().location, 'codex')
+    }
+  )
 
   it('tags the prompt kind from the method name, not from the client', async () => {
     const params = {

@@ -1,3 +1,4 @@
+import type { AgentSessionHandleProvider } from '../../../shared/agent-session-provider-handle'
 import type {
   AgentSessionAttachResult,
   AgentSessionMutationEnvelope,
@@ -20,22 +21,24 @@ import { LOCAL_STRUCTURED_SESSION_OWNER } from '@/runtime/local-structured-sessi
 type StructuredAgentSessionCreateParams = {
   envelope: AgentSessionMutationEnvelope
   worktree: string
-  agent: 'codex'
+  agent: AgentSessionHandleProvider
 }
 
 export type StructuredAgentSessionLaunchIntent = {
   sessionId: string
   worktreeId: string
+  agent: AgentSessionHandleProvider
   params: StructuredAgentSessionCreateParams
 }
 
 export class StructuredAgentSessionCreateRefusalError extends Error {}
 
-export function createStructuredCodexSessionLaunchIntent(
-  worktreeId: string
+export function createStructuredAgentSessionLaunchIntent(
+  worktreeId: string,
+  agent: AgentSessionHandleProvider
 ): StructuredAgentSessionLaunchIntent {
-  const sessionId = `codex_${crypto.randomUUID().replaceAll('-', '_')}`
-  const fields = { worktree: toRuntimeWorktreeSelector(worktreeId), agent: 'codex' as const }
+  const sessionId = `${agent}_${crypto.randomUUID().replaceAll('-', '_')}`
+  const fields = { worktree: toRuntimeWorktreeSelector(worktreeId), agent }
   const state = useAppStore.getState()
   recordWebSessionFocusIntent(
     { environmentId: LOCAL_STRUCTURED_SESSION_OWNER },
@@ -47,6 +50,7 @@ export function createStructuredCodexSessionLaunchIntent(
   return {
     sessionId,
     worktreeId,
+    agent,
     params: {
       envelope: {
         sessionId,
@@ -73,9 +77,38 @@ export function abandonStructuredAgentSessionLaunchIntent(
   )
 }
 
-export async function launchStructuredCodexSession(
+/**
+ * Only the host that will execute the session can answer whether it supports creating one there —
+ * on Windows that means reading the provider child's process start time, which a client cannot
+ * observe. Codex is absent on purpose: its answer is settled by the launch route and owned
+ * elsewhere, so probing here would change Codex's wire traffic.
+ */
+async function requireHostCreateSupport(intent: StructuredAgentSessionLaunchIntent): Promise<void> {
+  if (intent.agent !== 'claude') {
+    return
+  }
+  let supported = false
+  try {
+    const support = await callStructuredAgentSession<{ supported: boolean; reason?: string }>(
+      { kind: 'local' },
+      'agentSession.createSupport',
+      { worktree: intent.params.worktree, agent: intent.agent }
+    )
+    supported = support.supported === true
+  } catch {
+    // An unanswered probe is not a yes.
+    supported = false
+  }
+  if (!supported) {
+    abandonStructuredAgentSessionLaunchIntent(intent)
+    throw new StructuredAgentSessionCreateRefusalError('structured_agent_session_unsupported')
+  }
+}
+
+export async function launchStructuredAgentSession(
   intent: StructuredAgentSessionLaunchIntent
 ): Promise<Pick<AgentSessionAttachResult, 'sessionId' | 'fence'>> {
+  await requireHostCreateSupport(intent)
   const result = await callStructuredAgentSession<
     AgentSessionMutationResult<AgentSessionAttachResult>
   >({ kind: 'local' }, 'agentSession.create', intent.params)
