@@ -4,10 +4,7 @@ import type { AgentSessionOwnerBinding } from '../../shared/agent-session-host-a
 import { agentSessionOwnerBindingsEqual } from '../../shared/claimed-agent-pty-owner-snapshot'
 import { resolvePinnedCodexRolloutProof } from '../codex/codex-tui-rollout-proof'
 import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
-import {
-  readClaudeManagedAccountGateSettings,
-  structuredClaudeMatchesActiveManagedAccount
-} from '../native-chat/claude-structured-managed-account-support'
+import { resolveStructuredAgentSessionCreateSupport } from '../native-chat/structured-agent-session-create-support'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { AgentStatusIpcPayload } from '../../shared/agent-status-types'
 import { getLocalProjectWorktreeGitOptions } from '../project-runtime-git-options'
@@ -53,32 +50,16 @@ export class OrcaRuntimeWithResolveRecoveredStructuredTuiTranscript extends Orca
     worktreeSelector: string,
     agent: 'claude' | 'codex'
   ): Promise<{ supported: boolean; reason?: 'agent' | 'remote' | 'wsl' }> {
-    // Same settings the auth policy reads, so the gate and the policy cannot resolve different
-    // accounts. Unreadable settings fail closed below.
-    const accountSettings =
-      agent === 'claude'
-        ? readClaudeManagedAccountGateSettings(() => this.requireStore().getSettings())
-        : null
     const location = await this.resolveStructuredAgentSessionLocation(worktreeSelector)
     await this.ensureStructuredAgentSessionHost()
-    if (getStructuredAgentSessionHost()?.supportsCreate(location, agent)) {
-      // Claude only: Codex resolves its account through a different path, so its answer is
-      // untouched here. `wsl` is the closest existing reason — the cause is a WSL-bound account
-      // rather than a WSL workspace — and no client reads the field, so it stays as-is.
-      if (agent === 'claude' && !structuredClaudeMatchesActiveManagedAccount(accountSettings)) {
-        return { supported: false, reason: 'wsl' }
-      }
-      return { supported: true }
-    }
-    return {
-      supported: false,
-      reason:
-        location.executionHostId !== LOCAL_EXECUTION_HOST_ID
-          ? 'remote'
-          : location.wslDistro
-            ? 'wsl'
-            : 'agent'
-    }
+    // The verdict lives in a typechecked module; this file is @ts-nocheck.
+    return resolveStructuredAgentSessionCreateSupport({
+      agent,
+      location,
+      adapterSupportsCreate:
+        getStructuredAgentSessionHost()?.supportsCreate(location, agent) === true,
+      getSettings: () => this.requireStore().getSettings()
+    })
   }
 
   protected hasProviderSessionObservationSource(): boolean {

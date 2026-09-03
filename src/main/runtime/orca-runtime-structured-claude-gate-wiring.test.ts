@@ -16,7 +16,10 @@ vi.mock('./structured-agent-session-runtime', () => ({
 }))
 
 import { OrcaRuntimeService } from './orca-runtime'
-import type { ClaudeManagedAccountGateSettings } from '../native-chat/claude-structured-managed-account-support'
+import {
+  readClaudeManagedAccountGateSettings,
+  type ClaudeManagedAccountGateSettings
+} from '../native-chat/claude-structured-managed-account-support'
 
 const SETTINGS = {
   claudeManagedAccounts: [],
@@ -25,10 +28,10 @@ const SETTINGS = {
   agentDefaultArgs: {}
 } as unknown as ClaudeManagedAccountGateSettings
 
-function readGate(): (() => unknown) | undefined {
+function gateSettingsGetter(): (() => ClaudeManagedAccountGateSettings) | undefined {
   const deps: Record<string, unknown> = installed.deps ?? {}
-  const read = deps['readClaudeManagedAccountGate']
-  return typeof read === 'function' ? (read as () => unknown) : undefined
+  const get = deps['getClaudeManagedAccountGateSettings']
+  return typeof get === 'function' ? (get as () => ClaudeManagedAccountGateSettings) : undefined
 }
 
 /** The runtime class this wiring lives on does not typecheck its own `this` calls, so a broken or
@@ -40,17 +43,22 @@ describe('structured Claude managed-account gate wiring', () => {
 
     await runtime.ensureStructuredAgentSessionHost()
 
-    const read = readGate()
-    expect(typeof read).toBe('function')
-    expect(read?.()).toBe(SETTINGS)
+    const get = gateSettingsGetter()
+    expect(typeof get).toBe('function')
+    expect(get?.()).toBe(SETTINGS)
   })
 
-  it('answers null instead of throwing when the settings cannot be read', async () => {
+  /** The installer composes this getter with the fail-closed reader, which is the shape the
+   *  resolver consumes; pin that composition end to end. */
+  it('composes into a null answer instead of throwing when settings cannot be read', async () => {
     installed.deps = null
     const runtime = new OrcaRuntimeService()
 
     await runtime.ensureStructuredAgentSessionHost()
 
-    expect(readGate()?.()).toBeNull()
+    const get = gateSettingsGetter()
+    expect(typeof get).toBe('function')
+    expect(() => get?.()).toThrow()
+    expect(readClaudeManagedAccountGateSettings(get!)).toBeNull()
   })
 })
