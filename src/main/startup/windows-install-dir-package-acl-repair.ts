@@ -64,11 +64,13 @@ export type WindowsInstallDirAclRepairOptions = {
   platform?: NodeJS.Platform
   isServeMode?: boolean
   /**
-   * The DACL was read as poisoned just now, so a marker claiming a completed repair
-   * describes a tree that has since been re-poisoned — or an icacls run that silently
-   * no-opped. It stops outranking the evidence; the attempt budget still bounds retries.
+   * A DACL reading found this tree poisoned and nothing has read it clean since — this
+   * launch's probe, or a persisted poison marker from an earlier one. A marker claiming a
+   * completed repair therefore describes a tree that has since been re-poisoned, or an
+   * icacls run that silently no-opped: it stops outranking the reading. The attempt
+   * budget still bounds retries.
    */
-  probeConfirmedPoisoned?: boolean
+  poisonEvidenceOutstanding?: boolean
   /** Test seams. */
   runProcessFn?: typeof runProcess
   recordBreadcrumb?: typeof recordDurableCrashBreadcrumb
@@ -146,7 +148,7 @@ function markerHitFor(args: WindowsInstallDirAclRepairArgs): { alreadyRepaired: 
   if (!marker) {
     return null
   }
-  if (marker.outcome === 'repaired' && args.probeConfirmedPoisoned !== true) {
+  if (marker.outcome === 'repaired' && args.poisonEvidenceOutstanding !== true) {
     return { alreadyRepaired: true }
   }
   return (marker.attempts ?? 0) >= MAX_REPAIR_ATTEMPTS ? { alreadyRepaired: false } : null

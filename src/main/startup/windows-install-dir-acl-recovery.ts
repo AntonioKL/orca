@@ -115,6 +115,16 @@ export function isInstallDirAclRepairPending(): boolean {
   return poison?.stage === 'pending'
 }
 
+/**
+ * True once the repair has nothing left to try for this install and version: `marker-hit`
+ * is reachable only through the spent attempt budget. The suspicion itself stands — the
+ * dialog still names the cause and the admin commands — but a caller that was *withholding*
+ * a recovery to give the repair first go has nothing left to wait for.
+ */
+export function isInstallDirAclRepairExhausted(): boolean {
+  return poison?.stage === 'marker-hit'
+}
+
 /** True while the pre-window gate is rewriting the very files a new renderer would load. */
 export function isBlockingInstallDirAclRepairInFlight(): boolean {
   return blockingRepairInFlight
@@ -124,31 +134,24 @@ export function isBlockingInstallDirAclRepairInFlight(): boolean {
 function startRepair(
   installDir: string,
   options: WindowsInstallDirAclRecoveryOptions,
-  {
-    probeConfirmedPoisoned = false,
-    onDone
-  }: {
-    probeConfirmedPoisoned?: boolean
-    onDone?: (result: WindowsInstallDirAclRepairResult) => void
-  } = {}
+  onDone?: (result: WindowsInstallDirAclRepairResult) => void
 ): boolean {
   writeInstallDirAclPoisonMarker(options.userDataPath, installDir, options.appVersion)
   const started = repairWindowsInstallDirPackageAcl({
     ...options,
     installDir,
-    probeConfirmedPoisoned,
+    // Every caller here holds outstanding poison evidence — this launch's probe reading, or
+    // the persisted marker that armed the gate — so a marker recording a completed repair
+    // describes a re-poisoned tree, or an icacls run that silently no-opped. It must not
+    // stand in for a repair. `marker-hit` therefore only ever means the budget is spent.
+    poisonEvidenceOutstanding: true,
     onDone: (result) => {
-      // A marker recording a completed repair is not a failure to repair: this tree is done.
-      // `probeConfirmedPoisoned` keeps it off a tree the probe just read as poisoned:
-      // there the marker stops claiming `alreadyRepaired`, so icacls runs again.
-      const stage: RepairStage =
-        result.mode === 'marker-hit' && result.alreadyRepaired ? 'repaired' : result.mode
       // A clean reading of the tree outranks this: there was nothing left to repair.
       if (!installDirReadClean) {
-        poison = { installDir, stage }
+        poison = { installDir, stage: result.mode }
       }
       logStartupMilestone('install-dir-acl-repair-done', { mode: result.mode })
-      if (stage === 'repaired') {
+      if (result.mode === 'repaired') {
         clearInstallDirAclPoisonMarker(options.userDataPath)
         // The GPU child deaths were never a driver fault, so safe graphics — and the
         // --in-process-gpu launch that hides the next crash's evidence — must not outlive the repair.
@@ -200,14 +203,19 @@ function applyInstallDirAclProbeVerdict(
     }
     return
   }
-  // The blocking pre-window gate may already own this launch's repair; restarting it
-  // would reset the verdict to 'pending' against a repair that can no longer report.
-  if (poison) {
+  // The blocking pre-window gate still owns this launch's repair; restarting it would
+  // reset the verdict to 'pending' against a repair that can no longer report.
+  if (poison?.stage === 'pending') {
     return
   }
-  startRepair(options.installDir ?? dirname(process.execPath), options, {
-    probeConfirmedPoisoned: true
-  })
+  // This reading was taken after the gate finished, so it outranks the gate's own verdict:
+  // a tree that still matches the signature was never repaired, whatever icacls exited.
+  if (poison?.stage === 'repaired') {
+    poison = { installDir: poison.installDir, stage: 'failed' }
+  }
+  // Re-writes the poison marker — re-arming the next launch's gate — even when the
+  // once-per-process latch means no icacls can run again this launch.
+  startRepair(options.installDir ?? dirname(process.execPath), options)
 }
 
 /**
@@ -238,13 +246,11 @@ export async function repairKnownPoisonedInstallDirBeforeWindow(
         options.timeoutMs ?? BLOCKING_REPAIR_BUDGET_MS
       )
       timer.unref?.()
-      // No `probeConfirmedPoisoned`: the gate acts on a marker from an earlier launch,
-      // not on a DACL reading of its own, so a recorded repair still outranks it.
-      const started = startRepair(installDir, options, {
-        onDone: (result) => {
-          clearTimeout(timer)
-          resolve(result.mode)
-        }
+      // The marker is an earlier launch's DACL reading that nothing has retired, so a
+      // repair marker claiming success cannot stand in for the repair this launch owes.
+      const started = startRepair(installDir, options, (result) => {
+        clearTimeout(timer)
+        resolve(result.mode)
       })
       // No dispatch means no `onDone`, so waiting out the whole budget would buy nothing.
       if (!started) {

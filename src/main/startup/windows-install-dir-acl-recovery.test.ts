@@ -16,6 +16,7 @@ import {
 import {
   describeInstallDirAclPoison,
   isBlockingInstallDirAclRepairInFlight,
+  isInstallDirAclRepairExhausted,
   isInstallDirAclSuspect,
   noteWindowsInstallDirAclProbePending,
   repairKnownPoisonedInstallDirBeforeWindow,
@@ -475,39 +476,115 @@ describe('repairKnownPoisonedInstallDirBeforeWindow', () => {
   })
 })
 
-// hasMarkerFor also matches a marker written by a SUCCESSFUL repair, so 'marker-hit'
-// on its own cannot tell a finished tree from one Orca gave up on.
-describe('a marker-hit on a tree a previous launch already repaired', () => {
+// The repair marker matches whatever the outcome, so on its own 'marker-hit' cannot tell a
+// finished tree from one Orca gave up on. Both callers hold outstanding poison evidence —
+// this launch's probe reading, or the persisted marker that armed the gate — so a recorded
+// success never stands in for the repair, and 'marker-hit' only ever means budget spent.
+describe('a repair marker recording a completed repair', () => {
   beforeEach(() => {
     resetWindowsInstallDirAclProbeForTest()
     resetWindowsInstallDirAclRepairForTest()
     resetWindowsInstallDirAclRecoveryForTest()
   })
 
-  it('reads as repaired, not as a repair Orca could not do', async () => {
+  /** One launch: fresh module latches, then the gate runs against the userData on disk. */
+  async function gateLaunch(
+    userDataPath: string,
+    run: Runner
+  ): Promise<Awaited<ReturnType<typeof repairKnownPoisonedInstallDirBeforeWindow>>> {
+    resetWindowsInstallDirAclProbeForTest()
+    resetWindowsInstallDirAclRepairForTest()
+    resetWindowsInstallDirAclRecoveryForTest()
+    return repairKnownPoisonedInstallDirBeforeWindow(recoveryOptions(userDataPath, run))
+  }
+
+  // The three-launch shape the gate exists for, and the one it used to disarm itself on:
+  // launch 1 repairs; the tree is re-poisoned (an installer, AV, or an icacls run that
+  // silently no-opped); launch 2's probe records the poison but Chromium FATALs before the
+  // repair can write its marker. Launch 3's gate then meets a poison marker and a repair
+  // marker claiming success. Treating that as 'repaired' ran no icacls, deleted the poison
+  // marker so no later gate ever fires again, un-suspected the tree so --in-process-gpu
+  // could engage, and told the user their permissions were fixed.
+  it('re-runs icacls when a poison marker outlives it', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-acl-repaired-hit-'))
+
+    // Launch 1: the gate repairs the tree and retires the poison marker.
+    writeInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)
+    expect(await gateLaunch(userDataPath, okRun)).toBe('repaired')
+    expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(false)
+
+    // Launch 2: the probe reads the tree as poisoned again; the process dies mid-repair,
+    // so the repair marker still records launch 1's success.
+    resetWindowsInstallDirAclRecoveryForTest()
+    resetWindowsInstallDirAclRepairForTest()
+    startWindowsInstallDirAclRepairIfPoisoned(
+      POISON_VERDICT,
+      recoveryOptions(userDataPath, (() => new Promise<never>(() => undefined)) as Runner)
+    )
+    expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(true)
+
+    // Launch 3: the gate must repair, not congratulate itself on launch 1's work.
+    const spent: ProcessSpec[] = []
+    const mode = await gateLaunch(userDataPath, async (spec) => {
+      spent.push(spec)
+      return { code: 5, signal: null, stdout: '', stderr: 'Access is denied.', timedOut: false }
+    })
+    expect(mode).toBe('failed')
+    expect(spent.map((spec) => spec.args?.[2])).toEqual([
+      '*S-1-15-2-2:(OI)(CI)(RX)',
+      '*S-1-15-2-2:(RX)'
+    ])
+    expect(isInstallDirAclSuspect()).toBe(true)
+    expect(describeInstallDirAclPoison()?.detail).toContain('could not repair them')
+    expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(true)
+  })
+
+  // The budget is what stops the retry above running forever; a spent one must still read
+  // as "Orca could not fix this", never as a repair it never made.
+  it('does not let the gate report a spent budget as a repair', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-acl-gate-budget-'))
+    writeFileSync(
+      join(userDataPath, WINDOWS_INSTALL_DIR_ACL_REPAIR_MARKER_FILE),
+      JSON.stringify({
+        schemeVersion: WINDOWS_INSTALL_DIR_ACL_REPAIR_SCHEME_VERSION,
+        installDir: INSTALL_DIR,
+        appVersion: APP_VERSION,
+        attemptedAt: Date.now(),
+        outcome: 'repaired',
+        attempts: 3
+      })
+    )
+    writeInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)
+    const spent: ProcessSpec[] = []
+    const mode = await gateLaunch(userDataPath, async (spec) => {
+      spent.push(spec)
+      return okRun(spec)
+    })
+    expect(mode).toBe('marker-hit')
+    expect(spent).toHaveLength(0)
+    expect(isInstallDirAclSuspect()).toBe(true)
+    expect(isInstallDirAclRepairExhausted()).toBe(true)
+    expect(describeInstallDirAclPoison()?.detail).toContain('could not repair them')
+    // Still armed: nothing has proven this tree healthy, so a later launch still gates.
+    expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(true)
+  })
+
+  // The probe reads the tree AFTER the pre-window gate has finished with it, so a signature
+  // still matching means the repair never landed however icacls exited.
+  it('is overruled by a probe that reads the tree poisoned after the gate repaired it', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-acl-noop-icacls-'))
     writeInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)
     expect(
       await repairKnownPoisonedInstallDirBeforeWindow(recoveryOptions(userDataPath, okRun))
     ).toBe('repaired')
 
-    // The state a launch killed between the repair and the marker clear leaves behind.
-    writeInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)
-    resetWindowsInstallDirAclRecoveryForTest()
-    resetWindowsInstallDirAclRepairForTest()
-    const spent: ProcessSpec[] = []
-    expect(
-      await repairKnownPoisonedInstallDirBeforeWindow(
-        recoveryOptions(userDataPath, async (spec) => {
-          spent.push(spec)
-          return okRun(spec)
-        })
-      )
-    ).toBe('marker-hit')
-    expect(spent).toHaveLength(0)
-    expect(isInstallDirAclSuspect()).toBe(false)
-    expect(describeInstallDirAclPoison()?.detail).toContain('Orca repaired the permissions')
-    expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(false)
+    startWindowsInstallDirAclRepairIfPoisoned(POISON_VERDICT, recoveryOptions(userDataPath, okRun))
+
+    expect(isInstallDirAclSuspect()).toBe(true)
+    expect(isInstallDirAclRepairExhausted()).toBe(false)
+    expect(describeInstallDirAclPoison()?.detail).toContain('could not repair them')
+    // Re-armed: the next launch gates before it opens a window it cannot render.
+    expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(true)
   })
 
   // The opposite evidence: the probe has just READ this tree and found it poisoned, so a

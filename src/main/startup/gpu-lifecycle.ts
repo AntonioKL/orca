@@ -17,6 +17,7 @@ import { engageGpuFallbackAfterCrashBurst } from '../crash-reporting/gpu-fallbac
 import { recordCrashBreadcrumb } from '../crash-reporting/crash-breadcrumb-store'
 import { recordDurableCrashBreadcrumb } from '../crash-reporting/durable-crash-breadcrumb'
 import {
+  isInstallDirAclRepairExhausted,
   isInstallDirAclRepairPending,
   isInstallDirAclSuspect,
   waitForInstallDirAclVerdict
@@ -90,6 +91,11 @@ export async function presentGpuFallbackRecoveredLaunchPrompt(
   // One prompt per process. A failure leaves the on-disk marker unconfirmed so the next launch retries.
   state.activeGpuFallbackMarker = null
   const userDataPath = app.getPath('userData')
+  // The marker was read before whenReady; the pre-window ACL gate can have retired it since.
+  // Asking then would let a "keep it" answer pin software rendering on a machine Orca just fixed.
+  if (!readActiveGpuFallbackMarker(userDataPath, gpuFallbackEnvironment())) {
+    return
+  }
   await handleGpuFallbackRecoveredLaunch({
     isQuitting: () => state.isQuitting,
     prompt: () => promptForGpuFallbackRecoveredLaunch(window),
@@ -120,6 +126,18 @@ export async function presentGpuFallbackRecoveredLaunchPrompt(
 }
 
 /**
+ * Why withholding ends with the repair budget: withholding only buys the ACL repair the
+ * chance to land first. Once its attempts are spent no repair is coming on this launch or
+ * any later one, so holding safe graphics back forever would deny the only recovery left —
+ * on a genuinely poisoned tree Orca has already told the user the admin commands, and the
+ * probe's flag-blind ACE match also over-matches healthy installs whose driver really is
+ * the fault. It is a bounded delay, not a permanent suppression.
+ */
+function installDirAclWithholdsGpuFallback(): boolean {
+  return isInstallDirAclSuspect() && !isInstallDirAclRepairExhausted()
+}
+
+/**
  * Why: a poisoned install DACL kills the GPU child exactly like a bad driver, but safe
  * graphics does not rescue it and --in-process-gpu removes the GPU child, erasing the
  * sibling deaths that identify the real cause.
@@ -133,7 +151,7 @@ async function installDirAclClearsGpuFallback(
   userDataPath: string,
   crashesInWindow: number
 ): Promise<boolean> {
-  if (!isInstallDirAclSuspect()) {
+  if (!installDirAclWithholdsGpuFallback()) {
     return true
   }
   const persisted = persistGpuFallbackMarker(userDataPath, {
@@ -142,7 +160,7 @@ async function installDirAclClearsGpuFallback(
     userConfirmed: false
   })
   await waitForInstallDirAclVerdict()
-  if (!isInstallDirAclSuspect()) {
+  if (!installDirAclWithholdsGpuFallback()) {
     return true
   }
   // Why the marker survives a pending repair: withdrawing it here left a machine that
@@ -187,6 +205,11 @@ export async function handleGpuChildCrash(
   const fallbackData = { processReason: reason, exitCode, crashesInWindow: result.crashesInWindow }
   const userDataPath = app.getPath('userData')
   if (!(await installDirAclClearsGpuFallback(userDataPath, result.crashesInWindow))) {
+    return
+  }
+  // Re-read after that wait: it can span the probe's whole grace window, and a quit that
+  // started inside it must not be answered with a modal and a relaunch.
+  if (state.isQuitting) {
     return
   }
   await engageGpuFallbackAfterCrashBurst(

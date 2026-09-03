@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -38,20 +38,30 @@ import {
   DEFAULT_GPU_CRASH_FALLBACK_WINDOW_MS,
   GpuCrashFallbackTracker
 } from '../crash-reporting/gpu-crash-fallback-decision'
-import { readGpuFallbackMarker } from './gpu-fallback-marker'
-import { handleGpuChildCrash } from './gpu-lifecycle'
-import { mainProcessState as state } from './main-process-state'
+import {
+  readGpuFallbackMarker,
+  writeGpuFallbackMarker,
+  type GpuFallbackMarker
+} from './gpu-fallback-marker'
+import { handleGpuChildCrash, presentGpuFallbackRecoveredLaunchPrompt } from './gpu-lifecycle'
+import { gpuFallbackEnvironment, mainProcessState as state } from './main-process-state'
+import { writeInstallDirAclPoisonMarker } from './windows-install-dir-acl-poison-marker'
 import {
   isInstallDirAclRepairPending,
   noteWindowsInstallDirAclProbePending,
+  repairKnownPoisonedInstallDirBeforeWindow,
   resetWindowsInstallDirAclRecoveryForTest,
   startWindowsInstallDirAclRepairIfPoisoned
 } from './windows-install-dir-acl-recovery'
-import { resetWindowsInstallDirAclRepairForTest } from './windows-install-dir-package-acl-repair'
+import {
+  resetWindowsInstallDirAclRepairForTest,
+  WINDOWS_INSTALL_DIR_ACL_REPAIR_MARKER_FILE,
+  WINDOWS_INSTALL_DIR_ACL_REPAIR_SCHEME_VERSION
+} from './windows-install-dir-package-acl-repair'
 
 const INSTALL_DIR = 'C:\\Users\\neil\\AppData\\Local\\Programs\\orca'
 
-function recoveryOptions(): {
+function recoveryOptions(userDataPath?: string): {
   platform: 'win32'
   installDir: string
   appVersion: string
@@ -62,7 +72,7 @@ function recoveryOptions(): {
     platform: 'win32',
     installDir: INSTALL_DIR,
     appVersion: '1.4.184',
-    userDataPath: mkdtempSync(join(tmpdir(), 'orca-acl-gpu-guard-')),
+    userDataPath: userDataPath ?? mkdtempSync(join(tmpdir(), 'orca-acl-gpu-guard-')),
     recordBreadcrumb: () => undefined
   }
 }
@@ -100,11 +110,14 @@ function reportProbePoisoned(): { finishRepair: () => Promise<void> } {
 }
 
 /** A repair that settles, so `poison.stage` leaves 'pending' for a terminal verdict. */
-async function reportProbePoisonedWithSettledRepair(exitCode: number): Promise<void> {
+async function reportProbePoisonedWithSettledRepair(
+  exitCode: number,
+  userDataPath?: string
+): Promise<void> {
   startWindowsInstallDirAclRepairIfPoisoned(
     { status: 'ok', matchesPoisonSignature: true, wellKnownNameCheckReliable: true },
     {
-      ...recoveryOptions(),
+      ...recoveryOptions(userDataPath),
       runProcessFn: (async () => ({
         code: exitCode,
         signal: null,
@@ -117,6 +130,33 @@ async function reportProbePoisonedWithSettledRepair(exitCode: number): Promise<v
   for (let i = 0; i < 200 && isInstallDirAclRepairPending(); i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
+}
+
+/**
+ * The pre-window gate meeting a spent repair budget: the tree is still marked poisoned and
+ * Orca has no repair left to try. icacls must never be reached, so the runner throws.
+ */
+async function gateFindsRepairBudgetSpent(): Promise<void> {
+  const options = recoveryOptions()
+  writeFileSync(
+    join(options.userDataPath, WINDOWS_INSTALL_DIR_ACL_REPAIR_MARKER_FILE),
+    JSON.stringify({
+      schemeVersion: WINDOWS_INSTALL_DIR_ACL_REPAIR_SCHEME_VERSION,
+      installDir: INSTALL_DIR,
+      appVersion: options.appVersion,
+      attemptedAt: Date.now(),
+      outcome: 'failed',
+      attempts: 3
+    })
+  )
+  writeInstallDirAclPoisonMarker(options.userDataPath, INSTALL_DIR, options.appVersion)
+  const mode = await repairKnownPoisonedInstallDirBeforeWindow({
+    ...options,
+    runProcessFn: (() => {
+      throw new Error('the spent budget must not spawn icacls')
+    }) as never
+  })
+  expect(mode).toBe('marker-hit')
 }
 
 function reportProbeClean(): void {
@@ -246,6 +286,50 @@ describe('handleGpuChildCrash vs the install-dir ACL verdict', () => {
     expect(readGpuFallbackMarker(userData.path)).toBeNull()
   })
 
+  // The verdict wait can span the probe's whole 15s grace window, and the entry guard was
+  // read before it. A quit that starts inside the wait must not be answered with a modal.
+  it('does not prompt when the user quits during the verdict wait', async () => {
+    noteWindowsInstallDirAclProbePending()
+    await crashUpToThreshold()
+    const decisive = handleGpuChildCrash('crashed', null, 600)
+    state.isQuitting = true
+    reportProbeClean()
+    await decisive
+    expect(showMessageBox).not.toHaveBeenCalled()
+  })
+
+  // Withholding is a bounded delay, not a permanent suppression. Once the repair budget is
+  // spent no repair is coming on this launch or any later one, so pinning the tree as the
+  // suspect forever denied safe graphics on EVERY launch for the life of that version — and
+  // deleted the marker each time, so the machine also relaunched hardware accelerated. The
+  // victims are a standard-user install icacls can never fix and, via the probe's flag-blind
+  // ACE match, healthy installs whose driver genuinely is broken.
+  it('offers safe graphics on every launch once the ACL repair budget is spent', async () => {
+    for (let launch = 1; launch <= 3; launch += 1) {
+      resetWindowsInstallDirAclRepairForTest()
+      resetWindowsInstallDirAclRecoveryForTest()
+      showMessageBox.mockClear()
+      state.gpuCrashFallbackTracker = new GpuCrashFallbackTracker({
+        windowMs: DEFAULT_GPU_CRASH_FALLBACK_WINDOW_MS,
+        threshold: DEFAULT_GPU_CRASH_FALLBACK_THRESHOLD
+      })
+      await gateFindsRepairBudgetSpent()
+
+      await crashUpToThreshold()
+      await handleGpuChildCrash('crashed', null, 600)
+      expect(showMessageBox).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  // Still withheld while the budget has an attempt left: the repair is the better answer,
+  // and this is the launch a next one can be rescued on.
+  it('still withholds while the repair has an attempt left to spend', async () => {
+    await reportProbePoisonedWithSettledRepair(1)
+    await crashUpToThreshold()
+    await handleGpuChildCrash('crashed', null, 600)
+    expect(showMessageBox).not.toHaveBeenCalled()
+  })
+
   // recordGpuCrash reports the threshold crossing once and latches. Withholding consumes
   // that one report, so without a re-arm the same process could never engage again — a
   // machine whose tree is repaired and whose driver is genuinely broken would be stuck
@@ -264,5 +348,51 @@ describe('handleGpuChildCrash vs the install-dir ACL verdict', () => {
       await handleGpuChildCrash('crashed', null, 10_000 + i * 200)
     }
     expect(showMessageBox).toHaveBeenCalledTimes(1)
+  })
+})
+
+// The safe-graphics marker is read before whenReady, and the pre-window ACL gate runs after
+// that read. Asking "keep safe graphics?" on a machine Orca has just repaired invites a
+// `userConfirmed: true` marker that pins software rendering on healthy hardware.
+describe('presentGpuFallbackRecoveredLaunchPrompt vs a marker retired since it was read', () => {
+  const realPlatform = process.platform
+  const window = { isDestroyed: () => false } as unknown as Parameters<
+    typeof presentGpuFallbackRecoveredLaunchPrompt
+  >[0]
+
+  beforeAll(() => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+  })
+
+  afterAll(() => {
+    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true })
+  })
+
+  beforeEach(() => {
+    userData.path = mkdtempSync(join(tmpdir(), 'orca-acl-gpu-recovered-'))
+    resetWindowsInstallDirAclRepairForTest()
+    resetWindowsInstallDirAclRecoveryForTest()
+    showMessageBox.mockClear()
+    state.isQuitting = false
+    const info = { engagedAt: Date.now(), crashesInWindow: 3, userConfirmed: false }
+    writeGpuFallbackMarker(userData.path, info, {
+      ...gpuFallbackEnvironment(),
+      platform: 'win32'
+    })
+    state.activeGpuFallbackMarker = readGpuFallbackMarker(userData.path) as GpuFallbackMarker
+  })
+
+  it('asks while the marker is still on disk', async () => {
+    showMessageBox.mockResolvedValueOnce({ response: 0 })
+    await presentGpuFallbackRecoveredLaunchPrompt(window)
+    expect(showMessageBox).toHaveBeenCalledTimes(1)
+  })
+
+  it('stays silent once the install-DACL repair has cleared it', async () => {
+    await reportProbePoisonedWithSettledRepair(0, userData.path)
+    expect(readGpuFallbackMarker(userData.path)).toBeNull()
+
+    await presentGpuFallbackRecoveredLaunchPrompt(window)
+    expect(showMessageBox).not.toHaveBeenCalled()
   })
 })
