@@ -8,8 +8,8 @@ type LayoutsByTabId = Record<string, TerminalLayoutSnapshot>
 type LeafMembershipIndex = {
   /** First tab (in record order) whose layout tree holds the leaf — matches the linear scan. */
   readonly tabIdByLeafId: ReadonlyMap<string, string>
-  /** Layout objects the index was built from, used to detect in-place record edits. */
-  readonly builtFrom: ReadonlyMap<string, TerminalLayoutSnapshot>
+  /** Root nodes the index was built from; absent tab reads back `undefined`, empty tab `null`. */
+  readonly builtFrom: ReadonlyMap<string, TerminalPaneLayoutNode | null>
 }
 
 const EMPTY_INDEX: LeafMembershipIndex = {
@@ -41,13 +41,20 @@ function addLeafIds(
 /**
  * Why an identity check and not just the WeakMap: a few writers copy the layouts record and then
  * assign into the copy, so the record can be new while most layout objects are shared — and a
- * cached index must not outlive a replaced layout. Comparing layout references is O(tabs) pointer
+ * cached index must not outlive a replaced layout. Comparing root references is O(tabs) pointer
  * loads with no allocation, versus the rebuild's set-per-tab tree walk.
+ *
+ * Why the ROOT and not the layout object: `persistPtyBinding` grafts a leaf by assigning
+ * `layout.root` on the same layout object inside the same record (see the split/first-root branches
+ * in `persistence/loading-store/pty-binding-persistence.ts`), so a layout-identity check would keep
+ * serving an index that has never seen the grafted leaf. Membership is a pure function of the root
+ * tree, and no writer mutates a node in place, so root identity is the exact revalidation key.
  */
 function isIndexCurrent(index: LeafMembershipIndex, layouts: LayoutsByTabId): boolean {
   let seen = 0
   for (const tabId of Object.keys(layouts)) {
-    if (index.builtFrom.get(tabId) !== layouts[tabId]) {
+    const builtFromRoot = index.builtFrom.get(tabId)
+    if (builtFromRoot === undefined || builtFromRoot !== (layouts[tabId]?.root ?? null)) {
       return false
     }
     seen += 1
@@ -57,11 +64,11 @@ function isIndexCurrent(index: LeafMembershipIndex, layouts: LayoutsByTabId): bo
 
 function buildIndex(layouts: LayoutsByTabId): LeafMembershipIndex {
   const tabIdByLeafId = new Map<string, string>()
-  const builtFrom = new Map<string, TerminalLayoutSnapshot>()
+  const builtFrom = new Map<string, TerminalPaneLayoutNode | null>()
   for (const tabId of Object.keys(layouts)) {
-    const layout = layouts[tabId]
-    builtFrom.set(tabId, layout)
-    addLeafIds(layout?.root, tabId, tabIdByLeafId)
+    const root = layouts[tabId]?.root ?? null
+    builtFrom.set(tabId, root)
+    addLeafIds(root, tabId, tabIdByLeafId)
   }
   return { tabIdByLeafId, builtFrom }
 }

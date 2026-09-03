@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import type { TerminalLayoutSnapshot } from '../../shared/terminal-tab-types'
+import type {
+  TerminalLayoutSnapshot,
+  TerminalPaneLayoutNode
+} from '../../shared/terminal-tab-types'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { findTerminalTabIdForLeaf } from './workspace-session-terminal-membership-authority'
 import { getTerminalLeafMembershipIndex } from './terminal-leaf-membership-index'
@@ -70,20 +73,46 @@ describe('getTerminalLeafMembershipIndex', () => {
     expect(findTerminalTabIdForLeaf(session({ 'tab-a': layout('leaf-1') }), 'nope')).toBeUndefined()
   })
 
+  // `persistPtyBinding` grafts a leaf by assigning `layout.root` on the SAME layout object in the
+  // SAME record — a layout-identity check would keep serving an index blind to the new leaf.
+  it('rebuilds when a layout root is replaced in place on the same layout object', () => {
+    const tracked = layout('leaf-1')
+    const layouts: Record<string, TerminalLayoutSnapshot> = { 'tab-a': tracked }
+    expect(getTerminalLeafMembershipIndex(layouts).get('leaf-1')).toBe('tab-a')
+    tracked.root = {
+      type: 'split',
+      direction: 'vertical',
+      first: tracked.root,
+      second: { type: 'leaf', leafId: 'leaf-2' }
+    } as never
+    expect(getTerminalLeafMembershipIndex(layouts).get('leaf-2')).toBe('tab-a')
+    expect(getTerminalLeafMembershipIndex(layouts).get('leaf-1')).toBe('tab-a')
+  })
+
+  it('rebuilds when an empty layout gets its first root in place', () => {
+    const tracked = { root: null, activeLeafId: null, ptyIdsByLeafId: {} } as TerminalLayoutSnapshot
+    const layouts: Record<string, TerminalLayoutSnapshot> = { 'tab-a': tracked }
+    expect(getTerminalLeafMembershipIndex(layouts).get('leaf-1')).toBeUndefined()
+    tracked.root = { type: 'leaf', leafId: 'leaf-1' }
+    expect(getTerminalLeafMembershipIndex(layouts).get('leaf-1')).toBe('tab-a')
+  })
+
   it('does not walk a layout tree again once the record is indexed', () => {
-    let rootReads = 0
-    const tracked = {
-      get root() {
-        rootReads += 1
-        return layout('leaf-1').root
+    let nodeVisits = 0
+    // Stable node object: revalidation only compares its reference, a rebuild reads `type`.
+    const root = {
+      get type() {
+        nodeVisits += 1
+        return 'leaf' as const
       },
-      activeLeafId: 'leaf-1',
-      ptyIdsByLeafId: {}
-    } as unknown as TerminalLayoutSnapshot
-    const layouts = { 'tab-a': tracked }
+      leafId: 'leaf-1'
+    } as unknown as TerminalPaneLayoutNode
+    const layouts = {
+      'tab-a': { root, activeLeafId: 'leaf-1', ptyIdsByLeafId: {} } as TerminalLayoutSnapshot
+    }
     for (let i = 0; i < 50; i += 1) {
       findTerminalTabIdForLeaf(session(layouts), `leaf-${i}`)
     }
-    expect(rootReads).toBe(1)
+    expect(nodeVisits).toBe(1)
   })
 })
