@@ -263,7 +263,14 @@ internal class MobileWebShellView(
 
   private inner class LockedWebViewClient : WebViewClient() {
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse {
-      return runCatching { serveRequest(request) }.getOrElse { blockedResponse() }
+      return runCatching { serveRequest(request) }.getOrElse { error ->
+        if (request.isForMainFrame) {
+          // Chromium turns a non-2xx main-frame response into its own error page, so the shell has
+          // to name the reason itself before that page replaces the document.
+          reportDocumentFailure(error.message ?: "mobile_web_document_unavailable")
+        }
+        blockedResponse()
+      }
     }
 
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -280,6 +287,7 @@ internal class MobileWebShellView(
     override fun onPageFinished(view: WebView, url: String) {
       if (isAllowedDocumentUrl(Uri.parse(url))) {
         documentLoaded = true
+        view.visibility = View.VISIBLE
         view.clearHistory()
         onLoadState(mapOf("state" to "loaded"))
       }
@@ -291,8 +299,17 @@ internal class MobileWebShellView(
       error: android.webkit.WebResourceError
     ) {
       if (request.isForMainFrame && isAllowedDocumentRequestUrl(request.url)) {
-        documentLoaded = false
-        onLoadState(mapOf("state" to "failed"))
+        reportDocumentFailure("mobile_web_document_load_error_${error.errorCode}")
+      }
+    }
+
+    override fun onReceivedHttpError(
+      view: WebView,
+      request: WebResourceRequest,
+      errorResponse: WebResourceResponse
+    ) {
+      if (request.isForMainFrame && isAllowedDocumentRequestUrl(request.url)) {
+        reportDocumentFailure("mobile_web_document_http_${errorResponse.statusCode}")
       }
     }
 
@@ -320,6 +337,15 @@ internal class MobileWebShellView(
         webView.loadUrl("${mobileWebOriginForSession(sessionId)}/#$sessionId")
       }
       return true
+    }
+  }
+
+  /** Hides the Chromium error page and hands the RN shell a reason it can show instead. */
+  private fun reportDocumentFailure(reason: String) {
+    post {
+      documentLoaded = false
+      webView.visibility = View.INVISIBLE
+      onLoadState(mapOf("state" to "failed", "reason" to reason.take(128)))
     }
   }
 

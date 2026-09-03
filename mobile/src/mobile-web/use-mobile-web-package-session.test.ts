@@ -469,6 +469,27 @@ describe('useMobileWebPackageSession', () => {
     })
   })
 
+  // Reloading the view restarts the deadline that expired, so an unbounded restart livelocks a
+  // page that simply needs longer than one deadline: it never gets to finish loading.
+  it('keeps the page mounted when a health timeout has nothing to recover to', async () => {
+    native.openSession.mockResolvedValue(SESSION_B)
+    native.recoverSession.mockRejectedValue(new Error('no previous generation'))
+    await mount('disconnected')
+
+    await act(async () => {
+      await packageSession?.handleHealthTimeout(SESSION_B.sessionId)
+      await packageSession?.handleHealthTimeout(SESSION_B.sessionId)
+    })
+
+    expect(packageSession?.viewEpoch).toBe(0)
+    expect(packageSession?.session).toEqual(SESSION_B)
+    expect(packageSession?.packageWarning).toEqual({
+      message:
+        'Orca is taking longer than usual to start. There’s no earlier version to go back to.',
+      code: 'no_previous_version'
+    })
+  })
+
   it.each([
     ['incompatible_bridge', 'Update Orca Mobile to get the latest from Desktop.'],
     ['test_failure', 'Couldn’t update from Desktop. Showing the last version that worked.']

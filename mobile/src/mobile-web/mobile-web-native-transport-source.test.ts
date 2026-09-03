@@ -71,7 +71,7 @@ describe('mobile web native bridge transport', () => {
       '!isAllowedMobileWebBridgeDocumentUrl(documentUrl.toString(), sessionId)'
     )
     expect(androidBridgeUrlSource).toContain('url.scheme == MOBILE_WEB_ORIGIN_SCHEME')
-    expect(androidBridgeUrlSource).toContain('url.host == mobileWebOriginHostForSession(sessionId)')
+    expect(androidBridgeUrlSource).toContain('isMobileWebOriginHostForSession(url.host, sessionId)')
     expect(androidBridgeUrlSource).toContain('url.fragment == sessionId')
     expect(androidBridgeUrlSource).toContain('url.userInfo == null')
     expect(androidSource).toContain('request.isForMainFrame && isAllowedDocumentUrl(url)')

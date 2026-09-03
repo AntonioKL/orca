@@ -81,6 +81,12 @@ export function useMobileWebPackageRefresh(args: {
             signal: controller.signal,
             onProgress: setPackageProgress,
             reuseVerifiedBuild: async (buildId) => {
+              // An owned session only ever comes from openSession, so its build is already
+              // verified; waiting on the cache probe here re-downloaded every build this host
+              // epoch first learned from a refresh rather than from the cache.
+              if (!controller.signal.aborted && ownedSessionRef.current?.buildId === buildId) {
+                return true
+              }
               const verifiedBuildId =
                 cachedBuildProbe?.hostEpoch === hostEpoch ? await cachedBuildProbe.promise : null
               return (

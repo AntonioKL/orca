@@ -9,7 +9,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.security.MessageDigest
-import java.security.SecureRandom
 
 private const val CHUNK_BYTE_LIMIT = 48 * 1024
 private const val CHUNK_BASE64_CHARACTER_LIMIT = ((CHUNK_BYTE_LIMIT + 2) / 3) * 4
@@ -676,14 +675,7 @@ internal class MobileWebPackageStore internal constructor(
     "url" to "${mobileWebOriginForSession(sessionId)}/#$sessionId"
   )
 
-  private fun randomIdentifier(): String {
-    val bytes = ByteArray(32)
-    SecureRandom().nextBytes(bytes)
-    return encodeBase64(bytes)
-      .replace('+', '-')
-      .replace('/', '_')
-      .trimEnd('=')
-  }
+  private fun randomIdentifier(): String = mobileWebRandomIdentifier()
 
   private fun requireStage(stageId: String): MobileWebStageRecord =
     stages[stageId] ?: throw IllegalArgumentException("mobile_web_stage_unknown")

@@ -18,6 +18,7 @@
   "exclude": [
     "**/*.test.ts",
     "**/*.test.tsx",
-    "scripts/mobile-web-package-download-measurement.ts"
+    "scripts/mobile-web-package-download-measurement.ts",
+    "scripts/mobile-web-package-download-loopback-clients.ts"
   ]
 }

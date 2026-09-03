@@ -24,7 +24,7 @@ export type MobileWebShellViewProps = ViewProps & {
   onBridgeMessage?: MobileWebShellEvent<{ data: string }>
   onNavigationBlocked?: MobileWebShellEvent<{ url: string }>
   onProcessTerminated?: MobileWebShellEvent<{ sessionId: string }>
-  onLoadState?: MobileWebShellEvent<{ state: 'loading' | 'loaded' | 'failed' }>
+  onLoadState?: MobileWebShellEvent<{ state: 'loading' | 'loaded' | 'failed'; reason?: string }>
 }
 
 const NativeMobileWebShellView: ComponentType<
