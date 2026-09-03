@@ -109,6 +109,7 @@ export function createClaudeChildTreeReaper(
   let capturing: Promise<void> | null = null
   let refreshing: Promise<void> | null = null
   let queuedRefresh: Promise<void> | null = null
+  let rootIdentityUnsafe = false
   let inFlight: Promise<DescendantTreeVerdict> | null = null
   let treeVerdict: DescendantTreeVerdict = 'unverifiable'
 
@@ -189,7 +190,24 @@ export function createClaudeChildTreeReaper(
         return
       }
       if (snapshot !== null) {
-        snapshot = mergeClaudeCapturedTrees(snapshot, tree) ?? snapshot
+        const merged = mergeClaudeCapturedTrees(snapshot, tree)
+        if (merged) {
+          snapshot = merged
+        } else {
+          // A same-PID identity change is a recycle/replace decision, not an
+          // absent descendant. Discard the proof rather than signal either
+          // identity; a root mismatch also fences the late root kill below.
+          rootIdentityUnsafe =
+            snapshot.platform !== tree.platform ||
+            (snapshot.platform === 'posix' &&
+              tree.platform === 'posix' &&
+              snapshot.tree.rootPgid !== tree.tree.rootPgid) ||
+            (snapshot.platform === 'win32' &&
+              tree.platform === 'win32' &&
+              (snapshot.tree.root.pid !== tree.tree.root.pid ||
+                snapshot.tree.root.creationTimeMs !== tree.tree.root.creationTimeMs))
+          snapshot = null
+        }
       }
       // Keep an earlier admissible snapshot when this close-boundary read fails;
       // it remains the only identity-safe evidence after root exit.
@@ -246,7 +264,7 @@ export function createClaudeChildTreeReaper(
     const killRootIfLive = (): void => {
       // Once the child handle reported exit, its numeric pid may already belong
       // to another process; never issue a late root signal through that pid.
-      if (!exited()) {
+      if (!exited() && !rootIdentityUnsafe) {
         child.kill('SIGKILL')
       }
     }

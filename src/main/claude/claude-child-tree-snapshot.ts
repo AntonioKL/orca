@@ -8,19 +8,27 @@ export type ClaudeCapturedTree =
 
 /**
  * Process-table reads are not atomic: a refresh can omit a still-live row, but
- * it can also observe a new process after the old row exited. Keep the latest
- * identity for each PID and retain rows absent from the refresh so either case
- * remains in the close proof.
+ * it can also observe a new process after the old row exited. Retain rows absent
+ * from the refresh, but reject a PID whose identity changed between reads.
  */
 function mergeRowsByPid<Row extends { pid: number }>(
   previous: readonly Row[],
-  next: readonly Row[]
-): Row[] {
+  next: readonly Row[],
+  sameIdentity: (previous: Row, next: Row) => boolean
+): Row[] | null {
   const merged = new Map<number, Row>()
   for (const row of previous) {
+    const prior = merged.get(row.pid)
+    if (prior && !sameIdentity(prior, row)) {
+      return null
+    }
     merged.set(row.pid, row)
   }
   for (const row of next) {
+    const prior = merged.get(row.pid)
+    if (prior && !sameIdentity(prior, row)) {
+      return null
+    }
     merged.set(row.pid, row)
   }
   return [...merged.values()]
@@ -37,11 +45,22 @@ export function mergeClaudeCapturedTrees(
     if (previous.tree.rootPgid !== next.tree.rootPgid) {
       return null
     }
+    const descendants = mergeRowsByPid(
+      previous.tree.descendants,
+      next.tree.descendants,
+      (left, right) => left.pgid === right.pgid && left.startedAt === right.startedAt
+    )
+    if (!descendants) {
+      return null
+    }
     return {
       platform: 'posix',
       tree: {
         ...next.tree,
-        descendants: mergeRowsByPid(previous.tree.descendants, next.tree.descendants)
+        // A retained row keeps the earlier process-table boundary. A later
+        // displayed second must not make same-second PID reuse force-killable.
+        capturedAtMs: Math.min(previous.tree.capturedAtMs, next.tree.capturedAtMs),
+        descendants
       }
     }
   }
@@ -52,11 +71,20 @@ export function mergeClaudeCapturedTrees(
     ) {
       return null
     }
+    const descendants = mergeRowsByPid(
+      previous.tree.descendants,
+      next.tree.descendants,
+      (left, right) => left.creationTimeMs === right.creationTimeMs
+    )
+    if (!descendants) {
+      return null
+    }
     return {
       platform: 'win32',
       tree: {
         ...next.tree,
-        descendants: mergeRowsByPid(previous.tree.descendants, next.tree.descendants),
+        capturedAtMs: Math.min(previous.tree.capturedAtMs, next.tree.capturedAtMs),
+        descendants,
         unidentifiedCount: Math.max(previous.tree.unidentifiedCount, next.tree.unidentifiedCount)
       }
     }

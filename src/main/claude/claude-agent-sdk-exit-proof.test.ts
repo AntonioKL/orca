@@ -500,6 +500,107 @@ describe('claude child tree reaper', () => {
     expect(child.kill).toHaveBeenCalledWith('SIGKILL')
   })
 
+  it('keeps the original capture boundary for retained POSIX rows', async () => {
+    const child = mockChild()
+    const first = {
+      ...snapshotOf(4243),
+      capturedAtMs: 1_700_000_000_900
+    }
+    const refreshed = {
+      ...first,
+      capturedAtMs: 1_700_000_002_100,
+      descendants: [
+        ...first.descendants,
+        {
+          pid: 4244,
+          ppid: 424242,
+          pgid: 1,
+          startedAt: 'Tue Jan 2 00:00:00 2026'
+        }
+      ]
+    }
+    const captureDescendants = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(refreshed)
+    const terminateDescendants = vi.fn(async () => 'exited' as const)
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'linux',
+      captureDescendants,
+      terminateDescendants
+    })
+
+    await tree.capture()
+    await tree.refresh?.()
+    await tree.reap()
+
+    expect(terminateDescendants).toHaveBeenCalledWith({
+      ...refreshed,
+      // The retained 4243 row was first observed in the earlier displayed
+      // second. Advancing this boundary would make same-second PID reuse
+      // eligible for a delayed SIGKILL.
+      capturedAtMs: first.capturedAtMs
+    })
+  })
+
+  it('fails closed when a POSIX refresh reuses a PID with a new identity', async () => {
+    const child = mockChild()
+    const first = snapshotOf(4243)
+    const replacement = {
+      ...first,
+      descendants: [
+        {
+          ...first.descendants[0],
+          pgid: 9,
+          startedAt: 'Tue Jan 2 00:00:00 2026'
+        }
+      ]
+    }
+    const captureDescendants = vi
+      .fn()
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(replacement)
+    const terminateDescendants = vi.fn(async () => 'exited' as const)
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'linux',
+      captureDescendants,
+      terminateDescendants
+    })
+
+    await tree.capture()
+    await tree.refresh?.()
+
+    await expect(tree.reap()).resolves.toBe('unverifiable')
+    expect(terminateDescendants).not.toHaveBeenCalled()
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+  })
+
+  it('fails closed when a Windows refresh reuses a PID with a new creation time', async () => {
+    const child = mockChild()
+    const first = windowsSnapshotOf(4243)
+    const replacement = {
+      ...first,
+      descendants: [{ pid: 4243, creationTimeMs: first.descendants[0].creationTimeMs + 1 }]
+    }
+    const captureWindowsDescendants = vi
+      .fn()
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(replacement)
+    const terminateWindowsTree = vi.fn(async () => {})
+    const terminateWindowsDescendants = vi.fn(async () => 'exited' as const)
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'win32',
+      captureWindowsDescendants,
+      terminateWindowsTree,
+      terminateWindowsDescendants
+    })
+
+    await tree.capture()
+    await tree.refresh?.()
+
+    await expect(tree.reap()).resolves.toBe('unverifiable')
+    expect(terminateWindowsTree).not.toHaveBeenCalled()
+    expect(terminateWindowsDescendants).not.toHaveBeenCalled()
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+  })
+
   it('queues a fresh boundary behind an output-triggered capture already in flight', async () => {
     const child = mockChild()
     const firstDone = Promise.withResolvers<void>()
