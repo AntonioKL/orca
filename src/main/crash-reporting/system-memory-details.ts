@@ -72,10 +72,11 @@ export function setSystemMemoryInfoReaderForTest(reader: SystemMemoryInfoReader 
 
 function pressureSignal(
   platform: NodeJS.Platform,
-  details: CrashReportDetails
+  details: CrashReportDetails,
+  volumeQualifies = true
 ): SystemMemoryPressureSignal {
   if (platform === 'win32' && `${SYSTEM_MEMORY_KEY_PREFIX}SwapFreeMB` in details) {
-    return `${SYSTEM_MEMORY_KEY_PREFIX}SwapVolumeFreeMB` in details
+    return volumeQualifies && `${SYSTEM_MEMORY_KEY_PREFIX}SwapVolumeFreeMB` in details
       ? 'available-commit'
       : 'available-commit-unqualified'
   }
@@ -115,17 +116,25 @@ export function getSystemMemoryDetails(
 /**
  * Merges the statfs-derived volume datum, which needs an await and so is only
  * reachable from the periodic sampler, and upgrades the verdict it qualifies.
+ *
+ * `coTimed` false means the statfs outlived the tick that issued it, so this
+ * volume number and the commit number beside it describe different moments —
+ * during a pagefile-growth storm that is exactly when they diverge, and a
+ * pre-storm 40 GB printed next to 200 MB of commit reads as "the pagefile had
+ * room", the opposite conclusion. The datum still ships (with its own age), but
+ * it may not qualify the verdict.
  */
 export function withSwapVolumeFreeSpace(
   details: CrashReportDetails,
   volume: SwapVolumeFreeSpace,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  coTimed = true
 ): CrashReportDetails {
   const merged: CrashReportDetails = {
     ...details,
     [`${SYSTEM_MEMORY_KEY_PREFIX}SwapVolumeFreeMB`]: volume.freeMB,
     [`${SYSTEM_MEMORY_KEY_PREFIX}SwapVolume`]: volume.volume
   }
-  merged[`${SYSTEM_MEMORY_KEY_PREFIX}PressureSignal`] = pressureSignal(platform, merged)
+  merged[`${SYSTEM_MEMORY_KEY_PREFIX}PressureSignal`] = pressureSignal(platform, merged, coTimed)
   return merged
 }

@@ -22,6 +22,8 @@ type CrashReportDetails = Record<string, CrashReportDetailValue>
 type PreGoneSystemMemorySample = {
   details: CrashReportDetails
   sampledAtMs: number
+  /** Tick that ISSUED the statfs now merged in — never the tick it resolved on. */
+  swapVolumeSampledAtMs?: number
 }
 
 let preGoneSample: PreGoneSystemMemorySample | null = null
@@ -49,14 +51,18 @@ async function mergeSwapVolumeFreeSpace(): Promise<void> {
   }
   swapVolumeReadInFlight = true
   const generation = samplingGeneration
+  const issuedFor = preGoneSample
   try {
     const volume = await readSwapVolumeFreeSpace()
-    // Why merge into whatever sample is current: volume free space moves far
-    // slower than available commit, so a tick-old value still qualifies it.
     if (volume && preGoneSample && generation === samplingGeneration) {
+      // Why only its own tick qualifies: a statfs that outlived its tick carries a
+      // pre-storm volume number, and the latch makes that lag unbounded. It still
+      // ships beside its age, but it may not decide the verdict.
+      const coTimed = preGoneSample === issuedFor
       preGoneSample = {
         ...preGoneSample,
-        details: withSwapVolumeFreeSpace(preGoneSample.details, volume)
+        details: withSwapVolumeFreeSpace(preGoneSample.details, volume, process.platform, coTimed),
+        swapVolumeSampledAtMs: issuedFor?.sampledAtMs
       }
     }
   } catch {
@@ -107,6 +113,14 @@ export function preGoneSystemMemoryDetails(nowMs: number): CrashReportDetails {
     [`${SYSTEM_MEMORY_KEY_PREFIX}PreGoneSampleAgeMs`]: Math.max(
       0,
       nowMs - preGoneSample.sampledAtMs
+    )
+  }
+  // Why its own age: the volume read resolves out of band, so it can be older
+  // than the memory reading printed beside it, and that gap must be readable.
+  if (preGoneSample.swapVolumeSampledAtMs !== undefined) {
+    details[`${SYSTEM_MEMORY_KEY_PREFIX}PreGoneSwapVolumeAgeMs`] = Math.max(
+      0,
+      nowMs - preGoneSample.swapVolumeSampledAtMs
     )
   }
   for (const [key, value] of Object.entries(preGoneSample.details)) {

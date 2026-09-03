@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   getSystemMemoryDetails,
@@ -6,7 +8,8 @@ import {
 } from './system-memory-details'
 import {
   readSwapVolumeFreeSpace,
-  setSwapVolumeFreeSpaceReaderForTest
+  setSwapVolumeFreeSpaceReaderForTest,
+  type SwapVolumeFreeSpace
 } from './swap-volume-free-space'
 import { samplePreGoneSystemMemory } from './pre-gone-host-memory'
 import {
@@ -53,6 +56,13 @@ const AFTER_THE_CORPSE_RELEASED = {
   free: 3_000 * 1024,
   swapTotal: 48_000 * 1024,
   swapFree: 2_900 * 1024
+}
+
+const BEFORE_THE_STORM = {
+  total: 16_000 * 1024,
+  free: 9_000 * 1024,
+  swapTotal: 48_000 * 1024,
+  swapFree: 30_000 * 1024
 }
 
 describe('pre-gone host memory', () => {
@@ -118,6 +128,11 @@ describe('pre-gone host memory', () => {
       withSwapVolumeFreeSpace(windowsCommit, { freeMB: 120, volume: 'C:' }, 'win32')
         .systemMemoryPressureSignal
     ).toBe('available-commit')
+    // A volume number from a different moment cannot qualify this commit number.
+    expect(
+      withSwapVolumeFreeSpace(windowsCommit, { freeMB: 120, volume: 'C:' }, 'win32', false)
+        .systemMemoryPressureSignal
+    ).toBe('available-commit-unqualified')
 
     setSystemMemoryInfoReaderForTest(() => ({ total: 16_000 * 1024, free: 400 * 1024 }))
     expect(getSystemMemoryDetails('linux').systemMemoryPressureSignal).toBe('none')
@@ -135,8 +150,58 @@ describe('pre-gone host memory', () => {
     expect(getSystemMemoryDetails('darwin').systemMemoryPressureSignal).toBe('none')
   })
 
-  // Why this test exists: startup arms the host sampler on one line, and
-  // deleting that line left every other test in this directory green.
+  // Why the verdict and not just the field: a statfs issued on a healthy host at
+  // t=0 that resolves 20 s into a commit storm prints "200 MB commit, 40 GB of
+  // pagefile headroom" — which reads as NOT a commit refusal, the opposite
+  // conclusion, under the branch's most confident label.
+  it('will not let a statfs that outlived its tick qualify the win32 commit verdict', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    vi.useFakeTimers()
+    let resolveVolume: (value: SwapVolumeFreeSpace) => void = () => {}
+    try {
+      setSystemMemoryInfoReaderForTest(() => BEFORE_THE_STORM)
+      setSwapVolumeFreeSpaceReaderForTest(
+        () =>
+          new Promise<SwapVolumeFreeSpace>((resolve) => {
+            resolveVolume = resolve
+          })
+      )
+      void samplePreGoneSystemMemory(0)
+
+      // The storm arrives; the in-flight latch makes every tick skip the merge,
+      // so the pending statfs is as old as the tick that STARTED it.
+      setSystemMemoryInfoReaderForTest(() => UNDER_COMMIT_PRESSURE)
+      await samplePreGoneSystemMemory(10_000)
+      await samplePreGoneSystemMemory(20_000)
+
+      resolveVolume({ freeMB: 40_000, volume: 'C:' })
+      await vi.advanceTimersByTimeAsync(0)
+
+      vi.setSystemTime(20_000)
+      const stale = buildProcessGoneCrashDetails({}, 'renderer')
+      expect(stale.systemMemoryPreGoneSwapFreeMB).toBe(200)
+      // The pre-storm volume number still ships — but carrying its own age, and
+      // without promoting the verdict the analyst reads.
+      expect(stale.systemMemoryPreGoneSwapVolumeFreeMB).toBe(40_000)
+      expect(stale.systemMemoryPreGoneSampleAgeMs).toBe(0)
+      expect(stale.systemMemoryPreGoneSwapVolumeAgeMs).toBe(20_000)
+      expect(stale.systemMemoryPreGonePressureSignal).toBe('available-commit-unqualified')
+
+      // The next tick's statfs answers on its own tick, so it qualifies again.
+      setSwapVolumeFreeSpaceReaderForTest(() => Promise.resolve({ freeMB: 900, volume: 'C:' }))
+      await samplePreGoneSystemMemory(30_000)
+      vi.setSystemTime(30_000)
+      const fresh = buildProcessGoneCrashDetails({}, 'renderer')
+      expect(fresh.systemMemoryPreGoneSwapVolumeFreeMB).toBe(900)
+      expect(fresh.systemMemoryPreGoneSwapVolumeAgeMs).toBe(0)
+      expect(fresh.systemMemoryPreGonePressureSignal).toBe('available-commit')
+    } finally {
+      vi.useRealTimers()
+      Object.defineProperty(process, 'platform', platform)
+    }
+  })
+
   it("arms the host sampler on its own unref'd 10 s timer, not the metric sweep's", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(0)
@@ -197,5 +262,39 @@ describe('pre-gone host memory', () => {
 
     expect(details.processMetricsPreGoneRendererWorkingSetMB).toBe(400)
     expect(Object.keys(details).filter((key) => key.startsWith('systemMemoryPreGone'))).toEqual([])
+  })
+})
+
+/**
+ * Source-level because that is the property: the sampler is armed once inside the
+ * ready-phase composition, which has no runtime seam to assert against. Deleting
+ * `startPreGoneCrashSampling()` from main-process-ready-runtime.ts left every test
+ * in src/main/crash-reporting/ and src/main/startup/ green — this branch is pure
+ * instrumentation, so that one line is the whole of its value in the shipped app.
+ */
+describe('pre-gone crash sampling startup wiring', () => {
+  // Why normalize: the indent anchors below are `\n`-prefixed, and nothing pins
+  // src/**/*.ts to LF, so a CRLF Windows checkout would fail them spuriously.
+  const readSource = (name: string): string =>
+    readFileSync(join(__dirname, '..', 'startup', name), 'utf8').replace(/\r\n/g, '\n')
+
+  const readyRuntimeSource = readSource('main-process-ready-runtime.ts')
+  const readySource = readSource('main-process-ready.ts')
+
+  it('arms the sampler unconditionally on the app-ready path', () => {
+    expect(readyRuntimeSource).toContain(
+      "import { startPreGoneCrashSampling } from '../crash-reporting/process-gone-diagnostics'"
+    )
+    expect(readyRuntimeSource.split('startPreGoneCrashSampling()').length - 1).toBe(1)
+    // Why pin the indent: the call also matches as the body of an added
+    // `if (...)` guard, which keeps every other assertion here true while the
+    // sampler silently stops arming on most startups.
+    expect(readyRuntimeSource).toContain('\n  startPreGoneCrashSampling()')
+
+    // ...and that this really is the function app readiness runs.
+    expect(readySource).toContain(
+      "import { initializeReadyRuntimeServices } from './main-process-ready-runtime'"
+    )
+    expect(readySource).toContain('\n  await initializeReadyRuntimeServices()')
   })
 })
