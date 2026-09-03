@@ -8,6 +8,7 @@ import type { HostWorkspaceOperations } from './host-workspace-operations'
 
 export function webHostWorkspaceOperations(client: MobileWebBridgeClient): HostWorkspaceOperations {
   return {
+    connectionStateIsRelayed: true,
     async getViewSettings() {
       return (await client.workspaceSettingsSnapshot()).settings
     },

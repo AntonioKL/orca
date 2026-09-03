@@ -33,6 +33,7 @@ export function useHybridHostScreenCatalog(args: {
     syncViewSettingsFromDesktop
   } = args
   const {
+    catalogWarmupSpentRef,
     fetchWorktreesInFlightRef,
     newWorktreeModalVisibleRef,
     setCatalogError,
@@ -57,6 +58,11 @@ export function useHybridHostScreenCatalog(args: {
       fetchWorktreesInFlightRef.current = true
       const request = operations,
         requestHostId = hostId
+      // Why: `connected` on a relayed transport is the shell's snapshot, not proof its socket
+      // serves yet; forgive the binding's first failure so the list keeps loading and retries.
+      const warmupForgiven =
+        request.connectionStateIsRelayed === true && !catalogWarmupSpentRef.current.has(request)
+      catalogWarmupSpentRef.current.add(request)
       try {
         const next = await request.listWorkspaces(10000)
         if (state.workspaceOperationsRef.current !== request || hostId !== requestHostId) {
@@ -87,7 +93,11 @@ export function useHybridHostScreenCatalog(args: {
           return serverPinned
         })
       } catch {
-        if (state.workspaceOperationsRef.current === request && hostId === requestHostId) {
+        if (
+          !warmupForgiven &&
+          state.workspaceOperationsRef.current === request &&
+          hostId === requestHostId
+        ) {
           setCatalogError('network_error')
         }
       } finally {

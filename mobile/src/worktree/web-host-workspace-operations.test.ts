@@ -20,6 +20,14 @@ describe('webHostWorkspaceOperations', () => {
     expect(client.workspaceSnapshot).toHaveBeenCalledWith({ limit: 200 })
   })
 
+  it('declares its connection state as a relayed shell snapshot', () => {
+    const operations = webHostWorkspaceOperations(
+      createClient() as unknown as MobileWebBridgeClient
+    )
+
+    expect(operations.connectionStateIsRelayed).toBe(true)
+  })
+
   it('routes mutations and settings through named bridge operations', async () => {
     const client = createClient()
     const operations = webHostWorkspaceOperations(client as unknown as MobileWebBridgeClient)

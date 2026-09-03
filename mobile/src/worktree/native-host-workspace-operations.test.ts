@@ -3,6 +3,14 @@ import type { RpcClient } from '../transport/rpc-client'
 import { nativeHostWorkspaceOperations } from './native-host-workspace-operations'
 
 describe('native host workspace operations', () => {
+  it('does not relay its connection state, so a first failure stays a failure', () => {
+    const client = { sendRequest: vi.fn(), notifyForeground: vi.fn(), subscribe: vi.fn() }
+
+    expect(
+      nativeHostWorkspaceOperations(client as unknown as RpcClient).connectionStateIsRelayed
+    ).toBeUndefined()
+  })
+
   it('maps named reads and mutations to the existing RPC authority', async () => {
     const sendRequest = vi
       .fn<RpcClient['sendRequest']>()
