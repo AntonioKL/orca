@@ -311,6 +311,31 @@ describe('resolveSessionFilePath', () => {
     ).rejects.toThrow('not on the main transcript')
   })
 
+  it('rejects a post-snapshot descendant whose parent row was observed later', async () => {
+    const root = await makeRoot('orca-native-chat-resolve-claude-post-snapshot-')
+    const transcript = join(root, 'transcript.jsonl')
+    await writeFile(
+      transcript,
+      [
+        {
+          type: 'assistant',
+          uuid: 'descendant',
+          parentUuid: 'previous',
+          sessionId: 'session-1'
+        },
+        { type: 'assistant', uuid: 'previous', parentUuid: null, sessionId: 'session-1' },
+        { type: 'last-prompt', leafUuid: 'descendant', sessionId: 'session-1' }
+      ]
+        .map((record) => JSON.stringify(record))
+        .join('\n'),
+      'utf8'
+    )
+
+    await expect(readClaudeTranscriptLeafUuid(transcript, 'session-1', 'previous')).rejects.toThrow(
+      'parent row follows descendant'
+    )
+  })
+
   it('does not re-prove a divergent sibling after the sampled cursor rejects', async () => {
     const root = await makeRoot('orca-native-chat-resolve-claude-sibling-reproof-')
     const transcript = join(root, 'transcript.jsonl')
@@ -343,6 +368,7 @@ describe('resolveSessionFilePath', () => {
     await expect(
       readClaudeTranscriptLeafWithReproof({
         readTranscriptLeaf,
+        claudeConfigDir: '/accounts/claude',
         providerSessionId: 'session-1',
         previousLeafUuid: 'old'
       })
@@ -365,6 +391,7 @@ describe('resolveSessionFilePath', () => {
     await expect(
       readClaudeTranscriptLeafWithReproof({
         readTranscriptLeaf,
+        claudeConfigDir: '/accounts/claude',
         providerSessionId: 'session-1',
         previousLeafUuid: 'old'
       })

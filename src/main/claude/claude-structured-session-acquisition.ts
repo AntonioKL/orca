@@ -250,6 +250,7 @@ export async function acquireClaudeSession({
     const publication = createClaudeSessionPublication({
       connection,
       init,
+      claudeConfigDir: launch.claudeConfigDir,
       leafUuid: observedLeafUuid,
       fence: input.fence,
       resumed: launch.resumed,
@@ -315,7 +316,10 @@ export async function releaseClaudeAcquisition(input: {
   if (!exit || input.sessions.has(input.sessionId) || input.acquisitions.get(input.sessionId)) {
     return closeClaudeSession(input)
   }
-  if (await exit.connection.close()) {
+  const firstProof = exit.closePromise ? await exit.closePromise : false
+  // A failed exit-path proof is retained as evidence, not as a terminal result;
+  // a release retry must drive a fresh tree verification on the same connection.
+  if (firstProof || (await exit.connection.close())) {
     // Keep the first-hand exit evidence indexed until the tree proof succeeds;
     // a failed close must be retryable and cannot look like an absent session.
     input.exits.delete(input.sessionId)

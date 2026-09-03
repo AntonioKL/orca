@@ -614,6 +614,9 @@ describe('a structured Claude session over agentSession.*', () => {
     const resumed = await ok<{ fence: number }>('agentSession.ensure', ensureParams(created.fence))
     expect(resumed.fence).toBe(created.fence + 1)
     expect(old.closed).toBe(true)
+    expect(resolveSessionFilePath).toHaveBeenCalledWith('claude', PROVIDER_SESSION, {
+      claudeProjectsDir: join(root, 'claude-home', 'projects')
+    })
     expect(claude.live().launch.options).toMatchObject({
       resume: PROVIDER_SESSION,
       resumeSessionAt: 'assistant-leaf'

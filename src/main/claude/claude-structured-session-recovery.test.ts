@@ -68,9 +68,38 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
 
     expect(readTranscriptLeaf).toHaveBeenCalledWith({
       providerSessionId: PROVIDER_SESSION_ID,
-      previousLeafUuid: 'observed-tail'
+      previousLeafUuid: 'observed-tail',
+      claudeConfigDir: '/accounts/claude'
     })
     expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'durable-tail' })
+  })
+
+  it('passes the pinned Claude account home to transcript validation', async () => {
+    const claude = fakeClaude()
+    const persistedHandles: unknown[] = []
+    const readTranscriptLeaf = vi.fn().mockResolvedValue('durable-tail')
+    const adapter = adapterFor(
+      claude,
+      { claudeConfigDir: '/accounts/selected' },
+      [],
+      persistedHandles,
+      undefined,
+      readTranscriptLeaf
+    )
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+    claude.connections[0].handlers.onMessage?.({
+      type: 'assistant',
+      session_id: PROVIDER_SESSION_ID,
+      uuid: 'observed-tail'
+    })
+
+    await adapter.closeSession('session-1')
+
+    expect(readTranscriptLeaf).toHaveBeenCalledWith({
+      providerSessionId: PROVIDER_SESSION_ID,
+      previousLeafUuid: 'observed-tail',
+      claudeConfigDir: '/accounts/selected'
+    })
   })
 
   it('re-proves from the transcript root when the observed cursor is missing', async () => {
@@ -92,11 +121,13 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
 
     expect(readTranscriptLeaf).toHaveBeenNthCalledWith(1, {
       providerSessionId: PROVIDER_SESSION_ID,
-      previousLeafUuid: 'observed-tail'
+      previousLeafUuid: 'observed-tail',
+      claudeConfigDir: '/accounts/claude'
     })
     expect(readTranscriptLeaf).toHaveBeenNthCalledWith(2, {
       providerSessionId: PROVIDER_SESSION_ID,
-      previousLeafUuid: null
+      previousLeafUuid: null,
+      claudeConfigDir: '/accounts/claude'
     })
     expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'reproved-main-leaf' })
   })
@@ -196,11 +227,13 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
 
     expect(readTranscriptLeaf).toHaveBeenNthCalledWith(1, {
       providerSessionId: PROVIDER_SESSION_ID,
-      previousLeafUuid: 'stale-observed-tail'
+      previousLeafUuid: 'stale-observed-tail',
+      claudeConfigDir: '/accounts/claude'
     })
     expect(readTranscriptLeaf).toHaveBeenNthCalledWith(2, {
       providerSessionId: PROVIDER_SESSION_ID,
-      previousLeafUuid: null
+      previousLeafUuid: null,
+      claudeConfigDir: '/accounts/claude'
     })
     expect(persistedHandles.at(-1)).toMatchObject({ leafUuid: 'reproved-crash-leaf' })
   })
@@ -242,6 +275,20 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
     claude.connections[0].handlers.onExit?.(new Error('crashed'))
     await tick()
 
+    expect(events.at(-1)).toMatchObject({ type: 'ended', cause: 'unexpected-exit' })
+  })
+
+  it('runs the child close proof before publishing unexpected-exit recovery', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = adapterFor(claude, {}, events)
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+    const close = vi.spyOn(claude.connections[0], 'close').mockResolvedValue(true)
+
+    claude.connections[0].handlers.onExit?.(new Error('crashed'))
+    await tick()
+
+    expect(close).toHaveBeenCalledOnce()
     expect(events.at(-1)).toMatchObject({ type: 'ended', cause: 'unexpected-exit' })
   })
 })

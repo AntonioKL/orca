@@ -5,6 +5,8 @@ const MAX_CLAUDE_TRANSCRIPT_ANCESTRY = 10_000
 type TranscriptNode = {
   parentUuid: string | null
   sessionId: string | null
+  /** First line where this UUID was observed in the append-only transcript. */
+  lineIndex: number
   /** UUIDs from result/init/stream frames and sidechains are never leaves. */
   disallowedLeaf: boolean
 }
@@ -65,6 +67,18 @@ function proveMainLineAncestry(
   }
 }
 
+function proveAppendOrder(nodes: Map<string, TranscriptNode>): void {
+  for (const node of nodes.values()) {
+    if (!node.parentUuid) {
+      continue
+    }
+    const parent = nodes.get(node.parentUuid)
+    if (parent && parent.lineIndex >= node.lineIndex) {
+      throw transcriptError('parent row follows descendant')
+    }
+  }
+}
+
 export function proveClaudeTranscriptBranchFromJsonl(input: {
   contents: string
   providerSessionId: string
@@ -72,6 +86,7 @@ export function proveClaudeTranscriptBranchFromJsonl(input: {
 }): ClaudeTranscriptBranchProof {
   const nodes = new Map<string, TranscriptNode>()
   let leafUuid: string | null = null
+  let leafMarkerLineIndex = -1
   const lines = input.contents.split('\n')
   for (const [index, line] of lines.entries()) {
     if (!line.trim()) {
@@ -97,6 +112,7 @@ export function proveClaudeTranscriptBranchFromJsonl(input: {
         throw transcriptError('invalid last-prompt marker')
       }
       leafUuid = markerLeaf
+      leafMarkerLineIndex = index
     }
     const uuid = nonEmptyString(row.uuid)
     if (!uuid) {
@@ -122,7 +138,12 @@ export function proveClaudeTranscriptBranchFromJsonl(input: {
     ) {
       throw transcriptError(`record ${uuid} has conflicting ancestry`)
     }
-    nodes.set(uuid, { parentUuid, sessionId, disallowedLeaf })
+    nodes.set(uuid, {
+      parentUuid,
+      sessionId,
+      lineIndex: existing?.lineIndex ?? index,
+      disallowedLeaf
+    })
   }
   if (!leafUuid) {
     throw transcriptError('missing last-prompt marker')
@@ -131,9 +152,16 @@ export function proveClaudeTranscriptBranchFromJsonl(input: {
   if (!leaf || leaf.sessionId !== input.providerSessionId || leaf.disallowedLeaf) {
     throw transcriptError('marker leaf is missing from the session graph')
   }
+  if (leaf.lineIndex > leafMarkerLineIndex) {
+    throw transcriptError('marker precedes its leaf record')
+  }
   const previousLeafUuid = input.previousLeafUuid
   if (!previousLeafUuid) {
     proveMainLineAncestry(nodes, leafUuid, input.providerSessionId)
+    // A branch proof is based on an append-only snapshot. A child that appears
+    // before its claimed parent is not a post-snapshot descendant observation;
+    // accepting that graph would turn reordered/torn rows into durable ancestry.
+    proveAppendOrder(nodes)
     return { leafUuid, relation: 'initial' }
   }
   const previous = nodes.get(previousLeafUuid)
@@ -149,6 +177,7 @@ export function proveClaudeTranscriptBranchFromJsonl(input: {
   // could be persisted and resumed as if it were on the main transcript.
   proveMainLineAncestry(nodes, previousLeafUuid, input.providerSessionId)
   if (leafUuid === previousLeafUuid) {
+    proveAppendOrder(nodes)
     return { leafUuid, relation: 'same' }
   }
   const visited = new Set<string>()
@@ -167,6 +196,7 @@ export function proveClaudeTranscriptBranchFromJsonl(input: {
     }
     cursor = node.parentUuid
     if (cursor === previousLeafUuid) {
+      proveAppendOrder(nodes)
       return { leafUuid, relation: 'descendant' }
     }
   }
@@ -193,14 +223,17 @@ export async function readClaudeTranscriptLeafWithReproof(input: {
   readTranscriptLeaf: (input: {
     providerSessionId: string
     previousLeafUuid: string | null
+    claudeConfigDir: string
   }) => Promise<string | null>
+  claudeConfigDir: string
   providerSessionId: string
   previousLeafUuid: string | null
 }): Promise<string | null> {
   try {
     return await input.readTranscriptLeaf({
       providerSessionId: input.providerSessionId,
-      previousLeafUuid: input.previousLeafUuid
+      previousLeafUuid: input.previousLeafUuid,
+      claudeConfigDir: input.claudeConfigDir
     })
   } catch (error) {
     // A missing cursor can be stale after compaction and is safe to re-prove from the root. A torn
@@ -213,7 +246,8 @@ export async function readClaudeTranscriptLeafWithReproof(input: {
     }
     return input.readTranscriptLeaf({
       providerSessionId: input.providerSessionId,
-      previousLeafUuid: null
+      previousLeafUuid: null,
+      claudeConfigDir: input.claudeConfigDir
     })
   }
 }

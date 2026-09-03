@@ -77,10 +77,15 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       return
     }
     this.sessions.delete(sessionId)
-    this.exits.set(sessionId, { connection: session.connection, error })
+    // Re-enter the provider's close ladder before publishing lifecycle recovery.
+    // An exit callback is root evidence only; the retained tree proof must run
+    // before the host releases and reacquires this exact child.
+    const closePromise = session.connection.close().catch(() => false)
+    this.exits.set(sessionId, { connection: session.connection, error, closePromise })
     // Persist the transcript-derived cursor before publishing the lifecycle
     // event that lets the host release and reacquire this exact child.
-    void this.persistSessionHandle(sessionId, session)
+    void closePromise
+      .then(() => this.persistSessionHandle(sessionId, session))
       .catch(() => undefined)
       .then(() => {
         const ended: ClaudeStructuredSessionEvent = {
@@ -102,7 +107,8 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
         ? await readClaudeTranscriptLeafWithReproof({
             readTranscriptLeaf: this.deps.readTranscriptLeaf,
             providerSessionId: session.providerSessionId,
-            previousLeafUuid: session.leafUuid
+            previousLeafUuid: session.leafUuid,
+            claudeConfigDir: session.claudeConfigDir
           })
         : null
       if (transcriptLeaf) {

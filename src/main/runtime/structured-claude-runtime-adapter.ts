@@ -1,4 +1,5 @@
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
+import { join } from 'node:path'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import { createClaudeStructuredLaunchResolver } from '../claude/claude-structured-launch-resolution'
 import {
@@ -53,8 +54,10 @@ export function createStructuredClaudeRuntimeAdapter(
         })
       )
     },
-    readTranscriptLeaf: async ({ providerSessionId, previousLeafUuid }) => {
-      const transcriptPath = await resolveSessionFilePath('claude', providerSessionId)
+    readTranscriptLeaf: async ({ providerSessionId, previousLeafUuid, claudeConfigDir }) => {
+      const transcriptPath = await resolveSessionFilePath('claude', providerSessionId, {
+        claudeProjectsDir: join(claudeConfigDir, 'projects')
+      })
       return transcriptPath
         ? await readClaudeTranscriptLeafUuid(transcriptPath, providerSessionId, previousLeafUuid)
         : null

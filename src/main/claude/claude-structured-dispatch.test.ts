@@ -11,6 +11,7 @@ function sessionFor(send = vi.fn().mockResolvedValue(undefined)): ClaudeSession 
   return {
     connection: { send } as unknown as ClaudeSession['connection'],
     providerSessionId: 'provider-session',
+    claudeConfigDir: '/accounts/claude',
     leafUuid: null,
     fence: 1,
     acquisitionGeneration: 'generation-1',

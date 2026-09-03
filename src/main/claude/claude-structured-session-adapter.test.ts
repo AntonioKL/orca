@@ -613,7 +613,7 @@ describe('ClaudeStructuredSessionAdapter acquisition cleanup', () => {
 
     expect(error).toBeInstanceOf(AgentSessionAcquisitionRootExitObservedError)
     expect((error as Error).message).toBe('claude stream-json exited (code 1): crashed')
-    expect(connection.closeCount).toBe(1)
+    expect(connection.closeCount).toBe(2)
   })
 
   it('never releases after an exit that left a descendant observed alive', async () => {
@@ -639,7 +639,7 @@ describe('ClaudeStructuredSessionAdapter acquisition cleanup', () => {
     ).rejects.toThrow('not logged in')
     // The second start's own proven close is the answer; the first exit is stale.
     await expect(adapter.releaseAcquisition({ sessionId: 'session-1' })).resolves.toBe(true)
-    expect(first.closeCount).toBe(0)
+    expect(first.closeCount).toBe(1)
   })
 
   it('reports unproven published-session cleanup so callers can retry safely', async () => {

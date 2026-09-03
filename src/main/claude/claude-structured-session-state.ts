@@ -72,6 +72,8 @@ export type ClaudeStructuredSessionAdapterDeps = {
   readTranscriptLeaf?: (input: {
     providerSessionId: string
     previousLeafUuid: string | null
+    /** Account-scoped Claude config root that owns this provider session. */
+    claudeConfigDir: string
   }) => Promise<string | null>
 }
 
@@ -94,6 +96,8 @@ export type ClaudeDispatchWaiter = {
 export type ClaudeSession = {
   connection: ClaudeStreamJsonConnection
   providerSessionId: string
+  /** Durable transcript files live under this account's `projects` directory. */
+  claudeConfigDir: string
   leafUuid: string | null
   fence: number
   acquisitionGeneration: string
@@ -132,6 +136,8 @@ export function mintClaudeAcquisitionGeneration(deps: ClaudeStructuredSessionAda
 export type ClaudeSessionExit = {
   connection: ClaudeStreamJsonConnection
   error: Error
+  /** The exit path's first proof attempt; retries must observe this result. */
+  closePromise?: Promise<boolean>
 }
 
 export type ClaudeAcquisitionAttempt = {

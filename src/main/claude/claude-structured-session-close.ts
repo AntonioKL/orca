@@ -35,6 +35,7 @@ export async function closeClaudePublishedSession(input: {
   readTranscriptLeaf?: (input: {
     providerSessionId: string
     previousLeafUuid: string | null
+    claudeConfigDir: string
   }) => Promise<string | null>
 }): Promise<boolean> {
   const session = input.sessions.get(input.sessionId)
@@ -55,7 +56,8 @@ export async function closeClaudePublishedSession(input: {
       ? await readClaudeTranscriptLeafWithReproof({
           readTranscriptLeaf: input.readTranscriptLeaf,
           providerSessionId: session.providerSessionId,
-          previousLeafUuid: session.leafUuid
+          previousLeafUuid: session.leafUuid,
+          claudeConfigDir: session.claudeConfigDir
         })
       : null
     if (transcriptLeaf) {
@@ -113,6 +115,7 @@ export function closeClaudePublishedSessionForDeps(
     readTranscriptLeaf?: (input: {
       providerSessionId: string
       previousLeafUuid: string | null
+      claudeConfigDir: string
     }) => Promise<string | null>
   }
 ): Promise<boolean> {
@@ -133,6 +136,7 @@ export async function closeClaudeSession(input: {
   readTranscriptLeaf?: (input: {
     providerSessionId: string
     previousLeafUuid: string | null
+    claudeConfigDir: string
   }) => Promise<string | null>
 }): Promise<boolean> {
   const attempt = input.acquisitions.get(input.sessionId)

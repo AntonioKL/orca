@@ -8,6 +8,7 @@ import type { ClaudeSession } from './claude-structured-session-state'
 export function createClaudeSessionPublication(input: {
   connection: ClaudeSession['connection']
   init: ClaudeInitObservation
+  claudeConfigDir: string
   leafUuid: string | null
   fence: number
   acquisitionGeneration: string
@@ -39,6 +40,7 @@ export function createClaudeSessionPublication(input: {
     session: {
       connection: input.connection,
       providerSessionId: input.init.providerSessionId,
+      claudeConfigDir: input.claudeConfigDir,
       leafUuid: input.leafUuid,
       fence: input.fence,
       acquisitionGeneration: input.acquisitionGeneration,

@@ -6,6 +6,7 @@ function sessionFor(setModel: ClaudeSession['connection']['setModel']): ClaudeSe
   return {
     connection: { setModel } as ClaudeSession['connection'],
     providerSessionId: 'provider-session',
+    claudeConfigDir: '/accounts/claude',
     leafUuid: null,
     fence: 1,
     acquisitionGeneration: 'generation-1',
