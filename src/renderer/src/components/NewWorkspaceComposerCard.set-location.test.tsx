@@ -251,7 +251,9 @@ describe('NewWorkspaceComposerCard set location', () => {
     expect(storeMocks.openSettingsPage).not.toHaveBeenCalled()
   })
 
-  it('closes the nested dialog before publishing the ready run target', () => {
+  // Async for the same reason: without the flush this only passes when an earlier
+  // test in this file already resolved the shared lazy chunk.
+  it('closes the nested dialog before publishing the ready run target', async () => {
     const nestedOpenChanges: boolean[] = []
     const setupChanges: string[] = []
     container = renderCard({
@@ -266,6 +268,7 @@ describe('NewWorkspaceComposerCard set location', () => {
       (button) => button.textContent?.includes('Set project location')
     )
     act(() => setLocation?.click())
+    await act(async () => {})
     const complete = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent === 'Complete location'
     )
