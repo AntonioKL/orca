@@ -13,36 +13,49 @@ export function useHybridHostRepoMetadata(args: {
   state: HybridHostScreenState
 }) {
   const { operations, connState, hostId, hostState, state } = args
+  // Why: `state` is a fresh object every render. Listing it as a dependency re-created this
+  // callback per render, which re-armed the catalog refresh effect, whose fetch set state and
+  // rendered again: a self-sustaining request loop the shell then rate-limited. Only the stable
+  // refs and setters it uses may be dependencies.
+  const {
+    fetchRepoMetadataInFlightRef,
+    fetchRepoMetadataPendingRef,
+    repoMetadataFetchedAtRef,
+    setRepoColorsByName,
+    setRepoIconsByName,
+    setRepoIdsByName,
+    workspaceOperationsRef
+  } = state
   return useCallback(
     async (options: { force?: boolean; queueIfInFlight?: boolean } = {}) => {
       if (!operations || connState !== 'connected' || !hostId) {
         return
       }
-      if (state.fetchRepoMetadataInFlightRef.current.has(operations)) {
+      if (fetchRepoMetadataInFlightRef.current.has(operations)) {
         if (options.queueIfInFlight) {
-          state.fetchRepoMetadataPendingRef.current.add(operations)
+          fetchRepoMetadataPendingRef.current.add(operations)
         }
         return
       }
       if (
         !options.force &&
-        Date.now() - state.repoMetadataFetchedAtRef.current < REPO_METADATA_REFRESH_MS
+        Date.now() - repoMetadataFetchedAtRef.current < REPO_METADATA_REFRESH_MS
       ) {
         return
       }
-      state.fetchRepoMetadataInFlightRef.current.add(operations)
+      fetchRepoMetadataInFlightRef.current.add(operations)
       const request = operations,
         requestHostId = hostId
       try {
         do {
-          state.fetchRepoMetadataPendingRef.current.delete(request)
+          fetchRepoMetadataPendingRef.current.delete(request)
           const repos = await request.listRepos()
-          if (state.workspaceOperationsRef.current !== request || hostId !== requestHostId) {
+          if (workspaceOperationsRef.current !== request || hostId !== requestHostId) {
             return
           }
-          state.repoMetadataFetchedAtRef.current = Date.now()
+          repoMetadataFetchedAtRef.current = Date.now()
           hostState.cacheRepositories(requestHostId, repos)
-          state.setRepoColorsByName(
+          setRepoColorsByName(
             new Map(
               repos.map((repo) => [
                 repo.displayName,
@@ -50,22 +63,34 @@ export function useHybridHostRepoMetadata(args: {
               ])
             )
           )
-          state.setRepoIconsByName(
+          setRepoIconsByName(
             new Map(
               repos.flatMap((repo) =>
                 repo.repoIcon ? [[repo.displayName, repo.repoIcon] as const] : []
               )
             )
           )
-          state.setRepoIdsByName(new Map(repos.map((repo) => [repo.displayName, repo.id])))
-        } while (state.fetchRepoMetadataPendingRef.current.has(request))
+          setRepoIdsByName(new Map(repos.map((repo) => [repo.displayName, repo.id])))
+        } while (fetchRepoMetadataPendingRef.current.has(request))
       } catch {
         // Repo metadata is optional; catalog rows still render without it.
       } finally {
-        state.fetchRepoMetadataInFlightRef.current.delete(request)
+        fetchRepoMetadataInFlightRef.current.delete(request)
       }
     },
-    [operations, connState, hostId, hostState, state]
+    [
+      operations,
+      connState,
+      hostId,
+      hostState,
+      fetchRepoMetadataInFlightRef,
+      fetchRepoMetadataPendingRef,
+      repoMetadataFetchedAtRef,
+      setRepoColorsByName,
+      setRepoIconsByName,
+      setRepoIdsByName,
+      workspaceOperationsRef
+    ]
   )
 }
 

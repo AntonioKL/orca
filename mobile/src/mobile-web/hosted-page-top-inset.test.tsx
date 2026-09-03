@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { createElement, type ReactNode } from 'react'
 import { act, create } from 'react-test-renderer'
-
-// Why: CI's type-aware lint resolves react-test-renderer's types as any; derive the type instead.
-type Renderer = ReturnType<typeof create>
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+// Why: CI's type-aware lint resolves react-test-renderer's types as any, which collapses any
+// union naming them; a structural handle keeps the ref's null branch meaningful.
+type Renderer = { unmount(): void; toJSON(): unknown }
 
 const deviceInsets = vi.hoisted(() => ({ top: 44, bottom: 34, left: 0, right: 0 }))
 
