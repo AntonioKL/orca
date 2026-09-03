@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MutableRefObject } from 'react'
 import type { RpcClient } from '../transport/rpc-client'
 import type { HostProfile } from '../transport/types'
-import type { MobileWebShellSession } from '@orca/expo-mobile-web-shell'
+import type { MobileWebPackageSession } from './mobile-web-package-session-state'
 
 const native = vi.hoisted(() => ({ openSession: vi.fn(), closeSession: vi.fn() }))
 const downloadPackage = vi.hoisted(() => vi.fn())
@@ -18,6 +18,10 @@ vi.mock('./mobile-web-package-downloader', () => ({
 
 import { useMobileWebPackageRefresh } from './use-mobile-web-package-refresh'
 
+// Why: the type-aware CI lint resolves the file: shell package as `error`, so name the
+// session type through the app module instead of the package.
+type OwnedSession = NonNullable<MobileWebPackageSession['session']>
+
 const HOST: HostProfile = {
   id: 'host-1',
   name: 'Desktop',
@@ -27,7 +31,7 @@ const HOST: HostProfile = {
   lastConnected: 1
 }
 const BUILD_ID = 'a'.repeat(64)
-const OWNED: MobileWebShellSession = {
+const OWNED: OwnedSession = {
   sessionId: 'session-a',
   buildId: BUILD_ID,
   url: 'https://session-a.orca-mobile-web.invalid/#session-a'
@@ -63,7 +67,7 @@ describe('useMobileWebPackageRefresh', () => {
         : { commit: { buildId: BUILD_ID }, reusedVerifiedBuild: false }
     })
 
-    const ownedSessionRef = ref<MobileWebShellSession | null>(OWNED)
+    const ownedSessionRef = ref<OwnedSession | null>(OWNED)
     function Harness(): null {
       useMobileWebPackageRefresh({
         client: { sendRequest: vi.fn() } as unknown as RpcClient,
