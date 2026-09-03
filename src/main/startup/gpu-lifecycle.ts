@@ -16,7 +16,10 @@ import { promptForGpuFallbackRestart } from '../crash-reporting/gpu-fallback-res
 import { engageGpuFallbackAfterCrashBurst } from '../crash-reporting/gpu-fallback-engagement'
 import { recordCrashBreadcrumb } from '../crash-reporting/crash-breadcrumb-store'
 import { recordDurableCrashBreadcrumb } from '../crash-reporting/durable-crash-breadcrumb'
-import { isInstallDirAclSuspect } from './windows-install-dir-acl-recovery'
+import {
+  isInstallDirAclSuspect,
+  waitForInstallDirAclVerdict
+} from './windows-install-dir-acl-recovery'
 import { mainProcessState as state, gpuFallbackEnvironment } from './main-process-state'
 import { createGpuAccelerationAboutPanelOptions } from '../menu/gpu-acceleration-about-panel'
 
@@ -115,6 +118,39 @@ export async function presentGpuFallbackRecoveredLaunchPrompt(
   })
 }
 
+/**
+ * Why: a poisoned install DACL kills the GPU child exactly like a bad driver, but safe
+ * graphics does not rescue it and --in-process-gpu removes the GPU child, erasing the
+ * sibling deaths that identify the real cause.
+ *
+ * Why the marker is written before the wait rather than after: Chromium aborts the whole
+ * browser process on the 6th GPU crash, ~1.3s after the 3rd — less than the probe takes
+ * to answer — so a machine that dies waiting must still come back software-rendered.
+ * The withdrawal below, and the repair's own clear of an unconfirmed marker, undo it.
+ */
+async function installDirAclClearsGpuFallback(
+  userDataPath: string,
+  crashesInWindow: number
+): Promise<boolean> {
+  if (!isInstallDirAclSuspect()) {
+    return true
+  }
+  const persisted = persistGpuFallbackMarker(userDataPath, {
+    engagedAt: Date.now(),
+    crashesInWindow,
+    userConfirmed: false
+  })
+  await waitForInstallDirAclVerdict()
+  if (!isInstallDirAclSuspect()) {
+    return true
+  }
+  if (persisted) {
+    clearGpuFallbackMarker(userDataPath)
+  }
+  recordDurableCrashBreadcrumb('gpu_fallback_withheld_install_dir_acl', { crashesInWindow })
+  return false
+}
+
 // Why: a burst of GPU child crashes means HW acceleration is unusable — persist a build-scoped marker and offer software rendering.
 export async function handleGpuChildCrash(
   reason: string,
@@ -125,18 +161,18 @@ export async function handleGpuChildCrash(
   if (state.gpuFallbackActiveThisLaunch || state.isQuitting || state.isServeMode) {
     return
   }
-  // Why: a poisoned install DACL kills the GPU child exactly like a bad driver, but
-  // safe graphics does not rescue it and --in-process-gpu removes the GPU child, so
-  // every later crash loses the sibling deaths that identify the real cause.
-  if (isInstallDirAclSuspect()) {
-    return
-  }
+  // Recorded before any install-DACL consideration: the verdict decides whether safe
+  // graphics is the right answer, never whether the crash happened. Dropping it here
+  // would erase a real driver burst from the rolling window on healthy machines too.
   const result = state.gpuCrashFallbackTracker.recordGpuCrash(crashedAt)
   if (!result.shouldEngageFallback) {
     return
   }
   const fallbackData = { processReason: reason, exitCode, crashesInWindow: result.crashesInWindow }
   const userDataPath = app.getPath('userData')
+  if (!(await installDirAclClearsGpuFallback(userDataPath, result.crashesInWindow))) {
+    return
+  }
   await engageGpuFallbackAfterCrashBurst(
     { reason, exitCode, crashesInWindow: result.crashesInWindow, engagedAt: Date.now() },
     {

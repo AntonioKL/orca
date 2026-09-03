@@ -135,7 +135,7 @@ describe('repairWindowsInstallDirPackageAcl', () => {
     const second = fakeRunner()
     const { result, data } = await repair({ userDataPath, run: second.run })
     expect(second.specs).toHaveLength(0)
-    expect(result).toEqual({ mode: 'marker-hit' })
+    expect(result).toEqual({ mode: 'marker-hit', alreadyRepaired: true })
     expect(data.reason).toBe('marker-hit')
   })
 
@@ -248,7 +248,8 @@ describe('repairWindowsInstallDirPackageAcl', () => {
     resetWindowsInstallDirAclRepairForTest()
     const spent = fakeRunner()
     const { result } = await repair({ userDataPath, run: spent.run })
-    expect(result).toEqual({ mode: 'marker-hit' })
+    // Not alreadyRepaired: the budget ran out, so the tree is still poisoned.
+    expect(result).toEqual({ mode: 'marker-hit', alreadyRepaired: false })
     expect(spent.specs).toHaveLength(0)
   })
 
@@ -261,7 +262,10 @@ describe('repairWindowsInstallDirPackageAcl', () => {
 
     resetWindowsInstallDirAclRepairForTest()
     const after = fakeRunner()
-    expect((await repair({ userDataPath, run: after.run })).result).toEqual({ mode: 'marker-hit' })
+    expect((await repair({ userDataPath, run: after.run })).result).toEqual({
+      mode: 'marker-hit',
+      alreadyRepaired: true
+    })
     expect(after.specs).toHaveLength(0)
   })
 

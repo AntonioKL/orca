@@ -54,7 +54,8 @@ const TREE_GRANT_TIMEOUT_MS = 120_000
 const FAILED_PROCESSING = /Failed processing (\d+) files?/i
 
 export type WindowsInstallDirAclRepairResult =
-  | { mode: 'marker-hit' }
+  /** `alreadyRepaired`: the marker records a completed repair, not an exhausted retry budget. */
+  | { mode: 'marker-hit'; alreadyRepaired: boolean }
   | { mode: 'repaired' }
   | { mode: 'failed'; reason: string; failedFileCount: number | null }
 
@@ -134,12 +135,15 @@ function readMarkerFor(args: WindowsInstallDirAclRepairArgs): Partial<RepairMark
   }
 }
 
-function hasMarkerFor(args: WindowsInstallDirAclRepairArgs): boolean {
+function markerHitFor(args: WindowsInstallDirAclRepairArgs): { alreadyRepaired: boolean } | null {
   const marker = readMarkerFor(args)
   if (!marker) {
-    return false
+    return null
   }
-  return marker.outcome === 'repaired' || (marker.attempts ?? 0) >= MAX_REPAIR_ATTEMPTS
+  if (marker.outcome === 'repaired') {
+    return { alreadyRepaired: true }
+  }
+  return (marker.attempts ?? 0) >= MAX_REPAIR_ATTEMPTS ? { alreadyRepaired: false } : null
 }
 
 // Why write it on failure too: re-spawning icacls on every launch forever buys
@@ -206,9 +210,10 @@ async function runRepair(args: WindowsInstallDirAclRepairArgs): Promise<void> {
   let result: WindowsInstallDirAclRepairResult
   let data: CrashReportBreadcrumbData
   try {
-    if (hasMarkerFor(resolved)) {
-      result = { mode: 'marker-hit' }
-      data = { status: 'skipped', reason: 'marker-hit' }
+    const markerHit = markerHitFor(resolved)
+    if (markerHit) {
+      result = { mode: 'marker-hit', alreadyRepaired: markerHit.alreadyRepaired }
+      data = { status: 'skipped', reason: 'marker-hit', alreadyRepaired: markerHit.alreadyRepaired }
     } else {
       const runner = args.runProcessFn ?? runProcess
       const root = await runGrant(

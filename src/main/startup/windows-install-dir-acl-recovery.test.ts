@@ -9,7 +9,10 @@ import {
   probeWindowsInstallDirAcl,
   resetWindowsInstallDirAclProbeForTest
 } from './windows-install-dir-acl-probe'
-import { hasInstallDirAclPoisonMarker } from './windows-install-dir-acl-poison-marker'
+import {
+  hasInstallDirAclPoisonMarker,
+  writeInstallDirAclPoisonMarker
+} from './windows-install-dir-acl-poison-marker'
 import {
   describeInstallDirAclPoison,
   isBlockingInstallDirAclRepairInFlight,
@@ -469,6 +472,42 @@ describe('repairKnownPoisonedInstallDirBeforeWindow', () => {
       recoveryOptions(userDataPath, okRun)
     )
     expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(true)
+  })
+})
+
+// hasMarkerFor also matches a marker written by a SUCCESSFUL repair, so 'marker-hit'
+// on its own cannot tell a finished tree from one Orca gave up on.
+describe('a marker-hit on a tree a previous launch already repaired', () => {
+  beforeEach(() => {
+    resetWindowsInstallDirAclProbeForTest()
+    resetWindowsInstallDirAclRepairForTest()
+    resetWindowsInstallDirAclRecoveryForTest()
+  })
+
+  it('reads as repaired, not as a repair Orca could not do', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-acl-repaired-hit-'))
+    writeInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)
+    expect(
+      await repairKnownPoisonedInstallDirBeforeWindow(recoveryOptions(userDataPath, okRun))
+    ).toBe('repaired')
+
+    // The state a launch killed between the repair and the marker clear leaves behind.
+    writeInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)
+    resetWindowsInstallDirAclRecoveryForTest()
+    resetWindowsInstallDirAclRepairForTest()
+    const spent: ProcessSpec[] = []
+    expect(
+      await repairKnownPoisonedInstallDirBeforeWindow(
+        recoveryOptions(userDataPath, async (spec) => {
+          spent.push(spec)
+          return okRun(spec)
+        })
+      )
+    ).toBe('marker-hit')
+    expect(spent).toHaveLength(0)
+    expect(isInstallDirAclSuspect()).toBe(false)
+    expect(describeInstallDirAclPoison()?.detail).toContain('Orca repaired the permissions')
+    expect(hasInstallDirAclPoisonMarker(userDataPath, INSTALL_DIR, APP_VERSION)).toBe(false)
   })
 })
 

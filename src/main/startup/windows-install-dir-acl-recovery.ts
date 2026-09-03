@@ -41,17 +41,49 @@ let probePendingSince: number | null = null
 /** A positive clean DACL reading; outranks any repair verdict about a tree with nothing to fix. */
 let installDirReadClean = false
 let blockingRepairInFlight = false
+const verdictWaiters = new Set<() => void>()
+
+function settleVerdictWaiters(): void {
+  // `wake` deletes only itself, which is safe to do on the entry being visited.
+  for (const wake of verdictWaiters) {
+    wake()
+  }
+  verdictWaiters.clear()
+}
 
 export function resetWindowsInstallDirAclRecoveryForTest(): void {
   poison = null
   probePendingSince = null
   installDirReadClean = false
   blockingRepairInFlight = false
+  settleVerdictWaiters()
 }
 
 /** Call when the install-DACL probe is dispatched: its verdict is not in yet. */
 export function noteWindowsInstallDirAclProbePending(): void {
   probePendingSince = Date.now()
+}
+
+/**
+ * Resolves when the probe's verdict lands, or when its grace window runs out.
+ * For callers that must not act on a suspicion the probe is about to withdraw.
+ */
+export function waitForInstallDirAclVerdict(now: number = Date.now()): Promise<void> {
+  const remainingMs =
+    probePendingSince === null ? 0 : PROBE_VERDICT_GRACE_MS - (now - probePendingSince)
+  if (remainingMs <= 0) {
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => {
+    const wake = (): void => {
+      clearTimeout(timer)
+      verdictWaiters.delete(wake)
+      resolve()
+    }
+    const timer = setTimeout(wake, remainingMs)
+    timer.unref?.()
+    verdictWaiters.add(wake)
+  })
 }
 
 /**
@@ -86,12 +118,15 @@ function startRepair(
     ...options,
     installDir,
     onDone: (result) => {
+      // A marker recording a completed repair is not a failure to repair: this tree is done.
+      const stage: RepairStage =
+        result.mode === 'marker-hit' && result.alreadyRepaired ? 'repaired' : result.mode
       // A clean reading of the tree outranks this: there was nothing left to repair.
       if (!installDirReadClean) {
-        poison = { installDir, stage: result.mode }
+        poison = { installDir, stage }
       }
       logStartupMilestone('install-dir-acl-repair-done', { mode: result.mode })
-      if (result.mode === 'repaired') {
+      if (stage === 'repaired') {
         clearInstallDirAclPoisonMarker(options.userDataPath)
         // The GPU child deaths were never a driver fault, so safe graphics — and the
         // --in-process-gpu launch that hides the next crash's evidence — must not outlive the repair.
@@ -118,6 +153,18 @@ export function startWindowsInstallDirAclRepairIfPoisoned(
   options: WindowsInstallDirAclRecoveryOptions
 ): void {
   probePendingSince = null
+  try {
+    applyInstallDirAclProbeVerdict(data, options)
+  } finally {
+    // Only after the verdict is applied: a waiter wakes to re-read `isInstallDirAclSuspect()`.
+    settleVerdictWaiters()
+  }
+}
+
+function applyInstallDirAclProbeVerdict(
+  data: CrashReportBreadcrumbData,
+  options: WindowsInstallDirAclRecoveryOptions
+): void {
   if (!isInstallDirAclPoisonVerdict(data)) {
     // Only a positive clean reading retires the verdict; an unreadable DACL proves nothing.
     if (data.matchesPoisonSignature === false) {
