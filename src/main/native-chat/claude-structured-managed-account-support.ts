@@ -27,6 +27,8 @@ export function structuredClaudeMatchesActiveManagedAccount(
   settings: ClaudeManagedAccountGateSettings | null | undefined
 ): boolean {
   const accounts = settings?.claudeManagedAccounts
+  // Absent is not empty: an empty list is a real "no managed accounts" answer, but a missing field
+  // is settings we failed to parse, which is the same unknown as unreadable. Do not merge these.
   if (!settings || !Array.isArray(accounts)) {
     return false
   }
