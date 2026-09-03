@@ -52,9 +52,8 @@ vi.mock('fs/promises', async () => {
 import { GitCapabilityCache } from '../shared/git-capability-cache'
 import type { RemoveWorktreeResult } from '../shared/worktree/create-types'
 import { clearGitCapabilityStateForTests } from '../main/git/git-capability-state'
-import { _resetWorktreeScanCacheForTests } from '../main/git/worktree'
+import { _resetWorktreeScanCacheForTests, removeWorktree } from '../main/git/worktree'
 import { __resetSparseCheckoutStateCacheForTests } from '../main/git/worktree-sparse-checkout-cache'
-import { removeWorktree } from '../main/git/worktree'
 import type { GitExec } from './git-handler-ops'
 import { removeWorktreeOp } from './git-handler-worktree-ops'
 
