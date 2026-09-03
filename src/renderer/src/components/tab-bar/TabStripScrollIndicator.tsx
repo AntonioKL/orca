@@ -77,6 +77,13 @@ export function TabStripScrollIndicator({
     }
   }, [])
 
+  // Why: hiding the indicator mid-drag would otherwise leave window listeners and body cursor/user-select stuck.
+  useEffect(() => {
+    if (disabled || !metrics.hasOverflow) {
+      cleanupDragRef.current?.()
+    }
+  }, [disabled, metrics.hasOverflow])
+
   const handleThumbPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (e.button !== 0 || disabled) {
       return
@@ -205,6 +212,7 @@ export function TabStripScrollIndicator({
       onPointerLeave={() => setIsHovered(false)}
       onPointerDown={handleTrackPointerDown}
       onWheel={handleWheel}
+      // Why: decorative rail — keyboard/AT users scroll the strip with the adjacent labelled scroll buttons.
       aria-hidden
     >
       <div
