@@ -15,6 +15,11 @@ import {
   CLAUDE_AUTH_SWITCH_SETTLE_TIMEOUT_MS,
   whenClaudeAuthSwitchSettles
 } from '../claude-accounts/live-pty-gate'
+import { AgentSessionPreSpawnError } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
+import {
+  structuredClaudeMatchesActiveManagedAccount,
+  type ClaudeManagedAccountGateSettings
+} from '../native-chat/claude-structured-managed-account-support'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 
@@ -137,6 +142,8 @@ export type ClaudeStructuredLaunchResolverDeps = {
   resolveAuthPolicy: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
   /** How long an in-flight account switch may hold a launch before it is refused. */
   authSwitchSettleTimeoutMs?: number
+  /** Account state for the managed-account gate; null when it cannot be read, which refuses. */
+  readManagedAccountGate?: () => ClaudeManagedAccountGateSettings | null
 }
 
 /**
@@ -185,6 +192,17 @@ export function createClaudeStructuredLaunchResolver(
     }
     if (record.accountHome.variable !== 'CLAUDE_CONFIG_DIR') {
       throw new Error(`claude sessions pin CLAUDE_CONFIG_DIR, not ${record.accountHome.variable}`)
+    }
+    // Every acquisition, not just the first: the account state can change under a live session, and
+    // a reacquire after an unexpected exit would otherwise spawn under whatever it has become.
+    // Codex has no gate here — it resolves its account on a different path.
+    if (
+      deps.readManagedAccountGate &&
+      !structuredClaudeMatchesActiveManagedAccount(deps.readManagedAccountGate())
+    ) {
+      throw new AgentSessionPreSpawnError(
+        'structured Claude is not offered under the active managed Claude account'
+      )
     }
     const head = agentSessionProviderHandleChainHead(record.providerHandleChain)
     if (

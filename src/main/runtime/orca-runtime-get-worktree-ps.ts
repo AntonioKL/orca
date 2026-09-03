@@ -15,6 +15,7 @@ import type { Repo } from '../../shared/repo-types'
 import { enrichMissingRepoGitRemoteIdentities } from '../repo-git-remote-identity-enrichment'
 import { ensureStructuredAgentSessionHost as installStructuredAgentSessionHost } from './structured-agent-session-runtime'
 import { getProfileUserDataPath } from '../orca-profiles/profile-storage-paths'
+import { readClaudeManagedAccountGateSettings } from '../native-chat/claude-structured-managed-account-support'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import {
   resolveTuiAgentLaunchArgs,
@@ -159,6 +160,9 @@ export class OrcaRuntimeWithGetWorktreePs extends OrcaRuntimeWithStructuredAgent
         resolveTuiAgentLaunchEnv('claude', this.requireStore().getSettings().agentDefaultEnv),
       resolveClaudeAuthPolicy: () =>
         claudeStructuredAuthPolicyForSettings(this.requireStore().getSettings()),
+      // Same gate and same settings as agentSession.createSupport, re-read on every acquisition.
+      readClaudeManagedAccountGate: () =>
+        readClaudeManagedAccountGateSettings(() => this.requireStore().getSettings()),
       handoffTransport: this.createStructuredAgentSessionHandoffTransport()
     })
   }

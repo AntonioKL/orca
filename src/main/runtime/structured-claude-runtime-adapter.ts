@@ -14,6 +14,7 @@ import {
   resolveSessionFilePath
 } from '../native-chat/session-file-resolver'
 import { recordAgentSessionProviderHandle } from './agent-session-provider-handle-transition'
+import type { ClaudeManagedAccountGateSettings } from '../native-chat/claude-structured-managed-account-support'
 import type { AgentSessionRecordStore } from './agent-session-record-store'
 
 export type StructuredClaudeRuntimeAdapterDeps = {
@@ -24,6 +25,7 @@ export type StructuredClaudeRuntimeAdapterDeps = {
   /** Managed-account auth state for a Claude launch, mirroring the terminal preflight.
    *  Required: an absent policy is what silently under-strips. */
   resolveClaudeAuthPolicy: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
+  readClaudeManagedAccountGate?: () => ClaudeManagedAccountGateSettings | null
   openClaudeConnection?: ClaudeStructuredSessionAdapterDeps['openConnection']
   readProcessStartTime?: ClaudeStructuredSessionAdapterDeps['readProcessStartTime']
   onUnexpectedExit: (event: StructuredAgentSessionLifecycleEvent) => void
@@ -39,7 +41,10 @@ export function createStructuredClaudeRuntimeAdapter(
       resolveWorkspacePath: deps.resolveWorkspacePath,
       resolveCommand: deps.resolveClaudeCommand ?? resolveClaudeCommand,
       ...(deps.resolveClaudeLaunchEnv ? { resolveEnv: deps.resolveClaudeLaunchEnv } : {}),
-      resolveAuthPolicy: deps.resolveClaudeAuthPolicy
+      resolveAuthPolicy: deps.resolveClaudeAuthPolicy,
+      ...(deps.readClaudeManagedAccountGate
+        ? { readManagedAccountGate: deps.readClaudeManagedAccountGate }
+        : {})
     }),
     persistHandle: async ({ sessionId, providerSessionId, leafUuid, fence }) => {
       const currentFence = store.getRecord(sessionId)?.lease.runtimeFence ?? fence

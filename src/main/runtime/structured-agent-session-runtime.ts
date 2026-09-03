@@ -21,6 +21,7 @@ import { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/st
 import { StructuredAgentSessionAdapterRouter } from '../native-chat/agent-session-wire/structured-agent-session-adapter-router'
 import type { StructuredAgentSessionHandoffTransport } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
+import type { ClaudeManagedAccountGateSettings } from '../native-chat/claude-structured-managed-account-support'
 import { AgentSessionRecordStore } from './agent-session-record-store'
 import { agentSessionStorePath } from './agent-session-record-store-file'
 import { stopOrphanAgentSessionChildren } from './agent-session-orphan-child-reaper'
@@ -72,6 +73,7 @@ export type StructuredAgentSessionRuntimeDeps = {
   /** Required. The one production wiring lives in a `@ts-nocheck` file, so this is
    *  also asserted at install time — an absent policy must not degrade to a guess. */
   resolveClaudeAuthPolicy: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
+  readClaudeManagedAccountGate?: () => ClaudeManagedAccountGateSettings | null
   resolveEnvironment?: () => Promise<NodeJS.ProcessEnv>
   resolveCodexOverrides?: () => NodeJS.ProcessEnv
   onError?: (input: { scope: string; error: unknown }) => void
@@ -200,6 +202,9 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
         ? { resolveClaudeLaunchEnv: deps.resolveClaudeLaunchEnv }
         : {}),
       resolveClaudeAuthPolicy: deps.resolveClaudeAuthPolicy,
+      ...(deps.readClaudeManagedAccountGate
+        ? { readClaudeManagedAccountGate: deps.readClaudeManagedAccountGate }
+        : {}),
       onUnexpectedExit: (event) => {
         recoveryChain = recoveryChain.then(async () => {
           try {

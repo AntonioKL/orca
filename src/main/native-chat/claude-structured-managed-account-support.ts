@@ -1,4 +1,12 @@
-import type { ClaudeRateLimitAccountsState } from '../../shared/managed-account-types'
+import type { GlobalSettings } from '../../shared/global-settings-types'
+import { getSelectedClaudeAccountIdForTarget } from '../claude-accounts/runtime-selection'
+
+export type ClaudeManagedAccountGateSettings = Pick<
+  GlobalSettings,
+  | 'claudeManagedAccounts'
+  | 'activeClaudeManagedAccountId'
+  | 'activeClaudeManagedAccountIdsByRuntime'
+>
 
 /**
  * A structured Claude session launches against the ambient Claude config, which the account service
@@ -8,22 +16,38 @@ import type { ClaudeRateLimitAccountsState } from '../../shared/managed-account-
  * another. Refuse the structured path there and let the terminal-backed one, which resolves the
  * account per runtime, handle that account shape.
  *
- * Unknown answers refuse: an install with no managed accounts claims no identity and is fine, but
- * an active selection this cannot resolve is not evidence that the ambient identity is right.
+ * Reads the selection through the same accessor the auth policy uses. Resolving it any other way
+ * lets the two disagree, and a session admitted by this gate would then run under a policy computed
+ * from a different account than the one approved here.
+ *
+ * Unknown answers refuse: an install with no managed accounts claims no identity and is fine, but a
+ * selection this cannot resolve is not evidence that the ambient identity is right.
  */
 export function structuredClaudeMatchesActiveManagedAccount(
-  accounts: ClaudeRateLimitAccountsState | null | undefined
+  settings: ClaudeManagedAccountGateSettings | null | undefined
 ): boolean {
-  if (!accounts) {
+  const accounts = settings?.claudeManagedAccounts
+  if (!settings || !Array.isArray(accounts)) {
     return false
   }
-  if (accounts.accounts.length === 0) {
+  if (accounts.length === 0) {
     return true
   }
-  const activeHostId = accounts.activeAccountIdsByRuntime?.host ?? accounts.activeAccountId ?? null
+  const activeHostId = getSelectedClaudeAccountIdForTarget(settings, { runtime: 'host' })
   if (!activeHostId) {
     return false
   }
-  const active = accounts.accounts.find((candidate) => candidate.id === activeHostId)
+  const active = accounts.find((candidate) => candidate.id === activeHostId)
   return active ? active.managedAuthRuntime !== 'wsl' : false
+}
+
+/** Reads the gate's settings, answering null when they cannot be read so callers refuse. */
+export function readClaudeManagedAccountGateSettings(
+  getSettings: () => ClaudeManagedAccountGateSettings
+): ClaudeManagedAccountGateSettings | null {
+  try {
+    return getSettings()
+  } catch {
+    return null
+  }
 }
