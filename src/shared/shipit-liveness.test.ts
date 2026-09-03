@@ -7,6 +7,7 @@ import { getShipItLivenessForBundle } from './shipit-liveness'
 
 const BUNDLE = '/Applications/Orca.app'
 const SHIPIT = `${BUNDLE}/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt`
+const SHIPIT_FRAMEWORK_ROOT = `${BUNDLE}/Contents/Frameworks/Squirrel.framework/Resources/ShipIt`
 
 const psOutput = (...lines: string[]): void => {
   runProcessSyncMock.mockReturnValue({
@@ -34,6 +35,11 @@ describe('isShipItRunningForBundle', () => {
 
   it('matches an installer invoked with no arguments', () => {
     psOutput(SHIPIT)
+    expect(getShipItLivenessForBundle(BUNDLE)).toBe('live')
+  })
+
+  it('matches the framework-root resource path used by production ShipIt launches', () => {
+    psOutput(`${SHIPIT_FRAMEWORK_ROOT} com.stablyai.orca.ShipIt /tmp/state.plist`)
     expect(getShipItLivenessForBundle(BUNDLE)).toBe('live')
   })
 

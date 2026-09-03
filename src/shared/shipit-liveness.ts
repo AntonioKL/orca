@@ -27,16 +27,22 @@ export function getShipItLivenessForBundle(bundlePath: string): ShipItLiveness {
   // Why the full path and not a bare name: a `ps` match on any command line *mentioning* the
   // bundle would count unrelated processes (a grep, an editor, this very check's own shell) and
   // hold the gate closed forever.
-  const shipItPath = join(
-    resolvedBundlePath,
-    'Contents',
-    'Frameworks',
-    'Squirrel.framework',
-    'Versions',
-    'A',
-    'Resources',
-    'ShipIt'
-  )
+  // Squirrel.Mac has shipped both the framework's versioned resource path and its
+  // framework-root symlink as argv[0] across releases. Keep both explicit so we
+  // recognize the real installer without broadening the process-table match.
+  const shipItPaths = [
+    join(
+      resolvedBundlePath,
+      'Contents',
+      'Frameworks',
+      'Squirrel.framework',
+      'Versions',
+      'A',
+      'Resources',
+      'ShipIt'
+    ),
+    join(resolvedBundlePath, 'Contents', 'Frameworks', 'Squirrel.framework', 'Resources', 'ShipIt')
+  ]
   try {
     const result = runProcessSync({
       program: '/bin/ps',
@@ -51,11 +57,13 @@ export function getShipItLivenessForBundle(bundlePath: string): ShipItLiveness {
     // be a separator stops `.../ShipIt-other` from counting as `.../ShipIt`.
     const running = result.stdout.split('\n').some((line) => {
       const argv0Line = line.trimStart()
-      if (!argv0Line.startsWith(shipItPath)) {
-        return false
-      }
-      const next = argv0Line.charAt(shipItPath.length)
-      return next === '' || next === ' '
+      return shipItPaths.some((shipItPath) => {
+        if (!argv0Line.startsWith(shipItPath)) {
+          return false
+        }
+        const next = argv0Line.charAt(shipItPath.length)
+        return next === '' || next === ' '
+      })
     })
     return running ? 'live' : 'exited'
   } catch {
