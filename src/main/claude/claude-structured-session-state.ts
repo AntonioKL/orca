@@ -122,6 +122,8 @@ export type ClaudeSession = {
   optionMutationSequence: number
   /** Shared durable-close write; a failed write clears this for a retry. */
   closePersistence?: Promise<void>
+  /** Shared full close/finalization operation; a failed operation clears this for a retry. */
+  closeFinalization?: Promise<boolean>
   /** Set only after the durable close write succeeds, before lifecycle emission. */
   closeFinalized?: boolean
   translator: ClaudeJournalTranslator | null

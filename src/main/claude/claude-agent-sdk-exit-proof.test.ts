@@ -500,6 +500,36 @@ describe('claude child tree reaper', () => {
     expect(child.kill).toHaveBeenCalledWith('SIGKILL')
   })
 
+  it('retains the prior identity-safe snapshot when a refresh is partial', async () => {
+    const child = mockChild()
+    const first = {
+      ...snapshotOf(4243),
+      descendants: [
+        ...snapshotOf(4243).descendants,
+        { ...snapshotOf(4243).descendants[0], pid: 4244 }
+      ]
+    }
+    const captureDescendants = vi
+      .fn()
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce({
+        ...first,
+        descendants: first.descendants.slice(0, 1)
+      })
+    const terminateDescendants = vi.fn(async () => 'exited' as const)
+    const tree = createClaudeChildTreeReaper(child, {
+      platform: 'linux',
+      captureDescendants,
+      terminateDescendants
+    })
+
+    await tree.capture()
+    await tree.refresh?.()
+    await tree.reap()
+
+    expect(terminateDescendants).toHaveBeenCalledWith(first)
+  })
+
   it('stops re-walking once the root is gone, however the table behaved', async () => {
     const child = mockChild()
     let exited = false

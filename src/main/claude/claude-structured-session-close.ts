@@ -42,7 +42,7 @@ export function settleClaudeExitedSession(session: ClaudeSession): void {
   session.translator?.dispose()
 }
 
-export async function closeClaudePublishedSession(input: {
+type CloseClaudePublishedSessionInput = {
   sessions: Map<string, ClaudeSession>
   sessionId: string
   persistHandle?: (handle: {
@@ -57,14 +57,12 @@ export async function closeClaudePublishedSession(input: {
     previousLeafUuid: string | null
     claudeConfigDir: string
   }) => Promise<string | null>
-}): Promise<boolean> {
-  const session = input.sessions.get(input.sessionId)
-  if (!session) {
-    return true
-  }
-  if (session.closeFinalized) {
-    return true
-  }
+}
+
+async function finalizeClaudePublishedSession(
+  input: CloseClaudePublishedSessionInput,
+  session: ClaudeSession
+): Promise<boolean> {
   settleClaudeDispatchWaiters(session)
   // Settle every in-flight permission callback so closing leaves no dangling promise; `null`
   // writes no response, and the SDK ignores any post-cleanup answer regardless.
@@ -117,20 +115,62 @@ export async function closeClaudePublishedSession(input: {
     sessionId: input.sessionId,
     reason: 'claude session closed'
   } as const
+  let callbackError: unknown
+  let callbackThrew = false
+  const deliver = (event: ClaudeStructuredSessionEvent): void => {
+    try {
+      input.onEvent?.(event)
+    } catch (error) {
+      callbackThrew = true
+      callbackError ??= error
+    }
+  }
   try {
-    input.onEvent?.({
+    deliver({
       type: 'handle',
       sessionId: input.sessionId,
       providerSessionId: session.providerSessionId,
       leafUuid: session.leafUuid,
       fence: session.fence
     })
-    session.translator?.handle(ended)
-    input.onEvent?.(ended)
+    try {
+      session.translator?.handle(ended)
+    } catch (error) {
+      callbackThrew = true
+      callbackError ??= error
+    }
+    deliver(ended)
   } finally {
     session.translator?.dispose()
   }
+  if (callbackThrew) {
+    throw callbackError
+  }
   return true
+}
+
+export async function closeClaudePublishedSession(
+  input: CloseClaudePublishedSessionInput
+): Promise<boolean> {
+  const session = input.sessions.get(input.sessionId)
+  if (!session) {
+    return true
+  }
+  if (session.closeFinalized) {
+    return true
+  }
+  if (session.closeFinalization) {
+    return session.closeFinalization
+  }
+  const finalization = finalizeClaudePublishedSession(input, session)
+  session.closeFinalization = finalization
+  try {
+    return await finalization
+  } finally {
+    if (session.closeFinalization === finalization && !session.closeFinalized) {
+      session.closeFinalization = undefined
+    }
+  }
 }
 
 export function closeClaudePublishedSessionForDeps(

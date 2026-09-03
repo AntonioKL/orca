@@ -225,9 +225,8 @@ export async function openClaudeStreamJsonConnection(
       closing = true
       // Arm the descendant proof before ending stdin. The SDK may exit the root
       // immediately; a post-exit walk cannot recover descendants that reparented.
-      const treeCapture = tree.refresh?.() ?? tree.capture()
+      await (tree.refresh?.() ?? tree.capture())
       inbox.end()
-      await treeCapture
       const proven = await proveClaudeChildExit({
         child,
         exitPromise,

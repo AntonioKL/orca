@@ -16,6 +16,91 @@ import {
 } from './claude-structured-session-test-support'
 
 describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
+  it('shares concurrent close finalization and emits lifecycle once', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const persistence = Promise.withResolvers<void>()
+    const persistHandle = vi.fn(() => persistence.promise)
+    const adapter = adapterFor(claude, {}, events, [], undefined, undefined, persistHandle)
+    const journalSink: StructuredAgentSessionEventSink = {
+      appendItem: () => {},
+      appendTombstone: () => {},
+      publish: () => {}
+    }
+    await adapter.acquire({
+      identity: identityFor(),
+      fence: 7,
+      spawnToken: 'spawn-9',
+      events: journalSink
+    })
+    const session = (
+      adapter as unknown as {
+        sessions: Map<string, { translator: { dispose: () => void } | null }>
+      }
+    ).sessions.get('session-1')
+    const disposeTranslator = vi.spyOn(session!.translator!, 'dispose')
+
+    const first = adapter.closeSession('session-1')
+    const second = adapter.closeSession('session-1')
+    await tick()
+    expect(persistHandle).toHaveBeenCalledOnce()
+    expect(claude.connections[0].closeCount).toBe(1)
+
+    persistence.resolve()
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true])
+    expect(events.filter((event) => event.type === 'handle')).toHaveLength(1)
+    expect(events.filter((event) => event.type === 'ended')).toHaveLength(1)
+    expect(disposeTranslator).toHaveBeenCalledOnce()
+  })
+
+  it('still emits ended and disposes state when handle delivery throws', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const callbackError = new Error('handle delivery failed')
+    const adapter = new ClaudeStructuredSessionAdapter({
+      resolveLaunch: async () => ({
+        pathToClaudeCodeExecutable: 'claude',
+        options: {},
+        cwd: '/work/repo',
+        claudeConfigDir: '/accounts/claude',
+        providerSessionId: PROVIDER_SESSION_ID,
+        resumeLeafUuid: null,
+        resumed: false
+      }),
+      onEvent: (event) => {
+        events.push(event)
+        if (event.type === 'handle') {
+          throw callbackError
+        }
+      },
+      openConnection: claude.openConnection,
+      readProcessStartTime: async () => 1_700_000_000_000,
+      persistHandle: vi.fn(async () => undefined)
+    })
+    const journalSink: StructuredAgentSessionEventSink = {
+      appendItem: () => {},
+      appendTombstone: () => {},
+      publish: () => {}
+    }
+    await adapter.acquire({
+      identity: identityFor(),
+      fence: 7,
+      spawnToken: 'spawn-9',
+      events: journalSink
+    })
+    const session = (
+      adapter as unknown as {
+        sessions: Map<string, { translator: { dispose: () => void } | null }>
+      }
+    ).sessions.get('session-1')
+    const disposeTranslator = vi.spyOn(session!.translator!, 'dispose')
+
+    await expect(adapter.closeSession('session-1')).rejects.toBe(callbackError)
+    expect(events.filter((event) => event.type === 'handle')).toHaveLength(1)
+    expect(events.filter((event) => event.type === 'ended')).toHaveLength(1)
+    expect(disposeTranslator).toHaveBeenCalledOnce()
+  })
+
   it('retains a closed session until its durable cursor persistence succeeds', async () => {
     const claude = fakeClaude()
     const persistenceError = new Error('store unavailable')

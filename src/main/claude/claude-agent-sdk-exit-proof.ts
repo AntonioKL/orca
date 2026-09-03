@@ -55,6 +55,39 @@ function admissibleTree(
   return tree.rootPgid === null ? null : { platform: 'posix', tree }
 }
 
+function isSnapshotSuperset(previous: CapturedTree, next: CapturedTree): boolean {
+  if (previous.platform !== next.platform) {
+    return false
+  }
+  if (previous.platform === 'posix' && next.platform === 'posix') {
+    return (
+      previous.tree.rootPgid === next.tree.rootPgid &&
+      previous.tree.descendants.every((row) =>
+        next.tree.descendants.some(
+          (candidate) =>
+            candidate.pid === row.pid &&
+            candidate.pgid === row.pgid &&
+            candidate.startedAt === row.startedAt
+        )
+      )
+    )
+  }
+  if (previous.platform === 'win32' && next.platform === 'win32') {
+    return (
+      previous.tree.root.pid === next.tree.root.pid &&
+      previous.tree.root.creationTimeMs === next.tree.root.creationTimeMs &&
+      next.tree.unidentifiedCount >= previous.tree.unidentifiedCount &&
+      previous.tree.descendants.every((row) =>
+        next.tree.descendants.some(
+          (candidate) =>
+            candidate.pid === row.pid && candidate.creationTimeMs === row.creationTimeMs
+        )
+      )
+    )
+  }
+  return false
+}
+
 export type ClaudeChildTreeReaperDeps = {
   platform?: NodeJS.Platform
   /** Whether the root's exit has been observed; only a live root can be walked. */
@@ -186,7 +219,10 @@ export function createClaudeChildTreeReaper(
         return
       }
       const tree = admissibleTree(captured, platform, false)
-      if (tree) {
+      if (
+        tree &&
+        (snapshot === undefined || (snapshot !== null && isSnapshotSuperset(snapshot, tree)))
+      ) {
         snapshot = tree
       }
       // Keep an earlier admissible snapshot when this close-boundary read fails;
