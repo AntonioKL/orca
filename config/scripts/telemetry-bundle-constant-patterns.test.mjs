@@ -7,6 +7,11 @@ describe('telemetry bundle constant patterns', () => {
     expect(`${declaration} WRITE_KEY = "phc_example-key_123"`).toMatch(WRITE_KEY_RE)
   })
 
+  it('accepts minified names and Oxc backtick literals', () => {
+    expect('var nfe=`stable`,rfe=`phc_test_key`').toMatch(BUILD_IDENTITY_RE)
+    expect('var nfe=`stable`,rfe=`phc_test_key`').toMatch(WRITE_KEY_RE)
+  })
+
   it('rejects assignments and invalid values', () => {
     expect('BUILD_IDENTITY = "rc"').not.toMatch(BUILD_IDENTITY_RE)
     expect('const BUILD_IDENTITY = "dev"').not.toMatch(BUILD_IDENTITY_RE)

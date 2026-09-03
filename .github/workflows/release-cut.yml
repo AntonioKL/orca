@@ -1584,15 +1584,13 @@ jobs:
 
           Invoke-RestMethod -Method Post -Uri $env:SLACK_WEBHOOK_URL -ContentType 'application/json' -Body $payload
 
-      # Why gate on the notify outcome too: if nobody was told to approve,
-      # don't hold the release for the approval window — fall through and
-      # ship like today instead. The 1h wait (vs the installer's 4h) keeps
-      # both waits plus the build inside the 360-minute job cap; missing it
-      # falls through to today's unsigned-inner flow rather than blocking.
+      # Require the inner-binary request to complete before creating the
+      # installer request. A timeout or notification failure must fail closed:
+      # submitting a second request for an installer that still contains
+      # unsigned inner binaries wastes quota and obscures the real blocker.
       - name: Download signed inner binaries from SignPath
         id: download-signed-inner
         if: matrix.platform == 'win' && github.run_attempt == 1 && steps.submit-inner-signing.outcome == 'success' && steps.notify-inner-signing.outcome == 'success'
-        continue-on-error: true
         shell: pwsh
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
