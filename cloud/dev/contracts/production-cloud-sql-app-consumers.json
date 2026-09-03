@@ -1,0 +1,15 @@
+{
+  "comment": "Production Cloud SQL consumers owned by the orca-cloud application tree. The relay tree ships without apps/auth and apps/api, so the values it needs for the connection budget are published here instead of parsed out of application source. dev/scripts/production-cloud-sql-app-consumers.test.mjs binds every field back to its source with the regexes the budget script used, so application-side drift fails application-side CI.",
+  "authInstances": 2,
+  "authPoolMax": 10,
+  "apiInstances": 10,
+  "apiPoolMax": 5,
+  "maxConnections": 400,
+  "sources": {
+    "authInstances": "infra/terraform-apps/environments/production.tfvars: auth_max_instances",
+    "authPoolMax": "apps/auth/src/db/database.ts: new pg.Pool({ ..., max: N })",
+    "apiInstances": "infra/terraform-apps/environments/production.tfvars: max_instances (the artifact API service; the first max_instances not prefixed auth_)",
+    "apiPoolMax": "apps/api/src/skills/skill-database.ts: new pg.Pool({ ..., max: N })",
+    "maxConnections": "Tier default for google_sql_database_instance.auth; infra/terraform-foundation/database.tf declares no max_connections database flag that would override it"
+  }
+}
