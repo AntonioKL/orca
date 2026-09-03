@@ -36,7 +36,7 @@ export function useTerminalWindowLifecycle(controller: TerminalActivationControl
   }, [])
 
   useEffect(() => {
-    setWindowCloseRequestHandler(({ isQuitting }) => {
+    setWindowCloseRequestHandler(({ isQuitting, requestId }) => {
       if (isIntentionalAppRestartInProgress()) {
         window.api.ui.confirmWindowClose()
         return
@@ -48,7 +48,9 @@ export function useTerminalWindowLifecycle(controller: TerminalActivationControl
       if (dirtyFiles.length > 0) {
         queueEditorCloseRequests(
           dirtyFiles.map((file) => file.id),
-          { isQuitting }
+          // Why carry requestId: cancelling this dialog abandons THIS close request, and main
+          // correlates the cancel so it cannot clear a later one.
+          { isQuitting, requestId }
         )
         return
       }

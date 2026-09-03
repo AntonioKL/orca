@@ -22,6 +22,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 
 describe('window-close-request-coordinator', () => {
   const confirmWindowClose = vi.fn()
+  const cancelWindowClose = vi.fn()
   const unregisterFns: (() => void)[] = []
 
   const addGuard = (guard: () => boolean | Promise<boolean>): void => {
@@ -30,13 +31,14 @@ describe('window-close-request-coordinator', () => {
 
   beforeEach(() => {
     confirmWindowClose.mockClear()
+    cancelWindowClose.mockClear()
     vi.mocked(toast.error).mockClear()
     // Why: dispatch falls back to the preload bridge when no rich handler is
     // registered; stub just the surface it touches.
     const windowTarget = new EventTarget() as EventTarget & {
-      api: { ui: { confirmWindowClose: () => void } }
+      api: { ui: { cancelWindowClose: () => void; confirmWindowClose: () => void } }
     }
-    windowTarget.api = { ui: { confirmWindowClose } }
+    windowTarget.api = { ui: { cancelWindowClose, confirmWindowClose } }
     ;(globalThis as unknown as { window: typeof windowTarget }).window = windowTarget
   })
 
@@ -214,5 +216,26 @@ describe('window-close-request-coordinator', () => {
       })
     ).toThrow('listener exploded')
     expect(isWindowCloseCheckpointInProgress()).toBe(false)
+  })
+
+  it('tells main the quit was abandoned when a guard vetoes', () => {
+    // A guard veto never reaches beforeunload, so without this signal main cannot distinguish
+    // "still deciding" from "the user said no" — and a relaunch deferred to `quit` stays armed.
+    return (async () => {
+      registerWindowCloseGuard(() => false)
+      await dispatchWindowCloseRequest({ isQuitting: true })
+      expect(cancelWindowClose).toHaveBeenCalledTimes(1)
+      expect(confirmWindowClose).not.toHaveBeenCalled()
+    })()
+  })
+
+  it('names the request it is abandoning so main cannot mistake it for a later one', () => {
+    // The correlation is only real if the sender supplies the id; an undefined id bypasses the
+    // numeric check in main and lets a stale cancel clear the current quit.
+    return (async () => {
+      registerWindowCloseGuard(() => false)
+      await dispatchWindowCloseRequest({ isQuitting: true, requestId: 7 })
+      expect(cancelWindowClose).toHaveBeenCalledWith(7)
+    })()
   })
 })

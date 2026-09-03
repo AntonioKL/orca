@@ -27,7 +27,7 @@ export function useTerminalEditorCloseFoundation(
     closeDialogDebounceTimersRef.current.add(timer)
   }, [])
   const [windowCloseDialogOpen, setWindowCloseDialogOpen] = useState(false)
-  const windowCloseAfterDirtyRef = useRef<{ isQuitting: boolean } | null>(null)
+  const windowCloseAfterDirtyRef = useRef<{ isQuitting: boolean; requestId?: number } | null>(null)
 
   const confirmNativeWindowClose = useCallback(() => {
     // Why: capture only after every close guard has committed. A canceled child-

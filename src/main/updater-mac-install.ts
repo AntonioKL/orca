@@ -1,5 +1,6 @@
 import { app, autoUpdater as nativeUpdater } from 'electron'
 import type { UpdateStatus } from '../shared/update-status-types'
+import { markMacUpdateInstallInFlight } from './mac-update-install-marker'
 import { recordUpdaterLifecycle } from './updater-lifecycle-diagnostics'
 
 const MAC_INSTALL_READY_TIMEOUT_MS = 15000
@@ -33,6 +34,22 @@ export function registerMacUpdaterEvents({
       })
     })
   }
+
+  // Why will-quit and not the explicit install path only: autoInstallOnAppQuit is true on macOS
+  // (getLinuxPackageType() returns 'non-root' off Linux), so Squirrel applies a staged update on
+  // an ordinary quit too. A plain Cmd+Q therefore opens the same window in which reopening the
+  // old version cancels the install, and that quit never runs performQuitAndInstall.
+  // Why will-quit rather than before-quit: vetoes have already been resolved here, so the app is
+  // genuinely on its way out and the marker cannot strand a launch for a quit that got abandoned.
+  app.on('will-quit', () => {
+    if (process.platform !== 'darwin' || !isMacInstallerReady()) {
+      return
+    }
+    const pendingVersion = getPendingInstallVersion()
+    if (pendingVersion) {
+      markMacUpdateInstallInFlight(pendingVersion)
+    }
+  })
 
   app.on('before-quit', (event) => {
     if (!shouldDeferMacQuitForInstall()) {

@@ -16,6 +16,7 @@ import { getLinuxPackageType } from '../linux-update-package-type'
 import { createUpdaterDiagnosticLogger } from '../linux-package-install-diagnostic'
 import { registerAutoUpdaterHandlers } from '../updater-events'
 import { getServeUpdateHandoffFailure } from '../serve-update-handoff'
+import { reconcileMacUpdateInstallMarker } from '../mac-update-install-marker'
 import { recordUpdaterLifecycle } from '../updater-lifecycle-diagnostics'
 import { AUTO_UPDATE_CHECK_INTERVAL_MS } from './updater-state'
 import { UpdaterDownloadInstall } from './updater-download-install'
@@ -118,6 +119,10 @@ export class UpdaterSetup extends UpdaterDownloadInstall {
     this.getReleaseChannelOverride = opts?.getReleaseChannelOverride ?? null
     this.updateInstallMode = opts?.installMode ?? 'interactive'
     this.lastInstallDeferralVersion = { download: null, install: null }
+
+    // Why here: the previous run's install outcome is only knowable at startup — a marker that
+    // survives into a run of the old version is proof the swap never landed.
+    reconcileMacUpdateInstallMarker()
 
     const serveHandoffFailure = getServeUpdateHandoffFailure()
     if (serveHandoffFailure) {

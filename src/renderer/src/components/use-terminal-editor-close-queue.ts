@@ -93,7 +93,7 @@ export function useTerminalEditorCloseQueue(controller: TerminalEditorCloseFound
   ])
 
   const queueEditorCloseRequests = useCallback(
-    (fileIds: string[], pendingWindowClose?: { isQuitting: boolean }) => {
+    (fileIds: string[], pendingWindowClose?: { isQuitting: boolean; requestId?: number }) => {
       if (pendingWindowClose) {
         windowCloseAfterDirtyRef.current = pendingWindowClose
       }
