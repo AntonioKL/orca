@@ -43,6 +43,9 @@ export const CLAUDE_STREAM_JSON_FRAME_KINDS = [
   'message:system:mirror_error',
   'message:system:informational',
   'message:conversation_reset',
+  // Queue bookkeeping the CLI emits per client-supplied command uuid. Absent
+  // from the SDK's SDKMessage union, which is why it reached users as raw JSON.
+  'message:command_lifecycle',
   'message:result:success',
   'message:result:error_during_execution',
   'message:result:error_max_turns',
