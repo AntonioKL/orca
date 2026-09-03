@@ -101,3 +101,18 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+
+  # Fork pull requests reach this job, so it never configures a backend, never plans, and never
+  # holds a credential. Only the relay root ships here; foundation and apps stay private.
+  terraform:
+    runs-on: blacksmith-2vcpu-ubuntu-2204
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+
+      - run: terraform -chdir=infra/terraform fmt -check -recursive
+      - run: terraform -chdir=infra/terraform init -backend=false -input=false
+      - run: terraform -chdir=infra/terraform validate
