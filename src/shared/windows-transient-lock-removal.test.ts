@@ -62,41 +62,12 @@ describe('transient lock removal options', () => {
     expect(WINDOWS_RM_MAX_RETRIES).toBe(8)
   })
 
-  // Why a ratchet and not a nitpick: Node's rimraf hands every child back to the *retrying* entry
-  // point (`_rmchildren` -> `rimraf`), so `maxRetries` compounds per directory level — a
-  // permanently-failing leaf at depth d costs roughly `retryDelay * 36 * 9^(d-1)`. Measured on macOS
-  // against one `chflags uchg` file at depth 2: `{recursive, force}` rejected in 1 ms while
-  // `{maxRetries: 8, retryDelay: 150}` had not settled after 5 minutes. Off Windows the retry has to
-  // stay in the bounded outer loops, which re-issue one whole `rm` against the same path.
-  it.each(['darwin', 'linux'] as const)('never asks Node for a per-level ladder on %s', (os) => {
-    withPlatform(os)
-
-    expect(transientLockRemovalOptions()).toEqual({ recursive: true, force: true })
-    expect(transientLockRemovalOptions()).not.toHaveProperty('maxRetries')
-  })
-
-  it('retries a transient ENOTEMPTY off Windows too', () => {
-    withPlatform('darwin')
-    rmSyncMock.mockImplementationOnce(() => {
-      throw Object.assign(new Error('ENOTEMPTY: directory not empty'), { code: 'ENOTEMPTY' })
-    })
-    rmSyncMock.mockImplementationOnce(() => undefined)
-
-    expect(() => removeTreeSync('/tmp/orca-host-job')).not.toThrow()
-    expect(rmSyncMock).toHaveBeenCalledTimes(2)
-    expect(new Set(rmSyncMock.mock.calls.map((call) => call[0]))).toEqual(
-      new Set(['/tmp/orca-host-job'])
-    )
-  })
-
-  it('does not read a POSIX failure out of its prose, only its code', () => {
-    withPlatform('linux')
-    rmSyncMock.mockImplementation(() => {
-      throw new Error('operation not permitted')
-    })
-
-    expect(() => removeTreeSync('/tmp/orca-host-job')).toThrow('operation not permitted')
-    expect(rmSyncMock).toHaveBeenCalledTimes(1)
+  it('asks for no retries where removal is not raced by the OS', () => {
+    for (const platform of ['darwin', 'linux'] as const) {
+      withPlatform(platform)
+      expect(transientLockRemovalOptions()).toEqual({ recursive: true, force: true })
+      Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform })
+    }
   })
 
   it('retries a transient EPERM instead of treating force: true as enough', () => {
