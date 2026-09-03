@@ -36,8 +36,15 @@ type Args = {
   readonly nativeChatBaseSend: (
     text: string,
     images?: string[],
-    deadline?: number
+    deadline?: number,
+    attachments?: readonly {
+      id: string
+      path: string
+      previewUri: string
+    }[]
   ) => Promise<MobileNativeChatSendOutcome>
+  /** Structured agent sessions do not have a terminal paste path. */
+  readonly structuredNativeChat: boolean
   /** Launch-context text parked on the agent's TUI input line, or null — sizes
    *  the image paste's leading clear so a multi-line draft cannot ride along. */
   readonly readSeededLaunchDraft: () => string | null
@@ -67,6 +74,7 @@ export function useMobileSessionImageAttachments({
   getActiveWorktreeConnectionId,
   beforeTerminalSend,
   nativeChatBaseSend,
+  structuredNativeChat,
   readSeededLaunchDraft,
   showToast,
   onNativeChatSendError,
@@ -98,7 +106,8 @@ export function useMobileSessionImageAttachments({
     getActiveWorktreeConnectionId,
     connState,
     scopeKey: nativeChatScopeKey,
-    enabled: nativeChatInputLeaseReady,
+    enabled: structuredNativeChat ? connState === 'connected' : nativeChatInputLeaseReady,
+    structuredNativeChat,
     operations: nativeChatOperations,
     targetRef: nativeChatTargetRef,
     showToast,

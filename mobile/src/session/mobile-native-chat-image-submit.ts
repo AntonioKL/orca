@@ -26,7 +26,8 @@ type CurrentRef<T> = { readonly current: T }
 export type MobileNativeChatImageBaseSend = (
   text: string,
   imagePreviewUris?: string[],
-  deadline?: number
+  deadline?: number,
+  attachments?: readonly PendingNativeChatImage[]
 ) => Promise<MobileNativeChatSendOutcome>
 
 export async function sendMobileNativeChatWithImages(args: {

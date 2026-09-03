@@ -48,7 +48,12 @@ export type MobileNativeChatController = {
   handleNativeChatSendWithOutcome: (
     text: string,
     images?: string[],
-    deadline?: number
+    deadline?: number,
+    attachments?: readonly {
+      id?: string
+      path: string
+      previewUri: string
+    }[]
   ) => Promise<MobileNativeChatSendOutcome>
   readSeededLaunchDraft: () => string | null
   nativeChatSessionOptions: MobileNativeChatSessionOptionPickersProps | null

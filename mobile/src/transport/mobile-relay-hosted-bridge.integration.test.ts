@@ -346,7 +346,11 @@ describe('hosted mobile bridge over cloud Relay transport', () => {
       ],
       truncated: false
     })
-    expect(observedMethods).toEqual(['pairing.getEndpoints', 'worktree.ps'])
+    expect(observedMethods).toEqual([
+      'pairing.getEndpoints',
+      'runtime.clientCapabilities.update',
+      'worktree.ps'
+    ])
     expect(JSON.stringify(snapshot)).not.toContain('host-relay-workspace')
 
     const workspace = snapshot.workspaces[0]!
@@ -371,6 +375,7 @@ describe('hosted mobile bridge over cloud Relay transport', () => {
     ])
     expect(observedMethods).toEqual([
       'pairing.getEndpoints',
+      'runtime.clientCapabilities.update',
       'worktree.ps',
       'session.tabs.list',
       'session.tabs.list',

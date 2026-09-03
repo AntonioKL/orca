@@ -8,7 +8,7 @@ import type { MobileNativeChatAgentStatusWithProvider } from './mobile-native-ch
 
 export type Terminal = TerminalRecord
 
-export type MobileSessionTabType = 'terminal' | 'markdown' | 'file' | 'browser'
+export type MobileSessionTabType = 'terminal' | 'markdown' | 'file' | 'browser' | 'agent-session'
 
 export type MobileSessionTab =
   | {
@@ -27,6 +27,14 @@ export type MobileSessionTab =
       launchDraft?: string
       nativeChatSessionId?: string
       terminalTheme?: MobileTerminalTheme
+      isActive: boolean
+    }
+  | {
+      type: 'agent-session'
+      id: string
+      title: string
+      sessionId: string
+      agent: 'codex'
       isActive: boolean
     }
   | {

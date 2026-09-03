@@ -17,7 +17,7 @@ import {
   requestMobileWebPackageResult,
   type MobileWebPackageRequest,
   type MobileWebPackageStager
-} from './mobile-web-package-downloader'
+} from './mobile-web-package-download-contract'
 
 const MOBILE_WEB_PACKAGE_READ_LIMITED_RETRIES = 4
 const MOBILE_WEB_PACKAGE_READ_LIMITED_BACKOFF_MS = 50

@@ -14,6 +14,11 @@ vi.mock('./e2ee', () => ({
   decryptBytes: (bytes: Uint8Array) => bytes
 }))
 
+// Capability ordering has dedicated coverage; keep disposal tests focused on stream teardown.
+vi.mock('./mobile-runtime-capability-negotiation', () => ({
+  negotiateMobileRuntimeCapabilities: (args: { onReady: () => void }) => args.onReady()
+}))
+
 class ServerSubscriptionTestSocket {
   static CONNECTING = 0
   static OPEN = 1

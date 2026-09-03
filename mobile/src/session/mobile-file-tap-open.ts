@@ -31,8 +31,10 @@ export type OpenMobileFileTapOptions<T extends FileTapSessionTab> = {
     activated: boolean
     activationSeq: number
     latestActivationSeq: number
-    sourceTerminalHandle: string
+    sourceTerminalHandle: string | null
     activeTerminalHandle: string | null
+    sourceSessionTabId?: string | null
+    activeSessionTabId?: string | null
     activeTabType: string | null
   }
   switchSessionTab: (tab: T) => void
@@ -67,7 +69,10 @@ async function openMobileFileTapAsync<T extends FileTapSessionTab>(
   options: OpenMobileFileTapOptions<T>
 ): Promise<void> {
   const terminalHandle = options.terminalHandle?.trim()
-  const sourceTabId = terminalHandle || options.getActivationState(false).sourceTerminalHandle
+  const activation = options.getActivationState(false)
+  // Structured agent-session chat has no backing terminal; its tab id anchors the resolve.
+  const sourceTabId =
+    terminalHandle || activation.sourceTerminalHandle || activation.sourceSessionTabId
   if (!sourceTabId) {
     return
   }

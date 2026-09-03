@@ -2,64 +2,35 @@ import { Buffer } from 'buffer/'
 import { sha256 } from '@noble/hashes/sha256'
 import {
   MOBILE_WEB_PACKAGE_MAX_CONCURRENT_READS,
-  MobileWebPackageManifestResponseSchema,
-  isMobileWebPackageErrorCode,
-  type MobileWebPackageErrorCode
+  MobileWebPackageManifestResponseSchema
 } from '../../../src/shared/mobile-web/package-rpc-contract'
-import type {
-  MobileWebAsset,
-  MobileWebManifest
-} from '../../../src/shared/mobile-web/manifest-contract'
+import type { MobileWebManifest } from '../../../src/shared/mobile-web/manifest-contract'
 import {
   serializeMobileWebManifestForBuildId,
   supportsMobileWebBridgeVersion
 } from '../../../src/shared/mobile-web/manifest-contract'
-import type { RpcResponse } from '../transport/types'
 import { clampRangeBytes, downloadAssetChunks } from './mobile-web-package-chunk-pipeline'
+import {
+  MobileWebPackageDownloadError,
+  requestMobileWebPackageResult,
+  type MobileWebPackageRequest,
+  type MobileWebPackageStager
+} from './mobile-web-package-download-contract'
 
-export const MOBILE_WEB_PACKAGE_DOWNLOAD_ERROR_CODES = [
-  'cancelled',
-  'host_error',
-  'host_forbidden',
-  'host_method_unavailable',
-  'host_rejected_request',
-  'host_runtime_failure',
-  'invalid_manifest',
-  'incompatible_bridge',
-  'invalid_chunk',
-  'asset_integrity_failed',
-  'staging_failed'
-] as const
-
-export type MobileWebPackageDownloadErrorCode =
-  | (typeof MOBILE_WEB_PACKAGE_DOWNLOAD_ERROR_CODES)[number]
-  | MobileWebPackageErrorCode
-
-export class MobileWebPackageDownloadError extends Error {
-  constructor(readonly code: MobileWebPackageDownloadErrorCode) {
-    super(code)
-    this.name = 'MobileWebPackageDownloadError'
-  }
-}
-
-export function mobileWebPackageDownloadFailureCode(error: unknown): string {
-  return error instanceof MobileWebPackageDownloadError ? error.code : 'native_session_error'
-}
-
-export type MobileWebPackageRequest = (method: string, params?: unknown) => Promise<RpcResponse>
+export {
+  MOBILE_WEB_PACKAGE_DOWNLOAD_ERROR_CODES,
+  MobileWebPackageDownloadError,
+  mobileWebPackageDownloadFailureCode,
+  requestMobileWebPackageResult,
+  type MobileWebPackageDownloadErrorCode,
+  type MobileWebPackageRequest,
+  type MobileWebPackageStager
+} from './mobile-web-package-download-contract'
 
 export type MobileWebPackageDownloadProgress = {
   phase: 'downloading' | 'verifying' | 'activating'
   completedBytes: number
   totalBytes: number
-}
-
-export type MobileWebPackageStager<TCommit> = {
-  begin(manifest: MobileWebManifest): Promise<void>
-  writeAssetChunk(asset: MobileWebAsset, offset: number, bytes: Uint8Array): Promise<void>
-  finishAsset(asset: MobileWebAsset): Promise<void>
-  commit(manifest: MobileWebManifest): Promise<TCommit>
-  abort(): Promise<void>
 }
 
 type DownloadMobileWebPackageOptions = {
@@ -187,47 +158,8 @@ export async function downloadMobileWebPackage<TCommit>(
   }
 }
 
-export async function requestMobileWebPackageResult(
-  request: MobileWebPackageRequest,
-  method: string,
-  params?: unknown
-): Promise<unknown> {
-  let response: RpcResponse
-  try {
-    response = await request(method, params)
-  } catch {
-    throw new MobileWebPackageDownloadError('host_error')
-  }
-  if (!response.ok) {
-    const message = response.error.message
-    throw new MobileWebPackageDownloadError(
-      isMobileWebPackageErrorCode(message)
-        ? message
-        : mobileWebPackageHostFailureCode(response.error.code)
-    )
-  }
-  return response.result
-}
-
 function sha256Hex(bytes: Uint8Array): string {
   return Buffer.from(sha256(bytes)).toString('hex')
-}
-
-function mobileWebPackageHostFailureCode(code: string): MobileWebPackageDownloadErrorCode {
-  switch (code) {
-    case 'forbidden':
-    case 'unauthorized':
-      return 'host_forbidden'
-    case 'method_not_found':
-    case 'method_not_supported':
-      return 'host_method_unavailable'
-    case 'invalid_argument':
-      return 'host_rejected_request'
-    case 'runtime_error':
-      return 'host_runtime_failure'
-    default:
-      return 'host_error'
-  }
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

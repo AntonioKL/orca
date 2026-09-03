@@ -64,6 +64,14 @@ type MobileSessionTabLike =
       canGoForward?: boolean
       isActive?: boolean
     }
+  | {
+      type: 'agent-session'
+      id: string
+      title?: string
+      sessionId?: string
+      agent?: string
+      isActive?: boolean
+    }
 
 export function mobileTerminalThemesEqual(
   left: MobileTerminalTheme | null | undefined,
@@ -156,6 +164,8 @@ function mobileSessionTabEqual(
         a.canGoBack === b.canGoBack &&
         a.canGoForward === b.canGoForward
       )
+    case 'agent-session':
+      return b.type === 'agent-session' && a.sessionId === b.sessionId && a.agent === b.agent
   }
 }
 
