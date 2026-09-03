@@ -121,6 +121,13 @@ The source boundary and package verifier reject the retired duplicate
 presentation and direct hosted access to native clipboard, picker, haptic, and
 external-link authority.
 
+The native shell owns the top safe-area inset. It pads the container that holds
+the WebView, so inside the hosted document the top edge is no longer a device
+edge. Android derives `env(safe-area-inset-top)` from the window's display
+cutout and does not subtract the WebView's offset, so the hosted route root
+pins its own top inset to zero (`HostedPageTopInsetProvider`). The remaining
+edges still meet the device and keep their measured values.
+
 ## Security Model
 
 ### Transport and package trust

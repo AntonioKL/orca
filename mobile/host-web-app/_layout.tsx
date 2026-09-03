@@ -8,6 +8,7 @@ import {
   useMobileWebNativeShell
 } from '../../src/mobile-web/src/native-shell-channel'
 import { installMobileWebHistorySessionFragment } from '../src/mobile-web/mobile-web-history-session-fragment'
+import { HostedPageTopInsetProvider } from '../src/mobile-web/hosted-page-top-inset'
 import {
   MobileWebNativeBehaviorAdapter,
   installMobileWebNativeBehaviorAdapters
@@ -26,13 +27,15 @@ export default function HostMobileWebLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
-        <RpcClientProvider>
-          <MobileWebNativeShellProvider>
-            <MobileWebRouteRestorer />
-            <MobileWebRouteStack />
-            <MobileWebNativeBehaviorAdapter />
-          </MobileWebNativeShellProvider>
-        </RpcClientProvider>
+        <HostedPageTopInsetProvider>
+          <RpcClientProvider>
+            <MobileWebNativeShellProvider>
+              <MobileWebRouteRestorer />
+              <MobileWebRouteStack />
+              <MobileWebNativeBehaviorAdapter />
+            </MobileWebNativeShellProvider>
+          </RpcClientProvider>
+        </HostedPageTopInsetProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   )
