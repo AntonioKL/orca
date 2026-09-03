@@ -11,6 +11,7 @@ const fakes = vi.hoisted(() => ({
     endpoint: { cellUrl: string; relayHostId: string }
     credential: string
     expectedCredentialKind: string
+    onOpen(): void
     onHello(value: unknown): void
     onAuthenticated(): void
     onText(value: string): void
@@ -174,6 +175,35 @@ describe('mobile relay RPC session', () => {
     // answer within the request timeout never published 'connected' — it just redialled.
     await vi.waitFor(() => expect(session.getState()).toBe('connected'), { timeout: 5_000 })
     expect(session.getFailure()).toBeNull()
+  })
+
+  // Why: ConnectionState stays 'connecting' until relay-hello, so the migration bound
+  // needs a separate signal to tell "cell never answered the upgrade" from "cell took
+  // relay-auth and is still resolving the assignment".
+  it('reports the dial stage as the link opens, receives hello, and authenticates', async () => {
+    const session = openSession()
+    const stages: string[] = []
+    session.onDialStageChange((stage) => stages.push(stage))
+    expect(session.getDialStage()).toBe('opening')
+
+    fakes.linkOptions!.onOpen()
+    expect(session.getDialStage()).toBe('awaiting-hello')
+    expect(session.getState()).toBe('connecting')
+    fakes.linkOptions!.onHello({
+      type: 'relay-hello',
+      ok: true,
+      credentialKind: 'resume',
+      leaseExpiresAt: Date.now() + 10_000,
+      acceptedCredentialVersion: 3,
+      acceptedAs: 'current',
+      resumeExpiresAt: Date.now() + 300_000
+    })
+    expect(session.getDialStage()).toBe('handshaking')
+    fakes.linkOptions!.onAuthenticated()
+    expect(session.getDialStage()).toBe('confirming')
+    await vi.waitFor(() => expect(fakes.sendText).toHaveBeenCalledOnce())
+    expect(stages).toEqual(['awaiting-hello', 'handshaking', 'confirming'])
+    session.close()
   })
 
   it('rejects a mismatched outer credential version and closes the physical link', () => {
