@@ -25,6 +25,7 @@ import type {
 } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import type { OrcaRuntimeService } from './orca-runtime'
 import type { RpcRequest, RpcResponse } from './rpc/core'
+import type { ClaudeStructuredAuthPolicy } from '../claude-accounts/claude-structured-auth-policy'
 import { RpcDispatcher } from './rpc/dispatcher'
 import { STRUCTURED_AGENT_SESSION_METHODS } from './rpc/methods/structured-agent-session'
 import {
@@ -240,6 +241,9 @@ let dispatcher: RpcDispatcher
 let cleanups: Map<string, () => void>
 let tuiOwner: StructuredTuiOwner | null
 let transcriptPath: string
+/** Managed-account state and configured overlay this host installs, per test. */
+let claudeAuthPolicy: ClaudeStructuredAuthPolicy
+let claudeLaunchEnv: Record<string, string>
 
 async function call(method: string, params: unknown): Promise<RpcResponse> {
   const replies: RpcResponse[] = []
@@ -303,6 +307,11 @@ function textOf(item: AgentJournalRenderItem): string {
 
 beforeEach(async () => {
   operations = 0
+  claudeAuthPolicy = { stripAuthEnv: false }
+  claudeLaunchEnv = {
+    ANTHROPIC_AUTH_TOKEN: 'configured-token',
+    ANTHROPIC_BASE_URL: 'https://gateway.example.test'
+  }
   root = await mkdtemp(join(tmpdir(), 'orca-claude-structured-integration-'))
   transcriptPath = join(root, 'claude-home', 'projects', 'workspace', `${PROVIDER_SESSION}.jsonl`)
   await mkdir(join(root, 'claude-home', 'projects', 'workspace'), { recursive: true })
@@ -390,10 +399,8 @@ beforeEach(async () => {
         resolveCodexCommand: () => '/usr/local/bin/codex',
         resolveClaudeCommand: () => '/usr/local/bin/claude',
         readProcessStartTime: async (pid: number) => pid * 10,
-        resolveClaudeLaunchEnv: () => ({
-          ANTHROPIC_AUTH_TOKEN: 'configured-token',
-          ANTHROPIC_BASE_URL: 'https://gateway.example.test'
-        }),
+        resolveClaudeLaunchEnv: () => claudeLaunchEnv,
+        resolveClaudeAuthPolicy: () => claudeAuthPolicy,
         openClaudeConnection: claude.openConnection,
         handoffTransport
       }).then(() => undefined),
@@ -414,6 +421,34 @@ afterEach(async () => {
 })
 
 describe('a structured Claude session over agentSession.*', () => {
+  it('strips ambient Anthropic auth from the child once a managed account is pinned', async () => {
+    claudeAuthPolicy = { stripAuthEnv: true }
+    claudeLaunchEnv = { ANTHROPIC_BASE_URL: 'https://gateway.example.test' }
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-SHELL-LEAK')
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'tok-SHELL-LEAK')
+
+    await ok<{ fence: number }>('agentSession.create', createIntentParams())
+
+    const env = claude.live().launch.env
+    expect(env).not.toHaveProperty('ANTHROPIC_API_KEY')
+    expect(env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN')
+    expect(env).toMatchObject({
+      ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+      CLAUDE_CONFIG_DIR: join(root, 'claude-home')
+    })
+  })
+
+  it('refuses a create whose configured env overrides the pinned managed account auth', async () => {
+    claudeAuthPolicy = { stripAuthEnv: true }
+    // The default overlay carries ANTHROPIC_AUTH_TOKEN, which the terminal path
+    // refuses at spawn-env.ts:25 rather than letting it beat the pinned account.
+    const refused = await call('agentSession.create', createIntentParams())
+
+    expect(JSON.stringify(refused)).toContain('explicit Anthropic auth environment')
+    // Refused before spawn: no provider child was ever opened.
+    expect(claude.connections).toHaveLength(0)
+  })
+
   it('durably returns actionable sign-in guidance when initialization has no credentials', async () => {
     claude.setInitializeAccount({ apiProvider: 'firstParty', tokenSource: 'none' })
     const params = createIntentParams()
@@ -503,8 +538,9 @@ describe('a structured Claude session over agentSession.*', () => {
       CLAUDE_CONFIG_DIR: join(root, 'claude-home'),
       [CLAUDE_SPAWN_TOKEN_ENV]: expect.any(String)
     })
-    // The child inherits the shell env for PATH, but never the ambient Anthropic auth.
-    expect(claude.live().launch.env).not.toHaveProperty('ANTHROPIC_API_KEY')
+    // System auth: the user's own shell key is their sign-in, exactly as on the
+    // terminal path, and the configured overlay still wins over it.
+    expect(claude.live().launch.env).toMatchObject({ ANTHROPIC_API_KEY: 'sk-ant-SHELL-LEAK' })
     expect(claude.live().launch.env?.PATH ?? claude.live().launch.env?.Path).toBeTruthy()
     const history = await call('agentSession.history', {
       sessionId: SESSION,

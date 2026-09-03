@@ -1,6 +1,7 @@
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { join } from 'node:path'
 import { resolveClaudeCommand } from '../codex-cli/command'
+import type { ClaudeStructuredAuthPolicy } from '../claude-accounts/claude-structured-auth-policy'
 import { createClaudeStructuredLaunchResolver } from '../claude/claude-structured-launch-resolution'
 import {
   ClaudeStructuredSessionAdapter,
@@ -20,6 +21,9 @@ export type StructuredClaudeRuntimeAdapterDeps = {
   resolveWorkspacePath: (workspaceId: string) => Promise<string>
   resolveClaudeCommand?: () => string
   resolveClaudeLaunchEnv?: () => Promise<Record<string, string>> | Record<string, string>
+  /** Managed-account auth state for a Claude launch, mirroring the terminal preflight.
+   *  Required: an absent policy is what silently under-strips. */
+  resolveClaudeAuthPolicy: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
   openClaudeConnection?: ClaudeStructuredSessionAdapterDeps['openConnection']
   readProcessStartTime?: ClaudeStructuredSessionAdapterDeps['readProcessStartTime']
   onUnexpectedExit: (event: StructuredAgentSessionLifecycleEvent) => void
@@ -34,7 +38,8 @@ export function createStructuredClaudeRuntimeAdapter(
       store,
       resolveWorkspacePath: deps.resolveWorkspacePath,
       resolveCommand: deps.resolveClaudeCommand ?? resolveClaudeCommand,
-      ...(deps.resolveClaudeLaunchEnv ? { resolveEnv: deps.resolveClaudeLaunchEnv } : {})
+      ...(deps.resolveClaudeLaunchEnv ? { resolveEnv: deps.resolveClaudeLaunchEnv } : {}),
+      resolveAuthPolicy: deps.resolveClaudeAuthPolicy
     }),
     persistHandle: async ({ sessionId, providerSessionId, leafUuid, fence }) => {
       const currentFence = store.getRecord(sessionId)?.lease.runtimeFence ?? fence

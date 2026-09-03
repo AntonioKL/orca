@@ -25,6 +25,7 @@ import { resolveStartupShell, tokenizeStartupCommand } from '../../shared/tui-ag
 import { resolveCodexStructuredAppServerArgs } from '../codex/codex-structured-app-server-args'
 import type { StructuredAgentSessionHandoffTransport } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import { hostname } from 'node:os'
+import { claudeStructuredAuthPolicyForSettings } from '../claude-accounts/claude-structured-auth-policy'
 import { probeAgentSessionProcessIdentity } from './agent-session-process-identity-probe'
 import { structuredAgentSessionTabId } from '../../shared/structured-agent-session-projection'
 
@@ -156,6 +157,8 @@ export class OrcaRuntimeWithGetWorktreePs extends OrcaRuntimeWithStructuredAgent
         resolveTuiAgentLaunchEnv('codex', this.requireStore().getSettings().agentDefaultEnv),
       resolveClaudeLaunchEnv: () =>
         resolveTuiAgentLaunchEnv('claude', this.requireStore().getSettings().agentDefaultEnv),
+      resolveClaudeAuthPolicy: () =>
+        claudeStructuredAuthPolicyForSettings(this.requireStore().getSettings()),
       handoffTransport: this.createStructuredAgentSessionHandoffTransport()
     })
   }

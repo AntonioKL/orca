@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
+import { CLAUDE_AUTH_ENV_CONFLICT_MESSAGE } from '../claude-accounts/environment'
 import { CLAUDE_DEFAULT_SETTING_SOURCES } from './claude-structured-launch-resolution'
 import { CLAUDE_SPAWN_TOKEN_ENV } from './claude-structured-owner-identity'
 import { createClaudeTuiResumeLaunchBuilder } from './claude-tui-resume-launch'
@@ -44,6 +45,7 @@ describe('Claude TUI resume launch', () => {
     const build = createClaudeTuiResumeLaunchBuilder({
       resolveWorkspacePath: async (workspaceId) => `/workspaces/${workspaceId}`,
       resolveCommand: () => '/usr/local/bin/claude',
+      resolveAuthPolicy: () => ({ stripAuthEnv: false }),
       resolveEnv: () => ({
         SELECTED_ACCOUNT: 'one',
         ANTHROPIC_AUTH_TOKEN: 'selected-account-token'
@@ -78,7 +80,10 @@ describe('Claude TUI resume launch', () => {
       [CLAUDE_SPAWN_TOKEN_ENV]: 'spawn-one',
       ANTHROPIC_AUTH_TOKEN: 'selected-account-token'
     })
-    expect(launch.env.ANTHROPIC_API_KEY).toBeUndefined()
+    // System auth (the only state an explicit ANTHROPIC_AUTH_TOKEN overlay is legal in):
+    // the user's own inherited key is their sign-in and survives. The managed-account
+    // half — where it is stripped — is covered by 'structured-to-TUI handoff auth'.
+    expect(launch.env.ANTHROPIC_API_KEY).toBe('inherited-gateway-key')
     // Endpoint selection is not credential material; the existing adapter pinning preserves it.
     expect(launch.env.ANTHROPIC_BASE_URL).toBe('https://inherited-gateway.invalid')
     expect(launch.env.CLAUDE_CODE_SESSION_ID).toBeUndefined()
@@ -95,6 +100,7 @@ describe('Claude TUI resume launch', () => {
     const build = createClaudeTuiResumeLaunchBuilder({
       resolveWorkspacePath: async () => '/workspace',
       resolveCommand: () => claudeCommand,
+      resolveAuthPolicy: () => ({ stripAuthEnv: true }),
       resolveEnv: () => ({ PATH: '/usr/bin' }),
       inheritedEnv: {}
     })
@@ -108,6 +114,7 @@ describe('Claude TUI resume launch', () => {
     const build = createClaudeTuiResumeLaunchBuilder({
       resolveWorkspacePath: async () => '/workspace',
       resolveCommand: () => 'claude',
+      resolveAuthPolicy: () => ({ stripAuthEnv: false }),
       resolveEnv: () => ({ ANTHROPIC_AUTH_TOKEN: 'pinned-token' }),
       inheritedEnv: {}
     })
@@ -133,6 +140,7 @@ describe('Claude TUI resume launch', () => {
     const build = createClaudeTuiResumeLaunchBuilder({
       resolveWorkspacePath: async () => '/workspace',
       resolveCommand: () => 'claude',
+      resolveAuthPolicy: () => ({ stripAuthEnv: true }),
       inheritedEnv: {}
     })
 
@@ -146,6 +154,7 @@ describe('Claude TUI resume launch', () => {
     const build = createClaudeTuiResumeLaunchBuilder({
       resolveWorkspacePath: async () => '/workspace',
       resolveCommand: () => 'claude',
+      resolveAuthPolicy: () => ({ stripAuthEnv: true }),
       inheritedEnv: {}
     })
 
@@ -161,6 +170,7 @@ describe('Claude TUI resume launch', () => {
     const build = createClaudeTuiResumeLaunchBuilder({
       resolveWorkspacePath: async () => '/workspace',
       resolveCommand: () => 'claude',
+      resolveAuthPolicy: () => ({ stripAuthEnv: true }),
       inheritedEnv: {}
     })
 
@@ -173,5 +183,45 @@ describe('Claude TUI resume launch', () => {
         spawnToken: 'spawn'
       })
     ).rejects.toThrow(/CLAUDE_CONFIG_DIR/)
+  })
+})
+
+// buildClaudeChildProcessEnv strips its inherited half unconditionally, so this module
+// would have signed a system-auth user out of the session the structured path had just
+// honoured. It is not wired up yet; the required policy is what stops the next caller
+// from inheriting that.
+describe('structured-to-TUI handoff auth', () => {
+  it('carries a system-auth user their own inherited credential', async () => {
+    const launch = await createClaudeTuiResumeLaunchBuilder({
+      resolveWorkspacePath: async () => '/repos/workspace-1',
+      resolveCommand: () => '/usr/local/bin/claude',
+      resolveAuthPolicy: () => ({ stripAuthEnv: false }),
+      inheritedEnv: { ANTHROPIC_API_KEY: 'sk-ant-SHELL', PATH: '/usr/bin' }
+    })({ record: record(), spawnToken: 'token-1' })
+
+    expect(launch.env.ANTHROPIC_API_KEY).toBe('sk-ant-SHELL')
+  })
+
+  it('still strips it once a managed account owns the credential', async () => {
+    const launch = await createClaudeTuiResumeLaunchBuilder({
+      resolveWorkspacePath: async () => '/repos/workspace-1',
+      resolveCommand: () => '/usr/local/bin/claude',
+      resolveAuthPolicy: () => ({ stripAuthEnv: true }),
+      inheritedEnv: { ANTHROPIC_API_KEY: 'sk-ant-SHELL', PATH: '/usr/bin' }
+    })({ record: record(), spawnToken: 'token-1' })
+
+    expect(launch.env.ANTHROPIC_API_KEY).toBeUndefined()
+  })
+
+  it('refuses a configured override of a pinned managed account, as the terminal path does', async () => {
+    await expect(
+      createClaudeTuiResumeLaunchBuilder({
+        resolveWorkspacePath: async () => '/repos/workspace-1',
+        resolveCommand: () => '/usr/local/bin/claude',
+        resolveAuthPolicy: () => ({ stripAuthEnv: true }),
+        resolveEnv: () => ({ ANTHROPIC_API_KEY: 'sk-ant-CONFIGURED' }),
+        inheritedEnv: {}
+      })({ record: record(), spawnToken: 'token-1' })
+    ).rejects.toThrow(CLAUDE_AUTH_ENV_CONFLICT_MESSAGE)
   })
 })

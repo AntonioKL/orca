@@ -160,7 +160,8 @@ function resolvedLaunch(launchArgs: string[]) {
   return createClaudeStructuredLaunchResolver({
     store: { getRecord: () => record } as unknown as AgentSessionRecordStore,
     resolveWorkspacePath: async () => '/repos/workspace-1',
-    resolveCommand: () => FAKE_CLI
+    resolveCommand: () => FAKE_CLI,
+    resolveAuthPolicy: () => ({ stripAuthEnv: true })
   })({ identity: { sessionId: record.sessionId } as never })
 }
 

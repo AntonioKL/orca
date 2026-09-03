@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawnProcess, type SpawnedProcess } from '../../shared/child-process/run-process'
+import { hasLiveClaudePtys } from '../claude-accounts/live-pty-gate'
 import type { ProcessSpec } from '../../shared/child-process/process-spec'
 import { query, type CanUseTool, type Options } from '@anthropic-ai/claude-agent-sdk'
 import {
@@ -679,4 +680,43 @@ describe('Claude stream-json connection', () => {
     await new Promise((resolve) => setTimeout(resolve, 1_100))
     await expect(connection.close()).resolves.toBe(true)
   }, 20_000)
+})
+
+// A structured Claude child owns the account's credentials while it runs, exactly as
+// a Claude PTY does. The gate is what makes runtime-auth-sync defer the managed OAuth
+// refresh instead of rotating the single-use token out from under a live session, and
+// structured sessions used to be invisible to it.
+describe('the managed-auth live gate', () => {
+  it('holds while a structured child runs and releases when it ends', async () => {
+    // The gate is a process-wide singleton and a sibling test's release lands on its
+    // child's 'close' event, which can settle after that test's close() resolved.
+    await until(() => (hasLiveClaudePtys() ? null : true), 'a drained auth gate')
+    const scenario = scriptScenario([
+      { emit: { type: 'system', subtype: 'init', session_id: SESSION_ID, uuid: 'init-1' } },
+      { wait: HOLD_OPEN }
+    ])
+    const connection = await open(launchFor(scenario))
+
+    expect(hasLiveClaudePtys()).toBe(true)
+
+    await connection.close()
+
+    await until(() => (hasLiveClaudePtys() ? null : true), 'the auth gate to drain')
+    expect(hasLiveClaudePtys()).toBe(false)
+  }, 30_000)
+
+  it('releases when the child dies on its own rather than through close()', async () => {
+    await until(() => (hasLiveClaudePtys() ? null : true), 'a drained auth gate')
+    const scenario = scriptScenario([
+      { emit: { type: 'system', subtype: 'init', session_id: SESSION_ID, uuid: 'init-1' } },
+      { wait: HOLD_OPEN }
+    ])
+    await open(launchFor(scenario))
+    expect(hasLiveClaudePtys()).toBe(true)
+
+    spawnedChildren.at(-1)?.kill('SIGKILL')
+
+    await until(() => (hasLiveClaudePtys() ? null : true), 'the auth gate to drain')
+    expect(hasLiveClaudePtys()).toBe(false)
+  }, 30_000)
 })

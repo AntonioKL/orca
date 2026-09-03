@@ -4,7 +4,17 @@ import type { AgentSessionJournalIdentity } from '../../shared/agent-session-jou
 import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-provider-handle'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
-import { applyClaudeEnvPatch } from '../claude-accounts/environment'
+import {
+  CLAUDE_AUTH_ENV_CONFLICT_MESSAGE,
+  CLAUDE_AUTH_SWITCH_IN_PROGRESS_MESSAGE,
+  applyClaudeEnvPatch,
+  hasClaudeAuthEnvConflict
+} from '../claude-accounts/environment'
+import type { ClaudeStructuredAuthPolicy } from '../claude-accounts/claude-structured-auth-policy'
+import {
+  CLAUDE_AUTH_SWITCH_SETTLE_TIMEOUT_MS,
+  whenClaudeAuthSwitchSettles
+} from '../claude-accounts/live-pty-gate'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 
@@ -118,6 +128,31 @@ export type ClaudeStructuredLaunchResolverDeps = {
     | Promise<Record<string, string> | undefined>
     | Record<string, string>
     | undefined
+  /**
+   * Required, and deliberately not defaulted. `stripAuthEnv` used to be a literal
+   * `true` here, so a missing dependency could not under-strip. Now it can, and the
+   * failure is silent — so every caller states the account's policy rather than
+   * inherit a guess. Build it with claudeStructuredAuthPolicyForSettings.
+   */
+  resolveAuthPolicy: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
+  /** How long an in-flight account switch may hold a launch before it is refused. */
+  authSwitchSettleTimeoutMs?: number
+}
+
+/**
+ * Wait a running account switch out, and refuse only if it never settles.
+ *
+ * Launch resolution is reached from `acquireClaudeSession` *after* the old child has
+ * been closed and proved, so a plain refusal here would leave the user with a dead
+ * chat and no replacement — the very harm the acquire-entry guard exists to prevent.
+ * The entry guard still refuses outright, because nothing has been torn down yet.
+ */
+export async function assertClaudeAuthSwitchSettled(
+  timeoutMs = CLAUDE_AUTH_SWITCH_SETTLE_TIMEOUT_MS
+): Promise<void> {
+  if (!(await whenClaudeAuthSwitchSettles(timeoutMs))) {
+    throw new Error(CLAUDE_AUTH_SWITCH_IN_PROGRESS_MESSAGE)
+  }
 }
 
 export function claudeSessionIdForOrcaSession(sessionId: string): string {
@@ -132,6 +167,7 @@ export function createClaudeStructuredLaunchResolver(
   deps: ClaudeStructuredLaunchResolverDeps
 ): (input: { identity: AgentSessionJournalIdentity }) => Promise<ClaudeStructuredLaunch> {
   return async ({ identity }) => {
+    await assertClaudeAuthSwitchSettled(deps.authSwitchSettleTimeoutMs)
     const record = deps.store.getRecord(identity.sessionId)
     if (!record) {
       throw new Error(`no durable agent-session record for ${identity.sessionId}`)
@@ -165,11 +201,21 @@ export function createClaudeStructuredLaunchResolver(
         : claudeSessionIdForOrcaSession(identity.sessionId)
     const durable = claudeSdkOptionsForLaunchArgs(record.launchArgs ?? [])
     const command = (deps.resolveCommand ?? resolveClaudeCommand)()
+    const auth = await deps.resolveAuthPolicy()
     const overlay = await deps.resolveEnv?.()
+    // A switch can begin while the policy and overlay resolve, exactly as it can
+    // during the terminal preflight's prepareClaudeAuth — recheck after the awaits.
+    await assertClaudeAuthSwitchSettled(deps.authSwitchSettleTimeoutMs)
+    // Under a managed account the pinned credential is the only auth this launch may
+    // use, so an explicit override is refused rather than silently beating the pin.
+    if (auth.stripAuthEnv && hasClaudeAuthEnvConflict(overlay)) {
+      throw new Error(CLAUDE_AUTH_ENV_CONFLICT_MESSAGE)
+    }
     // Why the overlay merges onto the inherited env rather than replacing it: the child
     // still needs PATH and the rest of the shell environment, and withCliRuntimeOnPath
     // derives PATH from what it is handed. Ambient Anthropic auth is stripped from the
-    // inherited half only, so an explicit agentDefaultEnv override still wins.
+    // inherited half only when a managed account owns the credential; a system-auth
+    // user's own key is their sign-in and must reach the child.
     const env = withCliRuntimeOnPath(
       command,
       {
@@ -177,7 +223,7 @@ export function createClaudeStructuredLaunchResolver(
           cloneDefinedEnv(process.env),
           {},
           {
-            stripAuthEnv: true,
+            stripAuthEnv: auth.stripAuthEnv,
             platform: process.platform
           }
         ),

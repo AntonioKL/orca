@@ -257,6 +257,7 @@ beforeEach(async () => {
         claimKeyId: 'key-1',
         resolveWorkspacePath: async (workspaceId) => `/repos/${workspaceId}`,
         resolveCodexCommand: () => '/usr/local/bin/codex',
+        resolveClaudeAuthPolicy: () => ({ stripAuthEnv: true }),
         resolveEnvironment: async () => {
           bootEnvironmentReads += 1
           return {
@@ -317,6 +318,7 @@ describe('a structured codex session over agentSession.*', () => {
       claimKeyId: 'key-1',
       resolveWorkspacePath: async (workspaceId) => `/repos/${workspaceId}`,
       resolveCodexCommand: () => '/usr/local/bin/codex',
+      resolveClaudeAuthPolicy: () => ({ stripAuthEnv: true }),
       openCodexConnection: codex.openConnection,
       readProcessStartTime: async () => 1_700_000_000_000
     })
