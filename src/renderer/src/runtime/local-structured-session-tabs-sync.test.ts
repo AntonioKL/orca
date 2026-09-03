@@ -6,7 +6,8 @@ import { buildPersistedUnifiedTabSessionData } from '../lib/workspace-session-un
 import { buildHydratedTabState } from '../store/slices/tabs-hydration'
 import {
   applyLocalStructuredSessionTabSnapshots,
-  projectLocalStructuredSessionTabs
+  projectLocalStructuredSessionTabs,
+  resetLocalStructuredSessionVersionForTests
 } from './local-structured-session-tabs-sync'
 import {
   applyWebSessionTabsSnapshot,
@@ -25,6 +26,7 @@ const PRIMARY_GROUP = 'primary-group'
 const SECONDARY_GROUP = 'secondary-group'
 
 afterEach(() => {
+  resetLocalStructuredSessionVersionForTests()
   resetWebSessionFocusIntentForTests()
   resetWebSessionTabsSnapshotFreshnessForTests()
 })
@@ -148,6 +150,49 @@ function expectExactSplit(state: {
 }
 
 describe('local structured session tab projection', () => {
+  it('accepts a newer session after merged content returns to the base epoch', () => {
+    const state = createSnapshot()
+    const base = {
+      ...({
+        worktree: WORKTREE_ID,
+        publicationEpoch: 'renderer:generation-1',
+        snapshotVersion: 4,
+        activeGroupId: null,
+        activeTabId: null,
+        activeTabType: null,
+        tabs: []
+      } satisfies RuntimeMobileSessionTabsResult)
+    }
+    const withChat = {
+      ...base,
+      snapshotVersion: 5,
+      tabs: [
+        {
+          type: 'agent-session' as const,
+          id: STRUCTURED_ID,
+          title: 'Codex Chat',
+          sessionId: 'codex-1',
+          agent: 'codex' as const,
+          isActive: true
+        }
+      ]
+    }
+    const afterClose = { ...base, snapshotVersion: 6 }
+    const next = applyLocalStructuredSessionTabSnapshots(
+      state,
+      [
+        base,
+        withChat,
+        afterClose,
+        { ...base, snapshotVersion: 7, tabs: [{ ...withChat.tabs[0], isActive: true }] }
+      ],
+      'local-structured-session'
+    )
+    expect(next.unifiedTabsByWorktree[WORKTREE_ID]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ contentType: 'agent-session' })])
+    )
+  })
+
   it('drops terminal topology while retaining structured tabs', () => {
     const snapshot = {
       worktree: 'workspace-1',

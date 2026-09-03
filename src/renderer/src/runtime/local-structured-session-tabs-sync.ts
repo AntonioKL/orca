@@ -4,15 +4,19 @@ import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-typ
 import { useAppStore } from '../store'
 import type { WorktreeRuntimeOwnerState } from '../lib/worktree-runtime-owner'
 import { getExecutionHostIdForWorktree } from '../lib/worktree-runtime-owner'
-import {
-  applyWebSessionTabsSnapshot,
-  applyWebSessionTabsStorePatch,
-  decideWebSessionTabsSnapshot
-} from './web-session-tabs-sync'
+import { applyWebSessionTabsSnapshot, applyWebSessionTabsStorePatch } from './web-session-tabs-sync'
 import type { WebSessionTabsSyncState } from './web-session-tabs-sync'
 
 export const LOCAL_STRUCTURED_SESSION_OWNER = 'local-structured-session'
 let localStructuredSessionTabsRestorePromise: Promise<void> | null = null
+const localStructuredSessionVersionByWorktree = new Map<
+  string,
+  { publicationEpoch: string; snapshotVersion: number }
+>()
+
+export function resetLocalStructuredSessionVersionForTests(): void {
+  localStructuredSessionVersionByWorktree.clear()
+}
 
 type SessionTabsEvent =
   | (RuntimeMobileSessionTabsResult & { type: 'snapshot' | 'updated' })
@@ -79,7 +83,9 @@ export function applyLocalStructuredSessionTabSnapshots<
     if (getExecutionHostIdForWorktree(next, snapshot.worktree) !== 'local') {
       continue
     }
-    if (!decideWebSessionTabsSnapshot(snapshot, owner).apply) {
+    const prior = localStructuredSessionVersionByWorktree.get(snapshot.worktree)
+    const isNewerPublisher = prior?.publicationEpoch !== snapshot.publicationEpoch
+    if (prior && !isNewerPublisher && snapshot.snapshotVersion <= prior.snapshotVersion) {
       continue
     }
     const patch = applyWebSessionTabsSnapshot(
@@ -94,6 +100,10 @@ export function applyLocalStructuredSessionTabSnapshots<
       }
     )
     next = patch === next ? next : ({ ...next, ...patch } as State)
+    localStructuredSessionVersionByWorktree.set(snapshot.worktree, {
+      publicationEpoch: snapshot.publicationEpoch,
+      snapshotVersion: snapshot.snapshotVersion
+    })
   }
   return next
 }
