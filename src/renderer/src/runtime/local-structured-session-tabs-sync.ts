@@ -176,7 +176,7 @@ export function refreshLocalStructuredSessionTabs(): Promise<RuntimeMobileSessio
     })
 }
 
-async function startLocalStructuredSessionTabsSync(args: {
+export async function startLocalStructuredSessionTabsSync(args: {
   isDisposed: () => boolean
   setUnsubscribe: (unsubscribe: () => void) => void
 }): Promise<void> {
@@ -225,7 +225,18 @@ async function startLocalStructuredSessionTabsSync(args: {
     handle = await window.api.runtime.subscribe(
       { method: 'session.tabs.subscribeAll', params: {} },
       (response) => {
-        if (args.isDisposed() || !response.ok) {
+        if (args.isDisposed() || generation !== subscriptionGeneration) {
+          return
+        }
+        if (!response.ok) {
+          // A streaming RPC can terminate with an error response before its
+          // handle resolves; fence that generation and retry the subscription.
+          subscriptionGeneration += 1
+          handle?.unsubscribe()
+          if (activeHandle === handle) {
+            activeHandle = null
+          }
+          scheduleSubscribeRetry()
           return
         }
         const event = response.result as SessionTabsEvent
@@ -237,6 +248,9 @@ async function startLocalStructuredSessionTabsSync(args: {
           // Reattach with one refresh so a runtime-restart boundary cannot strand stale tabs.
           subscriptionGeneration += 1
           handle?.unsubscribe()
+          if (activeHandle === handle) {
+            activeHandle = null
+          }
           if (reconnectTimer !== null) {
             clearTimeout(reconnectTimer)
           }

@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest'
+// @vitest-environment happy-dom
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
 import type { Tab } from '../../../shared/tab-types'
 import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
@@ -8,7 +11,8 @@ import { buildHydratedTabState } from '../store/slices/tabs-hydration'
 import {
   applyLocalStructuredSessionTabSnapshots,
   projectLocalStructuredSessionTabs,
-  resetLocalStructuredSessionVersionForTests
+  resetLocalStructuredSessionVersionForTests,
+  startLocalStructuredSessionTabsSync
 } from './local-structured-session-tabs-sync'
 import {
   applyWebSessionTabsSnapshot,
@@ -30,6 +34,11 @@ afterEach(() => {
   resetLocalStructuredSessionVersionForTests()
   resetWebSessionFocusIntentForTests()
   resetWebSessionTabsSnapshotFreshnessForTests()
+  vi.useRealTimers()
+})
+
+beforeEach(() => {
+  vi.restoreAllMocks()
 })
 
 function createSnapshot(): WebSessionTabsSyncState {
@@ -151,6 +160,63 @@ function expectExactSplit(state: {
 }
 
 describe('local structured session tab projection', () => {
+  it('reconnects after a streaming subscription reports an error', async () => {
+    vi.useFakeTimers()
+    const priorApi = window.api
+    const callbacks: ((response: {
+      ok: false
+      error: { code: string; message: string }
+    }) => void)[] = []
+    const unsubscribes: ReturnType<typeof vi.fn>[] = []
+    const subscribe = vi.fn(async (_args: unknown, callback: (response: unknown) => void) => {
+      callbacks.push(
+        callback as (response: { ok: false; error: { code: string; message: string } }) => void
+      )
+      const unsubscribe = vi.fn()
+      unsubscribes.push(unsubscribe)
+      return { unsubscribe, sendBinary: vi.fn() }
+    })
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: {
+        runtime: {
+          getStatus: vi.fn().mockResolvedValue({
+            capabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY]
+          }),
+          call: vi.fn().mockResolvedValue({
+            ok: true,
+            result: { snapshots: [] }
+          }),
+          subscribe
+        }
+      }
+    })
+    try {
+      await startLocalStructuredSessionTabsSync({
+        isDisposed: () => false,
+        setUnsubscribe: () => undefined
+      })
+      expect(subscribe).toHaveBeenCalledOnce()
+
+      callbacks[0]?.({ ok: false, error: { code: 'runtime_unavailable', message: 'offline' } })
+      await vi.advanceTimersByTimeAsync(249)
+      expect(subscribe).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(1)
+      await Promise.resolve()
+
+      expect(subscribe).toHaveBeenCalledTimes(2)
+      expect(unsubscribes[0]).toHaveBeenCalledOnce()
+      expect(unsubscribes[1]).not.toHaveBeenCalled()
+
+      // A late error from the fenced generation must not start another retry.
+      callbacks[0]?.({ ok: false, error: { code: 'runtime_unavailable', message: 'late' } })
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(subscribe).toHaveBeenCalledTimes(2)
+    } finally {
+      Object.defineProperty(window, 'api', { configurable: true, value: priorApi })
+    }
+  })
+
   it('accepts a newer session after merged content returns to the base epoch', () => {
     const state = createSnapshot()
     const base = {
