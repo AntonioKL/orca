@@ -676,6 +676,49 @@ describe('ClaudeStructuredSessionAdapter acquisition cleanup', () => {
     )
     expect(connection.close).toHaveBeenCalledTimes(2)
   })
+
+  it('keeps shutdown pending until a retained unexpected-exit proof settles', async () => {
+    const claude = fakeClaude()
+    const adapter = await acquired(claude)
+    const connection = claude.connections[0]
+    const proof = Promise.withResolvers<boolean>()
+    connection.close = vi
+      .fn<() => Promise<boolean>>()
+      .mockImplementationOnce(() => proof.promise)
+      .mockResolvedValueOnce(true) as unknown as FakeConnection['close']
+
+    connection.handlers.onExit?.(new Error('crashed'))
+    await tick()
+    let settled = false
+    const closing = adapter.closeAll().then(() => {
+      settled = true
+    })
+    await tick()
+    expect(settled).toBe(false)
+
+    proof.resolve(false)
+    await expect(closing).resolves.toBeUndefined()
+    expect(connection.close).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not claim shutdown success for a retained false exit proof', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = await acquired(claude, {}, events)
+    const connection = claude.connections[0]
+    connection.close = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValue(false) as unknown as FakeConnection['close']
+
+    connection.handlers.onExit?.(new Error('crashed'))
+    await tick()
+
+    await expect(adapter.closeAll()).rejects.toThrow(
+      'claude structured session shutdown could not prove every child stopped'
+    )
+    expect(events.filter((event) => event.type === 'ended')).toEqual([])
+    expect(connection.close).toHaveBeenCalledTimes(4)
+  })
 })
 
 describe('ClaudeStructuredSessionAdapter prompts', () => {

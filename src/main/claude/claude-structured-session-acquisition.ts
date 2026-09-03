@@ -1,6 +1,5 @@
 import {
   AgentSessionAcquisitionExitUnprovenError,
-  AgentSessionAcquisitionRootExitObservedError,
   AgentSessionPreSpawnError
 } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type {
@@ -8,10 +7,7 @@ import type {
   StructuredAgentSessionAcquireInput
 } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
-import {
-  openClaudeStreamJsonConnection,
-  type ClaudeStreamJsonConnection
-} from './claude-stream-json-connection'
+import { openClaudeStreamJsonConnection } from './claude-stream-json-connection'
 import { buildClaudePermissionCallbacks } from './claude-structured-inbound-control'
 import { resolveClaudeReplayWaiter } from './claude-structured-dispatch'
 import {
@@ -45,7 +41,8 @@ import {
 } from './claude-structured-session-state'
 import {
   closeClaudePublishedSessionForDeps,
-  closeClaudeSession
+  closeClaudeSession,
+  claudeAcquisitionCleanupError
 } from './claude-structured-session-close'
 import { readClaudeTranscriptEntryUuid } from './claude-tui-exit'
 
@@ -59,27 +56,6 @@ type AcquireCallbacks = {
     event: ClaudeStructuredSessionEvent
   ) => void
   handleExit: (sessionId: string, attempt: ClaudeAcquisitionAttempt, error: Error) => void
-}
-
-/**
- * Which failure a Claude child that would not close cleanly actually is.
- *
- * The lease is keyed on the root's pid and start time, so a first-hand root exit
- * releases it and the CLI's own diagnostic reaches the user. A descendant seen
- * still alive, or a root Orca never saw leave, stays unproven and keeps the
- * reservation — releasing there is the orphaning this proof exists to prevent.
- */
-function claudeAcquisitionCleanupError(
-  connection: ClaudeStreamJsonConnection | null | undefined,
-  cause: unknown
-): Error {
-  const verdict = connection?.exitVerdict
-  if (verdict?.root === 'processless') {
-    return new AgentSessionPreSpawnError(cause)
-  }
-  return verdict?.root === 'exited' && verdict.tree === 'unverifiable'
-    ? new AgentSessionAcquisitionRootExitObservedError(cause)
-    : new AgentSessionAcquisitionExitUnprovenError(cause)
 }
 
 export async function acquireClaudeSession({
@@ -156,8 +132,19 @@ export async function acquireClaudeSession({
         new Error(`claude session ${sessionId} could not be stopped`)
       )
     }
-    // Any earlier session is closed or already gone: its exit says nothing about this start.
-    exits.delete(sessionId)
+    // A first-hand exit that has not yet proved its full tree still owns a cleanup
+    // obligation; never let a new acquisition hide that evidence by omission.
+    const retainedExit = exits.get(sessionId)
+    if (retainedExit) {
+      const firstProof = retainedExit.closePromise ? await retainedExit.closePromise : false
+      const proven = firstProof || (await retainedExit.connection.close().catch(() => false))
+      if (!proven) {
+        throw claudeAcquisitionCleanupError(retainedExit.connection, retainedExit.error)
+      }
+      // The old child is superseded by this acquisition. It has a true proof,
+      // so discard its lifecycle evidence without publishing a stale recovery.
+      exits.delete(sessionId)
+    }
     acquisitions.assertCurrent(sessionId, attempt)
     // Closing persists the prior connection's final leaf, so launch validates that durable head.
     const launchIdentity = priorSession
@@ -309,6 +296,7 @@ export async function releaseClaudeAcquisition(input: {
   sessions: Map<string, ClaudeSession>
   acquisitions: ClaudeAcquisitionRegistry
   exits: Map<string, ClaudeSessionExit>
+  onExitProven?: (sessionId: string, exit: ClaudeSessionExit) => Promise<void>
   persistHandle?: ClaudeStructuredSessionAdapterDeps['persistHandle']
   onEvent?: ClaudeStructuredSessionAdapterDeps['onEvent']
 }): Promise<boolean> {
@@ -319,7 +307,9 @@ export async function releaseClaudeAcquisition(input: {
   const firstProof = exit.closePromise ? await exit.closePromise : false
   // A failed exit-path proof is retained as evidence, not as a terminal result;
   // a release retry must drive a fresh tree verification on the same connection.
-  if (firstProof || (await exit.connection.close())) {
+  const retriedProof = firstProof || (await exit.connection.close())
+  if (retriedProof) {
+    await input.onExitProven?.(input.sessionId, exit)
     // Keep the first-hand exit evidence indexed until the tree proof succeeds;
     // a failed close must be retryable and cannot look like an absent session.
     input.exits.delete(input.sessionId)

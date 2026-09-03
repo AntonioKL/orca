@@ -81,24 +81,48 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     // An exit callback is root evidence only; the retained tree proof must run
     // before the host releases and reacquires this exact child.
     const closePromise = session.connection.close().catch(() => false)
-    this.exits.set(sessionId, { connection: session.connection, error, closePromise })
-    // Persist the transcript-derived cursor before publishing the lifecycle
-    // event that lets the host release and reacquire this exact child.
+    const exit: ClaudeSessionExit = {
+      connection: session.connection,
+      session,
+      error,
+      closePromise
+    }
+    this.exits.set(sessionId, exit)
     void closePromise
-      .then(() => this.persistSessionHandle(sessionId, session))
+      .then((proven) => (proven ? this.settleUnexpectedExit(sessionId, exit) : undefined))
       .catch(() => undefined)
-      .then(() => {
-        const ended: ClaudeStructuredSessionEvent = {
-          type: 'ended',
-          sessionId,
-          reason: error.message,
-          cause: 'unexpected-exit',
-          fence: session.fence,
-          acquisitionGeneration: session.acquisitionGeneration
-        }
-        this.emit(session, session.events, ended)
-        settleClaudeExitedSession(session)
-      })
+  }
+
+  /** Lifecycle recovery is published only after the child tree proof is true. */
+  private settleUnexpectedExit(sessionId: string, exit: ClaudeSessionExit): Promise<void> {
+    exit.settlementPromise ??= (async () => {
+      if (this.exits.get(sessionId) !== exit) {
+        settleClaudeExitedSession(exit.session)
+        return
+      }
+      // Persist the transcript-derived cursor before publishing the lifecycle
+      // event that lets the host release and reacquire this exact child.
+      await this.persistSessionHandle(sessionId, exit.session).catch(() => undefined)
+      if (this.exits.get(sessionId) !== exit) {
+        settleClaudeExitedSession(exit.session)
+        return
+      }
+      this.exits.delete(sessionId)
+      const ended: ClaudeStructuredSessionEvent = {
+        type: 'ended',
+        sessionId,
+        reason: exit.error.message,
+        cause: 'unexpected-exit',
+        fence: exit.session.fence,
+        acquisitionGeneration: exit.session.acquisitionGeneration
+      }
+      try {
+        this.emit(exit.session, exit.session.events, ended)
+      } finally {
+        settleClaudeExitedSession(exit.session)
+      }
+    })()
+    return exit.settlementPromise
   }
 
   private async persistSessionHandle(sessionId: string, session: ClaudeSession): Promise<void> {
@@ -185,12 +209,16 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       sessions: this.sessions,
       acquisitions: this.acquisitions,
       exits: this.exits,
+      onExitProven: (sessionId, exit) => this.settleUnexpectedExit(sessionId, exit),
       ...(this.deps.persistHandle ? { persistHandle: this.deps.persistHandle } : {}),
       ...(this.deps.onEvent ? { onEvent: this.deps.onEvent } : {})
     })
 
-  closeSession = (sessionId: string): Promise<boolean> =>
-    closeClaudeSession({
+  closeSession = (sessionId: string): Promise<boolean> => {
+    if (this.exits.has(sessionId)) {
+      return this.releaseAcquisition({ sessionId })
+    }
+    return closeClaudeSession({
       sessionId,
       sessions: this.sessions,
       acquisitions: this.acquisitions,
@@ -198,12 +226,15 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       ...(this.deps.readTranscriptLeaf ? { readTranscriptLeaf: this.deps.readTranscriptLeaf } : {}),
       ...(this.deps.onEvent ? { onEvent: this.deps.onEvent } : {})
     })
+  }
 
   closeAll = (): Promise<void> =>
     closeAllClaudeSessions({
       sessions: this.sessions,
       acquisitions: this.acquisitions,
-      closeSession: this.closeSession
+      exits: this.exits,
+      closeSession: this.closeSession,
+      closeExit: (sessionId) => this.releaseAcquisition({ sessionId })
     })
 
   private session(sessionId: string): ClaudeSession {

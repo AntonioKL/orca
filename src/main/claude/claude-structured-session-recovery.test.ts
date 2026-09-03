@@ -5,6 +5,7 @@ import {
   adapterFor,
   fakeClaude,
   identityFor,
+  invokeCanUseTool,
   PROVIDER_SESSION_ID,
   tick
 } from './claude-structured-session-test-support'
@@ -290,5 +291,58 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
 
     expect(close).toHaveBeenCalledOnce()
     expect(events.at(-1)).toMatchObject({ type: 'ended', cause: 'unexpected-exit' })
+  })
+
+  it('does not publish recovery while an unexpected-exit close proof is false', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const persistedHandles: unknown[] = []
+    const adapter = adapterFor(claude, {}, events, persistedHandles)
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+    claude.connections[0].close = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true) as unknown as (typeof claude.connections)[0]['close']
+
+    claude.connections[0].handlers.onExit?.(new Error('crashed'))
+    await tick()
+
+    expect(events.filter((event) => event.type === 'ended')).toEqual([])
+    expect(persistedHandles).toEqual([])
+  })
+
+  it('retains pending prompts while an unexpected-exit proof is unproven', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = adapterFor(claude, {}, events)
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+    const answered = invokeCanUseTool(claude.connections[0], 'Bash', 'permission-1', 'tool-1')
+    claude.connections[0].close = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValue(false) as unknown as (typeof claude.connections)[0]['close']
+
+    claude.connections[0].handlers.onExit?.(new Error('crashed'))
+    await tick()
+
+    expect(answered.settled()).toBe(false)
+    expect(events.filter((event) => event.type === 'ended')).toEqual([])
+  })
+
+  it('publishes unexpected recovery exactly once after a retained proof retries successfully', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = adapterFor(claude, {}, events)
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+    claude.connections[0].close = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true) as unknown as (typeof claude.connections)[0]['close']
+
+    claude.connections[0].handlers.onExit?.(new Error('crashed'))
+    await tick()
+    await expect(adapter.releaseAcquisition({ sessionId: 'session-1' })).resolves.toBe(true)
+    await tick()
+
+    expect(events.filter((event) => event.type === 'ended')).toHaveLength(1)
   })
 })

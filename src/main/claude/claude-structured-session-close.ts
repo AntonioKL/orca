@@ -1,11 +1,31 @@
 import type {
   ClaudeAcquisitionRegistry,
   ClaudeSession,
+  ClaudeSessionExit,
   ClaudeStructuredSessionEvent
 } from './claude-structured-session-state'
 import { cancelClaudeAcquisitionAttempt } from './claude-structured-session-state'
+import {
+  AgentSessionAcquisitionExitUnprovenError,
+  AgentSessionAcquisitionRootExitObservedError,
+  AgentSessionPreSpawnError
+} from '../native-chat/agent-session-wire/structured-agent-session-adapter'
+import type { ClaudeStreamJsonConnection } from './claude-stream-json-connection'
 import { closeProcessRegistry } from '../../shared/child-process/close-process-registry'
 import { readClaudeTranscriptLeafWithReproof } from './claude-transcript-branch-proof'
+
+export function claudeAcquisitionCleanupError(
+  connection: ClaudeStreamJsonConnection | null | undefined,
+  cause: unknown
+): Error {
+  const verdict = connection?.exitVerdict
+  if (verdict?.root === 'processless') {
+    return new AgentSessionPreSpawnError(cause)
+  }
+  return verdict?.root === 'exited' && verdict.tree === 'unverifiable'
+    ? new AgentSessionAcquisitionRootExitObservedError(cause)
+    : new AgentSessionAcquisitionExitUnprovenError(cause)
+}
 
 export function settleClaudeDispatchWaiters(session: ClaudeSession): void {
   for (const waiter of session.dispatchWaiters.splice(0)) {
@@ -152,14 +172,23 @@ export async function closeClaudeSession(input: {
 export async function closeAllClaudeSessions(input: {
   sessions: Map<string, ClaudeSession>
   acquisitions: ClaudeAcquisitionRegistry
+  exits: Map<string, ClaudeSessionExit>
   closeSession: (sessionId: string) => Promise<boolean>
+  closeExit: (sessionId: string) => Promise<boolean>
 }): Promise<void> {
   input.acquisitions.close()
   await closeProcessRegistry({
     attempts: 3,
-    hasEntries: () => input.sessions.size > 0 || input.acquisitions.size > 0,
-    entryIds: () => new Set([...input.sessions.keys(), ...input.acquisitions.sessionIds()]),
-    closeEntry: input.closeSession,
+    hasEntries: () =>
+      input.sessions.size > 0 || input.acquisitions.size > 0 || input.exits.size > 0,
+    entryIds: () =>
+      new Set([
+        ...input.sessions.keys(),
+        ...input.acquisitions.sessionIds(),
+        ...input.exits.keys()
+      ]),
+    closeEntry: async (sessionId) =>
+      input.exits.has(sessionId) ? input.closeExit(sessionId) : input.closeSession(sessionId),
     failureMessage: 'claude structured session shutdown could not prove every child stopped'
   })
 }

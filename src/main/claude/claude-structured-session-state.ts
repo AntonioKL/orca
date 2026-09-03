@@ -135,9 +135,13 @@ export function mintClaudeAcquisitionGeneration(deps: ClaudeStructuredSessionAda
  */
 export type ClaudeSessionExit = {
   connection: ClaudeStreamJsonConnection
+  /** Full session identity retained until its child tree is proven gone. */
+  session: ClaudeSession
   error: Error
   /** The exit path's first proof attempt; retries must observe this result. */
   closePromise?: Promise<boolean>
+  /** Shared lifecycle settlement for concurrent proof retries. */
+  settlementPromise?: Promise<void>
 }
 
 export type ClaudeAcquisitionAttempt = {
