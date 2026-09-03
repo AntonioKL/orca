@@ -224,9 +224,10 @@ describe('useMobileWebPackageSession', () => {
 
     expect(packageSession?.session).toBeNull()
     expect(packageSession?.packageLoading).toBe(false)
-    expect(packageSession?.packageWarning).toBe(
-      'Update Orca on this desktop to use its workspace interface.'
-    )
+    expect(packageSession?.packageWarning).toEqual({
+      message: 'Update Orca on Desktop to continue.',
+      code: 'host_update_required'
+    })
     expect(native.closeSession).toHaveBeenCalledWith(SESSION_A.sessionId)
     expect(downloadPackage).not.toHaveBeenCalled()
     expect(sendRequest).toHaveBeenCalledTimes(1)
@@ -242,9 +243,10 @@ describe('useMobileWebPackageSession', () => {
     await mount('connected')
 
     expect(packageSession?.session).toBeNull()
-    expect(packageSession?.packageWarning).toBe(
-      'Update Orca on this desktop to use its workspace interface.'
-    )
+    expect(packageSession?.packageWarning).toEqual({
+      message: 'Update Orca on Desktop to continue.',
+      code: 'host_update_required'
+    })
     expect(native.openSession).not.toHaveBeenCalled()
     expect(downloadPackage).not.toHaveBeenCalled()
   })
@@ -468,14 +470,8 @@ describe('useMobileWebPackageSession', () => {
   })
 
   it.each([
-    [
-      'incompatible_bridge',
-      'Using the last healthy interface because the refreshed interface is not compatible with this Orca Mobile version.'
-    ],
-    [
-      'test_failure',
-      'Using the last healthy interface because the desktop package could not be refreshed.'
-    ]
+    ['incompatible_bridge', 'Update Orca Mobile to get the latest from Desktop.'],
+    ['test_failure', 'Couldn’t update from Desktop. Showing the last version that worked.']
   ])('retains a cached session after %s package refresh failure', async (code, warning) => {
     native.openSession.mockResolvedValue(SESSION_A)
     downloadFailure.code = code
@@ -484,15 +480,12 @@ describe('useMobileWebPackageSession', () => {
     await mount('connected')
 
     expect(packageSession?.session).toEqual(SESSION_A)
-    expect(packageSession?.packageWarning).toBe(warning)
+    expect(packageSession?.packageWarning).toEqual({ message: warning, code })
   })
 
   it.each([
-    [
-      'incompatible_bridge',
-      'This desktop’s workspace interface is not compatible with this Orca Mobile version.'
-    ],
-    ['test_failure', 'The desktop did not provide a valid workspace interface.']
+    ['incompatible_bridge', 'Update Orca Mobile to open Desktop.'],
+    ['test_failure', 'Couldn’t load Desktop.']
   ])('reports %s package refresh failure without a cached session', async (code, warning) => {
     native.openSession.mockRejectedValue(new Error('cache unavailable'))
     downloadFailure.code = code
@@ -502,7 +495,7 @@ describe('useMobileWebPackageSession', () => {
 
     expect(packageSession?.session).toBeNull()
     expect(packageSession?.packageLoading).toBe(false)
-    expect(packageSession?.packageWarning).toBe(warning)
+    expect(packageSession?.packageWarning).toEqual({ message: warning, code })
   })
 
   it('remounts after isolated process loss and rolls back a crash loop', async () => {
@@ -515,7 +508,9 @@ describe('useMobileWebPackageSession', () => {
       await packageSession?.markHealthy(SESSION_B.sessionId)
     })
     expect(packageSession?.viewEpoch).toBe(1)
-    expect(packageSession?.packageWarning).toBe('The workspace view stopped and was restarted.')
+    expect(packageSession?.packageWarning).toEqual({
+      message: 'Orca stopped unexpectedly and restarted.'
+    })
     expect(native.recoverSession).not.toHaveBeenCalled()
 
     await act(async () => {
@@ -544,9 +539,9 @@ describe('useMobileWebPackageSession', () => {
 
     expect(native.recoverSession).toHaveBeenCalledWith(SESSION_B.sessionId)
     expect(packageSession?.session).toEqual(SESSION_A)
-    expect(packageSession?.packageWarning).toBe(
-      'The previous verified workspace interface was restored.'
-    )
+    expect(packageSession?.packageWarning).toEqual({
+      message: 'Went back to the last version that worked.'
+    })
   })
 
   it('clears only the selected host cache and downloads it again', async () => {

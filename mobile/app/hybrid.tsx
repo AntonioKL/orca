@@ -124,7 +124,7 @@ export default function HybridScreen() {
       if (sessionId && view) {
         void view.activateSessionView(sessionId).catch(() => {
           if (activeSessionIdRef.current === sessionId) {
-            showWarning('Hosted session could not be restored.')
+            showWarning('Couldn’t reopen Orca. Try again.', 'session_reopen_failed')
           }
         })
       }
@@ -320,7 +320,7 @@ export default function HybridScreen() {
             routeHandoff: nativeRouteHandoffRef.current,
             setHostedViewActive,
             navigateToTerminalSettings: () => router.push('/terminal-settings'),
-            onNavigationFailure: () => showWarning('Terminal settings could not be opened.')
+            onNavigationFailure: () => showWarning('Couldn’t open Terminal settings.')
           })
         }
       }
@@ -377,14 +377,14 @@ export default function HybridScreen() {
       onUsePrevious={recoverPrevious}
       onClearCache={clearCache}
       onRecoveryFailure={() =>
-        showWarning('The workspace interface recovery action could not be completed.')
+        showWarning('That didn’t work. Try again.', 'recovery_action_failed')
       }
       onBridgeMessage={(message) => void handleBridgeMessage(message)}
       onPageLoaded={() => {
         hardwareBackHandoff.resetPage()
         void postInit()
       }}
-      onNavigationBlocked={() => showWarning('Navigation outside Orca was blocked.')}
+      onNavigationBlocked={() => showWarning('That link can’t be opened here.')}
       onProcessTerminated={(sessionId) => {
         hardwareBackHandoff.resetPage()
         healthDeadlineRef.current.clear()

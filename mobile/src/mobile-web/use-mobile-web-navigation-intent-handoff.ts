@@ -32,7 +32,7 @@ export function useMobileWebNavigationIntentHandoff(options: {
   postMessage: (message: MobileWebBridgeShellMessage) => Promise<void>
   rememberRoute: (route: MobileWebResumeRoute) => void
   onNavigationResolved?: (intent: MobileWebNavigationIntent, route: MobileWebResumeRoute) => void
-  showWarning: (warning: string) => void
+  showWarning: (message: string, code?: string) => void
 }): void {
   const [intent, setIntent] = useState<MobileWebNavigationIntent | null>(null)
   const activeIntent =
@@ -107,7 +107,8 @@ export function useMobileWebNavigationIntentHandoff(options: {
         if (!cancelled && MOBILE_WEB_NAVIGATION_INTENTS.consume(activeIntent.sequence)) {
           setIntent(null)
           options.showWarning(
-            `${navigationIntentFailureSubject(activeIntent.source)} could not be verified (${mobileWebBridgeErrorCode(error)}).`
+            `${navigationIntentFailureSubject(activeIntent.source)} couldn’t be opened.`,
+            mobileWebBridgeErrorCode(error)
           )
         }
       }

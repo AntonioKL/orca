@@ -13,14 +13,13 @@ export function MobileWebPackageProgress({
       : 0
   const label =
     progress.phase === 'downloading'
-      ? `Downloading workspace interface… ${percent}%`
-      : progress.phase === 'verifying'
-        ? 'Verifying workspace interface…'
-        : 'Starting workspace interface…'
+      ? `Downloading… ${formatBytes(progress.completedBytes)} of ${formatBytes(progress.totalBytes)}`
+      : 'Almost ready…'
 
   return (
     <View
       style={styles.packageProgress}
+      testID="mobile-web-package-progress"
       accessibilityRole="progressbar"
       accessibilityLabel={label}
       accessibilityValue={{ min: 0, max: 100, now: percent }}
@@ -31,9 +30,6 @@ export function MobileWebPackageProgress({
       <View style={styles.packageProgressTrack}>
         <View style={[styles.packageProgressFill, { width: `${percent}%` }]} />
       </View>
-      <Text style={styles.packageProgressBytes}>
-        {formatBytes(progress.completedBytes)} of {formatBytes(progress.totalBytes)}
-      </Text>
     </View>
   )
 }

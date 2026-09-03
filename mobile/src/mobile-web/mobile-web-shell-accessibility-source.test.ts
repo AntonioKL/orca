@@ -9,6 +9,10 @@ const recoveryActionsSource = readFileSync(
   new URL('./MobileWebRecoveryActions.tsx', import.meta.url),
   'utf8'
 )
+const progressSource = readFileSync(
+  new URL('./MobileWebPackageProgress.tsx', import.meta.url),
+  'utf8'
+)
 
 describe('mobile web shell accessibility', () => {
   it('keeps shell navigation controls named and exposed as buttons', () => {
@@ -20,24 +24,48 @@ describe('mobile web shell accessibility', () => {
     )
   })
 
-  it('announces package loading and warnings', () => {
-    expect(shellSource).toMatch(
-      /accessibilityLiveRegion="polite"[\s\S]*?Preparing verified interface…/
-    )
-    expect(shellSource.match(/accessibilityRole="alert"/g)).toHaveLength(2)
+  it('announces status and warnings', () => {
+    expect(shellSource).toMatch(/accessibilityLiveRegion="polite"[\s\S]*?\{statusLine\}/)
+    expect(shellSource).toContain("accessibilityRole={packageWarning ? 'alert' : undefined}")
+    expect(shellSource).toContain('accessibilityRole="alert"')
+    expect(progressSource).toContain('accessibilityRole="progressbar"')
+    expect(progressSource).toContain('accessibilityLiveRegion="polite"')
   })
 
-  it('names recovery controls', () => {
+  it('names recovery controls and anchors them on stable test ids', () => {
     expect(recoveryActionsSource).toContain('accessibilityRole="toolbar"')
-    expect(recoveryActionsSource).toContain(
-      'accessibilityLabel={`${action.label} workspace interface`}'
-    )
-    expect(recoveryActionsSource).toContain("label: 'Retry'")
-    expect(recoveryActionsSource).toContain("label: 'Use previous'")
-    expect(recoveryActionsSource).toContain("label: 'Clear cache'")
-    expect(recoveryActionsSource).toContain("label: 'Switch hosts'")
-    expect(recoveryActionsSource).toContain(
-      'accessibilityState={{ disabled: Boolean(busyAction) }}'
-    )
+    expect(recoveryActionsSource).toContain('accessibilityLabel={action.label}')
+    expect(recoveryActionsSource).toContain('accessibilityState={{ disabled: busy }}')
+    for (const [testID, label] of [
+      ['mobile-web-recovery-retry', 'Retry'],
+      ['mobile-web-recovery-previous', 'Use last version'],
+      ['mobile-web-recovery-reset', 'Reset'],
+      ['mobile-web-recovery-hosts', 'Switch hosts']
+    ]) {
+      expect(recoveryActionsSource).toContain(testID)
+      expect(recoveryActionsSource).toContain(label)
+    }
+  })
+
+  it('keeps implementation vocabulary out of the shell copy', () => {
+    for (const source of [shellSource, recoveryActionsSource, progressSource]) {
+      for (const banned of [
+        'verified',
+        'cache',
+        'hosted session',
+        'workspace interface',
+        'workspace UI',
+        'desktop-served'
+      ]) {
+        expect(renderedCopy(source).toLowerCase()).not.toContain(banned.toLowerCase())
+      }
+    }
   })
 })
+
+/** Quoted literals a user can read, excluding prop names and identifiers. */
+function renderedCopy(source: string): string {
+  return [...source.matchAll(/'([^'\n]*)'/g), ...source.matchAll(/`([^`\n]*)`/g)]
+    .map((match) => match[1])
+    .join('\n')
+}

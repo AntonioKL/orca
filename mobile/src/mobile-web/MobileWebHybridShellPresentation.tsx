@@ -17,6 +17,7 @@ import {
   mobileWebShellShowsNativeChrome
 } from './mobile-web-shell-presentation-state'
 import type { MobileWebPackageDownloadProgress } from './mobile-web-package-downloader'
+import { mobileWebShellHostName, type MobileWebShellNotice } from './mobile-web-shell-notice'
 
 type MobileWebHybridShellPresentationProps = {
   viewRef: RefObject<MobileWebShellViewRef | null>
@@ -25,7 +26,7 @@ type MobileWebHybridShellPresentationProps = {
   viewEpoch: number
   packageLoading: boolean
   packageProgress: MobileWebPackageDownloadProgress | undefined
-  packageWarning: string | undefined
+  packageWarning: MobileWebShellNotice | undefined
   hostedViewActive: boolean
   onBack: () => void
   onShowHosts: () => void
@@ -66,6 +67,14 @@ export function MobileWebHybridShellPresentation({
     packageLoading
   })
   const showNativeChrome = mobileWebShellShowsNativeChrome(presentationState)
+  // The notice already reads as a full sentence, so it replaces the generic status line.
+  const statusLine =
+    packageWarning?.message ??
+    (presentationState === 'package-loading'
+      ? selectedHost
+        ? `Connecting to ${mobileWebShellHostName(selectedHost.name)}…`
+        : 'Getting things ready…'
+      : `Couldn’t connect to ${mobileWebShellHostName(selectedHost?.name)}.`)
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -82,9 +91,8 @@ export function MobileWebHybridShellPresentation({
           </Pressable>
           <View style={styles.headerCopy}>
             <Text numberOfLines={1} style={styles.heading}>
-              {selectedHost?.name ?? 'Hybrid workspace UI'}
+              {selectedHost?.name ?? 'Orca'}
             </Text>
-            <Text style={styles.headerMeta}>Verified desktop-served interface</Text>
           </View>
           {selectedHost ? (
             <Pressable
@@ -105,19 +113,23 @@ export function MobileWebHybridShellPresentation({
             <MobileWebPackageProgress progress={packageProgress} />
           ) : null}
           {packageWarning ? (
-            <>
-              <Text accessibilityRole="alert" style={styles.warning}>
-                {packageWarning}
+            <View style={styles.noticeBanner}>
+              <Text accessibilityRole="alert" style={styles.noticeBannerText}>
+                {packageWarning.message}
               </Text>
+              {packageWarning.code ? (
+                <Text style={styles.noticeCode}>Error: {packageWarning.code}</Text>
+              ) : null}
               <MobileWebRecoveryActions
                 canUsePrevious
+                align="start"
                 onClearCache={onClearCache}
                 onFailure={onRecoveryFailure}
                 onRetry={onRetryRecovery}
                 onShowHosts={onShowHosts}
                 onUsePrevious={onUsePrevious}
               />
-            </>
+            </View>
           ) : null}
           <MobileWebShellView
             key={`${session.sessionId}:${viewEpoch}`}
@@ -141,28 +153,29 @@ export function MobileWebHybridShellPresentation({
           ) : (
             <MonitorSmartphone size={26} color={colors.textMuted} />
           )}
-          <Text accessibilityLiveRegion="polite" style={styles.loadingTitle}>
-            {presentationState === 'package-loading'
-              ? 'Preparing verified interface…'
-              : 'Workspace interface unavailable'}
-          </Text>
           {packageLoading && packageProgress ? (
             <MobileWebPackageProgress progress={packageProgress} />
+          ) : (
+            <Text
+              accessibilityLiveRegion="polite"
+              accessibilityRole={packageWarning ? 'alert' : undefined}
+              style={styles.loadingTitle}
+            >
+              {statusLine}
+            </Text>
+          )}
+          {packageWarning?.code ? (
+            <Text style={styles.noticeCode}>Error: {packageWarning.code}</Text>
           ) : null}
           {packageWarning ? (
-            <>
-              <Text accessibilityRole="alert" style={styles.loadingBody}>
-                {packageWarning}
-              </Text>
-              <MobileWebRecoveryActions
-                canUsePrevious={false}
-                onClearCache={onClearCache}
-                onFailure={onRecoveryFailure}
-                onRetry={onRetryRecovery}
-                onShowHosts={onShowHosts}
-                onUsePrevious={onUsePrevious}
-              />
-            </>
+            <MobileWebRecoveryActions
+              canUsePrevious={false}
+              onClearCache={onClearCache}
+              onFailure={onRecoveryFailure}
+              onRetry={onRetryRecovery}
+              onShowHosts={onShowHosts}
+              onUsePrevious={onUsePrevious}
+            />
           ) : null}
         </View>
       )}

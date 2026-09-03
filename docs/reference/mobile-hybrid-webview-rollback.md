@@ -34,7 +34,7 @@ boundaries used by this runbook.
 | ------------------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------------------- |
 | Workspace UI regression follows one Desktop version                       | Desktop web package           | Stop that Desktop rollout and restore known-good package content            |
 | New package times out or repeatedly terminates its WebView process        | Native verified generation    | Let automatic recovery promote the previous verified generation             |
-| One host reports corrupt or unreadable cached assets                      | Host-scoped native cache      | Use **Clear cache** and redownload from an authenticated paired Desktop     |
+| One host reports corrupt or unreadable cached assets                      | Host-scoped native cache      | Use **Reset** and redownload from an authenticated paired Desktop           |
 | Package requires an unsupported bridge version                            | Desktop/native compatibility  | Restore a package compatible with the installed shell; do not force-open it |
 | Pairing, encrypted connectivity, asset origin, cache, or bridge is broken | Native shell                  | Halt the store rollout and prepare a corrected native release               |
 | Notification, deep-link, permission, audio, picker, or recovery UI fails  | Native shell                  | Halt the store rollout and prepare a corrected native release               |
@@ -81,9 +81,9 @@ restarting must not make an affected Desktop safe.
   manifest and assets and the page reaches the health boundary.
 - A health timeout or third WebView process loss inside the crash window
   attempts to promote the compatible verified previous generation.
-- **Use previous** promotes the verified previous generation and removes the
-  failed generation from the rollback position.
-- **Clear cache** closes the current package session, removes only the selected
+- **Use last version** promotes the verified previous generation and removes
+  the failed generation from the rollback position.
+- **Reset** closes the current package session, removes only the selected
   paired host's cache, and requires a verified redownload.
 - An implicit cold open may replace an invalid active generation with a
   compatible verified previous generation. An explicit build open fails
@@ -134,16 +134,22 @@ or native recovery UI.
 
 Use the least destructive control that addresses the observed failure:
 
+The recovery UI promotes **Retry** as the single primary button and demotes the
+remaining controls to text links, so support must name them by these labels:
+
 - **Retry** asks the authenticated Desktop for its current package again. Use it
   after connectivity or Desktop package delivery is corrected.
-- **Use previous** switches to the verified prior generation for the selected
-  host. Use it for a newly activated functional regression or repeated process
-  failure when the previous action is available.
-- **Clear cache** removes the selected host's verified generations and forces a
+- **Use last version** switches to the verified prior generation for the
+  selected host. Use it for a newly activated functional regression or repeated
+  process failure when the previous action is available.
+- **Reset** removes the selected host's verified generations and forces a
   redownload. Use it for host-scoped corruption or when support explicitly
   needs to eliminate cached-package state.
 - **Switch hosts** leaves the affected paired Desktop without changing another
   host's cache or credentials.
+
+The shell shows a plain-language notice plus an `Error: <code>` support line;
+that code is the same stable failure code recorded in diagnostics.
 
 Cache clearing is not a Desktop rollback. If the Desktop still serves the bad
 package, a cleared client downloads the same bad package again.
@@ -173,8 +179,8 @@ rather than a routine rollback.
 Before production cutover, record iOS and Android evidence for:
 
 1. Readiness timeout and three-process-loss automatic recovery.
-2. Manual **Use previous** recovery.
-3. **Clear cache** followed by an authenticated verified redownload.
+2. Manual **Use last version** recovery.
+3. **Reset** followed by an authenticated verified redownload.
 4. Corrupt active generation with compatible previous-generation fallback.
 5. Incompatible bridge, disconnected Desktop, pairing removal, and WebView
    process loss.

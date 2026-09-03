@@ -4,6 +4,7 @@ import type { HostProfile } from '../transport/types'
 import { mobileWebDiagnosticsStore } from './mobile-web-diagnostics-store'
 import { removeMobileWebHostCache } from './mobile-web-native-stager'
 import type { MobileWebProcessFailureTracker } from './mobile-web-process-failure-tracker'
+import { mobileWebShellHostName, type MobileWebShellNotice } from './mobile-web-shell-notice'
 
 type PackageRecoveryState = {
   host: HostProfile | undefined
@@ -17,7 +18,7 @@ type PackageRecoveryState = {
   setSessionHostId: Dispatch<SetStateAction<string | undefined>>
   setViewEpoch: Dispatch<SetStateAction<number>>
   setPackageLoading: Dispatch<SetStateAction<boolean>>
-  setPackageWarning: Dispatch<SetStateAction<string | undefined>>
+  setPackageWarning: Dispatch<SetStateAction<MobileWebShellNotice | undefined>>
   setRefreshEpoch: Dispatch<SetStateAction<number>>
 }
 
@@ -46,7 +47,7 @@ export function useMobileWebPackageRecovery({
   setRefreshEpoch
 }: PackageRecoveryState): MobileWebPackageRecoveryActions {
   const recoverSession = useCallback(
-    async (sessionId: string, warning: string, failureCode: string) => {
+    async (sessionId: string, warning: MobileWebShellNotice, failureCode: string) => {
       const current = ownedSessionRef.current
       const hostEpoch = hostEpochRef.current
       const hostId = activeHostIdRef.current
@@ -76,9 +77,10 @@ export function useMobileWebPackageRecovery({
           ownedSessionRef.current?.sessionId === sessionId
         ) {
           setViewEpoch((value) => value + 1)
-          setPackageWarning(
-            'The workspace view restarted; no previous healthy interface is available.'
-          )
+          setPackageWarning({
+            message: 'Orca restarted. There’s no earlier version to go back to.',
+            code: 'no_previous_version'
+          })
           mobileWebDiagnosticsStore.restarted(hostId, current.buildId)
         }
       }
@@ -123,7 +125,10 @@ export function useMobileWebPackageRecovery({
           current?.sessionId === sessionId &&
           current.buildId === owned.buildId
         ) {
-          setPackageWarning('The workspace interface is running but could not be marked healthy.')
+          setPackageWarning({
+            message: 'Orca started, but couldn’t finish its checks.',
+            code: 'health_mark_failed'
+          })
           const hostId = activeHostIdRef.current
           if (hostId) {
             mobileWebDiagnosticsStore.warning(hostId, 'health_mark_failed')
@@ -138,7 +143,7 @@ export function useMobileWebPackageRecovery({
     async (sessionId: string) => {
       await recoverSession(
         sessionId,
-        'The refreshed interface did not become healthy; the previous verified version was restored.',
+        { message: 'The update didn’t start correctly, so the last version that worked is back.' },
         'health_timeout'
       )
     },
@@ -153,7 +158,7 @@ export function useMobileWebPackageRecovery({
       }
       if (!processFailuresRef.current.record(current.buildId)) {
         setViewEpoch((value) => value + 1)
-        setPackageWarning('The workspace view stopped and was restarted.')
+        setPackageWarning({ message: 'Orca stopped unexpectedly and restarted.' })
         const hostId = activeHostIdRef.current
         if (hostId) {
           mobileWebDiagnosticsStore.restarted(hostId, current.buildId)
@@ -162,7 +167,7 @@ export function useMobileWebPackageRecovery({
       }
       await recoverSession(
         sessionId,
-        'The workspace view stopped repeatedly; the previous verified version was restored.',
+        { message: 'Orca kept stopping, so the last version that worked is back.' },
         'webview_crash_loop'
       )
     },
@@ -188,12 +193,15 @@ export function useMobileWebPackageRecovery({
   const recoverPrevious = useCallback(async () => {
     const current = ownedSessionRef.current
     if (!current) {
-      setPackageWarning('No previous verified workspace interface is available.')
+      setPackageWarning({
+        message: 'There’s no earlier version to go back to.',
+        code: 'no_previous_version'
+      })
       return
     }
     await recoverSession(
       current.sessionId,
-      'The previous verified workspace interface was restored.',
+      { message: 'Went back to the last version that worked.' },
       'manual_recovery'
     )
   }, [ownedSessionRef, recoverSession, setPackageWarning])
@@ -222,7 +230,10 @@ export function useMobileWebPackageRecovery({
     } catch {
       if (hostEpochRef.current === hostEpoch) {
         setPackageLoading(false)
-        setPackageWarning('The workspace interface cache could not be cleared.')
+        setPackageWarning({
+          message: `Couldn’t reset ${mobileWebShellHostName(host.name)}. Try again.`,
+          code: 'reset_failed'
+        })
       }
       return
     }
