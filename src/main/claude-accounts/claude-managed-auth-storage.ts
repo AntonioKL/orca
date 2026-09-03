@@ -12,9 +12,14 @@ import {
 import {
   deleteManagedClaudeKeychainCredentials,
   deleteActiveClaudeKeychainCredentialsStrict,
-  readManagedClaudeKeychainCredentials,
-  writeManagedClaudeKeychainCredentials
+  isTransientKeychainError,
+  readActiveClaudeKeychainCredentialsStrict,
+  writeActiveClaudeKeychainCredentials
 } from './keychain'
+import {
+  clearClaudeStaleFallbackMark,
+  markClaudeStaleFallbackPending
+} from './claude-stale-fallback-marker'
 
 export type ClaudeManagedAuthLocation = {
   managedAuthPath: string
@@ -35,6 +40,24 @@ export type ClaudeManagedAuthTarget = {
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`
+}
+
+/**
+ * A snapshot is a rollback source, so it must fail closed.
+ *
+ * Why not best-effort null: `null` means "this account had no credential", and a rollback acting
+ * on that deletes the credential the account still has. A Keychain we could not read is not an
+ * absent credential, so a transient failure aborts the snapshot instead of forging one.
+ */
+async function readScopedCredentialsForSnapshot(configDir: string): Promise<string | null> {
+  try {
+    return await readActiveClaudeKeychainCredentialsStrict(configDir)
+  } catch (error) {
+    if (isTransientKeychainError(error)) {
+      throw error
+    }
+    return null
+  }
 }
 
 export class ClaudeManagedAuthStorage {
@@ -75,11 +98,17 @@ export class ClaudeManagedAuthStorage {
     credentialsJson: string
   ): Promise<void> {
     const trustedPath = await this.assertOwned(managedAuthPath, accountId)
-    if (process.platform === 'darwin') {
-      await writeManagedClaudeKeychainCredentials(accountId, credentialsJson)
-    } else {
+    if (process.platform !== 'darwin') {
       writeClaudeManagedAuthFile(trustedPath, '.credentials.json', credentialsJson)
+      return
     }
+    await writeActiveClaudeKeychainCredentials(credentialsJson, trustedPath)
+    // The CLI keeps one live store: once its Keychain write lands it drops the fallback file, so
+    // leaving ours behind resurrects the token we just replaced on the next outage read. Mark
+    // first so a crash between write and clear still fails closed.
+    markClaudeStaleFallbackPending(trustedPath)
+    rmSync(join(trustedPath, '.credentials.json'), { force: true })
+    clearClaudeStaleFallbackMark(trustedPath)
   }
 
   async writeOauthAccount(
@@ -103,7 +132,7 @@ export class ClaudeManagedAuthStorage {
     return {
       credentialsJson:
         process.platform === 'darwin'
-          ? await readManagedClaudeKeychainCredentials(accountId)
+          ? await readScopedCredentialsForSnapshot(trustedPath)
           : readClaudeManagedAuthFile(trustedPath, '.credentials.json'),
       oauthAccountJson: readClaudeManagedAuthFile(trustedPath, 'oauth-account.json')
     }
@@ -117,8 +146,8 @@ export class ClaudeManagedAuthStorage {
     const trustedPath = await this.assertOwned(managedAuthPath, accountId)
     if (process.platform === 'darwin') {
       await (snapshot.credentialsJson !== null
-        ? writeManagedClaudeKeychainCredentials(accountId, snapshot.credentialsJson)
-        : deleteManagedClaudeKeychainCredentials(accountId))
+        ? writeActiveClaudeKeychainCredentials(snapshot.credentialsJson, trustedPath)
+        : deleteActiveClaudeKeychainCredentialsStrict(trustedPath))
     } else if (snapshot.credentialsJson !== null) {
       writeClaudeManagedAuthFile(trustedPath, '.credentials.json', snapshot.credentialsJson)
     } else {

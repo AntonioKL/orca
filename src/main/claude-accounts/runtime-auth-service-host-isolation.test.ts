@@ -141,9 +141,10 @@ describe('ClaudeRuntimeAuthService host account isolation', () => {
       systemCredentials
     )
     expect(testState.legacyKeychainCredentials).toBe(systemCredentials)
-    expect(vi.mocked(writeActiveClaudeKeychainCredentials).mock.calls).toEqual([
-      [managedCredentials, managedAuthPath]
-    ])
+    // The launch path no longer writes any credential store: the CLI owns the scoped item. The
+    // credential is there because startup migration copied it once, not because launch bridges it.
+    // Ablation: restoring the launch-path scoped write turns this red.
+    expect(vi.mocked(writeActiveClaudeKeychainCredentials)).not.toHaveBeenCalled()
     expect(testState.scopedKeychainCredentialsByConfigDir.get(managedAuthPath)).toBe(
       managedCredentials
     )

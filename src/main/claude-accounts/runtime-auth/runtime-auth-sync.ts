@@ -30,12 +30,18 @@ export class ClaudeRuntimeAuthSync extends ClaudeRuntimeAuthPreparationService {
       this.lastSyncedAccountId = activeAccount.id
       return
     }
-    const previousManagedCredentialsJson = previousAccount
-      ? await this.readManagedCredentials(previousAccount)
-      : null
-    const previousManagedOauthAccount = previousAccount
-      ? await this.readManagedOauthAccount(previousAccount)
-      : null
+    // Why: an isolated account's credentials live in its own home and were never materialized
+    // into the shared runtime, so there is nothing here to read back — and adopting a shared blob
+    // into it would store another account's token, or a spent one, under this account.
+    const previousIsIsolated = previousAccount?.managedAuthRuntime === 'host'
+    const previousManagedCredentialsJson =
+      previousAccount && !previousIsIsolated
+        ? await this.readManagedCredentials(previousAccount)
+        : null
+    const previousManagedOauthAccount =
+      previousAccount && !previousIsIsolated
+        ? await this.readManagedOauthAccount(previousAccount)
+        : null
     if (previousAccount && previousAccount.id !== activeAccount?.id) {
       if (previousManagedCredentialsJson) {
         const outgoingReadBackResult = await this.readBackRefreshedTokens(

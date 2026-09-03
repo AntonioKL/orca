@@ -229,6 +229,9 @@ export function createManagedClaudeAuth(
   writeFileSync(join(managedAuthPath, '.credentials.json'), credentialsJson, 'utf-8')
   writeFileSync(join(managedAuthPath, 'oauth-account.json'), oauthAccountJson, 'utf-8')
   testState.managedKeychainCredentials.set(accountId, credentialsJson)
+  // Production keeps ONE store per account on darwin: the Keychain item the CLI derives from the
+  // account's own dir. Seed that too, or fixtures model a second copy that no longer exists.
+  testState.scopedKeychainCredentialsByConfigDir.set(realpathSync(managedAuthPath), credentialsJson)
   return managedAuthPath
 }
 
@@ -292,14 +295,36 @@ export function createClaudeCredentialsWithoutEmail(
   })}\n`
 }
 
+/**
+ * Models the store the CLI owns, which is what production now reads and writes: the config-dir
+ * scoped Keychain item with the same-home `.credentials.json` as its fallback. Reading the old
+ * account-id-keyed service here would assert against a store nothing writes any more, and every
+ * such test would pass while exercising nothing.
+ */
 export function readManagedCredentialsForTest(
   accountId: string,
   managedAuthPath: string
 ): string | null {
   if (process.platform === 'darwin') {
-    return testState.managedKeychainCredentials.get(accountId) ?? null
+    // Fixtures seed both darwin stores, so order decides what this returns. Production writes
+    // exactly one per account: the account-id-keyed service for a pre-isolation account, the
+    // CLI-owned scoped item for an isolated one. This helper serves the legacy lane, so it reads
+    // the id-keyed service first; isolated-lane tests assert against
+    // `testState.scopedKeychainCredentialsByConfigDir` directly, which is the store that matters
+    // there and reads far more clearly at the call site.
+    const idKeyed = testState.managedKeychainCredentials.get(accountId)
+    if (idKeyed !== undefined) {
+      return idKeyed
+    }
+    const scoped =
+      testState.scopedKeychainCredentialsByConfigDir.get(managedAuthPath) ??
+      testState.scopedKeychainCredentialsByConfigDir.get(realpathSync(managedAuthPath))
+    if (scoped !== undefined) {
+      return scoped
+    }
   }
-  return readFileSync(join(managedAuthPath, '.credentials.json'), 'utf-8')
+  const filePath = join(managedAuthPath, '.credentials.json')
+  return existsSync(filePath) ? readFileSync(filePath, 'utf-8') : null
 }
 
 export function readRuntimeOauthAccountForTest(): unknown {
