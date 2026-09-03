@@ -32,7 +32,8 @@ import { recordCoalescedDurableCrashBreadcrumb } from './durable-crash-breadcrum
  *   there, and the tracer sink is a no-op.
  * - Never instrumented, and none of them a pid-addressed kill issued from main:
  *   the POSIX `process.kill(-pid, …)` group arms of the notebook, precheck,
- *   browser-route and ephemeral-VM kills; the relay's own
+ *   browser-route and ephemeral-VM kills, plus the macOS keyboard-input-source
+ *   probe's group kill in `ipc/app.ts`; the relay's own
  *   `subprocess-tree-termination` taskkill and the CLI's login-interruption
  *   taskkill (neither runs in main); and the browser-route Electron probes,
  *   which are reached only from `*.electron.test.ts`.
