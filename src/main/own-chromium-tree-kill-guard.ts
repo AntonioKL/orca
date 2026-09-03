@@ -4,16 +4,19 @@ import {
   type SelfInitiatedTreeKillScope
 } from './crash-reporting/self-initiated-tree-kill-log'
 import { readOrcaChromiumProcessPids } from './orca-chromium-process-pids'
+import { setProcessTreeKillGate } from '../shared/child-process/process-tree-kill-gate'
 
 /**
  * Gate every main-process tree-kill through one decision: refuse the pid when
  * Electron is currently accounting for it, otherwise put it on the record.
  *
  * Why a shared gate rather than a check inside `terminateWindowsProcessTree`:
- * the codex and claude account-login teardowns run their own `taskkill /T /F`
- * with different lifetimes (one sync, one with its own timeout ladder), so a
- * guard that only lived in the tree-kill helper would cover one of three
- * families. Returns false when the caller must not kill.
+ * five other families in main run their own `taskkill /T /F` with different
+ * lifetimes (sync, fire-and-forget, timeout ladder), and three more live in
+ * `src/shared` and reach this through `process-tree-kill-gate`, so a guard that
+ * only lived in the tree-kill helper would cover one of nine.
+ * `main-process-tree-kill-gate.test.ts` holds that set closed. Returns false
+ * when the caller must not kill.
  *
  * Electron main only, by construction. `terminateWindowsProcessTree` also runs
  * in the standalone daemon (the `pty-descendant-sweep` site), where
@@ -37,4 +40,9 @@ export function admitSelfInitiatedTreeKill(target: {
   }
   recordSelfInitiatedTreeKill(target)
   return true
+}
+
+/** Hands the gate to the shared choke points, which cannot import main. */
+export function installMainProcessTreeKillGate(): void {
+  setProcessTreeKillGate((kill) => admitSelfInitiatedTreeKill(kill))
 }
