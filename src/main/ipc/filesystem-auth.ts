@@ -43,10 +43,23 @@ export function authorizeExternalPath(targetPath: string): void {
   } catch {}
 }
 
+/**
+ * One allowed-root list shared by every check in a single authorization.
+ *
+ * Lazy so a path already covered by an external grant still builds nothing at all, the way it did
+ * before the list was hoisted out of the individual checks.
+ */
+type AllowedRootsSnapshot = { get: () => readonly string[] }
+
+function createAllowedRootsSnapshot(store: Store): AllowedRootsSnapshot {
+  let roots: readonly string[] | undefined
+  return { get: () => (roots ??= getAllowedRoots(store)) }
+}
+
 export function isPathAllowed(
   targetPath: string,
   store: Store,
-  allowedRoots?: readonly string[]
+  allowedRoots?: AllowedRootsSnapshot
 ): boolean {
   const resolvedTarget = resolve(targetPath)
   if (authorizedExternalPaths.has(resolvedTarget)) {
@@ -57,7 +70,7 @@ export function isPathAllowed(
       return true
     }
   }
-  return (allowedRoots ?? getAllowedRoots(store)).some((root) =>
+  return (allowedRoots?.get() ?? getAllowedRoots(store)).some((root) =>
     isDescendantOrEqual(resolvedTarget, root)
   )
 }
@@ -77,7 +90,7 @@ export async function resolveAuthorizedPath(
   const resolvedTarget = resolve(targetPath)
   // Why: the roots depend only on store state, not on the candidate path, so one snapshot serves
   // every authorization below; each candidate is still checked against it in full.
-  const allowedRoots = getAllowedRoots(store)
+  const allowedRoots = createAllowedRootsSnapshot(store)
   if (!(await isPathAllowedIncludingRegisteredWorktrees(resolvedTarget, store, { allowedRoots }))) {
     throw new Error(PATH_ACCESS_DENIED_MESSAGE)
   }
@@ -128,7 +141,7 @@ export async function resolveAuthorizedPath(
 async function resolveAuthorizedMissingPath(
   resolvedTarget: string,
   store: Store,
-  allowedRoots: readonly string[]
+  allowedRoots: AllowedRootsSnapshot
 ): Promise<string> {
   let existingAncestor = resolvedTarget
   const missingSegments: string[] = []
@@ -164,7 +177,7 @@ async function resolveAuthorizedMissingPath(
 async function isPathAllowedIncludingRegisteredWorktrees(
   targetPath: string,
   store: Store,
-  options: { canonicalSourcePath?: string; allowedRoots?: readonly string[] } = {}
+  options: { canonicalSourcePath?: string; allowedRoots?: AllowedRootsSnapshot } = {}
 ): Promise<boolean> {
   if (isPathAllowed(targetPath, store, options.allowedRoots)) {
     return true
@@ -202,12 +215,12 @@ async function isPathAllowedByCanonicalAllowedRoot(
   targetPath: string,
   sourcePath: string | undefined,
   store: Store,
-  allowedRoots?: readonly string[]
+  allowedRoots?: AllowedRootsSnapshot
 ): Promise<boolean> {
   if (!sourcePath) {
     return false
   }
-  for (const root of allowedRoots ?? getAllowedRoots(store)) {
+  for (const root of allowedRoots?.get() ?? getAllowedRoots(store)) {
     const resolvedRoot = resolve(root)
     if (!isDescendantOrEqual(sourcePath, resolvedRoot)) {
       continue
