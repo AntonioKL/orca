@@ -72,18 +72,7 @@ export function useLocalImageSrc(
   const [generation, setGeneration] = useState(getLocalImageCacheGeneration())
 
   useEffect(() => {
-    if (!rawSrc || isExternalUrl(rawSrc) || runtimeContext === null) {
-      return
-    }
-    const absolutePath = resolveImageAbsolutePath(rawSrc, filePath)
-    if (!absolutePath) {
-      return
-    }
-    const cacheKey = getLocalImageCacheKey(absolutePath, connectionId, runtimeContext)
-    pinLocalImageCache(cacheKey)
-    return () => {
-      unpinLocalImageCache(cacheKey)
-    }
+    return acquireLocalImageSrcLease(rawSrc, filePath, connectionId, runtimeContext)
   }, [rawSrc, filePath, connectionId, runtimeContext])
 
   useEffect(() => {
@@ -243,6 +232,26 @@ export function resetLocalImageSrcStateForTests(): void {
 
 export function invalidateLocalImageSrcCacheForTests(): void {
   invalidateLocalImageCache()
+}
+
+export function acquireLocalImageSrcLease(
+  rawSrc: string | undefined,
+  filePath: string,
+  connectionId?: string | null,
+  runtimeContext?:
+    | (Omit<RuntimeFileOperationArgs, 'connectionId'> & { connectionId?: string | null })
+    | null
+): (() => void) | undefined {
+  if (!rawSrc || isExternalUrl(rawSrc) || runtimeContext === null) {
+    return undefined
+  }
+  const absolutePath = resolveImageAbsolutePath(rawSrc, filePath)
+  if (!absolutePath) {
+    return undefined
+  }
+  const key = getLocalImageCacheKey(absolutePath, connectionId, runtimeContext)
+  pinLocalImageCache(key)
+  return () => unpinLocalImageCache(key)
 }
 
 /** Evict one no-longer-visible transcript preview immediately. */

@@ -135,6 +135,37 @@ describe('loadLocalImageSrc', () => {
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
   })
 
+  it('lets a mounted preview adopt an in-flight prewarm read', async () => {
+    const read = deferred<PreviewResult>()
+    const readFile = vi.fn().mockReturnValue(read.promise)
+    const renders: (string | undefined)[] = []
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:prewarmed')
+    setReadFile(readFile)
+
+    const prewarm = loadLocalImageSrc('diagram.png', '/repo/docs/readme.md')
+    const container = document.createElement('div')
+    const root: Root = createRoot(container)
+    await act(async () => {
+      root.render(
+        createElement(HookProbe, {
+          filePath: '/repo/docs/readme.md',
+          onRender: (displaySrc) => renders.push(displaySrc),
+          src: 'diagram.png'
+        })
+      )
+    })
+    expect(readFile).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      read.resolve(binaryPreview())
+      await flushPromises()
+    })
+
+    await expect(prewarm).resolves.toBe('blob:prewarmed')
+    expect(renders.at(-1)).toBe('blob:prewarmed')
+    root.unmount()
+  })
+
   it('does not revoke blob URLs still used by mounted previews during eviction', async () => {
     const readFile = vi.fn().mockResolvedValue(binaryPreview())
     let nextUrl = 0

@@ -4,7 +4,10 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RuntimeFileOperationArgs } from '@/runtime/runtime-file-client'
-import { resetLocalImageSrcStateForTests } from '@/components/editor/useLocalImageSrc'
+import {
+  invalidateLocalImageSrcCacheForTests,
+  resetLocalImageSrcStateForTests
+} from '@/components/editor/useLocalImageSrc'
 import { NativeChatImageAttachments } from './NativeChatTranscriptChrome'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -130,6 +133,34 @@ describe('NativeChatImageAttachments', () => {
     expect(container.querySelector('img')?.getAttribute('src')).not.toBe(firstOwnerSrc)
     expect(window.api.fs.readFile).toHaveBeenCalledTimes(2)
 
+    root.unmount()
+  })
+
+  it('retries a failed thumbnail after the image cache refreshes', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const props = {
+      blocks: [{ type: 'image-ref' as const, path: '/repo/image.png' }],
+      runtimeContext: runtimeContext('wt-1')
+    }
+
+    await act(async () => {
+      root.render(createElement(NativeChatImageAttachments, props))
+      await flushPromises()
+    })
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:owner-1')
+
+    await act(async () => {
+      container.querySelector('img')?.dispatchEvent(new Event('error'))
+    })
+    expect(container.querySelector('img')).toBeNull()
+
+    await act(async () => {
+      invalidateLocalImageSrcCacheForTests()
+      await flushPromises()
+    })
+
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:owner-2')
     root.unmount()
   })
 

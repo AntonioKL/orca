@@ -13,8 +13,8 @@ const BLOB_URL_CACHE_MAX_BYTES = 128 * 1024 * 1024
 export const blobUrlCache = new Map<string, string>()
 const blobUrlCacheBytes = new Map<string, number>()
 export const inFlightBlobUrlLoads = new Map<string, Promise<string | null>>()
-// Incremented on lease transitions so a read resolving after release cannot
-// repopulate the cache. A later lease gets a new version and may cache safely.
+// Incremented on release so a read resolving after its last consumer left
+// cannot repopulate the cache.
 const cacheKeyVersions = new Map<string, number>()
 
 export function getLocalImageCacheKeyVersion(key: string): number {
@@ -127,9 +127,6 @@ export function getLocalImageCacheGeneration(): number {
 }
 
 export function pinLocalImageCache(key: string): void {
-  if (!isLocalImageCacheKeyPinned(key)) {
-    cacheKeyVersions.set(key, getLocalImageCacheKeyVersion(key) + 1)
-  }
   pinLocalImageCacheKey(key)
 }
 

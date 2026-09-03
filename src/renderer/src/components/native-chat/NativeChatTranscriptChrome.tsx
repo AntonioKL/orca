@@ -78,8 +78,8 @@ function TranscriptImagePreview({
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const [near, setNear] = useState(false)
-  const [thumbnailError, setThumbnailError] = useState(false)
-  const [dialogError, setDialogError] = useState(false)
+  const [thumbnailErrorSrc, setThumbnailErrorSrc] = useState<string | null>(null)
+  const [dialogErrorSrc, setDialogErrorSrc] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const source = block.url?.trim() || block.path
   const filePath = block.path ?? source ?? ''
@@ -131,7 +131,7 @@ function TranscriptImagePreview({
   const showPreview =
     leaseActive &&
     Boolean(displaySrc) &&
-    !thumbnailError &&
+    displaySrc !== thumbnailErrorSrc &&
     Boolean(source) &&
     (external || runtimeContext !== null)
 
@@ -151,7 +151,7 @@ function TranscriptImagePreview({
           src={displaySrc}
           alt={label}
           loading="lazy"
-          onError={() => setThumbnailError(true)}
+          onError={() => setThumbnailErrorSrc(displaySrc ?? null)}
           className="size-full object-cover"
         />
       </button>
@@ -162,11 +162,11 @@ function TranscriptImagePreview({
             {translate('components.native-chat.composer.imagePreview', 'Full-size image preview')}
           </DialogDescription>
           <div className="scrollbar-sleek flex min-h-0 items-center justify-center overflow-auto rounded-md bg-muted/20 p-2">
-            {displaySrc && !dialogError ? (
+            {displaySrc && displaySrc !== dialogErrorSrc ? (
               <img
                 src={displaySrc}
                 alt={label}
-                onError={() => setDialogError(true)}
+                onError={() => setDialogErrorSrc(displaySrc)}
                 className="max-h-[75vh] max-w-full object-contain"
               />
             ) : (
