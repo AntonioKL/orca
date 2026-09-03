@@ -249,9 +249,6 @@ export function buildExplicitEntriesByTabId(
       pushEntry(agentEntry)
     }
   }
-  if (byTab.size === 0) {
-    return byTab
-  }
   return byTab
 }
 
