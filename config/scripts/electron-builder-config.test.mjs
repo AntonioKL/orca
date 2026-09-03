@@ -3,10 +3,6 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import {
-  createMobileWebResourceFixture,
-  createPackagedCliResourceFixture
-} from './electron-builder-mobile-web-fixture.mjs'
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..')
 const SRC_MAIN_DIR = join(REPO_ROOT, 'src', 'main')
