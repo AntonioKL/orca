@@ -121,7 +121,7 @@ export async function acquireClaudeSession({
       )
     }
     acquisitions.assertCurrent(sessionId, attempt)
-    const priorSession = sessions.get(sessionId)
+    let resumeSession = sessions.get(sessionId)
     if (
       !(await closeClaudePublishedSessionForDeps(sessions, sessionId, {
         ...(deps.persistHandle ? { persistHandle: deps.persistHandle } : {}),
@@ -146,16 +146,17 @@ export async function acquireClaudeSession({
       // before discarding the retained proof so its cursor and callbacks are
       // cleaned up exactly once.
       await callbacks.settleExit(sessionId, retainedExit)
+      resumeSession ??= retainedExit.session
     }
     acquisitions.assertCurrent(sessionId, attempt)
-    // Closing persists the prior connection's final leaf, so launch validates that durable head.
-    const launchIdentity = priorSession
+    // Both close paths persist their final leaf, so launch validates that durable head.
+    const launchIdentity = resumeSession
       ? {
           ...input.identity,
           providerHandle: {
             kind: 'claude' as const,
-            sessionId: priorSession.providerSessionId,
-            leafUuid: priorSession.leafUuid
+            sessionId: resumeSession.providerSessionId,
+            leafUuid: resumeSession.leafUuid
           }
         }
       : input.identity

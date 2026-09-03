@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
-import type { ClaudeStructuredSessionEvent } from './claude-structured-session-adapter'
+import {
+  ClaudeStructuredSessionAdapter,
+  type ClaudeStructuredSessionAdapterDeps,
+  type ClaudeStructuredSessionEvent
+} from './claude-structured-session-adapter'
 import { ClaudeTranscriptPreviousCursorMissingError } from './claude-transcript-branch-proof'
 import {
   adapterFor,
@@ -347,7 +351,7 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
     expect(events.filter((event) => event.type === 'ended')).toHaveLength(1)
   })
 
-  it('settles a retained exit before reacquisition replaces its provider session', async () => {
+  it('launches the first replacement from the settled retained transcript cursor', async () => {
     const claude = fakeClaude()
     const events: ClaudeStructuredSessionEvent[] = []
     const persistedHandles: unknown[] = []
@@ -356,22 +360,52 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
       appendTombstone: () => {},
       publish: () => {}
     }
-    const readTranscriptLeaf = vi
-      .fn()
-      .mockRejectedValue(new Error('latest marker is on a sibling branch'))
-    let persisted = false
-    const adapter = adapterFor(
-      claude,
-      { resumed: true, resumeLeafUuid: 'replacement-leaf' },
-      events,
-      persistedHandles,
-      undefined,
-      readTranscriptLeaf,
+    const readTranscriptLeaf = vi.fn().mockResolvedValue('durable-retained-leaf')
+    let durableLeafUuid: string | null = null
+    const resolveLaunch = vi.fn(async ({ identity }) => {
+      if (
+        identity.providerHandle.kind !== 'claude' ||
+        identity.providerHandle.sessionId !== PROVIDER_SESSION_ID ||
+        identity.providerHandle.leafUuid !== durableLeafUuid
+      ) {
+        throw new Error('claude durable resume identity changed before spawn')
+      }
+      if (durableLeafUuid === null) {
+        return {
+          pathToClaudeCodeExecutable: 'claude',
+          options: { sessionId: PROVIDER_SESSION_ID },
+          cwd: '/work/repo',
+          claudeConfigDir: '/accounts/claude',
+          providerSessionId: PROVIDER_SESSION_ID,
+          resumeLeafUuid: null,
+          resumed: false
+        }
+      }
+      return {
+        pathToClaudeCodeExecutable: 'claude',
+        options: { resume: PROVIDER_SESSION_ID, resumeSessionAt: durableLeafUuid },
+        cwd: '/work/repo',
+        claudeConfigDir: '/accounts/claude',
+        providerSessionId: PROVIDER_SESSION_ID,
+        resumeLeafUuid: durableLeafUuid,
+        resumed: true
+      }
+    })
+    const persistHandle = vi.fn<NonNullable<ClaudeStructuredSessionAdapterDeps['persistHandle']>>(
       async (handle) => {
-        persisted = true
+        durableLeafUuid = handle.leafUuid
         persistedHandles.push(handle)
       }
     )
+    const adapter = new ClaudeStructuredSessionAdapter({
+      resolveLaunch,
+      openConnection: claude.openConnection,
+      onEvent: (event) => events.push(event),
+      readProcessStartTime: async () => 1_700_000_000_000,
+      now: () => 1_700_000_000_500,
+      readTranscriptLeaf,
+      persistHandle
+    })
     const firstAcquisition = await adapter.acquire({
       identity: identityFor(),
       fence: 7,
@@ -382,11 +416,22 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
     const oldPrompt = invokeCanUseTool(first, 'Bash', 'permission-retained', 'tool-retained')
     const oldSession = (
       adapter as unknown as {
-        sessions: Map<string, { translator: { dispose: () => void } | null }>
+        sessions: Map<
+          string,
+          {
+            translator: { dispose: () => void } | null
+            prompts: {
+              find: (itemId: string) => { prompt: { settle: (value: unknown) => void } } | null
+            }
+          }
+        >
       }
     ).sessions.get('session-1')
     expect(oldSession?.translator).not.toBeNull()
     const disposeTranslator = vi.spyOn(oldSession!.translator!, 'dispose')
+    const pendingPrompt = oldSession?.prompts.find('permission-retained')
+    expect(pendingPrompt).not.toBeNull()
+    const settlePrompt = vi.spyOn(pendingPrompt!.prompt, 'settle')
     first.handlers.onMessage?.({
       type: 'assistant',
       session_id: PROVIDER_SESSION_ID,
@@ -416,20 +461,33 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
       events: journalSink
     })
 
-    expect(persisted).toBe(true)
     expect(disposeTranslator).toHaveBeenCalledOnce()
+    expect(settlePrompt).toHaveBeenCalledOnce()
+    expect(settlePrompt).toHaveBeenCalledWith(null)
+    expect(persistHandle).toHaveBeenCalledOnce()
     expect(persistedHandles).toEqual([
       {
         sessionId: 'session-1',
         providerSessionId: PROVIDER_SESSION_ID,
-        leafUuid: 'observed-retained-leaf',
+        leafUuid: 'durable-retained-leaf',
         fence: 7
       }
     ])
+    expect(readTranscriptLeaf).toHaveBeenCalledOnce()
     expect(readTranscriptLeaf).toHaveBeenCalledWith({
       providerSessionId: PROVIDER_SESSION_ID,
       previousLeafUuid: 'observed-retained-leaf',
       claudeConfigDir: '/accounts/claude'
+    })
+    expect(resolveLaunch).toHaveBeenNthCalledWith(2, {
+      identity: {
+        ...identityFor(),
+        providerHandle: {
+          kind: 'claude',
+          sessionId: PROVIDER_SESSION_ID,
+          leafUuid: 'durable-retained-leaf'
+        }
+      }
     })
     expect(oldPrompt.settled()).toBe(true)
     expect(events.filter((event) => event.type === 'ended')).toEqual([
@@ -446,10 +504,14 @@ describe('ClaudeStructuredSessionAdapter transcript-derived recovery', () => {
       handle: {
         provider: 'claude',
         sessionId: PROVIDER_SESSION_ID,
-        leafUuid: 'replacement-leaf'
+        leafUuid: 'durable-retained-leaf'
       },
       origin: 'resumed',
       mintedAtFence: 8
+    })
+    expect(claude.connections[1]?.launch.options).toMatchObject({
+      resume: PROVIDER_SESSION_ID,
+      resumeSessionAt: 'durable-retained-leaf'
     })
     expect(claude.connections).toHaveLength(2)
   })
