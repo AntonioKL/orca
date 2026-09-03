@@ -1,5 +1,6 @@
 import type { IPty } from 'node-pty'
 import { createRequire } from 'node:module'
+import { recordSelfInitiatedTreeKill } from '../crash-reporting/self-initiated-tree-kill-log'
 
 /**
  * Job-object ownership for a ConPTY's process tree.
@@ -94,7 +95,15 @@ export function terminatePtyJob(proc: IPty): JobTerminationOutcome {
     return 'unavailable'
   }
   try {
-    return native.terminateJob(target.id, target.shellPid) ? 'terminated' : 'unavailable'
+    if (!native.terminateJob(target.id, target.shellPid)) {
+      return 'unavailable'
+    }
+    recordSelfInitiatedTreeKill({
+      pid: target.shellPid,
+      site: 'windows-pty-job-teardown',
+      scope: 'win-pty-job'
+    })
+    return 'terminated'
   } catch {
     return 'unavailable'
   }

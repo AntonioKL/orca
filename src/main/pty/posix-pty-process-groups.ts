@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { recordSelfInitiatedTreeKill } from '../crash-reporting/self-initiated-tree-kill-log'
 
 const PROCESS_TABLE_TIMEOUT_MS = 1_000
 const PROCESS_TABLE_MAX_BYTES = 1024 * 1024
@@ -116,6 +117,11 @@ export function forceKillPosixPtyProcessGroups(
   for (const pgid of groups) {
     try {
       signalProcessGroup(pgid)
+      recordSelfInitiatedTreeKill({
+        pid: pgid,
+        site: 'posix-pty-process-group-sweep',
+        scope: 'posix-process-group'
+      })
     } catch (error) {
       // Why: the PTY exit callback may reap a group between `ps` and killpg.
       // ESRCH is proof that this captured owner is already gone, not failure.

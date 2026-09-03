@@ -151,7 +151,7 @@ async function terminateOnce(
   }
   if ((deps.platform ?? process.platform) === 'win32') {
     const terminate = deps.terminateWindowsTree ?? terminateWindowsProcessTree
-    await terminate(rootPid)
+    await terminate(rootPid, { site: 'codex-app-server-teardown' })
     // taskkill owns the tree; this preserves the prior direct-child fallback when it fails.
     child.kill('SIGKILL')
     return true
