@@ -30,7 +30,10 @@ export function readWorktreeUsesWslPath(
   worktreeId: string
 ): boolean {
   return worktreeUsesWslPath(
-    { folderWorkspaces: state.folderWorkspaces ?? [], worktreesByRepo: state.worktreesByRepo ?? {} },
+    {
+      folderWorkspaces: state.folderWorkspaces ?? [],
+      worktreesByRepo: state.worktreesByRepo ?? {}
+    },
     worktreeId
   )
 }
@@ -38,4 +41,15 @@ export function readWorktreeUsesWslPath(
 /** Workspace half, for a creation flow whose workspace has no store entry yet. */
 export function pathUsesWslUnc(path: string | null | undefined): boolean {
   return path ? isWslUncPath(path) : false
+}
+
+/** Both halves at once, so a store-backed call site adds one line, not two. */
+export function readWindowsStructuredGateInputs(
+  state: Partial<Pick<AppState, 'folderWorkspaces' | 'worktreesByRepo'>>,
+  worktreeId: string
+): { windowsProcessStartTime: WindowsProcessStartTimeGate; worktreeUsesWslPath: boolean } {
+  return {
+    windowsProcessStartTime: readWindowsProcessStartTimeGate(),
+    worktreeUsesWslPath: readWorktreeUsesWslPath(state, worktreeId)
+  }
 }

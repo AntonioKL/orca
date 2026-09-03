@@ -1,9 +1,6 @@
 import { useAppStore } from '@/store'
 import type { AgentStartupPlan } from '@/lib/tui-agent-startup'
-import {
-  readWindowsProcessStartTimeGate,
-  readWorktreeUsesWslPath
-} from '@/lib/agent-launch-routing-windows-gate'
+import { readWindowsStructuredGateInputs } from '@/lib/agent-launch-routing-windows-gate'
 import { planLaunchAgentStartupPrompt } from '@/lib/launch-agent-startup-prompt-plan'
 import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 import { getAgentLaunchPlatformForRepo } from '@/lib/agent-launch-platform'
@@ -218,8 +215,7 @@ function launchAgentInNewTabInternal(
         executionHostId: getExecutionHostIdForWorktree(store, worktreeId),
         platform: CLIENT_PLATFORM,
         hostCapabilities: readLocalRuntimeCapabilities(),
-        windowsProcessStartTime: readWindowsProcessStartTimeGate(),
-        worktreeUsesWslPath: readWorktreeUsesWslPath(store, worktreeId),
+        ...readWindowsStructuredGateInputs(store, worktreeId),
         workspaceKind,
         projectRuntime: getLocalProjectExecutionRuntimeContext(store, worktreeId),
         promptDelivery: viewModePromptDelivery,
