@@ -14,12 +14,16 @@ locals {
   create_staging_relay_deploy_identity = (
     local.relay_create_github_deploy_identity && var.environment == "staging"
   )
-  github_staging_relay_deploy_workflow_refs = [
-    "${local.relay_github_repository}/.github/workflows/bootstrap-relay-staging-capacity.yml@refs/heads/main",
-    "${local.relay_github_repository}/.github/workflows/deploy-relay-staging-gce-candidate.yml@refs/heads/main",
-    "${local.relay_github_repository}/.github/workflows/deploy-relay-staging.yml@refs/heads/main",
-    "${local.relay_github_repository}/.github/workflows/operate-relay-asia-admission.yml@refs/heads/main",
-    "${local.relay_github_repository}/.github/workflows/power-relay-staging.yml@refs/heads/main"
+  github_staging_relay_deploy_workflow_files = [
+    "bootstrap-relay-staging-capacity.yml",
+    "deploy-relay-staging-gce-candidate.yml",
+    "deploy-relay-staging.yml",
+    "operate-relay-asia-admission.yml",
+    "power-relay-staging.yml"
+  ]
+  github_staging_relay_deploy_workflow_clauses = [
+    for prefix in local.relay_github_workflow_ref_prefixes :
+    "(${join(" || ", [for workflow_file in local.github_staging_relay_deploy_workflow_files : "assertion.workflow_ref == '${prefix}${workflow_file}@refs/heads/main'"])})"
   ]
   # Apps-owned account the shared staging power workflow scales to zero alongside the director.
   staging_auth_runtime_service_account_email = "${var.name_prefix}-auth@${var.project_id}.iam.gserviceaccount.com"
@@ -55,10 +59,10 @@ resource "google_iam_workload_identity_pool_provider" "github_staging_relay_depl
 
   # An allowlist of exact workflow refs, never a prefix: a namespace grant would hand this account
   # to any future staging workflow with no Terraform diff.
-  attribute_condition = join(" && ", concat(local.relay_github_repository_claims, [
+  attribute_condition = join(" && ", concat(local.relay_github_leading_repository_claims, [
     "assertion.ref == 'refs/heads/main'",
     "assertion.environment == 'staging'",
-    "(${join(" || ", [for workflow_ref in local.github_staging_relay_deploy_workflow_refs : "assertion.workflow_ref == '${workflow_ref}'"])})"
+    local.relay_github_workflow_conditions["github_staging_relay_deploy"]
   ]))
 
   oidc {

@@ -129,7 +129,7 @@ test('recovers a failed or cancelled C4 refresh from an independent workflow', (
   assert.ok(preflightAuth < preflight && preflight < recoveryPlan && recoveryPlan < apply)
   assert.ok(apply < restore)
   assert.ok(restore < verifyAuth && verifyAuth < verify)
-  assert.match(githubActions, /recover-relay-staging-c4-image\.yml@refs\/heads\/main/)
+  assert.match(githubActions, /"recover-relay-staging-c4-image\.yml"/)
 })
 
 test('requeues a protected C4 recovery cancelled while pending', () => {

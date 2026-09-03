@@ -2,9 +2,11 @@ locals {
   create_relay_asia_proof_identity = (
     local.relay_create_github_deploy_identity && var.environment == "staging"
   )
-  github_relay_asia_proof_workflow_ref = (
-    "${local.relay_github_repository}/.github/workflows/prove-relay-asia-staging.yml@refs/heads/main"
-  )
+  github_relay_asia_proof_workflow_file = "prove-relay-asia-staging.yml"
+  github_relay_asia_proof_workflow_clauses = [
+    for prefix in local.relay_github_workflow_ref_prefixes :
+    "assertion.workflow_ref == '${prefix}${local.github_relay_asia_proof_workflow_file}@refs/heads/main'"
+  ]
   relay_asia_proof_service_account_email = try(
     google_service_account.github_relay_asia_proof[0].email,
     ""
@@ -31,11 +33,11 @@ resource "google_iam_workload_identity_pool_provider" "github_relay_asia_proof" 
     "attribute.relay_ops_identity"  = "'staging-asia-proof'"
   }
 
-  attribute_condition = join(" && ", concat(local.relay_github_repository_claims, [
+  attribute_condition = join(" && ", concat(local.relay_github_leading_repository_claims, [
     "assertion.ref == 'refs/heads/main'",
     "assertion.environment == 'staging'",
     "assertion.event_name == 'workflow_dispatch'",
-    "assertion.workflow_ref == '${local.github_relay_asia_proof_workflow_ref}'"
+    local.relay_github_workflow_conditions["github_relay_asia_proof"]
   ]))
 
   oidc {

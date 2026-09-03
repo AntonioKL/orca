@@ -37,6 +37,36 @@ identity (`google_service_account.github_deploy`, its provider, and its bindings
 with production-only counts; staging's copies are declared by `infra/terraform-apps`. An untargeted
 plan is orderable again; the `Plan:` line still reflects the standing cell-template drift backlog.
 
+### Dual-accept Workload Identity during the public extraction
+
+While the relay source moves to the public `stablyai/orca` repository, every relay Workload
+Identity provider accepts the same workflows from both repositories. `github_accepted_repositories`
+lists the extra repositories; `relay-github-workflow-trust.tf` renders one parenthesised OR arm per
+accepted repository, each arm carrying that repository's own `repository`, `repository_id`, and
+`repository_owner_id` claims plus its exact workflow refs. `ref`, `environment`, and `event_name`
+stay outside the OR. Workflow files keep their names in the private repo and take the
+`workflow_file_prefix` (`cloud-`) in the public one.
+
+Adding a repository is a tfvars edit: no provider block changes, and the rendered strings are
+pinned by `dev/scripts/workload-identity-attribute-conditions.test.mjs`. An empty list renders
+byte-identically to the single-repository form, which is what makes the arms reviewable against
+the pre-extraction condition.
+
+Closing the cutover is an owner step, in this order:
+
+1. Retire the private workflows, so nothing runs from `stablyai/orca-cloud` any more.
+2. Point `github_owner`, `github_repo`, `github_repo_id`, and `github_owner_id` at
+   `stablyai/orca` (`1183888342`, owner `127256420`), and set `workflow_file_prefix` for it by
+   moving the surviving entry's prefix onto the primary: the public files keep the `cloud-` names,
+   so the primary prefix becomes `cloud-` unless the files are renamed back.
+3. Empty `github_accepted_repositories` in both `environments/*.tfvars`.
+4. Re-render and update the pinned conditions, then apply. Each provider goes back to a single
+   arm, and `google_service_account_iam_member.github_accepted_repository_workload_identity_user`
+   is destroyed as the primary `attribute.repository` binding takes over.
+
+Step 2 and step 3 must land in the same apply: dropping the accepted entry before repointing the
+primary would revoke the public repository mid-flight.
+
 ### `ORCA_RELAY_IMAGE_DIGEST` is not Terraform-owned
 
 `deploy-relay-blue-green.mjs` sets `ORCA_RELAY_IMAGE_DIGEST` on the director container at deploy

@@ -57,7 +57,7 @@ test('requires exact confirmations and uses the existing admin identity', () => 
   assert.match(workflow, /CONFIGURE_ASIA_DIRECTOR/)
   assert.match(workflow, /GCP_RELAY_DEPLOY_SERVICE_ACCOUNT/)
   assert.match(workflow, /id_token_audience: \$\{\{ env\.DIRECTOR_ORIGIN \}\}\/v1\/admin\/drain/)
-  assert.match(iam, /operate-relay-asia-admission\.yml@refs\/heads\/main/)
+  assert.match(iam, /"operate-relay-asia-admission\.yml"/)
 })
 
 test('discovers generation read-only and explicitly initializes only generation zero', () => {
@@ -249,7 +249,14 @@ test('reserves rollback time beyond the complete bounded staging proof envelope'
 })
 
 test('binds the staging proof to one least-privilege Google identity', () => {
-  assert.match(proofIam, /prove-relay-asia-staging\.yml@refs\/heads\/main/)
+  assert.match(
+    proofIam,
+    /github_relay_asia_proof_workflow_file = "prove-relay-asia-staging\.yml"/
+  )
+  assert.match(
+    proofIam,
+    /assertion\.workflow_ref == '\$\{prefix\}\$\{local\.github_relay_asia_proof_workflow_file\}@refs\/heads\/main'/
+  )
   assert.match(proofIam, /assertion\.environment == 'staging'/)
   assert.match(proofIam, /assertion\.event_name == 'workflow_dispatch'/)
   assert.match(proofIam, /roles\/logging\.viewer/)

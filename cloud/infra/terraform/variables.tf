@@ -48,6 +48,40 @@ variable "github_owner_id" {
   }
 }
 
+# Additional repositories whose identical workflows the same identities must accept while the
+# public extraction runs. Each entry renders its own OR arm in every provider condition, so the
+# private repo keeps working while the public one takes over. `workflow_file_prefix` is the rename
+# the importing repository applies to the workflow files it copies. Empty is the steady state:
+# the final step of the cutover is to empty this list again and point github_owner/github_repo,
+# github_repo_id, and github_owner_id at the surviving repository.
+variable "github_accepted_repositories" {
+  type = list(object({
+    owner                = string
+    repo                 = string
+    repo_id              = string
+    owner_id             = string
+    workflow_file_prefix = string
+  }))
+  description = "Extra repositories accepted alongside github_owner/github_repo during the public extraction."
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for repository in var.github_accepted_repositories :
+      can(regex("^[0-9]+$", repository.repo_id)) && can(regex("^[0-9]+$", repository.owner_id))
+    ])
+    error_message = "github_accepted_repositories entries must carry numeric repo_id and owner_id values."
+  }
+
+  validation {
+    condition = alltrue([
+      for repository in var.github_accepted_repositories :
+      can(regex("^[a-z0-9-]*$", repository.workflow_file_prefix))
+    ])
+    error_message = "github_accepted_repositories workflow_file_prefix must be lowercase letters, digits, or hyphens."
+  }
+}
+
 variable "name_prefix" {
   type        = string
   description = "Prefix used for named resources."

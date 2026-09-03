@@ -9,29 +9,53 @@
 # relay-shared.tf, never by reference.
 
 locals {
-  github_monitor_caller_workflow_ref = "${local.relay_github_repository}/.github/workflows/monitor-relay-production.yml@refs/heads/main"
-  github_monitor_workflow_ref        = "${local.relay_github_repository}/.github/workflows/monitor-relay-production-job.yml@refs/heads/main"
-  github_fence_workflow_ref          = "${local.relay_github_repository}/.github/workflows/deploy-relay-production-multi-target.yml@refs/heads/main"
-  github_production_relay_workflow_refs = [
-    "${local.relay_github_repository}/.github/workflows/deploy-relay-fence-broker.yml@refs/heads/main",
-    "${local.relay_github_repository}/.github/workflows/deploy-relay-production-capacity.yml@refs/heads/main",
-    "${local.relay_github_repository}/.github/workflows/deploy-relay-production-director.yml@refs/heads/main",
-    "${local.relay_github_repository}/.github/workflows/deploy-relay-production-multi-target.yml@refs/heads/main",
-    "${local.relay_github_repository}/.github/workflows/deploy-relay-production.yml@refs/heads/main",
-    "${local.relay_github_repository}/.github/workflows/operate-relay-asia-admission.yml@refs/heads/main",
-    "${local.relay_github_repository}/.github/workflows/publish-relay-production.yml@refs/heads/main"
+  github_monitor_caller_workflow_file = "monitor-relay-production.yml"
+  github_monitor_workflow_file        = "monitor-relay-production-job.yml"
+  github_fence_workflow_file          = "deploy-relay-production-multi-target.yml"
+  github_production_relay_workflow_files = [
+    "deploy-relay-fence-broker.yml",
+    "deploy-relay-production-capacity.yml",
+    "deploy-relay-production-director.yml",
+    "deploy-relay-production-multi-target.yml",
+    "deploy-relay-production.yml",
+    "operate-relay-asia-admission.yml",
+    "publish-relay-production.yml"
   ]
-  github_production_relay_capacity_workflow_ref     = "${local.relay_github_repository}/.github/workflows/deploy-relay-production-capacity.yml@refs/heads/main"
-  github_production_relay_capacity_job_workflow_ref = "${local.relay_github_repository}/.github/workflows/deploy-relay-production-capacity-job.yml@refs/heads/main"
-  github_production_relay_same_cap_workflow_ref     = "${local.relay_github_repository}/.github/workflows/deploy-relay-production-same-cap.yml@refs/heads/main"
-  github_production_relay_same_cap_job_workflow_ref = "${local.relay_github_repository}/.github/workflows/deploy-relay-production-same-cap-job.yml@refs/heads/main"
-  github_production_relay_rehome_workflow_ref       = "${local.relay_github_repository}/.github/workflows/operate-relay-production-rehome.yml@refs/heads/main"
-  github_production_relay_rehome_job_workflow_ref   = "${local.relay_github_repository}/.github/workflows/operate-relay-production-rehome-job.yml@refs/heads/main"
-  github_staging_relay_capacity_workflow_refs = [
-    "${local.relay_github_repository}/.github/workflows/bootstrap-relay-staging-capacity.yml@refs/heads/main",
-    "${local.relay_github_repository}/.github/workflows/prove-relay-staging-capacity.yml@refs/heads/main",
-    "${local.relay_github_repository}/.github/workflows/recover-relay-staging-c4-image.yml@refs/heads/main"
+  github_production_relay_capacity_workflow_file     = "deploy-relay-production-capacity.yml"
+  github_production_relay_capacity_job_workflow_file = "deploy-relay-production-capacity-job.yml"
+  github_production_relay_same_cap_workflow_file     = "deploy-relay-production-same-cap.yml"
+  github_production_relay_same_cap_job_workflow_file = "deploy-relay-production-same-cap-job.yml"
+  github_production_relay_rehome_workflow_file       = "operate-relay-production-rehome.yml"
+  github_production_relay_rehome_job_workflow_file   = "operate-relay-production-rehome-job.yml"
+  github_staging_relay_capacity_workflow_files = [
+    "bootstrap-relay-staging-capacity.yml",
+    "prove-relay-staging-capacity.yml",
+    "recover-relay-staging-c4-image.yml"
   ]
+
+  # The same-cap caller admits its own jobs too: release_lease runs in the caller file and presents
+  # the caller as job_workflow_ref, so pinning only the reusable job would refuse it.
+  github_production_relay_workflow_clauses = [
+    for prefix in local.relay_github_workflow_ref_prefixes :
+    "((${join(" || ", [for workflow_file in local.github_production_relay_workflow_files : "assertion.workflow_ref == '${prefix}${workflow_file}@refs/heads/main'"])}) || (assertion.workflow_ref == '${prefix}${local.github_production_relay_rehome_workflow_file}@refs/heads/main' && assertion.job_workflow_ref == '${prefix}${local.github_production_relay_rehome_job_workflow_file}@refs/heads/main') || (assertion.workflow_ref == '${prefix}${local.github_production_relay_same_cap_workflow_file}@refs/heads/main' && (assertion.job_workflow_ref == '${prefix}${local.github_production_relay_same_cap_job_workflow_file}@refs/heads/main' || assertion.job_workflow_ref == '${prefix}${local.github_production_relay_same_cap_workflow_file}@refs/heads/main')))"
+  ]
+  github_monitor_workflow_clauses = [
+    for prefix in local.relay_github_workflow_ref_prefixes :
+    "assertion.workflow_ref == '${prefix}${local.github_monitor_caller_workflow_file}@refs/heads/main' && assertion.job_workflow_ref == '${prefix}${local.github_monitor_workflow_file}@refs/heads/main'"
+  ]
+  github_fence_workflow_clauses = [
+    for prefix in local.relay_github_workflow_ref_prefixes :
+    "assertion.workflow_ref == '${prefix}${local.github_fence_workflow_file}@refs/heads/main' && assertion.job_workflow_ref == '${prefix}${local.github_fence_workflow_file}@refs/heads/main'"
+  ]
+  github_production_relay_capacity_workflow_clauses = [
+    for prefix in local.relay_github_workflow_ref_prefixes :
+    "((assertion.workflow_ref == '${prefix}${local.github_production_relay_capacity_workflow_file}@refs/heads/main' && assertion.job_workflow_ref == '${prefix}${local.github_production_relay_capacity_job_workflow_file}@refs/heads/main') || (assertion.workflow_ref == '${prefix}${local.github_production_relay_same_cap_workflow_file}@refs/heads/main' && assertion.job_workflow_ref == '${prefix}${local.github_production_relay_same_cap_job_workflow_file}@refs/heads/main'))"
+  ]
+  github_staging_relay_capacity_workflow_clauses = [
+    for prefix in local.relay_github_workflow_ref_prefixes :
+    "(${join(" || ", [for workflow_file in local.github_staging_relay_capacity_workflow_files : "assertion.workflow_ref == '${prefix}${workflow_file}@refs/heads/main'"])})"
+  ]
+
   create_staging_relay_power_role = (
     local.relay_create_github_deploy_identity && var.environment == "staging"
   )
@@ -43,8 +67,6 @@ locals {
   )
 }
 
-# The same-cap caller admits its own jobs too: release_lease runs in the caller file and presents
-# the caller as job_workflow_ref, so pinning only the reusable job would refuse it.
 resource "google_iam_workload_identity_pool_provider" "github" {
   count = local.relay_create_production_ops_identity ? 1 : 0
 
@@ -66,10 +88,10 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 
   # Production-only, so the condition is unconditional. The staging copy of this provider is
   # declared by infra/terraform-apps/github-actions.tf and pinned there.
-  attribute_condition = join(" && ", concat(local.relay_github_repository_claims, [
+  attribute_condition = join(" && ", concat(local.relay_github_leading_repository_claims, [
     "assertion.ref == 'refs/heads/main'",
     "assertion.environment == 'production'",
-    "((${join(" || ", [for workflow_ref in local.github_production_relay_workflow_refs : "assertion.workflow_ref == '${workflow_ref}'"])}) || (assertion.workflow_ref == '${local.github_production_relay_rehome_workflow_ref}' && assertion.job_workflow_ref == '${local.github_production_relay_rehome_job_workflow_ref}') || (assertion.workflow_ref == '${local.github_production_relay_same_cap_workflow_ref}' && (assertion.job_workflow_ref == '${local.github_production_relay_same_cap_job_workflow_ref}' || assertion.job_workflow_ref == '${local.github_production_relay_same_cap_workflow_ref}')))"
+    local.relay_github_workflow_conditions["github"]
   ]))
 
   oidc {
@@ -94,11 +116,10 @@ resource "google_iam_workload_identity_pool_provider" "github_monitor" {
     "attribute.relay_ops_identity" = "'monitor'"
   }
 
-  attribute_condition = join(" && ", concat(local.relay_github_repository_claims, [
+  attribute_condition = join(" && ", concat(local.relay_github_leading_repository_claims, [
     "assertion.ref == 'refs/heads/main'",
     "assertion.environment == 'production'",
-    "assertion.workflow_ref == '${local.github_monitor_caller_workflow_ref}'",
-    "assertion.job_workflow_ref == '${local.github_monitor_workflow_ref}'"
+    local.relay_github_workflow_conditions["github_monitor"]
   ]))
 
   oidc {
@@ -123,11 +144,10 @@ resource "google_iam_workload_identity_pool_provider" "github_fence" {
     "attribute.relay_ops_identity" = "'fence'"
   }
 
-  attribute_condition = join(" && ", concat(local.relay_github_repository_claims, [
+  attribute_condition = join(" && ", concat(local.relay_github_leading_repository_claims, [
     "assertion.ref == 'refs/heads/main'",
     "assertion.environment == 'production'",
-    "assertion.workflow_ref == '${local.github_fence_workflow_ref}'",
-    "assertion.job_workflow_ref == '${local.github_fence_workflow_ref}'"
+    local.relay_github_workflow_conditions["github_fence"]
   ]))
 
   oidc {
@@ -152,10 +172,10 @@ resource "google_iam_workload_identity_pool_provider" "github_staging_relay_capa
     "attribute.relay_ops_identity" = "'staging-capacity'"
   }
 
-  attribute_condition = join(" && ", concat(local.relay_github_repository_claims, [
+  attribute_condition = join(" && ", concat(local.relay_github_leading_repository_claims, [
     "assertion.ref == 'refs/heads/main'",
     "assertion.environment == 'staging'",
-    "(${join(" || ", [for workflow_ref in local.github_staging_relay_capacity_workflow_refs : "assertion.workflow_ref == '${workflow_ref}'"])})"
+    local.relay_github_workflow_conditions["github_staging_relay_capacity"]
   ]))
 
   oidc {
@@ -181,10 +201,10 @@ resource "google_iam_workload_identity_pool_provider" "github_production_relay_c
     "attribute.relay_ops_identity" = "'production-capacity'"
   }
 
-  attribute_condition = join(" && ", concat(local.relay_github_repository_claims, [
+  attribute_condition = join(" && ", concat(local.relay_github_leading_repository_claims, [
     "assertion.ref == 'refs/heads/main'",
     "assertion.environment == 'production'",
-    "((assertion.workflow_ref == '${local.github_production_relay_capacity_workflow_ref}' && assertion.job_workflow_ref == '${local.github_production_relay_capacity_job_workflow_ref}') || (assertion.workflow_ref == '${local.github_production_relay_same_cap_workflow_ref}' && assertion.job_workflow_ref == '${local.github_production_relay_same_cap_job_workflow_ref}'))"
+    local.relay_github_workflow_conditions["github_production_relay_capacity"]
   ]))
 
   oidc {
@@ -243,6 +263,21 @@ resource "google_service_account_iam_member" "github_workload_identity_user" {
   service_account_id = google_service_account.github_deploy[0].name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${local.relay_workload_identity_pool_name}/attribute.repository/${local.relay_github_repository}"
+}
+
+# The `github` provider maps assertion.repository straight through, so the binding above admits
+# only the primary repository. Each additional accepted repository needs its own principalSet
+# before its workflows can mint this account; with an empty list this creates nothing.
+resource "google_service_account_iam_member" "github_accepted_repository_workload_identity_user" {
+  for_each = toset(
+    local.relay_create_production_ops_identity
+    ? slice(local.relay_github_accepted_repository_names, 1, length(local.relay_github_accepted_repository_names))
+    : []
+  )
+
+  service_account_id = google_service_account.github_deploy[0].name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${local.relay_workload_identity_pool_name}/attribute.repository/${each.key}"
 }
 
 resource "google_service_account_iam_member" "github_monitor_workload_identity_user" {

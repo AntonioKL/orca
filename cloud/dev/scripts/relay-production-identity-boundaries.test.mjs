@@ -107,9 +107,9 @@ test('Terraform binds dedicated identities to exact OIDC and resource boundaries
   for (const claim of ['job_workflow_ref', 'workflow_ref', 'ref', 'environment']) {
     assert.match(terraform, new RegExp(`assertion\\.${claim}`))
   }
-  assert.match(terraform, /github_monitor_workflow_ref/)
-  assert.match(terraform, /github_fence_workflow_ref/)
-  assert.match(terraform, /github_production_relay_capacity_job_workflow_ref/)
+  assert.match(terraform, /github_monitor_workflow_file/)
+  assert.match(terraform, /github_fence_workflow_file/)
+  assert.match(terraform, /github_production_relay_capacity_job_workflow_file/)
   assert.match(terraform, /google_service_account" "github_monitor"/)
   assert.match(terraform, /google_service_account" "github_fence"/)
   assert.match(terraform, /google_service_account\.github_monitor\[0\]\.member/)

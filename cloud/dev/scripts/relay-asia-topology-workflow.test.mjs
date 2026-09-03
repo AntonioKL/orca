@@ -26,7 +26,10 @@ test('uses only its exact workflow-bound topology identity', () => {
   assert.match(workflow, /RELAY_ASIA_TOPOLOGY_WORKLOAD_IDENTITY_PROVIDER/)
   assert.match(workflow, /RELAY_ASIA_TOPOLOGY_SERVICE_ACCOUNT/)
   assert.doesNotMatch(workflow, /GCP_DEPLOY_SERVICE_ACCOUNT/)
-  assert.match(iam, /assertion\.workflow_ref == '\$\{local\.github_relay_asia_topology_workflow_ref\}'/)
+  assert.match(
+    iam,
+    /assertion\.workflow_ref == '\$\{prefix\}\$\{local\.github_relay_asia_topology_workflow_file\}@refs\/heads\/main'/
+  )
   assert.match(iam, /assertion\.ref == 'refs\/heads\/main'/)
   assert.match(iam, /assertion\.event_name == 'workflow_dispatch'/)
   assert.match(iam, /assertion\.environment == '\$\{var\.environment\}'/)

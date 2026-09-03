@@ -5,6 +5,20 @@ region      = "us-central1"
 
 artifact_repository_id = "orca-cloud"
 
+# Dual accept while the relay source moves to the public stablyai/orca repository: the same
+# workflows are trusted from both repos, and the public copies carry a `cloud-` file prefix.
+# Remove this entry once the private workflows are retired and point github_owner/github_repo,
+# github_repo_id, and github_owner_id at the surviving repository.
+github_accepted_repositories = [
+  {
+    owner                = "stablyai"
+    repo                 = "orca"
+    repo_id              = "1183888342"
+    owner_id             = "127256420"
+    workflow_file_prefix = "cloud-"
+  }
+]
+
 # Our first-party auth service. auth.onorca.dev is PropelAuth's prod domain, so
 # our service lives at login.onorca.dev (desktop points ORCA_CLOUD_API_URL here).
 auth_base_url = "https://login.onorca.dev"

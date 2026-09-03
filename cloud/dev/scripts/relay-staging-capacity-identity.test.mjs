@@ -50,17 +50,27 @@ test('capacity workflow uses only its exact staging identity', () => {
   )
   // The three repository claims are pinned once in relay-shared.tf; every provider concatenates
   // that list rather than restating the repository on its own.
-  assert.match(provider, /concat\(local\.relay_github_repository_claims, \[/)
+  assert.match(provider, /concat\(local\.relay_github_leading_repository_claims, \[/)
   for (const boundary of [
     "assertion.ref == 'refs/heads/main'",
     "assertion.environment == 'staging'"
   ]) {
     assert.match(provider, new RegExp(boundary.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   }
-  assert.match(provider, /local\.github_staging_relay_capacity_workflow_refs/)
-  assert.match(terraform, /bootstrap-relay-staging-capacity\.yml@refs\/heads\/main/)
-  assert.match(terraform, /prove-relay-staging-capacity\.yml@refs\/heads\/main/)
-  assert.doesNotMatch(terraform, /github_staging_relay_capacity_workflow_ref\s*=/)
+  assert.match(provider, /local\.relay_github_workflow_conditions\["github_staging_relay_capacity"\]/)
+  assert.deepEqual(
+    terraformStringList(terraform, 'github_staging_relay_capacity_workflow_files'),
+    [
+      'bootstrap-relay-staging-capacity.yml',
+      'prove-relay-staging-capacity.yml',
+      'recover-relay-staging-c4-image.yml'
+    ]
+  )
+  assert.match(
+    terraform,
+    /for workflow_file in local\.github_staging_relay_capacity_workflow_files : "assertion\.workflow_ref == '\$\{prefix\}\$\{workflow_file\}@refs\/heads\/main'"/
+  )
+  assert.doesNotMatch(terraform, /github_staging_relay_capacity_workflow_file\s*=/)
 })
 
 test('job gates do not read environment variables before the environment is attached', () => {

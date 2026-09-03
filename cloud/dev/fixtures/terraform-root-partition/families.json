@@ -197,6 +197,7 @@
     "google_service_account.relay_director_runtime",
     "google_service_account.relay_fence_broker",
     "google_service_account.relay_runtime",
+    "google_service_account_iam_member.github_accepted_repository_workload_identity_user",
     "google_service_account_iam_member.github_fence_workload_identity_user",
     "google_service_account_iam_member.github_monitor_workload_identity_user",
     "google_service_account_iam_member.github_production_relay_capacity_runtime_user",

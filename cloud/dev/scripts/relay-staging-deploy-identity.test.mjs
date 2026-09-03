@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { readWorkflow, workflowFiles } from './cloud-sql-rollout-lock-census.mjs'
-import { relayWorkflowFile } from './relay-repository.mjs'
+import {
+  RELAY_WORKFLOW_FILE_PREFIX,
+  relayWorkflowFile,
+  relayWorkflowPath
+} from './relay-repository.mjs'
 
 const identity = readFileSync(
   new URL('../../infra/terraform/relay-staging-deploy-iam.tf', import.meta.url),
@@ -51,11 +55,11 @@ function declaredFamilies() {
     .sort()
 }
 
-function providerWorkflowRefs() {
+function providerWorkflowFiles() {
   const match = identity.match(
-    /github_staging_relay_deploy_workflow_refs\s*=\s*\[([\s\S]*?)\n {2}\]/
+    /github_staging_relay_deploy_workflow_files\s*=\s*\[([\s\S]*?)\n {2}\]/
   )
-  assert.ok(match, 'github_staging_relay_deploy_workflow_refs is missing')
+  assert.ok(match, 'github_staging_relay_deploy_workflow_files is missing')
   return [...match[1].matchAll(/"([^"]+)"/g)].map((entry) => entry[1])
 }
 
@@ -91,24 +95,26 @@ test('the Asia admission production arm keeps the production deploy pair', () =>
 })
 
 test('the provider allowlists exactly those five workflow refs', () => {
-  const refs = providerWorkflowRefs()
-  assert.deepEqual(
-    refs.map((ref) => ref.replace(/^.*\/\.github\/workflows\//, '').replace(/@.*$/, '')).sort(),
-    [...DEPLOY_WORKFLOWS].sort()
-  )
-  for (const ref of refs) {
-    assert.match(ref, /^\$\{local\.relay_github_repository\}\/\.github\/workflows\/[a-z0-9-]+\.yml@refs\/heads\/main$/)
+  const files = providerWorkflowFiles()
+  assert.deepEqual([...files].sort(), [...DEPLOY_WORKFLOWS].sort())
+  for (const file of files) {
+    assert.match(file, /^[a-z0-9-]+\.yml$/)
   }
+  // Each accepted repository turns that file list into its own exact refs.
+  assert.match(
+    identity,
+    /for workflow_file in local\.github_staging_relay_deploy_workflow_files : "assertion\.workflow_ref == '\$\{prefix\}\$\{workflow_file\}@refs\/heads\/main'"/
+  )
 
   const provider = block(
     'google_iam_workload_identity_pool_provider',
     'github_staging_relay_deploy'
   )
   assert.match(provider, /workload_identity_pool_provider_id\s*=\s*"github-relay-deploy"/)
-  assert.match(provider, /concat\(local\.relay_github_repository_claims/)
+  assert.match(provider, /concat\(local\.relay_github_leading_repository_claims/)
   assert.match(provider, /assertion\.ref == 'refs\/heads\/main'/)
   assert.match(provider, /assertion\.environment == 'staging'/)
-  assert.match(provider, /local\.github_staging_relay_deploy_workflow_refs/)
+  assert.match(provider, /local\.relay_github_workflow_conditions\["github_staging_relay_deploy"\]/)
   // A prefix match would turn the allowlist into a namespace grant with no Terraform diff.
   assert.doesNotMatch(provider, /startsWith|endsWith/)
 })
@@ -122,8 +128,8 @@ test('the rendered attribute condition stays inside the provider limit', () => {
     `assertion.repository_id == '${variableDefault('github_repo_id')}'`,
     `assertion.repository_owner_id == '${variableDefault('github_owner_id')}'`
   ]
-  const workflowRefs = providerWorkflowRefs().map((ref) =>
-    ref.replace('${local.relay_github_repository}', repository)
+  const workflowRefs = providerWorkflowFiles().map(
+    (file) => `${repository}/${relayWorkflowPath(file)}@refs/heads/main`
   )
   const rendered = [
     ...claims,
@@ -132,7 +138,9 @@ test('the rendered attribute condition stays inside the provider limit', () => {
     `(${workflowRefs.map((ref) => `assertion.workflow_ref == '${ref}'`).join(' || ')})`
   ].join(' && ')
   assert.ok(rendered.length < 4096, `rendered condition is ${rendered.length} characters`)
-  assert.equal(rendered.length, 797)
+  // 797 is the private repository's rendered length. This copy prefixes every workflow filename,
+  // which is the only difference, so the pin still moves the moment a workflow is added or dropped.
+  assert.equal(rendered.length, 797 + workflowRefs.length * RELAY_WORKFLOW_FILE_PREFIX.length)
 })
 
 // Why: the census is the point. A binding added here without a workflow step behind it, or one

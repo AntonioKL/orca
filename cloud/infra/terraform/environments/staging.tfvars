@@ -5,6 +5,20 @@ region      = "us-central1"
 
 artifact_repository_id = "orca-cloud"
 
+# Dual accept while the relay source moves to the public stablyai/orca repository: the same
+# workflows are trusted from both repos, and the public copies carry a `cloud-` file prefix.
+# Remove this entry once the private workflows are retired and point github_owner/github_repo,
+# github_repo_id, and github_owner_id at the surviving repository.
+github_accepted_repositories = [
+  {
+    owner                = "stablyai"
+    repo                 = "orca"
+    repo_id              = "1183888342"
+    owner_id             = "127256420"
+    workflow_file_prefix = "cloud-"
+  }
+]
+
 auth_base_url = "https://auth-staging.onorca.dev"
 
 relay_cloud_run_service_name          = "orca-cloud-relay-staging"

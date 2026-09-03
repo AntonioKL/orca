@@ -1,8 +1,10 @@
 locals {
-  create_relay_asia_topology_identity = local.relay_create_github_deploy_identity
-  github_relay_asia_topology_workflow_ref = (
-    "${local.relay_github_repository}/.github/workflows/deploy-relay-asia-topology.yml@refs/heads/main"
-  )
+  create_relay_asia_topology_identity      = local.relay_create_github_deploy_identity
+  github_relay_asia_topology_workflow_file = "deploy-relay-asia-topology.yml"
+  github_relay_asia_topology_workflow_clauses = [
+    for prefix in local.relay_github_workflow_ref_prefixes :
+    "assertion.workflow_ref == '${prefix}${local.github_relay_asia_topology_workflow_file}@refs/heads/main'"
+  ]
 }
 
 resource "google_iam_workload_identity_pool_provider" "github_relay_asia_topology" {
@@ -25,11 +27,11 @@ resource "google_iam_workload_identity_pool_provider" "github_relay_asia_topolog
     "attribute.relay_ops_identity"  = "'${var.environment}-asia-topology'"
   }
 
-  attribute_condition = join(" && ", concat(local.relay_github_repository_claims, [
+  attribute_condition = join(" && ", concat(local.relay_github_leading_repository_claims, [
     "assertion.ref == 'refs/heads/main'",
     "assertion.environment == '${var.environment}'",
     "assertion.event_name == 'workflow_dispatch'",
-    "assertion.workflow_ref == '${local.github_relay_asia_topology_workflow_ref}'"
+    local.relay_github_workflow_conditions["github_relay_asia_topology"]
   ]))
 
   oidc {

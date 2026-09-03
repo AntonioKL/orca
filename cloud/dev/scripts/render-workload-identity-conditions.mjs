@@ -2,8 +2,13 @@
 // Terraform would, so contract tests can pin the resulting strings without a
 // plan. Understands only the HCL subset those expressions use.
 //
-// Each root is loaded on its own. Only the relay root ships here; the apps and foundation
-// roots stay in the private repository with the services they own.
+// Each root is loaded on its own: the relay and apps roots both declare a provider named
+// `github` while the staging copy waits on its state surgery, and only separate scopes can
+// show that the two render the same string.
+//
+// Only the relay root ships in this repository. The apps root is still declared so this stays a
+// straight copy of the private original, and is skipped when its directory is absent.
+import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
 const TERRAFORM_ROOTS = {
@@ -11,15 +16,25 @@ const TERRAFORM_ROOTS = {
     directory: 'infra/terraform',
     sources: [
       'infra/terraform/relay-shared.tf',
+      'infra/terraform/relay-github-workflow-trust.tf',
       'infra/terraform/relay-github-actions.tf',
       'infra/terraform/relay-staging-deploy-iam.tf',
       'infra/terraform/relay-asia-topology-iam.tf',
       'infra/terraform/relay-asia-proof-iam.tf'
     ]
+  },
+  apps: {
+    directory: 'infra/terraform-apps',
+    sources: ['infra/terraform-apps/github-actions.tf']
   }
 }
 
-export const TERRAFORM_ROOT_NAMES = Object.keys(TERRAFORM_ROOTS)
+export function hasTerraformRoot(root) {
+  const directory = TERRAFORM_ROOTS[root]?.directory
+  return directory !== undefined && existsSync(repoFile(directory))
+}
+
+export const TERRAFORM_ROOT_NAMES = Object.keys(TERRAFORM_ROOTS).filter(hasTerraformRoot)
 
 const PROVIDER_RESOURCE = 'google_iam_workload_identity_pool_provider'
 
@@ -74,6 +89,37 @@ function endOfInterpolation(src, i) {
     cursor += 1
   }
   return { text: src.slice(i, cursor), next: cursor + 1 }
+}
+
+// Stands in for a loop variable when the collection is empty: the body still has to be parsed
+// once to find where it ends, and any attribute of the probe is another probe.
+const PROBE = new Proxy(
+  {},
+  {
+    get: (target, key) => (key === Symbol.toPrimitive ? () => '' : PROBE)
+  }
+)
+
+function readMember(value, key) {
+  if (value === PROBE) return PROBE
+  if (value === null || value === undefined) throw new Error(`cannot read ${String(key)} of ${value}`)
+  if (Array.isArray(value)) {
+    if (typeof key !== 'number') throw new Error(`list index must be a number, got ${String(key)}`)
+    if (!Number.isInteger(key) || key < 0 || key >= value.length) {
+      throw new Error(`list index ${key} is out of range`)
+    }
+    return value[key]
+  }
+  if (typeof value !== 'object') throw new Error(`cannot index ${typeof value}`)
+  if (!Object.hasOwn(value, key)) throw new Error(`unknown attribute ${String(key)}`)
+  return value[key]
+}
+
+// [key, value] pairs the way HCL iterates: list index and element, or object key and value.
+function collectionEntries(collection) {
+  if (Array.isArray(collection)) return collection.map((item, index) => [index, item])
+  if (collection && typeof collection === 'object') return Object.entries(collection)
+  throw new Error(`cannot iterate ${typeof collection}`)
 }
 
 class ExpressionParser {
@@ -140,6 +186,10 @@ class ExpressionParser {
   }
 
   parseUnary() {
+    return this.parsePostfix(this.parsePrimary())
+  }
+
+  parsePrimary() {
     if (this.eat('(')) {
       const value = this.parseTernary()
       this.expect(')')
@@ -147,12 +197,81 @@ class ExpressionParser {
     }
     if (this.peek('"')) return this.parseString()
     if (this.peek('[')) return this.parseList()
+    if (this.peek('{')) return this.parseObject()
     const number = /^[0-9]+/.exec(this.source.slice(this.index))
     if (number) {
       this.index += number[0].length
       return Number(number[0])
     }
     return this.parseIdentifier()
+  }
+
+  parsePostfix(value) {
+    let current = value
+    for (;;) {
+      if (this.eat('.')) {
+        current = readMember(current, this.readWord())
+        continue
+      }
+      if (this.peek('[')) {
+        this.index += 1
+        const key = this.parseTernary()
+        this.expect(']')
+        current = readMember(current, key)
+        continue
+      }
+      return current
+    }
+  }
+
+  // `for a in x : body` / `for a, b in x : body`, shared by list and object comprehensions.
+  parseComprehension(readBody) {
+    const names = [this.readWord()]
+    if (this.eat(',')) names.push(this.readWord())
+    this.expect('in')
+    const collection = this.parseUnary()
+    this.expect(':')
+    const bodyStart = skipTrivia(this.source, this.index)
+    const entries = collectionEntries(collection)
+    const bodyParser = ([key, item]) => {
+      const bindings = { ...this.scope.bindings }
+      if (names.length === 1) bindings[names[0]] = Array.isArray(collection) ? item : key
+      else {
+        bindings[names[0]] = key
+        bindings[names[1]] = item
+      }
+      const parser = new ExpressionParser(this.source, { ...this.scope, bindings })
+      parser.index = bodyStart
+      return parser
+    }
+    // Parse once with a probe binding to find where the body ends, because an empty
+    // collection would never parse it.
+    const probe = bodyParser(entries[0] ?? [PROBE, PROBE])
+    readBody(probe)
+    this.index = probe.index
+    return entries.map((entry) => readBody(bodyParser(entry)))
+  }
+
+  parseObject() {
+    this.expect('{')
+    if (this.eat('for')) {
+      const pairs = this.parseComprehension((parser) => {
+        const key = parser.parseTernary()
+        parser.expect('=>')
+        return [key, parser.parseTernary()]
+      })
+      this.expect('}')
+      return Object.fromEntries(pairs)
+    }
+    const object = {}
+    if (this.eat('}')) return object
+    for (;;) {
+      const key = this.peek('"') ? this.parseString() : this.readWord()
+      this.expect('=')
+      object[key] = this.parseTernary()
+      this.eat(',')
+      if (this.eat('}')) return object
+    }
   }
 
   parseString() {
@@ -182,26 +301,9 @@ class ExpressionParser {
   parseList() {
     this.expect('[')
     if (this.eat('for')) {
-      const name = this.readWord()
-      this.expect('in')
-      const collection = this.parseUnary()
-      this.expect(':')
-      const bodyStart = skipTrivia(this.source, this.index)
-      const bodyParser = (item) => {
-        const parser = new ExpressionParser(this.source, {
-          ...this.scope,
-          bindings: { ...this.scope.bindings, [name]: item }
-        })
-        parser.index = bodyStart
-        return parser
-      }
-      // Parse once with a placeholder binding to find where the body ends,
-      // because an empty collection would never parse it.
-      const probe = bodyParser('')
-      probe.parseTernary()
-      this.index = probe.index
+      const items = this.parseComprehension((parser) => parser.parseTernary())
       this.expect(']')
-      return collection.map((item) => bodyParser(item).parseTernary())
+      return items
     }
     const items = []
     if (this.eat(']')) return items
@@ -248,6 +350,13 @@ class ExpressionParser {
         break
       }
       return lists.flat()
+    }
+    if (word === 'length') {
+      this.expect('(')
+      const value = this.parseTernary()
+      this.eat(',')
+      this.expect(')')
+      return collectionEntries(value).length
     }
     if (word === 'local') {
       this.expect('.')
@@ -322,19 +431,59 @@ function collectProviderFields(source, fields) {
   }
 }
 
+// Values that are not a plain quoted string (a list of objects, say) are read with the
+// expression parser; anything it cannot evaluate is left undefined, exactly as before.
+function parseValueAt(source, index) {
+  const parser = new ExpressionParser(source, {
+    locals: new Map(),
+    variables: {},
+    bindings: {},
+    resolved: new Map(),
+    resolving: new Set()
+  })
+  parser.index = index
+  return parser.parseTernary()
+}
+
 function collectVariableDefaults(source, variables) {
   const pattern = /variable "([A-Za-z_0-9]+)" \{([\s\S]*?)\n\}/g
   let match
   while ((match = pattern.exec(source)) !== null) {
-    const fallback = /\n\s*default\s*=\s*"([^"]*)"/.exec(match[2])
-    if (fallback) variables[match[1]] = fallback[1]
+    const body = match[2]
+    const fallback = /\n\s*default\s*=\s*"([^"]*)"/.exec(body)
+    if (fallback) {
+      variables[match[1]] = fallback[1]
+      continue
+    }
+    const assignment = /\n\s*default\s*=\s*/.exec(body)
+    if (!assignment) continue
+    const start = match.index + match[0].indexOf(body) + assignment.index + assignment[0].length
+    try {
+      variables[match[1]] = parseValueAt(source, start)
+    } catch {
+      // A default this evaluator does not understand is not one any condition reads.
+    }
   }
 }
 
 function collectTfvars(source, variables) {
+  let offset = 0
   for (const line of source.split('\n')) {
-    const assignment = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"\s*$/.exec(line)
-    if (assignment) variables[assignment[1]] = assignment[2]
+    const quoted = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"\s*$/.exec(line)
+    if (quoted) {
+      variables[quoted[1]] = quoted[2]
+      offset += line.length + 1
+      continue
+    }
+    const structured = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?=[[{])/.exec(line)
+    if (structured) {
+      try {
+        variables[structured[1]] = parseValueAt(source, offset + structured[0].length)
+      } catch {
+        // Same as above: unreadable here means unread by every condition.
+      }
+    }
+    offset += line.length + 1
   }
 }
 

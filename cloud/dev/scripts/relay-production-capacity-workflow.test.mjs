@@ -344,14 +344,21 @@ test('GCE capacity identity is exact-workflow and narrowly permissioned', () => 
     'google_iam_workload_identity_pool_provider',
     'github_production_relay_capacity'
   )
-  assert.match(provider, /concat\(local\.relay_github_repository_claims, \[/)
+  assert.match(provider, /concat\(local\.relay_github_leading_repository_claims, \[/)
   for (const boundary of [
     "assertion.ref == 'refs/heads/main'",
     "assertion.environment == 'production'",
-    "assertion.workflow_ref == '${local.github_production_relay_capacity_workflow_ref}'",
-    "assertion.job_workflow_ref == '${local.github_production_relay_capacity_job_workflow_ref}'"
+    'local.relay_github_workflow_conditions["github_production_relay_capacity"]'
   ]) {
     assert.match(provider, new RegExp(boundary.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  }
+  // The workflow pair itself is pinned in the clause the provider renders, once per accepted
+  // repository, and each repository supplies its own workflow-ref head.
+  for (const boundary of [
+    "assertion.workflow_ref == '${prefix}${local.github_production_relay_capacity_workflow_file}@refs/heads/main'",
+    "assertion.job_workflow_ref == '${prefix}${local.github_production_relay_capacity_job_workflow_file}@refs/heads/main'"
+  ]) {
+    assert.match(terraform, new RegExp(boundary.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   }
   const role = resource(
     'google_project_iam_custom_role',

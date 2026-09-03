@@ -133,9 +133,11 @@ test('shared deploy WIF admits the exact same-cap reusable workflow pair and the
   const providerEnd = terraform.indexOf('\nresource "', providerStart + 1)
   const sharedProvider = terraform.slice(providerStart, providerEnd)
   assert.ok(providerStart >= 0 && providerEnd > providerStart)
+  assert.match(sharedProvider, /local\.relay_github_workflow_conditions\["github"\]/)
+  // The pairing itself now lives in the clause the provider renders, once per accepted repository.
   assert.match(
-    sharedProvider,
-    /assertion\.workflow_ref == '\$\{local\.github_production_relay_same_cap_workflow_ref\}' && \(assertion\.job_workflow_ref == '\$\{local\.github_production_relay_same_cap_job_workflow_ref\}' \|\| assertion\.job_workflow_ref == '\$\{local\.github_production_relay_same_cap_workflow_ref\}'\)/
+    terraform,
+    /assertion\.workflow_ref == '\$\{prefix\}\$\{local\.github_production_relay_same_cap_workflow_file\}@refs\/heads\/main' && \(assertion\.job_workflow_ref == '\$\{prefix\}\$\{local\.github_production_relay_same_cap_job_workflow_file\}@refs\/heads\/main' \|\| assertion\.job_workflow_ref == '\$\{prefix\}\$\{local\.github_production_relay_same_cap_workflow_file\}@refs\/heads\/main'\)/
   )
 })
 
