@@ -149,25 +149,45 @@ async function startLocalStructuredSessionTabsSync(args: {
   if (!supported) {
     return
   }
-  const handle = await window.api.runtime.subscribe(
-    { method: 'session.tabs.subscribeAll', params: {} },
-    (response) => {
-      if (args.isDisposed() || !response.ok) {
-        return
-      }
-      const event = response.result as SessionTabsEvent
-      if (event.type === 'snapshots') {
-        applyStructuredSessionTabSnapshots(event.snapshots)
-      } else if (event.type === 'snapshot' || event.type === 'updated') {
-        applyStructuredSessionTabSnapshots([event])
-      }
+  let subscriptionGeneration = 0
+  const subscribeCurrent = async (): Promise<void> => {
+    if (args.isDisposed()) {
+      return
     }
-  )
-  if (args.isDisposed()) {
-    handle.unsubscribe()
-  } else {
-    args.setUnsubscribe(handle.unsubscribe)
+    const generation = ++subscriptionGeneration
+    let handle: { unsubscribe: () => void } | null = null
+    handle = await window.api.runtime.subscribe(
+      { method: 'session.tabs.subscribeAll', params: {} },
+      (response) => {
+        if (args.isDisposed() || !response.ok) {
+          return
+        }
+        const event = response.result as SessionTabsEvent
+        if (event.type === 'snapshots') {
+          applyStructuredSessionTabSnapshots(event.snapshots)
+        } else if (event.type === 'snapshot' || event.type === 'updated') {
+          applyStructuredSessionTabSnapshots([event])
+        } else if (event.type === 'end' && generation === subscriptionGeneration) {
+          // Reattach with one refresh so a runtime-restart boundary cannot strand stale tabs.
+          subscriptionGeneration += 1
+          handle?.unsubscribe()
+          void refreshLocalStructuredSessionTabs()
+            .catch((error) => console.warn('[structured-session-tabs] resync failed', error))
+            .finally(() => {
+              if (!args.isDisposed()) {
+                void subscribeCurrent()
+              }
+            })
+        }
+      }
+    )
+    if (args.isDisposed() || generation !== subscriptionGeneration) {
+      handle.unsubscribe()
+    } else {
+      args.setUnsubscribe(handle.unsubscribe)
+    }
   }
+  await subscribeCurrent()
 }
 
 export function useLocalStructuredSessionTabsSync(): void {

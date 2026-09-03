@@ -193,6 +193,25 @@ describe('local structured session tab projection', () => {
     )
   })
 
+  it('survives repeated create-close cycles under one publisher generation', () => {
+    let state = createSnapshot()
+    let version = 10
+    for (const sessionId of ['session-1', 'session-2', 'session-3']) {
+      state = applyLocalStructuredSessionTabSnapshots(state, [
+        structuredInventory('renderer:generation-1', version++, sessionId)
+      ])
+      expect(state.unifiedTabsByWorktree[WORKTREE_ID]).toEqual(
+        expect.arrayContaining([expect.objectContaining({ entityId: sessionId })])
+      )
+
+      const closed = structuredInventory('renderer:generation-1', version++, sessionId)
+      state = applyLocalStructuredSessionTabSnapshots(state, [{ ...closed, tabs: [] }])
+      expect(state.unifiedTabsByWorktree[WORKTREE_ID]).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ contentType: 'agent-session' })])
+      )
+    }
+  })
+
   it('drops terminal topology while retaining structured tabs', () => {
     const snapshot = {
       worktree: 'workspace-1',
