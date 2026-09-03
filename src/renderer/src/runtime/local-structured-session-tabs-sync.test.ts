@@ -218,7 +218,7 @@ describe('local structured session tab projection', () => {
     const owner = {
       id: WORKTREE_ID,
       repoId: 'repo-1',
-      hostId: null,
+      hostId: undefined,
       runtimeOwnerEnvironmentId: null
     }
     let state = {
