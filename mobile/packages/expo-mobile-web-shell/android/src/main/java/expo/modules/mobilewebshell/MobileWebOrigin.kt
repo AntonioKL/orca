@@ -1,29 +1,35 @@
 package expo.modules.mobilewebshell
 
 import android.net.Uri
+import java.security.MessageDigest
 
 private const val MOBILE_WEB_ORIGIN_SUFFIX = ".orca-mobile-web.invalid"
-private const val MOBILE_WEB_ORIGIN_LABEL_LIMIT = 32
+private const val MOBILE_WEB_ORIGIN_LABEL_LENGTH = 32
 
 /**
  * Derives a per-session origin so WebView cookies/storage cannot cross hosts.
  *
- * The id's prefix *is* the host label, so it must already be a canonical hostname label: `https` is
- * a special scheme, so Chromium ASCII-lowercases the host of every URL it loads and reports back,
- * and `java.net.URI.getHost()` returns null for a label holding anything outside `[a-z0-9-]`.
- * Rejecting a non-canonical id here fails the session open loudly instead of leaving every asset
- * request to 403 behind Chromium's own error page.
+ * The label is hashed rather than sliced off the session id: the bridge contract pins session ids
+ * to base64url, which a URL host cannot carry. `https` is a special scheme, so Chromium
+ * ASCII-lowercases every host it loads and reports back, and `java.net.URI.getHost()` is null for a
+ * label holding `_`. Lowercase hex is canonical under both.
  */
 internal fun mobileWebOriginForSession(sessionId: String): String {
   require(
     sessionId.isNotEmpty() &&
       sessionId.length <= 128 &&
-      sessionId.all { it in 'a'..'z' || it in '0'..'9' }
+      sessionId.all { it.isLetterOrDigit() || it == '-' || it == '_' }
   ) {
     "mobile_web_session_id_invalid"
   }
-  return "$MOBILE_WEB_ORIGIN_SCHEME://${sessionId.take(MOBILE_WEB_ORIGIN_LABEL_LIMIT)}$MOBILE_WEB_ORIGIN_SUFFIX"
+  return "$MOBILE_WEB_ORIGIN_SCHEME://${mobileWebOriginLabelForSession(sessionId)}$MOBILE_WEB_ORIGIN_SUFFIX"
 }
+
+private fun mobileWebOriginLabelForSession(sessionId: String): String =
+  MessageDigest.getInstance("SHA-256")
+    .digest(sessionId.toByteArray(Charsets.UTF_8))
+    .joinToString("") { "%02x".format(it) }
+    .take(MOBILE_WEB_ORIGIN_LABEL_LENGTH)
 
 internal fun mobileWebOriginUriForSession(sessionId: String): Uri = Uri.parse(mobileWebOriginForSession(sessionId))
 

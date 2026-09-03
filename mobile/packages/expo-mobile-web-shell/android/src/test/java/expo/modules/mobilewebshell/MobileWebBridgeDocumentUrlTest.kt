@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MobileWebBridgeDocumentUrlTest {
-  private val sessionId = "s5i5ifxeticyxgmyvxhtvzktwwbo5o7h5uzaapc0w"
+  private val sessionId = "S5i5IfxeTICYxGmyVxhTvzKTWWBO5O7H5-UZaA-Pc0"
   private val origin = mobileWebOriginForSession(sessionId)
 
   @Test
@@ -39,7 +39,7 @@ class MobileWebBridgeDocumentUrlTest {
       "$origin:443/#$sessionId",
       "https://orca-mobile-web.invalid.evil.test/#$sessionId",
       "$origin/",
-      "${mobileWebOriginForSession("t".repeat(43))}/#$sessionId",
+      "${mobileWebOriginForSession("T".repeat(43))}/#$sessionId",
       "$origin/${"a".repeat(8 * 1024)}#$sessionId",
       "not a url"
     )
