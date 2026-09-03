@@ -1,6 +1,7 @@
 import { accessSync, constants, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
+import { getSystemCliInstallDirectories } from './system-cli-install-dirs'
 
 type ResolveCommandOptions = {
   pathEnv?: string | null
@@ -267,7 +268,10 @@ export function resolveCliCommand(
     nvmCandidate ??
     findFirstExecutable(
       platform,
-      getBaseVersionManagerDirectories(platform, homePath),
+      [
+        ...getBaseVersionManagerDirectories(platform, homePath),
+        ...getSystemCliInstallDirectories(platform, homePath)
+      ],
       executableNames
     )
   return versionManagerCandidate ?? commandName
@@ -283,7 +287,8 @@ export function resolveCliCommands(
   const homePath = options.homePath ?? homedir()
   const installDirectories = [
     ...getNvmVersionDirectories(homePath),
-    ...getBaseVersionManagerDirectories(platform, homePath)
+    ...getBaseVersionManagerDirectories(platform, homePath),
+    ...getSystemCliInstallDirectories(platform, homePath)
   ]
   const resolved = new Map<string, string>()
 
