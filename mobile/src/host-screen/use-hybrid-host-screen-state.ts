@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import type { ExecutionHostId } from '../../../src/shared/execution-host'
 import type { RepoIcon } from '../../../src/shared/repo-icon'
 import type { WorkspaceStatusDefinition } from '../../../src/shared/worktree/types'
 import { createInitialHostRouteActionState } from '../host-route-action-state'
@@ -34,6 +35,14 @@ export function useHybridHostScreenState(
   const [repoColorsByName, setRepoColorsByName] = useState<Map<string, string>>(new Map())
   const [repoIconsByName, setRepoIconsByName] = useState<Map<string, RepoIcon>>(new Map())
   const [repoIdsByName, setRepoIdsByName] = useState<Map<string, string>>(new Map())
+  // Why: mirrors the native host screen's host-label inputs so HostScreenView sees one state shape.
+  // The hosted bridge does not publish repo→host or host labels yet, so these stay empty (see
+  // use-hybrid-host-repo-metadata) and rows keep the single-host presentation.
+  const [repoHostIdByRepoId, setRepoHostIdByRepoId] = useState<Map<string, ExecutionHostId>>(
+    new Map()
+  )
+  const [hostLabelById, setHostLabelById] = useState<Map<ExecutionHostId, string>>(new Map())
+  const [hostPlatform, setHostPlatform] = useState<NodeJS.Platform | null>(null)
   const [hostName, setHostName] = useState('')
   const [hostPublicKey, setHostPublicKey] = useState('')
   const [error, setError] = useState('')
@@ -86,7 +95,9 @@ export function useHybridHostScreenState(
     fetchWorktreesInFlightRef,
     filters,
     groupMode,
+    hostLabelById,
     hostName,
+    hostPlatform,
     hostPublicKey,
     lastKnownWorktrees,
     newWorktreeModalRef,
@@ -94,6 +105,7 @@ export function useHybridHostScreenState(
     optimisticActiveWorktreeIdentity,
     pinnedIds,
     repoColorsByName,
+    repoHostIdByRepoId,
     repoIconsByName,
     repoIdsByName,
     repoMetadataFetchedAtRef,
@@ -107,12 +119,15 @@ export function useHybridHostScreenState(
     setError,
     setFilters,
     setGroupMode,
+    setHostLabelById,
     setHostName,
+    setHostPlatform,
     setHostPublicKey,
     setLastKnownWorktrees,
     setOptimisticActiveWorktreeIdentity,
     setPinnedIds,
     setRepoColorsByName,
+    setRepoHostIdByRepoId,
     setRepoIconsByName,
     setRepoIdsByName,
     setRouteActionState,

@@ -10,6 +10,7 @@ import {
 import { useMobileWebRouteParams } from '../mobile-web/use-mobile-web-route-params'
 import { useResponsiveLayout } from '../layout/responsive-layout'
 import { applyWorktreeRowDisplayState } from '../worktree/worktree-host-row-identity'
+import { applyWorktreeHostContextLabels } from '../worktree/worktree-host-context-labels'
 import { useWorkspaceSections } from '../worktree/use-workspace-sections'
 import { resolveHostRouteActionState } from '../host-route-action-state'
 import { visibleHostRouteNotice } from '../host-route-notice'
@@ -98,6 +99,9 @@ export function useHybridHostScreenController(props: HybridHostScreenProps = {})
     state.setCatalogError(null)
     state.setRepoColorsByName(new Map())
     state.setRepoIconsByName(new Map())
+    state.setRepoHostIdByRepoId(new Map())
+    state.setHostLabelById(new Map())
+    state.setHostPlatform(null)
     state.repoMetadataFetchedAtRef.current = 0
     const fresh = hostId ? hostState.cachedWorkspaces(hostId) : null
     if (fresh) {
@@ -168,17 +172,27 @@ export function useHybridHostScreenController(props: HybridHostScreenProps = {})
   }
   const displayWorktrees = useMemo(
     () =>
-      applyWorktreeRowDisplayState(
-        connState === 'connected' ? state.worktrees : state.lastKnownWorktrees,
-        state.sleptIds,
-        state.optimisticActiveWorktreeIdentity
+      applyWorktreeHostContextLabels(
+        applyWorktreeRowDisplayState(
+          connState === 'connected' ? state.worktrees : state.lastKnownWorktrees,
+          state.sleptIds,
+          state.optimisticActiveWorktreeIdentity
+        ),
+        {
+          repoHostIdByRepoId: state.repoHostIdByRepoId,
+          hostLabelById: state.hostLabelById,
+          hostPlatform: state.hostPlatform
+        }
       ),
     [
       connState,
       state.worktrees,
       state.lastKnownWorktrees,
       state.sleptIds,
-      state.optimisticActiveWorktreeIdentity
+      state.optimisticActiveWorktreeIdentity,
+      state.repoHostIdByRepoId,
+      state.hostLabelById,
+      state.hostPlatform
     ]
   )
   const sectionsResult = useWorkspaceSections({
