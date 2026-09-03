@@ -195,7 +195,9 @@ export function samplePreGoneProcessMetrics(nowMs: number = Date.now()): void {
   try {
     const metrics = app.getAppMetrics()
     preGoneSample = {
-      details: collectProcessGoneMetricDetails(metrics),
+      // Why: the gone-time system read happens after the corpse released its
+      // pages, so only a live sample can show the pressure that refused the alloc.
+      details: { ...collectProcessGoneMetricDetails(metrics), ...getSystemMemoryAtGoneDetails() },
       processes: sampledProcessIdentities(metrics),
       sampledAtMs: nowMs
     }
@@ -225,6 +227,15 @@ export function resetPreGoneProcessMetricsSamplingForTest(): void {
 
 const PROCESS_METRICS_KEY_PREFIX = 'processMetrics'
 
+// Why: the sample now mixes processMetrics* and systemMemory* keys; only the
+// former carries the prefix to strip, the latter just needs title-casing.
+function preGoneDetailKey(key: string): string {
+  const suffix = key.startsWith(PROCESS_METRICS_KEY_PREFIX)
+    ? key.slice(PROCESS_METRICS_KEY_PREFIX.length)
+    : `${key.charAt(0).toUpperCase()}${key.slice(1)}`
+  return `${PROCESS_METRICS_KEY_PREFIX}PreGone${suffix}`
+}
+
 function preGoneSampleDetails(
   sample: PreGoneProcessMetricsSample,
   nowMs: number
@@ -236,8 +247,7 @@ function preGoneSampleDetails(
     processMetricsPreGoneCrashedProcessAttributionAmbiguous: true
   }
   for (const [key, value] of Object.entries(sample.details)) {
-    details[`${PROCESS_METRICS_KEY_PREFIX}PreGone${key.slice(PROCESS_METRICS_KEY_PREFIX.length)}`] =
-      value
+    details[preGoneDetailKey(key)] = value
   }
   return details
 }
