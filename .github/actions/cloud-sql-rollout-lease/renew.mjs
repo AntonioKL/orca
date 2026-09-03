@@ -13,7 +13,9 @@ const logPath = renewerLogPath()
 const startedAt = Date.now()
 
 function log(message) {
-  if (!logPath) return
+  if (!logPath) {
+    return
+  }
   try {
     appendFileSync(logPath, `${new Date().toISOString()} ${message}\n`)
   } catch {
@@ -48,7 +50,9 @@ while (!stopping) {
   await new Promise((resolve) => {
     setTimeout(resolve, RENEW_INTERVAL_MS)
   })
-  if (stopping) break
+  if (stopping) {
+    break
+  }
   if (Date.now() - startedAt > MAX_LIFETIME_MS) {
     log('renewer hit its maximum lifetime; stopping so the lease can expire')
     break
@@ -59,7 +63,9 @@ while (!stopping) {
       log(`lease is no longer ours (${result.reason}); stopping`)
       break
     }
-    log(`renewed until ${new Date(result.record.expires_at).toISOString()} at generation ${result.generation}`)
+    log(
+      `renewed until ${new Date(result.record.expires_at).toISOString()} at generation ${result.generation}`
+    )
   } catch (error) {
     // Transient GCS or token failures are retried on the next tick; the TTL covers 7 misses.
     log(`renewal attempt failed: ${error.message}`)

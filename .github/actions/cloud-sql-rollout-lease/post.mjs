@@ -48,25 +48,33 @@ try {
 
 function stopRenewer() {
   const pid = Number(savedState('renewer_pid'))
-  if (!Number.isInteger(pid) || pid <= 0) return
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return
+  }
   try {
     process.kill(pid, 'SIGTERM')
     notice(`Stopped the lease renewer (pid ${pid}).`)
   } catch (error) {
-    if (error?.code !== 'ESRCH') warn(`could not stop the lease renewer ${pid}: ${error.message}`)
+    if (error?.code !== 'ESRCH') {
+      warn(`could not stop the lease renewer ${pid}: ${error.message}`)
+    }
   }
 }
 
 function printRenewerLog() {
   const path = renewerLogPath()
-  if (!path) return
+  if (!path) {
+    return
+  }
   let text = ''
   try {
     text = readFileSync(path, 'utf8')
   } catch {
     return
   }
-  if (!text.trim()) return
+  if (!text.trim()) {
+    return
+  }
   console.log('::group::Cloud SQL rollout lease renewer log')
   console.log(text.trimEnd())
   console.log('::endgroup::')

@@ -24,24 +24,36 @@ function fakeStorage({ object = null, faults = [] } = {}) {
     const record = { method, url, path: url.pathname, search: url.searchParams }
     state.requests.push(record)
     const fault = faults.find((candidate) => candidate.when(record))
-    if (fault) return json(fault.status, fault.body ?? {})
+    if (fault) {
+      return json(fault.status, fault.body ?? {})
+    }
 
     if (url.pathname.startsWith('/upload/')) {
       const want = url.searchParams.get('ifGenerationMatch')
       const have = state.object ? state.object.generation : '0'
-      if (want !== have) return json(412, {})
+      if (want !== have) {
+        return json(412, {})
+      }
       const generation = String(Number(have === '0' ? '1000' : have) + 1)
       state.object = { generation, body: JSON.parse(init.body) }
       return json(200, { generation })
     }
     if (method === 'DELETE') {
-      if (!state.object) return json(404, {})
-      if (url.searchParams.get('ifGenerationMatch') !== state.object.generation) return json(412, {})
+      if (!state.object) {
+        return json(404, {})
+      }
+      if (url.searchParams.get('ifGenerationMatch') !== state.object.generation) {
+        return json(412, {})
+      }
       state.object = null
       return json(204, {})
     }
-    if (!state.object) return json(404, {})
-    if (url.searchParams.get('alt') === 'media') return json(200, state.object.body)
+    if (!state.object) {
+      return json(404, {})
+    }
+    if (url.searchParams.get('alt') === 'media') {
+      return json(200, state.object.body)
+    }
     return json(200, { generation: state.object.generation })
   }
   return { state, fetcher }
@@ -55,7 +67,12 @@ function json(status, body) {
   }
 }
 
-function storedRecord({ holderKey, expiresAt, repository = 'stablyai/orca', workflow = 'Deploy Relay Production' }) {
+function storedRecord({
+  holderKey,
+  expiresAt,
+  repository = 'stablyai/orca',
+  workflow = 'Deploy Relay Production'
+}) {
   return {
     repository,
     workflow,
@@ -139,7 +156,9 @@ test('re-enters a live lease this run already holds and extends it', async () =>
     }
   })
   const warnings = []
-  const claim = await leaseFor(storage, { warn: (message) => warnings.push(message) }).acquire(HOLDER)
+  const claim = await leaseFor(storage, { warn: (message) => warnings.push(message) }).acquire(
+    HOLDER
+  )
 
   assert.equal(claim.state, 'reentrant')
   assert.deepEqual(warnings, [], 're-entering our own lease is not a takeover')
@@ -163,7 +182,9 @@ test('takes over an expired lease and warns naming the stale holder', async () =
     }
   })
   const warnings = []
-  const claim = await leaseFor(storage, { warn: (message) => warnings.push(message) }).acquire(HOLDER)
+  const claim = await leaseFor(storage, { warn: (message) => warnings.push(message) }).acquire(
+    HOLDER
+  )
 
   assert.equal(claim.state, 'takeover')
   assert.equal(warnings.length, 1)

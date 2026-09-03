@@ -40,9 +40,13 @@ export function fail(message) {
 
 function appendToEnvFile(variable, name, value) {
   const text = String(value)
-  if (/[\r\n]/.test(text)) throw new Error(`${name} must be single-line`)
+  if (/[\r\n]/.test(text)) {
+    throw new Error(`${name} must be single-line`)
+  }
   const path = process.env[variable]
-  if (!path) return // Running outside a runner (local smoke run); nothing to persist.
+  if (!path) {
+    return
+  } // Running outside a runner (local smoke run); nothing to persist.
   appendFileSync(path, `${name}=${text}\n`)
 }
 

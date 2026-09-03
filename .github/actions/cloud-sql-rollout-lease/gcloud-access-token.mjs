@@ -18,9 +18,13 @@ const TOKEN_REUSE_MS = 40 * 60 * 1_000 // GCP access tokens live ~60 min; re-min
 export function createAccessTokenSource({ run = runGcloud, now = Date.now } = {}) {
   let cached = null
   return () => {
-    if (cached && cached.mintedAt + TOKEN_REUSE_MS > now()) return cached.token
+    if (cached && cached.mintedAt + TOKEN_REUSE_MS > now()) {
+      return cached.token
+    }
     const token = run()
-    if (!token) throw new Error('gcloud auth print-access-token returned an empty token')
+    if (!token) {
+      throw new Error('gcloud auth print-access-token returned an empty token')
+    }
     cached = { token, mintedAt: now() }
     return token
   }

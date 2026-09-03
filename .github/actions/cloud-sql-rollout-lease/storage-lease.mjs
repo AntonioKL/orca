@@ -28,9 +28,15 @@ export class LeaseUnreadable extends Error {
 }
 
 function parseRecord(raw) {
-  if (!raw || typeof raw !== 'object') return null
-  if (typeof raw.holder_key !== 'string' || raw.holder_key.length === 0) return null
-  if (!Number.isSafeInteger(raw.acquired_at) || !Number.isSafeInteger(raw.expires_at)) return null
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+  if (typeof raw.holder_key !== 'string' || raw.holder_key.length === 0) {
+    return null
+  }
+  if (!Number.isSafeInteger(raw.acquired_at) || !Number.isSafeInteger(raw.expires_at)) {
+    return null
+  }
   return {
     repository: typeof raw.repository === 'string' ? raw.repository : 'unknown',
     workflow: typeof raw.workflow === 'string' ? raw.workflow : 'unknown',
@@ -78,7 +84,9 @@ export class CloudSqlRolloutLease {
   async acquire(holder) {
     const existing = await this.read()
     const now = this.#now()
-    if (!existing) return this.#claim(holder, '0', now, now, 'created')
+    if (!existing) {
+      return this.#claim(holder, '0', now, now, 'created')
+    }
     if (existing.record.holder_key === holder.holderKey) {
       // Same run, another job in the wave chain. Refresh, never fail.
       return this.#claim(
@@ -104,8 +112,12 @@ export class CloudSqlRolloutLease {
 
   async renew(holderKey) {
     const existing = await this.read()
-    if (!existing) return { renewed: false, reason: 'absent' }
-    if (existing.record.holder_key !== holderKey) return { renewed: false, reason: 'foreign' }
+    if (!existing) {
+      return { renewed: false, reason: 'absent' }
+    }
+    if (existing.record.holder_key !== holderKey) {
+      return { renewed: false, reason: 'foreign' }
+    }
     const now = this.#now()
     const record = { ...existing.record, expires_at: now + LEASE_TTL_MS }
     const written = await this.#write(record, existing.generation)
@@ -114,7 +126,9 @@ export class CloudSqlRolloutLease {
 
   async release(holderKey) {
     const existing = await this.read()
-    if (!existing) return { released: false, reason: 'absent' }
+    if (!existing) {
+      return { released: false, reason: 'absent' }
+    }
     if (existing.record.holder_key !== holderKey) {
       return { released: false, reason: 'foreign', holder: existing.record }
     }
@@ -122,7 +136,9 @@ export class CloudSqlRolloutLease {
       `${this.#metadataUrl()}?ifGenerationMatch=${encodeURIComponent(existing.generation)}`,
       { method: 'DELETE', headers: { Authorization: `Bearer ${await this.#token()}` } }
     )
-    if (response.status === 412) return { released: false, reason: 'conflict' }
+    if (response.status === 412) {
+      return { released: false, reason: 'conflict' }
+    }
     if (!response.ok && response.status !== 404) {
       throw new Error(`lease release failed: ${response.status}`)
     }
@@ -134,7 +150,9 @@ export class CloudSqlRolloutLease {
     const metadataResponse = await this.#fetcher(this.#metadataUrl(), {
       headers: { Authorization: `Bearer ${token}` }
     })
-    if (metadataResponse.status === 404) return null
+    if (metadataResponse.status === 404) {
+      return null
+    }
     if (!metadataResponse.ok) {
       throw new Error(`lease inspection failed: ${metadataResponse.status}`)
     }
@@ -145,7 +163,9 @@ export class CloudSqlRolloutLease {
     const bodyResponse = await this.#fetcher(`${this.#metadataUrl()}?alt=media`, {
       headers: { Authorization: `Bearer ${token}` }
     })
-    if (bodyResponse.status === 404) return null
+    if (bodyResponse.status === 404) {
+      return null
+    }
     if (!bodyResponse.ok) {
       throw new Error(`lease body read failed: ${bodyResponse.status}`)
     }
@@ -194,7 +214,9 @@ export class CloudSqlRolloutLease {
     if (response.status === 412) {
       throw new LeaseConflict(`${this.uri} changed concurrently while we were claiming it`)
     }
-    if (!response.ok) throw new Error(`lease write failed: ${response.status}`)
+    if (!response.ok) {
+      throw new Error(`lease write failed: ${response.status}`)
+    }
     const metadata = await response.json()
     if (!GENERATION.test(metadata?.generation ?? '')) {
       throw new LeaseUnreadable(`${this.uri} write returned no valid generation`)

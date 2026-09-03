@@ -37,8 +37,8 @@ in the first cell job.
 
 Buckets and objects in use:
 
-| Environment | Bucket                              | Object                                            |
-| ----------- | ----------------------------------- | ------------------------------------------------- |
+| Environment | Bucket                                 | Object                                              |
+| ----------- | -------------------------------------- | --------------------------------------------------- |
 | production  | `onorca-cloud-terraform-state`         | `terraform/state/cloud-sql-rollout/production.lock` |
 | staging     | `onorca-cloud-staging-terraform-state` | `terraform/state/cloud-sql-rollout/staging.lock`    |
 
@@ -70,7 +70,7 @@ jobs:
   gate:
     steps:
       - uses: ./.github/actions/cloud-sql-rollout-lease
-        with: { bucket: ..., object: ..., release: 'false' }   # intermediate
+        with: { bucket: ..., object: ..., release: 'false' } # intermediate
 
   wave-1: # ... release: 'false' on every wave job
 
@@ -81,7 +81,7 @@ jobs:
       - uses: google-github-actions/auth@v2
       - uses: google-github-actions/setup-gcloud@v2
       - uses: ./.github/actions/cloud-sql-rollout-lease
-        with: { bucket: ..., object: ..., release: 'true' }    # final
+        with: { bucket: ..., object: ..., release: 'true' } # final
 ```
 
 `release: 'false'` still acquires and still runs its `post` step; `post` only skips the delete. A
@@ -104,22 +104,22 @@ If the final job never runs (runner killed, run cancelled hard), the lease expir
 
 ## Failure behaviour
 
-| Situation                          | Behaviour                                                            |
-| ---------------------------------- | -------------------------------------------------------------------- |
-| Object absent                      | Acquire with `ifGenerationMatch: 0`.                                  |
-| Live lease, our own holder key     | Re-enter. Refresh `expires_at`, keep `acquired_at`. Never fails.      |
-| Live lease, another holder         | **Fail the job immediately**, printing the holder's repository, workflow and run URL. Never queues, never steals. |
-| Expired lease                      | Take over with the observed generation and emit `::warning::` naming the stale holder. |
-| `412` on write                     | Someone raced us. Fail as a conflict.                                 |
-| Bucket unreachable, `403`, `5xx`   | **Fail closed.**                                                      |
-| Record present but unparseable     | **Fail closed.** A record we cannot read is never treated as free; an operator must inspect and delete it. |
-| Release finds a foreign holder     | Warn and leave it alone. Our lease had already expired.               |
-| Release fails                      | Warn only. `post` never fails a job over a release; the TTL bounds the damage. |
+| Situation                        | Behaviour                                                                                                         |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Object absent                    | Acquire with `ifGenerationMatch: 0`.                                                                              |
+| Live lease, our own holder key   | Re-enter. Refresh `expires_at`, keep `acquired_at`. Never fails.                                                  |
+| Live lease, another holder       | **Fail the job immediately**, printing the holder's repository, workflow and run URL. Never queues, never steals. |
+| Expired lease                    | Take over with the observed generation and emit `::warning::` naming the stale holder.                            |
+| `412` on write                   | Someone raced us. Fail as a conflict.                                                                             |
+| Bucket unreachable, `403`, `5xx` | **Fail closed.**                                                                                                  |
+| Record present but unparseable   | **Fail closed.** A record we cannot read is never treated as free; an operator must inspect and delete it.        |
+| Release finds a foreign holder   | Warn and leave it alone. Our lease had already expired.                                                           |
+| Release fails                    | Warn only. `post` never fails a job over a release; the TTL bounds the damage.                                    |
 
 ## Why `monitor-relay-production` must not use this
 
 `monitor-relay-production` is in the `production-cloud-sql-rollout` concurrency group but is
-**read-only**: its identity holds only monitoring, logging, Cloud SQL and compute *viewer* roles,
+**read-only**: its identity holds only monitoring, logging, Cloud SQL and compute _viewer_ roles,
 and it runs `gcloud sql instances describe`, never a mutation. It consumes no connection budget.
 Putting it on the durable lease would let a monitoring run block a real rollout, and a rollout block
 monitoring exactly when an operator most needs it. Keep its same-repo concurrency group; keep it off

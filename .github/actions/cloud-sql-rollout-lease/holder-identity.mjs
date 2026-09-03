@@ -6,7 +6,9 @@ export function holderIdentity(explicitHolderKey) {
   const runId = process.env.GITHUB_RUN_ID ?? 'unknown'
   const server = process.env.GITHUB_SERVER_URL ?? 'https://github.com'
   const holderKey = explicitHolderKey || `${repository}/${runId}`
-  if (/[\r\n]/.test(holderKey)) throw new Error('holder-key must be single-line')
+  if (/[\r\n]/.test(holderKey)) {
+    throw new Error('holder-key must be single-line')
+  }
   return {
     holderKey,
     repository,
