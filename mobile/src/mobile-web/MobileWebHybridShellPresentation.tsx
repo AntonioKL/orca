@@ -35,6 +35,7 @@ type MobileWebHybridShellPresentationProps = {
   onRecoveryFailure: () => void
   onBridgeMessage: (message: string) => void
   onPageLoaded: () => void
+  onLoadFailed: (reason: string | undefined) => void
   onNavigationBlocked: () => void
   onProcessTerminated: (sessionId: string) => void
 }
@@ -56,6 +57,7 @@ export function MobileWebHybridShellPresentation({
   onRecoveryFailure,
   onBridgeMessage,
   onPageLoaded,
+  onLoadFailed,
   onNavigationBlocked,
   onProcessTerminated
 }: MobileWebHybridShellPresentationProps) {
@@ -127,6 +129,10 @@ export function MobileWebHybridShellPresentation({
             onLoadState={(event) => {
               if (event.nativeEvent.state === 'loaded') {
                 onPageLoaded()
+                return
+              }
+              if (event.nativeEvent.state === 'failed') {
+                onLoadFailed(event.nativeEvent.reason)
               }
             }}
             onNavigationBlocked={onNavigationBlocked}

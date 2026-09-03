@@ -18,6 +18,7 @@ import { MobileWebHealthDeadline } from '../src/mobile-web/mobile-web-health-dea
 import { useMobileWebAlertSafePackageSession } from '../src/mobile-web/use-mobile-web-alert-safe-package-session'
 import { createMobileWebNativeCapabilityAuthority } from '../src/mobile-web/mobile-web-native-capability-authority'
 import { MobileWebHybridShellPresentation } from '../src/mobile-web/MobileWebHybridShellPresentation'
+import { mobileWebShellLoadFailureWarning } from '../src/mobile-web/mobile-web-shell-load-failure-warning'
 import { useMobileWebNavigationIntentHandoff } from '../src/mobile-web/use-mobile-web-navigation-intent-handoff'
 import { useMobileWebColdResumeRoute } from '../src/mobile-web/use-mobile-web-cold-resume-route'
 import { mobileWebBridgeConnectionState } from '../src/mobile-web/mobile-web-bridge-connection-state'
@@ -383,6 +384,10 @@ export default function HybridScreen() {
       onPageLoaded={() => {
         hardwareBackHandoff.resetPage()
         void postInit()
+      }}
+      onLoadFailed={(reason) => {
+        healthDeadlineRef.current.clear()
+        showWarning(mobileWebShellLoadFailureWarning(reason))
       }}
       onNavigationBlocked={() => showWarning('Navigation outside Orca was blocked.')}
       onProcessTerminated={(sessionId) => {

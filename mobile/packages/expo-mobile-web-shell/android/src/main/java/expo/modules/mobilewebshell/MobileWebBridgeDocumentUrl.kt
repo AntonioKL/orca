@@ -9,7 +9,7 @@ internal fun isAllowedMobileWebBridgeDocumentUrl(value: String, sessionId: Strin
     val url = URI(value)
     value.length <= MOBILE_WEB_DOCUMENT_URL_LIMIT &&
       url.scheme == MOBILE_WEB_ORIGIN_SCHEME &&
-      url.host == mobileWebOriginHostForSession(sessionId) &&
+      isMobileWebOriginHostForSession(url.host, sessionId) &&
       url.port == -1 &&
       url.userInfo == null &&
       url.fragment == sessionId

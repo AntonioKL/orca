@@ -152,6 +152,17 @@ external-link authority.
 - Top-level navigation is restricted to the active document. External
   navigation, popups, downloads, workers, and arbitrary bridge origins fail
   closed.
+- The Android session id *is* the private origin's host label, so it is drawn
+  from a canonical hostname alphabet (lowercase base32). `https` is a special
+  scheme: Chromium ASCII-lowercases the host of every URL it loads and reports
+  back, and `java.net.URI.getHost()` is null for a label holding `_`. A
+  base64url id therefore lost every asset request to a 403 and dropped every
+  bridge message (`MobileWebOrigin.kt`, `MobileWebSessionIdentifier.kt`). iOS
+  uses a custom scheme, whose opaque host preserves both, which is why the iOS
+  lane never saw it.
+- A failed main-frame document does not stop at Chromium's error page: the
+  Android shell hides the WebView and reports `onLoadState` `failed` with a
+  reason code the React Native shell shows instead.
 
 ### Capability bridge
 
