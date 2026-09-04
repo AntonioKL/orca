@@ -124,8 +124,10 @@ describe('orchestration kernel', () => {
     expect(kernel).toContain('Send `worker_done` exactly once')
     expect(kernel).toContain('three-sentence executive summary')
     expect(kernel).toContain('`--outcome succeeded` or `--outcome failed`')
-    expect(kernel).toContain('--dispatch-capability <capability>')
-    expect(kernel).toContain('--task-id <task_id> --dispatch-id <dispatch_id>')
+    // Why: the runnable worker_done command is the preamble's; its flag spellings are pinned
+    // on worker-contract.md by 'keeps heartbeat and worker_done recipes bound to the injected
+    // capability', so the kernel carries the obligations as prose and no third copy.
+    expect(kernel).not.toContain('--type worker_done')
     expect(kernel).toContain('After `worker_done`, end the dispatched turn and idle')
     expect(kernel).toContain('Do not reuse the settled lifecycle IDs')
   })
@@ -141,6 +143,9 @@ describe('orchestration kernel', () => {
     expect(firstWait).toBeGreaterThan(secondStart)
     expect(squash(kernel)).toContain('start the full independent wave before waiting')
     expect(kernel).toContain('`worker-start` is the normal path')
+    expect(squash(kernel)).toContain(
+      "If `worker-start` exits non-zero, do not relaunch. Read the receipt's `failedStage` and `residualResources`"
+    )
     expect(kernel).toContain('operator-created process unsupervised')
     expect(kernel).not.toMatch(/^ORCA terminal create/mu)
   })
@@ -204,6 +209,9 @@ describe('orchestration kernel', () => {
     expect(squash(kernel)).toContain('Process every message')
     expect(squash(kernel)).toContain("decide each settled terminal's next owner before the ack")
     expect(squash(kernel)).toContain('reused, explicitly retained, or released')
+    expect(squash(kernel)).toContain(
+      'the turn ends only when the report to that user names, per Task, its outcome, the evidence behind it, and any unresolved blocker'
+    )
     expect(kernel).toContain('worker-release --dispatch <dispatch_id>')
     expect(kernel).toContain('check --ack <delivery_id> --wait')
     expect(squash(kernel)).toContain('`worker-list --terminal-state reclaimable --json`')
@@ -213,9 +221,17 @@ describe('orchestration kernel', () => {
   it('treats long waits and release uncertainty as safe checkpoints', () => {
     const kernel = readKernel()
 
+    // Why: e92d7812d91 and c78f40fdd0b protect one rule; `## Outcome` states it once and each
+    // gate cites it, so these pin the condition rather than a per-gate list of non-proofs.
+    expect(squash(kernel)).toContain(
+      'Only positive proof of exit authorizes stop, abandon, or retry, and only an accepted settlement authorizes release. Every other observation, absence included, is a checkpoint'
+    )
     expect(squash(kernel)).toContain('A timeout or empty result is a checkpoint, not a failure')
     expect(squash(kernel)).toContain('Do not stop, retry, release, or launch a duplicate editor')
-    expect(squash(kernel)).toContain('Never release because of idle state, timeout, heartbeat')
+    expect(squash(kernel)).toContain('without the positive proof `## Outcome` requires')
+    expect(squash(kernel)).toContain(
+      'Only an accepted settlement authorizes it; no other observation does'
+    )
     expect(kernel).toContain('never substitute `terminal close`')
   })
 
@@ -253,8 +269,10 @@ describe('owned orchestration references', () => {
     // Why the table and not every mention: prose may cite a reference the gate table already routes.
     expect(tableRoutes.sort()).toEqual(shipped)
     expect(kernel).toContain('ORCA skills get orchestration --full')
+    // Why: `skills get` has no per-reference selector, so the kernel describes the whole
+    // bundle it returns instead of promising selective loading.
     expect(squash(kernel)).toContain(
-      'returns this exact kernel and every reference from the same CLI build'
+      'It has no per-reference selector and returns this exact kernel and every reference from the same CLI build, so read only the named one'
     )
     expect(squash(kernel)).toContain('If an older CLI rejects `--full`')
   })
@@ -317,6 +335,9 @@ describe('owned orchestration references', () => {
     const reference = readReference('placement-and-remote.md')
 
     expect(reference).toContain('--worktree current --agent codex')
+    expect(squash(reference)).toContain(
+      'A worktree selector needs the full `<repo-id>::<path>` value Orca returned, passed as `id:<newFullWorktreeId>`; a bare repo id is not a worktree id'
+    )
     expect(reference).toContain('--worktree new-child')
     expect(reference).toContain('--worktree new-top-level')
     expect(reference).toContain('Folder workspaces are first-class')
