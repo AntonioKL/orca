@@ -38,6 +38,7 @@ export class SshGitWorktreeProvider extends SshGitReviewHeadProvider {
     this.worktreeListDedupe.clear()
   }
 
+  /** Un-signalled reads of one repo coalesce onto the request already in flight; nothing is cached. */
   async listWorktrees(
     repoPath: string,
     options?: { signal?: AbortSignal }
@@ -52,6 +53,7 @@ export class SshGitWorktreeProvider extends SshGitReviewHeadProvider {
     )
   }
 
+  /** The one real relay round trip a coalesced read's joiners all wait on. */
   private async requestWorktreeList(
     repoPath: string,
     signal?: AbortSignal
