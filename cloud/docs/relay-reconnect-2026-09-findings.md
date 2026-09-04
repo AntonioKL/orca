@@ -21,16 +21,16 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | Monitor dry-run #4 | Froze min 12 at 05:37:35Z: `cell.production-gce-c27.health`/`.ready` = 0. Retries green all 12 samples under the new 2000 bar. Cause: c27 (asia-east2) container died 3x 05:37:00–05:38:01Z, Finding 6 crash class. | run 33840364323 |
 | Monitor dry-run #5 | Froze at sample 1 (05:41Z): c27 health/ready still 0. MIG autoheal `recreateInstance` on c27 fired 05:38:12Z after the 3 crashes; instance RECREATING, process up with 0 controls (was ~395). Second c27 recreate in 7 h (Finding 3 seed pattern). Waiting for c27 to settle before dry-run #6. | run 33841327879 |
 | Monitor dry-run #6 | **Passed** 06:06:31Z: 16 samples, no freeze (started 05:47:42Z) | run 33841783747 attempt 1 |
-| c7 `canary-apply` | **Dispatched 06:07:15Z** (44 s after evidence), main b378101901, confirmation `ROLL_RELAY_SAME_CAP <target> production-gce-c7`. First production mutation of this effort. | run 33843071283 |
+| c7 `canary-apply` | **Succeeded.** Dispatched 06:07:15Z; drain 06:10Z; MIG recreate 06:16–06:23Z; new image listening 06:23:42Z; verify + trust proof passed; restored to `admission=general` 06:25:21Z; canary authority sealed. c7 is on `85bf6799…`. | run 33843071283 |
 | PR #18581 doc reconcile (Aug 23 figure: 2,200–3,000 raw log lines vs 1,510 on the gate metric) | **Merged** | https://github.com/stablyai/orca/pull/18581 |
-| Batch roll | Not dispatched. Stops after the canary verdict per plan. | |
+| Batch roll | **Not dispatched.** Stopped after the canary per plan; owner decides next. Batch needs a fresh dry-run (evidence single-use) + `canary-run-id=33843071283` + 2–4 cells. | |
 | Terraform alert `relay_postgres_retry_exhausted` at `> 0` | Firing continuously since #18521; recalibration not done (own change) | `cloud/infra/terraform/relay-observability.tf:447,469` |
 
 ## Mutations performed (complete list)
 
 1. Merged PR #18569 to main (code/docs only).
 2. Merged PR #18580 and #18581 to main (monitor bar + docs).
-3. 2026-09-04 06:07:15Z: dispatched `cloud-deploy-relay-production-same-cap` `canary-apply` for production-gce-c7 only (run 33843071283). Isolates, drains (~790 controls re-dial), rolls c7's template/MIG to 85bf6799, verifies, restores general admission. On failure leaves c7 isolated.
+3. 2026-09-04 06:07:15Z: dispatched `cloud-deploy-relay-production-same-cap` `canary-apply` for production-gce-c7 only (run 33843071283). Completed successfully 06:26Z: c7 isolated, drained (807 controls re-dialed), template + MIG rolled to 85bf6799, verified, restored to general admission. Selector generation advanced 110 -> 112 (isolate + restore).
 4. Nothing else. Both monitor dispatches were `mode=dry-run` (read-only). The same-cap dispatch was `mode=verify` (read-only, confirmed by step gates `if: inputs.mode != 'verify'` on every mutating step).
 
 ## Finding 6 (2026-09-04 ~05:00Z): the old cell image crashes the whole process on a Postgres connect timeout
