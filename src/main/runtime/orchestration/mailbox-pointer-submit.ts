@@ -17,6 +17,7 @@ type PointerSubmitDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   getLeafKey: (tabId: string, leafId: string) => string
   getMessageWaiters: (mailboxHandle: string) => ReadonlySet<TWaiter> | undefined
   isLeafPtyProvenAbsent: (ptyId: string) => Promise<boolean>
+  requestSleepingRecipientWake?: (mailboxHandle: string) => void
   writePty: (ptyId: string, data: string) => boolean | Promise<boolean>
   settle: (ptyId: string, flight: OrchestrationMailboxDeliveryFlight) => void
   redrive: (mailboxHandle: string, force?: boolean) => void
@@ -41,7 +42,10 @@ export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationM
     .isLeafPtyProvenAbsent(input.ptyId)
     .then(async (absent) => {
       if (absent) {
+        // The pane died between staging and submitting; the staged mail is put
+        // back undelivered below, so ask for a wake or it waits for a tab open.
         clearAndRedrive = true
+        deps.requestSleepingRecipientWake?.(input.mailboxHandle)
         return
       }
       if (!deps.state.isCurrentFlight(input.ptyId, input.flight)) {

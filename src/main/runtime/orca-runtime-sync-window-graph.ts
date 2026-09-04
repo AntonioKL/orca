@@ -149,6 +149,11 @@ export class OrcaRuntimeWithSyncWindowGraph extends OrcaRuntimeWithAttachWindow 
         if (!adoptedFirstPty) {
           this.invalidateLeafHandle(leafKey)
         }
+      } else if (!existing && ptyId) {
+        // Why: a slept pane's handle is minted from its resume record with no leaf
+        // behind it. Adopt the PTY the wake produced so the handle a sender
+        // addressed keeps resolving instead of being orphaned by a remint.
+        this.adoptFirstPtyForLeafHandle(leafKey, ptyId, ptyGeneration)
       }
     }
 

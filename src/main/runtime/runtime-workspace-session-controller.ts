@@ -109,6 +109,26 @@ export class RuntimeWorkspaceSessionController {
     return hostId ? (this.deps.getStore()?.getWorkspaceSession?.(hostId) ?? null) : null
   }
 
+  /** Every persisted host partition. Callers that key off pane identity — which
+   *  carries no host — must search all of them, not just 'local'. */
+  listSessions(): WorkspaceSessionState[] {
+    const store = this.deps.getStore()
+    if (!store) {
+      return []
+    }
+    const hostIds = new Set<ExecutionHostId>([LOCAL_EXECUTION_HOST_ID])
+    for (const repo of store.getRepos?.() ?? []) {
+      hostIds.add(getRepoExecutionHostId(repo))
+    }
+    for (const hostId of store.getWorkspaceSessionHostIds?.() ?? []) {
+      hostIds.add(hostId)
+    }
+    return [...hostIds].flatMap((hostId) => {
+      const session = store.getWorkspaceSession?.(hostId)
+      return session ? [session] : []
+    })
+  }
+
   set(worktreeId: string, session: WorkspaceSessionState): void {
     this.deps.getStore()?.setWorkspaceSession?.(session, this.getHostId(worktreeId))
   }

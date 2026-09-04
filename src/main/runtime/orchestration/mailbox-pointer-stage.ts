@@ -1,0 +1,124 @@
+import { isCursorAgentTitle } from '../../../shared/agent-detection'
+import type { OrchestrationDb } from './db'
+import { formatMessagePointer } from './formatter'
+import {
+  shouldReleaseOrchestrationPointer,
+  type OrchestrationMessageWaiter
+} from './mailbox-pointer-eligibility'
+import type { OrchestrationMailboxLeaf, OrchestrationMailboxOwner } from './mailbox-owner'
+import type {
+  OrchestrationMailboxDeliveryFlight,
+  OrchestrationMailboxPointerState
+} from './mailbox-pointer-state'
+import { submitOrchestrationMailboxPointer } from './mailbox-pointer-submit'
+
+/** Delay between the pointer text landing in the composer and the submit keystroke. */
+const POINTER_SUBMIT_DELAY_MS = 500
+
+type PointerStageDependencies<TWaiter extends OrchestrationMessageWaiter> = {
+  mailboxOwner: OrchestrationMailboxOwner
+  state: OrchestrationMailboxPointerState
+  getDb: () => OrchestrationDb | null
+  getLeaf: (leafKey: string) => OrchestrationMailboxLeaf | undefined
+  getLeafKey: (tabId: string, leafId: string) => string
+  getMessageWaiters: (mailboxHandle: string) => ReadonlySet<TWaiter> | undefined
+  getTabTitle: (tabId: string) => string | null | undefined
+  isLeafPtyProvenAbsent: (ptyId: string) => Promise<boolean>
+  requestSleepingRecipientWake?: (mailboxHandle: string) => void
+  writePty: (ptyId: string, data: string) => boolean | Promise<boolean>
+  settle: (ptyId: string, flight: OrchestrationMailboxDeliveryFlight) => void
+  redrive: (mailboxHandle: string, force?: boolean) => void
+}
+
+type PointerStageInput = {
+  leaf: OrchestrationMailboxLeaf
+  mailboxHandle: string
+  unread: readonly { id: string; type: string; sequence: number }[]
+  newestSequence: number
+}
+
+/** Write the pointer text into the recipient's composer, then arm its submit. */
+export function stageOrchestrationMailboxPointer<TWaiter extends OrchestrationMessageWaiter>(
+  deps: PointerStageDependencies<TWaiter>,
+  input: PointerStageInput
+): void {
+  const ptyId = input.leaf.ptyId
+  if (!ptyId) {
+    return
+  }
+  const flight = deps.state.beginFlight(ptyId)
+  const writeResult = deps.writePty(
+    ptyId,
+    formatMessagePointer(input.unread.length, input.mailboxHandle)
+  )
+  if (typeof writeResult === 'boolean') {
+    finishPointerWrite(deps, input, ptyId, flight, writeResult)
+    return
+  }
+  void writeResult
+    .then(
+      (accepted) => finishPointerWrite(deps, input, ptyId, flight, accepted),
+      () => finishPointerWrite(deps, input, ptyId, flight, false)
+    )
+    .catch(() => undefined)
+}
+
+function finishPointerWrite<TWaiter extends OrchestrationMessageWaiter>(
+  deps: PointerStageDependencies<TWaiter>,
+  input: PointerStageInput,
+  ptyId: string,
+  flight: OrchestrationMailboxDeliveryFlight,
+  accepted: boolean
+): void {
+  const { leaf, mailboxHandle, unread, newestSequence } = input
+  let delayedSettle = false
+  try {
+    if (!accepted || !deps.state.isCurrentFlight(ptyId, flight)) {
+      return
+    }
+    const db = deps.getDb()
+    if (
+      !db ||
+      shouldReleaseOrchestrationPointer(
+        db,
+        mailboxHandle,
+        unread,
+        deps.getMessageWaiters(mailboxHandle)
+      )
+    ) {
+      return
+    }
+    flight.stagedMessageIds = unread.map((message) => message.id)
+    db.markAsDelivered(flight.stagedMessageIds)
+    deps.state.setWatermark(
+      mailboxHandle,
+      newestSequence,
+      ptyId,
+      deps.getLeafKey(leaf.tabId, leaf.leafId)
+    )
+    if (
+      [leaf.lastOscTitle, leaf.paneTitle, deps.getTabTitle(leaf.tabId)].some(isCursorAgentTitle)
+    ) {
+      deps.state.clearWatermark(mailboxHandle, newestSequence, ptyId)
+      deps.redrive(mailboxHandle)
+      return
+    }
+    flight.enterTimer = setTimeout(
+      () =>
+        submitOrchestrationMailboxPointer(deps, {
+          leaf,
+          mailboxHandle,
+          messages: unread,
+          newestSequence,
+          ptyId,
+          flight
+        }),
+      POINTER_SUBMIT_DELAY_MS
+    )
+    delayedSettle = true
+  } finally {
+    if (!delayedSettle) {
+      deps.settle(ptyId, flight)
+    }
+  }
+}
