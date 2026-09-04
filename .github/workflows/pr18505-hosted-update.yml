@@ -1,0 +1,241 @@
+name: PR 18505 disposable packaged update QA
+
+on:
+  push:
+    branches:
+      - 'qa/pr18505-hosted-update-final'
+    paths:
+      - '.github/workflows/pr18505-hosted-update.yml'
+      - 'tests/tools/pr18505-hosted-update/**'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-in-app-update:
+    name: windows-control-${{ matrix.traffic-mode }}
+    runs-on: windows-2022
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        traffic-mode: [none, until-old-exit]
+    env:
+      SOURCE_TAG: v1.4.198-adhoc.20260904205337
+      FINAL_TAG: v1.4.198-adhoc.20260904215141
+      FINAL_VERSION: 1.4.198-adhoc.20260904215141
+      HIGHER_TAG: v1.4.198-adhoc.20260904215158
+      HIGHER_VERSION: 1.4.198-adhoc.20260904215158
+      EXPECTED_HEAD: 1b3077382d1d77bb459ec6c937940d64f5fde812
+      ORCA_QA_SINGLE_HOP: '1'
+      ORCA_QA_TRAFFIC_MODE: ${{ matrix.traffic-mode }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify QA commit parent
+        shell: bash
+        run: test "$(git rev-parse HEAD^)" = "$EXPECTED_HEAD"
+      - uses: ./.github/actions/install-node-dependencies
+      - name: Verify releases and download older source installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force artifacts/source | Out-Null
+          $source = gh release view $env:SOURCE_TAG --repo stablyai/orca-adhoc --json isDraft,isPrerelease,assets | ConvertFrom-Json
+          if ($source.isDraft -or -not $source.isPrerelease) { throw "$env:SOURCE_TAG is not a published prerelease" }
+          if (-not ($source.assets.name -contains 'orca-windows-setup.exe')) { throw "$env:SOURCE_TAG has no Windows installer" }
+          foreach ($tag in @($env:FINAL_TAG, $env:HIGHER_TAG)) {
+            $release = gh release view $tag --repo stablyai/orca-adhoc --json body,isDraft,isPrerelease,assets | ConvertFrom-Json
+            if ($release.isDraft -or -not $release.isPrerelease) { throw "$tag is not a published prerelease" }
+            if (-not $release.body.Contains($env:EXPECTED_HEAD)) { throw "$tag was not built from $env:EXPECTED_HEAD" }
+            if (-not ($release.assets.name -contains 'orca-windows-setup.exe')) { throw "$tag has no Windows installer" }
+          }
+          gh release download $env:SOURCE_TAG --repo stablyai/orca-adhoc --pattern orca-windows-setup.exe --dir artifacts/source
+      - name: Exercise real in-app update at traffic boundary
+        shell: pwsh
+        run: node tests/tools/pr18505-hosted-update/windows-live-update.mjs artifacts/source/orca-windows-setup.exe $env:FINAL_TAG $env:FINAL_VERSION $env:HIGHER_TAG $env:HIGHER_VERSION "artifacts/windows-$env:ORCA_QA_TRAFFIC_MODE"
+      - name: Prove manual recovery opens installed target idle
+        if: failure()
+        shell: pwsh
+        run: node tests/tools/pr18505-hosted-update/windows-manual-recovery.mjs $env:FINAL_VERSION "artifacts/windows-$env:ORCA_QA_TRAFFIC_MODE/profile" "artifacts/windows-$env:ORCA_QA_TRAFFIC_MODE"
+      - name: Record exact-artifact NSIS evidence boundary
+        if: always()
+        shell: pwsh
+        run: |
+          $output = "artifacts/windows-$env:ORCA_QA_TRAFFIC_MODE"
+          New-Item -ItemType Directory -Force $output | Out-Null
+          @(
+            "The exact release installer uses stock electron-builder NSIS without nsis.debugLogging.",
+            "There is no native NSIS LogSet file to preserve without rebuilding a different artifact.",
+            "app.log preserves electron-updater's exact installer invocation and arguments; the JSONL timeline preserves install-tree changes."
+          ) | Set-Content "$output/nsis-evidence-boundary.txt"
+          $roots = @(
+            "$env:LOCALAPPDATA/orca-updater",
+            "$env:LOCALAPPDATA/Programs"
+          )
+          $manifest = foreach ($root in $roots) {
+            if (Test-Path $root) {
+              Get-ChildItem -LiteralPath $root -File -Recurse -ErrorAction SilentlyContinue |
+                Select-Object FullName, Length, LastWriteTimeUtc, VersionInfo
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 4 | Set-Content "$output/installed-file-manifest.json"
+      - name: Upload Windows proof
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr18505-windows-control-${{ matrix.traffic-mode }}
+          path: artifacts/windows-${{ matrix.traffic-mode }}/**
+          retention-days: 14
+          if-no-files-found: error
+
+  macos-in-app-update:
+    if: false
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      SOURCE_TAG: v1.4.198-adhoc.20260904205337
+      FINAL_TAG: v1.4.198-adhoc.20260904215141
+      FINAL_VERSION: 1.4.198-adhoc.20260904215141
+      HIGHER_TAG: v1.4.198-adhoc.20260904215158
+      HIGHER_VERSION: 1.4.198-adhoc.20260904215158
+      EXPECTED_HEAD: 1b3077382d1d77bb459ec6c937940d64f5fde812
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify QA commit parent
+        run: test "$(git rev-parse HEAD^)" = "$EXPECTED_HEAD"
+      - uses: ./.github/actions/install-node-dependencies
+      - name: Resolve hosted runner architecture
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64) echo 'MAC_ARCH=arm64' >> "$GITHUB_ENV" ;;
+            x86_64) echo 'MAC_ARCH=x64' >> "$GITHUB_ENV" ;;
+            *) echo "unsupported macOS architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+      - name: Verify releases and download older source DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/source artifacts/macos
+          source_json="$(gh release view "$SOURCE_TAG" --repo stablyai/orca-adhoc --json isDraft,isPrerelease,assets)"
+          jq -e '.isDraft == false and .isPrerelease == true' <<<"$source_json" >/dev/null
+          jq -e --arg asset "orca-macos-${MAC_ARCH}.dmg" '.assets | map(.name) | index($asset) != null' <<<"$source_json" >/dev/null
+          for tag in "$FINAL_TAG" "$HIGHER_TAG"; do
+            release_json="$(gh release view "$tag" --repo stablyai/orca-adhoc --json body,isDraft,isPrerelease,assets)"
+            jq -e --arg head "$EXPECTED_HEAD" '.isDraft == false and .isPrerelease == true and (.body | contains($head))' <<<"$release_json" >/dev/null
+            jq -e --arg asset "orca-macos-${MAC_ARCH}.dmg" '.assets | map(.name) | index($asset) != null' <<<"$release_json" >/dev/null
+          done
+          gh release download "$SOURCE_TAG" --repo stablyai/orca-adhoc --pattern "orca-macos-${MAC_ARCH}.dmg" --dir artifacts/source
+      - name: Install signed older source app in disposable login
+        run: |
+          set -euo pipefail
+          mount="$RUNNER_TEMP/orca-source-dmg"
+          mkdir -p "$mount"
+          hdiutil attach "artifacts/source/orca-macos-${MAC_ARCH}.dmg" -nobrowse -readonly -mountpoint "$mount"
+          trap 'hdiutil detach "$mount" >/dev/null 2>&1 || true' EXIT
+          test -d "$mount/Orca.app"
+          sudo ditto "$mount/Orca.app" /Applications/Orca.app
+          sudo chown -R "$(id -u):$(id -g)" /Applications/Orca.app
+          codesign --verify --deep --strict /Applications/Orca.app
+          xattr -dr com.apple.quarantine /Applications/Orca.app || true
+          hdiutil detach "$mount"
+          trap - EXIT
+          swiftc tests/tools/pr18505-hosted-update/mac-visible-window.swift -o artifacts/macos/mac-visible-window
+      - name: Exercise two real ShipIt updates under bounded CLI traffic
+        env:
+          ORCA_QA_MAC_WINDOW_PROBE: ${{ github.workspace }}/artifacts/macos/mac-visible-window
+        run: node tests/tools/pr18505-hosted-update/windows-live-update.mjs /Applications/Orca.app/Contents/MacOS/Orca "$FINAL_TAG" "$FINAL_VERSION" "$HIGHER_TAG" "$HIGHER_VERSION" artifacts/macos
+      - name: Upload macOS proof
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr18505-macos-packaged-update
+          path: artifacts/macos/**
+          retention-days: 14
+          if-no-files-found: error
+
+  linux-package-manager-upgrade:
+    if: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      EXPECTED_HEAD: 1b3077382d1d77bb459ec6c937940d64f5fde812
+      FINAL_VERSION: 1.4.198-qa.18505.1
+      HIGHER_VERSION: 1.4.198-qa.18505.2
+      FINAL_DPKG_VERSION: 1.4.198~qa.18505.1
+      HIGHER_DPKG_VERSION: 1.4.198~qa.18505.2
+      DPKG_VERSION_FORMAT: '${Version}'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify QA commit parent
+        run: test "$(git rev-parse HEAD^)" = "$EXPECTED_HEAD"
+      - uses: ./.github/actions/install-node-dependencies
+        with:
+          native-runtime: electron
+      - name: Build exact-head package inputs
+        run: |
+          set -euo pipefail
+          status=0
+          pnpm run build:cli || status=1
+          scripts=(build:relay build:electron-vite:parallel)
+          pids=()
+          for script in "${scripts[@]}"; do pnpm run "$script" & pids+=("$!"); done
+          for pid in "${pids[@]}"; do wait "$pid" || status=1; done
+          test "$status" -eq 0
+          pnpm run build:web-from-renderer
+          pnpm run build:native
+      - name: Build final-head and strictly-higher deb packages
+        env:
+          ORCA_REUSE_PREPARED_NATIVE_RUNTIME: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/linux packages
+          ORCA_LOCAL_BUILD_VERSION="$FINAL_VERSION" pnpm exec electron-builder --config config/electron-builder.config.cjs --linux deb --x64 --publish never
+          mv "dist/orca-ide_${FINAL_VERSION}_amd64.deb" packages/final.deb
+          ORCA_LOCAL_BUILD_VERSION="$HIGHER_VERSION" pnpm exec electron-builder --config config/electron-builder.config.cjs --linux deb --x64 --publish never
+          mv "dist/orca-ide_${HIGHER_VERSION}_amd64.deb" packages/higher.deb
+          dpkg-deb --info packages/final.deb > artifacts/linux/final-package-info.txt
+          dpkg-deb --info packages/higher.deb > artifacts/linux/higher-package-info.txt
+          sha256sum packages/*.deb > artifacts/linux/package-sha256.txt
+          dpkg --compare-versions "$HIGHER_DPKG_VERSION" gt "$FINAL_DPKG_VERSION"
+      - name: Install and visibly launch exact final-head package
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ./packages/final.deb
+          test "$(dpkg-query -W -f="$DPKG_VERSION_FORMAT" orca-ide)" = "$FINAL_DPKG_VERSION"
+          Xvfb :99 -screen 0 1440x900x24 >artifacts/linux/xvfb.log 2>&1 &
+          echo "$!" > artifacts/linux/xvfb-pid.txt
+          echo 'DISPLAY=:99' >> "$GITHUB_ENV"
+          DISPLAY=:99 node tests/tools/pr18505-hosted-update/linux-packaged-upgrade.mjs /opt/Orca/orca-ide "$FINAL_VERSION" "$RUNNER_TEMP/profile-linux" artifacts/linux final seed
+      - name: Upgrade through apt and visibly launch strictly higher package
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y ./packages/higher.deb
+          test "$(dpkg-query -W -f="$DPKG_VERSION_FORMAT" orca-ide)" = "$HIGHER_DPKG_VERSION"
+          DISPLAY=:99 node tests/tools/pr18505-hosted-update/linux-packaged-upgrade.mjs /opt/Orca/orca-ide "$HIGHER_VERSION" "$RUNNER_TEMP/profile-linux" artifacts/linux higher reuse
+          sudo dpkg -r orca-ide
+      - name: Stop exact Xvfb PID
+        if: always()
+        run: |
+          pid="$(cat artifacts/linux/xvfb-pid.txt 2>/dev/null || true)"
+          if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then kill -TERM "$pid"; fi
+      - name: Upload Linux proof
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr18505-linux-packaged-upgrade
+          path: artifacts/linux/**
+          retention-days: 14
+          if-no-files-found: error
