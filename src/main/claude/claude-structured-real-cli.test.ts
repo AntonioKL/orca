@@ -211,6 +211,73 @@ describe.skipIf(!realClaudeAvailable)('Claude structured real CLI handshake', ()
     45_000
   )
 
+  // The model half of the same lesson: a fixture can only pin the shape we read.
+  // set_model answers success for a model it never resolves — a nonexistent id is
+  // accepted and only fails once a turn runs — so the CLI's own report is the only
+  // adoption evidence, and it arrives on the init frame that opens each turn. This
+  // asserts that frame carries the resolved model against the live binary; it goes
+  // red the day the CLI stops reporting it, which is the day the confirmation
+  // silently degrades to echoing back whatever Orca sent.
+  it.skipIf(!realClaudeAuthenticated)(
+    'reports the model it adopted on the init frame that opens each turn',
+    async () => {
+      const providerSessionId = randomUUID()
+      const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
+      const events: ClaudeStructuredSessionEvent[] = []
+      const adapter = realAdapter(providerSessionId, claudeConfigDir, events)
+
+      try {
+        await adapter.acquire({
+          identity: identity(providerSessionId),
+          fence: 1,
+          spawnToken: 'real-cli-model'
+        })
+        await adapter.setOption({
+          sessionId: 'real-cli-handshake',
+          key: 'model',
+          value: 'haiku',
+          fence: 1
+        })
+        const before = events.length
+        await adapter.dispatch({
+          sessionId: 'real-cli-handshake',
+          clientMessageId: 'real-cli-model-1',
+          body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'Say ok' }] },
+          fence: 1
+        })
+        const deadline = Date.now() + 60_000
+        let frames: Record<string, unknown>[] = []
+        for (;;) {
+          frames = events
+            .slice(before)
+            .flatMap((event) =>
+              event.type === 'message' &&
+              event.message.type === 'system' &&
+              event.message.subtype === 'init'
+                ? [event.message]
+                : []
+            )
+          if (frames.length > 0 || Date.now() >= deadline) {
+            break
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250))
+        }
+
+        expect(frames).not.toHaveLength(0)
+        // Both halves: the field exists, and it names the model the picker asked
+        // for in the catalog's resolved shape rather than the id Orca sent.
+        expect(frames[0]?.model).toEqual(expect.any(String))
+        expect(frames[0]?.model).toBe('claude-haiku-4-5-20251001')
+        await expect(
+          adapter.readOptions({ sessionId: 'real-cli-handshake', fence: 1 })
+        ).resolves.toMatchObject({ current: { model: 'haiku' } })
+      } finally {
+        await adapter.closeAll()
+      }
+    },
+    90_000
+  )
+
   it('turns a real silent unauthenticated startup into sign-in guidance', async () => {
     const claudeConfigDir = await mkdtemp(join(tmpdir(), 'orca-claude-no-auth-'))
     const providerSessionId = randomUUID()

@@ -5,6 +5,8 @@ import { AgentSessionAcquisitionRefusal } from '../native-chat/agent-session-wir
 export type ClaudeInitObservation = {
   providerSessionId: string
   uuid: string | null
+  /** The resolved model id the CLI reports it is running; only `system/init` carries it. */
+  model: string | null
   message: Record<string, unknown>
 }
 
@@ -32,6 +34,7 @@ export function readClaudeInit(message: Record<string, unknown>): ClaudeInitObse
     ? {
         providerSessionId,
         uuid: isInit ? readClaudeFrameString(message, 'uuid') : null,
+        model: isInit ? readClaudeFrameString(message, 'model') : null,
         message
       }
     : null

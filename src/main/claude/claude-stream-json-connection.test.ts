@@ -534,7 +534,7 @@ describe('Claude stream-json connection', () => {
       }
     })
     const connection = await open(launchFor(scenario))
-    const init = { providerSessionId: SESSION_ID, uuid: null, message: {} }
+    const init = { providerSessionId: SESSION_ID, uuid: null, model: null, message: {} }
 
     // With no ambient auth, every true below can only have come from the CLI's settings.
     expect(claudeAuthDiagnostic(init, null)).toMatchObject({

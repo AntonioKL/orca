@@ -9,6 +9,14 @@ import type { ClaudeSession } from './claude-structured-session-state'
 
 const OPTION_ORDER = ['model', 'effort', 'permissionMode'] as const
 
+/**
+ * Efforts the settings readback cannot report. `max` applies for the rest of the
+ * session and is excluded from the persisted `effortLevel` by contract, so
+ * `get_settings` answers with the level underneath it — an absence of evidence
+ * that must not be read as the child refusing a level its own catalog offers.
+ */
+const UNREPORTED_EFFORTS: ReadonlySet<string> = new Set(['max'])
+
 export function restoredClaudeStructuredSessionOptions(
   options: Readonly<Record<string, string>> | undefined
 ): Map<string, string> {
@@ -54,7 +62,7 @@ export async function setClaudeStructuredOption(
   // apply_flag_settings answers `success` for an effort it then ignores, so the
   // absence of a throw proves nothing. Ask what the child actually holds.
   const adopted =
-    input.key === 'effort'
+    input.key === 'effort' && !UNREPORTED_EFFORTS.has(input.value)
       ? await session.connection
           .getSettings({ timeoutMs })
           .then(readClaudeSettingsEffort)
@@ -71,6 +79,13 @@ export async function setClaudeStructuredOption(
     )
   }
   session.options.set(input.key, input.value)
+  // Only a readback that agreed is adoption evidence; one that could not be taken
+  // records the value but must not also claim the provider vouched for it.
+  if (adopted !== null && adopted === input.value) {
+    session.confirmedOptions.add(input.key)
+  } else {
+    session.confirmedOptions.delete(input.key)
+  }
   return Object.fromEntries(session.options)
 }
 
@@ -81,6 +96,10 @@ export async function restoreClaudeStructuredSessionOptions(
   // Any write that was already in flight belongs to the previous acquisition
   // state and must not repopulate this map after restore starts.
   session.optionMutationSequence += 1
+  // The fence bump is not a write, so the report the session already holds is still
+  // current as of this instant; leaving the stamp behind would make every restored
+  // session read as unconfirmed until its next turn.
+  session.reportedModelMutation = session.optionMutationSequence
   const options = [...session.options.entries()]
   session.options.clear()
   for (const [key, value] of options) {

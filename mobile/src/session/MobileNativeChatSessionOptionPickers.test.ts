@@ -41,6 +41,7 @@ const MODEL_DESCRIPTOR: SessionOptionDescriptor = {
     ]
   },
   valueSource: 'reported',
+  transport: 'catalog',
   settable: true
 }
 
@@ -57,6 +58,7 @@ const EFFORT_DESCRIPTOR: SessionOptionDescriptor = {
     ]
   },
   valueSource: 'dispatched',
+  transport: 'catalog',
   settable: true
 }
 
@@ -66,6 +68,7 @@ const FAST_MODE_DESCRIPTOR: SessionOptionDescriptor = {
   category: 'mode',
   kind: { type: 'boolean', currentValue: false },
   valueSource: 'reported',
+  transport: 'catalog',
   settable: true
 }
 
@@ -227,6 +230,7 @@ describe('MobileNativeChatSessionOptionPickers', () => {
         ...MODEL_DESCRIPTOR,
         kind: { type: 'select', choices: [] },
         valueSource: 'unknown',
+        transport: 'catalog',
         action: { type: 'agent-picker' }
       }
     ])
@@ -234,6 +238,42 @@ describe('MobileNativeChatSessionOptionPickers', () => {
     expect(rowByText('Choose in agent picker…').props.accessibilityRole).toBe('button')
     await act(async () => rowByText('Choose in agent picker…').props.onPress())
     expect(invokeAction).toHaveBeenCalledWith('model')
+  })
+
+  // The terminal transport can only learn the outcome by parsing the screen back,
+  // so the sheet admits the value is unconfirmed; the structured transport reports
+  // it every turn, which makes the same caption noise there.
+  it.each([
+    { transport: 'catalog' as const, caption: true },
+    { transport: 'agent-session' as const, caption: false }
+  ])('captions a dispatched value only on the terminal transport', async (scenario) => {
+    mount([
+      MODEL_DESCRIPTOR,
+      { ...EFFORT_DESCRIPTOR, valueSource: 'dispatched', transport: scenario.transport }
+    ])
+    await act(async () => pill('Model').props.onPress())
+    await act(async () => rowByText('Effort').props.onPress())
+    const captions = renderer!.root
+      .findAll((node) => node.type === 'Text')
+      .filter(
+        (node) =>
+          (node.props as { children?: unknown }).children === 'Sent to the agent — not confirmed'
+      )
+    expect(captions.length > 0).toBe(scenario.caption)
+  })
+
+  it('does not caption a reported value on either transport', async () => {
+    mount([MODEL_DESCRIPTOR, { ...EFFORT_DESCRIPTOR, valueSource: 'reported' }])
+    await act(async () => pill('Model').props.onPress())
+    await act(async () => rowByText('Effort').props.onPress())
+    expect(
+      renderer!.root
+        .findAll((node) => node.type === 'Text')
+        .some(
+          (node) =>
+            (node.props as { children?: unknown }).children === 'Sent to the agent — not confirmed'
+        )
+    ).toBe(false)
   })
 
   it('locks the pills while the agent is working', () => {

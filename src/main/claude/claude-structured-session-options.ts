@@ -103,12 +103,24 @@ export async function readClaudeStructuredSessionOptions(
   const catalog = await session.connection.supportedModels({ timeoutMs }).catch(() => null)
   const discovered = listedModels(catalog ? { models: catalog } : null)
   const models = discovered.length > 0 ? discovered : seedModels()
-  const reportedModel = session.options.get('model') ?? session.reportedOptions.model
+  // A report the CLI made after the last write outranks the write: it names the
+  // model the session ran. An older one does not — a model set between turns has
+  // no report yet, and deferring to the previous turn's would flip the pill back.
+  const confirmedModel =
+    session.reportedModelMutation === session.optionMutationSequence &&
+    session.reportedOptions.model !== undefined
+  const reportedModel = confirmedModel
+    ? (session.reportedOptions.model ?? session.options.get('model'))
+    : (session.options.get('model') ?? session.reportedOptions.model)
   const model = currentModelId(models, reportedModel)
   if (!models.some((entry) => entry.id === model)) {
     models.push({ id: model, label: model, isDefault: false, efforts: [], resolvedModel: null })
   }
   const effort = session.options.get('effort') ?? session.reportedOptions.effort
+  const confirmed = [
+    ...(confirmedModel ? ['model'] : []),
+    ...(effort && session.confirmedOptions.has('effort') ? ['effort'] : [])
+  ]
   return {
     models: models.map((entry) => ({
       id: entry.id,
@@ -117,6 +129,10 @@ export async function readClaudeStructuredSessionOptions(
       isDefault: entry.isDefault,
       efforts: entry.efforts
     })),
-    current: { model, ...(effort ? { effort } : {}) }
+    current: {
+      model,
+      ...(effort ? { effort } : {}),
+      ...(confirmed.length > 0 ? { confirmed } : {})
+    }
   }
 }
