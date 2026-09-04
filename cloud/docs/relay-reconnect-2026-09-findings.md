@@ -755,6 +755,14 @@ That is the same 2 s that the old image dies on and that the new director surfac
 
 ## Roll inputs (verified by the read-only `verify` run)
 
+**Image census from instance templates, 2026-09-04 21:45Z (authoritative, read from `gcloud compute
+instance-templates`):** 20 serving cells on `5aedbca5` (c8, c9, c10, c13–c16, c19–c29) — the image that exits
+the process on a Postgres connect timeout (Finding 6); c7 on `85bf6799`; c4, c5, c17, c18 (draining /
+migration-only) on `0e83408b` / `36a56b10`; c1, c2, c3, c6, c11, c12 (existing-only) on Jul/Aug images. Target
+for Roll 1 is `519f4914` (director already on it). Monitor dry-run dispatched 21:45Z as the roll gate; waves
+require owner go.
+
+
 - target-image-digest `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` (lock fix; supersedes 85bf6799 as target)
 - previous target `sha256:85bf67993869a769642995d0863f4c2b6b569c3850c2d8390ec2ca5f2b179e28` (c7 is on this; use as c7's rollback)
 - rollback-image-digest `sha256:5aedbca5c86de24c8b4d4bf7e3b444b76c712f281ede916cb9d90f70cad1e563`
