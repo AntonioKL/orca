@@ -23,13 +23,17 @@ which attempt is authoritative, and when supervised work has settled.
 ## Outcome
 
 **Result:** every in-scope Task has one explicit outcome and every settled worker
-terminal has a next owner or cleanup decision. **Done:** all expected Dispatches
-have settled, every delivered message was processed before acknowledgment, and
-each settled worker was reused, explicitly retained, or released.
+terminal has a next owner or cleanup decision. **Next consumer:** the user who
+requested supervision. **Done:** all expected Dispatches have settled, every
+delivered message was processed before acknowledgment, each settled worker was
+reused, explicitly retained, or released, and the turn ends only when the report
+to that user names, per Task, its outcome, the evidence behind it, and any
+unresolved blocker.
 
 **Safe failure:** preserve work and authority and report the state as unknown or
-`unverifiable`. A timeout, quiet terminal, missing client, or lost remote
-connection is never proof of failure or exit.
+`unverifiable`. Only positive proof of exit authorizes stop, abandon, or retry,
+and only an accepted settlement authorizes release. Every other observation,
+absence included, is a checkpoint.
 
 ## Classify the role
 
@@ -59,13 +63,11 @@ non-Orca subagent tool when Orca orchestration provenance was requested.
   for the agent; `worker-show`'s `observation.status` is PTY liveness only. A live
   terminal can still hold a dead or stuck agent.
 - Folder workspaces are valid; never require Git or assume a worktree.
-- Worktree selectors need the full `<repo-id>::<path>` value Orca returned,
-  passed as `id:<newFullWorktreeId>`; a bare repo id is not a worktree id.
 - Clients and remote servers update independently. Treat unknown optional fields
   as absent. A new stream operation requires advertised capability because old
   decoders may silently drop unknown opcodes. Never fall back to local execution
   when remote authority or capability is unproven.
-- Use the executable selected by the discovery stub for the entire run. In the
+- Use the executable you used to run `skills get` for the entire run. In the
   examples below, replace `ORCA` with it; do not create a shell variable or run
   `ORCA` literally. If it fails, report that exact error instead of switching.
 - A successful `orchestration send` proves durable enqueue; its wake or nudge is
@@ -90,13 +92,6 @@ The injected preamble is authoritative. A dispatched worker must:
    applicable. After `worker_done`, end the dispatched turn and idle; do not poll
    or start new work.
 
-The generic shape below is only a reminder. Copy the live preamble's command,
-including its executable, `--from`, and `--dispatch-capability` values:
-
-```text
-ORCA orchestration send --from <worker_handle> --dispatch-capability <capability> --type worker_done --subject "<short status>" --body "<three sentences: work, findings, remaining>" --task-id <task_id> --dispatch-id <dispatch_id> --outcome succeeded
-```
-
 A direct user instruction after completion starts new user-owned work and takes
 precedence over the idle rule. Do not reuse the settled lifecycle IDs.
 
@@ -112,6 +107,10 @@ ORCA orchestration worker-start --spec "<worker A task>" --worktree current --ag
 ORCA orchestration worker-start --spec "<worker B task>" --worktree current --agent claude --json
 ORCA orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json
 ```
+
+If `worker-start` exits non-zero, do not relaunch. Read the receipt's
+`failedStage` and `residualResources`, then load
+`references/recovery-and-cleanup.md`.
 
 Use `task-create` plus `worker-start --task <task_id>` for planned fan-out with
 dependencies or a retry of a known Task. Use dependencies only for real ordering
@@ -132,7 +131,7 @@ ORCA orchestration check --ack <delivery_id> --wait --types "worker_done,escalat
 
 Keep waiting until every expected Dispatch settles. A timeout or empty result is
 a checkpoint, not a failure. Do not stop, retry, release, or launch a duplicate
-editor from timeout, idle state, heartbeat, relay loss, or missing client alone.
+editor without the positive proof `## Outcome` requires.
 
 After three consecutive empty waits, stop waiting blindly and enumerate with
 `ORCA orchestration worker-list --include-remote --json`, acting on each row's
@@ -143,8 +142,8 @@ keep waiting with `check --wait`. Leave the wait only on positive proof the
 agent stopped: `exited` liveness, the worker's own observation of process exit,
 or a transcript whose final agent turn sent no `worker_done`. Then load
 `references/recovery-and-cleanup.md` and choose `worker-stop` or
-`worker-abandon` explicitly. `unverifiable` is absence — including when
-`worker-show` reports `agentWait` null — and never authorizes stop, abandon,
+`worker-abandon` explicitly. `unverifiable` is absence, including when
+`worker-show` reports `agentWait` null. Absence never authorizes stop, abandon,
 retry, or release; keep waiting or inspect.
 
 `worker-start` is the normal path, composing placement, terminal readiness,
@@ -169,10 +168,9 @@ After an accepted success or failure report, immediately do exactly one:
 2. Record user-requested retention with `worker-retain`.
 3. Run `worker-release`.
 
-Release is post-settlement cleanup, not cancellation. Never release because of
-idle state, timeout, heartbeat, status, question, escalation, or a rejected or
-stale completion. If release is uncertain, follow its exact recovery receipt and
-never substitute `terminal close`.
+Release is post-settlement cleanup, not cancellation. Only an accepted
+settlement authorizes it; no other observation does. If release is uncertain,
+follow its exact recovery receipt and never substitute `terminal close`.
 
 A valid `worker_done` settles the Task and Dispatch automatically; do not follow
 it with `task-update --status completed`. Enumerate the terminals still owing a
@@ -182,20 +180,20 @@ the coordinator turn until it returns none.
 ## Conditional references
 
 This compact guide is sufficient for the normal local loop. At an action gate
-below, run `ORCA skills get orchestration --full` once and read only the named
-bundled reference: it returns this exact kernel and every reference from the same
-CLI build. If an older CLI rejects `--full`, keep this kernel's safety floor, use
-that command's `--help`, and never guess newer flags.
+below, run `ORCA skills get orchestration --full` once. It has no per-reference
+selector and returns this exact kernel and every reference from the same CLI
+build, so read only the named one. If an older CLI rejects `--full`, keep this
+kernel's safety floor, use that command's `--help`, and never guess newer flags.
 
-| Action gate                                                                         | Bundled reference                         |
-| ----------------------------------------------------------------------------------- | ----------------------------------------- |
-| Expanded DAG waves, launch model/effort, same-terminal reuse, or review ownership   | `references/coordinator-loop.md`          |
-| Worker ask/resume, heartbeat, escalation, or completion command details             | `references/worker-contract.md`           |
-| New worktree, exact workspace, SSH, WSL, or connected-server placement              | `references/placement-and-remote.md`      |
-| Inbox replay, follow-up messages, group addresses, or decision gates                | `references/messaging-and-gates.md`       |
-| Failed/stopped/unknown attempts, retry, stop, abandon, retain, or uncertain release | `references/recovery-and-cleanup.md`      |
-| Custom argv or terminal topology that `worker-start` cannot express                 | `references/low-level-topology.md`        |
-| Any legacy label, adopted Run, compatibility receipt, or takeover                   | `references/legacy-contract-migration.md` |
+| Action gate                                                                                                   | Bundled reference                         |
+| ------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Expanded DAG waves, launch model/effort, same-terminal reuse, or review ownership                             | `references/coordinator-loop.md`          |
+| You are a dispatched worker and the live preamble does not answer your question, or `check` returned an error | `references/worker-contract.md`           |
+| New worktree, exact workspace, SSH, WSL, or connected-server placement                                        | `references/placement-and-remote.md`      |
+| Inbox replay, follow-up messages, group addresses, or decision gates                                          | `references/messaging-and-gates.md`       |
+| Failed/stopped/unknown attempts, retry, stop, abandon, retain, or uncertain release                           | `references/recovery-and-cleanup.md`      |
+| Custom argv or terminal topology that `worker-start` cannot express                                           | `references/low-level-topology.md`        |
+| Any legacy label, adopted Run, compatibility receipt, or takeover                                             | `references/legacy-contract-migration.md` |
 
 Retired scheduler commands are not aliases for Run creation. Recovery commands
 must provide their exact next action; follow it with the same selected executable.

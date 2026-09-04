@@ -18,8 +18,8 @@ liveness, never completion.
 
 ## Ask and resume
 
-Use Orca `ask` whenever the coordinator must answer. Never open a local
-AskUserQuestion-style TUI: the coordinator cannot see or answer it.
+Use Orca `ask` whenever the coordinator must answer. Never open a local question
+TUI the coordinator cannot answer.
 
 ```text
 ORCA orchestration ask --from <worker_handle> --dispatch-capability <capability> --question "<question>" --options "<choice-a>,<choice-b>" --timeout-ms 600000

@@ -9,12 +9,6 @@ accepted steering.
 
 ## Coordinator delivery loop
 
-```text
-ORCA orchestration check --terminal <handle> --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json
-ORCA orchestration reply --id <message_id> --body "<answer>" --json
-ORCA orchestration check --ack <delivery_id> --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json
-```
-
 `check` names its caller with `--terminal <handle>` and is the only verb that
 rejects `--from`. Omit `--terminal` inside an Orca terminal, where Orca resolves
 the caller; pass it explicitly from anywhere else, including a dispatched

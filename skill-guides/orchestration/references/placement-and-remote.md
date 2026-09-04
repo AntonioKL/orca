@@ -32,8 +32,10 @@ requires a valid Git repository and rejects a plain directory:
 ORCA project setup-existing-folder --project <project_id> --host <host_id> --path <abs_path> --kind folder --json
 ```
 
-Then place work on the returned workspace with an exact selector. `new-child`
-and `new-top-level` are worktree creation and do not apply to a folder.
+Then place work on the returned workspace with an exact selector. A worktree
+selector needs the full `<repo-id>::<path>` value Orca returned, passed as
+`id:<newFullWorktreeId>`; a bare repo id is not a worktree id. `new-child` and
+`new-top-level` are worktree creation and do not apply to a folder.
 
 New worktrees use agent-first creation and run setup by default. Preserve the
 repository's startup policy: `start-immediately` can report setup as `running`,
