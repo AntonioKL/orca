@@ -1,4 +1,4 @@
-import { createPtySlaveLineEditorProbe } from '../../shared/pty-slave-line-discipline-echo'
+import { shellReadyMarkerComesFromLineEditor } from './shell-ready'
 import {
   installDeviceAttributesResponder,
   STARTUP_DA1_RESPONSE
@@ -20,6 +20,7 @@ import { basename } from 'node:path'
 import type { ShellReadyState } from './types'
 
 const SHELL_READY_TIMEOUT_MS = 15_000
+export const CODEX_SHELL_READY_TIMEOUT_MS = 300
 
 export type SessionShellReadyBarrierDeps = {
   sessionId: string
@@ -70,7 +71,7 @@ export class SessionShellReadyBarrier {
 
     this.postReadyFlushGate = new PostReadyFlushGate(
       () => this.flushPreReadyQueue(),
-      createPtySlaveLineEditorProbe(deps.subprocess.slavePath)
+      shellReadyMarkerComesFromLineEditor(deps.subprocess.shellPath ?? '')
     )
   }
 

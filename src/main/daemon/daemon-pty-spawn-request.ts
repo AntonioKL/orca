@@ -33,6 +33,7 @@ export type DaemonPtySpawnContext = {
   effectiveCols: number
   effectiveRows: number
   shellReadySupported: boolean
+  shellReadyTimeoutMs: number | undefined
   historySeedSegments: readonly string[] | null
   detectColdRestore(options?: { ignoreCleanEnd?: boolean }): Promise<ColdRestoreInfo | null>
 }
@@ -122,6 +123,9 @@ export abstract class DaemonPtySpawnRequest extends DaemonPtyRuntimeState {
           ? undefined
           : opts.terminalWindowsPowerShellImplementation,
         shellReadySupported: context.attachOnly ? false : context.shellReadySupported,
+        ...(!context.attachOnly && context.shellReadyTimeoutMs !== undefined
+          ? { shellReadyTimeoutMs: context.shellReadyTimeoutMs }
+          : {}),
         ...(historySeed ? { historySeed } : {}),
         ...(historySeedTransferId ? { historySeedTransferId } : {}),
         ...(this.supportsStartupIngress && !context.attachOnly && opts.startupIngress

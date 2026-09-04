@@ -344,6 +344,15 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       }
     })
 
+    itOnPosix('preserves the existing fast-start timing for fish', async () => {
+      await adapter.spawn({ cols: 80, rows: 24, command: 'codex', env: { SHELL: '/usr/bin/fish' } })
+      await waitFor(() => vi.mocked(lastSubprocess.write).mock.calls.length > 0)
+      expect(lastSubprocess.write).toHaveBeenCalledExactlyOnceWith('codex\n')
+      expect(lastSpawnOpts).not.toEqual(
+        expect.objectContaining({ startupCommandDelivery: 'shell-ready' })
+      )
+    })
+
     itOnPosix.each([
       { command: 'codex' },
       { command: 'codex', startupCommandDelivery: 'fast' as const },

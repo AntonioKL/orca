@@ -20,50 +20,12 @@ describe('PostReadyFlushGate', () => {
     vi.useRealTimers()
   })
 
-  it('waits while a slow prompt still has cooked echo enabled', async () => {
-    const probe = vi.fn().mockResolvedValue('other')
-    gate = new PostReadyFlushGate(onFlush, probe)
-    gate.arm(true)
-    await vi.advanceTimersByTimeAsync(1000)
-    expect(onFlush).not.toHaveBeenCalled()
-    expect(gate.isPending).toBe(true)
-    probe.mockResolvedValue('line-editor')
-    await vi.advanceTimersByTimeAsync(250)
-    expect(onFlush).toHaveBeenCalledTimes(1)
-    expect(gate.isPending).toBe(false)
-  })
-
-  it('drops an in-flight probe result after teardown', async () => {
-    let resolveProbe!: (state: 'line-editor') => void
-    gate = new PostReadyFlushGate(
-      onFlush,
-      () =>
-        new Promise((resolve) => {
-          resolveProbe = resolve
-        })
-    )
-    gate.arm(true)
-    await vi.advanceTimersByTimeAsync(POST_READY_FLUSH_DELAY_MS)
-    gate.clear()
-    resolveProbe('line-editor')
-    await vi.advanceTimersByTimeAsync(1000)
-    expect(onFlush).not.toHaveBeenCalled()
-    expect(gate.isPending).toBe(false)
-  })
-
-  it.each(['unknown', 'unavailable'])('retains the fallback when probing is %s', async (state) => {
-    gate = new PostReadyFlushGate(onFlush, vi.fn().mockResolvedValue(state))
+  it('flushes synchronously when the marker comes from the line editor', () => {
+    gate = new PostReadyFlushGate(onFlush, true)
     gate.arm()
-    await vi.advanceTimersByTimeAsync(POST_READY_FLUSH_FALLBACK_MS)
-    expect(onFlush).toHaveBeenCalledTimes(1)
-  })
-
-  it('bounds waiting when a shell never enters its line editor', async () => {
-    gate = new PostReadyFlushGate(onFlush, vi.fn().mockResolvedValue('other'))
-    gate.arm(true)
-    await vi.advanceTimersByTimeAsync(15_500)
     expect(onFlush).toHaveBeenCalledTimes(1)
     expect(gate.isPending).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('does not flush immediately when armed', () => {
