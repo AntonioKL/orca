@@ -175,6 +175,10 @@ immediately so the bar can be re-tightened after the fleet is on the 500 ms lock
 - existing-only c1,c11,c12,c2,c3,c4,c5,c6; migration-only c17,c18; general c10,c13–c16,c19–c29,c7,c8,c9
 - confirmation for canary: `ROLL_RELAY_SAME_CAP <target-digest> production-gce-c7`
 - monitor evidence is single-use and must be < 5 min old at dispatch (plus 75 min per predecessor wave)
+- monitor dry-run dispatch (read-only, runs at `main` head so a merged bar change applies immediately):
+  `gh workflow run cloud-monitor-relay-production.yml --ref main -f mode=dry-run -f expected-selector-generation=110
+  -f expected-existing-only-cells=<existing-only list> -f expected-migration-only-cells=production-gce-c17,production-gce-c18
+  -f expected-general-cells=<general list> -f migration-policy=strict -f recovery-source-cell-id=none -f capacity-cell-id=none`
 
 ## Queries that worked (copy-paste)
 
