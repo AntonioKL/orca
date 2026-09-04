@@ -166,9 +166,10 @@ export function advanceTerminalTopologyRevision(
  * `detachTerminalPaneToTab` moves a live pane into a new tab, so a stored tabId names the tab the
  * pane left. Callers fencing on location must resolve it here rather than trust a frozen tabId.
  *
- * Allocation-free and stateless on purpose: writers graft leaves by assigning into a layout that is
- * already inside the layouts record, so any cache here would need a revalidation key that is itself
- * O(tabs) per read — the same cost as this walk, with a staleness invariant to keep.
+ * Stateless on purpose: writers graft leaves by assigning into a layout that is already inside the
+ * layouts record, so any cache here would need a revalidation key that is itself O(tabs) per read —
+ * the same cost as this walk, with a staleness invariant to keep. `Object.keys` over a guarded
+ * `for...in` is deliberate too: the key array is cheaper than a `hasOwn` call per tab (measured).
  */
 export function findTerminalTabIdForLeaf(
   session: WorkspaceSessionState | undefined,
