@@ -1,6 +1,7 @@
 import type { AppState } from '@/store/types'
 import { worktreeUsesWslPath } from '@/store/terminals/terminal-workspace-routing'
 import { isWslUncPath } from '../../../shared/wsl-paths'
+import { isWebClientLocation } from '@/lib/web-client-location'
 import {
   getCachedWindowsTerminalCapabilities,
   hasCachedWindowsTerminalCapabilities
@@ -47,9 +48,14 @@ export function pathUsesWslUnc(path: string | null | undefined): boolean {
 export function readWindowsStructuredGateInputs(
   state: Partial<Pick<AppState, 'folderWorkspaces' | 'worktreesByRepo'>>,
   worktreeId: string
-): { windowsProcessStartTime: WindowsProcessStartTimeGate; worktreeUsesWslPath: boolean } {
+): {
+  windowsProcessStartTime: WindowsProcessStartTimeGate
+  worktreeUsesWslPath: boolean
+  isWebClient: boolean
+} {
   return {
     windowsProcessStartTime: readWindowsProcessStartTimeGate(),
-    worktreeUsesWslPath: readWorktreeUsesWslPath(state, worktreeId)
+    worktreeUsesWslPath: readWorktreeUsesWslPath(state, worktreeId),
+    isWebClient: isWebClientLocation()
   }
 }

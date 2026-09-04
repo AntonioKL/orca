@@ -4,6 +4,7 @@ import {
   type LinkedWorkItemSummary
 } from '@/lib/new-workspace'
 import { seedNativeChatLaunchDraftForAgentTab } from '@/lib/agent-launch-prompt-delivery'
+import { isWebClientLocation } from '@/lib/web-client-location'
 import {
   pathUsesWslUnc,
   readWindowsProcessStartTimeGate
@@ -157,6 +158,7 @@ export async function submitFolderWorkspaceCreate({
         platform: CLIENT_PLATFORM,
         hostCapabilities: readLocalRuntimeCapabilities(),
         windowsProcessStartTime: readWindowsProcessStartTimeGate(),
+        isWebClient: isWebClientLocation(),
         // The workspace has no store entry yet, but it will be created under
         // the group's parent, so the parent decides WSL-ness before the click.
         worktreeUsesWslPath: pathUsesWslUnc(projectGroup.parentPath),

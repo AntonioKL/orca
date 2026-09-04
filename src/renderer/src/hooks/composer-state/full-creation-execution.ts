@@ -32,6 +32,7 @@ import { useCallback } from 'react'
 import type { PendingSmartGitHubSubmitResolution } from './source-selection-decisions'
 import { translate } from '@/i18n/i18n'
 import { settleComposerSubmit } from '@/lib/composer-submit-cancellation'
+import { isWebClientLocation } from '@/lib/web-client-location'
 import { readWindowsProcessStartTimeGate } from '@/lib/agent-launch-routing-windows-gate'
 import { toFolderWorkspaceLinkedTask } from '@/components/sidebar/folder-workspace-composer-helpers'
 import { CLIENT_PLATFORM, ensureAgentStartupInTerminal } from '@/lib/new-workspace'
@@ -144,6 +145,7 @@ export function useFullCreationExecution(input: FullCreationExecutionInput) {
         platform: CLIENT_PLATFORM,
         hostCapabilities: readLocalRuntimeCapabilities(),
         windowsProcessStartTime: readWindowsProcessStartTimeGate(),
+        isWebClient: isWebClientLocation(),
         // The workspace has no store entry until after this decision, so the
         // WSL-UNC check cannot run yet; it applies on the next launch.
         worktreeUsesWslPath: false,

@@ -36,6 +36,7 @@ import { useCallback } from 'react'
 import type { Repo } from '../../../../shared/repo-types'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { WorktreeCreationRequest } from '@/lib/pending-worktree-creation'
+import { isWebClientLocation } from '@/lib/web-client-location'
 import { readWindowsProcessStartTimeGate } from '@/lib/agent-launch-routing-windows-gate'
 import { useAppStore } from '@/store'
 import { settleComposerSubmit } from '@/lib/composer-submit-cancellation'
@@ -210,6 +211,7 @@ export function useQuickCreationExecution(input: QuickCreationExecutionInput) {
             platform: CLIENT_PLATFORM,
             hostCapabilities: readLocalRuntimeCapabilities(),
             windowsProcessStartTime: readWindowsProcessStartTimeGate(),
+            isWebClient: isWebClientLocation(),
             // The workspace has no store entry until after this decision, so the
             // WSL-UNC check cannot run yet; it applies on the next launch.
             worktreeUsesWslPath: false,

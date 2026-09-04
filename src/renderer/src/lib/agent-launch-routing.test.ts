@@ -21,6 +21,7 @@ function route(overrides: Partial<Parameters<typeof resolveAgentLaunchRoute>[0]>
     platform: 'darwin',
     hostCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY],
     windowsProcessStartTime: 'unavailable' as const,
+    isWebClient: false,
     worktreeUsesWslPath: false,
     workspaceKind: 'git-worktree',
     nativeChatTranscriptIsLocalReadable: true,
@@ -174,5 +175,29 @@ describe('resolveAgentLaunchRoute Windows structured gate', () => {
         executionHostId: 'ssh-1'
       })
     ).toBe('legacy-native-chat')
+  })
+})
+
+describe('resolveAgentLaunchRoute paired web client', () => {
+  // A web client's `platform` is the browser's machine, not the host that runs
+  // the agent, so the Windows gate cannot be evaluated. Refusing is the only
+  // safe answer until the host publishes eligibility itself.
+  it('refuses structured chat in a paired web client', () => {
+    expect(route({ isWebClient: true })).toBe('legacy-native-chat')
+  })
+
+  it('still refuses when the web client looks fully eligible on Windows', () => {
+    expect(
+      route({
+        isWebClient: true,
+        platform: 'win32',
+        windowsProcessStartTime: 'available',
+        worktreeUsesWslPath: false
+      })
+    ).toBe('legacy-native-chat')
+  })
+
+  it('leaves the desktop renderer unaffected', () => {
+    expect(route({ isWebClient: false })).toBe('structured-native-chat')
   })
 })

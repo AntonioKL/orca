@@ -36,6 +36,11 @@ export type AgentLaunchRoutingInput = {
    *  the distro's runtime and must keep the legacy terminal. Required for the
    *  same reason. */
   worktreeUsesWslPath: boolean
+  /** True when this renderer is a paired web client. Its `platform` then
+   *  describes the browser's machine, not the host that will run the agent, so
+   *  the Windows gate below cannot be evaluated and must refuse rather than
+   *  guess. Lifting this needs host-published eligibility, not a client probe. */
+  isWebClient: boolean
   workspaceKind?: 'git-worktree' | 'folder' | 'floating'
   projectRuntime?: ProjectExecutionRuntimeResolution | null
   promptDelivery?: NativeChatLaunchPromptDelivery
@@ -106,6 +111,7 @@ export function resolveAgentLaunchRoute(input: AgentLaunchRoutingInput): AgentLa
     input.platform !== 'win32' ||
     (input.windowsProcessStartTime === 'available' && !input.worktreeUsesWslPath)
   const structuredSupported =
+    !input.isWebClient &&
     input.agent === 'codex' &&
     input.promptDelivery !== 'draft' &&
     input.workspaceKind !== 'floating' &&
