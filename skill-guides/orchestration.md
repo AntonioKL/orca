@@ -2,16 +2,17 @@
 name: orchestration
 description: >-
   Coordinate supervised Orca workers: threaded messages, blocking ask/reply,
-  task dispatch, worker_done/escalation waits, task DAGs, decision gates, and
-  coordinator loops. Use `orca-cli` instead for full ownership handoffs — "hand
-  off", "handoff", "handover", "give this to another agent", "another worktree"
-  — unless the user asked to supervise, monitor, or coordinate a DAG, and for
-  terminal control, reading or waiting on terminals, and Orca's embedded
-  browser. Use Computer Use for external browser windows, webviews, Orca app
-  UI, or desktop UI outside Orca's embedded browser only when the task requires
-  OS/window-level control such as focus, menus, dialogs, coordinates, or
-  screenshots. Use `orca-cli` for Orca's embedded pages and a page-automation
-  tool such as Playwright or CDP for external pages.
+  task dispatch, worker_done/escalation waits, task DAGs, decision gates,
+  coordinator loops, and decomposing work across agents. Use `orca-cli` for full
+  ownership handoffs — "hand off", "handoff", "handover", "give this to another
+  agent", "another worktree" — unless asked to supervise, monitor, or coordinate
+  a DAG, and for terminal control, lightweight terminal prompts, shell commands,
+  Orca worktree management, and reading or waiting on terminals. Use Computer
+  Use for external browser windows, webviews, Orca app UI, or desktop UI outside
+  Orca's embedded browser only when the task requires OS/window-level control
+  such as focus, menus, dialogs, coordinates, or screenshots. Use `orca-cli` for
+  Orca's embedded pages and a page-automation tool such as Playwright or CDP for
+  external pages.
 ---
 
 # Orca orchestration
@@ -135,14 +136,14 @@ editor from timeout, idle state, heartbeat, relay loss, or missing client alone.
 
 After three consecutive empty waits, stop waiting blindly and enumerate with
 `ORCA orchestration worker-list --json`, acting on each row's
-`projection.attention`, `projection.requiresAction`, and literal
-`projection.nextAction` argv. Leave the wait only on positive proof the agent
-stopped: `exited` liveness, the worker's own observation of process exit, or a
-transcript whose final agent turn sent no `worker_done`. Then load
-`references/recovery-and-cleanup.md` and choose `worker-stop` or `worker-abandon`
-explicitly. `unverifiable` is absence — including when `worker-show` reports
-`agentWait` null — and never authorizes stop, abandon, retry, or release; keep
-waiting or inspect.
+`projection.attention` categories, `projection.attention.requiresAction`, and
+literal `projection.nextAction` argv. Leave the wait only on positive proof the
+agent stopped: `exited` liveness, the worker's own observation of process exit,
+or a transcript whose final agent turn sent no `worker_done`. Then load
+`references/recovery-and-cleanup.md` and choose `worker-stop` or
+`worker-abandon` explicitly. `unverifiable` is absence — including when
+`worker-show` reports `agentWait` null — and never authorizes stop, abandon,
+retry, or release; keep waiting or inspect.
 
 `worker-start` is the normal path, composing placement, terminal readiness,
 prompt injection, and supervised resource ownership. `dispatch --inject` leaves
@@ -169,8 +170,7 @@ After an accepted success or failure report, immediately do exactly one:
 Release is post-settlement cleanup, not cancellation. Never release because of
 idle state, timeout, heartbeat, status, question, escalation, or a rejected or
 stale completion. If release is uncertain, follow its exact recovery receipt and
-never substitute `terminal close`. Released output stays readable via
-`worker-read`.
+never substitute `terminal close`.
 
 A valid `worker_done` settles the Task and Dispatch automatically; do not follow
 it with `task-update --status completed`. Enumerate the terminals still owing a

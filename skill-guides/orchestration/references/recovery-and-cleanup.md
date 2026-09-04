@@ -22,10 +22,11 @@ ORCA orchestration worker-read --dispatch <dispatch_id> --limit 50 --json
 ```
 
 `worker-list` is the enumerating command and the authority on agent liveness:
-each row carries `projection.liveness`, `attention` categories, `requiresAction`,
-and a literal `nextAction` argv to run. `worker-show`'s `observation.status` is
-PTY liveness only, so a `live` terminal whose agent died at a trust prompt still
-reads `live` there. When the two disagree, the fleet verdict decides.
+each row carries `projection.liveness`, `projection.attention.categories`,
+`projection.attention.requiresAction`, and a literal `projection.nextAction`
+argv to run. `worker-show`'s `observation.status` is PTY liveness only, so a
+`live` terminal whose agent died at a trust prompt still reads `live` there.
+When the two disagree, the fleet verdict decides.
 
 ## Stall needs positive evidence
 

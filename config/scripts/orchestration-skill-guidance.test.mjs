@@ -23,19 +23,28 @@ function squash(text) {
   return text.replace(/\s+/gu, ' ').trim()
 }
 
+// Routing lives in the frontmatter description alone; the body must not satisfy these.
+function readDescription() {
+  return squash(frontmatter(readKernel()))
+}
+
 describe('orchestration skill routing', () => {
   it('keeps the verbatim routing triggers a model matches the skill on', () => {
-    const description = squash(readKernel())
+    const description = readDescription()
 
     for (const trigger of [
       'threaded messages',
       'worker_done/escalation waits',
       'decision gates',
+      'decomposing work across agents',
       '"hand off"',
       '"handoff"',
       '"handover"',
       '"give this to another agent"',
       '"another worktree"',
+      'lightweight terminal prompts',
+      'shell commands',
+      'Orca worktree management',
       'reading or waiting on terminals'
     ]) {
       expect(description).toContain(trigger)
@@ -43,7 +52,7 @@ describe('orchestration skill routing', () => {
   })
 
   it('keeps external browser routing at the OS/page boundary', () => {
-    const description = squash(readKernel())
+    const description = readDescription()
 
     expect(description).toContain(
       "Use Computer Use for external browser windows, webviews, Orca app UI, or desktop UI outside Orca's embedded browser only when the task requires OS/window-level control such as focus, menus, dialogs, coordinates, or screenshots."
@@ -150,7 +159,7 @@ describe('orchestration kernel', () => {
     expect(kernel).toContain('After three consecutive empty waits')
     expect(kernel).toContain('`ORCA orchestration worker-list --json`')
     expect(kernel).toContain(
-      '`projection.attention`, `projection.requiresAction`, and literal `projection.nextAction` argv'
+      '`projection.attention` categories, `projection.attention.requiresAction`, and literal `projection.nextAction` argv'
     )
     expect(kernel).toContain('choose `worker-stop` or `worker-abandon`')
   })
@@ -369,8 +378,10 @@ describe('owned orchestration references', () => {
 
     expect(reference).toContain('ORCA orchestration worker-list --json')
     expect(reference).toContain("`worker-show`'s `observation.status` is PTY liveness only")
-    expect(reference).toContain('`attention` categories, `requiresAction`')
-    expect(reference).toContain('`nextAction` argv')
+    expect(reference).toContain(
+      '`projection.attention.categories`, `projection.attention.requiresAction`'
+    )
+    expect(reference).toContain('`projection.nextAction` argv')
     expect(reference).toContain('the fleet verdict decides')
   })
 
