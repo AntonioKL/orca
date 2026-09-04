@@ -30,7 +30,10 @@ import type { ExecutionHostId } from '../../../shared/execution-host'
 import { findFolderWorkspaceOwner } from './folder-workspace-runtime-owner'
 import type { WorktreeStartupPayload } from '@/lib/worktree-startup-payload'
 import type { IssueCommandLaunch } from '@/lib/worktree-setup-issue-command-queue'
-import { ensureWorktreeHasInitialTerminal } from '@/lib/worktree-initial-terminal-seeding'
+import {
+  ensureWorktreeHasInitialTerminal,
+  reseedGatedEmptyWorkspace
+} from '@/lib/worktree-initial-terminal-seeding'
 import { ensureWebRuntimeWorktreeTerminalAfterWake } from '@/lib/web-runtime-worktree-terminal-after-wake'
 import { applyWorktreeNavViewEntry } from '@/lib/worktree-nav-view-history-replay'
 
@@ -146,12 +149,8 @@ export function activateAndRevealFolderWorkspace(
   }
   if (shouldGateAgentActivation) {
     void gateWorktreeAgentActivation(workspaceKey).then((outcome) => {
-      if (outcome === 'empty' && useAppStore.getState().activeWorktreeId === workspaceKey) {
-        ensureFolderWorkspaceInitialTerminal(
-          folderWorkspace,
-          undefined,
-          opts?.providesInitialSurface
-        )
+      if (outcome === 'empty') {
+        reseedGatedEmptyWorkspace(workspaceKey, opts?.providesInitialSurface)
       }
     })
   }
@@ -264,17 +263,8 @@ export function activateAndRevealWorktree(
   }
   if (shouldGateAgentActivation) {
     void gateWorktreeAgentActivation(worktreeId).then((outcome) => {
-      const currentState = useAppStore.getState()
-      if (outcome === 'empty' && currentState.activeWorktreeId === worktreeId) {
-        ensureWorktreeHasInitialTerminal(
-          currentState,
-          worktreeId,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          { reseedEmptiedWorkspace: opts?.providesInitialSurface !== true }
-        )
+      if (outcome === 'empty') {
+        reseedGatedEmptyWorkspace(worktreeId, opts?.providesInitialSurface)
       }
     })
   }
