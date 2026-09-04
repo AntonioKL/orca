@@ -6,9 +6,8 @@ export function MobileSyntaxSegments({ segments }: { segments: MobileSyntaxSegme
   let sourceOffset = 0
   return (
     <>
-      {segments.map((segment, index) => {
-        // The index keeps two adjacent zero-length segments of the same kind distinct.
-        const key = `${index}:${sourceOffset}:${segment.kind}`
+      {segments.map((segment) => {
+        const key = `${sourceOffset}:${segment.kind}`
         sourceOffset += segment.text.length
         return (
           <Text key={key} style={[webSyntaxTextStyle, syntaxTokenStyles[segment.kind]]}>

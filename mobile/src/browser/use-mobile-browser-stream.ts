@@ -60,7 +60,7 @@ type MobileBrowserStreamArgs = {
   setError: Dispatch<SetStateAction<string | null>>
   setFrameMetadata: Dispatch<SetStateAction<BrowserScreencastFrameMetadata | null>>
   setFrameUri: Dispatch<SetStateAction<string | null>>
-  setNavigationState?: Dispatch<SetStateAction<{ canGoBack: boolean; canGoForward: boolean }>>
+  setNavigationState?: (next: { canGoBack: boolean; canGoForward: boolean }) => void
   setZoom: Dispatch<SetStateAction<BrowserZoomState>>
   streamGenerationRef: { current: number }
   tab: MobileBrowserTab

@@ -22,6 +22,11 @@ import {
 } from './mobile-browser-frame-state'
 import { displayBrowserUrl, normalizeBrowserUrl } from './browser-url'
 import { resolveMobileBrowserAddressSync } from './mobile-browser-address-sync'
+import {
+  resolveMobileBrowserNavigationState,
+  type MobileBrowserNavigationRefinement,
+  type MobileBrowserNavigationState
+} from './mobile-browser-navigation-state'
 import { MobileBrowserPaneView } from './MobileBrowserPaneView'
 import { useMobileBrowserInteractions } from './use-mobile-browser-interactions'
 import { useMobileBrowserPaneLayers } from './use-mobile-browser-pane-layers'
@@ -84,10 +89,21 @@ export function MobileBrowserPane({
   const cachedInitialFrame = peekCachedBrowserFrame(cacheKey)
   const [addressValue, setAddressValue] = useState(displayBrowserUrl(tab.url))
   const [addressFocused, setAddressFocused] = useState(false)
-  const [navigationState, setNavigationState] = useState({
-    canGoBack: tab.canGoBack,
-    canGoForward: tab.canGoForward
-  })
+  // A host `navigation` event refines the tab's navigability until the tab itself republishes;
+  // an older host that never emits it leaves the tab props in charge. Derived in render so a tab
+  // update never lags one commit behind.
+  const [navigationRefinement, setNavigationRefinement] =
+    useState<MobileBrowserNavigationRefinement | null>(null)
+  const navigationState = resolveMobileBrowserNavigationState(tab, navigationRefinement)
+  const setNavigationState = useCallback(
+    (next: MobileBrowserNavigationState) => {
+      setNavigationRefinement({
+        ...next,
+        base: { canGoBack: tab.canGoBack, canGoForward: tab.canGoForward }
+      })
+    },
+    [tab.canGoBack, tab.canGoForward]
+  )
   const [addressSyncState, setAddressSyncState] = useState({
     focused: false,
     url: tab.url
@@ -177,12 +193,6 @@ export function MobileBrowserPane({
     focused: addressFocused,
     url: tab.url
   })
-  // The screencast `navigation` event is a newer-host refinement; the tab props stay
-  // the baseline so an older host that never emits it does not freeze Back/Forward.
-  useEffect(() => {
-    setNavigationState({ canGoBack: tab.canGoBack, canGoForward: tab.canGoForward })
-  }, [tab.canGoBack, tab.canGoForward])
-
   useEffect(() => {
     if (addressSync.nextState === addressSyncState) {
       return
