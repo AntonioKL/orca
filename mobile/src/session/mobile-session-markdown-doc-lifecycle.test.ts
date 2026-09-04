@@ -100,4 +100,37 @@ describe('mobile session markdown document lifecycle', () => {
 
     expect(docs.size).toBe(0)
   })
+
+  it('names the failing code in the retry state', async () => {
+    const lifecycle = new MobileSessionMarkdownDocLifecycle()
+    const tab = markdownTab('tab')
+    let docs = new Map<string, MarkdownDocState>()
+    const updateDocs = (update: (current: typeof docs) => typeof docs) => {
+      docs = update(docs)
+    }
+    lifecycle.reconcile([tab], updateDocs)
+
+    await lifecycle.load(tab, updateDocs, () => Promise.reject(new Error('host_error')))
+
+    expect(docs.get('tab')).toEqual({
+      status: 'error',
+      message: "Couldn't load markdown: host_error"
+    })
+  })
+
+  it('keeps the plain message when the failure carries prose', async () => {
+    const lifecycle = new MobileSessionMarkdownDocLifecycle()
+    const tab = markdownTab('tab')
+    let docs = new Map<string, MarkdownDocState>()
+    const updateDocs = (update: (current: typeof docs) => typeof docs) => {
+      docs = update(docs)
+    }
+    lifecycle.reconcile([tab], updateDocs)
+
+    await lifecycle.load(tab, updateDocs, () =>
+      Promise.reject(new Error('Unable to read markdown'))
+    )
+
+    expect(docs.get('tab')).toEqual({ status: 'error', message: "Couldn't load markdown" })
+  })
 })

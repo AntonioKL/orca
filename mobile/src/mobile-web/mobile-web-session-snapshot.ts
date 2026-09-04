@@ -141,6 +141,7 @@ function mobileWebSessionTab(
       ...base,
       type: 'markdown',
       ...(relativePath ? { relativePath } : {}),
+      isDirty: value.isDirty === true,
       ...(value.language === 'markdown' ? { language: 'markdown' as const } : {}),
       ...(value.mode === 'edit' || value.mode === 'markdown-preview' ? { mode: value.mode } : {})
     }

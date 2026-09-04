@@ -74,6 +74,7 @@ export const MobileWebSessionTabSchema = z.discriminatedUnion('type', [
       ...MobileWebSessionTabBase,
       type: z.literal('markdown'),
       relativePath: MobileWebRelativePathSchema.optional(),
+      isDirty: z.boolean().optional(),
       language: z.literal('markdown').optional(),
       mode: z.enum(['edit', 'markdown-preview']).optional()
     })

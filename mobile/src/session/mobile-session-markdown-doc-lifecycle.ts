@@ -59,12 +59,12 @@ export class MobileSessionMarkdownDocLifecycle {
       if (this.finishLoad(token)) {
         updateDocs((current) => new Map(current).set(tab.id, doc))
       }
-    } catch {
+    } catch (error) {
       if (this.finishLoad(token)) {
         updateDocs((current) =>
           new Map(current).set(tab.id, {
             status: 'error',
-            message: "Couldn't load markdown"
+            message: markdownLoadErrorMessage(error)
           })
         )
       }
@@ -109,6 +109,13 @@ export class MobileSessionMarkdownDocLifecycle {
     this.activeRequestIdByTabId.delete(token.tabId)
     return true
   }
+}
+
+/** Keep the failing code visible: every hosted read failure otherwise reads as the same dead end. */
+export function markdownLoadErrorMessage(error: unknown): string {
+  const code =
+    error instanceof Error && /^[a-z][a-z0-9_]{0,63}$/.test(error.message) ? error.message : null
+  return code ? `Couldn't load markdown: ${code}` : "Couldn't load markdown"
 }
 
 function retainLiveMarkdownDocs(

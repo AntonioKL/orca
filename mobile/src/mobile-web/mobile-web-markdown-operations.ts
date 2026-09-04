@@ -1,5 +1,6 @@
 import { Buffer } from 'buffer/'
 import {
+  MobileWebRelativePathSchema,
   MobileWebMarkdownDraftReadPayloadSchema,
   MobileWebMarkdownDraftReadResultSchema,
   MobileWebMarkdownDraftWritePayloadSchema,
@@ -14,6 +15,7 @@ import {
 } from '../../../src/shared/mobile-markdown-document'
 import {
   buildMarkdownDiskFallbackDoc,
+  MARKDOWN_TOO_LARGE_READ_ONLY_REASON,
   shouldReadMarkdownFromDiskAfterReadTabFailure
 } from '../session/mobile-markdown-disk-fallback'
 import type { RpcClient } from '../transport/rpc-client'
@@ -39,7 +41,14 @@ type MarkdownOperationArgs = {
 type MarkdownTarget = {
   workspaceId: string
   tabId: string
-  relativePath: string
+  relativePath?: string
+}
+
+/** The tab as the host records it; `hostRelativePath` may be absolute for a file opened outside
+ * the worktree, so it never leaves the shell except through `safeRelativePath`. */
+type ResolvedMarkdownTab = {
+  hostWorkspaceId: MobileWebHostWorkspaceId
+  hostRelativePath: string
 }
 
 export async function executeMobileWebMarkdownOperation(
@@ -47,29 +56,29 @@ export async function executeMobileWebMarkdownOperation(
 ): Promise<unknown> {
   if (args.operation === 'markdownRead') {
     const payload = MobileWebMarkdownReadPayloadSchema.parse(args.payload)
-    const hostWorkspaceId = await verifyMarkdownTarget(args, payload)
-    return readMarkdown(args.client, payload, hostWorkspaceId)
+    const tab = await resolveMarkdownTab(args, payload)
+    return readMarkdown(args.client, payload, tab)
   }
   if (args.operation === 'markdownSave') {
     const payload = MobileWebMarkdownSavePayloadSchema.parse(args.payload)
-    const hostWorkspaceId = await verifyMarkdownTarget(args, payload)
-    args.workspaceAuthority.assertHostWorkspaceBinding(payload.workspaceId, hostWorkspaceId)
-    return saveMarkdown(args.client, payload, hostWorkspaceId)
+    const tab = await resolveMarkdownTab(args, payload)
+    args.workspaceAuthority.assertHostWorkspaceBinding(payload.workspaceId, tab.hostWorkspaceId)
+    return saveMarkdown(args.client, payload, tab)
   }
   if (args.operation === 'markdownDraftRead') {
     const payload = MobileWebMarkdownDraftReadPayloadSchema.parse(args.payload)
-    const hostWorkspaceId = await verifyMarkdownTarget(args, payload)
+    const tab = await resolveMarkdownTab(args, payload)
     if (!args.nativeAuthority.sessionMarkdownDraftRead) {
       throw new MobileWebBrokerError('unsupported_capability')
     }
     const draft = await args.nativeAuthority.sessionMarkdownDraftRead(
-      hostWorkspaceId,
+      tab.hostWorkspaceId,
       payload.tabId,
-      payload.relativePath
+      tab.hostRelativePath
     )
     return parseHostResult(
       MobileWebMarkdownDraftReadResultSchema,
-      targetResult(payload, {
+      targetResult(payload, tab, {
         draft: draft
           ? {
               contentBase64: encodeMarkdownContent(draft.content),
@@ -81,15 +90,15 @@ export async function executeMobileWebMarkdownOperation(
   }
   if (args.operation === 'markdownDraftWrite') {
     const payload = MobileWebMarkdownDraftWritePayloadSchema.parse(args.payload)
-    const hostWorkspaceId = await verifyMarkdownTarget(args, payload)
+    const tab = await resolveMarkdownTab(args, payload)
     if (!args.nativeAuthority.sessionMarkdownDraftWrite) {
       throw new MobileWebBrokerError('unsupported_capability')
     }
-    args.workspaceAuthority.assertHostWorkspaceBinding(payload.workspaceId, hostWorkspaceId)
+    args.workspaceAuthority.assertHostWorkspaceBinding(payload.workspaceId, tab.hostWorkspaceId)
     await args.nativeAuthority.sessionMarkdownDraftWrite(
-      hostWorkspaceId,
+      tab.hostWorkspaceId,
       payload.tabId,
-      payload.relativePath,
+      tab.hostRelativePath,
       payload.draft
         ? {
             content: decodeMarkdownContent(payload.draft.contentBase64),
@@ -102,10 +111,11 @@ export async function executeMobileWebMarkdownOperation(
   throw new MobileWebBrokerError('unsupported_capability')
 }
 
-async function verifyMarkdownTarget(
+/** The host tab list is the only authority on which file a tab id names. */
+async function resolveMarkdownTab(
   args: MarkdownOperationArgs,
   target: MarkdownTarget
-): Promise<MobileWebHostWorkspaceId> {
+): Promise<ResolvedMarkdownTab> {
   const hostWorkspaceId = args.workspaceAuthority.hostWorkspaceId(target.workspaceId)
   const response = await args.client.sendRequest('session.tabs.list', {
     worktree: `id:${hostWorkspaceId}`
@@ -114,39 +124,40 @@ async function verifyMarkdownTarget(
   const tab =
     result?.worktree === hostWorkspaceId && Array.isArray(result.tabs)
       ? result.tabs.find(
-          (value) =>
-            isRecord(value) &&
-            value.id === target.tabId &&
-            value.type === 'markdown' &&
-            value.relativePath === target.relativePath
+          (value) => isRecord(value) && value.id === target.tabId && value.type === 'markdown'
         )
       : null
-  if (!tab) {
+  if (!isRecord(tab) || typeof tab.relativePath !== 'string' || !tab.relativePath) {
     throw new MobileWebBrokerError('not_found')
   }
-  return hostWorkspaceId
+  // A page that could name the path still asserts it, so a rename under the tab is refused rather
+  // than silently redirected. Tabs whose host path the page cannot express send nothing.
+  if (target.relativePath !== undefined && target.relativePath !== tab.relativePath) {
+    throw new MobileWebBrokerError('not_found')
+  }
+  return { hostWorkspaceId, hostRelativePath: tab.relativePath }
 }
 
 async function readMarkdown(
   client: RpcClient,
   payload: MarkdownTarget & { tabIsDirty: boolean },
-  hostWorkspaceId: string
+  tab: ResolvedMarkdownTab
 ) {
   const response = await client.sendRequest('markdown.readTab', {
-    worktree: `id:${hostWorkspaceId}`,
+    worktree: `id:${tab.hostWorkspaceId}`,
     tabId: payload.tabId
   })
   if (!response.ok) {
     if (!shouldReadMarkdownFromDiskAfterReadTabFailure(response as RpcFailure)) {
       throw new MobileWebBrokerError('host_error')
     }
-    return readMarkdownFallback(client, payload, hostWorkspaceId)
+    return readMarkdownFallback(client, payload, tab)
   }
   const result = response.result
   if (
     !isRecord(result) ||
     result.tabId !== payload.tabId ||
-    result.relativePath !== payload.relativePath ||
+    result.relativePath !== tab.hostRelativePath ||
     typeof result.content !== 'string' ||
     typeof result.version !== 'string' ||
     typeof result.isDirty !== 'boolean' ||
@@ -154,16 +165,20 @@ async function readMarkdown(
   ) {
     throw new MobileWebBrokerError('host_error')
   }
+  const readable = clampMarkdownReadContent(result.content)
+  const readOnlyReason = readable.truncated
+    ? MARKDOWN_TOO_LARGE_READ_ONLY_REASON
+    : typeof result.readOnlyReason === 'string'
+      ? result.readOnlyReason
+      : undefined
   return parseHostResult(
     MobileWebMarkdownReadResultSchema,
-    targetResult(payload, {
-      contentBase64: encodeMarkdownContent(result.content),
+    targetResult(payload, tab, {
+      contentBase64: encodeMarkdownContent(readable.content),
       baseVersion: result.version,
-      editable: result.editable,
+      editable: result.editable && !readable.truncated,
       stale: result.isDirty,
-      ...(typeof result.readOnlyReason === 'string'
-        ? { readOnlyReason: result.readOnlyReason }
-        : {})
+      ...(readOnlyReason ? { readOnlyReason } : {})
     })
   )
 }
@@ -171,30 +186,31 @@ async function readMarkdown(
 async function readMarkdownFallback(
   client: RpcClient,
   payload: MarkdownTarget & { tabIsDirty: boolean },
-  hostWorkspaceId: string
+  tab: ResolvedMarkdownTab
 ) {
   const response = await client.sendRequest('files.read', {
-    worktree: `id:${hostWorkspaceId}`,
-    relativePath: payload.relativePath
+    worktree: `id:${tab.hostWorkspaceId}`,
+    relativePath: tab.hostRelativePath
   })
   const result = response.ok ? response.result : null
   if (
     !isRecord(result) ||
-    result.worktree !== hostWorkspaceId ||
-    result.relativePath !== payload.relativePath ||
+    result.worktree !== tab.hostWorkspaceId ||
+    result.relativePath !== tab.hostRelativePath ||
     typeof result.content !== 'string' ||
     typeof result.truncated !== 'boolean'
   ) {
     throw new MobileWebBrokerError('host_error')
   }
+  const readable = clampMarkdownReadContent(result.content)
   const fallback = buildMarkdownDiskFallbackDoc({
-    content: result.content,
-    truncated: result.truncated,
+    content: readable.content,
+    truncated: result.truncated || readable.truncated,
     tabIsDirty: payload.tabIsDirty
   })
   return parseHostResult(
     MobileWebMarkdownReadResultSchema,
-    targetResult(payload, {
+    targetResult(payload, tab, {
       contentBase64: encodeMarkdownContent(fallback.content),
       baseVersion: fallback.baseVersion,
       editable: fallback.editable,
@@ -207,10 +223,10 @@ async function readMarkdownFallback(
 async function saveMarkdown(
   client: RpcClient,
   payload: MarkdownTarget & { baseVersion: string; contentBase64: string },
-  hostWorkspaceId: string
+  tab: ResolvedMarkdownTab
 ) {
   const response = await client.sendRequest('markdown.saveTab', {
-    worktree: `id:${hostWorkspaceId}`,
+    worktree: `id:${tab.hostWorkspaceId}`,
     tabId: payload.tabId,
     baseVersion: payload.baseVersion,
     content: decodeMarkdownContent(payload.contentBase64)
@@ -234,11 +250,25 @@ async function saveMarkdown(
   }
   return parseHostResult(
     MobileWebMarkdownSaveResultSchema,
-    targetResult(payload, {
+    targetResult(payload, tab, {
       contentBase64: encodeMarkdownContent(result.content),
       baseVersion: result.version
     })
   )
+}
+
+/** Reads must survive documents past the edit ceiling: the host already serves those read-only. */
+function clampMarkdownReadContent(content: string): { content: string; truncated: boolean } {
+  const bytes = Buffer.from(content, 'utf8')
+  if (bytes.byteLength <= MOBILE_MARKDOWN_EDIT_MAX_BYTES) {
+    return { content, truncated: false }
+  }
+  let end = MOBILE_MARKDOWN_EDIT_MAX_BYTES
+  // Never split a UTF-8 sequence; continuation bytes are 0b10xxxxxx.
+  while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) {
+    end -= 1
+  }
+  return { content: bytes.slice(0, end).toString('utf8'), truncated: true }
 }
 
 function encodeMarkdownContent(content: string): string {
@@ -260,11 +290,16 @@ function decodeMarkdownContent(contentBase64: string): string {
   return content
 }
 
-function targetResult(target: MarkdownTarget, result: Record<string, unknown>) {
+function targetResult(
+  target: MarkdownTarget,
+  tab: ResolvedMarkdownTab,
+  result: Record<string, unknown>
+) {
+  const relativePath = MobileWebRelativePathSchema.safeParse(tab.hostRelativePath)
   return {
     workspaceId: target.workspaceId,
     tabId: target.tabId,
-    relativePath: target.relativePath,
+    ...(relativePath.success ? { relativePath: relativePath.data } : {}),
     ...result
   }
 }

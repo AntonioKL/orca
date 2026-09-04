@@ -1,6 +1,7 @@
 import { Buffer } from 'buffer/'
 import { describe, expect, it, vi } from 'vitest'
 import { MOBILE_MARKDOWN_EDIT_MAX_BYTES } from '../../../src/shared/mobile-markdown-document'
+import { MARKDOWN_TOO_LARGE_READ_ONLY_REASON } from '../session/mobile-markdown-disk-fallback'
 import type { RpcClient } from '../transport/rpc-client'
 import type { MobileWebNativeCapabilityAuthority } from './mobile-web-native-capability-authority'
 import { executeMobileWebMarkdownOperation } from './mobile-web-markdown-operations'
@@ -141,7 +142,7 @@ describe('mobile web markdown operations', () => {
     })
   })
 
-  it('rejects oversized host content and stores drafts under host authority', async () => {
+  it('serves oversized host content read-only and stores drafts under host authority', async () => {
     const oversizedClient = rpcClient(
       vi
         .fn()
@@ -165,7 +166,27 @@ describe('mobile web markdown operations', () => {
         workspaceAuthority: WORKSPACE_AUTHORITY,
         nativeAuthority: {}
       })
-    ).rejects.toMatchObject({ code: 'host_error' })
+    ).resolves.toMatchObject({
+      editable: false,
+      readOnlyReason: MARKDOWN_TOO_LARGE_READ_ONLY_REASON,
+      contentBase64: Buffer.from('x'.repeat(MOBILE_MARKDOWN_EDIT_MAX_BYTES)).toString('base64')
+    })
+
+    await expect(
+      executeMobileWebMarkdownOperation({
+        operation: 'markdownSave',
+        payload: {
+          ...PAGE_TARGET,
+          baseVersion: 'v1',
+          contentBase64: Buffer.from('x'.repeat(MOBILE_MARKDOWN_EDIT_MAX_BYTES + 1)).toString(
+            'base64'
+          )
+        },
+        client: rpcClient(vi.fn().mockResolvedValue(tabsResponse())),
+        workspaceAuthority: WORKSPACE_AUTHORITY,
+        nativeAuthority: {}
+      })
+    ).rejects.toMatchObject({ code: 'invalid_request' })
 
     const draftRead = vi.fn().mockResolvedValue({ content: 'draft', baseVersion: 'v1' })
     const result = await executeMobileWebMarkdownOperation({

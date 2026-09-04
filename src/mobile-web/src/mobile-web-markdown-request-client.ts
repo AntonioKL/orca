@@ -116,11 +116,15 @@ export class MobileWebMarkdownRequestClient {
   }
 }
 
+/** A tab is addressed by id; `relativePath` is only ever an echo, and the shell omits it for tabs
+ * whose host path is not worktree-relative. */
 function matchingTarget<T extends MarkdownTarget>(expected: MarkdownTarget, result: T): T {
+  const relativePathDiverged =
+    expected.relativePath !== undefined && result.relativePath !== expected.relativePath
   if (
     result.workspaceId !== expected.workspaceId ||
     result.tabId !== expected.tabId ||
-    result.relativePath !== expected.relativePath
+    relativePathDiverged
   ) {
     throw new MobileWebBridgeClientError('invalid_message', false)
   }

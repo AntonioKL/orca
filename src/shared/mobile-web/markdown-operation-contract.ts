@@ -12,10 +12,16 @@ const MobileWebMarkdownBase64Schema = z
   .max(MOBILE_WEB_MARKDOWN_CONTENT_MAX_BASE64_CHARACTERS)
   .refine(isMobileWebBase64, 'Invalid base64')
 
+/**
+ * A markdown tab is addressed by `tabId` alone: the shell resolves the file from its authoritative
+ * `session.tabs.list`, so the page can neither name a host path nor be locked out of tabs whose
+ * host path is not worktree-relative (files opened from outside the worktree). `relativePath` is
+ * an echo for display and draft keys, present only when the host path really is relative.
+ */
 const MobileWebMarkdownTargetShape = {
   workspaceId: MobileWebWorkspaceIdSchema,
   tabId: z.string().min(1).max(512),
-  relativePath: MobileWebRelativePathSchema
+  relativePath: MobileWebRelativePathSchema.optional()
 } as const
 
 const MobileWebMarkdownResultTargetShape = {

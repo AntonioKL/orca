@@ -35,7 +35,7 @@ function presentTab(
       ...tab,
       filePath: syntheticFileIdentity(tab.id),
       relativePath,
-      isDirty: false,
+      isDirty: tab.isDirty === true,
       documentVersion: `${snapshot.publicationEpoch}:${snapshot.snapshotVersion}:${tab.id}`
     }
   }
