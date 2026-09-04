@@ -326,7 +326,13 @@ with a large `refresh_tokens` before building the index concurrently there.
 - orca-cloud PR #476 (`auth-refresh-token-pruning`): batched `refresh_tokens` pruner as a scheduled Cloud Run
   job (revoked rows kept 30 d, rotated rows 60 d against a 30 d TTL, 5k-row batches, 200 ms pauses, persisted
   cursor, per-run budget) plus a 10 s `statement_timeout` on the auth request pool with schema DDL on an
-  untimed connection. Merges cleanly onto #474. First production run should use a small budget.
+  untimed connection. Merges cleanly onto #474 and does not need its index (walks the primary key;
+  EXPLAIN-asserted no seq scan). CI ran the Postgres integration tests for real on PG 16 and 17. Ships
+  `auth_token_pruner_enabled = false` in both environments: enabling needs an image digest from a build that
+  contains the new entrypoint. Operating rules once enabled: monitor the run summary's `stopReason` and
+  `deletedRows`, not the exit code (a run that only ever times out exits 0); ~48 M rows drain in ~10 days at
+  200k/hour; deleting them leaves dead tuples, so the 16 GB is not reclaimed without a separate VACUUM FULL or
+  pg_repack pass, which is its own change.
 - Phone-side copy when the desktop is signed out: today the relay answers the phone with `HOST_OFFLINE` (4404)
   and the phone shows "Can't reach desktop" after enough attempts; the relay cannot tell "desktop asleep" from
   "desktop signed out" because the desktop closes its control with no reason. Design note: have the desktop
