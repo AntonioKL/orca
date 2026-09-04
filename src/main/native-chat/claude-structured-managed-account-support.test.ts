@@ -70,10 +70,11 @@ describe('structuredClaudeMatchesActiveManagedAccount', () => {
     ).toBe(false)
   })
 
-  /** Absent is not empty. An empty array is a real answer — the user has no managed accounts, so
-   *  nothing claims an identity and the ambient path is legitimate. Settings with no accounts field
-   *  are settings we failed to parse, which is the same epistemic state as unreadable. */
-  it('separates an empty account list from an absent one', () => {
+  /** Absent and empty are the same answer: this user has no managed Claude accounts, so nothing
+   *  claims an identity and the ambient path is legitimate. Only settings that cannot be READ are
+   *  unknown. Treating a missing key as unknown strands profiles that simply never wrote it — the
+   *  auth policy's own predicate takes `(accounts ?? [])` for exactly this reason. */
+  it('treats an absent account list the same as an empty one', () => {
     expect(
       structuredClaudeMatchesActiveManagedAccount(settings({ claudeManagedAccounts: [] }))
     ).toBe(true)
@@ -81,7 +82,7 @@ describe('structuredClaudeMatchesActiveManagedAccount', () => {
       structuredClaudeMatchesActiveManagedAccount({
         activeClaudeManagedAccountId: null
       } as unknown as ClaudeManagedAccountGateSettings)
-    ).toBe(false)
+    ).toBe(true)
   })
 
   it('fails closed when the settings cannot be read at all', () => {
@@ -89,12 +90,43 @@ describe('structuredClaudeMatchesActiveManagedAccount', () => {
     expect(structuredClaudeMatchesActiveManagedAccount(undefined)).toBe(false)
   })
 
-  it('fails closed when managed accounts exist but no host account is selected', () => {
+  /** The four states this gate exists to tell apart, pinned together so a change to one is visible
+   *  against the others. */
+  it.each([
+    ['no managed accounts', [], null, true],
+    ['accounts present, none active, no WSL account', [account('host-1', 'host')], null, true],
+    ['host account selected', [account('host-1', 'host')], 'host-1', true],
+    ['WSL-only, normalized to no host selection', [account('wsl-1', 'wsl')], null, false]
+  ] as const)('resolves %s', (_name, claudeManagedAccounts, activeId, expected) => {
     expect(
       structuredClaudeMatchesActiveManagedAccount(
-        settings({ claudeManagedAccounts: [account('host-1', 'host')] })
+        settings({
+          claudeManagedAccounts: [...claudeManagedAccounts],
+          activeClaudeManagedAccountIdsByRuntime: { host: activeId, wsl: {} }
+        })
       )
-    ).toBe(false)
+    ).toBe(expected)
+  })
+
+  /** THE discriminator, and the whole of this rule. With nothing selected for the host runtime the
+   *  settings alone cannot distinguish honest deselection from the WSL-only steady state, because
+   *  `pruneInvalidClaudeRuntimeSelection` empties the host slot in the second case and persists it.
+   *  So the presence of ANY WSL-bound account decides. Simplifying this to "none active ->
+   *  supported" re-opens the auth-identity misrepresentation this gate exists to prevent. */
+  it('splits none-active on whether a WSL-bound account exists at all', () => {
+    const noneActive = (accounts: ReturnType<typeof account>[]) =>
+      structuredClaudeMatchesActiveManagedAccount(
+        settings({
+          claudeManagedAccounts: accounts,
+          activeClaudeManagedAccountIdsByRuntime: { host: null, wsl: {} }
+        })
+      )
+
+    expect(noneActive([account('host-1', 'host')])).toBe(true)
+    expect(noneActive([account('host-1', 'host'), account('host-2', 'host')])).toBe(true)
+    expect(noneActive([account('wsl-1', 'wsl')])).toBe(false)
+    // Mixed list still refuses: the WSL account is present and nothing is selected.
+    expect(noneActive([account('host-1', 'host'), account('wsl-1', 'wsl')])).toBe(false)
   })
 
   /** The gate and the auth policy must resolve the SAME account. A legacy settings blob carries the

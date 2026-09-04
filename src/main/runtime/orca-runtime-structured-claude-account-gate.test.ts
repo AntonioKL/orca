@@ -30,6 +30,14 @@ const WSL_ONLY: ClaudeManagedAccountGateSettings = {
   activeClaudeManagedAccountIdsByRuntime: { host: null, wsl: { Ubuntu: 'wsl-1' } }
 }
 
+/** Registered Claude accounts with none selected: ambient auth, and the UI names no host identity,
+ *  so this must reach structured rather than silently falling back to a terminal session. */
+const ACCOUNTS_PRESENT_NONE_ACTIVE: ClaudeManagedAccountGateSettings = {
+  claudeManagedAccounts: [managedAccount('host-1', 'host'), managedAccount('host-2', 'host')],
+  activeClaudeManagedAccountId: null,
+  activeClaudeManagedAccountIdsByRuntime: { host: null, wsl: {} }
+}
+
 const HOST_SELECTED: ClaudeManagedAccountGateSettings = {
   claudeManagedAccounts: [managedAccount('host-1', 'host')],
   activeClaudeManagedAccountId: 'host-1',
@@ -70,6 +78,13 @@ describe('structured Claude managed-account gate', () => {
     await expect(
       runtime.getStructuredAgentSessionCreateSupport('id:workspace-1', 'claude')
     ).resolves.toMatchObject({ supported: false })
+  })
+
+  it('supports Claude when accounts are registered but none is selected', async () => {
+    const runtime = runtimeWithAccounts(ACCOUNTS_PRESENT_NONE_ACTIVE)
+    await expect(
+      runtime.getStructuredAgentSessionCreateSupport('id:workspace-1', 'claude')
+    ).resolves.toMatchObject({ supported: true })
   })
 
   it('still supports Claude under a selected host managed account', async () => {
