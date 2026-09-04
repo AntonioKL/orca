@@ -1,36 +1,39 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
+import { parse } from 'yaml'
 
-// Why: the Agent Skills spec caps `description` at 1,024 characters after YAML folding, and
-// conforming installers reject a skill over it (#17935). Every skills/*/SKILL.md must fit.
-const SKILLS_ROOT = resolve(import.meta.dirname, '../../skills')
+const skillsDir = resolve(import.meta.dirname, '../../skills')
+// Why: the Agent Skills spec caps `description` at 1024 chars and conforming installers
+// reject the whole skill (#17935); the frontmatter is what the installer parses, so check it.
 const MAX_DESCRIPTION_LENGTH = 1024
 
-function readDescription(skillText) {
-  const frontmatter = /^---\n([\s\S]*?)\n---\n/u.exec(skillText)?.[1] ?? ''
-  return parse(frontmatter)?.description ?? ''
+function readDescription(skillName) {
+  const skillMarkdown = readFileSync(join(skillsDir, skillName, 'SKILL.md'), 'utf8')
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/u.exec(skillMarkdown)?.[1]
+
+  expect(frontmatter, `${skillName}: missing frontmatter`).toBeDefined()
+
+  return parse(frontmatter ?? '').description
 }
 
 describe('bundled skill descriptions', () => {
-  it('stay within the Agent Skills 1024-character limit', () => {
-    const skills = readdirSync(SKILLS_ROOT, { withFileTypes: true }).filter((entry) =>
-      entry.isDirectory()
-    )
-    expect(skills.length).toBeGreaterThan(0)
+  const skillNames = readdirSync(skillsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
 
-    const violations = skills.flatMap((entry) => {
-      const description = readDescription(
-        readFileSync(join(SKILLS_ROOT, entry.name, 'SKILL.md'), 'utf8')
-      )
-      if (!description.trim()) {
-        return [`${entry.name}: missing description`]
-      }
-      return description.length > MAX_DESCRIPTION_LENGTH
-        ? [`${entry.name}: ${description.length} chars (limit ${MAX_DESCRIPTION_LENGTH})`]
-        : []
-    })
-    expect(violations).toEqual([])
+  it('discovers the bundled skills', () => {
+    expect(skillNames).toContain('orchestration')
+  })
+
+  it.each(skillNames)('%s keeps description within the Agent Skills spec limit', (name) => {
+    const description = readDescription(name)
+
+    expect(typeof description, `${name}: description must be a string`).toBe('string')
+    expect(description.trim().length, `${name}: description is empty`).toBeGreaterThan(0)
+    expect(
+      description.length,
+      `${name}: description is ${description.length} chars`
+    ).toBeLessThanOrEqual(MAX_DESCRIPTION_LENGTH)
   })
 })
