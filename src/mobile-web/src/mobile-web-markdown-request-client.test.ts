@@ -23,7 +23,7 @@ describe('mobile web markdown request client', () => {
     async (operation) => {
       const harness = createHarness(operation)
       const content = '\ufeff# Notes\r\nλ'
-      const contentBase64 = Buffer.from(content).toString('base64')
+      const contentBase64 = btoa(String.fromCharCode(...new TextEncoder().encode(content)))
       const pending =
         operation === 'markdownRead'
           ? harness.client.markdown.read({ ...TARGET, tabIsDirty: false })
