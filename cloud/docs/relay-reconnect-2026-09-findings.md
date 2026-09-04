@@ -529,7 +529,35 @@ also a Cloud SQL instance setting in the owning Terraform root. Per the standing
 this session. Until then the fleet-wide 4–6 s stalls recur on
 every slow checkpoint sync, the old-image cells die on each one, and no 15-min gate window will exist.
 
-## Finding 11 (2026-09-04 12:55Z): a second stall class, Cloud SQL proxy dial timeouts, independent of the checkpoint loop
+## Finding 11 (2026-09-04 12:55Z): **Cloud NAT port exhaustion** on the us-central1 cells is the second stall class
+
+`google_compute_router_nat.relay_gce` (us-central1, `AUTO_ONLY` IPs, no `min_ports_per_vm`, no dynamic
+port allocation, i.e. the default **64 ports per VM**). `router.googleapis.com/nat/port_usage` per VM
+hit **64 = the cap** in exactly the minutes the cells' Cloud SQL proxies logged `dial tcp
+35.188.82.89:3307: i/o timeout` (12:20–12:22, 12:41–12:43, 12:51–12:53), and
+`nat/dropped_sent_packets_count` went 0 -> 56/552/590, 82/272/133, 395/1565/1842 in those same minutes.
+Hourly: port_usage max was 25–50 all of Sep 3 and until 10Z today, 64 in 11Z and 12Z; dropped packets 0
+until 11Z (219), then 5,491 in 12Z. Open NAT connections rose 400–600 -> 815–874. Every cell's Cloud SQL
+traffic egresses through this NAT to the instance's public IP (the instance has no private IP:
+`ipv4Enabled=true`, `privateNetwork` unset). When a VM's 64 ports fill, new TCP SYNs to 3307 are dropped,
+the proxy's dial times out, and the relay pool's 2 s `connectionTimeoutMillis` fires: that is the exact
+2 s stall the old image dies on and the new director surfaces as a 500. The dial timeouts hit c7 and c8
+hardest because they carry the most controls and open the most DB connections.
+
+What raised port demand today: each old-image crash re-opens a full pool through fresh NAT ports, the
+autoheal recreates do the same, and the 55P03 retry storms keep more connections mid-transaction, so
+crashes and NAT exhaustion feed each other. This is why the afternoon accelerated even after the disk
+loop broke at 12:39.
+
+**Owning change (not applied):** `cloud/infra/terraform/relay-gce-foundation.tf`
+`google_compute_router_nat.relay_gce` (this repo): set `min_ports_per_vm = 1024` (or enable
+`enable_dynamic_port_allocation = true` with `max_ports_per_vm = 4096`) and, if needed, add manual NAT IPs
+(each IP supplies 64,512 ports across VMs). Online change, no VM restart. The durable fix is giving the
+Cloud SQL instance a **private IP** and pointing the proxy at `--private-ip`, which takes DB traffic off
+NAT entirely; that is a Cloud SQL instance change in the orca-cloud foundation root plus a startup-script
+flag here. Per the standing rule, not applied from this session.
+
+Original write-up of the symptom before the NAT correlation follows.
 
 The 12:50:30–12:50:50 stall (every cell 3.7–3.9 s SQL max, six old-image cells died) happened with
 checkpoints healthy (85 ms) and disk at 6 MB/s, so it is not Finding 10. The cells' Cloud SQL Auth Proxy
