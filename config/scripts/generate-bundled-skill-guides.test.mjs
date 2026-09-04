@@ -394,10 +394,12 @@ describe('guide reference routing', () => {
       const unshipped = routed.filter((file) => !owner.shipped.includes(file))
       const unrouted = owner.shipped.filter((file) => !routed.includes(file))
       if (unshipped.length > 0) {
-        mismatches.push(`${owner.name}: routes missing ${unshipped}`)
+        mismatches.push(
+          `${owner.name}: routes references that do not exist: ${unshipped.join(', ')}`
+        )
       }
       if (unrouted.length > 0) {
-        mismatches.push(`${owner.name}: ships unrouted ${unrouted}`)
+        mismatches.push(`${owner.name}: ships references no gate routes: ${unrouted.join(', ')}`)
       }
     }
     expect(mismatches).toEqual([])
