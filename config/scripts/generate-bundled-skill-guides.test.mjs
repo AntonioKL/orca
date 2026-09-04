@@ -239,15 +239,6 @@ describe('bundled skill guide generator', () => {
     for (const name of ['orca-cli', 'computer-use', 'orca-emulator', 'orca-emulator-android']) {
       const source = await readFile(path.join(projectDir, 'skill-guides', `${name}.md`), 'utf8')
 
-      // Why: orca-cli and computer-use delegate executable resolution to their discovery
-      // stubs, so the `ORCA_CLI_COMMAND` / `orca-dev` / `orca-ide` ladder is asserted against
-      // `skills/<name>/SKILL.md` in their own guidance tests. Every guide still has to keep
-      // the placeholder substitution safe for PowerShell and cmd.exe.
-      if (!['orca-cli', 'computer-use'].includes(name)) {
-        expect(source).toContain('ORCA_CLI_COMMAND')
-        expect(source).toContain('orca-dev')
-        expect(source).toContain('orca-ide')
-      }
       expect(source).toContain('PowerShell')
       expect(source).toContain('cmd.exe')
       expect(source).toMatch(/^ORCA .+--json$/mu)
@@ -255,6 +246,31 @@ describe('bundled skill guide generator', () => {
       // the same guide unusable from PowerShell and cmd.exe.
       expect(source).not.toMatch(/^orca /mu)
       expect(source).not.toMatch(/\$ORCA(?:_|\b)/u)
+    }
+  })
+
+  // Why: a guide that restates the resolver must restate all of it — a partial copy is what
+  // sends an agent to bare `orca` and the GNOME screen reader on Linux.
+  it('keeps the executable-resolution ladder whole in the guides that restate it', async () => {
+    for (const name of ['orca-cli', 'computer-use']) {
+      const source = await readFile(path.join(projectDir, 'skill-guides', `${name}.md`), 'utf8')
+
+      expect(source, name).toContain('ORCA_CLI_COMMAND')
+      expect(source, name).toContain('orca-dev')
+      expect(source, name).toContain('orca-ide')
+    }
+  })
+
+  // Why: `skills get` already ran on a resolved executable, so the emulator guides name that
+  // executable instead of carrying a fourth copy of the ladder the stubs own.
+  it('points the emulator guides at the stub-resolved executable', async () => {
+    for (const name of ['orca-emulator', 'orca-emulator-android']) {
+      const source = await readFile(path.join(projectDir, 'skill-guides', `${name}.md`), 'utf8')
+
+      expect(source, name).toContain(
+        '`ORCA` is a placeholder for the executable you used to run `skills get`'
+      )
+      expect(source, name).not.toContain('ORCA_CLI_COMMAND')
     }
   })
 
