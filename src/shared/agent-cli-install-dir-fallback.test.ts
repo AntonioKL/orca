@@ -1,8 +1,13 @@
 import { delimiter, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { detectCommandsInInstallDirs } from './local-agent-install-dir-detection'
-import { getVersionManagerBinPaths, resolveCliCommands } from './node-cli-command-resolution'
+import {
+  getVersionManagerBinPaths,
+  resolveCliCommand,
+  resolveCliCommands
+} from './node-cli-command-resolution'
 import { buildPosixFallbackPathPrelude } from './posix-version-manager-bin-dirs'
+import { getSystemCliInstallDirectories } from './system-cli-install-dirs'
 
 /**
  * The install-dir fallback answers "is this agent CLI installed?" whenever the
@@ -148,15 +153,40 @@ describe('agent CLI install-dir fallback', () => {
     }
   })
 
-  it('still lets a version-manager install outrank a system one', () => {
-    const home = '/Users/tester'
-    stage(
-      join(home, '.volta', 'bin', 'codex'),
-      join('/opt/homebrew/bin', 'codex'),
-      join('/usr/local/bin', 'codex')
-    )
-    expect(resolveAll(['codex'], { platform: 'darwin', homePath: home })).toEqual({
-      codex: join(home, '.volta', 'bin', 'codex')
+  // Why both resolvers and both platforms: resolveCliCommand is what every
+  // spawn site (codex login, app-server, session-index heal) calls, and its
+  // list was once spelled separately from resolveCliCommands'. A same-named
+  // binary in /usr/local/bin must never shadow the one a version manager owns.
+  describe.each([
+    { platform: 'darwin' as const, home: '/Users/tester', systemDir: '/opt/homebrew/bin' },
+    {
+      platform: 'linux' as const,
+      home: '/home/tester',
+      systemDir: '/home/linuxbrew/.linuxbrew/bin'
+    }
+  ])('$platform: system dirs stay last', ({ platform, home, systemDir }) => {
+    it('lets a version-manager install outrank a system one', () => {
+      const managed = join(home, '.volta', 'bin', 'codex')
+      stage(managed, join(systemDir, 'codex'), join('/usr/local/bin', 'codex'))
+      expect(resolveCliCommand('codex', { platform, homePath: home })).toBe(managed)
+      expect(resolveAll(['codex'], { platform, homePath: home })).toEqual({ codex: managed })
+    })
+
+    it('lets an npm --user (~/.local/bin) install outrank a system one', () => {
+      const managed = join(home, '.local', 'bin', 'codex')
+      stage(managed, join(systemDir, 'codex'))
+      expect(resolveCliCommand('codex', { platform, homePath: home })).toBe(managed)
+      expect(resolveAll(['codex'], { platform, homePath: home })).toEqual({ codex: managed })
+    })
+
+    it('lets a copy already on PATH outrank every install dir', () => {
+      const onPath = join('/custom/bin', 'codex')
+      const pathEnv = [GUI_LAUNCH_PATH, '/custom/bin'].join(delimiter)
+      stage(onPath, join(home, '.volta', 'bin', 'codex'), join(systemDir, 'codex'))
+      expect(resolveCliCommand('codex', { platform, homePath: home, pathEnv })).toBe(onPath)
+      expect(resolveCliCommands(['codex'], { platform, homePath: home, pathEnv })).toEqual(
+        new Map([['codex', onPath]])
+      )
     })
   })
 
@@ -223,5 +253,24 @@ describe('agent CLI install-dir fallback', () => {
     expect(prelude.indexOf('.nvm/versions/node/*/bin')).toBeLessThan(offsets[0])
     // Why absent: a WSL guest is Linux, so /opt/homebrew is never its brew prefix.
     expect(prelude).not.toContain('/opt/homebrew')
+  })
+
+  // Why derived: the native and guest lists drifted apart once by hand. Every
+  // version-manager dir the native resolver knows must precede the guest's
+  // first system dir, and the guest's system block must be the native one.
+  it('keeps the WSL guest prelude in step with the native Linux lists', () => {
+    const prelude = buildPosixFallbackPathPrelude()
+    const asGuest = (dir: string): string => `"${dir.split('\\').join('/')}"`
+    const systemDirs = getSystemCliInstallDirectories('linux', '$HOME').map(asGuest)
+    const firstSystemOffset = prelude.indexOf(systemDirs[0])
+    expect(firstSystemOffset).toBeGreaterThan(0)
+    for (const dir of getVersionManagerBinPaths({ platform: 'linux', homePath: '$HOME' })) {
+      const offset = prelude.indexOf(asGuest(dir))
+      expect(offset, dir).toBeGreaterThanOrEqual(0)
+      expect(offset, dir).toBeLessThan(firstSystemOffset)
+    }
+    const systemOffsets = systemDirs.map((dir) => prelude.indexOf(dir))
+    expect(systemOffsets.every((offset) => offset >= firstSystemOffset)).toBe(true)
+    expect([...systemOffsets].sort((a, b) => a - b)).toEqual(systemOffsets)
   })
 })
