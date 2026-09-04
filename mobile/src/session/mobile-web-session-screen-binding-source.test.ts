@@ -70,10 +70,10 @@ describe('mobile web session screen binding', () => {
   })
 
   it('keeps one native-shell channel alive across hosted route navigation', () => {
-    expect(hostedLayout).toContain('installMobileWebHistorySessionFragment()')
+    expect(hostedLayout).toContain('installMobileWebHistoryUrlRewriter(')
     expect(hostedLayout).toContain('<MobileWebNativeShellProvider>')
     expect(hostedLayout).toContain('<Stack screenOptions={{ headerShown: false }} />')
-    expect(hostedLayout.indexOf('installMobileWebHistorySessionFragment()')).toBeLessThan(
+    expect(hostedLayout.indexOf('installMobileWebHistoryUrlRewriter(')).toBeLessThan(
       hostedLayout.indexOf('export default function HostMobileWebLayout()')
     )
     expect(hostedLayout.indexOf('<MobileWebNativeShellProvider>')).toBeLessThan(

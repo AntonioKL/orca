@@ -7,20 +7,22 @@ import {
   MobileWebNativeShellProvider,
   useMobileWebNativeShell
 } from '../../src/mobile-web/src/native-shell-channel'
-import { installMobileWebHistorySessionFragment } from '../src/mobile-web/mobile-web-history-session-fragment'
 import { HostedPageTopInsetProvider } from '../src/mobile-web/hosted-page-top-inset'
 import {
   MobileWebNativeBehaviorAdapter,
   installMobileWebNativeBehaviorAdapters
 } from '../src/mobile-web/mobile-web-native-behavior-adapter'
-import { installMobileWebQuerylessHistory } from '../src/mobile-web/mobile-web-queryless-history'
+import {
+  installMobileWebHistoryUrlRewriter,
+  pinMobileWebShellSessionFragment,
+  stripMobileWebRouteQuery
+} from '../src/mobile-web/mobile-web-history-url-rewriter'
 import { colors } from '../src/theme/mobile-theme'
 import { RpcClientProvider } from '../src/transport/client-context'
 import { MobileWebRouteErrorBoundary } from './mobile-web-route-error-boundary'
 import { MobileWebRouteRestorer } from './mobile-web-route-restorer'
 
-installMobileWebHistorySessionFragment()
-installMobileWebQuerylessHistory()
+installMobileWebHistoryUrlRewriter([stripMobileWebRouteQuery, pinMobileWebShellSessionFragment])
 installMobileWebNativeBehaviorAdapters()
 
 export default function HostMobileWebLayout() {
