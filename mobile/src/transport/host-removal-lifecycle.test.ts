@@ -157,4 +157,17 @@ describe('host removal lifecycle', () => {
     ).rejects.toThrow('close failed')
     expect(deleteConnectionLogMock).toHaveBeenCalledWith('host-1')
   })
+
+  // Why: the Remove tap must not depend on a key the screen loads asynchronously, so an
+  // unresolvable key is a skipped cache purge rather than a refused unpair.
+  it('unpairs when the hybrid cache key could not be resolved', async () => {
+    removeHostMock.mockResolvedValue(undefined)
+    const forget = vi.fn()
+
+    await removeHostAndCloseClient('host-1', '', forget)
+
+    expect(removeMobileWebHostCacheMock).not.toHaveBeenCalled()
+    expect(removeHostMock).toHaveBeenCalledWith('host-1')
+    expect(forget).toHaveBeenCalledWith('host-1')
+  })
 })

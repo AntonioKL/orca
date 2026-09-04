@@ -10,7 +10,8 @@ import {
   fetchMergePR,
   fetchRequestPRReviewers,
   fetchRerunPRChecks,
-  fetchResolveReviewThread
+  fetchResolveReviewThread,
+  type GitHubPrMutationOutcome
 } from '../session/github-pr-mutations'
 
 export function nativeHostTaskProjectMutationOperations(
@@ -83,12 +84,14 @@ export function nativeHostTaskProjectMutationOperations(
         await fetchResolveReviewThread(client, repoId, {
           threadId,
           resolve,
-          prRepo: slugPayload(target)
+          // Why: `prRepo` is fork/GHES decoration the host treats as optional, and a draft row
+          // has no slug — send it only when one resolved rather than an empty pair.
+          prRepo: target.owner && target.repo ? slugPayload(target) : null
         })
       )
     },
     async replyReviewComment(target, repoId, payload) {
-      requirePrMutation(
+      return prMutationComment(
         await fetchAddPRReviewCommentReply(client, repoId, {
           prNumber: target.number,
           ...payload,
@@ -97,11 +100,12 @@ export function nativeHostTaskProjectMutationOperations(
       )
     },
     async addConversationComment(target, repoId, body) {
-      requirePrMutation(
+      return prMutationComment(
         await fetchAddIssueComment(client, repoId, {
           prNumber: target.number,
           body,
-          prRepo: slugPayload(target)
+          prRepo: slugPayload(target),
+          type: target.type
         })
       )
     },
@@ -166,8 +170,15 @@ async function projectMutation<T extends object = object>(
   return (response.result ?? {}) as T
 }
 
-function requirePrMutation(result: { ok: true } | { ok: false; error: string }): void {
+function requirePrMutation(result: GitHubPrMutationOutcome): void {
   if (!result.ok) {
     throw new Error(result.error)
   }
+}
+
+function prMutationComment(
+  result: GitHubPrMutationOutcome
+): MobileWebTaskDetailComment | undefined {
+  requirePrMutation(result)
+  return (result as { comment?: MobileWebTaskDetailComment }).comment
 }

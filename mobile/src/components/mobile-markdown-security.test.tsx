@@ -30,7 +30,7 @@ describe('MobileMarkdown security', () => {
     vi.restoreAllMocks()
   })
 
-  it('keeps HTML/SVG inert and admits only HTTP(S) link taps', async () => {
+  it('keeps HTML/SVG inert and admits only HTTP(S)/mailto link taps', async () => {
     const onOpenLink = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     await act(async () => {
@@ -62,9 +62,11 @@ describe('MobileMarkdown security', () => {
     for (const node of renderer!.root.findAll((candidate) => Boolean(candidate.props.onPress))) {
       await act(async () => node.props.onPress())
     }
+    // mailto joins http(s): the OS mail handler owns it, javascript:/data: stay refused.
     expect(onOpenLink.mock.calls).toEqual([
       ['https://example.com/path'],
-      ['http://example.com/path']
+      ['http://example.com/path'],
+      ['mailto:security@example.com']
     ])
   })
 })

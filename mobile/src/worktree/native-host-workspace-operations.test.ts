@@ -79,4 +79,93 @@ describe('native host workspace operations', () => {
     expect(listener).toHaveBeenCalledWith({ type: 'worktreesChanged' })
     expect(unsubscribe).toHaveBeenCalledOnce()
   })
+
+  it('polls the catalog with a snapshot token and reuses the confirmed rows when unchanged', async () => {
+    const sendRequest = vi
+      .fn<RpcClient['sendRequest']>()
+      .mockResolvedValueOnce({
+        ok: true,
+        result: { snapshotId: 'snap-1', worktrees: [{ worktreeId: 'workspace-1' }] }
+      })
+      .mockResolvedValueOnce({ ok: true, result: { snapshotId: 'snap-1', unchanged: true } })
+    const operations = nativeHostWorkspaceOperations({
+      sendRequest,
+      notifyForeground: vi.fn(),
+      subscribe: vi.fn()
+    } as unknown as RpcClient)
+
+    const first = await operations.fetchWorkspaceCatalog!('host-1')
+    const firstRows = first.kind === 'response' ? first.commit() : null
+    const second = await operations.fetchWorkspaceCatalog!('host-1')
+    const secondRows = second.kind === 'response' ? second.commit() : null
+
+    expect(sendRequest.mock.calls).toEqual([
+      ['worktree.ps', { limit: 10_000, afterSnapshotId: null }],
+      ['worktree.ps', { limit: 10_000, afterSnapshotId: 'snap-1' }]
+    ])
+    expect(firstRows).toEqual([{ worktreeId: 'workspace-1' }])
+    // Why (bandwidth over relay): an unchanged reply still reasserts the confirmed rows.
+    expect(secondRows).toEqual([{ worktreeId: 'workspace-1' }])
+  })
+
+  // Why (STA-3123): the host's own code has to survive, or an unreachable remote host
+  // is indistinguishable from a healthy host with zero workspaces.
+  it('passes the host error code through instead of collapsing it', async () => {
+    const sendRequest = vi
+      .fn<RpcClient['sendRequest']>()
+      .mockResolvedValue({ ok: false, error: { code: 'worktree_list_unavailable', message: 'x' } })
+    const operations = nativeHostWorkspaceOperations({
+      sendRequest,
+      notifyForeground: vi.fn(),
+      subscribe: vi.fn()
+    } as unknown as RpcClient)
+
+    await expect(operations.fetchWorkspaceCatalog!('host-1')).resolves.toEqual({
+      kind: 'request_failed',
+      code: 'worktree_list_unavailable'
+    })
+  })
+
+  it('reads ssh labels, host overrides and platform for multi-host catalogs', async () => {
+    const sendRequest = vi
+      .fn<RpcClient['sendRequest']>()
+      .mockImplementation(async (method: string) => {
+        if (method === 'ssh.listTargetSummaries') {
+          return { ok: true, result: { targets: [{ id: 'ssh-1', label: 'Build box' }, { id: 7 }] } }
+        }
+        if (method === 'settings.get') {
+          return { ok: true, result: { settings: { hostSettingOverrides: { 'ssh:ssh-1': {} } } } }
+        }
+        return { ok: true, result: { platform: 'linux' } }
+      })
+    const operations = nativeHostWorkspaceOperations({
+      sendRequest,
+      notifyForeground: vi.fn(),
+      subscribe: vi.fn()
+    } as unknown as RpcClient)
+
+    await expect(operations.listHostContext!()).resolves.toEqual({
+      sshTargets: [{ id: 'ssh-1', label: 'Build box' }],
+      hostSettingOverrides: { 'ssh:ssh-1': {} },
+      platform: 'linux'
+    })
+  })
+
+  // Hosts that predate a method still list repos; labels degrade to host ids.
+  it('degrades host context when the older host rejects or drops the calls', async () => {
+    const sendRequest = vi.fn<RpcClient['sendRequest']>().mockImplementation(async () => {
+      throw new Error('unknown method')
+    })
+    const operations = nativeHostWorkspaceOperations({
+      sendRequest,
+      notifyForeground: vi.fn(),
+      subscribe: vi.fn()
+    } as unknown as RpcClient)
+
+    await expect(operations.listHostContext!()).resolves.toEqual({
+      sshTargets: [],
+      hostSettingOverrides: undefined,
+      platform: null
+    })
+  })
 })

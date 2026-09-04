@@ -166,33 +166,36 @@ export function useMobileNativeChatImageAttachments({
       const scope = scopeKey
       const pendingImages =
         (scope ? attachmentsByScope[scope] : undefined) ?? NO_NATIVE_CHAT_IMAGE_ATTACHMENTS
-      if (structuredNativeChat && pendingImages.length > 0 && scope) {
-        if (!client || !enabled || connState !== 'connected') {
-          onError?.()
-          onSendError('Message not sent (disconnected)')
-          return false
-        }
-        const outcome = await baseSend(
-          text,
-          pendingImages.map((attachment) => attachment.previewUri),
-          openMobileNativeChatSendBudget(),
-          pendingImages
-        )
-        if (outcome !== 'rejected') {
-          dropSentAttachments(scope, new Set(pendingImages.map((attachment) => attachment.id)))
-        }
-        return outcome !== 'rejected'
-      }
       // Serialize clear/paste/submit ownership per terminal while allowing other
       // tabs to send. Shared with the prompt-card writes (answer/permission), so
-      // a card tap can't interleave into a mid-flight paste sequence either.
+      // a card tap can't interleave into a mid-flight paste sequence either. The
+      // structured path writes to the same PTY, so it takes the lock too.
       const operationTerminal = activeHandleRef.current
       if (operationTerminal && !acquireMobileNativeChatTerminalWrite(operationTerminal)) {
         onError?.()
         onSendError('Message not sent')
         return false
       }
+      // Why: one budget per action, shared by whichever leg runs.
+      const deadline = openMobileNativeChatSendBudget()
       try {
+        if (structuredNativeChat && pendingImages.length > 0 && scope) {
+          if (!client || !enabled || connState !== 'connected') {
+            onError?.()
+            onSendError('Message not sent (disconnected)')
+            return false
+          }
+          const outcome = await baseSend(
+            text,
+            pendingImages.map((attachment) => attachment.previewUri),
+            deadline,
+            pendingImages
+          )
+          if (outcome !== 'rejected') {
+            dropSentAttachments(scope, new Set(pendingImages.map((attachment) => attachment.id)))
+          }
+          return outcome !== 'rejected'
+        }
         return await sendMobileNativeChatWithImages({
           text,
           pendingImages,

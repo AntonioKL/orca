@@ -180,8 +180,10 @@ export function normalizeMobileWebExternalUrl(value: string): string | null {
     }
   }
   try {
+    // Why: mailto joins http(s) as a scheme the OS handler can open safely — markdown bodies,
+    // task links and PR comments all carry them, and dropping it made those taps dead.
     const protocol = new URL(url).protocol
-    return protocol === 'http:' || protocol === 'https:' ? url : null
+    return protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:' ? url : null
   } catch {
     return null
   }

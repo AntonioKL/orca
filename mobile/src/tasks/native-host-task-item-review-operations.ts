@@ -48,7 +48,7 @@ export function nativeHostTaskItemReviewOperations(
       }
     },
     async replyReviewComment(target, payload) {
-      assertMutation(
+      return mutationComment(
         await client.sendRequest(
           'github.addPRReviewCommentReply',
           {

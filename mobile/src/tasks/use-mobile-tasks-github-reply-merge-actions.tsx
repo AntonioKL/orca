@@ -48,7 +48,7 @@ export function useMobileTasksGithubReplyMergeActions(model: GithubCheckFileActi
           comment.path &&
           typeof comment.line === 'number' &&
           typeof comment.id === 'number'
-        await (canUseReviewReply
+        const posted = await (canUseReviewReply
           ? taskItemReviewOperations.replyReviewComment(taskItemMutationTarget(item), {
               commentId: comment.id as number,
               body,
@@ -60,7 +60,9 @@ export function useMobileTasksGithubReplyMergeActions(model: GithubCheckFileActi
               taskItemMutationTarget(item),
               `@${commentAuthor(comment)} ${body}`
             ))
-        const reply: DetailComment = {
+        // Why: only the server entry carries the numeric id a follow-up reply needs to stay on
+        // this thread; the stub is the fallback for hosts that publish no comment.
+        const reply: DetailComment = posted ?? {
           id: `local-${Date.now()}`,
           body,
           createdAt: new Date().toISOString(),

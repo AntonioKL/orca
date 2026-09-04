@@ -5,6 +5,7 @@ import {
   type GitHubProjectRow,
   type GitHubWorkItem,
   projectRowMutationTarget,
+  projectRowSlugTarget,
   projectRowStatusLabel,
   projectRowType,
   splitRepositorySlug
@@ -185,7 +186,8 @@ export function useMobileTasksProjectWorkspaceCommentActions(model: WorkspaceCre
       if (!taskProjectMutationOperations || projectMutating) {
         return
       }
-      const target = projectRowMutationTarget(row, activeGitHubProjectHost)
+      // Why: `updateIssueCommentBySlug` addresses by repository and comment id only.
+      const target = projectRowSlugTarget(row, activeGitHubProjectHost)
       const commentId = Number(comment.id)
       const body = projectEditingCommentDraft.trim()
       if (!target || !Number.isInteger(commentId) || commentId <= 0 || !body) {

@@ -36,12 +36,23 @@ const hash = (parts: string[] | string): string =>
  *
  * Declarations dropped from 196 to 195 when projectRowGitHubRepository was
  * deleted: it carried over from the monolith with no caller in either shape.
+ *
+ * SCREEN_HOOKS and STATEMENTS were re-frozen when the two review-reply hooks began
+ * binding the awaited mutation result (`const posted = await ...`) so an optimistic
+ * reply carries the server comment. Hook and statement counts are unchanged; only those
+ * two await expressions gained a binding.
+ *
+ * The remaining digests moved with the project-row target split: the three row-target
+ * builders left mobile-tasks-mutation-targets.ts for mobile-tasks-project-row-targets.ts,
+ * which added the slug-addressed and id-addressed variants so field edits, comment
+ * edits/deletes and thread toggles stop refusing rows the host would accept. Declarations
+ * net to 194 and the semantic source gains the new module's lines.
  */
-const SCREEN_HOOKS = '8ba3974a4c4c26bd04aa22cb0e59757c98ebda4a91ab6b7081215c5e8710d0b3'
+const SCREEN_HOOKS = '7aeb2ef2d5db4fa8c2873b01c49e40d98929b491c39878a708b6d75b4b2d86a5'
 const DIFF_HOOKS = '93c7189b32bed8456cc51814fffa8ce80cf62011ef968a9d53ddec2b9686f58f'
-const STATEMENTS = '02ef31a6b6a30748c41e485dbac8fb4e4433e887ecdbd2db5442a81c31bdf244'
-const DECLARATIONS = '11ddb68df1bdde8ee3299bb391de14765e6860b8406d0c17f837223e3667bd13'
-const SEMANTICS = '541a22531e77209f9c9fea32b49cb0539a8e1bd2e6b74ca7e5e1de0642f028c9'
+const STATEMENTS = 'e3fee89681079e66b19f73a0a57d0f4bdc88d2dfc0b1fb310c7101b66908e334'
+const DECLARATIONS = '18638220f414d06f0c1f3a5b993b33bf2a6ab8201476017cffab2eef1b6b29f0'
+const SEMANTICS = 'fcce0125e25ad6a7a7a2767dedf5094387694d18a6c43d2b6a547efc00f9dc0f'
 const STYLES = '1db6af69c791d9963928541ad5310942fcbda6d984b422c90b6eb92b6816579a'
 const RENDER_TREE = '92596eb283232607d8c2df3f09ba970232c7df496555c6f59e0c7160a00501af'
 
@@ -64,13 +75,13 @@ describe('Mobile Tasks refactor parity', () => {
 
   it('preserves every moved top-level declaration', () => {
     const declarations = readMobileTasksDeclarationSignatures()
-    expect(declarations).toHaveLength(195)
+    expect(declarations).toHaveLength(194)
     expect(hash(declarations)).toBe(DECLARATIONS)
   })
 
   it('preserves RPC calls, runtime strings, and JSX host signatures', () => {
     const semantics = readMobileTasksSemanticSource()
-    expect(semantics.split('\n')).toHaveLength(3_236)
+    expect(semantics.split('\n')).toHaveLength(3_247)
     expect(hash(semantics)).toBe(SEMANTICS)
   })
 

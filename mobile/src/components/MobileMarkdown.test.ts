@@ -314,14 +314,17 @@ describe('parseMobileMarkdown', () => {
 })
 
 describe('mobile Markdown external links', () => {
-  it('normalizes only bounded HTTP(S) URLs at the native capability contract', () => {
+  it('normalizes only bounded HTTP(S)/mailto URLs at the native capability contract', () => {
     expect(normalizeMobileWebExternalUrl(' https://example.com/path ')).toBe(
       'https://example.com/path'
     )
     expect(MobileWebOpenExternalPayloadSchema.parse({ url: ' http://example.com ' })).toEqual({
       url: 'http://example.com'
     })
-    expect(normalizeMobileWebExternalUrl('mailto:security@example.com')).toBeNull()
+    // Markdown bodies, task links and PR comments all carry mailto; the OS handler owns it.
+    expect(normalizeMobileWebExternalUrl('mailto:security@example.com')).toBe(
+      'mailto:security@example.com'
+    )
     expect(normalizeMobileWebExternalUrl('javascript:alert(1)')).toBeNull()
     expect(normalizeMobileWebExternalUrl('data:text/html,bad')).toBeNull()
     expect(normalizeMobileWebExternalUrl('https://example.com/\nscript')).toBeNull()

@@ -1,5 +1,8 @@
 import { useCallback } from 'react'
+import { getRepoExecutionHostId } from '../../../src/shared/execution-host'
+import { buildHostLabelById } from '../../../src/shared/worktree/host-context-labels'
 import { repoColor } from '../worktree/repo-color'
+import { buildRepoHostIdByRepoId } from '../worktree/worktree-host-context-labels'
 import type { HostWorkspaceOperations } from '../worktree/host-workspace-operations'
 import type { HybridHostScreenState } from './use-hybrid-host-screen-state'
 
@@ -21,7 +24,10 @@ export function useHybridHostRepoMetadata(args: {
     fetchRepoMetadataInFlightRef,
     fetchRepoMetadataPendingRef,
     repoMetadataFetchedAtRef,
+    setHostLabelById,
+    setHostPlatform,
     setRepoColorsByName,
+    setRepoHostIdByRepoId,
     setRepoIconsByName,
     setRepoIdsByName,
     workspaceOperationsRef
@@ -71,6 +77,19 @@ export function useHybridHostRepoMetadata(args: {
             )
           )
           setRepoIdsByName(new Map(repos.map((repo) => [repo.displayName, repo.id])))
+          setRepoHostIdByRepoId(buildRepoHostIdByRepoId(repos))
+          // Why: rows only name their host when the list spans hosts, so a single-host
+          // catalog never pays for the label lookups. Counted over repos, not the id-keyed
+          // map: one repo id registered on two hosts is two hosts.
+          const hostIds = new Set(repos.map((repo) => getRepoExecutionHostId(repo)))
+          if (hostIds.size > 1 && request.listHostContext) {
+            const context = await request.listHostContext()
+            if (workspaceOperationsRef.current !== request || hostId !== requestHostId) {
+              return
+            }
+            setHostLabelById(buildHostLabelById(context))
+            setHostPlatform(context.platform)
+          }
         } while (fetchRepoMetadataPendingRef.current.has(request))
       } catch {
         // Repo metadata is optional; catalog rows still render without it.
@@ -86,7 +105,10 @@ export function useHybridHostRepoMetadata(args: {
       fetchRepoMetadataInFlightRef,
       fetchRepoMetadataPendingRef,
       repoMetadataFetchedAtRef,
+      setHostLabelById,
+      setHostPlatform,
       setRepoColorsByName,
+      setRepoHostIdByRepoId,
       setRepoIconsByName,
       setRepoIdsByName,
       workspaceOperationsRef

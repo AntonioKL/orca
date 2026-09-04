@@ -6,5 +6,5 @@ export type HostScreenShellOperations = {
   openExternalUrl(url: string): Promise<void>
   reconnect(): Promise<void>
   repairPairing(): void
-  removeHost(hostPublicKey: string): Promise<void>
+  removeHost(): Promise<void>
 }

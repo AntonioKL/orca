@@ -45,4 +45,13 @@ describe('isMobileNativeChatAgentWorking', () => {
       )
     ).toBe(false)
   })
+
+  // Why: a monitoring agent is working without holding the foreground; treating it as busy
+  // shows the spinner, the Stop button and a live streaming bubble for work it is not doing.
+  it('never reports a monitoring agent as working', () => {
+    const monitoring = { ...workingStatus, workingMode: 'monitoring' as const }
+
+    expect(isMobileNativeChatAgentWorking(monitoring, undefined)).toBe(false)
+    expect(isMobileNativeChatAgentWorking(monitoring, lifecycle('working', 210))).toBe(false)
+  })
 })

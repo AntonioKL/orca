@@ -44,12 +44,14 @@ export function webHostTaskProjectMutationOperations(
         resolve
       })
     },
+    // The hosted bridge publishes no comment on these; callers fall back to a local entry.
     async replyReviewComment(target, repoId, payload) {
       await client.task.replyProjectReviewComment({
         targetId: targetId(target),
         repoId,
         ...payload
       })
+      return undefined
     },
     async addConversationComment(target, repoId, body) {
       await client.task.addProjectConversationComment({
@@ -57,6 +59,7 @@ export function webHostTaskProjectMutationOperations(
         repoId,
         body
       })
+      return undefined
     },
     async requestReviewers(target, repoId, reviewers) {
       await client.task.requestProjectReviewers({

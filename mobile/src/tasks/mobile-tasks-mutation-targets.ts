@@ -2,23 +2,15 @@ import type {
   HostTaskGitHubItemTarget,
   HostTaskGitLabItemTarget,
   HostTaskItemMutationTarget,
-  HostTaskLinearTarget,
-  HostTaskProjectItemTarget
+  HostTaskLinearTarget
 } from './mobile-tasks-dependencies'
-import type { GitHubProjectRow } from './mobile-tasks-view-state-types'
 import type { TaskItem } from './mobile-tasks-project-workspace-types'
-import { projectRowType, splitRepositorySlug } from './mobile-tasks-item-mapping'
 
-export function projectRowMutationTarget(
-  row: GitHubProjectRow,
-  host: string
-): HostTaskProjectItemTarget | null {
-  const slug = splitRepositorySlug(row.content.repository)
-  const type = projectRowType(row)
-  return slug && type && row.content.number
-    ? { ...slug, host, number: row.content.number, type, targetId: row.targetId }
-    : null
-}
+export {
+  projectRowIdentityTarget,
+  projectRowMutationTarget,
+  projectRowSlugTarget
+} from './mobile-tasks-project-row-targets'
 
 export function taskItemMutationTarget(
   item: Extract<TaskItem, { provider: 'github' }>

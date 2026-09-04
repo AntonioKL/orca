@@ -1,11 +1,13 @@
 import type { NativeChatTurnLifecycle } from '../../../src/shared/native-chat-types'
-import type { MobileWebNativeChatAgentStatus } from '../../../src/shared/mobile-web/native-chat-operation-contract'
+import type { MobileNativeChatAgentStatusWithProvider } from './mobile-native-chat-eligibility'
 
 export function isMobileNativeChatAgentWorking(
-  status: MobileWebNativeChatAgentStatus | null | undefined,
+  status: MobileNativeChatAgentStatusWithProvider | null | undefined,
   lifecycle: NativeChatTurnLifecycle | undefined
 ): boolean {
-  if (status?.state !== 'working') {
+  // Why: a monitoring agent is working without holding the foreground — showing the busy
+  // indicator, Stop, and a live streaming bubble for it misreports what it is doing.
+  if (status?.state !== 'working' || status.workingMode === 'monitoring') {
     return false
   }
   if (!lifecycle || lifecycle.state === 'working') {
