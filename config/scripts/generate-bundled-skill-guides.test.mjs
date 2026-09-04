@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -420,5 +420,59 @@ describe('bundled skill guide generator', () => {
     await rm(path.join(referenceRoot, 'notes.txt'))
     await writeFile(path.join(referenceRoot, 'empty.md'), '\n')
     await expect(buildArtifacts(root)).rejects.toThrow('Guide reference is empty')
+  })
+})
+
+// Why generalized: `orchestration-skill-guidance.test.mjs` pins this both-directions routing for
+// orchestration alone. Any guide that grows a `references/` directory needs the same contract, or a
+// reference can ship unroutable or a gate can route a file that does not exist.
+describe('guide reference routing', () => {
+  async function guidesWithReferences() {
+    const guideRoot = path.join(projectDir, 'skill-guides')
+    const entries = await readdir(guideRoot, { withFileTypes: true })
+    const owners = []
+    for (const entry of entries.filter((candidate) => candidate.isDirectory())) {
+      const referenceRoot = path.join(guideRoot, entry.name, 'references')
+      const shipped = await readdir(referenceRoot).catch(() => null)
+      if (shipped === null) {
+        continue
+      }
+      owners.push({
+        name: entry.name,
+        referenceRoot,
+        shipped: shipped.filter((file) => file.endsWith('.md')).sort()
+      })
+    }
+    return owners
+  }
+
+  it('routes every shipped reference from its own guide, in both directions', async () => {
+    const owners = await guidesWithReferences()
+    // A vacuous loop would pass forever; orchestration is the guide that owns references today.
+    expect(owners.map((owner) => owner.name)).toContain('orchestration')
+
+    const mismatches = []
+    for (const owner of owners) {
+      const guidePath = path.join(projectDir, 'skill-guides', `${owner.name}.md`)
+      const guide = await readFile(guidePath, 'utf8').catch(() => null)
+      if (guide === null) {
+        mismatches.push(`${owner.name}: references/ exists with no ${owner.name}.md beside it`)
+        continue
+      }
+      const routed = [
+        ...new Set([...guide.matchAll(/`references\/([^`]+\.md)`/gu)].map((match) => match[1]))
+      ].sort()
+      const unshipped = routed.filter((file) => !owner.shipped.includes(file))
+      const unrouted = owner.shipped.filter((file) => !routed.includes(file))
+      if (unshipped.length > 0) {
+        mismatches.push(
+          `${owner.name}: routes references that do not exist: ${unshipped.join(', ')}`
+        )
+      }
+      if (unrouted.length > 0) {
+        mismatches.push(`${owner.name}: ships references no gate routes: ${unrouted.join(', ')}`)
+      }
+    }
+    expect(mismatches).toEqual([])
   })
 })
