@@ -24,9 +24,12 @@ const AUDITED_NON_NET_FETCH_CALLS = new Map<string, number>([
 ])
 
 // `globalThis.fetch` / `global.fetch` belong to global-fetch-call-site-audit.test.ts.
-const NON_NET_FETCH_CALL = /(?<![.\w$])(?!net\b|globalThis\b|global\b)[A-Za-z_$][\w$]*\.fetch\(/g
+const FETCH_CALL = /\.fetch\(/g
+const RECEIVER_IDENTIFIER = /(?:^|[^.\w$])([A-Za-z_$][\w$]*)\s*$/
+const DEFAULT_SESSION_RECEIVERS = new Set(['net', 'globalThis', 'global'])
 const NET_REQUEST_CALL = /(?<![.\w$])net\.(?:fetch|request)\(/g
-const SESSION_SCOPED_OPTION = /(?:^|[{,\s])(?:session|partition)\s*:/
+// Matches `{ session: x }` and the `{ url, session }` shorthand both `net.request` overloads take.
+const SESSION_SCOPED_OPTION = /(?:^|[{,\s])(?:session|partition)\s*[:,}]/
 
 /** Text between the call's parentheses, skipping string bodies so quoted parens don't unbalance. */
 function callArgumentText(content: string, callEnd: number): string {
@@ -105,7 +108,12 @@ describe('proxy-guarded fetch call-site audit (main)', () => {
   it('keeps every non-default-session fetcher audited with its expected count', () => {
     const found = new Map<string, number>()
     for (const { file, content } of sources) {
-      const hits = [...content.matchAll(NON_NET_FETCH_CALL)].length
+      const hits = [...content.matchAll(FETCH_CALL)].filter((match) => {
+        const receiver = RECEIVER_IDENTIFIER.exec(content.slice(0, match.index))?.[1]
+        // A chained (`session.fromPartition(...).fetch(`) or member (`ctx.session.fetch(`)
+        // receiver has no bare trailing identifier, and is never the default session.
+        return receiver === undefined || !DEFAULT_SESSION_RECEIVERS.has(receiver)
+      }).length
       if (hits > 0) {
         found.set(file, hits)
       }
