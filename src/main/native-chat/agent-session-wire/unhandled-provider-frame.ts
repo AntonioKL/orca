@@ -55,7 +55,8 @@ function directReadableMessage(payload: unknown): string | null {
   return null
 }
 
-function readableMessage(payload: unknown): string | null {
+/** The provider's own sentence for a frame, when it carries one. */
+export function readableProviderFrameText(payload: unknown): string | null {
   const direct = directReadableMessage(payload)
   if (direct || typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     return direct
@@ -90,7 +91,7 @@ export function unhandledProviderFrameJournalItem(
   // Why: the opcode alone ("codex · notification:warning") tells the user nothing
   // and reads as protocol noise. Lead with the provider's own sentence when it has
   // one; the raw frame stays behind the row's disclosure either way.
-  const message = readableMessage(payload)
+  const message = readableProviderFrameText(payload)
   const display = message ? boundInlineText(message, limits) : null
   return {
     body: {

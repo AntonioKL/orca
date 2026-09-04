@@ -19,6 +19,16 @@ function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null
 }
 
+/**
+ * The session's current effort, which only `get_settings` reports: the
+ * `system/init` frame carries `model` but has never carried an effort of any
+ * kind. Null when the provider stops reporting it, so the pill goes empty
+ * rather than showing an effort nothing measured.
+ */
+export function readClaudeSettingsEffort(settings: unknown): string | null {
+  return text(record(record(settings)?.effective)?.effortLevel)
+}
+
 function effortLabel(value: string): string {
   return value === 'xhigh' ? 'Extra high' : `${value.charAt(0).toUpperCase()}${value.slice(1)}`
 }

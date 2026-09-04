@@ -50,7 +50,6 @@ export function fakeClaude(
     initSessionId?: string
     initUuid?: string
     initModel?: string
-    initEffort?: string
     initProof?: 'init' | 'session-start' | 'none'
     initAccount?: unknown
     exitBeforeInit?: string
@@ -97,13 +96,15 @@ export function fakeClaude(
             uuid: options.initUuid ?? 'init-uuid'
           })
         } else if (options.initProof !== 'none') {
+          // Keys mirror the real system/init frame, which carries `model` but no
+          // effort of any kind: the current effort only comes back from
+          // get_settings. Never add a field the CLI does not send.
           handlers.onMessage?.({
             type: 'system',
             subtype: 'init',
             session_id: options.initSessionId ?? PROVIDER_SESSION_ID,
             uuid: options.initUuid ?? 'init-uuid',
             model: options.initModel ?? 'claude-sonnet-5',
-            effortLevel: options.initEffort ?? 'high',
             apiKeySource: 'none',
             ...(options.capabilities ? { capabilities: options.capabilities } : {})
           })
@@ -115,7 +116,15 @@ export function fakeClaude(
       },
       getSettings: async () => {
         connection.calls.push({ subtype: 'get_settings' })
-        return options.settings ?? { env: {} }
+        // Shape measured from Claude Code 2.1.258: {applied, effective, sources},
+        // and the only place the session's current effort is reported.
+        return (
+          options.settings ?? {
+            applied: { model: 'claude-sonnet-5', effort: 'high', advisor: null, ultracode: false },
+            effective: { model: 'claude-sonnet-5', effortLevel: 'high', env: {} },
+            sources: {}
+          }
+        )
       },
       supportedModels: async () => {
         connection.calls.push({ subtype: 'list_models' })

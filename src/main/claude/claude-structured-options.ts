@@ -4,6 +4,7 @@ import {
   AgentSessionOptionRejectedError,
   isAgentSessionOptionRejectedError
 } from '../native-chat/agent-session-wire/structured-agent-session-option-error'
+import { readClaudeSettingsEffort } from './claude-structured-session-options'
 import type { ClaudeSession } from './claude-structured-session-state'
 
 const OPTION_ORDER = ['model', 'effort', 'permissionMode'] as const
@@ -50,8 +51,24 @@ export async function setClaudeStructuredOption(
     }
     throw error
   }
+  // apply_flag_settings answers `success` for an effort it then ignores, so the
+  // absence of a throw proves nothing. Ask what the child actually holds.
+  const adopted =
+    input.key === 'effort'
+      ? await session.connection
+          .getSettings({ timeoutMs })
+          .then(readClaudeSettingsEffort)
+          .catch(() => null)
+      : null
   if (mutationSequence !== session.optionMutationSequence) {
     return Object.fromEntries(session.options)
+  }
+  // A readback that could not be taken is not evidence of a refusal; one that
+  // disagrees is, and recording it anyway would show an effort nothing adopted.
+  if (adopted !== null && adopted !== input.value) {
+    throw new AgentSessionOptionRejectedError(
+      `claude kept effort ${adopted} instead of ${input.value}`
+    )
   }
   session.options.set(input.key, input.value)
   return Object.fromEntries(session.options)
