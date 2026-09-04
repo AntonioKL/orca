@@ -167,17 +167,16 @@ describe('Claude root kill fallback', () => {
     expect(child.kill).not.toHaveBeenCalled()
   })
 
-  it('chains per-pid Windows boundaries across a second merge', async () => {
-    const first = windowsSnapshot(1_000)
+  it('chains the boundary of a row dropped from later walks', () => {
+    const first: WindowsDescendantSnapshot = { ...windowsSnapshot(1_000) }
     const second: WindowsDescendantSnapshot = {
       ...windowsSnapshot(2_000),
-      descendants: [
-        { pid: 4243, creationTimeMs: 1_700_000_000_000 },
-        { pid: 4244, creationTimeMs: 1_700_000_000_002 }
-      ]
+      descendants: [{ pid: 4244, creationTimeMs: 1_700_000_000_002 }]
     }
     const third: WindowsDescendantSnapshot = { ...second, capturedAtMs: 3_000 }
 
+    // 4243 is absent from both refreshes, so it keeps the boundary of the walk
+    // that did see it rather than inheriting the latest scan's scalar.
     const merged = mergeClaudeCapturedTrees(
       { platform: 'win32', tree: first },
       { platform: 'win32', tree: second }
@@ -185,6 +184,6 @@ describe('Claude root kill fallback', () => {
     expect(merged?.tree.capturedAtMsByPid).toEqual({ '4243': 1_000, '4244': 2_000 })
     const rechained = mergeClaudeCapturedTrees(merged!, { platform: 'win32', tree: third })
 
-    expect(rechained?.tree.capturedAtMsByPid).toEqual({ '4243': 1_000, '4244': 2_000 })
+    expect(rechained?.tree.capturedAtMsByPid).toEqual({ '4243': 1_000, '4244': 3_000 })
   })
 })

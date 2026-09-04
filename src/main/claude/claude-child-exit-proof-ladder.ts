@@ -19,6 +19,10 @@ export async function proveClaudeChildExitWithReaper(
   const tree = input.tree ?? createTree()
   // Arm before stdin closes: only a live root can identify its descendants.
   await tree.capture()
+  // And re-walk it here, while the root certainly still lives: a descendant the
+  // arm first saw inside its own birth second is otherwise never eligible for a
+  // forced sweep, and the root may exit before any later walk gets the chance.
+  await tree.refresh?.()
   try {
     input.child.stdin?.end()
   } catch {

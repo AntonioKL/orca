@@ -24,19 +24,17 @@ function windowsSnapshot(): WindowsDescendantSnapshot {
 }
 
 describe('Claude child root identity', () => {
-  it('keeps a retained row boundary when a refresh observes no new descendants', () => {
+  it('advances a re-walked row boundary to the refresh that re-derived it', () => {
     const previous = posixSnapshot(1_700_000_000_900)
     const next = posixSnapshot(1_700_000_002_100)
 
+    // Every row carries the refresh boundary, so no per-pid map is needed.
     expect(
       mergeClaudeCapturedTrees(
         { platform: 'posix', tree: previous },
         { platform: 'posix', tree: next }
       )
-    ).toEqual({
-      platform: 'posix',
-      tree: { ...next, capturedAtMsByPid: { '200': previous.capturedAtMs } }
-    })
+    ).toEqual({ platform: 'posix', tree: next })
   })
 
   it('keeps the descendant verdict when a POSIX root probe is unavailable', async () => {
