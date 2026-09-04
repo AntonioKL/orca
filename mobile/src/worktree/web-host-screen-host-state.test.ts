@@ -25,4 +25,18 @@ describe('web host screen host state', () => {
       publicKeyB64: ''
     })
   })
+
+  it('keeps the last listed workspaces so a session return re-renders them', () => {
+    const state = webHostScreenHostState({ name: 'Paired Orca Desktop', publicKeyB64: '' })
+    const listed = [{ worktreeId: 'repo-1::/tmp/orca/feature' }] as never
+
+    state.cacheWorkspaces('returning-host', listed)
+
+    // A fresh instance stands in for the screen remounting after the session route.
+    expect(
+      webHostScreenHostState({ name: 'Paired Orca Desktop', publicKeyB64: '' }).cachedWorkspaces(
+        'returning-host'
+      )
+    ).toEqual(listed)
+  })
 })

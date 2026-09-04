@@ -205,7 +205,8 @@ export function useHybridHostScreenController(props: HybridHostScreenProps = {})
     repoIdsByName: state.repoIdsByName,
     repoColorsByName: state.repoColorsByName,
     collapsedGroups: state.collapsedGroups,
-    workspaceStatuses: state.workspaceStatuses
+    workspaceStatuses: state.workspaceStatuses,
+    worktreesLoaded: state.worktreesLoaded
   })
   const activeWorktreeScroll = useActiveWorktreeScroll(sectionsResult.sections)
   const { hostCapabilities, floatingWorkspaceEnabled } = useHostProtocolGates()
