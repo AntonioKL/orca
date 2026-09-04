@@ -88,15 +88,8 @@ export const MobileWebMarkdownDraftWriteResultSchema = z.null()
 
 export type MobileWebMarkdownReadPayload = z.infer<typeof MobileWebMarkdownReadPayloadSchema>
 export type MobileWebMarkdownReadWireResult = z.infer<typeof MobileWebMarkdownReadResultSchema>
-export type MobileWebMarkdownSavePayload = z.infer<typeof MobileWebMarkdownSavePayloadSchema>
 export type MobileWebMarkdownSaveWireResult = z.infer<typeof MobileWebMarkdownSaveResultSchema>
 export type MobileWebMarkdownDraftWire = z.infer<typeof MobileWebMarkdownDraftSchema>
 export type MobileWebMarkdownDraftReadPayload = z.infer<
   typeof MobileWebMarkdownDraftReadPayloadSchema
->
-export type MobileWebMarkdownDraftReadWireResult = z.infer<
-  typeof MobileWebMarkdownDraftReadResultSchema
->
-export type MobileWebMarkdownDraftWritePayload = z.infer<
-  typeof MobileWebMarkdownDraftWritePayloadSchema
 >

@@ -4,7 +4,7 @@ import {
   type GitHubAssignableUser,
   type GitHubPRFileContents,
   groupDetailComments
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksItemState() {
   const [detailPayload, setDetailPayload] = useState<DetailPayload | null>(null)

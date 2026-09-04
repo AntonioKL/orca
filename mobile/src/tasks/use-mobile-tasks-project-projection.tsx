@@ -20,7 +20,7 @@ import {
   normalizeProjectTableForMobileSort,
   projectFieldVisibilityKey,
   projectSummaryFields
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksProjectProjection(model: WorkspaceAndProjectStateModel) {
   const {

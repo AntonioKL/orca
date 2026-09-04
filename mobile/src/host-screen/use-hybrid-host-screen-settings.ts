@@ -153,5 +153,3 @@ export function useHybridHostScreenSettings(args: {
     toggleWorktreeLineage
   }
 }
-
-export type HybridHostScreenSettings = ReturnType<typeof useHybridHostScreenSettings>

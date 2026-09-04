@@ -1,6 +1,6 @@
 import type { ProjectFileMergeActionsModel } from './use-mobile-tasks-project-file-merge-actions'
 import { useCallback } from './mobile-tasks-dependencies'
-import { type TaskItem, taskItemMutationTarget } from './mobile-tasks-legacy-foundation'
+import { type TaskItem, taskItemMutationTarget } from './mobile-tasks-model'
 
 export function useMobileTasksGitlabGithubStatusActions(model: ProjectFileMergeActionsModel) {
   const {

@@ -1,4 +1,3 @@
-import { open, stat } from 'node:fs/promises'
 import type { IFilesystemProvider } from '../providers/types'
 
 const MAX_TRANSCRIPT_SOURCE_READ_BYTES = 64 * 1024
@@ -19,32 +18,6 @@ export type TranscriptFileSource = {
   supportsNativeWatch: boolean
   stat(filePath: string): Promise<TranscriptFileVersion>
   open(filePath: string): Promise<TranscriptFileReader>
-}
-
-export const localTranscriptFileSource: TranscriptFileSource = {
-  supportsNativeWatch: true,
-  async stat(filePath) {
-    const value = await stat(filePath)
-    return {
-      identity: `${value.dev}:${value.ino}`,
-      size: value.size,
-      mtimeMs: value.mtimeMs,
-      ctimeMs: value.ctimeMs
-    }
-  },
-  async open(filePath) {
-    const handle = await open(filePath, 'r')
-    return {
-      async read(offset, length) {
-        const buffer = Buffer.allocUnsafe(length)
-        const { bytesRead } = await handle.read(buffer, 0, length, offset)
-        return buffer.subarray(0, bytesRead)
-      },
-      async close() {
-        await handle.close()
-      }
-    }
-  }
 }
 
 export function createProviderTranscriptFileSource(

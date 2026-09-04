@@ -4,7 +4,7 @@ import {
   buildGitLabCheckSummary,
   useEffect
 } from './mobile-tasks-dependencies'
-import { type TaskItem, createLinearTask } from './mobile-tasks-legacy-foundation'
+import { type TaskItem, createLinearTask } from './mobile-tasks-model'
 
 export function useMobileTasksItemDetailLoading(model: ItemDetailMetadataEffectsModel) {
   const {

@@ -20,7 +20,7 @@ import {
   type RepoSummary,
   taskWorkspaceSuggestedName,
   workspaceAgentIconId
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksWorkspaceCreateProjection(model: ProjectMetadataLoadingModel) {
   const {

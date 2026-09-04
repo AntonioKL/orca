@@ -2,6 +2,7 @@ import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-
 import type { MobileWebSourceControlStatusInvalidation } from '../../../src/shared/mobile-web/source-control-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
+import { MobileWebBrokerError } from './mobile-web-broker-error'
 
 type SubscriptionRecord = {
   requestId: string
@@ -40,10 +41,10 @@ export class MobileWebSourceControlSubscriptions {
     client: RpcClient
   }): void {
     if (this.records.has(args.subscriptionId)) {
-      throw new MobileWebSourceControlSubscriptionError('invalid_request')
+      throw new MobileWebBrokerError('invalid_request')
     }
     if (this.records.size >= MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS) {
-      throw new MobileWebSourceControlSubscriptionError('rate_limited')
+      throw new MobileWebBrokerError('rate_limited')
     }
     const record: SubscriptionRecord = {
       requestId: args.requestId,
@@ -70,7 +71,7 @@ export class MobileWebSourceControlSubscriptions {
       }
     } catch {
       this.cancel(args.subscriptionId)
-      throw new MobileWebSourceControlSubscriptionError('host_error')
+      throw new MobileWebBrokerError('host_error')
     }
   }
 
@@ -200,12 +201,6 @@ export class MobileWebSourceControlSubscriptions {
     } catch {
       return false
     }
-  }
-}
-
-export class MobileWebSourceControlSubscriptionError extends Error {
-  constructor(readonly code: 'invalid_request' | 'rate_limited' | 'host_error') {
-    super(code)
   }
 }
 

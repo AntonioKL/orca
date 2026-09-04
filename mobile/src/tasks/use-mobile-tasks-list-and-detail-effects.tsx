@@ -11,7 +11,7 @@ import {
   resetActionItemDrafts,
   scopeGitHubTaskSearch,
   taskLinearTarget
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksListAndDetailEffects(model: ProjectLoadingActionsModel) {
   const {

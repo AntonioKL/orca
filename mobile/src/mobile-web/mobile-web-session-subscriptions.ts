@@ -8,6 +8,7 @@ import type { RpcClient } from '../transport/rpc-client'
 import type { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
 import type { MobileWebNativeChatAuthority } from './mobile-web-native-chat-authority'
 import { mobileWebSessionSnapshot } from './mobile-web-session-snapshot'
+import { MobileWebBrokerError } from './mobile-web-broker-error'
 
 type SubscriptionRecord = {
   requestId: string
@@ -42,10 +43,10 @@ export class MobileWebSessionSubscriptions {
     client: RpcClient
   }): void {
     if (this.records.has(args.subscriptionId)) {
-      throw new MobileWebSessionSubscriptionError('invalid_request')
+      throw new MobileWebBrokerError('invalid_request')
     }
     if (this.records.size >= MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS) {
-      throw new MobileWebSessionSubscriptionError('rate_limited')
+      throw new MobileWebBrokerError('rate_limited')
     }
     const record: SubscriptionRecord = {
       requestId: args.requestId,
@@ -76,7 +77,7 @@ export class MobileWebSessionSubscriptions {
       }
     } catch {
       this.cancel(args.subscriptionId)
-      throw new MobileWebSessionSubscriptionError('host_error')
+      throw new MobileWebBrokerError('host_error')
     }
   }
 
@@ -161,12 +162,6 @@ export class MobileWebSessionSubscriptions {
       .catch(() => {
         this.cancel(subscriptionId)
       })
-  }
-}
-
-export class MobileWebSessionSubscriptionError extends Error {
-  constructor(readonly code: 'invalid_request' | 'rate_limited' | 'host_error') {
-    super(code)
   }
 }
 

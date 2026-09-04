@@ -5,7 +5,7 @@ import {
   projectFieldDraftValue,
   projectRowType,
   splitRepositorySlug
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksProjectDetailLoading(model: ItemDetailLoadingModel) {
   const {

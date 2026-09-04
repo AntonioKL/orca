@@ -1,6 +1,6 @@
 import type { ProjectDetailLoadingModel } from './use-mobile-tasks-project-detail-loading'
 import { useEffect } from './mobile-tasks-dependencies'
-import { splitRepositorySlug } from './mobile-tasks-legacy-foundation'
+import { splitRepositorySlug } from './mobile-tasks-model'
 
 export function useMobileTasksProjectMetadataLoading(model: ProjectDetailLoadingModel) {
   const {

@@ -21,7 +21,7 @@ import {
   detailCommentGroupRoot,
   isResolvedDetailCommentGroup,
   renderCommentReactions
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 import { styles } from './mobile-tasks-legacy-styles'
 
 export function useMobileTasksDetailCommentRenderers(model: TaskCreateActionsModel) {

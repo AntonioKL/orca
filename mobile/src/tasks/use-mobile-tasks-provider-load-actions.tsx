@@ -22,7 +22,7 @@ import {
   reconcileTeamSelection,
   scopeGitHubTaskSearch,
   taskTime
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksProviderLoadActions(model: RuntimeHydrationModel) {
   const {

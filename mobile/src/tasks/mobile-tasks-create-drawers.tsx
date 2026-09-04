@@ -21,7 +21,7 @@ import {
   issueSourceSlug,
   type LinearTeam,
   TASK_SECONDARY_DRAWER_Z_INDEX
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function renderMobileTasksCreateDrawer(model: ConnectionPresentationModel) {
   const {

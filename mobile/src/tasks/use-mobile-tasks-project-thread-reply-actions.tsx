@@ -5,7 +5,7 @@ import {
   type GitHubProjectRow,
   commentAuthor,
   projectRowMutationTarget
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksProjectThreadReplyActions(
   model: ProjectWorkspaceCommentActionsModel

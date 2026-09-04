@@ -102,7 +102,6 @@ export const MobileWebWorkspaceChangeSchema = z
   })
   .strict()
 
-export type MobileWebRepositoryPresentation = z.infer<typeof MobileWebRepositoryPresentationSchema>
 export type MobileWebWorkspaceRepositoriesResult = z.infer<
   typeof MobileWebWorkspaceRepositoriesResultSchema
 >

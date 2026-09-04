@@ -6,7 +6,7 @@ import {
   type GitHubProjectRow,
   projectRowMutationTarget,
   splitReviewerList
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksProjectReviewCheckActions(model: ProjectMetadataActionsModel) {
   const {

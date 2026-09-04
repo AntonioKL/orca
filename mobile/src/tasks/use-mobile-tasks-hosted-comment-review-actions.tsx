@@ -6,7 +6,7 @@ import {
   type TaskItem,
   splitReviewerList,
   taskItemMutationTarget
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksHostedCommentReviewActions(model: HostedMetadataActionsModel) {
   const {

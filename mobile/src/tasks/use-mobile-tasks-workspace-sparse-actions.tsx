@@ -1,6 +1,6 @@
 import type { WorkspaceSourceEffectsModel } from './use-mobile-tasks-workspace-source-effects'
 import { type SparsePreset, useCallback, useEffect } from './mobile-tasks-dependencies'
-import { sortSparsePresetsByName } from './mobile-tasks-legacy-foundation'
+import { sortSparsePresetsByName } from './mobile-tasks-model'
 
 export function useMobileTasksWorkspaceSparseActions(model: WorkspaceSourceEffectsModel) {
   const {

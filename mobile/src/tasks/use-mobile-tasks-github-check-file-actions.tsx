@@ -6,7 +6,7 @@ import {
   type GitHubDetailFile,
   type TaskItem,
   taskItemMutationTarget
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksGithubCheckFileActions(model: HostedCommentReviewActionsModel) {
   const {

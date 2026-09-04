@@ -14,9 +14,9 @@ import { HostWorkspaceListStates } from '../worktree/host-workspace-list-states'
 import { getWorktreeStatus } from '../worktree/workspace-list-sections'
 import { repoColor } from '../worktree/repo-color'
 import { hostScreenStyles as styles } from './host-screen-styles'
-import type { HostScreenController } from './use-host-screen-controller'
+import type { HybridHostScreenController } from './use-hybrid-host-screen-controller'
 
-export function HostWorkspaceList({ controller }: { controller: HostScreenController }) {
+export function HostWorkspaceList({ controller }: { controller: HybridHostScreenController }) {
   const {
     actions,
     activeWorktreeScroll,
@@ -51,7 +51,7 @@ export function HostWorkspaceList({ controller }: { controller: HostScreenContro
       {(connState === 'auth-failed' || relayRecovery.pairingRejected) && (
         <AuthFailedBanner
           canRetry={!!hostId}
-          onRetry={() => hostId && void forceReconnectHost(hostId)}
+          onRetry={() => hostId && void forceReconnectHost()}
           onRepair={() => shellOperations.repairPairing()}
           onRemove={() => state.setConfirmRemoveHost(true)}
         />

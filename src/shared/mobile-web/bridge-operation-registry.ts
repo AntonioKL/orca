@@ -283,23 +283,6 @@ export type MobileWebBridgeOperationName<
   ? keyof (typeof MOBILE_WEB_BRIDGE_OPERATIONS)[TCapability] & string
   : never
 
-export function mobileWebBridgeOperationNames<TCapability extends MobileWebBridgeCapability>(
-  capability: TCapability
-): readonly MobileWebBridgeOperationName<TCapability>[] {
-  return Object.keys(
-    MOBILE_WEB_BRIDGE_OPERATIONS[capability]
-  ) as MobileWebBridgeOperationName<TCapability>[]
-}
-
-export function mobileWebBridgeOperationKind(
-  capability: MobileWebBridgeCapability,
-  operation: string
-): MobileWebBridgeOperationKind | undefined {
-  const kinds: Record<string, MobileWebBridgeOperationKind> =
-    MOBILE_WEB_BRIDGE_OPERATIONS[capability]
-  return Object.hasOwn(kinds, operation) ? kinds[operation] : undefined
-}
-
 export function isMobileWebBridgeOperation(
   capability: MobileWebBridgeCapability,
   operation: string

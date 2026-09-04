@@ -136,5 +136,3 @@ export function useHybridHostWorktreeActions(args: {
     leaveHost: shellOperations.leaveHost
   }
 }
-
-export type HybridHostWorktreeActions = ReturnType<typeof useHybridHostWorktreeActions>

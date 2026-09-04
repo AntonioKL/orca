@@ -6,7 +6,7 @@ import {
   createGitHubTask,
   createGitLabTask,
   createLinearTask
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksTaskCreateActions(model: LinearItemActionsModel) {
   const {

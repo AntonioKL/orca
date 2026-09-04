@@ -2,6 +2,7 @@ import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-
 import type { MobileWebAccountEvent } from '../../../src/shared/mobile-web/account-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import { mobileWebAccountEvent } from './mobile-web-account-presentation'
+import { MobileWebBrokerError } from './mobile-web-broker-error'
 
 type SubscriptionRecord = {
   requestId: string
@@ -27,10 +28,10 @@ export class MobileWebAccountSubscriptions {
 
   start(args: { requestId: string; subscriptionId: string; client: RpcClient }): void {
     if (this.records.has(args.subscriptionId)) {
-      throw new MobileWebAccountSubscriptionError('invalid_request')
+      throw new MobileWebBrokerError('invalid_request')
     }
     if (this.records.size >= MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS) {
-      throw new MobileWebAccountSubscriptionError('rate_limited')
+      throw new MobileWebBrokerError('rate_limited')
     }
     const record: SubscriptionRecord = {
       requestId: args.requestId,
@@ -51,7 +52,7 @@ export class MobileWebAccountSubscriptions {
       }
     } catch {
       this.cancel(args.subscriptionId)
-      throw new MobileWebAccountSubscriptionError('host_error')
+      throw new MobileWebBrokerError('host_error')
     }
   }
 
@@ -116,11 +117,5 @@ export class MobileWebAccountSubscriptions {
       .catch(() => {
         this.cancel(subscriptionId)
       })
-  }
-}
-
-export class MobileWebAccountSubscriptionError extends Error {
-  constructor(readonly code: 'invalid_request' | 'rate_limited' | 'host_error') {
-    super(code)
   }
 }

@@ -93,5 +93,3 @@ export function useHybridHostRepoMetadata(args: {
     ]
   )
 }
-
-export type FetchHybridHostRepoMetadata = ReturnType<typeof useHybridHostRepoMetadata>

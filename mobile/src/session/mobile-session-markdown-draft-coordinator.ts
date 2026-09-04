@@ -139,10 +139,6 @@ export class MobileSessionMarkdownDraftCoordinator {
   }
 }
 
-export function mobileSessionMarkdownTargetKey(target: HostSessionMarkdownTarget): string {
-  return targetKey(target)
-}
-
 export function restoreMobileSessionMarkdownDraft(
   document: ReadyMarkdownDoc,
   draft: HostSessionMarkdownDraft

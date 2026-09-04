@@ -17,7 +17,7 @@ import {
   formatDurationSeconds,
   SHOW_MOBILE_LINEAR_DETAIL_TOOLS,
   discussionSummary
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 import {
   renderMobileTasksItemBodyEditor,
   renderMobileTasksItemReviewPanel,

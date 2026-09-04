@@ -6,7 +6,7 @@ import {
   type TaskItem,
   createLinearTask,
   taskLinearTarget
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksLinearItemActions(model: GithubReplyMergeActionsModel) {
   const {

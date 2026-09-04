@@ -14,7 +14,7 @@ import {
   hasGitHubIssueSourceChoice,
   issueSourceSlug,
   taskRepositoryMeta
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 import { styles } from './mobile-tasks-legacy-styles'
 
 export function useMobileTasksPickerProjection(model: DetailCommentRenderersModel) {

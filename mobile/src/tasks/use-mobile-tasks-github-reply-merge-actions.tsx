@@ -10,7 +10,7 @@ import {
   isGitHubPrMergeBlocked,
   taskItemMutationTarget,
   taskLinearTarget
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksGithubReplyMergeActions(model: GithubCheckFileActionsModel) {
   const {

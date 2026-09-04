@@ -22,7 +22,7 @@ import {
   commentDate,
   renderCommentReactions,
   projectRowType
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function renderMobileTasksProjectComments(model: ConnectionPresentationModel) {
   const {
