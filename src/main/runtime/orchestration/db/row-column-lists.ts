@@ -50,6 +50,8 @@ export const DISPATCH_CONTEXT_COLUMNS = [
   'capability_revoked_at',
   'retry_of_dispatch_id',
   'creator_dispatch_id',
+  'creator_handle',
+  'creator_pane_key',
   'host_scope',
   'status',
   'failure_count',

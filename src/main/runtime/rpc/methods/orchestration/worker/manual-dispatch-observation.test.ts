@@ -18,11 +18,16 @@ describe('manual Dispatch observation', () => {
     vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) =>
       handle === 'term_coord' ? coordinatorPaneKey : workerPaneKey
     )
-    vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockReturnValue({
-      terminalHandle: 'term_worker',
-      paneKey: workerPaneKey,
-      processIncarnation: 'runtime_test:term_worker:1'
-    } as never)
+    // Authority is per handle in the real runtime; a flat mock would give the coordinator the worker's pane.
+    vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockImplementation(
+      (handle) =>
+        ({
+          terminalHandle: handle,
+          paneKey: handle === 'term_coord' ? coordinatorPaneKey : workerPaneKey,
+          processIncarnation:
+            handle === 'term_coord' ? 'runtime_test:term_coord:1' : 'runtime_test:term_worker:1'
+        }) as never
+    )
     vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
     vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
       handle: 'term_worker',

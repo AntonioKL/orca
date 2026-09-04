@@ -283,6 +283,9 @@ export type DispatchContextRow = {
   /** Dispatch ID is the Attempt identity; retries point to the prior Attempt. */
   retry_of_dispatch_id: string | null
   creator_dispatch_id: string | null
+  /** Creator identity; equal to the assignee means a self-dispatch, which adds no nesting depth. */
+  creator_handle: string | null
+  creator_pane_key: string | null
   host_scope: string | null
   status: DispatchStatus
   failure_count: number
