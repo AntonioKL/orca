@@ -8,6 +8,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { OrcaRuntimeService } from './orca-runtime'
 import { setRuntimeBrowserCommandsFactory } from './runtime-browser-commands-factory'
+import { RpcDispatcher } from './rpc/dispatcher'
+import { BROWSER_CORE_METHODS } from './rpc/methods/browser-core'
 
 const { browserSessionRegistryMock } = vi.hoisted(() => ({
   browserSessionRegistryMock: {
@@ -141,6 +143,37 @@ describe('browser.tabCreate file: URLs from a paired client', () => {
         clientKind: 'mobile'
       })
     ).rejects.toThrow(/outside the requested workspace/)
+    expect(createTab).not.toHaveBeenCalled()
+  })
+
+  // Why: the shell-side confinement is page code; a paired client that is not this shell must still be fenced.
+  it('refuses file:///etc/passwd dispatched over RPC by a paired mobile device', async () => {
+    const { runtime, createTab } = createRuntime({
+      id: WT,
+      path: WORKTREE_PATH
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: BROWSER_CORE_METHODS })
+    const replies: string[] = []
+    await dispatcher.dispatchStreaming(
+      {
+        id: 'req-1',
+        authToken: 'tok',
+        method: 'browser.tabCreate',
+        params: {
+          worktree: `id:${WT}`,
+          page: 'page-new',
+          url: 'file:///etc/passwd',
+          activate: true,
+          navigation: 'caller'
+        }
+      },
+      (reply) => replies.push(reply),
+      { pairedDeviceId: 'device-1', clientKind: 'mobile' }
+    )
+    expect(JSON.parse(replies[0]!)).toMatchObject({
+      ok: false,
+      error: { message: expect.stringMatching(/outside the requested workspace/) }
+    })
     expect(createTab).not.toHaveBeenCalled()
   })
 
