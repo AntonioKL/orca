@@ -293,6 +293,9 @@ a desktop whose family was revoked by reuse-detection during the outage; the des
 them. Fresh `/session` sign-ins: 1, 5, 3 per minute at 19:10–19:12. Recovery of controls is now paced by users
 signing in, not by infrastructure. Total `session-refresh-reuse-detected` events 13:00–19:00Z ≈ 100k, against a
 ~100/hour baseline.
+**Affected-user count (19:22Z, from `refresh_tokens`):** 23,318 live token families revoked in the window,
+**21,605 distinct users**. Only ~3,800 desktops had seen their 401 by 19:15Z; the rest were closed or asleep
+and will find themselves signed out on next launch, so sign-ins will trickle for days.
 
 orca-cloud PR #474 (branch `auth-revoke-only-live-tokens`): caps → 20, disk 250 / max_wal_size 16384 in
 Terraform, partial index in the schema, `already-revoked` short-circuit. Do not deploy auth to any environment
