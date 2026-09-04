@@ -133,6 +133,7 @@ independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is p
 - [ ] Measure with `orca_relay_runtime_metrics` region counters before/after.
 
 ### 5.x Observability
+- [ ] **Relay-root runtime-metric drift**: `relay_snapshot[*]` in Terraform carries a `region` label the 21 live metrics lack; applying replaces all 21 (history reset, alert policies blank during swap). Decide: apply in a quiet window as an intentional replacement, or drop the label from Terraform. The incident dashboard (#18717) is blocked behind this.
 - [ ] 5.1 `container die` log metric per cell, > 3 / 15 min, relay channel.
 - [ ] 5.2 Add a paging channel to `auth_alert_notification_channels` for refresh rejections + latency.
 - [ ] 5.4 One dashboard: `orca_relay_cloud_sql_wal_checkpoint`, NAT drops, `orca_auth_refresh_401`, summed `controls`.

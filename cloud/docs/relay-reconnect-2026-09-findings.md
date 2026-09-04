@@ -387,6 +387,16 @@ retry. `latencyMs` is the slowest answering round trip, never a sleep. `requires
 touched; `auth.ready` had no consumer. 81/81 relay-ops tests and 9/9 evidence-script tests locally. The monitor
 runs at `main` head, so once merged the next dry-run uses it.
 
+Applying #18717 (22:10Z): the cell-exit log metric `orca_relay_cell_process_exit` is created; the alert policy
+raced descriptor propagation (404) and is being retried. **Not applied, deliberately:** the dashboard. Its
+targeted plan drags in `google_logging_metric.relay_snapshot[*]`, and that plan is `32 to add, 21 to destroy`:
+the Terraform source adds a `region` label to every runtime metric (`EXTRACT(jsonPayload.region)`) which the
+live metrics do not have, and a label change on a log metric is a delete+create. Replacing 21 live metrics
+resets their history and would blank the 14 existing relay alert policies during the swap. That is
+pre-existing drift in the relay root (unapplied since the region work), not something #18717 introduced. It
+needs its own reviewed apply in a quiet window, ideally with the runtime-metric replacement acknowledged as
+intentional. Dashboard apply waits on that.
+
 **Landing (2026-09-04 20:50Z–21:02Z, owner: "if you are confident the cloud changes are valid, you can land them"):**
 
 - Merged: orca-cloud #474, #475, #476; stablyai/orca #18693, #18694, #18698. Neither repo has branch
