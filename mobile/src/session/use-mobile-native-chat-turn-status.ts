@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import {
   nativeChatTurnHasResponse,
@@ -48,13 +48,18 @@ export function useMobileNativeChatTurnStatus({
     )
   }, [activeTurnKey, isWorking, messages, workingStartedAt])
 
-  return {
-    ...selectNativeChatTurnStatuses(timingByTurn, {
-      activeTurnKey,
-      isWorking,
-      workingStartedAt,
-      hasCurrentTurnResponse
-    }),
-    activeTurnKey
-  }
+  // Why: the selection rebuilds its status objects on every call, and a streaming
+  // turn re-renders ~20x/s. Without this, every settled turn's row gets fresh
+  // props each tick and the memoized message rows all re-render.
+  const statuses = useMemo(
+    () =>
+      selectNativeChatTurnStatuses(timingByTurn, {
+        activeTurnKey,
+        isWorking,
+        workingStartedAt,
+        hasCurrentTurnResponse
+      }),
+    [timingByTurn, activeTurnKey, isWorking, workingStartedAt, hasCurrentTurnResponse]
+  )
+  return { ...statuses, activeTurnKey }
 }
