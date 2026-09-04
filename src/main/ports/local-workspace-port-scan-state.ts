@@ -89,6 +89,7 @@ function listenerMetadataKey(port: RawListeningPort): string {
   return `${port.pid ?? 'unknown'}:${port.host}:${port.port}`
 }
 
+/** Call after partitionListenersNeedingMetadata: it consumes the reuse set that call recorded. */
 export function rememberListenerMetadata(ports: readonly RawListeningPort[]): void {
   const previous = lastListenerMetadata
   lastListenerMetadata = new Map()
@@ -111,6 +112,8 @@ export function rememberListenerMetadata(ports: readonly RawListeningPort[]): vo
 
 /**
  * Split listeners into those a previous scan already resolved and the pids still needing a probe.
+ *
+ * Records which keys were reused; rememberListenerMetadata reads and clears that on the same scan.
  *
  * Why: the metadata commands are the expensive half of a macOS scan, and a listener that is still
  * the same process on the same address has the same command line it had 30s ago. A remembered
