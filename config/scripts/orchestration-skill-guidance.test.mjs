@@ -327,6 +327,10 @@ describe('owned orchestration references', () => {
       'ORCA project setup-existing-folder --project <project_id> --host <host_id> --path <abs_path> --kind folder --json'
     )
     expect(squash(reference)).toContain('and rejects a plain directory')
+    expect(reference).toContain('ORCA orchestration worker-list --include-remote --json')
+    expect(squash(reference)).toContain(
+      'enumerate remote workers with `--include-remote` or every one of them reads `unverifiable`'
+    )
   })
 
   it('owns FIFO mail, Dispatch addresses, groups, questions, and gates', () => {
@@ -384,6 +388,9 @@ describe('owned orchestration references', () => {
     )
     expect(reference).toContain('`projection.nextAction` argv')
     expect(reference).toContain('the fleet verdict decides')
+    expect(reference).toContain('ORCA orchestration worker-list --include-remote --json')
+    expect(reference).toContain('reads `unverifiable` until you enumerate with `--include-remote`')
+    expect(reference).toContain('follow `page.nextCursor` with `--cursor <value>`')
   })
 
   it('requires positive evidence of exit before stop, abandon, retry, or release', () => {
