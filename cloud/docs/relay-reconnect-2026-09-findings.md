@@ -316,6 +316,11 @@ finding: cell exits log to `cos_system` with uppercase `jsonPayload.MESSAGE` and
 so every earlier `jsonPayload.message:"container die"` count in this doc that read 0 was querying the wrong
 field. Verified: 87 exits 12–13Z on the agent's filter, 0 in the last 6 h. Monitor dry-run 33922255205
 dispatched 21:41Z as the Roll 1 gate.
+Dry-run 33922255205 froze at 21:46Z on `signal_missing cloud_sql.backends`. Cause: Cloud Monitoring published
+no `num_backends` point for the auth instance between 21:40 and 21:46 (every other minute of the last 100 has
+one; measured directly via the timeSeries API). A Google-side publish gap, not a database or monitor defect;
+the monitor's freeze-on-missing rule is correct. The 12–13Z monitor failures were a different cause (active
+probes reading 0 during the crash cascade). Re-dispatched at 21:50Z.
 
 **Landing (2026-09-04 20:50Z–21:02Z, owner: "if you are confident the cloud changes are valid, you can land them"):**
 
