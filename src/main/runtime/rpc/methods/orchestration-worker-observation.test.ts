@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { OrchestrationDb } from '../../orchestration/db'
-import { inspectWorkerTerminal } from './orchestration-worker-observation'
+import {
+  exposeDispatchContext,
+  exposeWorker,
+  inspectWorkerTerminal
+} from './orchestration-worker-observation'
+import type { DispatchContextRow, WorkerDispatchRow } from '../../orchestration/types'
 
 const DISPATCH_ID = 'ctx-worker'
 const TERMINAL_HANDLE = 'term-worker'
@@ -61,5 +66,60 @@ describe('inspectWorkerTerminal missing liveness verdict', () => {
       status: 'unverifiable',
       reason: 'missing_liveness_verdict'
     })
+  })
+})
+
+describe('worker-show receipt shape', () => {
+  it('parses the JSON columns once and emits one casing', () => {
+    const exposed = exposeWorker({
+      dispatch_id: DISPATCH_ID,
+      runtime_epoch: 'epoch-1',
+      state: 'ready',
+      stage: 'input_accepted',
+      worktree_id: 'repo::/tmp/wt',
+      agent_terminal_handle: TERMINAL_HANDLE,
+      setup_state: 'ran',
+      effects: '[{"kind":"setup"}]',
+      residual_resources: '["res-1"]',
+      start_options: '{"agent":"codex"}',
+      last_error: null,
+      created_at: 'now',
+      updated_at: 'now'
+    } as WorkerDispatchRow)
+
+    expect(exposed).toEqual({
+      dispatchId: DISPATCH_ID,
+      runtimeEpoch: 'epoch-1',
+      state: 'ready',
+      stage: 'input_accepted',
+      worktreeId: 'repo::/tmp/wt',
+      agentTerminalHandle: TERMINAL_HANDLE,
+      setupState: 'ran',
+      effects: [{ kind: 'setup' }],
+      residualResources: ['res-1'],
+      startOptions: { agent: 'codex' },
+      lastError: null,
+      createdAt: 'now',
+      updatedAt: 'now'
+    })
+  })
+
+  it('parses host_scope and withholds authority hashes from the dispatch row', () => {
+    const exposed = exposeDispatchContext({
+      id: DISPATCH_ID,
+      run_id: 'run-1',
+      task_id: 'task-1',
+      launch_token_hash: 'launch-secret',
+      capability_hash: 'capability-secret',
+      host_scope: JSON.stringify({ kind: 'local', hostId: 'local' })
+    } as DispatchContextRow)
+
+    expect(exposed).toMatchObject({
+      id: DISPATCH_ID,
+      hostScope: { kind: 'local', hostId: 'local' }
+    })
+    expect(exposed).not.toHaveProperty('host_scope')
+    expect(exposed).not.toHaveProperty('launch_token_hash')
+    expect(exposed).not.toHaveProperty('capability_hash')
   })
 })

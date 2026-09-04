@@ -6,9 +6,12 @@ import { defineMethod, type RpcMethod } from '../core'
 import { OptionalFiniteNumber, requiredString } from '../schemas'
 import {
   callFederatedWorkerShow,
+  exposeDispatchContext,
   exposeFederatedWorkerObservation,
+  exposeObservation,
   exposeWorker,
   inspectWorkerTerminal,
+  projectFleetWorker,
   resolvePinnedFederatedServer,
   showContextOnlyWorker
 } from './orchestration-worker-observation'
@@ -118,8 +121,9 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
           )
         }
         return {
-          dispatch: db.getDispatchContextById(params.dispatch),
+          dispatch: exposeDispatchContext(db.getDispatchContextById(params.dispatch) ?? dispatch),
           worker: exposeWorker(worker),
+          projection: projectFleetWorker(runtime, db, params.dispatch),
           server: { environmentId: server.environmentId, name: server.name },
           remoteRuntimeEpoch:
             db.getFederatedDispatch(params.dispatch)?.remote_runtime_epoch ??
@@ -148,19 +152,12 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
       const observation = await inspectWorkerTerminal(runtime, db, params.dispatch)
       const resource = db.getWorkerTerminalResourceByOwner(params.dispatch)
       return {
-        dispatch,
+        dispatch: exposeDispatchContext(dispatch),
         worker: exposeWorker(worker),
+        // Why: the fleet verdict, so worker-show and worker-list cannot disagree.
+        projection: projectFleetWorker(runtime, db, params.dispatch),
         terminal: observation.exact ? observation.terminal : null,
-        observation: {
-          status: observation.status,
-          exactWorker: observation.exact,
-          // Why: a bare `unverifiable` is not actionable without naming what we lost.
-          ...(observation.reason ? { reason: observation.reason } : {}),
-          // Why conditional: a present null must mean "looked, nothing waiting". An
-          // unattached, missing or identity-changed worker was never looked at, and saying
-          // null there is the false negative this field exists to remove.
-          ...(observation.agentWait !== undefined ? { agentWait: observation.agentWait } : {})
-        },
+        observation: exposeObservation(observation),
         terminalResource: resource ? exposeWorkerTerminalResource(resource) : null
       }
     }

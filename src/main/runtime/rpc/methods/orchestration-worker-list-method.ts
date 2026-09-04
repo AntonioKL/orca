@@ -272,7 +272,15 @@ async function projectWorkerListPageWithFilteredSnapshot(
       agentTerminalHandle: row.agentTerminalHandle,
       terminalState: row.terminalState,
       resource: row.resource ? exposeWorkerTerminalResource(row.resource) : null,
-      projection
+      // Why: `projection.resource` restated id/ownerDispatchId/releaseState/terminalState
+      // that the row already carries; only the derived ownership classification is new.
+      projection: {
+        ...projection,
+        resource:
+          projection.resource.state === 'absent'
+            ? projection.resource
+            : { state: projection.resource.state }
+      }
     }
   })
   const counts = Object.fromEntries(
