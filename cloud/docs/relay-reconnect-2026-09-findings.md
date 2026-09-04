@@ -198,6 +198,47 @@ until this process is complete." Owner has had multi-day experiences with cell r
 5. Consider deleting the 55-min control lease rebind entirely (no recorded reason; liveness is the 75 s
    watchdog + 90 s activity lease). Separate PR after (1) so its effect is measurable.
 
+## Faster same-cap rollout: design (step 2 of the plan), from reading the real limits
+
+What actually bounds parallelism today (measured on the c7 canary, run 33843071283):
+
+| step | c7 duration | bound by |
+|---|---|---|
+| prechecks (recheck, backend init, resolve, verify) | 43 s | none |
+| isolate + drain + transition wait | 7 min | drain is `graceMs: 0`; `verify-relay-capacity-transition --activity restart-safe` polls until leases drain |
+| Terraform template + MIG recreate + wait-until stable | 8 min | GCE recreate; per cell, independent |
+| verify new incarnation + trust proof + restore | 1.5 min | none |
+
+Real constraints: (1) the director is 5 x 80 = 400 in-flight `/v1/assign`; a `graceMs: 0` drain of ~800
+hosts pins it at cap for ~2 min (observed 79.75/84.75 p99). (2) `production-cloud-sql-rollout` lease and
+workflow concurrency group serialise the whole run, by design, and the per-cell job shares it via
+`holder-key`. Nothing else forbids parallel cells.
+
+Changes, smallest first:
+1. **Paced drain.** `HostSessionRegistry.drain(graceMs)` already sends `drain {graceMs}` and closes each
+   session after `graceMs`, but the desktop's `handleDrain` re-dials immediately regardless of graceMs
+   (`relay-origin-pool.ts:150-162`), so graceMs only delays the *close*, not the stampede. Fix on the
+   cell: stagger the drain *send* across sessions over a window (e.g. 800 sessions over 120 s = ~7/s),
+   which needs no desktop change and works for every desktop version in the field. New admin body field
+   `spreadMs` (optional, default 0 keeps today's behaviour); canary script passes `spreadMs: 120000`.
+   Requires the cell to be on an image with the change, so it applies to batches after the first
+   post-lock-fix roll, not to this one.
+2. **Parallel cells in a batch.** In `cloud-deploy-relay-production-same-cap.yml` make `cell_2..cell_4`
+   `needs: [gate]` instead of chaining, gated on the same evidence (drop the `+75 min x wave-index`
+   allowance, it exists only because of chaining). Each job already takes the rollout lease with the
+   run's `holder-key`, so they re-enter it rather than fail. With paced drains, 4 cells x ~800 hosts
+   over 120 s is ~27 dials/s, well under the director cap. Raise `timeout-minutes` to 90.
+3. **Post-canary batches skip the 15-min dry-run.** The in-job "Recheck aggregate SQL, pool,
+   reconnect, migration, and selector safety" step (`pnpm incident:relay-preflight`) already runs a
+   live one-shot check before each drain. For `batch-apply` with a sealed `canary-run-id` from the
+   same commit, accept a dry-run of any age (the canary's) plus that live recheck; keep the 15-min
+   requirement for `canary-apply`. Change lands in `relay-monitor-evidence.mjs verify-authority` +
+   `relay-production-same-cap-wave.mjs` + their node:test suites.
+
+Expected: batch of 4 = max(cell) ~ 17 min + 1 min gate = ~18 min. 22 cells = 6 batches = ~2 h, with
+one 15-min dry-run at the start instead of six. Order: (3) and (2) are workflow/script only and can ship
+now; (1) needs the relay image rebuilt, which the lock-fix PR forces anyway.
+
 ## Recommended next steps (superseded by the plan above; kept for history)
 
 1. Resolve the gate decision above, then: monitor dry-run -> c7 `canary-apply` only -> verify -> stop.
