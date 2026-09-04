@@ -1,7 +1,12 @@
 import { dirname } from 'node:path'
 import type { CrashReportBreadcrumbData } from '../../shared/crash-reporting'
 import { logStartupMilestone } from './startup-diagnostics'
-import { clearGpuFallbackMarker, readGpuFallbackMarker } from './gpu-fallback-marker'
+import {
+  clearGpuFallbackMarker,
+  readGpuFallbackMarker,
+  writeGpuFallbackMarker,
+  type GpuFallbackMarker
+} from './gpu-fallback-marker'
 import {
   clearInstallDirAclPoisonMarker,
   hasInstallDirAclPoisonMarker,
@@ -42,6 +47,8 @@ let probePendingSince: number | null = null
 let installDirReadClean = false
 /** A poison DACL reading taken after a repair was dispatched; outranks that repair's success claim. */
 let installDirReadPoisonedMidRepair = false
+/** What a 'repaired' claim cleared; restored if a later reading disproves the claim. */
+let gpuMarkerClearedByRepairClaim: GpuFallbackMarker | null = null
 let blockingRepairInFlight = false
 const verdictWaiters = new Set<() => void>()
 
@@ -58,6 +65,7 @@ export function resetWindowsInstallDirAclRecoveryForTest(): void {
   probePendingSince = null
   installDirReadClean = false
   installDirReadPoisonedMidRepair = false
+  gpuMarkerClearedByRepairClaim = null
   blockingRepairInFlight = false
   settleVerdictWaiters()
 }
@@ -99,9 +107,13 @@ export function isInstallDirAclSuspect(now: number = Date.now()): boolean {
   if (installDirReadClean) {
     return false
   }
-  if (poison) {
-    return poison.stage !== 'repaired'
+  if (poison && poison.stage !== 'repaired') {
+    return true
   }
+  // A 'repaired' stage is icacls's exit claim, not a reading of the tree — and the GPU
+  // children die 48-1373ms after window creation while the probe answers 0.9-3.0s in. So
+  // the claim stays provisional while this launch's probe is still out: the grace check
+  // below keeps the suspicion until the reading corroborates it or the window lapses.
   return probePendingSince !== null && now - probePendingSince < PROBE_VERDICT_GRACE_MS
 }
 
@@ -165,7 +177,11 @@ function startRepair(
         // The GPU child deaths were never a driver fault, so safe graphics — and the
         // --in-process-gpu launch that hides the next crash's evidence — must not outlive the repair.
         // Never a user-confirmed marker: "keep safe graphics" is a choice, not Orca's latch.
-        if (readGpuFallbackMarker(options.userDataPath)?.userConfirmed === false) {
+        const gpuMarker = readGpuFallbackMarker(options.userDataPath)
+        if (gpuMarker?.userConfirmed === false) {
+          // Kept: a probe reading that later disproves this claim restores the marker,
+          // or the next launch relaunches hardware accelerated into the re-armed gate.
+          gpuMarkerClearedByRepairClaim = gpuMarker
           clearGpuFallbackMarker(options.userDataPath)
         }
       }
@@ -204,6 +220,8 @@ function applyInstallDirAclProbeVerdict(
     if (data.matchesPoisonSignature === false) {
       clearInstallDirAclPoisonMarker(options.userDataPath)
       installDirReadClean = true
+      // The reading corroborates any repair claim, so its marker clear stands.
+      gpuMarkerClearedByRepairClaim = null
       // Keeping 'repaired' costs nothing and is what tells the user to reload; anything
       // else would go on suppressing the driver fallback and accusing a healthy folder.
       if (poison?.stage !== 'repaired') {
@@ -223,6 +241,17 @@ function applyInstallDirAclProbeVerdict(
   // a tree that still matches the signature was never repaired, whatever icacls exited.
   if (poison?.stage === 'repaired') {
     poison = { installDir: poison.installDir, stage: 'failed' }
+    // The claim also cleared the safe-graphics marker; disproved, it owes that back, or
+    // the next launch relaunches hardware accelerated and FATALs before its gate can win.
+    const cleared = gpuMarkerClearedByRepairClaim
+    gpuMarkerClearedByRepairClaim = null
+    if (cleared) {
+      try {
+        writeGpuFallbackMarker(options.userDataPath, cleared, cleared)
+      } catch {
+        // Best effort: the re-armed poison marker below still gates the next launch.
+      }
+    }
   }
   // Re-writes the poison marker — re-arming the next launch's gate — even when the
   // once-per-process latch means no icacls can run again this launch.

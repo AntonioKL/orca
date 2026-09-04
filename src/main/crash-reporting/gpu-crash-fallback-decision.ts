@@ -50,6 +50,8 @@ export class GpuCrashFallbackTracker {
     crashesInWindow: number
   } {
     if (this.engaged || !Number.isFinite(msSinceLaunch) || msSinceLaunch < 0) {
+      // Crashes landing while engaged (e.g. during a verdict wait before `disengage`) are
+      // not recorded, so a reported crashesInWindow can understate the actual burst.
       return { shouldEngageFallback: false, crashesInWindow: this.recentCrashes.length }
     }
     // Why: out-of-order arrivals would corrupt the sorted window, and a clock

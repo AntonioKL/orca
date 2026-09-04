@@ -242,6 +242,39 @@ describe('handleGpuChildCrash vs the install-dir ACL verdict', () => {
     expect(showMessageBox).not.toHaveBeenCalled()
   })
 
+  // The gate's 'repaired' is icacls's exit claim, not a reading of the tree, and an icacls
+  // that silently no-opped exits 0 on a tree it left poisoned. The GPU children die in the
+  // interval before this launch's probe answers, so a claim that un-suspects the tree there
+  // engages --in-process-gpu on a tree safe graphics cannot rescue — and a "keep it" answer
+  // then pins a userConfirmed marker no later repair may clear.
+  it('withholds safe graphics between a gate repair claim and this launch probe reading', async () => {
+    writeInstallDirAclPoisonMarker(userData.path, INSTALL_DIR, '1.4.184')
+    const mode = await repairKnownPoisonedInstallDirBeforeWindow({
+      ...recoveryOptions(userData.path),
+      runProcessFn: (async () => ({
+        code: 0,
+        signal: null,
+        stdout: 'Successfully processed 3200 files; Failed processing 0 files',
+        stderr: '',
+        timedOut: false
+      })) as unknown as (spec: ProcessSpec) => Promise<ProcessResult>
+    })
+    expect(mode).toBe('repaired')
+    noteWindowsInstallDirAclProbePending()
+
+    await crashUpToThreshold()
+    const decisive = handleGpuChildCrash('crashed', null, 600)
+    expect(showMessageBox).not.toHaveBeenCalled()
+
+    // The reading lands poisoned: the claim was false, and engagement stays withheld.
+    startWindowsInstallDirAclRepairIfPoisoned(
+      { status: 'ok', matchesPoisonSignature: true, wellKnownNameCheckReliable: true },
+      recoveryOptions(userData.path)
+    )
+    await decisive
+    expect(showMessageBox).not.toHaveBeenCalled()
+  })
+
   // Chromium aborts the browser on the 6th GPU crash, sooner than the probe can answer,
   // so the wait must not be the reason a machine comes back hardware-accelerated.
   it('holds an unconfirmed safe-graphics marker on disk across the wait', async () => {
