@@ -4,6 +4,7 @@ import { OptionalBoolean, OptionalString, requiredString } from '../../../schema
 import { ORCHESTRATION_RUN_PAGE_LIMIT } from '../../../../../../shared/orchestration-run-pagination'
 import { OrchestrationError } from '../../../../orchestration/orchestration-error'
 import { assertCallerHandleMatchesEvidence, resolveOrchestrationCaller } from './run-scope'
+import { exposeRun } from './run-receipt'
 
 const RunCreateParams = z.object({
   objective: requiredString('Missing --objective'),
@@ -44,7 +45,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
       if (priorRun) {
         runtime.cancelMessageWaiters(`run:${priorRun.id}`)
       }
-      return { run, binding: { consumerGeneration: run.consumer_generation } }
+      return { run: exposeRun(run) }
     }
   }),
   defineMethod({
@@ -97,7 +98,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
       if (priorRun && priorRun.id !== params.id) {
         runtime.cancelMessageWaiters(`run:${priorRun.id}`)
       }
-      return { run, binding: { consumerGeneration: run.consumer_generation } }
+      return { run: exposeRun(run) }
     }
   }),
   defineMethod({
@@ -109,13 +110,17 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         callerEvidence: orchestrationCompatibilityEvidence,
         requireStablePane: true
       })
-      return { run: runtime.getOrchestrationDb().getCurrentRunForPane(paneKey) ?? null }
+      const run = runtime.getOrchestrationDb().getCurrentRunForPane(paneKey)
+      return { run: run ? exposeRun(run) : null }
     }
   }),
   defineMethod({
     name: 'orchestration.runList',
     params: RunListParams,
-    handler: (params, { runtime }) => runtime.getOrchestrationDb().listRuns(params)
+    handler: (params, { runtime }) => {
+      const listed = runtime.getOrchestrationDb().listRuns(params)
+      return { ...listed, runs: listed.runs.map(exposeRun) }
+    }
   }),
   defineMethod({
     name: 'orchestration.runShow',
@@ -125,7 +130,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
       if (!run) {
         throw new OrchestrationError('run_not_found', `Run ${params.id} was not found.`)
       }
-      return { run }
+      return { run: exposeRun(run) }
     }
   })
 ]

@@ -209,13 +209,12 @@ describe('legacy compatibility after explicit takeover', () => {
 
     expect(bound).toMatchObject({
       ok: true,
-      result: {
-        run: {
-          coordinator_handle: CURRENT_COORDINATOR_HANDLE,
-          coordinator_pane_key: CURRENT_COORDINATOR_PANE
-        }
-      }
+      result: { run: { coordinator_handle: CURRENT_COORDINATOR_HANDLE } }
     })
+    // Why: the pane key is routing state the receipt withholds; prove the binding on the row.
+    expect(harness.db.getRun(harness.adoptedRunId)?.coordinator_pane_key).toBe(
+      CURRENT_COORDINATOR_PANE
+    )
   })
 
   it('does not let an uncommitted legacy coordinator attest after explicit takeover', async () => {
@@ -395,11 +394,11 @@ describe('legacy compatibility after explicit takeover', () => {
 
     expect(takeover).toMatchObject({
       ok: true,
-      result: { binding: { consumerGeneration: 2 } }
+      result: { run: { consumer_generation: 2 } }
     })
     expect(repeated).toMatchObject({
       ok: true,
-      result: { binding: { consumerGeneration: 2 } }
+      result: { run: { consumer_generation: 2 } }
     })
     expect(harness.db.getDispatchContextById(harness.dispatchId)?.status).toBe('dispatched')
     expect(harness.db.getLegacyCoordinatorPrincipal(harness.adoptedRunId)?.status).toBe('revoked')

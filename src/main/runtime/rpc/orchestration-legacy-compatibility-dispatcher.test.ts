@@ -702,11 +702,11 @@ describe('legacy compatibility through RpcDispatcher', () => {
       )
       expect(first).toMatchObject({
         ok: true,
-        result: { binding: { consumerGeneration: 1 }, mutation: { replayed: false } }
+        result: { run: { consumer_generation: 1 }, mutation: { replayed: false } }
       })
       expect(replay).toMatchObject({
         ok: true,
-        result: { binding: { consumerGeneration: 1 }, mutation: { replayed: true } }
+        result: { run: { consumer_generation: 1 }, mutation: { replayed: true } }
       })
       expect(harness.db.getRun(harness.adoptedRunId)?.consumer_generation).toBe(1)
     }
