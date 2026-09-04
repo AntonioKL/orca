@@ -87,9 +87,9 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
         ...(ctx.env ? { launchEnv: ctx.env } : {})
       })
     }
-    // Why: an adoption attaches to a live session too, and this branch returns before the
-    // normal commit site; without this the cache keeps whatever the caller requested.
-    commitRuntimePtySize(ctx, { ...ctx.result, isReattach: true })
+    // Why: this branch returns before the normal commit site; without this the cache keeps
+    // whatever the caller requested. The provider's own reattach flag decides the grid source.
+    commitRuntimePtySize(ctx, ctx.result)
     // Why: the adopted branch returns before the normal settle site, so the
     // reservation must be resolved here or every later spawn for this pane
     // awaits a promise that never settles.

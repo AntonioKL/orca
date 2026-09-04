@@ -2,7 +2,7 @@ import { commitAttachedPtySize } from '../delivery/attached-pty-size'
 import type { RuntimePtySpawnState } from './spawn-state'
 
 /** Record the settled grid for a runtime-path spawn; `result` is passed explicitly because the
- *  adopted-claim branch commits with `isReattach` forced on before it returns early. */
+ *  adopted-claim branch commits before it returns early. */
 export function commitRuntimePtySize(
   ctx: RuntimePtySpawnState,
   result: RuntimePtySpawnState['result']
