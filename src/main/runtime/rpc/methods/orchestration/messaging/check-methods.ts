@@ -6,6 +6,7 @@ import { checkRunMailbox } from './check-run'
 import { checkWorkerMailbox } from './check-worker'
 import { checkDirectMailbox } from './check-direct'
 import { orchestrationSkillRecoveryData } from '../../../../../../shared/orchestration-rpc-contract'
+import { callerHoldsDispatchPane, dispatchFenced } from './dispatch-mailbox-fence'
 
 export const ORCHESTRATION_CHECK_METHODS: RpcMethod[] = [
   defineMethod({
@@ -46,6 +47,10 @@ export const ORCHESTRATION_CHECK_METHODS: RpcMethod[] = [
       }
 
       const activeDispatch = db.getActiveDispatchForIdentity(handle, paneKey)
+      // Why: reading another pane's Dispatch mail is wrong in every mode, so peek is fenced too.
+      if (activeDispatch && !callerHoldsDispatchPane(activeDispatch, paneKey)) {
+        throw dispatchFenced()
+      }
       const remoteAttachment =
         !activeDispatch && paneKey ? db.findActiveRemoteAttachmentForPane(paneKey) : undefined
       if (
