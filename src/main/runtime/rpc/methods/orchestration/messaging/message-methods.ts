@@ -9,6 +9,7 @@ import {
   readMutationReplayNudge,
   stripMutationReplayNudge
 } from '../../../orchestration-mutation-executor'
+import { exposeMessage } from './mailbox-message-receipt'
 import { recordReceiptBeforeNudge, replayMutationNudge } from './mutation-replay-nudge'
 import {
   ReplyParams,
@@ -82,7 +83,7 @@ export const ORCHESTRATION_MESSAGE_METHODS: RpcMethod[] = [
         })
         const federated = db.getFederatedDispatch(question.dispatch_id)
         const receipt = {
-          message: answered.message,
+          message: exposeMessage(answered.message),
           question: answered.question,
           duplicate: answered.duplicate
         }
@@ -120,7 +121,7 @@ export const ORCHESTRATION_MESSAGE_METHODS: RpcMethod[] = [
         runId: original.run_id
       })
 
-      const receipt = { message: reply }
+      const receipt = { message: exposeMessage(reply) }
       return recordReceiptBeforeNudge(recordMutationReceipt, receipt, () =>
         runtime.notifyMessageArrived(reply.to_handle, reply.type)
       )

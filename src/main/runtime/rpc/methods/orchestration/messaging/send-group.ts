@@ -4,6 +4,7 @@ import { OrchestrationError } from '../../../../orchestration/orchestration-erro
 import { resolveGroupAddress } from '../../../../orchestration/groups'
 import { resolveBareOrchestrationRecipient } from './recipient-routing'
 import { legacyWorkerDeliveryContract } from '../routing'
+import { exposeMessages } from './mailbox-message-receipt'
 import { recordReceiptBeforeNudge } from './mutation-replay-nudge'
 import type { SendRecipientWarning } from './recipient-routing'
 import type { SendParams } from '../schemas'
@@ -120,7 +121,7 @@ export async function sendGroupMessage(args: {
     resolution.ok ? (resolution.warning ? [resolution.warning] : []) : [resolution.warning]
   )
   const receipt = {
-    messages,
+    messages: exposeMessages(messages),
     recipients: messages.length,
     ...(groupWarnings.length > 0 ? { warnings: groupWarnings } : {})
   }

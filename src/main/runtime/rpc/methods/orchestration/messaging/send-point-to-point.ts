@@ -5,6 +5,7 @@ import { bindCoordinatorMutationPayload } from '../../../../orchestration/dispat
 import { isDispatchMutationMessageType, parseMessageTaskId } from '../schemas'
 import type { SendParams } from '../schemas'
 import { legacyWorkerDeliveryContract } from '../routing'
+import { exposeMessage } from './mailbox-message-receipt'
 import { recordReceiptForPostCommitNudge } from './mutation-replay-nudge'
 import { sweepSettledWorkerResumeFences } from '../../settled-worker-resume-fence-sweep'
 import type { SendRecipientWarning } from './recipient-routing'
@@ -93,7 +94,7 @@ export function sendPointToPointMessage(args: {
         const rejection =
           db.convertLifecycleMessageToRejection(msg.id, authority.code, authority.reason) ?? msg
         const receipt = withSendWarnings({
-          message: rejection,
+          message: exposeMessage(rejection),
           lifecycle: {
             action: 'rejected',
             code: authority.code,
@@ -112,25 +113,30 @@ export function sendPointToPointMessage(args: {
       if (reconciled.action === 'suppressed') {
         return recordReceiptForPostCommitNudge(
           recordMutationReceipt,
-          withSendWarnings({ message: msg }),
+          withSendWarnings({ message: exposeMessage(msg) }),
           () => undefined
         )
       }
       if (reconciled.action === 'rejected') {
         const rejection = db.getMessageById(msg.id) ?? msg
-        const receipt = withSendWarnings({ message: rejection, lifecycle: reconciled })
+        const receipt = withSendWarnings({
+          message: exposeMessage(rejection),
+          lifecycle: reconciled
+        })
         return recordReceiptForPostCommitNudge(recordMutationReceipt, receipt, () =>
           runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
         )
       }
       const receipt = withSendWarnings(
-        msg.type === 'worker_done' ? { message: msg, lifecycle: reconciled } : { message: msg }
+        msg.type === 'worker_done'
+          ? { message: exposeMessage(msg), lifecycle: reconciled }
+          : { message: exposeMessage(msg) }
       )
       return recordReceiptForPostCommitNudge(recordMutationReceipt, receipt, () =>
         runtime.notifyMessageArrived(msg.to_handle, msg.type)
       )
     }
-    const receipt = withSendWarnings({ message: msg })
+    const receipt = withSendWarnings({ message: exposeMessage(msg) })
     return recordReceiptForPostCommitNudge(recordMutationReceipt, receipt, () =>
       runtime.notifyMessageArrived(msg.to_handle, msg.type)
     )

@@ -13,6 +13,10 @@ const INTERNAL_MESSAGE_COLUMNS = [
 
 export type MailboxMessageReceipt = Omit<MessageRow, (typeof INTERNAL_MESSAGE_COLUMNS)[number]>
 
+export function exposeMessage(message: MessageRow): MailboxMessageReceipt {
+  return exposeMessages([message])[0]!
+}
+
 export function exposeMessages(messages: MessageRow[]): MailboxMessageReceipt[] {
   return messages.map((message) => {
     const exposed: Partial<MessageRow> = { ...message }
