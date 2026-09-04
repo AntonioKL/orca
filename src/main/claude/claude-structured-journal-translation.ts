@@ -29,7 +29,9 @@ import {
   claudeQuestionItems
 } from './claude-structured-prompt-items'
 import type { ClaudePromptRegistry } from './claude-structured-prompt-replies'
+import { readableProviderFrameText } from '../native-chat/agent-session-wire/unhandled-provider-frame'
 import {
+  CLAUDE_UNRENDERABLE_CONTENT_TEXT,
   claudeProviderFrameKind,
   claudeResultFailure,
   createClaudeProviderFrameFallback,
@@ -171,7 +173,11 @@ export function createClaudeJournalTranslator(
     const unhandledContent = envelope.content.filter((part) => !isModeledClaudeContent(part))
     for (const part of unhandledContent) {
       const partType = claudeText(claudeRecord(part)?.type) ?? 'unknown'
-      providerFallback.append(`message:${envelope.role}:content:${partType}`, part)
+      providerFallback.append(
+        `message:${envelope.role}:content:${partType}`,
+        part,
+        readableProviderFrameText(part) ?? CLAUDE_UNRENDERABLE_CONTENT_TEXT
+      )
       changed = true
     }
     // An empty user frame is a replay with nothing to show, not an unknown kind.
