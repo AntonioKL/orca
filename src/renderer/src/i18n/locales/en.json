@@ -17009,7 +17009,10 @@
       },
       "structuredSessionCloseFailed": "Could not close this Codex chat",
       "structuredSessionLaunchFailed": "Could not open Codex chat",
-      "structuredSessionCloseFailedDescription": "The terminal stayed open so the provider remains recoverable."
+      "structuredSessionCloseFailedDescription": "The terminal stayed open so the provider remains recoverable.",
+      "monitoringStatus": {
+        "label": "Monitoring background tasks"
+      }
     },
     "tab": {
       "bar": {

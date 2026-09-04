@@ -44,12 +44,11 @@ function resolveNativeChatHookStatus(
 }
 
 export function useNativeChatMonitoringStatus(paneKey: string): boolean {
-  // Why: monitoring stays out of foreground lifecycle while remaining visible from the tab glyph's pane-status source.
-  const agentStatusEpoch = useAppStore((store) => store.agentStatusEpoch)
-  void agentStatusEpoch
-  return useAppStore((store) =>
-    resolveNativeChatMonitoringStatus(store.agentStatusByPaneKey[paneKey])
-  )
+  return useAppStore((store) => {
+    // Why: epoch invalidates freshness; the primitive result avoids unrelated-pane rerenders.
+    void store.agentStatusEpoch
+    return resolveNativeChatMonitoringStatus(store.agentStatusByPaneKey[paneKey])
+  })
 }
 
 export function useNativeChatHookStatus(

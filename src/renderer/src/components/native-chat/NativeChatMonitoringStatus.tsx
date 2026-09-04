@@ -1,6 +1,5 @@
-import { AgentStateDot, agentStateLabel } from '@/components/AgentStateDot'
-
-const MONITORING_LABEL = agentStateLabel('monitoring')
+import { AgentStateDot } from '@/components/AgentStateDot'
+import { translate } from '@/i18n/i18n'
 
 export function NativeChatMonitoringStatus({
   monitoring
@@ -20,7 +19,9 @@ export function NativeChatMonitoringStatus({
       <span aria-hidden="true">
         <AgentStateDot state="monitoring" title={null} />
       </span>
-      <span>{MONITORING_LABEL}</span>
+      <span>
+        {translate('components.native-chat.monitoringStatus.label', 'Monitoring background tasks')}
+      </span>
     </div>
   )
 }
