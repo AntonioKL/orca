@@ -8,7 +8,7 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 
 | Item | State | Where |
 |---|---|---|
-| PR #18565 relay accept abandonment + lease jitter + desktop rotation spread + phone probe fail-fast | Open, CI green (23), CodeRabbit + Pullfrog cleared, 3 review rounds | https://github.com/stablyai/orca/pull/18565 |
+| PR #18565 relay accept abandonment + lease jitter + desktop rotation spread + phone probe fail-fast | Open, CI fully green again after the doc move (05:45Z), CodeRabbit + Pullfrog cleared, 3 review rounds; not merged (owner has not asked) | https://github.com/stablyai/orca/pull/18565 |
 | PR #18569 monitor `relayPostgresRetryExhausted` 0 -> 300 | **Merged** 2026-09-04 ~04:20Z as 4101505b6b | https://github.com/stablyai/orca/pull/18569 |
 | Same-cap `verify` of c7 (read-only) | **Passed** run 33836527159 | confirms identities, selector gen 110, rehome gen 12, protocol 1, digests |
 | Monitor dry-run #1 | Froze min 5: `relay.postgres_retries` 380 > 300 | run 33836470590 |
@@ -20,7 +20,8 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | PR #18580 | **Merged** 2026-09-04 05:23Z as 79d5fb469a (Pullfrog cancelled by the merge; independent Opus review requested instead, per owner) | |
 | Monitor dry-run #4 | Froze min 12 at 05:37:35Z: `cell.production-gce-c27.health`/`.ready` = 0. Retries green all 12 samples under the new 2000 bar. Cause: c27 (asia-east2) container died 3x 05:37:00–05:38:01Z, Finding 6 crash class. | run 33840364323 |
 | Monitor dry-run #5 | Froze at sample 1 (05:41Z): c27 health/ready still 0. MIG autoheal `recreateInstance` on c27 fired 05:38:12Z after the 3 crashes; instance RECREATING, process up with 0 controls (was ~395). Second c27 recreate in 7 h (Finding 3 seed pattern). Waiting for c27 to settle before dry-run #6. | run 33841327879 |
-| PR #18581 doc reconcile (Aug 23 figure: 2,200–3,000 raw log lines vs 1,510 on the gate metric) | Open, doc only | https://github.com/stablyai/orca/pull/18581 |
+| Monitor dry-run #6 | Dispatched 05:47:04Z at main b378101901 after c27 settled (NONE/HEALTHY, controls returning 05:46:36Z); all 29 MIGs stable, no crash in prior 6 min | run 33841783747 |
+| PR #18581 doc reconcile (Aug 23 figure: 2,200–3,000 raw log lines vs 1,510 on the gate metric) | **Merged** | https://github.com/stablyai/orca/pull/18581 |
 | Cell canary / batch roll | **Not dispatched yet.** No production mutation has happened. | |
 | Terraform alert `relay_postgres_retry_exhausted` at `> 0` | Firing continuously since #18521; recalibration not done (own change) | `cloud/infra/terraform/relay-observability.tf:447,469` |
 
