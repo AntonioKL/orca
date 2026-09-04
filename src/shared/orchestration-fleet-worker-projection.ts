@@ -108,7 +108,12 @@ function projectResource(worker: FleetDurableWorker): FleetResourceProjection {
   }
 }
 
-function nextAction(worker: FleetDurableWorker, liveness: FleetLiveness): FleetNextAction {
+/** Exported so a later host verdict can re-derive it; `inspect` under a stale local
+ *  verdict outranked the `recover` a proven remote exit owes. */
+export function projectFleetNextAction(
+  worker: FleetDurableWorker,
+  liveness: FleetLiveness
+): FleetNextAction {
   if (worker.workerStage === 'released') {
     return { kind: 'none', argv: [] }
   }
@@ -249,7 +254,7 @@ export function projectOrchestrationFleetWorker(
       lastObservedAt: status ? agentStatusFleetObservedAt(status) : null
     },
     resource: projectResource(worker),
-    nextAction: nextAction(worker, liveness),
+    nextAction: projectFleetNextAction(worker, liveness),
     attention: projectOrchestrationFleetAttention({
       isRoot: worker.parentTaskId === null,
       outcome,
