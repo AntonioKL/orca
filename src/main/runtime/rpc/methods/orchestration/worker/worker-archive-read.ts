@@ -158,8 +158,9 @@ function readArchivedTerminalTail(
     cursor: nextCursor,
     status,
     fallbackReason: content.fallbackReason ?? null,
-    sourceExact: content.sourceExact ?? false,
-    contentComplete: content.contentComplete ?? false,
+    // An archived terminal tail is never the exact transcript source, and it is a bounded snapshot.
+    sourceExact: false,
+    contentComplete: false,
     ...(content.clipping ? { clipping: content.clipping } : {}),
     warnings: content.warnings,
     archived: true

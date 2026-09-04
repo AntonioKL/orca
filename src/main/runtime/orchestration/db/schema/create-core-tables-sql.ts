@@ -111,22 +111,6 @@ CREATE TABLE IF NOT EXISTS mutation_caller_identities (
   caller_fingerprint  TEXT NOT NULL UNIQUE
 );
 
--- Append-only lifecycle audit facts. Legacy status enums remain unchanged;
--- richer observation/projection work can consume this table in a later slice.
-CREATE TABLE IF NOT EXISTS lifecycle_transition_receipts (
-  id          TEXT PRIMARY KEY,
-  entity      TEXT NOT NULL CHECK(entity IN ('task', 'dispatch', 'worker')),
-  entity_id   TEXT NOT NULL,
-  from_state  TEXT NOT NULL,
-  to_state    TEXT NOT NULL,
-  kind        TEXT NOT NULL DEFAULT 'lifecycle_transition',
-  details     TEXT,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_lifecycle_transition_receipts_entity
-  ON lifecycle_transition_receipts(entity, entity_id, created_at);
-
 -- Attempt evidence stays additive so old Task/Dispatch/worker CHECK enums remain wire-compatible.
 CREATE TABLE IF NOT EXISTS attempt_observation_facts (
   id                    TEXT PRIMARY KEY,

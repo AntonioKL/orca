@@ -62,7 +62,6 @@ export function createDispatchContext(
       assigneePaneKey: assigneePaneKey ?? null,
       processIncarnation: processIncarnation ?? null,
       creatorDispatchId,
-      creatorRole: params.creator.kind,
       priorFailures,
       depth,
       taskId,
@@ -84,8 +83,7 @@ export function createDispatchContext(
       entity: 'task',
       id: taskId,
       from: 'ready',
-      to: 'dispatched',
-      receipt: { kind: 'task_dispatched', details: { dispatchId: id } }
+      to: 'dispatched'
     })
     const dispatch = this.db
       .prepare('SELECT * FROM dispatch_contexts WHERE id = ?')

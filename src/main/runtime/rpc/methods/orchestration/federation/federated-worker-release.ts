@@ -166,8 +166,7 @@ function applyConfirmedFederatedReleaseHomeProjection(
           stage: 'released',
           agent_terminal_handle: null,
           updated_at: new Date().toISOString()
-        },
-        receipt: { kind: 'federated_release_confirmed' }
+        }
       })
     }
     // The remote handle is an execution-host fact; clear it after confirmation

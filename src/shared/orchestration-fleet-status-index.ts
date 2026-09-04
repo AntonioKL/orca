@@ -66,12 +66,6 @@ function keepFreshest(
   }
 }
 
-type StatusIdentity = AgentStatusIpcPayload & {
-  processIncarnation?: string
-  endpointId?: string
-  endpointIncarnation?: string
-}
-
 export function statusForFleetWorker(
   worker: FleetDurableWorker,
   index: FleetStatusIndex
@@ -94,64 +88,28 @@ function statusIdentityMatchesWorker(
   status: AgentStatusIpcPayload,
   index: FleetStatusIndex
 ): boolean {
-  const candidate = status as StatusIdentity
   const resource = worker.resource
-  const explicitDispatch = candidate.orchestration?.dispatchId
+  const explicitDispatch = status.orchestration?.dispatchId
   if (explicitDispatch && explicitDispatch !== worker.dispatchId) {
     return false
   }
-  const paneMatches = !worker.paneKey || candidate.paneKey === worker.paneKey
+  const paneMatches = !worker.paneKey || status.paneKey === worker.paneKey
   const handleMatches =
-    !worker.agentTerminalHandle || candidate.terminalHandle === worker.agentTerminalHandle
-  const processIncarnation = resource?.processIncarnation ?? null
-  const endpointId = resource?.endpointId ?? null
-  const endpointIncarnation = resource?.endpointIncarnation ?? null
+    !worker.agentTerminalHandle || status.terminalHandle === worker.agentTerminalHandle
   const remoteTargetId = remoteTargetFromHostScope(resource?.hostScope)
-  if (remoteTargetId && candidate.connectionId !== remoteTargetId) {
-    return false
-  }
-  const processMatches = matchesOptionalIdentity(
-    candidate.processIncarnation,
-    processIncarnation,
-    explicitDispatch,
-    candidate.providerSessionOnly
-  )
-  const endpointMatches = matchesOptionalIdentity(
-    candidate.endpointId,
-    endpointId,
-    explicitDispatch,
-    candidate.providerSessionOnly
-  )
-  const endpointIncarnationMatches = matchesOptionalIdentity(
-    candidate.endpointIncarnation,
-    endpointIncarnation,
-    explicitDispatch,
-    candidate.providerSessionOnly
-  )
-  if (!processMatches || !endpointMatches || !endpointIncarnationMatches) {
+  if (remoteTargetId && status.connectionId !== remoteTargetId) {
     return false
   }
   if (explicitDispatch) {
-    return (paneMatches && handleMatches) || (handleMatches && Boolean(processIncarnation))
+    return (
+      (paneMatches && handleMatches) || (handleMatches && Boolean(resource?.processIncarnation))
+    )
   }
   return (
     paneMatches &&
     handleMatches &&
     uniqueOwner(index.paneOwners, worker.paneKey) &&
     uniqueOwner(index.handleOwners, worker.agentTerminalHandle)
-  )
-}
-
-function matchesOptionalIdentity(
-  observed: string | undefined,
-  expected: string | null,
-  explicitDispatch: string | undefined,
-  providerSessionOnly: boolean | undefined
-): boolean {
-  return (
-    !expected ||
-    observed === expected ||
-    (!observed && (!explicitDispatch || providerSessionOnly === true))
   )
 }
 

@@ -42,7 +42,6 @@ export async function readRemoteTranscriptRangedWindow(args: {
   provider: IFilesystemProvider
   filePath: string
   requestedOffset?: number
-  endOffset?: number
   expectedBoundaryCheckpoint?: string
   maxScanBytes: number
 }): Promise<RemoteTranscriptWindow | null> {
@@ -51,10 +50,7 @@ export async function readRemoteTranscriptRangedWindow(args: {
   if (!sourceIdentity) {
     throw new Error('Remote transcript host did not provide stable file identity')
   }
-  if (args.endOffset !== undefined && remoteStat.size < args.endOffset) {
-    return null
-  }
-  const fileSize = Math.min(remoteStat.size, args.endOffset ?? remoteStat.size)
+  const fileSize = remoteStat.size
   const startOffset = args.requestedOffset ?? Math.max(0, fileSize - args.maxScanBytes)
   if (startOffset > fileSize) {
     return null

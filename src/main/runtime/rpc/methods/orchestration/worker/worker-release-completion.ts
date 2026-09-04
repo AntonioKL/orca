@@ -69,16 +69,7 @@ export function completeWorkerTerminalRelease(
   const release = completeWorkerTerminalReleaseOnce(args)
     .then((receipt) => {
       if (activeRelease.recoveryRequested) {
-        args.db.recordWorkerTerminalRecoveryAttempt(
-          args.resource.id,
-          receipt.state === 'released' || receipt.state === 'already_released'
-            ? 'released'
-            : receipt.state === 'release_pending'
-              ? 'pending'
-              : receipt.state === 'release_unknown'
-                ? 'unknown'
-                : 'retained'
-        )
+        args.db.recordWorkerTerminalRecoveryAttempt(args.resource.id)
       }
       return receipt
     })

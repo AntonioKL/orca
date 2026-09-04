@@ -99,11 +99,8 @@ describe('OrchestrationDb worker Dispatch state', () => {
       effects: [],
       terminalOwnership: 'created'
     })
-    expect(d.getDispatchContextById(started.dispatch.id)).toMatchObject({
-      attachment_kind: 'local',
-      resource_id: expect.any(String)
-    })
     expect(d.getWorkerTerminalResourceByOwner(started.dispatch.id)).toMatchObject({
+      owner_dispatch_id: started.dispatch.id,
       endpoint_incarnation: 'runtime:pty:1'
     })
     d.markWorkerDispatchReady(started.dispatch.id)
@@ -246,7 +243,6 @@ describe('OrchestrationDb worker Dispatch state', () => {
       startOptions: {}
     })
     expect(second.dispatch.retry_of_dispatch_id).toBe(first.dispatch.id)
-    expect(second.dispatch.creator_role).toBe('system')
     d.failWorkerStart(second.dispatch.id, 'agent_readiness', 'second failed')
 
     expect(() =>
@@ -345,39 +341,6 @@ describe('OrchestrationDb worker Dispatch state', () => {
     ).toMatchObject({ action: 'rejected', code: 'inactive_dispatch' })
     expect(d.settleWorkerStop(started.dispatch.id).state).toBe('stopped')
     expect(d.getTask(task.id)?.status).toBe('blocked')
-  })
-
-  it('rolls back stop-unknown projection when its receipt cannot be inserted', () => {
-    const d = createDb()
-    const task = d.createTask({ spec: 'atomic uncertain stop' })
-    const started = d.createStartingWorkerDispatch({
-      creator: { kind: 'system' },
-      maxDepth: Number.MAX_SAFE_INTEGER,
-      taskId: task.id,
-      startOptions: {}
-    })
-    d.markWorkerDispatchReady(started.dispatch.id)
-    expect(d.beginWorkerStop(started.dispatch.id, 'runtime_test').disposition).toBe('stopping')
-    d.db.exec(`
-      CREATE TRIGGER reject_worker_stop_unknown_receipt
-      BEFORE INSERT ON lifecycle_transition_receipts
-      WHEN NEW.kind = 'worker_stop_unknown'
-      BEGIN SELECT RAISE(ABORT, 'forced stop-unknown receipt failure'); END;
-    `)
-
-    expect(() => d.markWorkerStopUnknown(started.dispatch.id, 'stop response lost')).toThrow(
-      'forced stop-unknown receipt failure'
-    )
-    expect(d.getWorkerDispatch(started.dispatch.id)).toMatchObject({
-      state: 'stopping',
-      stage: 'stop_requested',
-      last_error: null
-    })
-    expect(
-      d
-        .getLifecycleTransitionReceipts('worker', started.dispatch.id)
-        .some((receipt) => receipt.kind === 'worker_stop_unknown')
-    ).toBe(false)
   })
 
   it('allows explicit stop recovery from uncertain local and remote starts', () => {

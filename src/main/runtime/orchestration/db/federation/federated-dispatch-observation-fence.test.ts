@@ -54,8 +54,7 @@ describe('federated Dispatch observation fence', () => {
       id: started.dispatch.id,
       from: 'ready',
       to: 'ready',
-      projection: { stage: 'released', agent_terminal_handle: null },
-      receipt: { kind: 'test_release' }
+      projection: { stage: 'released', agent_terminal_handle: null }
     })
     database.db
       .prepare(

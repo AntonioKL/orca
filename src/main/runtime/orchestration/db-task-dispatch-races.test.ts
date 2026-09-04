@@ -160,11 +160,10 @@ describe('Task/Dispatch concurrency', () => {
       result: 'completed concurrently'
     })
     expect(first.db.getWorkerDispatch(started.dispatch.id)?.state).toBe('succeeded')
-    expect(
-      first.db
-        .getLifecycleTransitionReceipts('dispatch', started.dispatch.id)
-        .map((receipt) => receipt.kind)
-    ).not.toContain('dispatch_failed')
+    expect(first.db.getDispatchContextById(started.dispatch.id)).toMatchObject({
+      status: 'completed',
+      last_failure: null
+    })
     expect(
       first.db.verifyDispatchCapability({
         dispatchId: started.dispatch.id,
@@ -184,9 +183,7 @@ describe('Task/Dispatch concurrency', () => {
     sqlite.exec('BEGIN IMMEDIATE')
     expect(db.failDispatch(dispatch.id, 'nested failure')).toMatchObject({ status: 'failed' })
     expect(sqlite.isTransaction).toBe(true)
-    expect(db.getLifecycleTransitionReceipts('dispatch', dispatch.id)).toEqual([
-      expect.objectContaining({ kind: 'dispatch_failed' })
-    ])
+    expect(db.getDispatchContextById(dispatch.id)?.status).toBe('failed')
     sqlite.exec('ROLLBACK')
 
     expect(db.getTask(task.id)?.status).toBe('dispatched')
@@ -195,7 +192,6 @@ describe('Task/Dispatch concurrency', () => {
       failure_count: 0,
       last_failure: null
     })
-    expect(db.getLifecycleTransitionReceipts('dispatch', dispatch.id)).toEqual([])
   })
 
   it('serializes reminted-pane worker authority claims', () => {

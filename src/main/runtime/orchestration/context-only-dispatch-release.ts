@@ -45,10 +45,6 @@ export function releaseContextOnlyDispatch(
       last_failure: requestedState,
       capability_revoked_at: dispatch.capability_revoked_at ?? new Date().toISOString(),
       completed_at: dispatch.completed_at ?? new Date().toISOString()
-    },
-    receipt: {
-      kind: `dispatch_context_only_${requestedState}`,
-      details: { taskId: dispatch.task_id }
     }
   })
   const remaining = db
@@ -67,11 +63,7 @@ export function releaseContextOnlyDispatch(
         entity: 'task',
         id: dispatch.task_id,
         from: 'dispatched',
-        to: 'blocked',
-        receipt: {
-          kind: 'task_context_only_dispatch_released',
-          details: { dispatchId: dispatch.id, requestedState }
-        }
+        to: 'blocked'
       }).changed
     }
   }

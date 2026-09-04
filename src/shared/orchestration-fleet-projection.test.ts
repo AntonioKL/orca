@@ -226,7 +226,7 @@ describe('orchestration fleet projection', () => {
     expect(result.workers[0]?.provider).toBeNull()
   })
 
-  it('accepts a reminted pane only with exact Dispatch and process endpoint identity', () => {
+  it('accepts a reminted pane when the Dispatch and terminal handle both match', () => {
     const durable = worker('dispatch-1', {
       paneKey: 'old-tab:old-leaf',
       agentTerminalHandle: 'term-worker',
@@ -250,9 +250,6 @@ describe('orchestration fleet projection', () => {
         status('new', 100, {
           paneKey: 'new-tab:new-leaf',
           terminalHandle: 'term-worker',
-          processIncarnation: 'pty:inc-2',
-          endpointId: 'runtime-1',
-          endpointIncarnation: 'endpoint:inc-2',
           orchestration: { taskId: 'task-dispatch-1', dispatchId: 'dispatch-1' }
         })
       ],
@@ -260,6 +257,22 @@ describe('orchestration fleet projection', () => {
     })
 
     expect(result.workers[0]?.liveness.verdict).toBe('live')
+
+    // A reminted pane is only accepted through the terminal handle; a foreign handle is not
+    // this worker even when both the pane and the Dispatch would otherwise be reachable.
+    expect(
+      projectOrchestrationFleet({
+        workers: [durable],
+        statuses: [
+          status('new', 100, {
+            paneKey: 'new-tab:new-leaf',
+            terminalHandle: 'term-other',
+            orchestration: { taskId: 'task-dispatch-1', dispatchId: 'dispatch-1' }
+          })
+        ],
+        now: 100
+      }).workers[0]?.liveness.verdict
+    ).toBe('unverifiable')
   })
 
   it('keeps provider-session-only status as identity without liveness evidence', () => {

@@ -40,11 +40,6 @@ describe('Task/Dispatch invariant transactions', () => {
       expect(updated?.status).toBe(status)
       expect(db.getTask(task.id)?.status).toBe(status)
       expect(db.getTask(dependent.id)?.status).toBe(status === 'completed' ? 'ready' : 'pending')
-      expect(db.getLifecycleTransitionReceipts('task', task.id)).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ from_state: 'pending', to_state: status })
-        ])
-      )
     }
   )
 

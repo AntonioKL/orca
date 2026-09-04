@@ -281,14 +281,7 @@ export type DispatchContextRow = {
   /** Dispatch ID is the Attempt identity; retries point to the prior Attempt. */
   retry_of_dispatch_id: string | null
   creator_dispatch_id: string | null
-  creator_role: string | null
-  endpoint_id: string | null
-  endpoint_incarnation: string | null
   host_scope: string | null
-  /** `local`, `remote`, `unsupervised`, or null when attachment is unproven. */
-  attachment_kind: string | null
-  /** Existing worker_terminal_resources.id, when a local Resource is proven. */
-  resource_id: string | null
   status: DispatchStatus
   failure_count: number
   last_failure: string | null

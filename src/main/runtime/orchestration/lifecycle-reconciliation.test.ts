@@ -102,12 +102,6 @@ describe('lifecycle reconciliation', () => {
     expect(db.getTask(task.id)?.status).toBe('completed')
     expect(db.getDispatchContextById(started.dispatch.id)?.status).toBe('completed')
     expect(db.getWorkerDispatch(started.dispatch.id)?.state).toBe('succeeded')
-    expect(db.getLifecycleTransitionReceipts('task', task.id)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ from_state: 'blocked', to_state: 'dispatched' }),
-        expect.objectContaining({ from_state: 'dispatched', to_state: 'completed' })
-      ])
-    )
   })
 
   it('fails both the dispatch and task from an authenticated failed worker report', () => {

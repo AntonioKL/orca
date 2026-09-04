@@ -32,7 +32,6 @@ type RemoteReadArgs = {
   sessionId: string
   transcriptPath?: string
   offset?: number
-  endOffset?: number
   limit?: number
   expectedBoundaryCheckpoint?: string
   filesystemProvider?: IFilesystemProvider
@@ -90,7 +89,6 @@ async function readTranscriptWindow(
         provider,
         filePath,
         requestedOffset: args.offset,
-        endOffset: args.endOffset,
         expectedBoundaryCheckpoint: args.expectedBoundaryCheckpoint,
         maxScanBytes: MAX_REMOTE_TRANSCRIPT_SCAN_BYTES
       })
@@ -101,20 +99,13 @@ async function readTranscriptWindow(
       }
     }
   }
-  return readLegacyWindow(
-    provider,
-    filePath,
-    args.offset,
-    args.endOffset,
-    args.expectedBoundaryCheckpoint
-  )
+  return readLegacyWindow(provider, filePath, args.offset, args.expectedBoundaryCheckpoint)
 }
 
 async function readLegacyWindow(
   provider: IFilesystemProvider,
   filePath: string,
   requestedOffset: number | undefined,
-  endOffset: number | undefined,
   expectedBoundaryCheckpoint: string | undefined
 ): Promise<RemoteTranscriptWindow | null> {
   const sourceIdentity = remoteWorkerTranscriptSourceIdentity(await provider.stat(filePath))
@@ -130,10 +121,7 @@ async function readLegacyWindow(
     throw new Error('Remote transcript read returned invalid content')
   }
   const allBytes = Buffer.from(result.content, 'utf8')
-  if (endOffset !== undefined && allBytes.length < endOffset) {
-    return null
-  }
-  const fileSize = Math.min(allBytes.length, endOffset ?? allBytes.length)
+  const fileSize = allBytes.length
   const startOffset = requestedOffset ?? Math.max(0, fileSize - MAX_REMOTE_TRANSCRIPT_SCAN_BYTES)
   if (startOffset > fileSize) {
     return null

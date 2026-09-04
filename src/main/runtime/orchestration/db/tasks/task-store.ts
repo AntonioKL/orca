@@ -214,8 +214,7 @@ export function promoteReadyTasks(this: OrchestrationDb, completedTaskId: string
         entity: 'task',
         id: task.id,
         from: 'pending',
-        to: 'ready',
-        receipt: { kind: 'task_ready', details: { dependency: completedTaskId } }
+        to: 'ready'
       })
     }
   }

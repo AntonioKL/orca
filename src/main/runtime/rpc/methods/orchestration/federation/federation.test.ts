@@ -9,8 +9,8 @@ import { OrchestrationDb } from '../../../../orchestration/db'
 import type { OrchestrationEnvironmentTransport } from '../../../../orchestration/environment-transport'
 import { RpcDispatcher } from '../../../dispatcher'
 import { ORCHESTRATION_METHODS } from '../../orchestration'
-import { createFederationWorkerStartRequest as startRequest } from './federation-test-request'
-import { configureFederationWorkerRuntime } from './federation-test-runtime'
+import { createFederationWorkerStartRequest as startRequest } from './federation-request.test-support'
+import { configureFederationWorkerRuntime } from './federation-runtime.test-support'
 
 describe('orchestration federation', () => {
   const databases: OrchestrationDb[] = []

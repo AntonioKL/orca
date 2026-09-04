@@ -19,8 +19,7 @@ export function markWorkerDispatchReady(
       entity: 'dispatch',
       id: dispatchId,
       from: 'pending',
-      to: 'dispatched',
-      receipt: { kind: 'dispatch_ready' }
+      to: 'dispatched'
     })
     transitionLifecycleWithDb(this.db, {
       entity: 'worker',
@@ -30,8 +29,7 @@ export function markWorkerDispatchReady(
       projection: {
         stage: 'input_accepted',
         effects: effects ? JSON.stringify(effects) : worker.effects
-      },
-      receipt: { kind: 'worker_ready' }
+      }
     })
     this.db.exec('COMMIT')
     return this.getWorkerDispatch(dispatchId) as WorkerDispatchRow
@@ -70,16 +68,14 @@ export function failWorkerStart(
         capability_revoked_at: options.retainCapability
           ? dispatch.capability_revoked_at
           : (dispatch.capability_revoked_at ?? now)
-      },
-      receipt: { kind: 'dispatch_start_failed', details: { reason } }
+      }
     })
     transitionLifecycleWithDb(this.db, {
       entity: 'worker',
       id: dispatchId,
       from: 'starting',
       to: 'failed',
-      projection: { stage, last_error: reason, updated_at: now },
-      receipt: { kind: 'worker_start_failed', details: { reason } }
+      projection: { stage, last_error: reason, updated_at: now }
     })
     const hasActiveDispatch = Boolean(
       this.db
@@ -96,8 +92,7 @@ export function failWorkerStart(
         id: dispatch.task_id,
         from: task.status,
         to: 'failed',
-        projection: { completed_at: now },
-        receipt: { kind: 'task_start_failed', details: { reason } }
+        projection: { completed_at: now }
       })
     }
     this.closeQuestionsForDispatch(dispatchId)
@@ -127,22 +122,19 @@ export function markWorkerStartUnknown(
       id: dispatchId,
       from: 'starting',
       to: 'start_unknown',
-      projection: { stage, last_error: reason, updated_at: new Date().toISOString() },
-      receipt: { kind: 'worker_start_unknown', details: { reason } }
+      projection: { stage, last_error: reason, updated_at: new Date().toISOString() }
     })
     transitionLifecycleWithDb(this.db, {
       entity: 'dispatch',
       id: dispatchId,
       from: dispatch.status,
-      to: dispatch.status,
-      receipt: { kind: 'dispatch_start_unknown' }
+      to: dispatch.status
     })
     transitionLifecycleWithDb(this.db, {
       entity: 'task',
       id: dispatch.task_id,
       from: 'dispatched',
-      to: 'blocked',
-      receipt: { kind: 'task_start_unknown', details: { reason } }
+      to: 'blocked'
     })
     this.closeQuestionsForDispatch(dispatchId)
     this.db.exec('COMMIT')

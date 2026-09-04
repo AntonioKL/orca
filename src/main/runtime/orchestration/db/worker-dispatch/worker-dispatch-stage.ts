@@ -42,8 +42,7 @@ export function recordWorkerStage(
           : current.residual_resources,
         last_error: params.lastError ?? current.last_error,
         updated_at: new Date().toISOString()
-      },
-      receipt: { kind: 'worker_stage', details: { stage: params.stage } }
+      }
     })
     this.db.exec('RELEASE worker_stage_transition')
   } catch (error) {
@@ -84,8 +83,7 @@ export function updateWorkerSetupEvidence(
         setup_state: params.setupState,
         effects,
         updated_at: new Date().toISOString()
-      },
-      receipt: { kind: 'worker_setup_evidence' }
+      }
     })
     this.db.exec('RELEASE worker_setup_transition')
   } catch (error) {

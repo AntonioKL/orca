@@ -174,10 +174,6 @@ export function settleWorkerReportInTransaction(
         last_failure: params.outcome === 'failed' ? params.result : dispatch.last_failure,
         capability_revoked_at: dispatch.capability_revoked_at ?? now
       },
-      receipt: {
-        kind: 'dispatch_prompt_stall_corrected',
-        details: { outcome: params.outcome }
-      },
       correction: 'unobserved_prompt_report'
     })
     const taskTransition = transitionLifecycleWithDb(this.db, {
@@ -186,10 +182,6 @@ export function settleWorkerReportInTransaction(
       from: 'failed',
       to: expectedTaskStatus,
       projection: { result: params.result, completed_at: now },
-      receipt: {
-        kind: 'task_prompt_stall_corrected',
-        details: { dispatchId: params.dispatchId, outcome: params.outcome }
-      },
       correction: 'unobserved_prompt_report'
     })
     dispatchUpdate = { changes: dispatchTransition.changed ? 1 : 0 }
@@ -200,11 +192,7 @@ export function settleWorkerReportInTransaction(
         entity: 'task',
         id: params.taskId,
         from: 'blocked',
-        to: 'dispatched',
-        receipt: {
-          kind: 'task_start_unknown_report_reconnected',
-          details: { dispatchId: params.dispatchId }
-        }
+        to: 'dispatched'
       })
     }
     const dispatchTransition = transitionLifecycleWithDb(this.db, {
@@ -216,16 +204,14 @@ export function settleWorkerReportInTransaction(
         completed_at: new Date().toISOString(),
         last_failure: params.outcome === 'failed' ? params.result : dispatch.last_failure,
         capability_revoked_at: dispatch.capability_revoked_at ?? new Date().toISOString()
-      },
-      receipt: { kind: 'dispatch_report_settled', details: { outcome: params.outcome } }
+      }
     })
     const taskTransition = transitionLifecycleWithDb(this.db, {
       entity: 'task',
       id: params.taskId,
       from: 'dispatched',
       to: expectedTaskStatus,
-      projection: { result: params.result, completed_at: new Date().toISOString() },
-      receipt: { kind: 'task_report_settled', details: { dispatchId: params.dispatchId } }
+      projection: { result: params.result, completed_at: new Date().toISOString() }
     })
     dispatchUpdate = { changes: dispatchTransition.changed ? 1 : 0 }
     taskUpdate = { changes: taskTransition.changed ? 1 : 0 }
@@ -246,10 +232,6 @@ export function settleWorkerReportInTransaction(
       from: 'failed',
       to: params.outcome === 'succeeded' ? 'succeeded' : 'failed',
       projection: { stage: 'settled', updated_at: new Date().toISOString() },
-      receipt: {
-        kind: 'worker_prompt_stall_corrected',
-        details: { outcome: params.outcome }
-      },
       correction: 'unobserved_prompt_report'
     })
   } else if (reconnectingStart && params.outcome === 'succeeded') {
@@ -257,16 +239,14 @@ export function settleWorkerReportInTransaction(
       entity: 'worker',
       id: params.dispatchId,
       from: 'start_unknown',
-      to: 'ready',
-      receipt: { kind: 'worker_start_unknown_report_reconnected' }
+      to: 'ready'
     })
     transitionLifecycleWithDb(this.db, {
       entity: 'worker',
       id: params.dispatchId,
       from: 'ready',
       to: 'succeeded',
-      projection: { stage: 'settled', updated_at: new Date().toISOString() },
-      receipt: { kind: 'worker_report_settled', details: { outcome: params.outcome } }
+      projection: { stage: 'settled', updated_at: new Date().toISOString() }
     })
   } else if (reportingWorker) {
     transitionLifecycleWithDb(this.db, {
@@ -275,8 +255,7 @@ export function settleWorkerReportInTransaction(
       // A start_unknown success report reconnects through 'ready' above; only failure settles here.
       from: params.outcome === 'succeeded' ? 'ready' : ['ready', 'start_unknown'],
       to: params.outcome === 'succeeded' ? 'succeeded' : 'failed',
-      projection: { stage: 'settled', updated_at: new Date().toISOString() },
-      receipt: { kind: 'worker_report_settled', details: { outcome: params.outcome } }
+      projection: { stage: 'settled', updated_at: new Date().toISOString() }
     })
   }
   settleActiveDispatchesForTask(
