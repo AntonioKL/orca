@@ -67,6 +67,14 @@ the target image `sha256:85bf6799…` (main 11aace8dec). The roll is the fix. No
 this session: the same-cap verify finished ~04:25Z and never reached a mutating step; no compute
 operations exist for those instances; heap/event-loop were flat before the crash.
 
+Autoheal amplifier: MIG health check is `/health` every 10 s, timeout 5 s, unhealthy after 3, so a
+crash loop of ~30 s+ triggers `compute.instances.repair.recreateInstance`. All ~20 recreates in the
+48 h to 2026-09-04 05:40Z were the three Asia cells (c27 x6, c28 x7, c29 x8; gcloud prints local
+-07:00 times). c27 recreated 05:38:12Z after 3 crashes in 62 s; its ~395 controls went to 0 and the
+monitor's `cell.production-gce-c27.health/ready` probe read 0 for the whole recreate (~several min),
+freezing dry-runs #4 and #5. Each recreate also seeds a Finding 3 rotation cohort. Rolling the Asia
+cells early in the batch phase should be weighed against the canary-first rule; c7 stays the canary.
+
 Implication for the gate: the monitor's `director.concurrency` freeze is *correctly* detecting these
 crash storms. A dry-run only passes in a 15-minute window with no cell crash, roughly 1 in 3 windows
 at current rates. Retrying in quiet hours is legitimate; the bar is not wrong.
