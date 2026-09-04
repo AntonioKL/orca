@@ -22,15 +22,36 @@ import {
 const projectDir = path.resolve(import.meta.dirname, '..', '..')
 const temporaryDirectories = []
 const execFileAsync = promisify(execFile)
-const ORCHESTRATION_REFERENCES = [
-  'coordinator-loop.md',
-  'legacy-contract-migration.md',
-  'low-level-topology.md',
-  'messaging-and-gates.md',
-  'placement-and-remote.md',
-  'recovery-and-cleanup.md',
-  'worker-contract.md'
-]
+const GUIDE_REFERENCES = {
+  'orca-per-workspace-env': [
+    'docker-ssh.md',
+    'failure-modes.md',
+    'provider-vercel.md',
+    'ssh-host.md',
+    'windows-scripts.md'
+  ],
+  orchestration: [
+    'coordinator-loop.md',
+    'legacy-contract-migration.md',
+    'low-level-topology.md',
+    'messaging-and-gates.md',
+    'placement-and-remote.md',
+    'recovery-and-cleanup.md',
+    'worker-contract.md'
+  ]
+}
+const REFERENCE_ENTRIES = Object.entries(GUIDE_REFERENCES)
+
+async function readPerWorkspaceEnvCorpus() {
+  const guideRoot = path.join(projectDir, 'skill-guides')
+  const files = [
+    path.join(guideRoot, 'orca-per-workspace-env.md'),
+    ...GUIDE_REFERENCES['orca-per-workspace-env'].map((reference) =>
+      path.join(guideRoot, 'orca-per-workspace-env', 'references', reference)
+    )
+  ]
+  return (await Promise.all(files.map((file) => readFile(file, 'utf8')))).join('\n')
+}
 
 async function createFixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'orca-bundled-skill-guides-'))
@@ -106,16 +127,27 @@ describe('bundled skill guide generator', () => {
   })
 
   it('uses the exported recipe id variable in per-workspace environment examples', async () => {
-    const source = await readFile(
-      path.join(projectDir, 'skill-guides', 'orca-per-workspace-env.md'),
+    // The guide is a kernel plus conditional references, so the env-var contract is asserted over
+    // the whole corpus while the name-building recipe is pinned in the file that now carries it.
+    const corpus = await readPerWorkspaceEnvCorpus()
+    const vercelReference = await readFile(
+      path.join(
+        projectDir,
+        'skill-guides',
+        'orca-per-workspace-env',
+        'references',
+        'provider-vercel.md'
+      ),
       'utf8'
     )
 
-    expect(source).toContain('ORCA_RECIPE_ID')
-    expect(source).not.toContain('ORCA_VM_RECIPE_ID')
-    expect(source).toContain('recipe_id="${recipe_id//./-}"')
-    expect(source).toContain('max_recipe_id_length=$((128 - ${#instance_id} - 6))')
-    expect(source).toContain('name="orca-${recipe_id:0:max_recipe_id_length}-${instance_id}"')
+    expect(corpus).toContain('ORCA_RECIPE_ID')
+    expect(corpus).not.toContain('ORCA_VM_RECIPE_ID')
+    expect(vercelReference).toContain('recipe_id="${recipe_id//./-}"')
+    expect(vercelReference).toContain('max_recipe_id_length=$((128 - ${#instance_id} - 6))')
+    expect(vercelReference).toContain(
+      'name="orca-${recipe_id:0:max_recipe_id_length}-${instance_id}"'
+    )
   })
 
   it.skipIf(process.platform === 'win32')(
@@ -157,7 +189,13 @@ describe('bundled skill guide generator', () => {
     'keeps Vercel sandbox names valid while preserving the instance suffix',
     async () => {
       const source = await readFile(
-        path.join(projectDir, 'skill-guides', 'orca-per-workspace-env.md'),
+        path.join(
+          projectDir,
+          'skill-guides',
+          'orca-per-workspace-env',
+          'references',
+          'provider-vercel.md'
+        ),
         'utf8'
       )
       const startMarker = 'recipe_id="${ORCA_RECIPE_ID:-vercel-sandbox}"'
@@ -204,19 +242,20 @@ describe('bundled skill guide generator', () => {
       expect(guide.description).toBe(frontmatter.description)
       expect(guide.markdown).toBe(source)
       expect(guide.aliases).toEqual(GUIDE_ALIASES[guide.name])
-      if (guide.name !== 'orchestration') {
+      const references = GUIDE_REFERENCES[guide.name]
+      if (!references) {
         expect(guide.fullMarkdown).toBe(source)
         continue
       }
       expect(guide.fullMarkdown).not.toBe(guide.markdown)
       expect(guide.fullMarkdown.length).toBeGreaterThan(guide.markdown.length)
       expect(guide.fullMarkdown.startsWith(source.trimEnd())).toBe(true)
-      for (const reference of ORCHESTRATION_REFERENCES) {
+      for (const reference of references) {
         const marker = `<!-- bundled-reference: references/${reference} -->`
         expect(guide.fullMarkdown.split(marker)).toHaveLength(2)
         expect(guide.fullMarkdown).toContain(
           await readFile(
-            path.join(projectDir, 'skill-guides', 'orchestration', 'references', reference),
+            path.join(projectDir, 'skill-guides', guide.name, 'references', reference),
             'utf8'
           )
         )
@@ -262,16 +301,12 @@ describe('bundled skill guide generator', () => {
       const stubSource = await readFile(stubPath, 'utf8')
       await writeFile(stubPath, stubSource.replaceAll('\n', '\r\n'))
     }
-    for (const reference of ORCHESTRATION_REFERENCES) {
-      const referencePath = path.join(
-        root,
-        'skill-guides',
-        'orchestration',
-        'references',
-        reference
-      )
-      const source = await readFile(referencePath, 'utf8')
-      await writeFile(referencePath, source.replaceAll('\n', '\r\n'))
+    for (const [guideName, references] of REFERENCE_ENTRIES) {
+      for (const reference of references) {
+        const referencePath = path.join(root, 'skill-guides', guideName, 'references', reference)
+        const source = await readFile(referencePath, 'utf8')
+        await writeFile(referencePath, source.replaceAll('\n', '\r\n'))
+      }
     }
 
     const actual = await buildArtifacts(root)

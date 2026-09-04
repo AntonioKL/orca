@@ -112,18 +112,18 @@
     {
       "name": "orca-per-workspace-env",
       "sourcePath": "skills/orca-per-workspace-env",
-      "releaseRevision": 5,
-      "packageDigest": "9c96ed37a89d4959d05ab1565a81fc80d68f00174c2873b2efb81e20daef8e1d",
-      "gitTreeSha": "942b9397139f9d5b6cd4164339c965c35494985d",
+      "releaseRevision": 6,
+      "packageDigest": "ee28be70b1ae470eb5f40e60d9958b4c7d67538daede95c01f393f3df540cfae",
+      "gitTreeSha": "6d7468eca7a27f6a378b1390b7a61115bcce5ffc",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 4222,
+          "size": 3404,
           "executable": false,
           "classification": "text",
-          "exactSha256": "a7ae9a0d22b8bc14a6cb3bdb6fc6ebf1f11cc25ab489d1cc63928bd025d7dddc",
-          "textNormalizedSha256": "a7ae9a0d22b8bc14a6cb3bdb6fc6ebf1f11cc25ab489d1cc63928bd025d7dddc",
-          "identitySha256": "a7ae9a0d22b8bc14a6cb3bdb6fc6ebf1f11cc25ab489d1cc63928bd025d7dddc"
+          "exactSha256": "f1f74bc372e7ac9a85e393ceba4f9ae9c6aae96311515546b16c0c05b07327ac",
+          "textNormalizedSha256": "f1f74bc372e7ac9a85e393ceba4f9ae9c6aae96311515546b16c0c05b07327ac",
+          "identitySha256": "f1f74bc372e7ac9a85e393ceba4f9ae9c6aae96311515546b16c0c05b07327ac"
         }
       ]
     },
