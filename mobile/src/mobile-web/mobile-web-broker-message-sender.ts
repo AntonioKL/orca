@@ -44,6 +44,19 @@ export class MobileWebBrokerMessageSender {
     })
   }
 
+  subscriptionClosed(
+    subscriptionId: string,
+    code: MobileWebBridgeErrorCode,
+    retryable: boolean
+  ): Promise<void> {
+    return this.post({
+      ...mobileWebBrokerEnvelope(this.options.context),
+      type: 'subscriptionClosed',
+      subscriptionId,
+      error: { code, retryable }
+    })
+  }
+
   private async post(message: MobileWebBridgeShellMessage): Promise<void> {
     if (this.options.isActive()) {
       await this.options.postMessage(message)

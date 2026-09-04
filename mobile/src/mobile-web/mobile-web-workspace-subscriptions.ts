@@ -1,3 +1,7 @@
+import type {
+  MobileWebPostSubscriptionClosed,
+  MobileWebSubscriptionClosure
+} from './mobile-web-subscription-closure'
 import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-web/bridge-contract'
 import {
   MobileWebWorkspaceChangeSchema,
@@ -24,6 +28,7 @@ export class MobileWebWorkspaceSubscriptions {
         sequence: number,
         event: MobileWebWorkspaceChange
       ) => Promise<void>
+      postClosed: MobileWebPostSubscriptionClosed
     }
   ) {}
 
@@ -57,7 +62,7 @@ export class MobileWebWorkspaceSubscriptions {
     }
   }
 
-  cancel(subscriptionId: string): string | null {
+  cancel(subscriptionId: string, closure?: MobileWebSubscriptionClosure): string | null {
     const record = this.records.get(subscriptionId)
     if (!record) {
       return null
@@ -68,6 +73,9 @@ export class MobileWebWorkspaceSubscriptions {
       record.unsubscribe()
     } catch {
       // The page authority is retired even when host subscription cleanup fails.
+    }
+    if (closure) {
+      this.options.postClosed(subscriptionId, closure)
     }
     return record.requestId
   }
@@ -96,7 +104,7 @@ export class MobileWebWorkspaceSubscriptions {
     }
     const parsed = workspaceChange(value)
     if (!parsed) {
-      this.cancel(subscriptionId)
+      this.cancel(subscriptionId, { code: 'invalid_message', retryable: false })
       return
     }
     const retireAfterDelivery = parsed.type === 'end' || parsed.type === 'error'
@@ -116,7 +124,7 @@ export class MobileWebWorkspaceSubscriptions {
         }
       })
       .catch(() => {
-        this.cancel(subscriptionId)
+        this.cancel(subscriptionId, { code: 'unavailable', retryable: true })
       })
   }
 }

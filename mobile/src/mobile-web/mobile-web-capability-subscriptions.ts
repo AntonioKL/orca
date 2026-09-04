@@ -1,4 +1,5 @@
 import { MobileWebAccountSubscriptions } from './mobile-web-account-subscriptions'
+import { mobileWebSubscriptionClosedPoster } from './mobile-web-subscription-closure'
 import type { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
 import { MobileWebBrowserStreams } from './mobile-web-browser-streams'
 import type { MobileWebBrokerMessageSender } from './mobile-web-broker-message-sender'
@@ -26,31 +27,44 @@ export class MobileWebCapabilitySubscriptions {
   }) {
     const postEvent = (subscriptionId: string, sequence: number, event: unknown) =>
       args.messages.event(subscriptionId, sequence, event)
-    this.account = new MobileWebAccountSubscriptions({ isActive: args.isActive, postEvent })
+    const postClosed = mobileWebSubscriptionClosedPoster(args.messages)
+    this.account = new MobileWebAccountSubscriptions({
+      isActive: args.isActive,
+      postEvent,
+      postClosed
+    })
     this.browser = new MobileWebBrowserStreams({
       isActive: args.isActive,
       workspaceAuthority: args.workspaceAuthority,
       browserAuthority: args.browserAuthority,
-      postEvent
+      postEvent,
+      postClosed
     })
     this.nativeChat = new MobileWebNativeChatSubscriptions({
       isActive: args.isActive,
       nativeChatAuthority: args.nativeChatAuthority,
       workspaceAuthority: args.workspaceAuthority,
-      postEvent
+      postEvent,
+      postClosed
     })
     this.session = new MobileWebSessionSubscriptions({
       isActive: args.isActive,
       browserAuthority: args.browserAuthority,
       nativeChatAuthority: args.nativeChatAuthority,
-      postEvent
+      postEvent,
+      postClosed
     })
     this.sourceControl = new MobileWebSourceControlSubscriptions({
       isActive: args.isActive,
       workspaceAuthority: args.workspaceAuthority,
-      postEvent
+      postEvent,
+      postClosed
     })
-    this.workspace = new MobileWebWorkspaceSubscriptions({ isActive: args.isActive, postEvent })
+    this.workspace = new MobileWebWorkspaceSubscriptions({
+      isActive: args.isActive,
+      postEvent,
+      postClosed
+    })
   }
 
   countForOperation(operationKey: string): number {

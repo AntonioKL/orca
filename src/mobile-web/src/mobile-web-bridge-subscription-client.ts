@@ -17,6 +17,7 @@ import {
   type MobileWebTerminalRequest
 } from '../../shared/mobile-web/terminal-stream-contract'
 import { MobileWebBridgeClientError } from './mobile-web-bridge-client-error'
+import { deliverMobileWebSubscriptionEvent } from './mobile-web-bridge-subscription-event-delivery'
 import {
   accountSubscriptionSetup,
   browserSubscriptionSetup,
@@ -203,6 +204,15 @@ export class MobileWebBridgeSubscriptionClient {
     if (message.type === 'event') {
       return this.receiveEvent(message)
     }
+    if (message.type === 'subscriptionClosed') {
+      // fail() no-ops on an unknown id, and no request path handles this frame, so it stops here.
+      this.fail(
+        message.subscriptionId,
+        new MobileWebBridgeClientError(message.error.code, message.error.retryable),
+        true
+      )
+      return true
+    }
     if (message.type !== 'response') {
       return false
     }
@@ -258,20 +268,9 @@ export class MobileWebBridgeSubscriptionClient {
     if (!subscription) {
       return false
     }
-    if (message.sequence < subscription.nextSequence) {
-      return true
-    }
-    if (message.sequence !== subscription.nextSequence) {
-      this.fail(message.subscriptionId, new MobileWebBridgeClientError('invalid_message', true))
-      return true
-    }
-    const parsed = subscription.eventSchema.safeParse(message.payload)
-    if (!parsed.success) {
-      this.fail(message.subscriptionId, new MobileWebBridgeClientError('invalid_message', false))
-      return true
-    }
-    subscription.nextSequence += 1
-    subscription.onEvent(parsed.data)
+    deliverMobileWebSubscriptionEvent(subscription, message, (error) =>
+      this.fail(message.subscriptionId, error)
+    )
     return true
   }
 

@@ -1,3 +1,7 @@
+import type {
+  MobileWebPostSubscriptionClosed,
+  MobileWebSubscriptionClosure
+} from './mobile-web-subscription-closure'
 import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-web/bridge-contract'
 import type { MobileWebAccountEvent } from '../../../src/shared/mobile-web/account-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
@@ -22,6 +26,7 @@ export class MobileWebAccountSubscriptions {
         sequence: number,
         event: MobileWebAccountEvent
       ) => Promise<void>
+      postClosed: MobileWebPostSubscriptionClosed
     }
   ) {}
 
@@ -55,7 +60,7 @@ export class MobileWebAccountSubscriptions {
     }
   }
 
-  cancel(subscriptionId: string): string | null {
+  cancel(subscriptionId: string, closure?: MobileWebSubscriptionClosure): string | null {
     const record = this.records.get(subscriptionId)
     if (!record) {
       return null
@@ -66,6 +71,9 @@ export class MobileWebAccountSubscriptions {
       record.unsubscribe()
     } catch {
       // The page authority is retired even when host subscription cleanup fails.
+    }
+    if (closure) {
+      this.options.postClosed(subscriptionId, closure)
     }
     return record.requestId
   }
@@ -94,7 +102,7 @@ export class MobileWebAccountSubscriptions {
     }
     const event = mobileWebAccountEvent(value)
     if (!event) {
-      this.cancel(subscriptionId)
+      this.cancel(subscriptionId, { code: 'invalid_message', retryable: false })
       return
     }
     const retireAfterDelivery = event.type === 'end' || event.type === 'error'
@@ -114,7 +122,7 @@ export class MobileWebAccountSubscriptions {
         }
       })
       .catch(() => {
-        this.cancel(subscriptionId)
+        this.cancel(subscriptionId, { code: 'unavailable', retryable: true })
       })
   }
 }

@@ -1,3 +1,7 @@
+import type {
+  MobileWebPostSubscriptionClosed,
+  MobileWebSubscriptionClosure
+} from './mobile-web-subscription-closure'
 import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-web/bridge-contract'
 import {
   MOBILE_WEB_NATIVE_CHAT_EVENT_MAX_BYTES,
@@ -34,6 +38,7 @@ export class MobileWebNativeChatSubscriptions {
         sequence: number,
         event: MobileWebNativeChatEvent
       ) => Promise<void>
+      postClosed: MobileWebPostSubscriptionClosed
       nativeChatAuthority: MobileWebNativeChatAuthority
       workspaceAuthority: MobileWebWorkspaceAuthority
     }
@@ -100,7 +105,7 @@ export class MobileWebNativeChatSubscriptions {
     }
   }
 
-  cancel(subscriptionId: string): string | null {
+  cancel(subscriptionId: string, closure?: MobileWebSubscriptionClosure): string | null {
     const record = this.records.get(subscriptionId)
     if (!record) {
       return null
@@ -111,6 +116,9 @@ export class MobileWebNativeChatSubscriptions {
       record.unsubscribe()
     } catch {
       // The record is already retired.
+    }
+    if (closure) {
+      this.options.postClosed(subscriptionId, closure)
     }
     return record.requestId
   }
@@ -146,12 +154,16 @@ export class MobileWebNativeChatSubscriptions {
     try {
       this.options.nativeChatAuthority.resolve(record.hostWorkspaceId, record.pageSessionId)
     } catch {
-      this.cancel(subscriptionId)
+      this.cancel(subscriptionId, { code: 'not_found', retryable: false })
       return
     }
     const event = sanitizeEvent(value)
-    if (!event || encodedByteLength(event) > MOBILE_WEB_NATIVE_CHAT_EVENT_MAX_BYTES) {
-      this.cancel(subscriptionId)
+    if (!event) {
+      this.cancel(subscriptionId, { code: 'invalid_message', retryable: false })
+      return
+    }
+    if (encodedByteLength(event) > MOBILE_WEB_NATIVE_CHAT_EVENT_MAX_BYTES) {
+      this.cancel(subscriptionId, { code: 'too_large', retryable: false })
       return
     }
     const sequence = record.sequence++
@@ -166,7 +178,7 @@ export class MobileWebNativeChatSubscriptions {
         }
       })
       .catch(() => {
-        this.cancel(subscriptionId)
+        this.cancel(subscriptionId, { code: 'unavailable', retryable: true })
       })
   }
 }

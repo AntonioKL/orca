@@ -1,3 +1,4 @@
+import type { MobileWebSubscriptionClosure } from './mobile-web-subscription-closure'
 import type {
   MobileWebSpeechEvent,
   MobileWebSpeechStartResult,
@@ -39,6 +40,7 @@ export class MobileWebSpeechAuthority {
     requestId: string
     subscriptionId: string
     post: (sequence: number, event: MobileWebSpeechEvent) => Promise<void>
+    closed: (closure: MobileWebSubscriptionClosure) => void
   }): void {
     if (this.disposed) {
       throw new MobileWebBrokerError('invalid_request')

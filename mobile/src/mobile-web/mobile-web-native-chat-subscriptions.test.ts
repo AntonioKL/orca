@@ -17,9 +17,11 @@ describe('mobile web native chat subscriptions', () => {
       providerSessionId: 'provider-session-1'
     })
     const postEvent = vi.fn().mockResolvedValue(undefined)
+    const postClosed = vi.fn()
     const subscriptions = new MobileWebNativeChatSubscriptions({
       isActive: () => true,
       postEvent,
+      postClosed,
       nativeChatAuthority,
       workspaceAuthority
     })
@@ -98,6 +100,11 @@ describe('mobile web native chat subscriptions', () => {
 
     expect(unsubscribe).toHaveBeenCalledOnce()
     expect(postEvent).toHaveBeenCalledOnce()
+    // The page must learn the transcript stream is over; silence leaves it on its last messages.
+    expect(postClosed).toHaveBeenCalledWith('subscription-1', {
+      code: 'not_found',
+      retryable: false
+    })
   })
 
   it('does not register after the owning bridge request is cancelled', async () => {
@@ -122,6 +129,7 @@ describe('mobile web native chat subscriptions', () => {
     const subscriptions = new MobileWebNativeChatSubscriptions({
       isActive: () => true,
       postEvent: vi.fn(),
+      postClosed: vi.fn(),
       nativeChatAuthority,
       workspaceAuthority
     })
