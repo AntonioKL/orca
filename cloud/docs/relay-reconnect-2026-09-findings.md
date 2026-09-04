@@ -328,6 +328,19 @@ image.
   but never run a monitor dry-run concurrently with a wave, and prefer batches of 2 over 4 until the fleet
   is on the new image and the crash class is gone.
 
+## Post-merge dispatch plan for #18606 (image -> director -> cells)
+
+1. `gh workflow run cloud-publish-relay-production.yml --ref main -f mode=publish` (after the squash lands
+   on main). Resolve the digest by tag, never by parsing the log (it mixes relay and fence-broker digests):
+   `gcloud artifacts docker images describe us-central1-docker.pkg.dev/onorca-cloud/orca-cloud/relay:sha-<merge-sha> --format='value(image_summary.digest)'`.
+2. Director: `gh workflow run cloud-deploy-relay-production-director.yml --ref main -f image-digest=<new>
+   -f regional-placement-mode=preserve -f prune-incompatible-revisions=false -f expected-rehome-generation=12`
+   (no monitor evidence needed; requires rehome disabled at gen 12, which it is). Last run 33826514754 used
+   the same shape. Watch director `orca_relay_postgres_transaction_retry` per minute before/after.
+3. Cells: same-cap `verify` c7 with target=<new>, rollback=85bf6799; fresh dry-run; `canary-apply` c7;
+   then batches (3 per batch, Asia c27/c29/c28 first). Each batch: new dry-run unless the batch-reuse
+   change (design section above) has shipped.
+
 ## Roll inputs (verified by the read-only `verify` run)
 
 - target-image-digest `sha256:85bf67993869a769642995d0863f4c2b6b569c3850c2d8390ec2ca5f2b179e28`
