@@ -135,9 +135,11 @@ a checkpoint, not a failure. Do not stop, retry, release, or launch a duplicate
 editor from timeout, idle state, heartbeat, relay loss, or missing client alone.
 
 After three consecutive empty waits, stop waiting blindly and enumerate with
-`ORCA orchestration worker-list --json`, acting on each row's
+`ORCA orchestration worker-list --include-remote --json`, acting on each row's
 `projection.attention` categories, `projection.attention.requiresAction`, and
-literal `projection.nextAction` argv. Leave the wait only on positive proof the
+literal `projection.nextAction` argv. An `inspect` `nextAction` on a `live` row
+with `attention.requiresAction` false is informational, not a command to re-run:
+keep waiting with `check --wait`. Leave the wait only on positive proof the
 agent stopped: `exited` liveness, the worker's own observation of process exit,
 or a transcript whose final agent turn sent no `worker_done`. Then load
 `references/recovery-and-cleanup.md` and choose `worker-stop` or

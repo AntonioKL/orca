@@ -834,6 +834,29 @@ describe('orchestration timeout flag validation', () => {
     )
   })
 
+  it('envelopes ask --json through the shared result printer', async () => {
+    process.env.ORCA_TERMINAL_HANDLE = 'term_worker'
+    const response = {
+      id: 'req_ask',
+      ok: true,
+      result: { answer: 'yes', messageId: 'msg_1', threadId: 'thread_1', timedOut: false },
+      _meta: { runtimeId: 'runtime_1' }
+    }
+    callMock.mockResolvedValue(response)
+    vi.mocked(printResult).mockClear()
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await invokeAsk(
+      new Map<string, string | boolean>([
+        ['to', 'term_coord'],
+        ['question', 'Proceed?']
+      ])
+    )
+
+    expect(printResult).toHaveBeenCalledWith(response, true, expect.any(Function))
+    expect(logSpy).not.toHaveBeenCalled()
+  })
+
   it('passes an ask resume without creating a new question payload', async () => {
     process.env.ORCA_TERMINAL_HANDLE = 'term_worker'
     callMock.mockResolvedValue({
