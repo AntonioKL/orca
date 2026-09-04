@@ -127,6 +127,8 @@ describe('a create refused before it commits', () => {
 
     const refusal = refusalOf(response)
     expect(refusal?.code).toBe('structured_agent_session_unsupported')
+    expect(refusal?.message).toContain('structured agent chat')
+    expect(refusal?.message).not.toContain('Codex')
     expect(isDefinitiveAgentSessionCreateRefusal(refusal?.code)).toBe(true)
     expect(attach).not.toHaveBeenCalled()
   })
@@ -141,6 +143,8 @@ describe('a create refused before it commits', () => {
 
     const refusal = refusalOf(response)
     expect(isDefinitiveAgentSessionCreateRefusal(refusal?.code)).toBe(true)
+    expect(refusal?.message).toContain('structured agent chat')
+    expect(refusal?.message).not.toContain('Codex')
     expect(refusal?.message).toContain('No worktree matches id:workspace-1')
     expect(attach).not.toHaveBeenCalled()
   })
