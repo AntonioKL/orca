@@ -433,6 +433,14 @@ jobs:
               return 0
             fi
 
+            # Release-only workflow fixes may land after the product commit
+            # was tagged. Treat an ancestor tag as the same candidate; the
+            # tag still identifies the immutable product tree while the
+            # workflow comes from the corrected branch ref.
+            if git merge-base --is-ancestor "$tag_commit" "$head_commit"; then
+              return 0
+            fi
+
             local tag_parent
             tag_parent="$(git rev-parse "${tag_commit}^" 2>/dev/null)" || return 1
             [[ "$tag_parent" == "$head_commit" ]]
