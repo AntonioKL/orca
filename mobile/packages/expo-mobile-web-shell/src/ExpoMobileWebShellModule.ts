@@ -1,4 +1,4 @@
-import { requireNativeModule } from 'expo-modules-core'
+import { requireOptionalNativeModule } from 'expo-modules-core'
 
 export type CommittedMobileWebGeneration = {
   buildId: string
@@ -40,4 +40,16 @@ type ExpoMobileWebShellNativeModule = {
   postViewMessage(sessionId: string, message: string): Promise<void>
 }
 
-export default requireNativeModule<ExpoMobileWebShellNativeModule>('ExpoMobileWebShell')
+const nativeModule =
+  requireOptionalNativeModule<ExpoMobileWebShellNativeModule>('ExpoMobileWebShell')
+
+// Why: this module is imported (transitively) from the app's initial route, so a missing pod —
+// Expo Go, a stale dev client — used to throw at module scope and white-screen the launch.
+// Failing at the call instead lets callers that already tolerate failure degrade.
+const missingNativeModule = new Proxy({} as ExpoMobileWebShellNativeModule, {
+  get(_target, property) {
+    return () => Promise.reject(new Error(`ExpoMobileWebShell is unavailable: ${String(property)}`))
+  }
+})
+
+export default nativeModule ?? missingNativeModule

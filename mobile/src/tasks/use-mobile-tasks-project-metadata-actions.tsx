@@ -6,6 +6,7 @@ import {
   type GitHubProjectFieldMutationValue,
   type GitHubProjectRow,
   optimisticProjectFieldValue,
+  projectRowIdentityTarget,
   projectRowMutationTarget
 } from './mobile-tasks-model'
 
@@ -126,11 +127,9 @@ export function useMobileTasksProjectMetadataActions(model: ProjectThreadReplyAc
       if (!taskProjectMutationOperations || !githubProjectTable || projectMutating) {
         return
       }
-      const target = projectRowMutationTarget(row, activeGitHubProjectHost)
-      if (!target) {
-        setProjectRowDetailError('This project field cannot be edited from mobile.')
-        return
-      }
+      // Why: the host addresses a field edit by project id + item id, so a draft row with no
+      // repository slug, issue number or issue/PR kind is still editable.
+      const target = projectRowIdentityTarget(row, activeGitHubProjectHost)
       setProjectMutating(true)
       try {
         await taskProjectMutationOperations.updateField(

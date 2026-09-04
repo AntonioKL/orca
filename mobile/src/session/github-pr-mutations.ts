@@ -7,7 +7,9 @@ import { buildGithubPrParams, githubPrRepoSlugParam, type GitHubPrRepoSlug } fro
 // return a host-status outcome (the host mutations all return
 // `{ ok: true } | { ok: false; error: string }`).
 
-export type GitHubPrMutationOutcome = { ok: true } | { ok: false; error: string }
+// `comment` is the server-created entry when the host publishes one; callers that echo the
+// comment optimistically need its real id, not a locally minted stub.
+export type GitHubPrMutationOutcome = { ok: true; comment?: unknown } | { ok: false; error: string }
 
 // Sends a request whose host result is a bare boolean (not the `{ ok }` envelope),
 // normalizing a transport throw into a failure so the raw-boolean callers below
@@ -65,9 +67,9 @@ async function sendGithubPrMutation(
     }
     const result = response.result
     if (result && typeof result === 'object' && 'ok' in result) {
-      const r = result as { ok: boolean; error?: unknown }
+      const r = result as { ok: boolean; error?: unknown; comment?: unknown }
       if (r.ok === true) {
-        return { ok: true }
+        return { ok: true, comment: r.comment }
       }
       return { ok: false, error: extractMutationError(r.error, method) }
     }
@@ -234,16 +236,23 @@ export async function fetchAddPRReviewCommentReply(
   )
 }
 
-// Add a root conversation comment to the PR. Host returns GitHubCommentResult.
+// Add a root conversation comment to a PR or an issue. Host returns GitHubCommentResult.
 export async function fetchAddIssueComment(
   client: Pick<RpcClient, 'sendRequest'>,
   worktreeId: string,
-  args: { prNumber: number; body: string; prRepo?: GitHubPrRepoSlug | null }
+  args: {
+    prNumber: number
+    body: string
+    prRepo?: GitHubPrRepoSlug | null
+    // Why: the host addresses the comment by this; an issue row sent as 'pr' targets the
+    // wrong conversation. PR call sites omit it.
+    type?: 'issue' | 'pr'
+  }
 ): Promise<GitHubPrMutationOutcome> {
   const params: Record<string, unknown> = {
     number: args.prNumber,
     body: args.body,
-    type: 'pr'
+    type: args.type ?? 'pr'
   }
   return sendGithubPrMutation(
     client,

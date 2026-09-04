@@ -41,9 +41,11 @@ const noopViewSettings = async (): Promise<void> => {}
 function operations(args: {
   relayed: boolean
   listWorkspaces: HostWorkspaceOperations['listWorkspaces']
+  fetchWorkspaceCatalog?: HostWorkspaceOperations['fetchWorkspaceCatalog']
 }): HostWorkspaceOperations {
   return {
     ...(args.relayed ? { connectionStateIsRelayed: true } : {}),
+    ...(args.fetchWorkspaceCatalog ? { fetchWorkspaceCatalog: args.fetchWorkspaceCatalog } : {}),
     getViewSettings: async () => null,
     setViewSettings: async () => {},
     listRepos: async () => [],
@@ -182,3 +184,99 @@ describe('hybrid host catalog first-load failure', () => {
     expect(listState()).toBe('catalog-error')
   })
 })
+
+describe('hybrid host catalog snapshot-token polling', () => {
+  let renderer: ReactTestRenderer | null = null
+  let probe: Probe | null = null
+
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true
+    probe = null
+  })
+
+  afterEach(() => {
+    act(() => renderer?.unmount())
+    renderer = null
+  })
+
+  function render(ops: HostWorkspaceOperations): void {
+    function CatalogProbe(): null {
+      const state = useHybridHostScreenState(HOST_ID, undefined, hostState)
+      state.workspaceOperationsRef.current = ops
+      const catalog = useHybridHostScreenCatalog({
+        operations: ops,
+        connState: 'connected',
+        embedded: false,
+        fetchRepoMetadata: noopRepoMetadata,
+        hostId: HOST_ID,
+        hostState,
+        state,
+        syncViewSettingsFromDesktop: noopViewSettings
+      })
+      probe = {
+        catalogError: state.catalogError,
+        worktreesLoaded: state.worktreesLoaded,
+        displayCount: state.worktrees.length,
+        fetchWorktrees: catalog.fetchWorktrees
+      }
+      return null
+    }
+    act(() => {
+      renderer = create(createElement(CatalogProbe))
+    })
+  }
+
+  it('prefers the snapshot-token poll over the full list when the binding offers one', async () => {
+    const listWorkspaces = vi.fn(async () => [])
+    const fetchWorkspaceCatalog = vi.fn(async () => ({
+      kind: 'response' as const,
+      invalidShape: false,
+      commit: () => [] as never[]
+    }))
+    render(operations({ relayed: false, listWorkspaces, fetchWorkspaceCatalog }))
+    await act(async () => {})
+
+    expect(fetchWorkspaceCatalog).toHaveBeenCalledWith(HOST_ID)
+    expect(listWorkspaces).not.toHaveBeenCalled()
+    expect(probe?.worktreesLoaded).toBe(true)
+  })
+
+  // Why (STA-3123): a failed catalog request must not read as an empty host.
+  it('surfaces the host error code rather than a generic transport failure', async () => {
+    const fetchWorkspaceCatalog = vi.fn(async () => ({
+      kind: 'request_failed' as const,
+      code: 'worktree_list_unavailable'
+    }))
+    render(operations({ relayed: false, listWorkspaces: async () => [], fetchWorkspaceCatalog }))
+    await act(async () => {})
+
+    expect(probe?.catalogError).toBe('worktree_list_unavailable')
+    expect(listStateFor(probe)).toBe('catalog-error')
+  })
+
+  it('reports an unreadable payload without applying rows', async () => {
+    const fetchWorkspaceCatalog = vi.fn(async () => ({
+      kind: 'response' as const,
+      invalidShape: true,
+      commit: () => null
+    }))
+    render(operations({ relayed: false, listWorkspaces: async () => [], fetchWorkspaceCatalog }))
+    await act(async () => {})
+
+    expect(probe?.catalogError).toBe('invalid_response')
+    expect(probe?.worktreesLoaded).toBe(false)
+  })
+})
+
+function listStateFor(current: Probe | null): ReturnType<typeof selectHostWorkspaceListState> {
+  if (!current) {
+    throw new Error('probe missing')
+  }
+  return selectHostWorkspaceListState({
+    connState: 'connected',
+    worktreesLoaded: current.worktreesLoaded,
+    displayCount: current.displayCount,
+    sectionCount: 0,
+    catalogError: current.catalogError
+  })
+}

@@ -6,8 +6,7 @@ import {
   ScrollView,
   Keyboard,
   BackHandler,
-  Modal,
-  Platform
+  Modal
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler'
@@ -23,7 +22,7 @@ import Animated, {
 } from 'react-native-reanimated'
 import { spacing } from '../theme/mobile-theme'
 import { resolveBottomDrawerFillHeight } from './bottom-drawer-fill-height'
-import { resolveBottomDrawerKeyboardInset } from './bottom-drawer-keyboard-inset'
+import { useBottomDrawerKeyboardLift } from './bottom-drawer-keyboard-lift'
 import { BOTTOM_DRAWER_HIDE_DURATION_MS } from './bottom-drawer-constants'
 import { bottomDrawerStyles as styles } from './bottom-drawer-styles'
 import { useInsideBottomDrawerModalHost } from './bottom-drawer-modal-host'
@@ -131,47 +130,17 @@ export function MountedBottomDrawer({
     }
   }, [onHidden, visible])
 
-  // Why: KeyboardAvoidingView and useAnimatedKeyboard are both unreliable
-  // inside Modal (iOS ignores KAV; Android needs adjustNothing for
-  // useAnimatedKeyboard). Keyboard event listeners work on both platforms
-  // and give us the exact height to shift the drawer by.
-  useEffect(() => {
-    // Pinned-under sheets stay visible for size but must not ride the keyboard —
-    // only the top interactive sheet owns inset/lift.
-    if (!visible || !interactive) {
-      keyboardOffset.value = 0
-      setKeyboardInset(0)
-      return
-    }
-
-    function applyKeyboardHeight(keyboardHeight: number, duration = 0): void {
-      const inset = resolveBottomDrawerKeyboardInset({
-        keyboardHeight,
-        bottomInset: insets.bottom,
-        fillAvailable,
-        platform: Platform.OS
-      })
-      setKeyboardInset(inset)
-      if (duration > 0) {
-        keyboardOffset.value = withTiming(inset, { duration })
-      } else {
-        keyboardOffset.value = inset
-      }
-    }
-
-    applyKeyboardHeight(mobileKeyboardInset.height, mobileKeyboardInset.duration || 250)
-    return () => {
-      keyboardOffset.value = 0
-      setKeyboardInset(0)
-    }
-  }, [
-    visible,
-    interactive,
-    insets.bottom,
+  // Why: KeyboardAvoidingView and useAnimatedKeyboard are both unreliable inside Modal
+  // (iOS ignores KAV; Android needs adjustNothing for useAnimatedKeyboard), so the shared
+  // keyboard-inset hook owns the listeners and the lift hook owns the animation.
+  useBottomDrawerKeyboardLift({
+    ridesKeyboard: visible && interactive,
+    bottomInset: insets.bottom,
     fillAvailable,
-    mobileKeyboardInset.duration,
-    mobileKeyboardInset.height
-  ])
+    keyboard: mobileKeyboardInset,
+    keyboardOffset,
+    setKeyboardInset
+  })
 
   const dismiss = useCallback(() => {
     Keyboard.dismiss()

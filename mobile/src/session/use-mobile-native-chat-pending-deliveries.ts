@@ -196,11 +196,10 @@ export function useMobileNativeChatPendingDeliveries(args: {
           normalizeReconcileText(pending.text) === origin.normalizedText &&
           pending.expectedOccurrence > origin.baselineOccurrences
       ).length
+      // Why: the ordinal names which caption-less TURN this echo is, so it must count pending
+      // turns, not the images inside them — three images in one send is still ordinal 1.
       const expectedImageEchoOrdinal =
-        current.reduce(
-          (sum, pending) => sum + (pending.images?.length ?? (pending.text.trim() === '' ? 1 : 0)),
-          0
-        ) + 1
+        current.filter((pending) => pending.text.trim() === '' && pending.images?.length).length + 1
       const next = [
         ...current,
         {

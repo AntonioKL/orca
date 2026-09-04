@@ -23,10 +23,12 @@ export function webHostTaskItemReviewOperations(
       })
     },
     async replyReviewComment(target, payload) {
+      // The hosted bridge publishes no comment on reply; callers fall back to a local entry.
       await client.task.replyHostedTaskReviewComment({
         targetId: targetId(target),
         ...payload
       })
+      return undefined
     },
     async merge(target, method) {
       await client.task.mergeHostedTaskReview({ targetId: targetId(target), method })

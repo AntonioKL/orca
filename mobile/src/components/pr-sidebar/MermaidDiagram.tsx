@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { WebView } from 'react-native-webview'
 import { buildMermaidDiagramDocument } from './mermaid-diagram-document'
 import {
@@ -12,9 +12,12 @@ type Props = {
   base: number
 }
 
-export function MermaidDiagram({ source, base }: Props) {
+// memo: both props are primitives; without it every mounted diagram re-renders per frame
+// during pinch-to-zoom (textScale updates), marshalling the full HTML string across the
+// Fabric boundary each time.
+export const MermaidDiagram = memo(function MermaidDiagram({ source, base }: Props) {
   return <MermaidDiagramFrame key={source} source={source} base={base} />
-}
+})
 
 function MermaidDiagramFrame({ source, base }: Props) {
   const [height, setHeight] = useState(0)

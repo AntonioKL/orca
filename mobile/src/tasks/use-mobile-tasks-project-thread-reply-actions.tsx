@@ -4,7 +4,9 @@ import {
   type DetailComment,
   type GitHubProjectRow,
   commentAuthor,
-  projectRowMutationTarget
+  projectRowIdentityTarget,
+  projectRowMutationTarget,
+  projectRowSlugTarget
 } from './mobile-tasks-model'
 
 export function useMobileTasksProjectThreadReplyActions(
@@ -29,7 +31,8 @@ export function useMobileTasksProjectThreadReplyActions(
       if (!taskProjectMutationOperations || projectMutating) {
         return
       }
-      const target = projectRowMutationTarget(row, activeGitHubProjectHost)
+      // Why: `deleteIssueCommentBySlug` addresses by repository and comment id only.
+      const target = projectRowSlugTarget(row, activeGitHubProjectHost)
       const commentId = Number(comment.id)
       if (!target || !Number.isInteger(commentId) || commentId <= 0) {
         setProjectRowDetailError('This project comment cannot be deleted from mobile.')
@@ -67,13 +70,14 @@ export function useMobileTasksProjectThreadReplyActions(
   const toggleProjectGitHubReviewThread = useCallback(
     async (row: GitHubProjectRow, comment: DetailComment): Promise<void> => {
       const repo = findProjectRowRepo(row)
-      const target = projectRowMutationTarget(row, activeGitHubProjectHost)
+      // Why: `resolveReviewThread` addresses by repo id and thread id; the slug, number and kind
+      // are decoration the host treats as optional.
+      const target = projectRowIdentityTarget(row, activeGitHubProjectHost)
       if (
         !taskProjectMutationOperations ||
         projectMutating ||
         row.itemType !== 'PULL_REQUEST' ||
         !repo ||
-        !target ||
         !comment.threadId
       ) {
         return
@@ -130,7 +134,7 @@ export function useMobileTasksProjectThreadReplyActions(
           comment.path &&
           typeof comment.line === 'number' &&
           typeof comment.id === 'number'
-        await (canUseReviewReply
+        const posted = await (canUseReviewReply
           ? taskProjectMutationOperations.replyReviewComment(target, repo.id, {
               commentId: comment.id as number,
               body,
@@ -143,7 +147,9 @@ export function useMobileTasksProjectThreadReplyActions(
               repo.id,
               `@${commentAuthor(comment)} ${body}`
             ))
-        const reply: DetailComment = {
+        // Why: only the server entry carries the numeric id a follow-up reply needs to stay on
+        // this thread; the stub is the fallback for hosts that publish no comment.
+        const reply: DetailComment = posted ?? {
           id: `local-${Date.now()}`,
           body,
           createdAt: new Date().toISOString(),

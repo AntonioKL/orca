@@ -42,12 +42,24 @@ const hash = (parts: string[] | string): string =>
  * discarded) and `toggleGitHubProjectFieldVisibility` went back to the monolith's
  * functional state updater. Both move the composition toward the baseline, not away:
  * one added statement, one changed callback body, no hook or declaration count change.
+ *
+ * SCREEN_HOOKS and STATEMENTS were re-frozen when the two review-reply hooks began
+ * binding the awaited mutation result (`const posted = await ...`) so an optimistic
+ * reply carries the server comment. Hook and statement counts are unchanged; only those
+ * two await expressions gained a binding.
+ *
+ * The remaining digests moved with the project-row target split: the three row-target
+ * builders left mobile-tasks-mutation-targets.ts for mobile-tasks-project-row-targets.ts,
+ * which added the slug-addressed and id-addressed variants so field edits, comment
+ * edits/deletes and thread toggles stop refusing rows the host would accept. Declarations
+ * net to 194 and the semantic source gains the new module's lines. The two re-freezes above
+ * landed together, so these digests are the union of both changes.
  */
-const SCREEN_HOOKS = 'c5026e3f5633d36eae56f0492c5b239896f0b6d363079be1568de6460d7eae30'
+const SCREEN_HOOKS = 'd75985f73d06e1c8dfdc9a576f46f13cb91b6af71efcda785c1c8fab744c2e86'
 const DIFF_HOOKS = '93c7189b32bed8456cc51814fffa8ce80cf62011ef968a9d53ddec2b9686f58f'
-const STATEMENTS = '300258f651ed5aec07966cd4a382597ee21b381764aaa6222d18ce35b2600dd3'
-const DECLARATIONS = '11ddb68df1bdde8ee3299bb391de14765e6860b8406d0c17f837223e3667bd13'
-const SEMANTICS = '990736b2b2b450230fca06bb27ed97903d9827c59ad7e4c7be442a0d854f5750'
+const STATEMENTS = 'b4b13e6e57283de642ab8c9482dc0714460189a2ab0d81f7518538c660e6e0b8'
+const DECLARATIONS = '18638220f414d06f0c1f3a5b993b33bf2a6ab8201476017cffab2eef1b6b29f0'
+const SEMANTICS = '907fcdc8591dff58c4ba988c4590f9414659f5fa09dd84c79239b22ae1e5625a'
 const STYLES = '1db6af69c791d9963928541ad5310942fcbda6d984b422c90b6eb92b6816579a'
 const RENDER_TREE = '92596eb283232607d8c2df3f09ba970232c7df496555c6f59e0c7160a00501af'
 
@@ -70,13 +82,13 @@ describe('Mobile Tasks refactor parity', () => {
 
   it('preserves every moved top-level declaration', () => {
     const declarations = readMobileTasksDeclarationSignatures()
-    expect(declarations).toHaveLength(195)
+    expect(declarations).toHaveLength(194)
     expect(hash(declarations)).toBe(DECLARATIONS)
   })
 
   it('preserves RPC calls, runtime strings, and JSX host signatures', () => {
     const semantics = readMobileTasksSemanticSource()
-    expect(semantics.split('\n')).toHaveLength(3_237)
+    expect(semantics.split('\n')).toHaveLength(3_248)
     expect(hash(semantics)).toBe(SEMANTICS)
   })
 

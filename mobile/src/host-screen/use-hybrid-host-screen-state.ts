@@ -38,16 +38,14 @@ export function useHybridHostScreenState(
   const [repoColorsByName, setRepoColorsByName] = useState<Map<string, string>>(new Map())
   const [repoIconsByName, setRepoIconsByName] = useState<Map<string, RepoIcon>>(new Map())
   const [repoIdsByName, setRepoIdsByName] = useState<Map<string, string>>(new Map())
-  // Why: mirrors the native host screen's host-label inputs so HostScreenView sees one state shape.
-  // The hosted bridge does not publish repo→host or host labels yet, so these stay empty (see
-  // use-hybrid-host-repo-metadata) and rows keep the single-host presentation.
+  // Why: the hosted bridge publishes no host labels, so these stay empty there (the binding omits
+  // `listHostContext`) and its rows keep the single-host presentation.
   const [repoHostIdByRepoId, setRepoHostIdByRepoId] = useState<Map<string, ExecutionHostId>>(
     new Map()
   )
   const [hostLabelById, setHostLabelById] = useState<Map<ExecutionHostId, string>>(new Map())
   const [hostPlatform, setHostPlatform] = useState<NodeJS.Platform | null>(null)
   const [hostName, setHostName] = useState('')
-  const [hostPublicKey, setHostPublicKey] = useState('')
   const [error, setError] = useState('')
   const [lastKnownWorktrees, setLastKnownWorktrees] = useState<Worktree[]>(initialCache ?? [])
   const [search, setSearch] = useState('')
@@ -102,7 +100,6 @@ export function useHybridHostScreenState(
     hostLabelById,
     hostName,
     hostPlatform,
-    hostPublicKey,
     lastKnownWorktrees,
     newWorktreeModalRef,
     newWorktreeModalVisibleRef,
@@ -126,7 +123,6 @@ export function useHybridHostScreenState(
     setHostLabelById,
     setHostName,
     setHostPlatform,
-    setHostPublicKey,
     setLastKnownWorktrees,
     setOptimisticActiveWorktreeIdentity,
     setPinnedIds,

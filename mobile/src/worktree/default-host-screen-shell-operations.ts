@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { usePathname, useRouter } from 'expo-router'
 import { leaveHostRoute } from '../host-route-exit'
 import { useForceReconnect, useForgetHostClient } from '../transport/client-context'
+import { loadHostCatalog } from '../transport/host-store'
 import { removeHostAndCloseClient } from '../transport/host-removal-lifecycle'
 import { MOBILE_WEB_NATIVE_CAPABILITY_AUTHORITY } from '../mobile-web/mobile-web-native-capability-authority'
 import { navigateFromHostScreenList } from './host-screen-route-navigation'
@@ -42,11 +43,16 @@ export function useDefaultHostScreenShellOperations(args: {
       repairPairing() {
         router.push('/pair-scan')
       },
-      removeHost(hostPublicKey: string) {
-        if (!args.hostId || !hostPublicKey) {
-          return Promise.reject(new Error('Host identity unavailable'))
+      async removeHost() {
+        const hostId = args.hostId
+        if (!hostId) {
+          throw new Error('Host identity unavailable')
         }
-        return removeHostAndCloseClient(args.hostId, hostPublicKey, closeHostClient)
+        // Why: only the hybrid cache purge needs the key, and that purge is best-effort — so
+        // resolve it here instead of letting a Remove tap race the host screen's identity read.
+        const catalog = await loadHostCatalog().catch(() => [])
+        const hostPublicKey = catalog.find((entry) => entry.id === hostId)?.publicKeyB64 ?? ''
+        await removeHostAndCloseClient(hostId, hostPublicKey, closeHostClient)
       }
     }),
     [args.embedded, args.hostId, closeHostClient, forceReconnectHost, pathname, router]

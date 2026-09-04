@@ -94,7 +94,6 @@ export function useHybridHostScreenController(props: HybridHostScreenProps = {})
   }, [operations])
   useEffect(() => {
     state.setHostName('')
-    state.setHostPublicKey('')
     state.setError('')
     state.setCatalogError(null)
     state.setRepoColorsByName(new Map())
@@ -126,7 +125,6 @@ export function useHybridHostScreenController(props: HybridHostScreenProps = {})
         return
       }
       state.setHostName(host.name)
-      state.setHostPublicKey(host.publicKeyB64)
       void hostState.recordConnected(hostId)
     })
     void hostState.loadPinnedWorkspaceIds(hostId).then((pins) => {

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
+import { LogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import { nativeHostSessionTabOperations } from './native-host-session-tab-operations'
 
 describe('native host session tab operations', () => {
@@ -82,7 +83,8 @@ describe('native host session tab operations', () => {
           tabId: 'tab-1',
           leafId: 'leaf-1',
           notifyClients: false,
-          navigation: 'caller'
+          navigation: 'caller',
+          intent: 'user'
         }
       ],
       ['session.tabs.close', { worktree: 'id:workspace-1', tabId: 'tab-1', reason: 'user' }]
@@ -116,6 +118,39 @@ describe('native host session tab operations', () => {
       ...sessionSnapshot(3)
     })
     expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+
+  // Why: a host-side subscription cleanup ends the stream; without degrading, the tab
+  // list freezes on its last snapshot and never refetches.
+  it('degrades the stream on end and error rather than dropping them silently', () => {
+    let listener: ((event: unknown) => void) | null = null
+    const subscribe = vi.fn((_method, _params, onData) => {
+      listener = onData
+      return vi.fn()
+    })
+    const onSnapshot = vi.fn()
+    const onError = vi.fn()
+    const operations = nativeHostSessionTabOperations({ subscribe } as unknown as RpcClient)
+
+    operations.subscribe('workspace-1', onSnapshot, onError)
+    listener?.({ type: 'end' })
+    listener?.({ type: 'error' })
+
+    expect(onSnapshot).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledTimes(2)
+  })
+
+  // Why: a relay-to-direct cutover rejects the in-flight request; activation is idempotent,
+  // so one retry keeps the host's active tab in step with the tab the user just tapped.
+  it('retries activation once after a logical client cutover', async () => {
+    const sendRequest = vi
+      .fn<RpcClient['sendRequest']>()
+      .mockRejectedValueOnce(new LogicalClientCutoverError('cutover'))
+      .mockResolvedValueOnce({ ok: true, result: sessionSnapshot(4) })
+    const operations = nativeHostSessionTabOperations({ sendRequest } as unknown as RpcClient)
+
+    await expect(operations.activate('workspace-1', 'tab-1')).resolves.toEqual(sessionSnapshot(4))
+    expect(sendRequest).toHaveBeenCalledTimes(2)
   })
 
   it('loads enabled agent choices and creates the selected agent through named operations', async () => {

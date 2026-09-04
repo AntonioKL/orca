@@ -20,6 +20,8 @@ export type HostTaskItemReviewOperations = {
       path?: string
       line?: number
     }
-  ): Promise<void>
+    // Why: the server comment carries the real id; a local stub id fails the numeric-id check
+    // that routes a follow-up reply back to the same review thread.
+  ): Promise<MobileWebTaskDetailComment | undefined>
   merge(target: HostTaskItemMutationTarget, method: HostTaskReviewMergeMethod): Promise<void>
 }

@@ -8,9 +8,26 @@ import {
   clearConfirmedActiveWorktreeIdentity,
   retainLiveSleptWorktreeIdentities
 } from '../worktree/worktree-host-row-identity'
-import type { HostWorkspaceOperations } from '../worktree/host-workspace-operations'
+import type {
+  HostWorkspaceCatalogFetch,
+  HostWorkspaceOperations
+} from '../worktree/host-workspace-operations'
+import { WORKTREE_PS_FULL_LIMIT } from '../worktree/worktree-catalog-snapshot-client'
 import type { HostScreenHostState } from '../worktree/host-screen-host-state'
 import type { HybridHostScreenState } from './use-hybrid-host-screen-state'
+
+// Why: bindings without a snapshot token still poll; wrap their full list in the same shape so
+// the hook has one apply path rather than two divergent ones.
+async function fetchHostWorkspaceCatalog(
+  operations: HostWorkspaceOperations,
+  hostId: string | undefined
+): Promise<HostWorkspaceCatalogFetch> {
+  if (operations.fetchWorkspaceCatalog && hostId) {
+    return operations.fetchWorkspaceCatalog(hostId)
+  }
+  const worktrees = await operations.listWorkspaces(WORKTREE_PS_FULL_LIMIT)
+  return { kind: 'response', invalidShape: false, commit: () => worktrees }
+}
 
 export function useHybridHostScreenCatalog(args: {
   operations: HostWorkspaceOperations | null
@@ -64,11 +81,26 @@ export function useHybridHostScreenCatalog(args: {
         request.connectionStateIsRelayed === true && !catalogWarmupSpentRef.current.has(request)
       catalogWarmupSpentRef.current.add(request)
       try {
-        const next = await request.listWorkspaces(10000)
+        const fetched = await fetchHostWorkspaceCatalog(request, requestHostId)
         if (state.workspaceOperationsRef.current !== request || hostId !== requestHostId) {
           return
         }
         if (!options.allowDuringModal && newWorktreeModalVisibleRef.current) {
+          return
+        }
+        // Why (STA-3123): a failed catalog request must not pass for "0 worktrees"; surface the
+        // host's code so a broken remote host is diagnosable instead of looking empty.
+        if (fetched.kind === 'request_failed') {
+          if (!warmupForgiven) {
+            setCatalogError(fetched.code)
+          }
+          return
+        }
+        if (fetched.invalidShape) {
+          setCatalogError('invalid_response')
+        }
+        const next = fetched.commit()
+        if (!next) {
           return
         }
         setCatalogError(null)

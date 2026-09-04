@@ -95,13 +95,13 @@ export function useHybridHostWorktreeActions(args: {
       return
     }
     try {
-      await shellOperations.removeHost(state.hostPublicKey)
+      await shellOperations.removeHost()
       shellOperations.leaveHost()
     } catch {
       state.setConfirmRemoveHost(true)
       Alert.alert('Could not remove host', 'Please try again.')
     }
-  }, [hostId, shellOperations, state.hostPublicKey])
+  }, [hostId, shellOperations])
   const openWorktreeSession = useCallback(
     (item: Worktree) => {
       state.setOptimisticActiveWorktreeIdentity(getWorktreeRowIdentity(item))

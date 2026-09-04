@@ -25,8 +25,10 @@ export async function removeHostAndCloseClient(
     // Why last: the hybrid WebView serves its document out of this cache, so deleting it while one
     // is still mounted 403s every asset the page asks for next. Cache deletion is recoverable by
     // redownload, so a hybrid-only failure here must never block the unpair either — on a native
-    // build the cache may not even exist.
-    await removeMobileWebHostCache(hostPublicKey).catch(() => null)
+    // build the cache may not even exist, and an unresolvable key is the same recoverable miss.
+    if (hostPublicKey) {
+      await removeMobileWebHostCache(hostPublicKey).catch(() => null)
+    }
     await clearMobileWebColdResumeRouteForHost(hostId).catch(() => null)
   }
 }

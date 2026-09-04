@@ -4,6 +4,7 @@ import type { HostSessionTabOperations } from './host-session-tab-operations'
 import { projectHostSessionRuntimeCapabilities } from './host-session-runtime-capabilities'
 import type { SessionTabsResult } from './mobile-session-route-types'
 import { loadMobileNewTabAgentOptions } from './mobile-new-tab-agent-loader'
+import { activateMobileSessionTab } from './mobile-session-tab-activation'
 
 export function nativeHostSessionTabOperations(client: RpcClient): HostSessionTabOperations {
   return {
@@ -25,7 +26,7 @@ export function nativeHostSessionTabOperations(client: RpcClient): HostSessionTa
         })
       )
     },
-    subscribe(workspaceId, onSnapshot, _onError) {
+    subscribe(workspaceId, onSnapshot, onError) {
       return client.subscribe(
         'session.tabs.subscribe',
         { worktree: `id:${workspaceId}` },
@@ -33,6 +34,12 @@ export function nativeHostSessionTabOperations(client: RpcClient): HostSessionTa
           const event = payload as { type?: string } & SessionTabsResult
           if (event.type === 'snapshot' || event.type === 'updated') {
             onSnapshot(event)
+            return
+          }
+          // Why: a host-side subscription cleanup ends the stream; without degrading here the
+          // tab list freezes on its last snapshot and never refetches.
+          if (event.type === 'end' || event.type === 'error') {
+            onError()
           }
         }
       )
@@ -91,13 +98,16 @@ export function nativeHostSessionTabOperations(client: RpcClient): HostSessionTa
       return { browserPageId: result.browserPageId }
     },
     async activate(workspaceId, tabId, leafId) {
+      // Why: a relay-to-direct cutover rejects the in-flight request; activation is idempotent,
+      // so retrying once keeps the host's active tab in step with the UI the user just switched.
       return successfulSnapshot(
-        await client.sendRequest('session.tabs.activate', {
+        await activateMobileSessionTab(client, {
           worktree: `id:${workspaceId}`,
           tabId,
           ...(leafId ? { leafId } : {}),
           notifyClients: false,
-          navigation: 'caller'
+          navigation: 'caller',
+          intent: 'user'
         })
       )
     },
