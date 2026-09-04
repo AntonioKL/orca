@@ -78,7 +78,46 @@ describe('detected worktree listing authority', () => {
     expect(result.authoritative).toBe(false)
     expect(result.source).toBe('metadata-fallback')
     expect(result.worktrees).toEqual([])
+    // Why: the retained rows must carry the cause, or the user sees inert worktrees with no explanation.
+    expect(result.unavailableReason).toContain('Command failed: wsl.exe')
     // The destructive halves of a fresh scan must not run against a listing that failed.
+    expect(isRegisteredWorktreePath(REPO_PATH)).toBe(false)
+    expect(removeWorktreeLineage).not.toHaveBeenCalled()
+  })
+
+  it('surfaces the annotated wsl.exe diagnostic as the unavailable reason', async () => {
+    gitExecFileAsyncMock.mockRejectedValue(
+      Object.assign(
+        new Error(
+          'wsl.exe host failure (distro "kali-linux"): There is no distribution with the supplied name.\r\nError code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND\nCommand failed: wsl.exe -d kali-linux --exec sh -lc ...'
+        ),
+        { code: 4294967295, stdout: '', stderr: '' }
+      )
+    )
+
+    const result = await listDetected()
+
+    expect(result.authoritative).toBe(false)
+    expect(result.unavailableReason).toBe(
+      'wsl.exe host failure (distro "kali-linux"): There is no distribution with the supplied name. Error code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND'
+    )
+  })
+
+  // Why (measured on a real Windows host): under WSL the spawn cwd is the interop directory, so a
+  // deleted guest repo fails as `bash: cd` exit 1 — not ENOENT — and must stay retained, not pruned.
+  it('retains a WSL repo whose guest directory is gone, and says why', async () => {
+    gitExecFileAsyncMock.mockRejectedValue(
+      Object.assign(new Error('bash: line 1: cd: /home/neil/repo: No such file or directory'), {
+        code: 1,
+        stdout: '',
+        stderr: 'bash: line 1: cd: /home/neil/repo: No such file or directory\n'
+      })
+    )
+
+    const result = await listDetected()
+
+    expect(result.authoritative).toBe(false)
+    expect(result.unavailableReason).toContain('No such file or directory')
     expect(isRegisteredWorktreePath(REPO_PATH)).toBe(false)
     expect(removeWorktreeLineage).not.toHaveBeenCalled()
   })
@@ -96,6 +135,7 @@ describe('detected worktree listing authority', () => {
     expect(result.authoritative).toBe(true)
     expect(result.source).toBe('git')
     expect(result.worktrees).toEqual([])
+    expect(result.unavailableReason).toBeUndefined()
     expect(isRegisteredWorktreePath(REPO_PATH)).toBe(true)
   })
 
