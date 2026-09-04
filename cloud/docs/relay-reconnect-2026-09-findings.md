@@ -323,6 +323,10 @@ with a large `refresh_tokens` before building the index concurrently there.
   "Your Orca account session expired. Sign in again to use Orca Relay" and hides Retry. StrictMode regression
   test verified red on the old guard. Does not help desktops already revoked today (session cleared before
   this code); it fixes every future revocation.
+- orca-cloud PR #476 (`auth-refresh-token-pruning`): batched `refresh_tokens` pruner as a scheduled Cloud Run
+  job (revoked rows kept 30 d, rotated rows 60 d against a 30 d TTL, 5k-row batches, 200 ms pauses, persisted
+  cursor, per-run budget) plus a 10 s `statement_timeout` on the auth request pool with schema DDL on an
+  untimed connection. Merges cleanly onto #474. First production run should use a small budget.
 - Phone-side copy when the desktop is signed out: today the relay answers the phone with `HOST_OFFLINE` (4404)
   and the phone shows "Can't reach desktop" after enough attempts; the relay cannot tell "desktop asleep" from
   "desktop signed out" because the desktop closes its control with no reason. Design note: have the desktop
