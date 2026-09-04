@@ -203,6 +203,28 @@ The same-cap roll is blocked only by the monitor gate, and the gate is blocked b
 My recommendation: B, with the number chosen from the table in Finding 5 and the roll following
 immediately so the bar can be re-tightened after the fleet is on the 500 ms lock wait.
 
+## Finding 12 (2026-09-04 13:12Z): **INCIDENT IN PROGRESS. The auth service is at its 2-instance cap and rejecting 90% of desktop token calls with 429; the relay fleet has emptied.**
+
+Timeline: 13:04–13:06 the old-image cascades and NAT stalls drove ~1,400 desktops to re-dial. Their relay
+JWTs (5-min TTL) expired mid-storm, so they hit `orca-cloud-auth` `/v1/desktop/auth/refresh` and
+`/v1/desktop/auth/relay-token` together. The auth service is Cloud Run `maxScale=2`, `concurrency=80`,
+1 vCPU throttled (`auth_max_instances = 2` in orca-cloud `infra/terraform-apps/environments/production.tfvars`,
+applied by `deploy-auth-production.yml`). Both instances pinned at concurrency 85 from 13:02; from 13:07
+Cloud Run's front door returns **429 "no available instance"** (0 s latency, never reaches the container):
+12,045 at 13:07, 54,292 at 13:08, 46,025 at 13:08, 42,529 at 13:09. Sep 3 total auth 429s: **0**.
+Without a fresh relay token every desktop's `/v1/assign` gets 401 (1,433 distinct hosts 401'd, 0 got 200
+since 13:07) and every cell closes its control with `4401 relay authorization expired`. Fleet controls:
+13,375 (12:55) -> 7,633 (13:08) -> **249 (13:12)**, splices 1. Auth container CPU 0.15–0.5, so the cap is
+the limit, not the code. Every desktop is now in its refresh-retry loop hammering the same 2 instances:
+this is a self-sustaining thundering herd and will not clear on its own.
+
+**Immediate mitigation (owner action, not applied):** raise the auth service's max instances. Fastest:
+`gcloud run services update orca-cloud-auth --region us-central1 --max-instances 20` (or `10`, matching
+the other apps' `max_instances = 10`), then land the same in `auth_max_instances` so Terraform does not
+revert it. Auth is stateless behind Cloud SQL (`refresh_tokens` table); backends 210 of 400, so 20
+instances x a small pool is within budget. Also consider the desktop's refresh backoff: it re-dials on
+401 immediately with no jitter, so a 429 storm sustains itself.
+
 ## What actually blocks the roll now (12:58Z summary for the owner)
 
 0. **Cloud NAT ports** (Finding 11, found 12:55Z): every us-central1 cell reaches Cloud SQL's public IP
