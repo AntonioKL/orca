@@ -1,11 +1,24 @@
+let warnedMissingNavigationHistory = false
+
 export function readGuestNavigationState(guest: Electron.WebContents): {
   canGoBack: boolean
   canGoForward: boolean
 } {
   const history = guest.navigationHistory
+  // Why: Electron always provides navigationHistory, so `false` here is an API break, not a
+  // page with no history — say so once instead of silently greying out Back/Forward forever.
+  if (typeof history?.canGoBack !== 'function' || typeof history?.canGoForward !== 'function') {
+    if (!warnedMissingNavigationHistory) {
+      warnedMissingNavigationHistory = true
+      console.warn(
+        '[browser-guest] webContents.navigationHistory is unavailable; Back/Forward stay disabled'
+      )
+    }
+    return { canGoBack: false, canGoForward: false }
+  }
   return {
-    canGoBack: history?.canGoBack?.() ?? false,
-    canGoForward: history?.canGoForward?.() ?? false
+    canGoBack: history.canGoBack(),
+    canGoForward: history.canGoForward()
   }
 }
 

@@ -280,7 +280,7 @@ export const FILE_METHODS: RpcAnyMethod[] = [
     handler: async (params, { runtime, connectionId }) => {
       if (connectionId) {
         return {
-          unsubscribed: runtime.cleanupSubscriptionIfOwnedByConnection(
+          unsubscribed: await runtime.cleanupSubscriptionIfOwnedByConnectionAndWait(
             params.subscriptionId,
             connectionId
           )

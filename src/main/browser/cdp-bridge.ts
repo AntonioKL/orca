@@ -27,15 +27,12 @@ import type {
   BrowserSelectResult,
   BrowserSnapshotResult,
   BrowserTabListResult,
-  BrowserTabInfo,
   BrowserTabSwitchResult,
   BrowserTypeResult,
   BrowserUploadResult,
   BrowserViewportResult,
   BrowserWaitResult
 } from '../../shared/runtime-types'
-import { readGuestNavigationState } from './browser-guest-navigation-state'
-import { webContents } from 'electron'
 import type { BrowserManager } from './browser-manager'
 import type { CdpAuxiliaryCommands, CdpTabState } from './cdp-auxiliary-commands'
 import { CdpBridgeCommandSet } from './cdp-bridge-command-set'
@@ -259,26 +256,7 @@ export class CdpBridge {
   }
 
   tabList(): BrowserTabListResult {
-    const tabs: BrowserTabInfo[] = []
-    let index = 0
-
-    for (const [tabId, wcId] of this.getRegisteredTabs()) {
-      const guest = webContents.fromId(wcId)
-      if (!guest || guest.isDestroyed()) {
-        continue
-      }
-      tabs.push({
-        browserPageId: tabId,
-        index,
-        url: guest.getURL(),
-        title: guest.getTitle(),
-        active: wcId === this.activeWebContentsId,
-        ...readGuestNavigationState(guest)
-      })
-      index++
-    }
-
-    return { tabs }
+    return this.commands.tabs.tabList()
   }
 
   async tabSwitch(index: number): Promise<BrowserTabSwitchResult> {

@@ -1,4 +1,5 @@
 import type { z } from 'zod'
+import { isRecord } from '../is-record'
 import { MOBILE_WEB_BRIDGE_MAX_MESSAGE_BYTES } from './bridge-limits'
 import { MOBILE_WEB_BRIDGE_PROTOCOL_VERSION } from './bridge-protocol-version'
 import { isExactMobileWebJsonDocument } from './exact-json-document'
@@ -61,8 +62,4 @@ export function parseMobileWebBridgeMessageDocument<T>(
     return { ok: false, error: 'invalid_message' }
   }
   return { ok: true, value: parsed.data }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

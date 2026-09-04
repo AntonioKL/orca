@@ -134,9 +134,6 @@ importers:
       '@linear/sdk':
         specifier: ^82.1.0
         version: 82.1.0(graphql@16.14.2)
-      '@noble/hashes':
-        specifier: 1.8.0
-        version: 1.8.0
       '@parcel/watcher':
         specifier: ^2.5.6
         version: 2.5.6
@@ -213,6 +210,9 @@ importers:
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.55.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@noble/hashes':
+        specifier: 1.8.0
+        version: 1.8.0
       '@playwright/test':
         specifier: ^1.59.1
         version: 1.59.1
