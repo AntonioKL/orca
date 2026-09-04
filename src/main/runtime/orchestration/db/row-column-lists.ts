@@ -48,6 +48,7 @@ export const DISPATCH_CONTEXT_COLUMNS = [
   'capability_hash',
   'process_incarnation',
   'capability_revoked_at',
+  'retry_of_dispatch_id',
   'creator_dispatch_id',
   'host_scope',
   'status',

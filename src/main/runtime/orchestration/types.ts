@@ -278,6 +278,8 @@ export type DispatchContextRow = {
   capability_hash: string | null
   process_incarnation: string | null
   capability_revoked_at: string | null
+  /** Dispatch ID is the Attempt identity; retries point to the prior Attempt. */
+  retry_of_dispatch_id: string | null
   creator_dispatch_id: string | null
   host_scope: string | null
   status: DispatchStatus

@@ -186,6 +186,7 @@ export function applySchemaMigrationsV13ToV30(this: OrchestrationDb, current: nu
   }
   if (current < 31) {
     const dispatchColumns = [
+      ['retry_of_dispatch_id', 'TEXT'],
       ['creator_dispatch_id', 'TEXT'],
       ['host_scope', 'TEXT']
     ] as const

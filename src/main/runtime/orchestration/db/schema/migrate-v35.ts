@@ -13,7 +13,6 @@ const PENDING_POINTER_ENTER_INDEX_SQL = `
 
 /** v31 identity columns that were never read back; only creator_dispatch_id and host_scope stay. */
 const DROPPED_DISPATCH_IDENTITY_COLUMNS = [
-  'retry_of_dispatch_id',
   'creator_role',
   'endpoint_id',
   'endpoint_incarnation',

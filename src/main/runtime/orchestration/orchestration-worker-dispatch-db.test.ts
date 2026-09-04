@@ -242,6 +242,7 @@ describe('OrchestrationDb worker Dispatch state', () => {
       retryOf: first.dispatch.id,
       startOptions: {}
     })
+    expect(second.dispatch.retry_of_dispatch_id).toBe(first.dispatch.id)
     d.failWorkerStart(second.dispatch.id, 'agent_readiness', 'second failed')
 
     expect(() =>

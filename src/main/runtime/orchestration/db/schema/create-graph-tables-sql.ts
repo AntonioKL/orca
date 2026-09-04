@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS dispatch_contexts (
   process_incarnation TEXT,
   capability_revoked_at TEXT,
   -- R1 identity facts; nullable when legacy provenance was never proven.
+  retry_of_dispatch_id TEXT,
   creator_dispatch_id TEXT,
   host_scope          TEXT,
   status              TEXT NOT NULL DEFAULT 'pending'

@@ -132,6 +132,7 @@ export function createStartingWorkerDispatch(
       contractVersion: CURRENT_CONTRACT_VERSION,
       launchTokenHash: params.launchTokenHash ?? null,
       depth: this.resolveChildDispatchDepth(params.creator, params.maxDepth),
+      retryOfDispatchId: params.retryOf ?? null,
       creatorDispatchId
     })
     this.db

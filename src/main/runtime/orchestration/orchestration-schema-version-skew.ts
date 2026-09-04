@@ -31,6 +31,7 @@ const VERSIONED_POST_V6_COLUMNS = [
   { version: 27, table: 'federated_dispatches', column: 'to_home_acknowledged_sequence' },
   { version: 30, table: 'dispatch_contexts', column: 'depth' },
   { version: 30, table: 'remote_dispatch_attachments', column: 'depth' },
+  { version: 31, table: 'dispatch_contexts', column: 'retry_of_dispatch_id' },
   { version: 31, table: 'dispatch_contexts', column: 'creator_dispatch_id' },
   { version: 31, table: 'dispatch_contexts', column: 'host_scope' },
   { version: 31, table: 'worker_terminal_resources', column: 'endpoint_id' },
