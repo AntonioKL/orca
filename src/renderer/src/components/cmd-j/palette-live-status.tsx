@@ -9,7 +9,6 @@ import {
   buildExplicitEntriesByTabId,
   type TabPaneInputSources
 } from '@/components/sidebar/smart-attention'
-import { cn } from '@/lib/utils'
 import { isExplicitAgentStatusFresh } from '@/lib/agent-status'
 import { getLiveAgentStatusByWorktreeId } from '@/lib/worktree-activity-state'
 import {
@@ -255,15 +254,9 @@ export function PaletteRecentTabStatusDot({
       <span className="relative inline-flex size-3.5 shrink-0 items-center justify-center">
         {fallback}
         <span
-          className={cn(
-            // Why popover, not background: the dialog surface is --popover (#171717 in dark), while
-            // --background is the app canvas (#0a0a0a) — using it punched a dark halo through every
-            // dark-mode row. Selected rows use --jump-palette-selection-surface so the cutout tracks
-            // the stronger keyboard highlight from main.css.
-            'pointer-events-none absolute -right-0.5 -bottom-0.5 flex items-center justify-center rounded-full',
-            'bg-popover ring-2 ring-popover',
-            'group-data-[selected=true]:bg-[var(--jump-palette-selection-surface)] group-data-[selected=true]:ring-[var(--jump-palette-selection-surface)]'
-          )}
+          // Keep the attention glyph as a lightweight overlay; a background ring reads as a
+          // second selection bubble around the row icon.
+          className="pointer-events-none absolute -right-0.5 -bottom-0.5"
           aria-hidden="true"
         >
           <RecentTabAttentionBadgeGlyph badge={badge} />
