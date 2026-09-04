@@ -129,7 +129,18 @@ describe('buildDispatchPreamble', () => {
     expect(result).toMatch(/orchestration ask --from term_worker/)
     expect(result).toMatch(/orchestration send --from term_worker --type escalation/)
     expect(result).toContain('--task-id task_abc123 --dispatch-id ctx_def456')
-    expect(result).toContain('orchestration check --terminal term_worker')
+    expect(result).toContain('orchestration check --terminal term_worker --json')
+  })
+
+  it('gives the worker a concrete cadence for reading coordinator follow-ups', () => {
+    const result = buildDispatchPreamble(baseParams())
+    const checkLine = result.indexOf('orchestration check --terminal term_worker --json')
+    const cadence = result.slice(0, checkLine)
+
+    // Why: the transport is durable but never interrupts, so "you may check" produced
+    // workers that never read a single follow-up.
+    expect(cadence).toContain('before you\n  # start a new file and after a test run')
+    expect(cadence).toContain('immediately before\n  # you send worker_done')
   })
 
   it('carries the minted Dispatch capability on lifecycle and question commands', () => {

@@ -56,8 +56,11 @@ Slack, GitHub comments, or any other channel to reach a human during the run.
   # coordinator to do something before you can continue):
   orca orchestration send --from term_WORKER --type escalation --subject "Blocked: <reason>" --body "<details>" --task-id task_SNAP --dispatch-id ctx_SNAP
 
-  # Check for messages from the coordinator:
-  orca orchestration check --terminal term_WORKER
+  # Read coordinator follow-ups. Nothing interrupts you: a durable message only
+  # arrives when you look, so run this at each natural checkpoint — before you
+  # start a new file and after a test run — and once more immediately before
+  # you send worker_done, so a redirect lands before the task settles.
+  orca orchestration check --terminal term_WORKER --json
 
 === AFTER YOU SEND worker_done ===
 

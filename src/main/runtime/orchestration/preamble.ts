@@ -115,8 +115,11 @@ Slack, GitHub comments, or any other channel to reach a human during the run.
   # coordinator to do something before you can continue):
   ${cli} orchestration send --from ${params.workerHandle}${capabilityFlag} --type escalation --subject "Blocked: <reason>" --body "<details>" --task-id ${params.taskId} --dispatch-id ${params.dispatchId}
 
-  # Check for messages from the coordinator:
-  ${cli} orchestration check --terminal ${params.workerHandle}
+  # Read coordinator follow-ups. Nothing interrupts you: a durable message only
+  # arrives when you look, so run this at each natural checkpoint — before you
+  # start a new file and after a test run — and once more immediately before
+  # you send worker_done, so a redirect lands before the task settles.
+  ${cli} orchestration check --terminal ${params.workerHandle} --json
 
 ${postDoneInstructions}`
 
