@@ -1,6 +1,7 @@
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
 import { ptyOwnership, ptyIncarnationById, deletePtyOwnership } from '../provider/ownership-state'
 import { ptySizes } from '../delivery/visibility-state'
+import { commitAttachedPtySize } from '../delivery/attached-pty-size'
 import {
   shouldSkipCodexHomeEnvForWindowsShell,
   recordCodexPaneAccountForSpawn,
@@ -125,7 +126,14 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
   if (!ctx.hostSessionBinding) {
     persistSshLease()
   }
-  ptySizes.set(ctx.result.id, { cols: args.cols, rows: args.rows })
+  commitAttachedPtySize({
+    result: ctx.result,
+    requested: { cols: args.cols, rows: args.rows },
+    cachedBeforeAttach: ctx.sessionSizeBeforeAttach,
+    reflowHeadlessTerminalToPtyGrid: ctx.deps.runtime?.reflowHeadlessTerminalToPtyGrid?.bind(
+      ctx.deps.runtime
+    )
+  })
   if (ctx.effectiveSessionAppId !== undefined && ctx.effectiveSessionAppId !== ctx.result.id) {
     ptySizes.delete(ctx.effectiveSessionAppId)
   }
