@@ -309,6 +309,25 @@ orca-cloud PR #474 (branch `auth-revoke-only-live-tokens`): caps → 20, disk 25
 Terraform, partial index in the schema, `already-revoked` short-circuit. Do not deploy auth to any environment
 with a large `refresh_tokens` before building the index concurrently there.
 
+**Alerting + NAT follow-ups (19:58Z, both open, neither applied):**
+
+- stablyai/orca PR #18693 (`relay-nat-ports-and-sql-alerts`): both relay NATs switch to dynamic port
+  allocation (64–4096 per VM); new relay-channel alerts for the Cloud SQL WAL checkpoint loop (log metric on
+  `checkpoint starting: wal`, > 3 per 5 min), Cloud SQL disk > 70%, and NAT `OUT_OF_RESOURCES` drops. No
+  existing workflow applies these resources; the PR body carries the targeted plan.
+- orca-cloud PR #475 (`auth-observability-alerts`): log metrics + policies for auth refresh 401 (> 100 per 5
+  min; Sep 3 baseline 20–80 per hour), 429 (> 20 per 5 min; baseline 0), 5xx (> 10 per 5 min), and Cloud Run
+  p99 latency > 10 s. Production routes to the relay Slack channel.
+- Desktop stale auth-status fix: Opus agent in an isolated worktree (push auth-status change on session clear,
+  re-fetch on pane mount, "Sign in again" pairing copy). Pending its report.
+- Phone-side copy when the desktop is signed out: today the relay answers the phone with `HOST_OFFLINE` (4404)
+  and the phone shows "Can't reach desktop" after enough attempts; the relay cannot tell "desktop asleep" from
+  "desktop signed out" because the desktop closes its control with no reason. Design note: have the desktop
+  close its control with a `signed-out` reason on auth loss, have the relay remember the last close reason per
+  host for the credential's lifetime and return it in `relay-hello`, and have the phone render "Sign in to Orca
+  on your desktop to reconnect". Needs a wire change on all three sides (new optional field, safe for old
+  clients). Not started.
+
 ## What actually blocks the roll now (12:58Z summary for the owner)
 
 0. **Cloud NAT ports** (Finding 11, found 12:55Z): every us-central1 cell reaches Cloud SQL's public IP
