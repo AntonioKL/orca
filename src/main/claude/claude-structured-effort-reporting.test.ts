@@ -105,13 +105,18 @@ describe('Claude effort reporting', () => {
 })
 
 describe('Claude effort readback', () => {
-  it('refuses to record an effort the child did not adopt', async () => {
+  it('records an effort the child did not adopt without vouching for it', async () => {
     const { session, calls } = sessionWith('high')
 
+    // The disagreement stops the confirmation, not the write: no other client
+    // vetoes here, and the pre-flight catalog guard already refuses the levels
+    // the model cannot run.
     await expect(
       setClaudeStructuredOption(session, { key: 'effort', value: 'bogus-effort-xyz' }, undefined)
-    ).rejects.toBeInstanceOf(AgentSessionOptionRejectedError)
-    expect(session.options.has('effort')).toBe(false)
+    ).resolves.toEqual({ effort: 'bogus-effort-xyz' })
+    expect(session.confirmedOptions.has('effort')).toBe(false)
+    // The child's own answer is kept rather than discarded with the refusal.
+    expect(session.reportedOptions.effort).toBe('high')
     expect(calls).toEqual(['apply:bogus-effort-xyz', 'get_settings'])
   })
 
@@ -223,6 +228,18 @@ describe('Claude effort against the model that must run it', () => {
     await expect(
       setClaudeStructuredOption(session, { key: 'effort', value: 'high' }, undefined)
     ).rejects.toBeInstanceOf(AgentSessionOptionRejectedError)
+  })
+
+  it('keeps a disagreeing effort through restore instead of skipping it', async () => {
+    const calls: string[] = []
+    const { session } = sessionWith('high', calls, { model: 'sonnet', catalog: [SONNET] })
+    session.options.set('effort', 'low')
+
+    await restoreClaudeStructuredSessionOptions(session, undefined)
+
+    expect(session.options.get('effort')).toBe('low')
+    expect(session.restoreSkippedOptions.has('effort')).toBe(false)
+    expect(session.confirmedOptions.has('effort')).toBe(false)
   })
 
   it('drops a stale effort on restore instead of replaying it onto the new model', async () => {

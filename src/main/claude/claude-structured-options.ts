@@ -95,16 +95,16 @@ export async function setClaudeStructuredOption(
   if (mutationSequence !== session.optionMutationSequence) {
     return Object.fromEntries(session.options)
   }
-  // A readback that could not be taken is not evidence of a refusal; one that
-  // disagrees is, and recording it anyway would show an effort nothing adopted.
+  // A disagreement stops main vouching for the value, it does not veto the write:
+  // the pre-flight guard already refuses levels the model advertises no control
+  // for, and no other client refuses on a readback. Keep the child's own answer so
+  // the disagreement survives as the level a later read falls back to.
   if (adopted !== null && adopted !== input.value) {
-    throw new AgentSessionOptionRejectedError(
-      `claude kept effort ${adopted} instead of ${input.value}`
-    )
+    session.reportedOptions.effort = adopted
   }
   session.options.set(input.key, input.value)
-  // Only a readback that agreed is adoption evidence; one that could not be taken
-  // records the value but must not also claim the provider vouched for it.
+  // Only a readback that agreed is adoption evidence; one that disagreed or could
+  // not be taken records the value but must not also claim the provider vouched for it.
   if (adopted !== null && adopted === input.value) {
     session.confirmedOptions.add(input.key)
   } else {
