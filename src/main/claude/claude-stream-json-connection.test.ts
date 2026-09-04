@@ -381,6 +381,9 @@ describe('Claude stream-json connection', () => {
         item.body.kind === 'status' && item.body.providerFrame ? [item.body.providerFrame.kind] : []
       )
     ).toEqual([])
+    // The journal owns a SQLite connection now; afterEach removes this temp root and an open
+    // handle blocks that on Windows.
+    await journal.close()
   })
 
   it('feeds an inbound permission request to canUseTool and writes its answer back on the same id', async () => {

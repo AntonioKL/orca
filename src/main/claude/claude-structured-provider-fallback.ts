@@ -117,8 +117,7 @@ export function createClaudeProviderFrameFallback(
           provider: 'orca',
           clientMessageId: `provider-frame:claude:${acquisitionId}:${sequence}`
         },
-        bounded ? { ...translated.body, text: bounded } : translated.body,
-        translated.blobs
+        bounded ? { ...translated.body, text: bounded } : translated.body
       )
       sink.publish()
     }
