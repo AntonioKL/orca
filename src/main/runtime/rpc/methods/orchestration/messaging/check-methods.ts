@@ -6,7 +6,11 @@ import { checkRunMailbox } from './check-run'
 import { checkWorkerMailbox } from './check-worker'
 import { checkDirectMailbox } from './check-direct'
 import { orchestrationSkillRecoveryData } from '../../../../../../shared/orchestration-rpc-contract'
-import { callerHoldsDispatchPane, dispatchFenced } from './dispatch-mailbox-fence'
+import {
+  callerHoldsDispatchPane,
+  dispatchFenced,
+  isSupersededDispatch
+} from './dispatch-mailbox-fence'
 
 export const ORCHESTRATION_CHECK_METHODS: RpcMethod[] = [
   defineMethod({
@@ -79,9 +83,16 @@ export const ORCHESTRATION_CHECK_METHODS: RpcMethod[] = [
           remoteAttachment
         })
       }
+      // Why: an empty consuming check is the worker contract's "checkpoint, not a failure", so a
+      // caller whose Attempt moved on has to be told rather than handed an empty direct mailbox.
+      const consumingCheck = params.peek !== true && params.all !== true && params.unread !== false
+      const settledDispatch = consumingCheck ? db.getLatestDispatchForTerminal(handle) : undefined
+      if (settledDispatch && isSupersededDispatch(settledDispatch)) {
+        throw dispatchFenced()
+      }
       // Why: a consuming check on a handle with no live pane and no Dispatch can never see
       // Run mail, so an empty inbox would read as "nothing yet" instead of a stale caller.
-      if (!paneKey && params.peek !== true && params.all !== true && params.unread !== false) {
+      if (!paneKey && consumingCheck) {
         throw new OrchestrationError(
           'stable_pane_required',
           `Terminal ${handle} has no live pane bound to a Run, so this inbox can never receive Run mail. Rebind this terminal with orchestration run-use, or read the Run mailbox with --run <run_id>.`,
