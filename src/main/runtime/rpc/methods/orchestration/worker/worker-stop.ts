@@ -149,33 +149,41 @@ export const ORCHESTRATION_WORKER_STOP_METHODS: RpcMethod[] = [
           'none'
         )
       }
-      try {
-        const close = await runtime.closeTerminal(handle)
-        if (!close.ptyKilled) {
+      const closed = await runtime
+        .closeTerminal(handle)
+        .then((close) => ({ close }) as const)
+        .catch(
+          (error: unknown) =>
+            ({ error: error instanceof Error ? error.message : String(error) }) as const
+        )
+      // The process exit can land mid-close and settle the stop from the exit path; that exit
+      // is this stop's proof of success, so do not re-settle it or report it as unknown.
+      if (db.getWorkerDispatch(params.dispatch)?.state !== 'stopped') {
+        if ('error' in closed) {
+          return unknownReceipt(
+            params.dispatch,
+            db.markWorkerStopUnknown(params.dispatch, closed.error),
+            'unknown'
+          )
+        }
+        if (!closed.close.ptyKilled) {
           // The tab is retired, but the agent process was never confirmed stopped —
           // settling here is the false success this receipt exists to prevent.
           return unknownReceipt(
             params.dispatch,
-            db.markWorkerStopUnknown(params.dispatch, describeUnconfirmedAgentStop(close)),
+            db.markWorkerStopUnknown(params.dispatch, describeUnconfirmedAgentStop(closed.close)),
             'closed_agent_terminal'
           )
         }
-        const worker = db.settleWorkerStop(params.dispatch)
-        runtime.notifyMessageArrived(`dispatch:${params.dispatch}`, 'status')
-        return {
-          dispatchId: params.dispatch,
-          state: worker.state,
-          alreadySettled: false,
-          processAction: 'closed_agent_terminal',
-          close
-        }
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error)
-        return unknownReceipt(
-          params.dispatch,
-          db.markWorkerStopUnknown(params.dispatch, reason),
-          'unknown'
-        )
+        db.settleWorkerStop(params.dispatch)
+      }
+      runtime.notifyMessageArrived(`dispatch:${params.dispatch}`, 'status')
+      return {
+        dispatchId: params.dispatch,
+        state: db.getWorkerDispatch(params.dispatch)?.state ?? 'stopped',
+        alreadySettled: false,
+        processAction: 'closed_agent_terminal',
+        ...('close' in closed ? { close: closed.close } : {})
       }
     }
   })

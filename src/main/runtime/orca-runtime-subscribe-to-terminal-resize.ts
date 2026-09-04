@@ -71,6 +71,12 @@ export class OrcaRuntimeWithSubscribeToTerminalResize extends OrcaRuntimeWithApp
     if (!dispatch) {
       return
     }
+    // A process that dies while we are stopping it is that stop succeeding, not a failure:
+    // settling it as `failed` here made the in-flight worker-stop report its own success as an error.
+    if (this._orchestrationDb.getWorkerDispatch?.(dispatch.id)?.state === 'stopping') {
+      this._orchestrationDb.settleWorkerStop(dispatch.id)
+      return
+    }
 
     const errorContext = describeTerminalExitCause(cause)
     const settled = this._orchestrationDb.failDispatch(dispatch.id, errorContext, {
