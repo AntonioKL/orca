@@ -1,7 +1,8 @@
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, ChildProcess } from 'node:child_process'
+import { subscribe, unsubscribe } from 'node:diagnostics_channel'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { setAppEnvironment, type AppEnvironment } from '../shared/app-environment'
 import { setProcessTreeKillGate } from '../shared/child-process/process-tree-kill-gate'
@@ -70,6 +71,18 @@ let markerDirectory = ''
 let markerSequence = 0
 const spawnedRoots: ChildProcess[] = []
 const spawnedLeaves: number[] = []
+const observedSpawns: ChildProcess[] = []
+
+function observeSpawn(message: unknown): void {
+  if (
+    typeof message === 'object' &&
+    message !== null &&
+    'process' in message &&
+    message.process instanceof ChildProcess
+  ) {
+    observedSpawns.push(message.process)
+  }
+}
 
 /** A real root with a real grandchild; the grandchild reports its pid on disk. */
 async function spawnLiveTree(): Promise<{
@@ -79,7 +92,8 @@ async function spawnLiveTree(): Promise<{
 }> {
   const marker = join(markerDirectory, `leaf-${markerSequence++}.pid`)
   const leafSource = `require('node:fs').writeFileSync(${JSON.stringify(marker)}, String(process.pid)); setTimeout(() => {}, 600000)`
-  const rootSource = `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(leafSource)}], { stdio: 'ignore' }); setTimeout(() => {}, 600000)`
+  // Non-detached Windows children can die with the root's libuv Job Object.
+  const rootSource = `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(leafSource)}], { stdio: 'ignore', detached: true, windowsHide: true }); setTimeout(() => {}, 600000)`
   const child = spawn(process.execPath, ['-e', rootSource], {
     stdio: 'ignore',
     windowsHide: true
@@ -101,9 +115,12 @@ describeOnWindows('own-Chromium gate against real Windows process trees', () => 
     orcaChromiumPids = []
     setAppEnvironment(appEnvironment())
     installMainProcessTreeKillGate()
+    observedSpawns.length = 0
+    subscribe('child_process', observeSpawn)
   })
 
   afterEach(async () => {
+    unsubscribe('child_process', observeSpawn)
     orcaChromiumPids = []
     for (const leafPid of spawnedLeaves.splice(0)) {
       await terminateWindowsProcessTree(leafPid, { site: 'live-tree-kill-cleanup' })
@@ -148,6 +165,8 @@ describeOnWindows('own-Chromium gate against real Windows process trees', () => 
     // The fallback every gated site runs after a refusal.
     child.kill('SIGKILL')
     expect(await waitFor(() => !isAlive(rootPid))).toBe(true)
+    // Let root-owned job cleanup finish before asserting independent survival.
+    await sleep(250)
     // Disclosed asymmetry: a refusal orphans descendants rather than reaping them.
     expect(isAlive(leafPid)).toBe(true)
   })
@@ -155,18 +174,23 @@ describeOnWindows('own-Chromium gate against real Windows process trees', () => 
   it('signalProcessTree refused: the root goes by handle and the barrier reports unverified', async () => {
     const { child, rootPid, leafPid } = await spawnLiveTree()
     orcaChromiumPids = [rootPid]
+    observedSpawns.length = 0
 
     await expect(signalProcessTree(child, 'SIGKILL')).resolves.toBe(false)
 
+    expect(observedSpawns).toHaveLength(0)
     expect(await waitFor(() => !isAlive(rootPid))).toBe(true)
+    await sleep(250)
     expect(isAlive(leafPid)).toBe(true)
   })
 
   it('signalProcessTree admitted: the whole tree goes and the barrier reports verified', async () => {
     const { child, rootPid, leafPid } = await spawnLiveTree()
+    observedSpawns.length = 0
 
     await expect(signalProcessTree(child, 'SIGKILL')).resolves.toBe(true)
 
+    expect(observedSpawns.map((child) => child.spawnfile)).toEqual(['taskkill'])
     expect(await waitFor(() => !isAlive(rootPid))).toBe(true)
     expect(await waitFor(() => !isAlive(leafPid))).toBe(true)
   })
