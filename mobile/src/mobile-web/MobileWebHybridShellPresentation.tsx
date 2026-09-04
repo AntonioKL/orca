@@ -35,6 +35,7 @@ type MobileWebHybridShellPresentationProps = {
   onClearCache: () => void | Promise<void>
   onRecoveryFailure: () => void
   onBridgeMessage: (message: string) => void
+  onDocumentLoadStarted: () => void
   onPageLoaded: () => void
   onLoadFailed: (reason: string | undefined) => void
   onNavigationBlocked: () => void
@@ -57,6 +58,7 @@ export function MobileWebHybridShellPresentation({
   onClearCache,
   onRecoveryFailure,
   onBridgeMessage,
+  onDocumentLoadStarted,
   onPageLoaded,
   onLoadFailed,
   onNavigationBlocked,
@@ -141,6 +143,12 @@ export function MobileWebHybridShellPresentation({
             sessionId={hostedViewActive ? session.sessionId : null}
             onBridgeMessage={(event) => onBridgeMessage(event.nativeEvent.data)}
             onLoadState={(event) => {
+              // A load only ever starts because the document is being replaced, and the outgoing
+              // page's grants have to retire before the incoming one initializes.
+              if (event.nativeEvent.state === 'loading') {
+                onDocumentLoadStarted()
+                return
+              }
               if (event.nativeEvent.state === 'loaded') {
                 onPageLoaded()
                 return

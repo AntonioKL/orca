@@ -57,6 +57,20 @@ describe('useMobileWebCapabilityBroker', () => {
     expect(errorFor(harness.messages, 'B')).toEqual([])
   })
 
+  it('retires the previous page subscriptions when the document is replaced in place', async () => {
+    await mount(0)
+    await handle(subscribeRequest('A', 'Z'))
+
+    await act(async () => {
+      renderer?.update(createElement(harness.Harness, { viewEpoch: 0, documentEpoch: 1 }))
+    })
+    await handle(subscribeRequest('B', 'Y'))
+
+    expect(harness.unsubscribe).toHaveBeenCalledOnce()
+    expect(harness.subscribe).toHaveBeenCalledTimes(2)
+    expect(errorFor(harness.messages, 'B')).toEqual([])
+  })
+
   it('retires the broker on demand so an in-place reload cannot inherit it', async () => {
     await mount(0)
     await handle(subscribeRequest('A', 'Z'))
@@ -99,7 +113,10 @@ function createHarness() {
     created: 0,
     brokerSessionId: undefined as string | undefined,
     retireBroker: undefined as (() => void) | undefined,
-    Harness: undefined as unknown as FunctionComponent<{ viewEpoch: number }>
+    Harness: undefined as unknown as FunctionComponent<{
+      viewEpoch: number
+      documentEpoch?: number
+    }>
   }
   const createBroker = (page: MobileWebBrokerPageIdentity): MobileWebCapabilityBroker => {
     state.created += 1
@@ -124,12 +141,13 @@ function createHarness() {
   const onBrokerSessionChange = (sessionId: string | undefined): void => {
     state.brokerSessionId = sessionId
   }
-  state.Harness = ({ viewEpoch }) => {
+  state.Harness = ({ viewEpoch, documentEpoch = 0 }) => {
     const lifecycle = useMobileWebCapabilityBroker({
       brokerRef,
       sessionId: CONTEXT.shellSessionId,
       buildId: CONTEXT.buildId,
       viewEpoch,
+      documentEpoch,
       createBroker,
       onBrokerReady,
       onBrokerSessionChange

@@ -6,6 +6,9 @@ import { isLogicalClientCutoverError } from './stable-logical-rpc-client'
 // status.get without ever changing connState, so a one-shot probe would latch
 // capability-gated UI hidden until the screen remounts; retry until one lands.
 const CUTOVER_RETRY_DELAY_MS = 250
+// Why a cap: a link that keeps forcing cutovers would otherwise poll status.get four times a second
+// for as long as the screen is mounted. After the prompt attempts, cutovers join the backoff ladder.
+const CUTOVER_FAST_RETRY_LIMIT = 3
 const FAILURE_RETRY_BASE_DELAY_MS = 1_000
 const FAILURE_RETRY_MAX_DELAY_MS = 15_000
 
@@ -43,6 +46,7 @@ export function startRuntimeCapabilityRead<T>(
   let cancelled = false
   let retryTimer: ReturnType<typeof setTimeout> | null = null
   let failureRetries = 0
+  let cutoverRetries = 0
 
   function attempt(): void {
     void readCapabilities().then(
@@ -64,9 +68,10 @@ export function startRuntimeCapabilityRead<T>(
   function scheduleRetry(cutover: boolean): void {
     // Why: cutover means the replacement transport is already authenticated —
     // re-ask promptly; other failures back off so a wedged host isn't hammered.
-    const delay = cutover
-      ? CUTOVER_RETRY_DELAY_MS
-      : Math.min(FAILURE_RETRY_BASE_DELAY_MS * 2 ** failureRetries++, FAILURE_RETRY_MAX_DELAY_MS)
+    const delay =
+      cutover && cutoverRetries++ < CUTOVER_FAST_RETRY_LIMIT
+        ? CUTOVER_RETRY_DELAY_MS
+        : Math.min(FAILURE_RETRY_BASE_DELAY_MS * 2 ** failureRetries++, FAILURE_RETRY_MAX_DELAY_MS)
     retryTimer = setTimeout(attempt, delay)
   }
 

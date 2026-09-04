@@ -13,6 +13,7 @@ import {
   useMobileWebCapabilityBroker,
   type MobileWebBrokerPageIdentity
 } from '../src/mobile-web/use-mobile-web-capability-broker'
+import { useMobileWebPageDocument } from '../src/mobile-web/use-mobile-web-page-document'
 import { MOBILE_WEB_PRODUCTION_GRANTS } from '../src/mobile-web/mobile-web-production-grants'
 import { MobileWebHealthDeadline } from '../src/mobile-web/mobile-web-health-deadline'
 import { useMobileWebAlertSafePackageSession } from '../src/mobile-web/use-mobile-web-alert-safe-package-session'
@@ -49,7 +50,6 @@ export default function HybridScreen() {
   const params = useLocalSearchParams<{ hostId?: string }>()
   const viewRef = useRef<MobileWebShellViewRef>(null)
   const activeSessionIdRef = useRef<string | undefined>(undefined)
-  const initializedSessionRef = useRef<string | undefined>(undefined)
   const healthDeadlineRef = useRef(new MobileWebHealthDeadline(10_000))
   const brokerRef = useRef<MobileWebCapabilityBroker | null>(null)
   const postInitRef = useRef<() => Promise<void>>(() => Promise.resolve())
@@ -60,7 +60,6 @@ export default function HybridScreen() {
   )
   const { hosts, hostsLoading, hostLoadError, refreshHosts } = useMobileWebHostCatalog()
   const [selectedHostId, setSelectedHostId] = useState<string | undefined>(params.hostId)
-  const [pageReadySessionId, setPageReadySessionId] = useState<string>()
   const [brokerSessionId, setBrokerSessionId] = useState<string>()
   const [hostedViewActive, setHostedViewActive] = useState(true)
   const selectHost = useCallback((hostId: string | undefined) => setSelectedHostId(hostId), [])
@@ -140,14 +139,12 @@ export default function HybridScreen() {
     }
   }, [params.hostId])
 
-  // A view-epoch bump replaces the document, so every page-scoped grant retires with it.
-  useEffect(() => {
-    initializedSessionRef.current = undefined
-    nativeRouteHandoffRef.current.clear()
-    setPageReadySessionId(undefined)
-    healthDeadlineRef.current.clear()
-    return () => healthDeadlineRef.current.clear()
-  }, [session?.sessionId, viewEpoch])
+  const pageDocument = useMobileWebPageDocument({
+    sessionId: session?.sessionId,
+    viewEpoch,
+    healthDeadlineRef,
+    routeHandoffRef: nativeRouteHandoffRef
+  })
 
   const postToWeb = useCallback(async (message: MobileWebBridgeShellMessage) => {
     if (responseDropRef.current.shouldDrop(message)) {
@@ -229,6 +226,7 @@ export default function HybridScreen() {
     sessionId: session?.sessionId,
     buildId: session?.buildId,
     viewEpoch,
+    documentEpoch: pageDocument.epoch,
     createBroker,
     onBrokerReady,
     onBrokerSessionChange: setBrokerSessionId
@@ -243,7 +241,7 @@ export default function HybridScreen() {
     if (!current || activeSessionIdRef.current !== current.sessionId || !brokerRef.current) {
       return
     }
-    initializedSessionRef.current = current.sessionId
+    pageDocument.initializedSessionRef.current = current.sessionId
     healthDeadlineRef.current.arm(current.sessionId, (sessionId) => {
       if (activeSessionIdRef.current === sessionId) {
         void onHealthTimeout(sessionId)
@@ -269,7 +267,7 @@ export default function HybridScreen() {
   useEffect(() => {
     brokerRef.current?.updateConnectionState(mobileWebBridgeConnectionState(state))
     const current = session
-    if (!current || initializedSessionRef.current !== current.sessionId) {
+    if (!current || pageDocument.initializedSessionRef.current !== current.sessionId) {
       return
     }
     void postToWeb({
@@ -301,7 +299,7 @@ export default function HybridScreen() {
       if (parsed.value.type === 'ready') {
         // `ready` acknowledges init; echoing init here starves the health frame.
         if (activeSessionIdRef.current === current.sessionId) {
-          setPageReadySessionId(current.sessionId)
+          pageDocument.setReadySessionId(current.sessionId)
         }
       } else if (!backMessageHandled) {
         if (parsed.value.type === 'health') {
@@ -356,7 +354,7 @@ export default function HybridScreen() {
     selectedHostId,
     connectionState: state,
     shellContext,
-    pageReadySessionId,
+    pageReadySessionId: pageDocument.readySessionId,
     brokerSessionId,
     getBroker,
     selectHost,
@@ -394,7 +392,9 @@ export default function HybridScreen() {
         showWarning('That didn’t work. Try again.', 'recovery_action_failed')
       }
       onBridgeMessage={(message) => void handleBridgeMessage(message)}
+      onDocumentLoadStarted={pageDocument.onLoadStart}
       onPageLoaded={() => {
+        pageDocument.onLoaded()
         hardwareBackHandoff.resetPage()
         void postInit()
       }}

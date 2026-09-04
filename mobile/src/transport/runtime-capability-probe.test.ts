@@ -172,6 +172,26 @@ describe('startRuntimeCapabilityProbe', () => {
     cancel()
   })
 
+  it('stops polling at cutover speed when the link keeps cutting over', async () => {
+    const outcomes: ProbeOutcome[] = Array.from(
+      { length: 6 },
+      () => new LogicalClientCutoverError()
+    )
+    outcomes.push(ok(['a.v1']))
+    const { client, calls } = makeClient(outcomes)
+    const seen: (readonly string[])[] = []
+    const cancel = startRuntimeCapabilityProbe(client, (capabilities) => seen.push(capabilities))
+    await flushMicrotasks()
+
+    // Three prompt retries, then the backoff ladder: an endless 4 Hz poll would be 40 calls here.
+    await vi.advanceTimersByTimeAsync(250 * 4)
+    expect(calls()).toBe(4)
+    await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 4_000)
+    expect(seen).toEqual([['a.v1']])
+    expect(calls()).toBe(7)
+    cancel()
+  })
+
   it('stops retrying and dropping results once cancelled', async () => {
     const { client, calls } = makeClient([new Error('timeout'), ok(['a.v1'])])
     const seen: (readonly string[])[] = []

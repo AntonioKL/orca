@@ -566,6 +566,14 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
     decisionHandler(allowed ? .allow : .cancel)
   }
 
+  func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+    // The page can replace its own document (the route error boundary reloads on a failed chunk),
+    // and that is the only signal the shell gets. Every load start is reported so the shell can
+    // retire the outgoing page's grants before the new document initializes.
+    guard activeSessionId != nil else { return }
+    onLoadState(["state": "loading"])
+  }
+
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
     guard isAllowedDocumentUrl(webView.url) else { return }
     onLoadState(["state": "loaded"])
