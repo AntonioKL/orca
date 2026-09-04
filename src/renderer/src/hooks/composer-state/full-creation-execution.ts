@@ -32,7 +32,7 @@ import { useCallback } from 'react'
 import type { PendingSmartGitHubSubmitResolution } from './source-selection-decisions'
 import { translate } from '@/i18n/i18n'
 import { settleComposerSubmit } from '@/lib/composer-submit-cancellation'
-import { readWindowsCreationGateInputs } from '@/lib/agent-launch-routing-windows-gate'
+import { readWindowsProcessStartTimeGate } from '@/lib/agent-launch-routing-windows-gate'
 import { toFolderWorkspaceLinkedTask } from '@/components/sidebar/folder-workspace-composer-helpers'
 import { CLIENT_PLATFORM, ensureAgentStartupInTerminal } from '@/lib/new-workspace'
 import { createBrowserUuid } from '@/lib/browser-uuid'
@@ -141,8 +141,12 @@ export function useFullCreationExecution(input: FullCreationExecutionInput) {
         agent: tuiAgent,
         settings,
         executionHostId: selectedRepoExecutionHostId ?? 'local',
+        platform: CLIENT_PLATFORM,
         hostCapabilities: readLocalRuntimeCapabilities(),
-        ...readWindowsCreationGateInputs(CLIENT_PLATFORM),
+        windowsProcessStartTime: readWindowsProcessStartTimeGate(),
+        // The workspace has no store entry until after this decision, so the
+        // WSL-UNC check cannot run yet; it applies on the next launch.
+        worktreeUsesWslPath: false,
         workspaceKind: selectedRepoIsGit ? 'git-worktree' : 'folder',
         promptDelivery: startupPlan?.draftPrompt ? 'draft' : 'auto-submit',
         launchText: startupPlan?.draftPrompt ?? submitStartupPrompt,

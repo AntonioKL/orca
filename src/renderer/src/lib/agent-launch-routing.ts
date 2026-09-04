@@ -25,8 +25,7 @@ export type AgentLaunchRoutingInput = {
     | null
     | undefined
   executionHostId: string
-  /** Execution-host platform; null until a paired host answers status. */
-  executionHostPlatform: NodeJS.Platform | null
+  platform: NodeJS.Platform
   hostCapabilities: readonly string[]
   /** Whether the host PROVED its process table exposes creation times, which is
    *  what makes Windows PID ownership decidable. Required (not optional) so a
@@ -104,9 +103,8 @@ export function resolveAgentLaunchRoute(input: AgentLaunchRoutingInput): AgentLa
   // Windows structured ownership is safe only once the host proved it can read
   // process creation times; a WSL UNC workspace stays on the legacy terminal.
   const windowsStructuredAllowed =
-    input.executionHostPlatform !== null &&
-    (input.executionHostPlatform !== 'win32' ||
-      (input.windowsProcessStartTime === 'available' && !input.worktreeUsesWslPath))
+    input.platform !== 'win32' ||
+    (input.windowsProcessStartTime === 'available' && !input.worktreeUsesWslPath)
   const structuredSupported =
     input.agent === 'codex' &&
     input.promptDelivery !== 'draft' &&

@@ -98,8 +98,9 @@ export async function prepareDirectWorkItemAgentLaunch(args: {
       agent: effectiveAgent,
       settings: args.settings,
       executionHostId: getExecutionHostIdForWorktree(args.latestStore, args.worktreeId),
+      platform: CLIENT_PLATFORM,
       hostCapabilities: readLocalRuntimeCapabilities(),
-      ...readWindowsStructuredGateInputs(args.latestStore, args.worktreeId, CLIENT_PLATFORM),
+      ...readWindowsStructuredGateInputs(args.latestStore, args.worktreeId),
       workspaceKind: 'git-worktree',
       projectRuntime: getLocalProjectExecutionRuntimeContext(
         args.latestStore,

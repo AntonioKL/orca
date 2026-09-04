@@ -1,5 +1,5 @@
 import { buildAgentStartupPlan } from '@/lib/tui-agent-startup'
-import { readWindowsCreationGateInputs } from '@/lib/agent-launch-routing-windows-gate'
+import { readWindowsProcessStartTimeGate } from '@/lib/agent-launch-routing-windows-gate'
 import { tuiAgentToAgentKind } from '@/lib/telemetry'
 import { isTuiAgentEnabled } from '../../../shared/tui-agent-selection'
 import {
@@ -136,8 +136,12 @@ export function resolveDismissedOnboardingFolderAgentLaunch(args: {
     agent,
     settings: args.settings,
     executionHostId: args.executionHostId,
+    platform: getClientPlatform(),
     hostCapabilities: readLocalRuntimeCapabilities(),
-    ...readWindowsCreationGateInputs(getClientPlatform()),
+    windowsProcessStartTime: readWindowsProcessStartTimeGate(),
+    // The workspace has no store entry until after this decision, so the
+    // WSL-UNC check cannot run yet; it applies on the next launch.
+    worktreeUsesWslPath: false,
     workspaceKind: 'folder',
     nativeChatTranscriptIsLocalReadable: args.nativeChatTranscriptIsLocalReadable,
     requiresTuiLaunchCustomization: hasExplicitTuiLaunchCustomization(args.settings, agent),

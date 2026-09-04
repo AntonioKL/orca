@@ -70,10 +70,6 @@ vi.mock('@/runtime/runtime-rpc-client', () => ({
   callRuntimeRpc: vi.fn()
 }))
 
-vi.mock('@/lib/web-client-location', () => ({
-  isWebClientLocation: () => false
-}))
-
 vi.mock('@/lib/new-workspace', () => ({
   CLIENT_PLATFORM: 'win32',
   getWorkspaceIntentName: (args: {

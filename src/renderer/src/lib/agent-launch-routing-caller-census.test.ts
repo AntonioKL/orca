@@ -29,18 +29,6 @@ const ROUTE_POLICY_OWNERS = [
   'src/renderer/src/lib/onboarding-folder-agent-startup.ts'
 ]
 
-const NEW_WORKSPACE_ROUTE_PLATFORM_READERS = [
-  'src/renderer/src/components/sidebar/folder-workspace-composer-submit.ts',
-  'src/renderer/src/hooks/composer-state/full-creation-execution.ts',
-  'src/renderer/src/hooks/composer-state/quick-creation-execution.ts',
-  'src/renderer/src/lib/onboarding-folder-agent-startup.ts'
-]
-
-const STORED_WORKSPACE_ROUTE_PLATFORM_READERS = [
-  'src/renderer/src/lib/launch-agent-in-new-tab.ts',
-  'src/renderer/src/lib/launch-work-item-direct-route-preparation.ts'
-]
-
 async function productionFiles(): Promise<string[]> {
   return glob(['src/**/*.ts', 'src/**/*.tsx'], {
     cwd: REPO_ROOT,
@@ -67,19 +55,6 @@ describe('agent launch routing caller census', () => {
       )
       .sort()
     expect(owners).toEqual([...ROUTE_POLICY_OWNERS].sort())
-  })
-
-  it('sources every route platform from the execution host boundary', () => {
-    for (const file of NEW_WORKSPACE_ROUTE_PLATFORM_READERS) {
-      expect(readFileSync(join(REPO_ROOT, file), 'utf8')).toContain(
-        'readWindowsCreationGateInputs('
-      )
-    }
-    for (const file of STORED_WORKSPACE_ROUTE_PLATFORM_READERS) {
-      expect(readFileSync(join(REPO_ROOT, file), 'utf8')).toContain(
-        'readWindowsStructuredGateInputs('
-      )
-    }
   })
 
   it('keeps non-visible, resume, and floating launchers intentionally outside the route', () => {
