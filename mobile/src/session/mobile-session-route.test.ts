@@ -101,19 +101,26 @@ describe('mobile session route', () => {
     })
   })
 
-  it('routes the home Resume card through the hybrid navigation intent', () => {
+  it('routes the home Resume card through the coordinated host-target opener', () => {
     expect(resumeSource).toContain('Resume')
     expect(resumeSource).toContain('onOpenResume')
 
     const handlerStart = homeSource.indexOf('const openResume = useCallback(')
-    const handlerEnd = homeSource.indexOf('[data.router]', handlerStart)
+    const handlerEnd = homeSource.indexOf('[openMobileHostTarget]', handlerStart)
     expect(handlerStart).toBeGreaterThanOrEqual(0)
     expect(handlerEnd).toBeGreaterThan(handlerStart)
 
     const openResume = homeSource.slice(handlerStart, handlerEnd)
-    expect(openResume).toContain('navigateFromMobileHome({')
-    expect(openResume).toContain("target: { kind: 'workspaceList', notice: 'worktree-missing' }")
-    expect(openResume).toContain("target: { kind: 'session', hostWorkspaceId:")
+    // Why the opener and not a bare push: on a native build it drives the host stack through
+    // the mount-then-replace coordinator, which keeps the session screen from mounting blank.
+    expect(homeSource).toContain(
+      "import { useOpenMobileHostTarget } from '../mobile-web/use-open-mobile-host-target'"
+    )
+    expect(openResume).toContain(
+      "openMobileHostTarget(card.hostId, { kind: 'workspaceList', notice: 'worktree-missing' })"
+    )
+    expect(openResume).toContain("kind: 'session',")
+    expect(openResume).toContain('name: card.worktree.displayName || card.worktree.repo')
     expect(openResume).not.toContain('router.push(')
   })
 })

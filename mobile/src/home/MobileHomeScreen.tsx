@@ -8,7 +8,7 @@ import { getHostListActionSheetActions } from '../host-list-action-sheet-actions
 import { useResponsiveLayout } from '../layout/responsive-layout'
 import { triggerMediumImpact } from '../platform/haptics'
 import type { TaskProvider } from '../tasks/mobile-task-providers'
-import { navigateFromMobileHome } from '../mobile-web/mobile-web-home-navigation'
+import { useOpenMobileHostTarget } from '../mobile-web/use-open-mobile-host-target'
 import { colors } from '../theme/mobile-theme'
 import {
   useDisconnectHostClient,
@@ -34,6 +34,7 @@ export function MobileHomeScreen() {
   const insets = useSafeAreaInsets()
   const { isWideLayout, contentMaxWidth } = useResponsiveLayout()
   const openMobileHostEdit = useOpenMobileHostEdit()
+  const openMobileHostTarget = useOpenMobileHostTarget()
   const disconnectHostClient = useDisconnectHostClient()
   const forgetHostClient = useForgetHostClient()
   const forceReconnectHost = useForceReconnect()
@@ -52,44 +53,35 @@ export function MobileHomeScreen() {
           getProvenCachedWorktrees(card.hostId) as HomeWorktreeSummary[] | null
         )
       ) {
-        navigateFromMobileHome({
-          router: data.router,
-          hostId: card.hostId,
-          target: { kind: 'workspaceList', notice: 'worktree-missing' }
-        })
+        openMobileHostTarget(card.hostId, { kind: 'workspaceList', notice: 'worktree-missing' })
         return
       }
-      navigateFromMobileHome({
-        router: data.router,
-        hostId: card.hostId,
-        target: { kind: 'session', hostWorkspaceId: card.worktree.worktreeId }
+      openMobileHostTarget(card.hostId, {
+        kind: 'session',
+        hostWorkspaceId: card.worktree.worktreeId,
+        name: card.worktree.displayName || card.worktree.repo
       })
     },
-    [data.router]
+    [openMobileHostTarget]
   )
 
   const openMobileTasks = useCallback(
     (provider?: TaskProvider) => {
       if (data.primaryHost) {
-        navigateFromMobileHome({
-          router: data.router,
-          hostId: data.primaryHost.id,
-          target: provider ? { kind: 'tasks', taskSource: provider } : { kind: 'tasks' }
-        })
+        openMobileHostTarget(
+          data.primaryHost.id,
+          provider ? { kind: 'tasks', taskSource: provider } : { kind: 'tasks' }
+        )
       }
     },
-    [data.primaryHost, data.router]
+    [data.primaryHost, openMobileHostTarget]
   )
 
   const openMobileAccounts = useCallback(
     (hostId: string) => {
-      navigateFromMobileHome({
-        router: data.router,
-        hostId,
-        target: { kind: 'accounts' }
-      })
+      openMobileHostTarget(hostId, { kind: 'accounts' })
     },
-    [data.router]
+    [openMobileHostTarget]
   )
 
   function openHost(host: HostCatalogEntry): void {
@@ -100,11 +92,7 @@ export function MobileHomeScreen() {
         .then(data.setHostCatalog)
         .catch(() => Alert.alert('Could not check pairing', 'Please try again.'))
     } else {
-      navigateFromMobileHome({
-        router: data.router,
-        hostId: host.id,
-        target: { kind: 'workspaceList' }
-      })
+      openMobileHostTarget(host.id, { kind: 'workspaceList' })
     }
   }
 
@@ -153,13 +141,7 @@ export function MobileHomeScreen() {
               primaryHost={data.primaryHost}
               primaryTaskProviders={data.primaryTaskProviders}
               resumeCard={data.resumeCard}
-              onCreateWorkspace={(hostId) =>
-                navigateFromMobileHome({
-                  router: data.router,
-                  hostId,
-                  target: { kind: 'newWorkspace' }
-                })
-              }
+              onCreateWorkspace={(hostId) => openMobileHostTarget(hostId, { kind: 'newWorkspace' })}
               onOpenAccounts={openMobileAccounts}
               onOpenResume={openResume}
               onOpenTasks={openMobileTasks}

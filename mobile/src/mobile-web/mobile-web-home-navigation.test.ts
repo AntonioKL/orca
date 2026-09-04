@@ -3,6 +3,7 @@ import type { MobileWebNavigationIntent } from './mobile-web-navigation-intent-b
 import { MOBILE_WEB_NAVIGATION_INTENTS } from './mobile-web-navigation-intent-buffer'
 import {
   mobileHomeDestination,
+  mobileHomeHostStackTarget,
   mobileHostWorkspaceEntry,
   navigateFromMobileHome
 } from './mobile-web-home-navigation'
@@ -64,6 +65,102 @@ describe('mobile web Home navigation', () => {
     expect(
       mobileHomeDestination('host/key', { kind: 'workspaceList', notice: 'worktree-missing' }, true)
     ).toBe('/h/host%2Fkey?notice=worktree-missing')
+  })
+
+  it('coordinates the deep native routes instead of cold-pushing them', () => {
+    // Why this matters: a cold push straight to a nested host route resolves to the host
+    // index without the dynamic id, so HostProtocolGate mounts blank (#12001).
+    for (const target of [
+      { kind: 'session', hostWorkspaceId: 'repo::/workspace', name: 'Fix #1' },
+      { kind: 'tasks', taskSource: 'linear' },
+      { kind: 'accounts' }
+    ] as const) {
+      const router = { push: vi.fn() }
+      const openHostStackRoute = vi.fn()
+
+      navigateFromMobileHome({
+        router,
+        openHostStackRoute,
+        hostId: 'host/one',
+        target,
+        nativeBaselineEnabled: true
+      })
+
+      expect(router.push).not.toHaveBeenCalled()
+      expect(openHostStackRoute).toHaveBeenCalledWith(
+        'host/one',
+        mobileHomeHostStackTarget('host/one', target)
+      )
+    }
+  })
+
+  it('maps each deep intent onto its own host-stack screen, identities left raw', () => {
+    expect(
+      mobileHomeHostStackTarget('host/one', {
+        kind: 'session',
+        hostWorkspaceId: 'repo::/workspace',
+        name: 'Fix #1'
+      })
+    ).toEqual({
+      name: '[hostId]/session/[worktreeId]',
+      params: { hostId: 'host/one', worktreeId: 'repo::/workspace', name: 'Fix #1' }
+    })
+    expect(mobileHomeHostStackTarget('host/one', { kind: 'tasks', taskSource: 'linear' })).toEqual({
+      name: '[hostId]/tasks',
+      params: { hostId: 'host/one', taskSource: 'linear' }
+    })
+    expect(mobileHomeHostStackTarget('host/one', { kind: 'accounts' })).toEqual({
+      name: '[hostId]/accounts',
+      params: { hostId: 'host/one' }
+    })
+    // The host index itself needs no coordination — a plain push already resolves it.
+    expect(mobileHomeHostStackTarget('host/one', { kind: 'newWorkspace' })).toBeNull()
+    expect(
+      mobileHomeHostStackTarget('host/one', { kind: 'workspaceList', notice: 'worktree-missing' })
+    ).toBeNull()
+  })
+
+  it('keeps host-index intents and the whole hybrid build on a plain push', () => {
+    const nativeRouter = { push: vi.fn() }
+    const nativeOpen = vi.fn()
+    navigateFromMobileHome({
+      router: nativeRouter,
+      openHostStackRoute: nativeOpen,
+      hostId: 'host/one',
+      target: { kind: 'workspaceList', notice: 'worktree-missing' },
+      nativeBaselineEnabled: true
+    })
+    expect(nativeOpen).not.toHaveBeenCalled()
+    expect(nativeRouter.push).toHaveBeenCalledWith('/h/host%2Fone?notice=worktree-missing')
+
+    const hybridRouter = { push: vi.fn() }
+    const hybridOpen = vi.fn()
+    navigateFromMobileHome({
+      router: hybridRouter,
+      openHostStackRoute: hybridOpen,
+      hostId: 'host/one',
+      target: { kind: 'session', hostWorkspaceId: 'repo::/workspace' },
+      nativeBaselineEnabled: false
+    })
+    expect(hybridOpen).not.toHaveBeenCalled()
+    expect(hybridRouter.push).toHaveBeenCalledWith('/hybrid?hostId=host%2Fone')
+  })
+
+  it('publishes the intent for the hybrid page whichever build routes it', () => {
+    navigateFromMobileHome({
+      router: { push: vi.fn() },
+      openHostStackRoute: vi.fn(),
+      hostId: 'host-1',
+      target: { kind: 'accounts' },
+      source: 'notification',
+      nativeBaselineEnabled: true
+    })
+
+    expect(latestIntent).toMatchObject({
+      source: 'notification',
+      hostId: 'host-1',
+      target: { kind: 'accounts' }
+    })
   })
 })
 

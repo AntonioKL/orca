@@ -4,10 +4,18 @@ import type { HostRouteNotice } from '../host-route-notice'
 
 export type MobileWebNavigationIntentTarget =
   | { kind: 'workspaceList'; notice?: HostRouteNotice }
-  | { kind: 'session'; hostWorkspaceId: string }
+  | { kind: 'session'; hostWorkspaceId: string; name?: string }
   | { kind: 'tasks'; taskSource?: TaskProvider }
   | { kind: 'accounts' }
   | { kind: 'newWorkspace' }
+
+export function mobileWebIntentTargetForNotification(
+  target: NotificationNavigationTarget
+): MobileWebNavigationIntentTarget {
+  return target.kind === 'session'
+    ? { kind: 'session', hostWorkspaceId: target.hostWorkspaceId }
+    : { kind: 'workspaceList' }
+}
 
 export type MobileWebNavigationIntent = {
   sequence: number
@@ -29,9 +37,7 @@ export class MobileWebNavigationIntentBuffer {
   ): MobileWebNavigationIntent {
     return this.publishHostTarget(
       target.hostId,
-      target.kind === 'session'
-        ? { kind: 'session', hostWorkspaceId: target.hostWorkspaceId }
-        : { kind: 'workspaceList' },
+      mobileWebIntentTargetForNotification(target),
       source
     )
   }

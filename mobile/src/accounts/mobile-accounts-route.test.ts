@@ -86,15 +86,17 @@ describe('mobile accounts route', () => {
     })
   })
 
-  it('opens the home account-usage card through the hybrid navigation intent', () => {
+  it('opens the home account-usage card through the coordinated host-target opener', () => {
     const start = homeSource.indexOf('Account usage')
 
     // Assert the marker first: a renamed banner would otherwise slice garbage and report a
     // missing call instead of the real cause.
     expect(start).toBeGreaterThanOrEqual(0)
 
-    expect(homeSource).toContain('navigateFromMobileHome({')
-    expect(homeSource).toContain("target: { kind: 'accounts' }")
+    expect(homeSource).toContain(
+      "import { useOpenMobileHostTarget } from '../mobile-web/use-open-mobile-host-target'"
+    )
+    expect(homeSource).toContain("openMobileHostTarget(hostId, { kind: 'accounts' })")
     expect(homeSource).not.toContain('/accounts`')
   })
 })

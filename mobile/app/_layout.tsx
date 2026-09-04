@@ -12,7 +12,11 @@ import {
   LatestNotificationNavigationResolver,
   notificationCredentialRecoveryRoute
 } from '../src/notifications/notification-routing'
-import { MOBILE_WEB_NAVIGATION_INTENTS } from '../src/mobile-web/mobile-web-navigation-intent-buffer'
+import {
+  MOBILE_WEB_NAVIGATION_INTENTS,
+  mobileWebIntentTargetForNotification
+} from '../src/mobile-web/mobile-web-navigation-intent-buffer'
+import { useOpenMobileHostTarget } from '../src/mobile-web/use-open-mobile-host-target'
 import {
   loadMobileWebColdResumeRoute,
   mobileWebColdResumeStartupPath
@@ -25,10 +29,7 @@ import {
   MOBILE_HYBRID_ROUTE_RETIRED,
   MOBILE_NATIVE_BASELINE_MODE
 } from '../src/mobile-web/mobile-native-baseline-mode'
-import {
-  mobileHomeDestination,
-  mobileHostWorkspaceEntry
-} from '../src/mobile-web/mobile-web-home-navigation'
+import { mobileHostWorkspaceEntry } from '../src/mobile-web/mobile-web-home-navigation'
 import { loadHosts } from '../src/transport/host-store'
 import { extractPairingCodeFromUrl } from '../src/transport/pairing'
 import { recoverMobileRelayPairing } from '../src/transport/mobile-relay-pairing-recovery'
@@ -54,6 +55,7 @@ Notifications.setNotificationHandler({
 
 export default function RootLayout() {
   const router = useRouter()
+  const openMobileHostTarget = useOpenMobileHostTarget()
   const pathname = usePathname()
   const { hostId, notice } = useGlobalSearchParams<{ hostId?: string; notice?: string }>()
   const pathnameRef = useRef(pathname)
@@ -203,18 +205,16 @@ export default function RootLayout() {
           router.push(recoveryRoute)
           return
         }
-        MOBILE_WEB_NAVIGATION_INTENTS.publish(navigation.target)
-        if (pathnameRef.current !== '/hybrid') {
-          router.push(
-            mobileHomeDestination(
-              navigation.target.hostId,
-              navigation.target.kind === 'session'
-                ? { kind: 'session', hostWorkspaceId: navigation.target.hostWorkspaceId }
-                : { kind: 'workspaceList' },
-              MOBILE_NATIVE_BASELINE_MODE
-            )
-          )
+        // Why: the hybrid page is already mounted here — publishing is the whole navigation.
+        if (pathnameRef.current === '/hybrid') {
+          MOBILE_WEB_NAVIGATION_INTENTS.publish(navigation.target)
+          return
         }
+        openMobileHostTarget(
+          navigation.target.hostId,
+          mobileWebIntentTargetForNotification(navigation.target),
+          'notification'
+        )
       }
     }
 
@@ -230,7 +230,7 @@ export default function RootLayout() {
       disposed = true
       sub.remove()
     }
-  }, [router])
+  }, [openMobileHostTarget, router])
   // ─── End notification tap routing ───
 
   // Why: hide the native splash only once the navigation Stack has been laid
