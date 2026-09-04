@@ -24,7 +24,8 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | c7 `canary-apply` | **Succeeded.** Dispatched 06:07:15Z; drain 06:10Z; MIG recreate 06:16–06:23Z; new image listening 06:23:42Z; verify + trust proof passed; restored to `admission=general` 06:25:21Z; canary authority sealed. c7 is on `85bf6799…`. | run 33843071283 |
 | PR #18581 doc reconcile (Aug 23 figure: 2,200–3,000 raw log lines vs 1,510 on the gate metric) | **Merged** | https://github.com/stablyai/orca/pull/18581 |
 | Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
-| PR #18606 lock removal (root cause) | **Open** 08:57Z; Opus reviewed + fixed; 5/5 mutants; re-verification requested | https://github.com/stablyai/orca/pull/18606 |
+| PR #18606 lock removal (root cause) | **Merged** 09:2xZ as 7b108abf71 after review, fix, re-verify; CI green | https://github.com/stablyai/orca/pull/18606 |
+| Image publish for 7b108abf71 | Dispatched (see next row once digest resolves) | `cloud-publish-relay-production.yml` |
 | c7 on new image, 2 h in | 817 controls, **0 container die** since restore (was ~1 per 15 min on old image); `sqlLatencyMsMax` still 1.0 s = lock wait unchanged, which #18606 targets | |
 | Terraform alert `relay_postgres_retry_exhausted` at `> 0` | Firing continuously since #18521; recalibration not done (own change) | `cloud/infra/terraform/relay-observability.tf:447,469` |
 
@@ -32,6 +33,8 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 
 1. Merged PR #18569 to main (code/docs only).
 2. Merged PR #18580 and #18581 to main (monitor bar + docs).
+2b. Merged PR #18606 to main (relay lock change; no serving effect until the image is deployed).
+2c. Dispatched `cloud-publish-relay-production` for 7b108abf71 (builds and pushes an image; changes nothing serving).
 3. 2026-09-04 06:07:15Z: dispatched `cloud-deploy-relay-production-same-cap` `canary-apply` for production-gce-c7 only (run 33843071283). Completed successfully 06:26Z: c7 isolated, drained (807 controls re-dialed), template + MIG rolled to 85bf6799, verified, restored to general admission. Selector generation advanced 110 -> 112 (isolate + restore).
 4. Nothing else. Both monitor dispatches were `mode=dry-run` (read-only). The same-cap dispatch was `mode=verify` (read-only, confirmed by step gates `if: inputs.mode != 'verify'` on every mutating step).
 
