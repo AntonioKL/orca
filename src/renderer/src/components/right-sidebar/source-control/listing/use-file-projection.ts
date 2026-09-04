@@ -57,7 +57,7 @@ export type SourceControlFileProjection = {
   visibleListRowsBySection: Partial<
     Record<SourceControlDisplaySectionId, RenderableSubmoduleListItem[]>
   >
-  visibleBranchTreeRows: SourceControlTreeNode<GitBranchChangeEntry, 'branch'>[]
+  visibleBranchTreeRows: readonly SourceControlTreeNode<GitBranchChangeEntry, 'branch'>[]
   visibleSelectionEntries: FlatEntry[]
 }
 
@@ -76,7 +76,8 @@ const EMPTY_TREE_ROWS_BY_SECTION: Readonly<
 const EMPTY_LIST_ROWS_BY_SECTION: Readonly<
   Partial<Record<SourceControlDisplaySectionId, RenderableSubmoduleListItem[]>>
 > = Object.freeze({})
-const EMPTY_BRANCH_TREE_NODES: SourceControlTreeNode<GitBranchChangeEntry, 'branch'>[] = []
+const EMPTY_BRANCH_TREE_NODES: readonly SourceControlTreeNode<GitBranchChangeEntry, 'branch'>[] =
+  Object.freeze([])
 
 export function useSourceControlFileProjection({
   entries,
