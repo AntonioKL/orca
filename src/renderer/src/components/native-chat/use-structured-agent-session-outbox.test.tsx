@@ -106,6 +106,32 @@ describe('useStructuredAgentSessionOutbox', () => {
     )
   })
 
+  it('retains the session read from queueing until lifecycle settlement owns release', async () => {
+    const releasePendingTurn = vi.fn()
+    const retainPendingTurn = vi.fn()
+    mocks.call.mockResolvedValue(acceptedResult(1))
+    const view = renderHook(() =>
+      useStructuredAgentSessionOutbox({
+        sessionId: 'session-1',
+        target: LOCAL_TARGET,
+        fence: 1,
+        submissions: [],
+        releasePendingTurn,
+        retainPendingTurn
+      })
+    )
+
+    act(() => expect(view.result.current.send('hello')).toBe(true))
+
+    expect(retainPendingTurn).toHaveBeenCalledTimes(2)
+    expect(new Set(retainPendingTurn.mock.calls.flat()).size).toBe(1)
+    await waitFor(() => expect(view.result.current.outbox).toHaveLength(0))
+    expect(releasePendingTurn).not.toHaveBeenCalled()
+
+    view.unmount()
+    expect(releasePendingTurn).not.toHaveBeenCalled()
+  })
+
   it('requeues across a fence change and ignores the stale settlement', async () => {
     const first = deferred<ReturnType<typeof acceptedResult>>()
     const second = deferred<ReturnType<typeof acceptedResult>>()

@@ -16,6 +16,7 @@ import {
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import { callStructuredAgentSession } from '@/runtime/structured-agent-session-client'
 import { readOutbox, writeOutbox } from './structured-agent-session-outbox-storage'
+import { prepareStructuredAgentSessionOutboxRetry } from './structured-agent-session-outbox-retry'
 
 export function structuredSessionOperationId(): string {
   return createStructuredAgentSessionOperationId(() => crypto.randomUUID())
@@ -38,8 +39,10 @@ export function useStructuredAgentSessionOutbox(args: {
   target: RuntimeClientTarget
   fence: number | null
   submissions: readonly AgentJournalSubmission[]
+  releasePendingTurn?: (clientMessageId: string) => void
+  retainPendingTurn?: (clientMessageId: string) => void
 }) {
-  const { fence, sessionId, submissions, target } = args
+  const { fence, releasePendingTurn, retainPendingTurn, sessionId, submissions, target } = args
   const targetKey = target.kind === 'local' ? 'local' : `environment:${target.environmentId}`
   const [outbox, setOutbox] = useState<StructuredAgentSessionOutboxEntry[]>(() =>
     readOutbox(sessionId)
@@ -126,6 +129,7 @@ export function useStructuredAgentSessionOutbox(args: {
     }
     outboxRef.current = staged
     setOutbox(staged)
+    retainPendingTurn?.(next.clientMessageId)
     void callStructuredAgentSession<AgentSessionMutationResult<AgentSessionSendResult>>(
       target,
       'agentSession.send',
@@ -136,6 +140,7 @@ export function useStructuredAgentSessionOutbox(args: {
           return
         }
         if (!result.ok) {
+          releasePendingTurn?.(next.clientMessageId)
           setError(result.refusal.message)
           const updated = outboxRef.current.map((entry) =>
             entry.clientMessageId === next.clientMessageId
@@ -154,6 +159,7 @@ export function useStructuredAgentSessionOutbox(args: {
         }
         const submission = result.value.submission
         if (submission.dispatchState === 'rejected') {
+          releasePendingTurn?.(next.clientMessageId)
           blockedIdRef.current = next.clientMessageId
           setError(submission.reason ?? 'Message was not accepted')
         } else {
@@ -184,6 +190,7 @@ export function useStructuredAgentSessionOutbox(args: {
         }
         const failure = classifyStructuredAgentSessionSendFailure(caught, isDesktopDeliveryUnknown)
         if (failure === 'failed') {
+          releasePendingTurn?.(next.clientMessageId)
           blockedIdRef.current = next.clientMessageId
         }
         const updated = outboxRef.current.map((entry) =>
@@ -207,7 +214,7 @@ export function useStructuredAgentSessionOutbox(args: {
           dispatchingRef.current = false
         }
       })
-  }, [fence, outbox, sessionId, target])
+  }, [fence, outbox, releasePendingTurn, retainPendingTurn, sessionId, target])
 
   // A transport-side unknown may never have reached the host, and nothing else
   // moves it out of `unconfirmed`, so one wedges the whole FIFO queue. Re-issuing
@@ -270,61 +277,31 @@ export function useStructuredAgentSessionOutbox(args: {
       outboxRef.current = next
       setOutbox(next)
       setError(null)
+      retainPendingTurn?.(entry.clientMessageId)
       return true
     },
-    [sessionId]
+    [retainPendingTurn, sessionId]
   )
 
   const retry = (clientMessageId: string): void => {
     blockedIdRef.current = null
     setError(null)
-    const submission = submissions.find(
-      (candidate) => candidate.clientMessageId === clientMessageId
-    )
-    const current = outboxRef.current.find((entry) => entry.clientMessageId === clientMessageId)
-    // A provider-history reconciliation can settle an earlier unknown as
-    // rejected before the user presses Retry. Reusing that operation id only
-    // replays the settled rejection forever, so rotate the id for a safe resend.
-    if (current && submission?.dispatchState === 'rejected') {
-      const rotated = outboxRef.current.map((entry) =>
-        entry.clientMessageId === clientMessageId
-          ? {
-              ...entry,
-              clientMessageId: structuredSessionOperationId(),
-              state: 'queued' as const,
-              retryAfterUnknownSubmittedAt: null
-            }
-          : entry
-      )
-      if (!writeOutbox(sessionId, rotated)) {
-        setError('Message could not be saved to the outbox')
-        return
-      }
-      outboxRef.current = rotated
-      setOutbox(rotated)
-      return
-    }
-    const retryAfterUnknownSubmittedAt =
-      submission?.dispatchState === 'unknown'
-        ? submission.submittedAt
-        : current?.state === 'unconfirmed'
-          ? -1
-          : null
-    const next = outboxRef.current.map((entry) =>
-      entry.clientMessageId === clientMessageId
-        ? {
-            ...entry,
-            state: 'queued' as const,
-            retryAfterUnknownSubmittedAt
-          }
-        : entry
-    )
-    if (!writeOutbox(sessionId, next)) {
+    const prepared = prepareStructuredAgentSessionOutboxRetry({
+      clientMessageId,
+      createOperationId: structuredSessionOperationId,
+      entries: outboxRef.current,
+      submissions
+    })
+    if (!writeOutbox(sessionId, prepared.entries)) {
       setError('Message could not be saved to the outbox')
       return
     }
-    outboxRef.current = next
-    setOutbox(next)
+    outboxRef.current = prepared.entries
+    setOutbox(prepared.entries)
+    if (prepared.nextClientMessageId !== clientMessageId) {
+      releasePendingTurn?.(clientMessageId)
+    }
+    retainPendingTurn?.(prepared.nextClientMessageId)
   }
   return { outbox, error, blockedClientMessageId: blockedIdRef.current, send, retry }
 }

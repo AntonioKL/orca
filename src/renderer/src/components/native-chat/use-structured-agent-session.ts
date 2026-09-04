@@ -48,11 +48,8 @@ export function useStructuredAgentSession(args: {
     surface: 'desktop-chat',
     enabled: isVisible
   })
-  const { state, loadingOlder, loadOlder } = useStructuredAgentSessionRead({
-    sessionId,
-    target,
-    isVisible
-  })
+  const { state, loadingOlder, loadOlder, releasePendingTurn, retainPendingTurn } =
+    useStructuredAgentSessionRead({ sessionId, target, isVisible })
   const stateRef = useRef(state)
   const [writeError, setWriteError] = useState<string | null>(null)
   const operationIds = useRef(new Map<string, string>())
@@ -65,7 +62,9 @@ export function useStructuredAgentSession(args: {
     sessionId,
     target,
     fence: state.fence,
-    submissions: state.submissions
+    submissions: state.submissions,
+    releasePendingTurn,
+    retainPendingTurn
   })
 
   useEffect(() => {

@@ -15,6 +15,7 @@ import {
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import { callStructuredAgentSession } from '@/runtime/structured-agent-session-client'
 import { NATIVE_CHAT_INITIAL_LIMIT } from './native-chat-pagination'
+import { createStructuredAgentSessionPendingTurnRetentions } from './structured-agent-session-pending-turn-retentions'
 import { startStructuredAgentSessionReadTransport } from './structured-agent-session-read-transport'
 
 export type StructuredAgentSessionReadSnapshot = {
@@ -29,6 +30,8 @@ export type StructuredAgentSessionReadOwner = {
   getSnapshot: () => StructuredAgentSessionReadSnapshot
   loadOlder: () => Promise<void>
   refresh: () => void
+  releasePendingTurn: (clientMessageId: string) => void
+  retainPendingTurn: (clientMessageId: string) => void
   subscribe: (listener: () => void) => () => void
 }
 
@@ -58,6 +61,9 @@ function createReadOwner(
   let captureActiveHistoryReadGuard = (): (() => boolean) => retiredHistoryRead
   const activations = new Set<symbol>()
   const listeners = new Set<() => void>()
+  const pendingTurnRetentions = createStructuredAgentSessionPendingTurnRetentions(
+    () => snapshot.state
+  )
 
   const emit = (): void => {
     for (const listener of listeners) {
@@ -70,6 +76,7 @@ function createReadOwner(
     }
     snapshot = next
     emit()
+    pendingTurnRetentions.observe()
   }
   const apply = (action: StructuredAgentSessionAction): void => {
     const state = reduceStructuredAgentSession(snapshot.state, action)
@@ -178,7 +185,17 @@ function createReadOwner(
   }
 
   let owner: StructuredAgentSessionReadOwner
+  let releasingUnusedRetentions = false
   const deleteIfUnused = (): void => {
+    if (
+      listeners.size === 0 &&
+      pendingTurnRetentions.hasRetentions() &&
+      !releasingUnusedRetentions
+    ) {
+      releasingUnusedRetentions = true
+      pendingTurnRetentions.dispose()
+      releasingUnusedRetentions = false
+    }
     if (activations.size === 0 && listeners.size === 0 && owners.get(key) === owner) {
       owners.delete(key)
     }
@@ -190,6 +207,7 @@ function createReadOwner(
       if (activations.size === 1) {
         start()
       }
+      pendingTurnRetentions.releaseObservedTurn()
       return () => {
         activations.delete(token)
         if (activations.size === 0) {
@@ -199,6 +217,7 @@ function createReadOwner(
       }
     },
     dispose: () => {
+      pendingTurnRetentions.dispose()
       activations.clear()
       listeners.clear()
       stopActiveRun?.()
@@ -240,6 +259,9 @@ function createReadOwner(
       }
     },
     refresh: () => refreshActiveRun(),
+    releasePendingTurn: pendingTurnRetentions.release,
+    retainPendingTurn: (clientMessageId) =>
+      pendingTurnRetentions.retain(clientMessageId, owner.activate),
     subscribe: (listener) => {
       listeners.add(listener)
       return () => {
