@@ -125,6 +125,44 @@ describe('PtyHandler', () => {
     expect(hasChildren).toHaveBeenLastCalledWith(mockPtyInstance.pid, { fresh: true })
   })
 
+  it('does not re-enter the shared capture after the evidence read gave up on it', async () => {
+    // The budget is worthless if the compatibility fields answer by joining the very capture the
+    // evidence read just abandoned: `processHasChildren` and `getForegroundProcessName` read the
+    // same TTL-shared table with no budget of their own, so on a slow host this call would still
+    // block for the whole capture -- once, and then once per managed PTY in the listing.
+    const snapshot = vi
+      .spyOn(processTableSnapshotReader, 'getStrictProcessTableSnapshotWithAge')
+      .mockRejectedValue(new Error('process table unreadable: capture_over_budget'))
+    const hasChildren = vi.spyOn(ptyShellUtils, 'processHasChildren')
+    const foregroundName = vi.spyOn(ptyShellUtils, 'getForegroundProcessName')
+
+    const { id } = (await spawnPty({ cols: 80, rows: 24 })) as { id: string }
+    hasChildren.mockClear()
+    foregroundName.mockClear()
+
+    const inspection = (await dispatcher.callRequest('pty.inspectProcess', { id })) as {
+      hasChildProcesses: boolean
+      foregroundProcessEvidence?: { verdict: string; reason?: string }
+    }
+
+    expect(snapshot).toHaveBeenCalled()
+    expect(hasChildren).not.toHaveBeenCalled()
+    // The verdict the gates already handle, reached promptly instead of late.
+    expect(inspection.foregroundProcessEvidence?.verdict).toBe('unverifiable')
+    expect(inspection.foregroundProcessEvidence?.reason).toBe('process_table_unreadable')
+    // `false` is what the child probe itself answers for an unreadable table; this is that same
+    // degraded answer without the wait, not a new claim about the pane.
+    expect(inspection.hasChildProcesses).toBe(false)
+
+    const listing = (await dispatcher.callRequest('pty.listProcesses', {})) as {
+      id: string
+      title: string
+    }[]
+
+    expect(foregroundName).not.toHaveBeenCalled()
+    expect(listing.find((entry) => entry.id === id)?.title).toBeTruthy()
+  })
+
   it('rejects strict process inspection for a missing relay PTY', async () => {
     await expect(dispatcher.callRequest('pty.inspectProcess', { id: 'missing' })).rejects.toThrow(
       'terminal_gone'

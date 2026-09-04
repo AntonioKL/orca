@@ -2661,6 +2661,9 @@ export class PtyHandler {
       }
     }
     let rows: readonly ProcessTableRow[] | null = null
+    // Set only when the budgeted evidence read gave up, so the compatibility fields below do not
+    // turn around and ask the same unreadable table again with no budget at all.
+    let tableUnavailable = false
     let evidence: RemoteForegroundEvidence | undefined
     if (process.platform === 'win32') {
       // Why SSH-to-Windows is always unverifiable: POSIX has a real foreground primitive
@@ -2699,6 +2702,7 @@ export class PtyHandler {
           rows
         )
       } catch {
+        tableUnavailable = true
         evidence = {
           authorityGeneration: this.ptyIdMintEpoch,
           observationEpoch: ++this.foregroundEvidenceEpoch,
@@ -2721,9 +2725,19 @@ export class PtyHandler {
       // Derive child liveness from the same capture; do not fork a second
       // process-table probe for each field/pane in an event burst. Windows
       // has no evidence capture, so preserve the compatibility child probe.
+      //
+      // Why the middle branch: `processHasChildren` reads the same shared capture with no budget
+      // of its own, so on a host slow enough to blow the evidence budget it would join the very
+      // capture this call just abandoned and block for all of it -- spending the whole latency
+      // the budget exists to avoid, on a compatibility field. `false` is what that helper already
+      // answers for an unreadable table, so this is the existing degraded answer reached promptly
+      // rather than a new one. The destructive gate is the separate `pty.hasChildProcesses` RPC,
+      // which keeps its unbudgeted fresh probe.
       hasChildProcesses: rows
         ? rows.some((row) => row.ppid === managed.pty.pid)
-        : await processHasChildren(managed.pty.pid),
+        : tableUnavailable
+          ? false
+          : await processHasChildren(managed.pty.pid),
       ...(evidence ? { foregroundProcessEvidence: evidence } : {})
     }
   }
@@ -2742,6 +2756,10 @@ export class PtyHandler {
     // process-table work on the host.
     const includeForegroundProcessEvidence = params.includeForegroundProcessEvidence !== false
     let evidenceRows: readonly ProcessTableRow[] | null = null
+    // Same reason as `inspectProcess`: once the budgeted read has given up, the per-PTY title
+    // fallback below must not re-enter the same capture without a budget -- and here it would do
+    // so once per managed PTY.
+    let evidenceTableUnavailable = false
     let evidenceResults: BatchedForegroundProcessResult[] = []
     const evidenceEpoch = ++this.foregroundEvidenceEpoch
     // Worst-case capture time for the snapshot below, not the instant its await settled: the
@@ -2767,6 +2785,7 @@ export class PtyHandler {
       } catch {
         // An unreadable capture is represented as unverifiable evidence below;
         // existing inventory fields remain available for old clients.
+        evidenceTableUnavailable = true
       }
     }
     for (const [entryIndex, [id, managed]] of managedEntries.entries()) {
@@ -2781,7 +2800,7 @@ export class PtyHandler {
       const title =
         (evidenceRows
           ? (evidenceResults[entryIndex]?.processName ?? managed.pty.process ?? null)
-          : includeForegroundProcessEvidence
+          : includeForegroundProcessEvidence && !evidenceTableUnavailable
             ? await getForegroundProcessName(managed.pty.pid, managed.pty.process || null)
             : managed.pty.process || null) || 'shell'
       const foregroundProcessEvidence =
