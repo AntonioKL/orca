@@ -5,32 +5,38 @@ import { listProcessesWithHostScopeFromRuntimeController } from './inventory-ope
 import type { PtyRuntimeControllerDeps } from './controller-deps'
 
 /**
- * `hostScopeCensusIsComplete` treats a `runtime:` host in `omittedHostIds` as disclosure rather
- * than a gap, on the strength of one fact about this process: it has no paired-runtime PTY
- * provider, so it never queried that host and never owed it coverage.
+ * `hostScopeCensusIsComplete` discounts a `runtime:` host in `omittedHostIds` on the strength of
+ * one fact about this process: it has no paired-runtime PTY provider, so it never queried that
+ * host and never owed it coverage. This file pins the producer side of that fact.
  *
- * That fact is asserted at the client, about the host, which is exactly the kind of assumption
- * that rots silently. The consolidation moving the SSH path onto `orcad` is the change most
- * likely to introduce a runtime-backed PTY provider — at which point a runtime host really could
- * answer an inventory, `hostScopeCensusIsComplete` would start calling a genuine gap complete,
- * and nothing downstream would say so. Break here instead, at the source of the invariant.
+ * What it catches: a new branch here that spells a queried host `runtime:`. Every id this
+ * function emits is built by `toSshExecutionHostId` or is `LOCAL_EXECUTION_HOST_ID`, so a third
+ * shape is the observable form of "a runtime host can now answer an inventory" — at which point
+ * the client predicate would start calling a genuine gap complete.
+ *
+ * What it does NOT catch, so do not lean on it: a runtime-backed transport registered under an
+ * SSH connection id still reports as `ssh:` and passes, which is fine — the predicate only
+ * discounts the `runtime:` spelling. The consolidation moving the SSH path onto orcad is expected
+ * to look exactly like that. The other route into `queriedHostIds` is separately fenced to
+ * `kind === 'ssh'` in `orca-runtime-refresh-pty-worktree-records-with-controller-inventory.ts`.
  */
 describe('the hosts a PTY inventory can report having queried', () => {
   afterEach(() => {
     sshProviders.clear()
   })
 
-  it('never names a paired-runtime host, which is what lets the scope gate discount one', async () => {
+  it('emits only local and ssh spellings, never a paired-runtime one', async () => {
     const listProcesses = vi.fn(async () => [])
     sshProviders.set('box-1', { listProcesses } as never)
-    sshProviders.set('box-2', { listProcesses } as never)
+    // A connection id shaped like an environment uuid still has to come back `ssh:`; the spelling
+    // is what the gate keys on, so a `runtime:` id appearing here is the breakage that matters.
+    sshProviders.set('a2478221-1d5c-4603-b8bf-b6b728eac9df', { listProcesses } as never)
 
     const { hostIds } = await listProcessesWithHostScopeFromRuntimeController({
       runtime: null
     } as unknown as PtyRuntimeControllerDeps)
 
-    expect(hostIds.length).toBeGreaterThan(0)
-    expect(hostIds.map((hostId) => parseExecutionHostId(hostId)?.kind)).not.toContain('runtime')
+    expect(hostIds).toContain('ssh:a2478221-1d5c-4603-b8bf-b6b728eac9df')
     expect(new Set(hostIds.map((hostId) => parseExecutionHostId(hostId)?.kind))).toEqual(
       new Set(['local', 'ssh'])
     )
