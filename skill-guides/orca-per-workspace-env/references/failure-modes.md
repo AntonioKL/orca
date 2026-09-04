@@ -1,13 +1,12 @@
 # Failure modes
 
-Load this when a doctor, provision, clone, login, or snapshot step failed. Each entry maps an
-observed signal to its cause. The rule that prevents it sits in the guide beside the action it
-protects, or in the provider reference for that route.
+Load this when a doctor, provision, clone, login, or snapshot step failed. Each entry maps a
+symptom to its cause; the rule that prevents it lives in the guide next to the step.
 
 ## Reading a failed `--provision` result
 
-The JSON result carries a `provisionTranscript` with the complete captured output of each stage, so
-you can diagnose without asking the user to relay logs:
+The JSON result carries a `provisionTranscript` with each stage's captured output, so you can
+diagnose without asking the user for logs:
 
 ```json
 {
@@ -20,8 +19,7 @@ you can diagnose without asking the user to relay logs:
 }
 ```
 
-Each stream is redacted and capped at both ends, so a large log keeps the setup context and the
-failure. Two common reads:
+Streams are redacted and capped at both ends, keeping the start and the failure. Two common reads:
 
 - A non-empty `stderr` with `exitCode 0` plus a `parseError` means `create` ran but printed something
   other than the single recipe-result JSON object on stdout. The offending stdout is in the

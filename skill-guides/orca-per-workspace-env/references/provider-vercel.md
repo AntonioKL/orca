@@ -1,9 +1,9 @@
 # Worked example — Vercel Sandbox
 
-Load this when you are writing the base-snapshot, auth, or per-workspace `create` script for a
-snapshot-capable cloud provider. It grounds the generic skeletons in section 7 of the guide with a
-real provider surface: `vercel sandbox create|exec|snapshot|remove`. Adapt the names, and verify the
-flags against `vercel sandbox --help` for the user's CLI version before relying on them.
+Load this when writing the base-snapshot, auth, or `create` script for a snapshot-capable cloud
+provider. It fills section 7's skeletons with a real surface, `vercel sandbox
+create|exec|snapshot|remove`. Adapt the names and verify every flag against
+`vercel sandbox --help` for the user's CLI version.
 
 This is the Orca-server connection mode: the recipe emits a pairing URL. If the user chose SSH in
 the interview, use `references/ssh-host.md` instead.
@@ -38,9 +38,8 @@ vercel sandbox create --name "$auth" --snapshot "$snapshot_id" --timeout 30m --p
 vercel sandbox exec --interactive --tty "$auth" "${vercel_args[@]}" -- bash -lc 'codex login --device-auth'
 ```
 
-Verify by exit code. The remote command turns the status command's exit code into a sentinel because
-a provider CLI does not necessarily propagate a remote exit code, and the check is a plain command
-with no pipeline, so `set -o pipefail` cannot turn a successful login into a failure:
+Verify by exit code. The remote command prints a sentinel instead of relying on the exit code,
+because a provider CLI may not propagate remote exit codes:
 
 ```bash
 verdict="$(vercel sandbox exec "$auth" "${vercel_args[@]}" --timeout 30s \
@@ -51,10 +50,9 @@ case "$verdict" in
 esac
 ```
 
-Fallback, for an agent CLI whose `status` verb does not signal auth through its exit code. Capture
-the output with stderr folded in, then match the exact success line the agent prints. The match runs
-against a shell variable rather than through a pipe, so no upstream provider process can take
-SIGPIPE:
+Fallback for an agent whose `status` exit code says nothing about auth: capture the output with
+stderr folded in and match the agent's exact success line. Match a variable, not a pipe, so the
+provider process cannot take SIGPIPE:
 
 ```bash
 status="$(vercel sandbox exec "$auth" "${vercel_args[@]}" --timeout 30s -- bash -lc 'codex login status 2>&1')"

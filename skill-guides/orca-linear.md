@@ -10,30 +10,27 @@ description: >-
 
 # Orca Linear
 
-**Result:** either the current ticket's context loaded before you plan, or a Linear ticket
-whose state, attachments, and comments reflect the work just done.
+**Result:** the current ticket's context loaded before you plan, or a ticket whose state,
+attachments, and comments reflect the work just done.
 
-**Done:** each branch you entered ended in its own stated outcome.
+**Done:** the branch you took reached its outcome.
 
-- Read: you have the issue's current state, its comments, and its `inlineMedia`, and you say
-  which of them you actually used.
+- Read: you have the issue's state, comments, and `inlineMedia`, and you say which you used.
 - Complete: the PR/MR link is attached, exactly one completion comment is posted, and status
-  is either moved or left unchanged with the reason named in that comment.
+  is moved or left unchanged with the reason in that comment.
 - Move status: the target state was named by the user or resolved deterministically, and the
-  move was non-regressive.
-- Search: you report the matching issues and the value of `truncated` you checked before
-  quoting a count.
+  move does not regress the ticket.
+- Search: you report the matches and the `truncated` value you checked before quoting a count.
 - Follow-up: the parented issue exists and you report its identifier.
 
-**Safe failure:** stop and report the uncertainty to the user when a write stays unconfirmed
-after its one retry or read-back, when the target state is ambiguous, or when the installed
-CLI disagrees with this guide. Leave Linear state unchanged rather than guessing.
+**Safe failure:** when a write is still unconfirmed after its one retry or read-back, the target
+state is ambiguous, or the installed CLI disagrees with this guide, stop and report. Leave Linear
+unchanged rather than guess.
 
 Use `ORCA linear` when Linear is the source of task context or ticket updates.
 
-`ORCA` is a placeholder for the executable you used to run `skills get`. Replace it in every
-example below before running the command; do not create a shell variable or run `ORCA`
-literally.
+`ORCA` is a placeholder for the executable you used to run `skills get`. Substitute it before
+running; do not make a shell variable or run `ORCA` literally.
 
 `orca-linear` and `linear-tickets` are skill names, not CLI namespaces. Always run
 `ORCA linear ...` commands.
@@ -54,9 +51,8 @@ ORCA open --json
 ORCA status --json
 ```
 
-`ORCA linear --help` is the authority on the available command surface, and each verb's own
-`--help` prints its usage string. If the installed CLI help disagrees with this skill, trust
-the help output and tell the user the skill guidance may be stale.
+`ORCA linear --help` and each verb's `--help` are the authority on the command surface. Where
+they disagree with this guide, trust them and tell the user the guide may be stale.
 
 ## Read First
 
@@ -175,11 +171,11 @@ Include a concise repro, expected behavior, actual behavior, and any useful file
 
 ## Unconfirmed Writes
 
-Writes are single-attempt. On `linear_write_unconfirmed`, act on the error's own payload, never on the verb name. Every write verb can return this code, so the payload is the only discriminator.
+Writes are single-attempt. Any write verb can return `linear_write_unconfirmed`; what to do next is in the error payload, not the verb name.
 
-If `error.data.writeId` is present, the write is replayable. Retry exactly once with the pinned command in `error.data.nextSteps`, supplying the same body, URL, and title, and keeping the explicit issue and parent identifiers the pinned command carries. Never replace the pinned explicit target with `--current` or `--parent-current` on a retry. Never reuse a `writeId` from a different command's error.
+With `error.data.writeId`, the write is replayable: retry exactly once with the command in `error.data.nextSteps`, same body, URL, and title, keeping the explicit issue and parent ids it carries. Do not swap them for `--current` or `--parent-current`, and never reuse a `writeId` from another command's error.
 
-If there is no `writeId`, the write is not replayable. Run the read command in `error.data.nextSteps` and inspect the returned issue:
+Without a `writeId`, read back first with the command in `error.data.nextSteps`:
 
 ```bash
 ORCA linear issue <id> --workspace <workspaceId> --json

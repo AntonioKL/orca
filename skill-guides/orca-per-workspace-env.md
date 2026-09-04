@@ -20,35 +20,32 @@ registered checkout, offers the recipe as a "Run on" target, and runs
 `create`/`suspend`/`resume`/`destroy` against it.
 
 **Done:** `ORCA vm recipe doctor <recipe-id> --repo-path <repo> --provision --json` returns
-`ok: true` with no check at status `warn` (a `warn` leaves `ok` true, so read the checks), and
-the recipe is on the project's primary branch. Only the user can defer that placement, and only
-by saying so.
+`ok: true` with no check at `warn` (a `warn` keeps `ok` true, so read the checks), and the recipe
+is on the project's primary branch. Only the user can defer that, and only by saying so.
 
 **Safe failure:** stop and report the provider's own error text and the command that produced it.
-Never replace a provider error with a generic message, and never leave a paid resource running.
+Never paraphrase a provider error, and never leave a paid resource running.
 
-`ORCA` is a placeholder for the executable you used to run `skills get`. Substitute it before
-running anything; do not create a shell variable or run `ORCA` literally. The placeholder does
-not apply inside the lifecycle scripts: a command such as `orca serve` written there executes on
-the remote machine with that machine's own binary.
+`ORCA` in every example is the executable you used to run `skills get`. Substitute it before
+running; do not make a shell variable or run `ORCA` literally. Inside the lifecycle scripts the
+placeholder does not apply: `orca serve` written there runs on the remote machine's own binary.
 
 ## Autonomy envelope
 
-Invoking this workflow authorizes, without asking again: reading the repo and its `orca.yaml`,
-detecting provider CLIs and their login state, scaffolding and editing files under
-`scripts/orca-vm/`, and running `ORCA vm recipe doctor` without `--provision`. Stop and get an
-explicit OK before anything that provisions a paid resource. The paid steps are the base snapshot,
-the auth snapshot, and `--provision`. One OK covers the whole `--provision` fix-and-rerun loop, so
-do not re-ask per iteration. Stop for the interactive agent login, which you cannot drive: the user runs
-it and tells you when it finished. Never create an Orca workspace except for the step-10 test the user asked for. Never commit,
-choose a plan or region, invent a scope, project, or billing id, or write a credential into a script, `userData`, the state
-file, or a commit.
+Without asking again you may read the repo and its `orca.yaml`, detect provider CLIs and their
+login state, scaffold and edit files under `scripts/orca-vm/`, and run `ORCA vm recipe doctor`
+without `--provision`. Get an explicit OK before each paid step: the base snapshot, the auth
+snapshot, and `--provision`. One OK covers the whole `--provision` fix-and-rerun loop. Stop for
+the interactive agent login, which you cannot drive; the user runs it and tells you when it is
+done. Never create an Orca workspace except for the step-10 test the user asked for. Never
+commit, choose a plan or region, invent a scope, project, or billing id, or write a credential
+into a script, `userData`, the state file, or a commit.
 
 ## The branch that shapes everything
 
 In **Orca-server** mode `create` runs `orca serve` in the environment and emits a `pairingCode`. In
-**SSH** mode `create` runs no server and emits a `connection.type:"ssh"` block that Orca dials into.
-Settle this first: it changes the `create` output shape and half the templates.
+**SSH** mode `create` runs no server and emits a `connection.type:"ssh"` block Orca dials into.
+Settle this first; it changes the `create` output and half the templates.
 
 Keep Orca's checkout behavior unchanged by default: omit `checkoutMode`, emit schema version 1, and
 let Orca create a linked worktree. Use `checkoutMode: provisioned-root` only when the user
@@ -58,11 +55,9 @@ version 2.
 
 ## 1. Setup workflow
 
-Drive these with the user. Three setup phases run before the per-workspace recipe can run and their
-order is invariant: the base snapshot (step 5) is what the auth snapshot (step 6) boots from, and
-`create` boots from the authenticated snapshot the two of them produce. A **[CHECKPOINT]** label
-marks a step the autonomy envelope above stops for. The envelope is the rule; the label only
-points at it.
+Drive these with the user. The order is fixed: the auth snapshot (step 6) boots from the base
+snapshot (step 5), and `create` boots from the authenticated snapshot they produce. A
+**[CHECKPOINT]** label marks a step the autonomy envelope stops for.
 
 1. **Inspect the repo** for an existing `environmentRecipes` entry, `scripts/orca-vm/`, a state
    file, or setup notes. If a working recipe already exists, go straight to the doctor loop below
@@ -89,10 +84,9 @@ points at it.
 5. **[CHECKPOINT] Build the base snapshot** (section 3). Paid and slow.
 6. **[CHECKPOINT] Authenticate the agent** (section 4). Interactive; the user follows a URL and code.
 7. **Wire the recipe** so `orca.yaml` points create, suspend, resume, and destroy at the scripts.
-   Tell the user up front that the composer reads `environmentRecipes` from the project's primary
-   checkout, so a recipe that exists only on a branch or in a worktree never appears as a "Run on"
-   option. The doctor and `--provision` validate the scripts from the working copy on any branch;
-   the picker needs the `orca.yaml` change on the primary branch.
+   Tell the user up front: the composer reads `environmentRecipes` from the primary checkout, so
+   a recipe that lives only on a branch never appears as a "Run on" option. The doctor works on
+   any branch; the picker needs `orca.yaml` on the primary branch.
 8. **Dry-run the doctor** — free and static.
 9. **[CHECKPOINT] Live self-test** — run the `--provision` loop until it passes.
 10. **[CHECKPOINT] Optional workspace test** — only if asked: create a workspace via the picker,
@@ -100,8 +94,8 @@ points at it.
 
 ## 2. Prerequisites
 
-These are the user's responsibility. Verify what is verifiable, ask for the rest, invent nothing,
-and state which items you verified against which the user asserted.
+These are the user's responsibility. Verify what you can, ask for the rest, invent nothing, and
+say which items you verified and which the user asserted.
 
 - **Cloud account and plan** that allows sandboxes or VMs. Ask.
 - **Provider CLI installed and authenticated** — detect with `command -v <cli>` and check auth (for
@@ -156,22 +150,21 @@ ephemeral. Authenticate once and bake it into a second snapshot layer.
 4. Re-snapshot, parse the new id, overwrite `snapshotId` in state with the authenticated image, and
    record `authSourceSnapshotId`. Remove the auth environment.
 
-Authenticate inside the disposable runtime and snapshot that layer. Do not bind-mount or copy a host
-agent home such as `~/.codex` as the auth snapshot: it carries sqlite state, hook approvals, caches,
-and host-specific config that break in the runtime. If the agent's credentials are short-lived, tell
-the user the snapshot needs periodic re-auth.
+Authenticate inside the runtime and snapshot that layer. Do not bind-mount or copy a host agent
+home such as `~/.codex`: its sqlite state, hook approvals, caches, and host-specific config break
+in the runtime. If the agent's credentials are short-lived, tell the user the snapshot needs
+periodic re-auth.
 
-You cannot drive step 2: you run commands non-interactively, so there is no TTY for `docker exec -it`
-or `ssh -t` to prompt against. The user runs the login in their own terminal, and you cannot observe
-it finishing, so ask them to report back before you verify and re-snapshot.
+You cannot drive step 2. You have no TTY for `docker exec -it` or `ssh -t`, so the user runs the
+login in their own terminal and tells you when it finished. Verify and re-snapshot after that.
 
 > Harness adapter: in Claude Code the user can run that login in the session itself with the bang
 > prefix, `! <cmd>`, including the required space after `!`. Other harnesses have no such
 > affordance; the portable rule is that the user runs it wherever they have a terminal.
 
-This layer inherits section 3's rule. If you started `orca serve` on the base or auth machine to
-smoke-test it, delete the runtime's user-data directory before re-snapshotting, or every workspace
-booted from this image shares one pairing identity and one `agent-session-authority.key`.
+Section 3's rule still applies: if you ran `orca serve` on this machine to smoke-test it, delete
+the runtime's user-data directory before re-snapshotting, or every workspace from this image
+shares one pairing identity.
 
 ## 5. Credentials
 
@@ -211,16 +204,15 @@ the authenticated image; per-workspace `create` boots from `snapshotId`.
 
 ## 7. Script shapes
 
-Scaffold under `scripts/orca-vm/`. These are shapes: fill in the provider's real commands. **Every
-script reserves stdout for its final JSON object and sends all progress and errors to stderr**; a
-stray `echo` on stdout corrupts the result. Include a shared `json_value <key>` and
-`env_value <NAME>` reader (env, then state, then fallback) in each.
+Scaffold under `scripts/orca-vm/`. These are shapes; fill in the provider's real commands. **Every
+script reserves stdout for its final JSON object and sends progress and errors to stderr.** A stray
+`echo` on stdout corrupts the result. Give each script a `json_value <key>` and `env_value <NAME>`
+reader (env, then state, then fallback).
 
-The local-side scripts — `create`, `suspend`, `resume`, `destroy`, and the base-snapshot and auth
-scripts the user invokes by hand — run on the user's desktop, so they must run on that OS. On macOS
-and Linux use `#!/usr/bin/env bash`, `set -euo pipefail`, and quoted paths. The remote-side commands
-you `exec` inside the Linux environment always run in its Linux shell, so bash is fine there
-regardless of the desktop OS.
+The local-side scripts (`create`, `suspend`, `resume`, `destroy`, and the hand-run snapshot and auth
+scripts) run on the user's desktop, so they must run on that OS: on macOS and Linux,
+`#!/usr/bin/env bash`, `set -euo pipefail`, quoted paths. Commands you `exec` inside the Linux
+environment are always bash.
 
 ### 7a. Base snapshot (`<provider>-base-snapshot.sh`)
 
@@ -304,9 +296,8 @@ environmentRecipes:
 
 `create` is required, runs locally from the repo root, and prints exactly one JSON object on stdout.
 `suspend` and `resume` are optional and read the lifecycle payload on stdin; `resume` must print
-fresh recipe JSON because the pairing may have changed. `destroy` is optional only when the recipe
-sets `destroy: none`. The legacy keys `command` and `cleanup` still map to `create` and `destroy`;
-prefer the lifecycle names.
+fresh recipe JSON because the pairing may have changed. `destroy` may be omitted only with
+`destroy: none`. The legacy keys `command` and `cleanup` still map to `create` and `destroy`.
 
 The base result, which is what Orca-server mode prints:
 
@@ -349,11 +340,10 @@ In an environment built from source, run it as `pnpm exec orca-dev serve …` fr
 on that machine's PATH, and the flags and output are identical either way. There is no `--host` flag,
 and `--project-root` must be an absolute directory on the remote.
 
-`pairingCode` already points at whatever you passed as `--pairing-address`, so set that flag to the
-externally reachable address and pass `pairingCode` through unchanged; never hand-rewrite it.
-Tunneling and port mapping are the script's job. With `--recipe-json` the server stays running and
-does not exit, so redirect its stdout to a file and poll until that file parses as JSON, bailing and
-dumping its stderr log if the process dies.
+`pairingCode` embeds whatever you passed as `--pairing-address`, so pass the externally reachable
+address there and never hand-edit the code. Tunneling and port mapping are the script's job. With
+`--recipe-json` the server keeps running, so redirect its stdout to a file and poll until the file
+parses as JSON; if the process dies first, dump its stderr log and fail.
 
 ## 9. Doctor and the `--provision` loop
 
@@ -362,31 +352,28 @@ nothing. It checks local-host execution, the repo path, that the recipe id exist
 destroy, suspend, and resume command paths resolve, that suspend and resume are paired, and that
 each script is executable (the POSIX exec bit, skipped on Windows).
 
-**This free gate is clear only when no check has status `fail` and no check has status `warn`.**
-A `warn` still leaves `ok: true`, so `ok: true` alone does not clear the gate. Before spending money
-on `--provision`, resolve each `warn` or state the reason you are accepting it.
+**The free gate is clear only with no `fail` and no `warn`.** A `warn` keeps `ok: true`, so `ok`
+alone proves nothing. Resolve each `warn`, or say why you accept it, before spending money on
+`--provision`.
 
-Adding `--provision` runs the recipe end to end: it executes `create`, validates the returned recipe
-JSON, then runs `destroy` to tear the environment back down, so the test leaves nothing running as
-long as `destroy` works. `--connect` is an accepted synonym for `--provision`, so the envelope's money
-boundary covers both.
+`--provision` (or its synonym `--connect`) runs the recipe end to end: `create`, validation of the
+returned JSON, then `destroy`. Nothing is left running as long as `destroy` works.
 
-Run it as a loop: read the `provisionTranscript` the failed result carries, fix the script, and
-re-run `--provision` until `ok` is `true`, rather than waiting for the user to paste errors. Reading
-that transcript is in `references/failure-modes.md`.
+Run it as a loop: read the `provisionTranscript` in the failed result, fix the script, re-run, until
+`ok` is `true`. Do not wait for the user to paste errors. How to read the transcript is in
+`references/failure-modes.md`.
 
-The self-test cannot see provider-side truth beyond what the scripts print, so confirm separately
-that state holds a populated **authenticated** `snapshotId` and that `destroy` is implemented and
-tested, or explicitly `none` — in which case the self-test tears nothing down and you must clean up
-manually.
+The self-test sees only what the scripts print, so confirm separately that state holds an
+**authenticated** `snapshotId` and that `destroy` is implemented and tested. With `destroy: none`
+the self-test tears nothing down and you must clean up by hand.
 
 ## Conditional references
 
-This kernel is sufficient for the interview, the phase order, and the doctor loop. At an action gate
-below, run `ORCA skills get orca-per-workspace-env --full` once and read only the named reference:
-that returns this exact kernel plus every reference from the same CLI build. A read you made before
-reaching the gate does not satisfy it. If an older CLI rejects `--full`, keep this kernel's rules,
-use that command's `--help`, and never guess newer flags.
+This guide covers the interview, the phase order, and the doctor loop on its own. At a gate below,
+run `ORCA skills get orca-per-workspace-env --full` once and read only the named reference. It
+returns this guide plus every reference from the same CLI build. Read the reference at the gate, not
+before. If `--full` is rejected, keep these rules, use the command's `--help`, and do not guess
+flags.
 
 | Action gate | Bundled reference |
 | --- | --- |

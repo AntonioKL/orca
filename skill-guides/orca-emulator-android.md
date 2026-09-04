@@ -15,18 +15,16 @@ license: Apache-2.0
 **Result:** an observed UI state change on an adb-connected Android emulator or device,
 driven from the CLI while the live stream stays visible in Orca's emulator pane.
 
-**Done:** every action you report names the command you ran and the evidence you read back
-for it — an accessibility-tree dump, a logcat excerpt, a returned payload, or a named error.
-An action with no evidence is unverified; report it that way rather than as done.
+**Done:** every action you report names the command and the evidence you read back: an
+accessibility-tree dump, a logcat excerpt, a returned payload, or a named error. No evidence
+means unverified; say so instead of done.
 
-**Safe failure:** if a command is rejected as unknown or returns an unexpected shape, trust
-`ORCA emulator --help` over this guide for the available surface, and tell the user this
-guidance may be stale.
+**Safe failure:** if a command is unknown or its output has an unexpected shape, trust
+`ORCA emulator --help` over this guide and tell the user the guide may be stale.
 
-`ORCA` is a placeholder for the executable you used to run `skills get`. Replace it in every
-example below — fenced blocks, tables, and prose — before running the command; do not create
-a shell variable or run `ORCA` literally. The examples are shell-neutral for POSIX shells,
-PowerShell, and cmd.exe.
+`ORCA` in every example, including tables and prose, is the executable you used to run
+`skills get`. Substitute it before running; do not make a shell variable or run `ORCA`
+literally. The examples work in POSIX shells, PowerShell, and cmd.exe.
 
 ## Command surface
 
@@ -34,9 +32,9 @@ The Android backend shells out to the Android SDK (`adb`, `emulator`, `avdmanage
 Android Studio installs, so it runs on Windows, Linux, and macOS. Input uses
 `adb shell input`, with no extra streaming server.
 
-The verbs Orca wraps are the ones `ORCA emulator --help` lists. Anything else goes through
+`ORCA emulator --help` lists the wrapped verbs. Anything else goes through
 `ORCA emulator exec --command "<adb shell command>"`, which runs
-`adb -s <serial> shell <command>` and forwards the string unvalidated.
+`adb -s <serial> shell <command>` with the string unvalidated.
 
 `install`, `launch`, `permissions`, and `logcat` are Android-only and fail against an iOS
 device with `emulator_unsupported`. `tap`, `type`, `gesture`, `button`, `rotate`, `ax`, and
@@ -86,9 +84,8 @@ device.
 
 ## Targeting
 
-`attach` makes one device active per worktree, and opening the emulator pane does the same,
-so unqualified commands target it. Pass a selector only to override that or to reach a
-second device.
+`attach`, or opening the emulator pane, makes one device active per worktree, and unqualified
+commands target it. Pass a selector only to override that or reach a second device.
 
 - `--device <serial>` such as `emulator-5554`, from `ORCA emulator devices`. An AVD name
   resolves only once that AVD is booted.
@@ -111,8 +108,7 @@ second device.
   app UI directly for unicode-heavy input.
 - `gesture` is a straight swipe between the first and last point, so it fits scrolling and
   swiping but not a true multi-touch path.
-- Run `kill` when you are done. Orca cleans orphaned helpers on quit, but a helper left
-  running holds the device until then.
+- Run `kill` when you are done. A helper left running holds the device until Orca quits.
 
 ## Examples
 

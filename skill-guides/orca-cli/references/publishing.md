@@ -1,7 +1,6 @@
 # Artifact and skill publishing commands
 
-The publish gate and its recovery path are stated in the guide body; this reference supplies the
-command surface behind that gate.
+The publish gate and its recovery are in the guide body. This is the command surface behind it.
 
 ## Artifacts
 
@@ -50,9 +49,8 @@ ORCA skills share --skill <selector> [--skill <selector> ...] --bundle-name <nam
   Use IDs when names collide.
 - Multiple `--skill` flags create one bundle and one link. `--all` and arbitrary paths are
   intentionally unsupported; name every skill the user asked to publish.
-- Skill folders can contain scripts, configuration, credentials, or other private files.
-  Treat the permission as authority, not blanket intent: publish only the explicitly
-  requested skills and never widen the selection.
+- Skill folders can contain scripts, configuration, or credentials. The permission is
+  authority, not intent: publish only the skills the user named and never widen the set.
 - A denied command fails with `agent_skill_sharing_disabled`. Do not retry; ask the user to
   enable the switch in the desktop app if they want this action.
 - Orca stages one agent-published bundle at a time per host. If another publish is active,

@@ -15,25 +15,22 @@ license: Apache-2.0
 **Result:** an observed UI state change on a booted Apple Simulator, driven from the CLI
 while the live stream stays visible in Orca's emulator pane.
 
-**Done:** every action you report names the command you ran and the evidence you read back
-for it — an accessibility-tree dump, a returned payload, or a named error. An action with
-no evidence is unverified; report it that way rather than as done.
+**Done:** every action you report names the command and the evidence you read back: an
+accessibility-tree dump, a returned payload, or a named error. No evidence means unverified;
+say so instead of done.
 
-**Safe failure:** if a command is rejected as unknown or returns an unexpected shape, trust
-`ORCA emulator --help` over this guide for the available surface, and tell the user this
-guidance may be stale.
+**Safe failure:** if a command is unknown or its output has an unexpected shape, trust
+`ORCA emulator --help` over this guide and tell the user the guide may be stale.
 
-`ORCA` is a placeholder for the executable you used to run `skills get`. Replace it in every
-example below — fenced blocks, tables, and prose — before running the command; do not create
-a shell variable or run `ORCA` literally. The examples are shell-neutral for POSIX shells,
-PowerShell, and cmd.exe.
+`ORCA` in every example, including tables and prose, is the executable you used to run
+`skills get`. Substitute it before running; do not make a shell variable or run `ORCA`
+literally. The examples work in POSIX shells, PowerShell, and cmd.exe.
 
 ## Command surface
 
-The verbs Orca wraps are the ones `ORCA emulator --help` lists. Anything else goes through
-`ORCA emulator exec --command "<serve-sim command>"`, whose vocabulary is serve-sim's
-contract rather than Orca's: the bridge injects the active device context and forwards the
-string unvalidated.
+`ORCA emulator --help` lists the wrapped verbs. Anything else goes through
+`ORCA emulator exec --command "<serve-sim command>"`, which forwards the string to serve-sim
+unvalidated with the active device injected.
 
 `install`, `launch`, `permissions`, and `logcat` are Android-only and fail against an iOS
 device with `emulator_unsupported`. `tap`, `type`, `gesture`, `button`, `rotate`, `ax`, and
@@ -75,10 +72,10 @@ device.
 
 ## Targeting
 
-`attach` makes one device active per worktree, and opening the emulator pane does the same,
-so unqualified commands target it. Pass a selector only to override that or to reach a
-second device. An unqualified command with no active session fails with
-`emulator_no_active`; run `attach` or open the pane, then retry.
+`attach`, or opening the emulator pane, makes one device active per worktree, and unqualified
+commands target it. Pass a selector only to override that or reach a second device. With no
+active session an unqualified command fails with `emulator_no_active`; attach or open the pane
+and retry.
 
 - `--device "iPhone 16 Pro"` or `--device <udid>`, from `list` or `devices`. `--emulator
   <id>` is an alternative spelling: the bridge resolves both through the same lookup. These
@@ -99,8 +96,7 @@ second device. An unqualified command with no active session fails with
 - `type` sends US-ASCII only, and unsupported characters error rather than degrading.
 - The pane and the CLI share one stream and one helper, so closing the pane can stop the
   stream.
-- Run `kill` when you are done. Orca cleans orphaned helpers on quit, but a helper left
-  running holds the device until then.
+- Run `kill` when you are done. A helper left running holds the device until Orca quits.
 - The iOS backend drives private simulator APIs, so an Xcode update can change its behavior.
 
 ## Examples

@@ -53,13 +53,13 @@ Browser rules:
 - For concurrent browser work, run `ORCA tab list --json`, read `tabs[].browserPageId`, and pass `--page <browserPageId>` on later commands.
 - Use typed tab commands (`ORCA tab list/create/close/switch`), not `ORCA exec --command "tab ..."`, so Orca keeps UI state synchronized.
 - Prefer `wait --text`, `--url`, `--selector`, or `--load` after async page changes instead of bare timeouts.
-- Less common workflows can use typed commands above or `ORCA exec --command "<agent-browser command>"` passthrough.
+- Anything not listed above goes through `ORCA exec --command "<agent-browser command>"`.
 - If `fill` or `type` fails on a custom input, try `ORCA focus --element @e1 --json` then `ORCA inserttext --text "text" --json`.
-- Client-hosted pages have interactive-session affinity: the page renders in the paired desktop's own browser engine, so every command against it needs that desktop online, and returns `browser_host_unavailable` while the desktop is closed, asleep, or disconnected. Server-hosted pages keep running with no desktop attached, so prefer server placement for long-running or unattended browser automation.
+- A client-hosted page renders in the paired desktop's browser engine, so every command against it needs that desktop online and returns `browser_host_unavailable` while it is closed, asleep, or disconnected. Server-hosted pages run with no desktop attached; prefer them for long or unattended automation.
 
 Common recoveries:
 
 - `browser_no_tab`: open a tab with `ORCA tab create --url <url> --json`.
 - `browser_stale_ref`: run `ORCA snapshot --json` and retry with fresh refs.
 - `browser_tab_not_found`: run `ORCA tab list --json` before switching or closing.
-- `browser_host_unavailable`: the desktop hosting that page is offline. Bring it back, or create the page for server placement when the work must survive without an interactive session.
+- `browser_host_unavailable`: the desktop hosting the page is offline. Bring it back, or recreate the page with server placement if the work must outlive the desktop session.

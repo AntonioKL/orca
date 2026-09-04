@@ -15,18 +15,16 @@ Use this skill for desktop UI through `orca computer`. For a website or web app,
 
 ## Done
 
-An action is done only when its verification class was read and reported to the caller.
-`unverified` in any form means the action is not proven to have landed: re-read the UI
-state before the next step and never report it as success. When an unverified action had
-an external effect such as sending, submitting, purchasing, or deleting, say that the
-effect is unproven.
+An action is done when you read its verification class and reported it. Any `unverified`
+result is unproven: re-read the UI before the next step and never call it success. If an
+unverified action could have sent, submitted, bought, or deleted something, say the effect
+is unproven.
 
 ## Preconditions
 
-- In every command example, `ORCA` is a placeholder for the executable you used to run
-  `skills get`, including examples that name a specific shell. Replace it before running
-  the command; do not create a shell variable or run `ORCA` literally. Blocks that name no
-  shell are intentionally shell-neutral for POSIX shells, PowerShell, and cmd.exe.
+- `ORCA` in every example, including the shell-specific ones, is the executable you used to run
+  `skills get`. Substitute it before running; do not make a shell variable or run `ORCA`
+  literally. Blocks that name no shell work in POSIX shells, PowerShell, and cmd.exe.
 - Prefer `--json`; see Screenshots below for image output.
 - Do not push, submit forms, send messages, buy items, delete data, change account settings, or expose secrets unless the user explicitly asked for that action.
 - If an app contains sensitive content, read only what the user requested.

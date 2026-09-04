@@ -3,15 +3,15 @@
 Load this when the recipe connects over SSH instead of starting `orca serve`, and when the user has
 explicitly asked for `checkoutMode: provisioned-root`.
 
-SSH mode is not a relabeling of the Orca-server templates. `create` does not run `orca serve` and
-does not emit a `pairingCode`. Orca itself connects to the host over its SSH relay, brings up the
-git and filesystem providers, and imports the repo. The script's only job is to make the host ready
-and print the SSH connection details Orca dials.
+SSH mode is a different shape, not the Orca-server templates relabeled. `create` runs no
+`orca serve` and emits no `pairingCode`. Orca connects over its SSH relay, brings up the git and
+filesystem providers, and imports the repo. The script only readies the host and prints the SSH
+details Orca dials.
 
 ## The result shape
 
-Orca rejects anything else. This carries only the required fields; add optionals from the next
-section as the network actually needs them.
+Orca rejects anything else. Required fields only; add optionals from the next section as the
+network needs them.
 
 ```json
 {
@@ -54,10 +54,10 @@ These describe how the user's desktop reaches the box; there is no `orca serve` 
 
 ## Toolchain and agent auth on a persistent host
 
-A no-snapshot host has no base image to bake, because the host is the base. Run the install steps
-and the agent's device-auth login directly over SSH on the host once, by hand, before wiring the
-recipe. The login is interactive, for example `ssh -t user@host '<agent> login --device-auth'`, so
-the user runs it. After that the host stays ready across workspaces.
+A persistent host is its own base image. Run the install steps and the agent's device-auth login
+over SSH once, by hand, before wiring the recipe. The login is interactive, for example
+`ssh -t user@host '<agent> login --device-auth'`, so the user runs it. The host then stays ready
+across workspaces.
 
 ## The create script
 
