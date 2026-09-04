@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RpcContext } from '../../../core'
+import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import { createRootDispatch } from '../../../../orchestration/db/root-dispatch-test-fixture'
 import { createOrchestrationRpcHarness } from '../rpc-test-harness'
@@ -18,6 +19,7 @@ type CheckResult = {
 describe('orchestration.check on a re-attached Dispatch', () => {
   const h = createOrchestrationRpcHarness()
   let db: OrchestrationDb
+  let runtime: OrcaRuntimeService
   let ctx: RpcContext
 
   afterEach(() => {
@@ -25,7 +27,7 @@ describe('orchestration.check on a re-attached Dispatch', () => {
   })
 
   function attachedDispatchWithMail(): string {
-    ;({ db, ctx } = h.setup())
+    ;({ db, runtime, ctx } = h.setup())
     const task = db.createTask({ spec: 'worker that gets replaced' })
     const dispatch = createRootDispatch(db, task.id, 'term_worker', PANE_A)
     db.mintDispatchCapability({
@@ -55,6 +57,15 @@ describe('orchestration.check on a re-attached Dispatch', () => {
       dispatchId,
       paneKey: PANE_B,
       processIncarnation: 'runtime:pty-b:1'
+    })
+  }
+
+  /** Same pane, new process: bumps the generation without moving the Dispatch off PANE_A. */
+  function remintOnSamePane(dispatchId: string): void {
+    db.mintDispatchCapability({
+      dispatchId,
+      paneKey: PANE_A,
+      processIncarnation: 'runtime:pty-a:2'
     })
   }
 
@@ -128,6 +139,38 @@ describe('orchestration.check on a re-attached Dispatch', () => {
     })
   })
 
+  it('never mints a Delivery at a generation a re-attach already left', async () => {
+    const dispatchId = attachedDispatchWithMail()
+    const identity = db.getActiveDispatchForIdentity.bind(db)
+    let resolved = 0
+    vi.spyOn(db, 'getActiveDispatchForIdentity').mockImplementation((handle, paneKey) => {
+      resolved += 1
+      if (resolved === 2) {
+        remintOnSamePane(dispatchId)
+      }
+      return identity(handle, paneKey)
+    })
+
+    await expect(check(PANE_A)).rejects.toMatchObject({ code: 'consumer_fenced' })
+
+    vi.mocked(db.getActiveDispatchForIdentity).mockRestore()
+    const live = await check(PANE_A)
+    expect(live.messages.map((message) => message.subject)).toEqual(['do the work'])
+  })
+
+  it('fences a blocked --peek whose generation moved while it waited', async () => {
+    const dispatchId = attachedDispatchWithMail()
+    vi.spyOn(runtime, 'waitForMessage').mockImplementation(async () => {
+      remintOnSamePane(dispatchId)
+      return 'timed_out'
+    })
+
+    // Filtered to a type this mailbox has none of, so the peek actually blocks.
+    await expect(
+      check(PANE_A, { peek: true, wait: true, types: 'escalation' })
+    ).rejects.toMatchObject({ code: 'consumer_fenced' })
+  })
+
   it('fences before routing the stale worker direct mail into the new owner mailbox', async () => {
     const dispatchId = attachedDispatchWithMail()
     reattach(dispatchId)
@@ -158,7 +201,7 @@ describe('orchestration.check on a re-attached Dispatch', () => {
   })
 
   it('serves a worker whose Dispatch row never recorded a pane', async () => {
-    ;({ db, ctx } = h.setup())
+    ;({ db, runtime, ctx } = h.setup())
     const task = db.createTask({ spec: 'dispatch with no recorded pane' })
     const dispatch = createRootDispatch(db, task.id, 'term_worker')
     db.insertMessage({

@@ -181,6 +181,11 @@ export async function checkWorkerMailbox(args: {
   const showAll = params.all === true || (params.unread === false && params.peek !== true)
   const readPeek = () => db.getUnreadMessages(address, typeFilter)
   const readDelivery = (wakeTypes?: MessageType[]) => {
+    // Why: re-read live, or a re-attach landing on an await above mints a Delivery at a generation
+    // the row has already left, which then fences the legitimate worker on every later check.
+    if (readCurrentGeneration() !== workerMailbox.generation) {
+      throw dispatchFenced()
+    }
     try {
       return db.getOrCreateMailboxDelivery({
         runId: deliveryRunId,
