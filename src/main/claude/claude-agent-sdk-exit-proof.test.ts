@@ -513,17 +513,20 @@ describe('claude child tree reaper', () => {
     expect(child.kill).toHaveBeenCalledWith('SIGKILL')
   })
 
-  it('keeps the original capture boundary for retained POSIX rows', async () => {
+  it('advances a re-walked POSIX row boundary but not one the refresh missed', async () => {
     const child = mockChild()
+    const unseen = { pid: 4245, ppid: 424242, pgid: 1, startedAt: 'Mon Jan 1 00:00:00 2026' }
+    const base = snapshotOf(4243)
     const first = {
-      ...snapshotOf(4243),
-      capturedAtMs: 1_700_000_000_900
+      ...base,
+      capturedAtMs: 1_700_000_000_900,
+      descendants: [...base.descendants, unseen]
     }
     const refreshed = {
-      ...first,
+      ...base,
       capturedAtMs: 1_700_000_002_100,
       descendants: [
-        ...first.descendants,
+        ...base.descendants,
         {
           pid: 4244,
           ppid: 424242,
@@ -546,11 +549,13 @@ describe('claude child tree reaper', () => {
 
     expect(terminateDescendants).toHaveBeenCalledWith({
       ...refreshed,
-      // The retained 4243 row was first observed in the earlier displayed
-      // second. Its per-row boundary must not advance with the refresh.
+      descendants: [...base.descendants, unseen, refreshed.descendants[1]],
       capturedAtMsByPid: {
-        '4243': first.capturedAtMs,
-        '4244': refreshed.capturedAtMs
+        // Re-derived from the live root by this walk, so proved ours again at it.
+        '4243': refreshed.capturedAtMs,
+        '4244': refreshed.capturedAtMs,
+        // Absent from the refresh: nothing re-proved it, so it keeps its own.
+        '4245': first.capturedAtMs
       }
     })
   })
