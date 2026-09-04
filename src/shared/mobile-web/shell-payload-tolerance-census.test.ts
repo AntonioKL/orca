@@ -2,6 +2,10 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { z } from 'zod'
+import {
+  MobileWebBridgePageMessageSchema,
+  MobileWebBridgeShellMessageSchema
+} from './bridge-contract'
 import { tolerantMobileWebShellPayload } from './shell-payload-tolerance'
 
 const PAGE_DIR = resolve(__dirname, '..', '..', 'mobile-web', 'src')
@@ -134,11 +138,21 @@ describe('mobile web shell payload tolerance census', () => {
     expect(offenders).toEqual({})
   })
 
+  // The envelope is the same hazard one level up: an additive field on `init` from a newer APK
+  // used to fail the union, and a dropped `init` costs the page every grant at once.
+  it('leaves no strict object under the shell->page envelope', () => {
+    expect(strictPaths(MobileWebBridgeShellMessageSchema).length).toBeGreaterThan(8)
+    expect(strictPaths(tolerantMobileWebShellPayload(MobileWebBridgeShellMessageSchema))).toEqual(
+      []
+    )
+  })
+
   it('keeps the page->shell request schemas strict', () => {
     const payloads = [...schemas.keys()].filter((name) => name.endsWith('PayloadSchema'))
     const open = payloads.filter((name) => strictPaths(schemas.get(name)!).length === 0)
 
     expect(payloads.length).toBeGreaterThanOrEqual(50)
     expect(open.length).toBeLessThan(payloads.length / 2)
+    expect(strictPaths(MobileWebBridgePageMessageSchema).length).toBeGreaterThan(4)
   })
 })

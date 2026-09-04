@@ -79,6 +79,19 @@ describe('mobile web bridge adversarial corpus', () => {
       ok: false
     })
   })
+
+  // An undeclared key on a shell frame is stripped, not fatal: the shell can be a newer release
+  // than the page, and dropping the frame costs the page the whole message. The key still never
+  // reaches the page, so the leak fence is unchanged.
+  it('strips an undeclared shell field instead of dropping the frame', () => {
+    const parsed = parseMobileWebBridgeShellMessage(
+      JSON.stringify(shellEvent({ hostPath: '/private/repo' })),
+      CONTEXT
+    )
+
+    expect(parsed).toMatchObject({ ok: true })
+    expect(parsed.ok && parsed.value).not.toHaveProperty('hostPath')
+  })
 })
 
 function pageRequest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -184,6 +197,5 @@ function shellMutationCorpus(): { label: string; value: Record<string, unknown> 
       })
     }
   }
-  cases.push({ label: 'shell unknown field', value: shellEvent({ hostPath: '/private/repo' }) })
   return cases
 }

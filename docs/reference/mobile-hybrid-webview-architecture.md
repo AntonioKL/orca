@@ -230,8 +230,18 @@ depends on its direction and on whether it adds a field or an operation:
   `unsupported_capability`, so a newer page against an older shell degrades at
   the call site instead of hanging.
 - **Additive frame type, either direction** is safe at the same version: both
-  receivers drop a frame they cannot parse. Frame *fields* do not share that
-  property — the envelope schemas are strict in both directions.
+  receivers drop a frame they cannot parse.
+- **Additive envelope field, shell to page** is safe for the same reason as a
+  payload field: `parseMobileWebBridgeShellMessage` and
+  `parseMobileWebBridgeInitialMessage` parse through the tolerant view, so an
+  undeclared key is stripped rather than dropping the frame. That matters most
+  for `init`, where dropping the frame costs the page every grant at once.
+  Stripping keeps the leak fence intact — an undeclared `resumeRoute.hostPath`
+  or a raw error `message` still never reaches the page. The page->shell
+  envelope stays strict.
+- **Additive route kind or other closed variant** is not covered by any of the
+  above and must negotiate. An unknown `resumeRoute.kind` still fails `init`,
+  because the page cannot invent a meaning for a variant it does not have.
 
 Desktop must retain support for the existing bridge floor until a replacement
 has shipped in at least two stable mobile releases and the supported shell
