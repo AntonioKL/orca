@@ -1,31 +1,24 @@
 import type {
-  RuntimeTerminalClose,
   RuntimeTerminalCreate,
   RuntimeTerminalFocus,
   RuntimeTerminalListResult,
   RuntimeTerminalRead,
   RuntimeTerminalRename,
-  RuntimeTerminalSend,
   RuntimeTerminalShow,
   RuntimeTerminalSplit,
-  RuntimeTerminalWait,
-  RuntimeWorktreeTerminalCloseResult
+  RuntimeTerminalWait
 } from '../../shared/runtime-types'
-import { TERMINAL_PROMPT_DELIVERY_RUNTIME_CAPABILITY } from '../../shared/protocol-version'
 import type { CommandHandler } from '../dispatch'
 import { shouldUseRendererBackedInteractiveTerminal } from '../codex-command-classification'
 import {
-  formatTerminalClose,
   formatTerminalCreate,
   formatTerminalFocus,
   formatTerminalList,
   formatTerminalRead,
   formatTerminalRename,
-  formatTerminalSend,
   formatTerminalShow,
   formatTerminalSplit,
   formatTerminalWait,
-  reportCliError,
   printResult
 } from '../format'
 import {
@@ -38,53 +31,19 @@ import {
   type WithAnnotatedHostScope
 } from '../omitted-host-scope-selectors'
 import { RuntimeClientError } from '../runtime-client'
-import { attachUnverifiedTerminalPromptRecovery } from '../runtime/terminal-prompt-mutation-recovery'
 import {
   getBrowserWorktreeSelector,
   getOptionalWorktreeSelector,
   getRequiredWorktreeSelector,
   getTerminalHandle
 } from '../selectors'
+import { terminalCloseHandler } from './terminal-close'
+import { terminalSendHandler } from './terminal-send'
 
 // Why: terminal wait legitimately needs to outlive the CLI's default RPC
 // timeout. Even without an explicit server timeout, the client must allow
 // long waits instead of failing at the generic 15s transport cap.
 const DEFAULT_TERMINAL_WAIT_RPC_TIMEOUT_MS = 5 * 60 * 1000
-
-/** A false stop receipt is an error only when the host supplied a liveness verdict. */
-function terminalCloseFailure(close: RuntimeTerminalClose): RuntimeClientError | null {
-  if (close.ptyKilled || close.ptyStopVerdict === undefined) {
-    return null
-  }
-
-  const verdict = close.ptyStopVerdict
-  const detail =
-    verdict === 'live'
-      ? 'The PTY is live.'
-      : `The PTY was not confirmed stopped: ${close.ptyStopReason ?? 'its host could not be reached'}.`
-  return new RuntimeClientError(
-    verdict === 'live' ? 'terminal_stop_live' : 'terminal_stop_unverifiable',
-    `Terminal ${close.handle} close failed to confirm the PTY stopped (${verdict}). ${detail}`,
-    { close }
-  )
-}
-
-function terminalCloseAllFailure(
-  close: RuntimeWorktreeTerminalCloseResult
-): RuntimeClientError | null {
-  if (!close.ptyStopVerdict) {
-    return null
-  }
-  const detail =
-    close.ptyStopVerdict === 'live'
-      ? 'At least one PTY is live.'
-      : `At least one PTY was not confirmed stopped: ${close.ptyStopReason ?? 'its owning host could not be reached'}.`
-  return new RuntimeClientError(
-    close.ptyStopVerdict === 'live' ? 'terminal_stop_live' : 'terminal_stop_unverifiable',
-    `Workspace terminal close did not confirm every PTY stopped (${close.ptyStopVerdict}). ${detail}`,
-    { close }
-  )
-}
 
 const terminalFocusHandler: CommandHandler = async ({ flags, client, cwd, json }) => {
   const result = await client.call<{ focus: RuntimeTerminalFocus }>('terminal.focus', {
@@ -149,102 +108,7 @@ export const TERMINAL_HANDLERS: Record<string, CommandHandler> = {
     }
     printResult(result, json, formatTerminalRead)
   },
-  'terminal send': async ({ flags, client, cwd, json }) => {
-    const text = getOptionalStringFlag(flags, 'text')
-    const enter = flags.get('enter') === true
-    const interrupt = flags.get('interrupt') === true
-    const promptCandidate = !!text && enter && !interrupt
-    const retryRequest = getOptionalStringFlag(flags, 'retry-request')
-    const waitSubmitSeconds = getOptionalPositiveIntegerFlag(flags, 'wait-submit')
-    if ((retryRequest || waitSubmitSeconds) && !promptCandidate) {
-      throw new RuntimeClientError(
-        'invalid_argument',
-        '--retry-request and --wait-submit require --text with --enter and without --interrupt.'
-      )
-    }
-    if (waitSubmitSeconds && waitSubmitSeconds > 3600) {
-      throw new RuntimeClientError(
-        'invalid_argument',
-        '--wait-submit must be at most 3600 seconds.'
-      )
-    }
-    const waitSubmitMs = waitSubmitSeconds ? waitSubmitSeconds * 1000 : undefined
-    let promptDeliverySupported = false
-    let promptDeliveryRuntimeId: string | null = null
-    if (promptCandidate) {
-      const status = await client.getCliStatus()
-      if (!status.result.runtime.reachable) {
-        throw new RuntimeClientError(
-          'runtime_unavailable',
-          'Orca could not verify prompt-delivery support, so no input was sent. Wait for the execution host to become reachable and retry.'
-        )
-      }
-      promptDeliverySupported =
-        status.result.runtime.capabilities?.includes(
-          TERMINAL_PROMPT_DELIVERY_RUNTIME_CAPABILITY
-        ) === true
-      promptDeliveryRuntimeId = status.result.runtime.runtimeId
-    }
-    if (retryRequest && !promptDeliverySupported) {
-      throw new RuntimeClientError(
-        'incompatible_runtime',
-        'This Orca host cannot honor --retry-request and never recorded this request ID. This attempt sent no input, but an earlier prompt may have been delivered; inspect the terminal and do not resend unless you independently prove it was not delivered, because updating the host cannot make this specific retry idempotent.'
-      )
-    }
-    if (waitSubmitMs && !promptDeliverySupported) {
-      throw new RuntimeClientError(
-        'incompatible_runtime',
-        'This Orca host does not support --wait-submit. No input was sent; update Orca on the execution host, or omit only --wait-submit for a legacy prompt whose delivery cannot be observed or retried safely.'
-      )
-    }
-    const params = {
-      terminal: await getTerminalHandle(flags, cwd, client),
-      text,
-      enter,
-      interrupt,
-      ...(promptCandidate
-        ? { agentPrompt: true as const, ...(waitSubmitMs ? { waitSubmitMs } : {}) }
-        : {}),
-      client: { id: 'orca-cli', type: 'desktop' }
-    }
-    const options = promptDeliverySupported
-      ? {
-          terminalPromptPreflight: { runtimeId: promptDeliveryRuntimeId },
-          ...(retryRequest ? { orchestrationRequestId: retryRequest } : {}),
-          ...(waitSubmitMs ? { timeoutMs: waitSubmitMs + 10_000 } : {})
-        }
-      : promptCandidate
-        ? { legacyTerminalPrompt: true as const }
-        : undefined
-    const result = options
-      ? await client.call<{ send: RuntimeTerminalSend }>('terminal.send', params, options)
-      : await client.call<{ send: RuntimeTerminalSend }>('terminal.send', params)
-    const missingPromptReceipt =
-      promptCandidate && result.result.send.accepted && !result.result.send.prompt
-    if (missingPromptReceipt && promptDeliverySupported) {
-      throw attachUnverifiedTerminalPromptRecovery(
-        new RuntimeClientError(
-          'incompatible_runtime',
-          'The Orca host changed after prompt-delivery support was verified and accepted input without returning a durable prompt receipt.'
-        )
-      )
-    }
-    if (missingPromptReceipt) {
-      result.result.send.prompt = {
-        requestId: 'unsupported-old-host',
-        stages: ['input_accepted'],
-        provider: 'old-host',
-        observation: 'unsupported',
-        processIncarnation: 'unknown',
-        generation: 0,
-        baselineWorkingSequence: 0
-      }
-    }
-    printResult(result, json, formatTerminalSend)
-    if (!result.result.send.accepted) {
-      process.exitCode = 1
-    }
-  },
+  'terminal send': terminalSendHandler,
   'terminal wait': async ({ flags, client, cwd, json }) => {
     const timeoutMs = getOptionalPositiveIntegerFlag(flags, 'timeout-ms')
     const result = await client.call<{ wait: RuntimeTerminalWait }>(
@@ -304,67 +168,7 @@ export const TERMINAL_HANDLERS: Record<string, CommandHandler> = {
   },
   // `focus` resolves to this canonical path via CommandSpec.aliases before dispatch.
   'terminal switch': terminalFocusHandler,
-  'terminal close': async ({ flags, client, cwd, json }) => {
-    if (flags.get('all') === true) {
-      if (flags.has('terminal') || flags.get('tab') === true) {
-        throw new RuntimeClientError(
-          'invalid_argument',
-          '--all uses --worktree and cannot be combined with --terminal or --tab'
-        )
-      }
-      try {
-        const result = await client.call<RuntimeWorktreeTerminalCloseResult>('terminal.closeAll', {
-          worktree: await getRequiredWorktreeSelector(flags, 'worktree', cwd, client)
-        })
-        const failure = terminalCloseAllFailure(result.result)
-        if (failure) {
-          reportCliError(failure, json)
-          process.exitCode = 1
-          return
-        }
-        printResult(
-          result,
-          json,
-          (value) =>
-            `Closed ${value.closed} terminal tabs and stopped ${value.stopped} terminal processes.`
-        )
-        return
-      } catch (error) {
-        if (error instanceof RuntimeClientError && error.code === 'method_not_found') {
-          throw new RuntimeClientError(
-            'incompatible_runtime',
-            'This Orca host does not support closing every terminal in a workspace yet. Update Orca on the host and try again.'
-          )
-        }
-        throw error
-      }
-    }
-    if (flags.has('worktree')) {
-      throw new RuntimeClientError(
-        'invalid_argument',
-        'Closing a workspace requires --all: terminal close --worktree <selector> --all'
-      )
-    }
-    const method = flags.get('tab') === true ? 'terminal.closeTab' : 'terminal.close'
-    const result = await client.call<{ close: RuntimeTerminalClose }>(method, {
-      terminal: await getTerminalHandle(flags, cwd, client)
-    })
-    // Why: a transport-level success must not hide a live or unverifiable PTY. Keep the receipt in
-    // error.data so JSON callers retain the host's exact evidence while receiving a failing outcome.
-    const failure = terminalCloseFailure(result.result.close)
-    if (failure) {
-      // Keep the established human receipt (including its liveness warning); JSON needs the
-      // standard failure envelope so callers do not mistake transport success for a stopped PTY.
-      if (json) {
-        reportCliError(failure, true)
-      } else {
-        printResult(result, false, formatTerminalClose)
-      }
-      process.exitCode = 1
-      return
-    }
-    printResult(result, json, formatTerminalClose)
-  },
+  'terminal close': terminalCloseHandler,
   'terminal split': async ({ flags, client, cwd, json }) => {
     const directionFlag = getOptionalStringFlag(flags, 'direction')
     if (

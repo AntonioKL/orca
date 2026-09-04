@@ -11,6 +11,12 @@ export type OrchestrationWorkerServer = {
   pairingRevision?: number
 }
 
+/** Callers that already proved the contract, or that pin the pairing generation they resolved against. */
+export type OrchestrationEnvironmentCallOptions = {
+  contractVerified?: boolean
+  expectedEnvironmentPairingRevision?: number
+}
+
 export type OrchestrationEnvironmentTransport = {
   resolve(selector: string): OrchestrationWorkerServer
   call(

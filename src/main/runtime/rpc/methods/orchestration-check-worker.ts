@@ -2,6 +2,7 @@ import type { MessageType, OrchestrationDb } from '../../orchestration/db'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { formatMessageBanner } from '../../orchestration/formatter'
+import { ORCHESTRATION_LEGACY_RUN_ID } from '../../../../shared/orchestration-rpc-contract'
 import { routeAllMailboxPages } from './orchestration-schemas'
 import type { CheckParams } from './orchestration-schemas'
 import type { z } from 'zod'
@@ -143,22 +144,69 @@ export async function checkWorkerMailbox(args: {
     }
   }
   await revalidateWorkerMailbox()
+  const deliveryRunId = workerMailbox.runId ?? ORCHESTRATION_LEGACY_RUN_ID
+  const acknowledged = params.ack
+    ? db.acknowledgeMailboxDelivery({
+        runId: deliveryRunId,
+        mailboxHandle: address,
+        consumerGeneration: 0,
+        deliveryId: params.ack
+      })
+    : undefined
   const showAll = params.all === true || (params.unread === false && params.peek !== true)
-  const messages = showAll
-    ? db.getAllMessagesForHandle(address, 100, typeFilter)
-    : db.getUnreadMessages(address, typeFilter)
-  if (!showAll && params.peek !== true && messages.length > 0) {
-    db.markAsRead(messages.map((message) => message.id))
-  }
-  if (messages.length > 0 || !params.wait) {
+  const readPeek = () => db.getUnreadMessages(address, typeFilter)
+  const readDelivery = (wakeTypes?: MessageType[]) =>
+    db.getOrCreateMailboxDelivery({
+      runId: deliveryRunId,
+      mailboxHandle: address,
+      consumerGeneration: 0,
+      wakeTypes
+    })
+  if (showAll) {
+    const messages = db.getAllMessagesForHandle(address, 100, typeFilter)
     return {
       ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
       dispatchId: workerMailbox.dispatchId,
       messages,
       count: messages.length,
+      acknowledged: acknowledged?.delivery.id ?? null,
       ...(params.format || params.inject
         ? { formatted: messages.map(formatMessageBanner).join('\n\n') }
         : {})
+    }
+  }
+  if (params.peek) {
+    const messages = readPeek()
+    if (messages.length > 0 || !params.wait) {
+      return {
+        ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
+        dispatchId: workerMailbox.dispatchId,
+        messages,
+        count: messages.length,
+        acknowledged: acknowledged?.delivery.id ?? null,
+        ...(params.format || params.inject
+          ? { formatted: messages.map(formatMessageBanner).join('\n\n') }
+          : {})
+      }
+    }
+  } else {
+    const current = readDelivery(params.wait ? typeFilter : undefined)
+    if (current || !params.wait) {
+      return {
+        ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
+        dispatchId: workerMailbox.dispatchId,
+        deliveryId: current?.delivery.id ?? null,
+        messages: current?.messages ?? [],
+        count: current?.messages.length ?? 0,
+        replayed: current?.replayed ?? false,
+        acknowledged: acknowledged?.delivery.id ?? null,
+        timedOut: false,
+        cancelled: false,
+        connectionLost: false,
+        ...(params.format || params.inject
+          ? { formatted: current?.messages.map(formatMessageBanner).join('\n\n') ?? '' }
+          : {})
+      }
     }
   }
   const waitResult = await runtime.waitForMessage(address, {
@@ -173,20 +221,36 @@ export async function checkWorkerMailbox(args: {
       dispatchId: workerMailbox.dispatchId,
       messages: [],
       count: 0,
+      acknowledged: acknowledged?.delivery.id ?? null,
       timedOut: waitResult === 'timed_out',
       cancelled: waitResult === 'cancelled',
       connectionLost: waitResult === 'cancelled' && signal?.aborted === true
     }
   }
-  const arrived = db.getUnreadMessages(address, typeFilter)
-  db.markAsRead(arrived.map((message) => message.id))
+  if (params.peek) {
+    const arrived = readPeek()
+    return {
+      ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
+      dispatchId: workerMailbox.dispatchId,
+      messages: arrived,
+      count: arrived.length,
+      acknowledged: acknowledged?.delivery.id ?? null,
+      ...(params.format || params.inject
+        ? { formatted: arrived.map(formatMessageBanner).join('\n\n') }
+        : {})
+    }
+  }
+  const arrived = readDelivery(typeFilter)
   return {
     ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
     dispatchId: workerMailbox.dispatchId,
-    messages: arrived,
-    count: arrived.length,
+    deliveryId: arrived?.delivery.id ?? null,
+    messages: arrived?.messages ?? [],
+    count: arrived?.messages.length ?? 0,
+    replayed: arrived?.replayed ?? false,
+    acknowledged: acknowledged?.delivery.id ?? null,
     ...(params.format || params.inject
-      ? { formatted: arrived.map(formatMessageBanner).join('\n\n') }
+      ? { formatted: arrived?.messages.map(formatMessageBanner).join('\n\n') ?? '' }
       : {})
   }
 }

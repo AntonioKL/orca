@@ -4,6 +4,7 @@ import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { resolveGroupAddress } from '../../orchestration/groups'
 import { resolveBareOrchestrationRecipient } from './orchestration-recipient-routing'
 import { legacyWorkerDeliveryContract } from './orchestration-routing'
+import { recordReceiptBeforeNudge } from './orchestration-mutation-replay-nudge'
 import type { SendRecipientWarning } from './orchestration-recipient-routing'
 import type { SendParams } from './orchestration-schemas'
 import type { z } from 'zod'
@@ -123,9 +124,9 @@ export async function sendGroupMessage(args: {
     recipients: messages.length,
     ...(groupWarnings.length > 0 ? { warnings: groupWarnings } : {})
   }
-  recordMutationReceipt?.(receipt)
-  for (const message of messages) {
-    runtime.notifyMessageArrived(message.to_handle, message.type)
-  }
-  return receipt
+  return recordReceiptBeforeNudge(recordMutationReceipt, receipt, () => {
+    for (const message of messages) {
+      runtime.notifyMessageArrived(message.to_handle, message.type)
+    }
+  })
 }

@@ -3,6 +3,7 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { encodeFederatedControlMessage } from '../../orchestration/federation-control-message'
 import { ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION } from '../../../../shared/protocol-version'
+import { recordReceiptBeforeNudge } from './orchestration-mutation-replay-nudge'
 import type { SendParams } from './orchestration-schemas'
 import type { SendRecipientWarning } from './orchestration-recipient-routing'
 import type { z } from 'zod'
@@ -19,6 +20,7 @@ export function sendFederatedControlMail(args: {
   to: string
   messageRunId: string | undefined
   revalidateLegacyCoordinator: (() => string) | undefined
+  recordMutationReceipt: ((receipt: unknown) => void) | undefined
   withSendWarnings: SendReceipt
 }): unknown {
   const {
@@ -29,6 +31,7 @@ export function sendFederatedControlMail(args: {
     to,
     messageRunId,
     revalidateLegacyCoordinator,
+    recordMutationReceipt,
     withSendWarnings
   } = args
   const dispatchId = to.startsWith('dispatch:') ? to.slice('dispatch:'.length) : undefined
@@ -70,8 +73,7 @@ export function sendFederatedControlMail(args: {
       payload: params.payload ?? null
     })
   })
-  runtime.ensureOrchestrationFederationRelay(messageRunId)
-  return withSendWarnings({
+  const receipt = withSendWarnings({
     relay: {
       messageId: relay.message_id,
       sequence: relay.sequence,
@@ -80,4 +82,10 @@ export function sendFederatedControlMail(args: {
       accepted: true
     }
   })
+  return recordReceiptBeforeNudge(
+    recordMutationReceipt,
+    receipt,
+    () => runtime.ensureOrchestrationFederationRelay(messageRunId),
+    { kind: 'federation', ...(messageRunId ? { runId: messageRunId } : {}) }
+  )
 }

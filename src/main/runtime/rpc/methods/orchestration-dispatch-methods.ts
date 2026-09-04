@@ -16,7 +16,8 @@ export const ORCHESTRATION_DISPATCH_METHODS: RpcMethod[] = [
         orchestrationCompatibilityEvidence,
         runtime,
         legacyCoordinatorRunId,
-        revalidateLegacyCoordinator
+        revalidateLegacyCoordinator,
+        orchestrationMutation
       }
     ) => {
       const db = runtime.getOrchestrationDb()
@@ -123,9 +124,15 @@ export const ORCHESTRATION_DISPATCH_METHODS: RpcMethod[] = [
       })
 
       let injected = false
+      let prompt
       if (params.inject) {
         try {
-          await runtime.sendTerminalAgentPrompt(to, preamble)
+          prompt = await runtime.sendTerminalAgentPrompt(to, preamble, {
+            // A delayed provider hook must not revoke an accepted Dispatch.
+            acceptQueued: true,
+            observationTimeoutMs: 0,
+            requestId: orchestrationMutation?.requestId ?? ctx.id
+          })
           injected = true
         } catch (err) {
           db.failDispatch(ctx.id, err instanceof Error ? err.message : String(err))
@@ -135,9 +142,14 @@ export const ORCHESTRATION_DISPATCH_METHODS: RpcMethod[] = [
 
       // Why: returnPreamble is opt-in because the preamble is several hundred bytes most callers don't need in the response.
       if (params.returnPreamble) {
-        return { dispatch: ctx, injected, preamble }
+        return {
+          dispatch: ctx,
+          injected,
+          preamble,
+          ...(prompt?.prompt ? { prompt: prompt.prompt } : {})
+        }
       }
-      return { dispatch: ctx, injected }
+      return { dispatch: ctx, injected, ...(prompt?.prompt ? { prompt: prompt.prompt } : {}) }
     }
   }),
 

@@ -6,6 +6,14 @@ import { abbreviateOrchestrationTasks } from '../../../../shared/orchestration-t
 import { parseOrchestrationTaskDepsFlag } from '../../orchestration/task-deps-flag'
 import { resolveRunScope } from './orchestration-run-scope'
 import {
+  readMutationReplayNudge,
+  stripMutationReplayNudge
+} from '../orchestration-mutation-executor'
+import {
+  recordReceiptBeforeNudge,
+  replayMutationNudge
+} from './orchestration-mutation-replay-nudge'
+import {
   ReplyParams,
   InboxParams,
   TaskCreateParams,
@@ -19,8 +27,19 @@ export const ORCHESTRATION_MESSAGE_METHODS: RpcMethod[] = [
     params: ReplyParams,
     handler: async (
       params,
-      { orchestrationCompatibilityEvidence, runtime, legacyCoordinatorRunId }
+      {
+        orchestrationCompatibilityEvidence,
+        runtime,
+        legacyCoordinatorRunId,
+        recordMutationReceipt,
+        replayedMutationReceipt
+      }
     ) => {
+      const replayNudge = readMutationReplayNudge(replayedMutationReceipt)
+      if (replayNudge) {
+        replayMutationNudge(runtime, replayNudge)
+        return stripMutationReplayNudge(replayedMutationReceipt)
+      }
       const db = runtime.getOrchestrationDb()
       const original = db.getMessageById(params.id)
       if (!original) {
@@ -65,6 +84,11 @@ export const ORCHESTRATION_MESSAGE_METHODS: RpcMethod[] = [
           body: params.body
         })
         const federated = db.getFederatedDispatch(question.dispatch_id)
+        const receipt = {
+          message: answered.message,
+          question: answered.question,
+          duplicate: answered.duplicate
+        }
         if (federated) {
           db.enqueueFederationRelay({
             dispatchId: question.dispatch_id,
@@ -76,15 +100,16 @@ export const ORCHESTRATION_MESSAGE_METHODS: RpcMethod[] = [
               body: params.body
             })
           })
-          runtime.ensureOrchestrationFederationRelay(run.id)
-        } else {
+          return recordReceiptBeforeNudge(
+            recordMutationReceipt,
+            receipt,
+            () => runtime.ensureOrchestrationFederationRelay(run.id),
+            { kind: 'federation', runId: run.id }
+          )
+        }
+        return recordReceiptBeforeNudge(recordMutationReceipt, receipt, () =>
           runtime.notifyMessageArrived(`dispatch:${question.dispatch_id}`, 'status')
-        }
-        return {
-          message: answered.message,
-          question: answered.question,
-          duplicate: answered.duplicate
-        }
+        )
       }
 
       db.markAsRead([original.id])
@@ -98,8 +123,10 @@ export const ORCHESTRATION_MESSAGE_METHODS: RpcMethod[] = [
         runId: original.run_id
       })
 
-      runtime.notifyMessageArrived(reply.to_handle, reply.type)
-      return { message: reply }
+      const receipt = { message: reply }
+      return recordReceiptBeforeNudge(recordMutationReceipt, receipt, () =>
+        runtime.notifyMessageArrived(reply.to_handle, reply.type)
+      )
     }
   }),
 

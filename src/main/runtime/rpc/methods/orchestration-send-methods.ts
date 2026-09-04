@@ -13,6 +13,12 @@ import {
   resolveBareOrchestrationRecipient,
   type SendRecipientWarning
 } from './orchestration-recipient-routing'
+import {
+  readMutationReplayNudge,
+  readWorkerDoneReplayNudge,
+  stripMutationReplayNudge
+} from '../orchestration-mutation-executor'
+import { replayMutationNudge } from './orchestration-mutation-replay-nudge'
 import { sendRemoteMessage } from './orchestration-send-remote'
 import { sendPointToPointMessage } from './orchestration-send-point-to-point'
 import { sendGroupMessage } from './orchestration-send-group'
@@ -31,10 +37,26 @@ export const ORCHESTRATION_SEND_METHODS: RpcMethod[] = [
         revalidateLegacyCoordinator,
         orchestrationCompatibilityCallerAuthority,
         recordMutationReceipt,
+        markWorkerDoneMutationEffectFree,
+        replayedMutationReceipt,
         signal
       }
     ) => {
       const db = runtime.getOrchestrationDb()
+      const legacyReplayNudge = readWorkerDoneReplayNudge(
+        'orchestration.send',
+        params,
+        replayedMutationReceipt
+      )
+      const replayNudge =
+        readMutationReplayNudge(replayedMutationReceipt) ??
+        (legacyReplayNudge
+          ? { kind: 'messages' as const, targets: [legacyReplayNudge] }
+          : undefined)
+      if (replayNudge) {
+        replayMutationNudge(runtime, replayNudge)
+        return stripMutationReplayNudge(replayedMutationReceipt)
+      }
       const from = params.from ?? 'unknown'
       const attestedCaller =
         orchestrationCompatibilityCallerAuthority?.terminalHandle === from
@@ -145,6 +167,7 @@ export const ORCHESTRATION_SEND_METHODS: RpcMethod[] = [
           to,
           messageRunId,
           revalidateLegacyCoordinator,
+          recordMutationReceipt,
           withSendWarnings
         })
         if (federatedControl !== undefined) {
@@ -166,6 +189,8 @@ export const ORCHESTRATION_SEND_METHODS: RpcMethod[] = [
             runtime.getTerminalProcessIncarnation(from) ??
             undefined,
           revalidateLegacyCoordinator,
+          recordMutationReceipt,
+          markWorkerDoneMutationEffectFree,
           withSendWarnings
         })
       }

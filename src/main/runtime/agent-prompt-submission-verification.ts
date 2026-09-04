@@ -50,6 +50,13 @@ export function resolveAgentPromptEffectTimeoutMs(agent: TuiAgent | null | undef
     : AGENT_PROMPT_EFFECT_TIMEOUT_MS
 }
 
+/** Only these providers expose a turn-start signal Orca can settle a prompt receipt against. */
+export function isTerminalSendSettlementAgent(
+  agent: TuiAgent | null | undefined
+): agent is 'claude' | 'codex' {
+  return agent === 'claude' || agent === 'codex'
+}
+
 export function isAgentPromptStalledError(error: unknown): boolean {
   if (error instanceof Error && error.message === AGENT_PROMPT_STALLED_ERROR) {
     return true

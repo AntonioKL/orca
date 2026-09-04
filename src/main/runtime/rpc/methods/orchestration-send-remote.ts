@@ -3,7 +3,10 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { waitForFederatedLifecycleSettlement } from '../../orchestration/federation-lifecycle-settlement'
 import { bindCoordinatorMutationPayload } from '../../orchestration/dispatch-message-binding'
-import { ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION } from '../../../../shared/protocol-version'
+import {
+  ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION,
+  ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY
+} from '../../../../shared/protocol-version'
 import type { z } from 'zod'
 import { parseRemoteWorkerPayload } from './orchestration-schemas'
 import type { SendParams } from './orchestration-schemas'
@@ -67,7 +70,11 @@ export async function sendRemoteMessage(args: {
 
   const supportsLifecycleSettlement =
     remoteAttachment.protocol_version >=
-    ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION
+      ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION &&
+    runtime
+      .getStatus()
+      .capabilities?.includes(ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY) ===
+      true
   const relay = db.enqueueFederationRelay({
     dispatchId: remoteAttachment.dispatch_id,
     direction: 'to_home',

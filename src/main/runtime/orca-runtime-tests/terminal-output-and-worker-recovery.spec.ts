@@ -660,7 +660,7 @@ describe('OrcaRuntimeService', () => {
       await vi.advanceTimersByTimeAsync(500)
 
       const firstInjections = write.mock.calls.filter(
-        (c) => typeof c[1] === 'string' && c[1].includes('orca orchestration check')
+        (c) => typeof c[1] === 'string' && c[1].includes('orchestration check')
       ).length
       expect(firstInjections).toBe(1)
 
@@ -669,7 +669,7 @@ describe('OrcaRuntimeService', () => {
       await vi.advanceTimersByTimeAsync(500)
 
       const totalInjections = write.mock.calls.filter(
-        (c) => typeof c[1] === 'string' && c[1].includes('orca orchestration check')
+        (c) => typeof c[1] === 'string' && c[1].includes('orchestration check')
       ).length
       expect(totalInjections).toBe(1)
       db.close()

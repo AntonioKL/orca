@@ -5,6 +5,7 @@ import { bindCoordinatorMutationPayload } from '../../orchestration/dispatch-mes
 import { isDispatchMutationMessageType, parseMessageTaskId } from './orchestration-schemas'
 import type { SendParams } from './orchestration-schemas'
 import { legacyWorkerDeliveryContract } from './orchestration-routing'
+import { recordReceiptForPostCommitNudge } from './orchestration-mutation-replay-nudge'
 import type { SendRecipientWarning } from './orchestration-recipient-routing'
 import type { z } from 'zod'
 
@@ -24,6 +25,8 @@ export function sendPointToPointMessage(args: {
   orchestrationCapability: string | undefined
   resolveProcessIncarnation: () => string | undefined
   revalidateLegacyCoordinator: (() => string) | undefined
+  recordMutationReceipt: ((receipt: unknown) => void) | undefined
+  markWorkerDoneMutationEffectFree: (() => void) | undefined
   withSendWarnings: SendReceipt
 }): unknown {
   const {
@@ -39,77 +42,108 @@ export function sendPointToPointMessage(args: {
     orchestrationCapability,
     resolveProcessIncarnation,
     revalidateLegacyCoordinator,
+    recordMutationReceipt,
+    markWorkerDoneMutationEffectFree,
     withSendWarnings
   } = args
   // Point-to-point — existing single-recipient behavior
   revalidateLegacyCoordinator?.()
-  const dispatch = dispatchId ? db.getDispatchContextById(dispatchId) : undefined
   const messageType = (params.type ?? 'status') as MessageType
-  const msg = db.insertMessage({
-    from,
-    to,
-    subject: params.subject,
-    body: params.body,
-    type: messageType,
-    priority: params.priority as MessagePriority,
-    threadId: params.threadId,
-    payload: dispatch
-      ? bindCoordinatorMutationPayload(messageType, params.payload, dispatch.id)
-      : params.payload,
-    senderPaneKey,
-    runId: messageRunId,
-    deliveryContract: legacyWorkerDeliveryContract(
-      runtime,
-      messageRunId ?? legacyCoordinatorRunId,
-      to
-    )
-  })
-  if (isDispatchMutationMessageType(msg.type)) {
-    const processIncarnation = resolveProcessIncarnation()
-    const taskId = parseMessageTaskId(params.payload)
-    const capabilityBacked = Boolean(dispatch?.capability_hash)
-    const coordinatorMutation = msg.type === 'escalation' || msg.type === 'decision_gate'
-    const authority = resolveLifecycleAuthority({
-      db,
-      dispatch,
+  const processIncarnation = isDispatchMutationMessageType(messageType)
+    ? resolveProcessIncarnation()
+    : undefined
+  const commitMessage = (): { receipt: unknown; nudge: () => void } => {
+    const dispatch = dispatchId ? db.getDispatchContextById(dispatchId) : undefined
+    const msg = db.insertMessage({
       from,
-      paneKey: senderPaneKey,
-      processIncarnation,
-      capability: orchestrationCapability,
-      taskId,
-      capabilityBacked,
-      coordinatorMutation
+      to,
+      subject: params.subject,
+      body: params.body,
+      type: messageType,
+      priority: params.priority as MessagePriority,
+      threadId: params.threadId,
+      payload: dispatch
+        ? bindCoordinatorMutationPayload(messageType, params.payload, dispatch.id)
+        : params.payload,
+      senderPaneKey,
+      runId: messageRunId,
+      deliveryContract: legacyWorkerDeliveryContract(
+        runtime,
+        messageRunId ?? legacyCoordinatorRunId,
+        to
+      )
     })
-    if (!authority.valid) {
-      const rejection =
-        db.convertLifecycleMessageToRejection(msg.id, authority.code, authority.reason) ?? msg
-      runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
-      return withSendWarnings({
-        message: rejection,
-        lifecycle: { action: 'rejected', code: authority.code, reason: authority.reason }
+    if (isDispatchMutationMessageType(msg.type)) {
+      const taskId = parseMessageTaskId(params.payload)
+      const capabilityBacked = Boolean(dispatch?.capability_hash)
+      const coordinatorMutation = msg.type === 'escalation' || msg.type === 'decision_gate'
+      const authority = resolveLifecycleAuthority({
+        db,
+        dispatch,
+        from,
+        paneKey: senderPaneKey,
+        processIncarnation,
+        capability: orchestrationCapability,
+        taskId,
+        capabilityBacked,
+        coordinatorMutation
       })
+      if (!authority.valid) {
+        const rejection =
+          db.convertLifecycleMessageToRejection(msg.id, authority.code, authority.reason) ?? msg
+        const receipt = withSendWarnings({
+          message: rejection,
+          lifecycle: {
+            action: 'rejected',
+            code: authority.code,
+            reason: authority.reason
+          }
+        })
+        return recordReceiptForPostCommitNudge(recordMutationReceipt, receipt, () =>
+          runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
+        )
+      }
     }
-  }
 
-  // Why: reconcile releases the dispatch lock before waking recipients, else a woken coordinator re-dispatches while the lock is still held.
-  if (msg.type === 'worker_done' || msg.type === 'heartbeat') {
-    const reconciled = reconcileLifecycleMessage(db, msg)
-    // Why: a suppressed message is already read, so skip the notify that would wake a check --wait waiter to an empty result.
-    if (reconciled.action === 'suppressed') {
-      return withSendWarnings({ message: msg })
+    if (msg.type === 'worker_done' || msg.type === 'heartbeat') {
+      const reconciled = reconcileLifecycleMessage(db, msg)
+      // Why: a suppressed message is already read, so skip waking a check waiter to an empty result.
+      if (reconciled.action === 'suppressed') {
+        return recordReceiptForPostCommitNudge(
+          recordMutationReceipt,
+          withSendWarnings({ message: msg }),
+          () => undefined
+        )
+      }
+      if (reconciled.action === 'rejected') {
+        const rejection = db.getMessageById(msg.id) ?? msg
+        const receipt = withSendWarnings({ message: rejection, lifecycle: reconciled })
+        return recordReceiptForPostCommitNudge(recordMutationReceipt, receipt, () =>
+          runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
+        )
+      }
+      const receipt = withSendWarnings(
+        msg.type === 'worker_done' ? { message: msg, lifecycle: reconciled } : { message: msg }
+      )
+      return recordReceiptForPostCommitNudge(recordMutationReceipt, receipt, () =>
+        runtime.notifyMessageArrived(msg.to_handle, msg.type)
+      )
     }
-    if (reconciled.action === 'rejected') {
-      const rejection = db.getMessageById(msg.id) ?? msg
-      runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
-      return withSendWarnings({ message: rejection, lifecycle: reconciled })
-    }
-    runtime.notifyMessageArrived(msg.to_handle, msg.type)
-    return withSendWarnings(
-      msg.type === 'worker_done' ? { message: msg, lifecycle: reconciled } : { message: msg }
+    const receipt = withSendWarnings({ message: msg })
+    return recordReceiptForPostCommitNudge(recordMutationReceipt, receipt, () =>
+      runtime.notifyMessageArrived(msg.to_handle, msg.type)
     )
   }
-  runtime.notifyMessageArrived(msg.to_handle, msg.type)
-  return withSendWarnings({ message: msg })
+  // Why: worker_done wakes the Run only after its mailbox row, settlement, and replay receipt commit together.
+  if (messageType === 'worker_done') {
+    markWorkerDoneMutationEffectFree?.()
+  }
+  const committed =
+    messageType === 'worker_done'
+      ? db.commitWorkerDoneMessageMutation(commitMessage)
+      : commitMessage()
+  committed.nudge()
+  return committed.receipt
 }
 
 type LifecycleAuthority = {
@@ -181,7 +215,11 @@ function resolveLifecycleAuthority(args: {
   return {
     valid:
       !coordinatorMutation ||
-      db.isDispatchMessageSender({ dispatchId: dispatch.id, handle: from, paneKey }),
+      db.isDispatchMessageSender({
+        dispatchId: dispatch.id,
+        handle: from,
+        paneKey
+      }),
     code: 'sender_not_assignee',
     reason: `Terminal ${from} does not own Dispatch ${dispatch.id}.`
   }

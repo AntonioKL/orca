@@ -7,6 +7,7 @@ import type { AttemptProjectedOutcome } from '../attempt-observation-types'
 import type { DispatchStatus, WorkerDispatchState } from '../../types'
 import type { TerminalExitCause } from '../../../../../shared/terminal-exit-cause'
 import type { OrchestrationDb } from '../orchestration-db'
+import { ATTEMPT_OBSERVATION_FACT_COLUMN_LIST } from '../row-column-lists'
 
 export type WorkerAttentionFacts = {
   outcome: AttemptProjectedOutcome
@@ -72,7 +73,7 @@ export function getWorkerAttentionFactsForDispatches(
   }[]
   const observationRows = this.db
     .prepare(
-      `SELECT * FROM attempt_observation_facts
+      `SELECT ${ATTEMPT_OBSERVATION_FACT_COLUMN_LIST} FROM attempt_observation_facts
         WHERE dispatch_id IN (SELECT value FROM json_each(?))
         ORDER BY dispatch_id, sequence, rowid`
     )
