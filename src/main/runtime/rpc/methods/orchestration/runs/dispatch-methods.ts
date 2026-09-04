@@ -93,11 +93,13 @@ export const ORCHESTRATION_DISPATCH_METHODS: RpcMethod[] = [
       }
       const callerPane = params.from ? runtime.getTerminalPaneKey(params.from) : null
       if (
+        params.inject &&
         params.from &&
         (to === params.from || (assigneePaneKey != null && assigneePaneKey === callerPane))
       ) {
-        // A coordinator dispatched to itself answers its own preamble forever (worker-start
-        // --terminal is the other door into the same self-adoption).
+        // An injected preamble into the coordinator's own pane makes it answer itself forever
+        // (worker-start --terminal is the other door). A context-only self-dispatch writes
+        // nothing into the pane and stays legal for low-level topologies.
         throw new OrchestrationError(
           'terminal_is_coordinator',
           `Terminal ${to} is this coordinator's own terminal. Dispatch to a different agent pane, or use worker-start to create one.`

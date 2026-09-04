@@ -72,9 +72,17 @@ describe('orchestration.dispatch --to the caller', () => {
     expect(harness.runtime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
   })
 
-  it('refuses a different handle that resolves to the coordinator pane', async () => {
+  it('refuses an injected dispatch to a different handle that resolves to the coordinator pane', async () => {
     vi.spyOn(harness.runtime, 'getTerminalPaneKey').mockImplementation((handle) =>
       handle === 'term_coord' || handle === 'term_coord_alias' ? harness.coordinatorPaneKey : null
+    )
+    vi.spyOn(harness.runtime, 'getOrchestrationDispatchAuthority').mockImplementation(
+      (handle) =>
+        ({
+          terminalHandle: handle,
+          paneKey: harness.coordinatorPaneKey,
+          processIncarnation: 'runtime_test:term_coord:1'
+        }) as never
     )
     const task = harness.db.createTask({ spec: 'self dispatch alias', runId: harness.activeRunId })
 
@@ -82,9 +90,28 @@ describe('orchestration.dispatch --to the caller', () => {
       harness.call('orchestration.dispatch', {
         task: task.id,
         from: 'term_coord',
-        to: 'term_coord_alias'
+        to: 'term_coord_alias',
+        inject: true
       })
     ).rejects.toMatchObject({ code: 'terminal_is_coordinator' })
+  })
+
+  // Low-level topologies (and the e2e specs that drive them from one pane) dispatch context
+  // to the caller's own terminal; nothing is written into the pane, so nothing self-adopts.
+  it('still records a context-only dispatch aimed at the coordinator handle', async () => {
+    const task = harness.db.createTask({ spec: 'self context', runId: harness.activeRunId })
+
+    const result = (await harness.call('orchestration.dispatch', {
+      task: task.id,
+      from: 'term_coord',
+      to: 'term_coord'
+    })) as { dispatch: { id: string; status: string } }
+
+    expect(result.dispatch.status).toBe('dispatched')
+    expect(harness.db.getDispatchContextById(result.dispatch.id)?.assignee_handle).toBe(
+      'term_coord'
+    )
+    expect(harness.runtime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
   })
 
   it('still dispatches to a different pane', async () => {
