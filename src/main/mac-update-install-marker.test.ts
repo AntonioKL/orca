@@ -18,6 +18,7 @@ const {
   markerPathRef,
   isShipItProvenExitedMock,
   getShipItLivenessMock,
+  getProcessStartTimesMock,
   isProcessAliveMock
 } = vi.hoisted(() => ({
   getVersionMock: vi.fn(),
@@ -25,6 +26,7 @@ const {
   markerPathRef: { dir: '', bundle: '/Applications/Orca.app' },
   isShipItProvenExitedMock: vi.fn(),
   getShipItLivenessMock: vi.fn(),
+  getProcessStartTimesMock: vi.fn(),
   isProcessAliveMock: vi.fn()
 }))
 
@@ -35,7 +37,8 @@ vi.mock('./updater-lifecycle-diagnostics', () => ({
 vi.mock('../shared/shipit-liveness', () => ({
   isShipItProvenExited: isShipItProvenExitedMock,
   getShipItLivenessForBundle: getShipItLivenessMock,
-  isProcessAlive: isProcessAliveMock
+  getProcessStartTimes: getProcessStartTimesMock,
+  isRecordedProcessAlive: isProcessAliveMock
 }))
 vi.mock('../shared/mac-update-install-marker', async (importOriginal) => {
   const actual = await importOriginal<typeof MarkerModule>()
@@ -87,6 +90,7 @@ const writeMarker = (overrides: Partial<MacUpdateInstallMarker> = {}): MacUpdate
     fromVersion: '1.4.194',
     targetVersion: '1.4.195',
     requestedByPid: 321,
+    requestedByStartedAtMs: Date.now() - 60_000,
     createdAtMs: Date.now() - 30_000,
     attemptId: 'a1b2c3d4e5f60718',
     ...overrides
@@ -116,6 +120,8 @@ beforeEach(() => {
   isShipItProvenExitedMock.mockReturnValue(false)
   getShipItLivenessMock.mockReset()
   getShipItLivenessMock.mockReturnValue('live')
+  getProcessStartTimesMock.mockReset()
+  getProcessStartTimesMock.mockReturnValue(new Map())
   isProcessAliveMock.mockReset()
   isProcessAliveMock.mockReturnValue(false)
   // Never let a test resolve this to the real Squirrel cache.
@@ -347,6 +353,18 @@ describe('startup gate liveness', () => {
 })
 
 describe('marker directory hygiene', () => {
+  it('records the kernel process identity instead of relying on wall-clock uptime math', () => {
+    const startedAtMs = Date.now() - 3_600_000
+    getProcessStartTimesMock.mockReturnValue(new Map([[process.pid, startedAtMs]]))
+    getVersionMock.mockReturnValue('1.4.194')
+
+    markMacUpdateInstallInFlight('1.4.196')
+
+    const attempt = readdirSync(dir).find((name) => name.startsWith('attempt-'))
+    const written = JSON.parse(readFileSync(join(dir, attempt!), 'utf8'))
+    expect(written.requestedByStartedAtMs).toBe(startedAtMs)
+  })
+
   it('drops attempt files past the age cap while leaving live ones alone', () => {
     // Per-attempt filenames make deletion safe, but a crashed attempt would otherwise leave its
     // file behind forever. Only provably expired files go.

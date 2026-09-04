@@ -18,6 +18,8 @@ export type MacUpdateInstallMarker = {
   fromVersion: string
   targetVersion: string
   requestedByPid: number
+  /** Kernel-reported process start; optional for markers written by earlier builds. */
+  requestedByStartedAtMs?: number
   createdAtMs: number
   /** Random per-attempt token. Two attempts from one process in the same millisecond would
    *  otherwise share a filename, and the loser could be unlinked by the winner's owner. */
@@ -202,6 +204,9 @@ export function parseMacUpdateInstallMarker(value: unknown): MacUpdateInstallMar
     !isVersion(state.targetVersion) ||
     !Number.isInteger(state.requestedByPid) ||
     (state.requestedByPid as number) <= 0 ||
+    (state.requestedByStartedAtMs !== undefined &&
+      (!Number.isInteger(state.requestedByStartedAtMs) ||
+        (state.requestedByStartedAtMs as number) <= 0)) ||
     !Number.isInteger(state.createdAtMs) ||
     (state.createdAtMs as number) <= 0 ||
     typeof state.attemptId !== 'string' ||

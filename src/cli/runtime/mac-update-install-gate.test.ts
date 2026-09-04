@@ -3,7 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as MacUpdateInstallMarkerModule from '../../shared/mac-update-install-marker'
-import type { MacUpdateInstallMarker } from '../../shared/mac-update-install-marker'
+import {
+  MAC_UPDATE_INSTALL_MARKER_MAX_AGE_MS,
+  type MacUpdateInstallMarker
+} from '../../shared/mac-update-install-marker'
 
 const {
   markerDirRef,
@@ -52,7 +55,8 @@ vi.mock('./mac-app-update-bundle', () => ({
 }))
 vi.mock('../../shared/shipit-liveness', () => ({
   getShipItLivenessForBundle: getShipItLivenessMock,
-  isProcessAlive: isProcessAliveMock
+  getProcessStartTimes: vi.fn(() => new Map()),
+  isRecordedProcessAlive: isProcessAliveMock
 }))
 
 import { awaitMacUpdateInstall } from './mac-update-install-gate'
@@ -66,6 +70,7 @@ const writeMarker = (overrides: Partial<MacUpdateInstallMarker> = {}): void => {
     fromVersion: '1.4.194',
     targetVersion: '1.4.195',
     requestedByPid: 999,
+    requestedByStartedAtMs: Date.now() - 60_000,
     createdAtMs: Date.now(),
     attemptId: 'a1b2c3d4e5f60718',
     ...overrides
@@ -164,12 +169,33 @@ describe('awaitMacUpdateInstall', () => {
     expect(waitForMacBundleVersionChangeMock).not.toHaveBeenCalled()
   })
 
+  it('does not let an older sibling marker re-gate a newer installed build', async () => {
+    writeMarker({ fromVersion: '1.4.194', targetVersion: '1.4.195' })
+    readMacBundleVersionMock.mockResolvedValue('1.4.196')
+    getShipItLivenessMock.mockReturnValue('live')
+
+    await expect(
+      awaitMacUpdateInstall('/Applications/Orca.app/Contents/MacOS/Orca')
+    ).resolves.toEqual({ kind: 'proceed' })
+    expect(waitForMacBundleVersionChangeMock).not.toHaveBeenCalled()
+  })
+
   it('does not wait out the cap when the installer is proven gone', () => {
     // A marker left by a silent -9 abort would otherwise make every `orca open` poll for minutes.
     // requestedByPid 321 is not a live process, so the writer has exited and only ShipIt liveness
     // decides — which here says the install is over.
     writeMarker()
     getShipItLivenessMock.mockReturnValue('exited')
+
+    return expect(
+      awaitMacUpdateInstall('/Applications/Orca.app/Contents/MacOS/Orca')
+    ).resolves.toEqual({ kind: 'proceed' })
+  })
+
+  it('fails open during the pre-spawn phase for a marker from an older installed build', () => {
+    writeMarker({ requestedByStartedAtMs: undefined })
+    getShipItLivenessMock.mockReturnValue('exited')
+    isProcessAliveMock.mockReturnValue(false)
 
     return expect(
       awaitMacUpdateInstall('/Applications/Orca.app/Contents/MacOS/Orca')
@@ -208,6 +234,22 @@ describe('awaitMacUpdateInstall', () => {
         '1.4.194',
         expect.any(Number)
       )
+    })
+  })
+
+  it('never waits beyond the marker absolute age cap', () => {
+    writeMarker({
+      createdAtMs: Date.now() - MAC_UPDATE_INSTALL_MARKER_MAX_AGE_MS + 1_000
+    })
+    waitForMacBundleVersionChangeMock.mockResolvedValue(false)
+
+    return awaitMacUpdateInstall('/Applications/Orca.app/Contents/MacOS/Orca').then(() => {
+      expect(waitForMacBundleVersionChangeMock).toHaveBeenCalledWith(
+        '/Applications/Orca.app/Contents/MacOS/Orca',
+        '1.4.194',
+        expect.any(Number)
+      )
+      expect(waitForMacBundleVersionChangeMock.mock.calls[0][2]).toBeLessThanOrEqual(1_000)
     })
   })
 

@@ -6,7 +6,6 @@ import {
   unlinkSync,
   writeFileSync
 } from 'node:fs'
-import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import {
@@ -23,11 +22,14 @@ import {
   type MacUpdateInstallMarker
 } from '../shared/mac-update-install-marker'
 import {
+  getProcessStartTimes,
   getShipItLivenessForBundle,
-  isProcessAlive,
-  isShipItProvenExited
+  isRecordedProcessAlive
 } from '../shared/shipit-liveness'
+import { clearWedgedShipItState } from './mac-update-shipit-state'
 import { recordUpdaterLifecycle } from './updater-lifecycle-diagnostics'
+
+export { _setShipItStatePathForTests, canDeleteShipItState } from './mac-update-shipit-state'
 
 /**
  * Publish "an install is in flight for this bundle" where a launching process can see it.
@@ -41,13 +43,19 @@ export function markMacUpdateInstallInFlight(targetVersion: string): void {
   if (!bundlePath || !targetVersion) {
     return
   }
+  const createdAtMs = Date.now()
+  // The kernel value survives later wall-clock changes; uptime math is only a fail-open fallback
+  // when the bounded identity probe is unavailable during shutdown.
+  const observedProcessStart = getProcessStartTimes([process.pid])?.get(process.pid)
   const marker: MacUpdateInstallMarker = {
     schemaVersion: 1,
     bundlePath,
     fromVersion: app.getVersion(),
     targetVersion,
     requestedByPid: process.pid,
-    createdAtMs: Date.now(),
+    requestedByStartedAtMs:
+      observedProcessStart ?? Math.max(1, Math.round(createdAtMs - process.uptime() * 1_000)),
+    createdAtMs,
     attemptId: createAttemptId()
   }
   const markerPath = getMacUpdateInstallMarkerPath(bundlePath, marker)
@@ -131,36 +139,6 @@ function readNewestMarkerForThisBundle(): MacUpdateInstallMarker | null {
   )
 }
 
-// Why injectable: this is the one destructive path in this module, and a test that resolved it
-// to the real cache would delete the developer's own Squirrel state.
-let shipItStatePathOverride: string | null = null
-
-function getShipItStatePath(): string {
-  return (
-    shipItStatePathOverride ??
-    join(homedir(), 'Library', 'Caches', 'com.stablyai.orca.ShipIt', 'ShipItState.plist')
-  )
-}
-
-export function _setShipItStatePathForTests(path: string | null): void {
-  shipItStatePathOverride = path
-}
-
-/**
- * May this process delete the installer's state file?
- *
- * Pure so the refusal is directly testable. An absence-based assertion cannot distinguish "the
- * guard worked" from "the real file happened not to exist", which is how earlier versions of this
- * test passed while still being capable of deleting a developer's own Squirrel state (#16980
- * class).
- */
-export function canDeleteShipItState(input: {
-  hasPathOverride: boolean
-  isUnderTest: boolean
-}): boolean {
-  return input.hasPathOverride || !input.isUnderTest
-}
-
 /** Whether an update install is currently in flight for this bundle. */
 export function isMacUpdateInstallInFlight(): boolean {
   if (process.platform !== 'darwin') {
@@ -177,17 +155,25 @@ export function isMacUpdateInstallInFlight(): boolean {
       return false
     }
     let shipItLiveness: 'live' | 'unverifiable' | 'exited' | undefined
+    const processStarts = getProcessStartTimes(markers.map((marker) => marker.requestedByPid))
     // Why inspect every attempt: a dead newer marker can otherwise mask an older writer that is
     // still in the pre-spawn window and must keep relaunches out of the bundle.
     return Boolean(
-      selectInFlightMarker(markers, now, (marker) =>
-        isAttemptInFlight({
+      selectInFlightMarker(markers, now, (marker) => {
+        const writerAlive = isRecordedProcessAlive(
+          marker.requestedByPid,
+          marker.requestedByStartedAtMs,
+          processStarts
+        )
+        return isAttemptInFlight({
           marker,
           now,
-          shipItLiveness: (shipItLiveness ??= getShipItLivenessForBundle(bundlePath)),
-          writerAlive: isProcessAlive(marker.requestedByPid)
+          shipItLiveness: writerAlive
+            ? 'exited'
+            : (shipItLiveness ??= getShipItLivenessForBundle(bundlePath)),
+          writerAlive
         })
-      )
+      })
     )
   } catch {
     return false
@@ -294,49 +280,6 @@ export function reconcileMacUpdateInstallMarker(): void {
 }
 
 /**
- * Delete Squirrel's staged-install state after an install that demonstrably failed.
- *
- * A state file left by an aborted install keeps being resumed and pins the machine to an update
- * that can never complete — issue #14732 needed this removed by hand before updates worked again.
- *
- * The liveness check is what makes this safe: an earlier version deleted unconditionally, which
- * meant a Dock or alternate-profile launch could abort a swap that was still running. Only a
- * bundle with no ShipIt of its own alive is safe to clean up.
- */
-function clearWedgedShipItState(bundlePath: string): void {
-  // Why proven-exited and not merely "not seen": deleting installer state while a swap is still
-  // running aborts a valid update, and a `ps` we could not run tells us nothing about it.
-  if (!isShipItProvenExited(bundlePath)) {
-    return
-  }
-  // Why this guard and not just the override: a test that forgets to set the override would
-  // delete the developer's own Squirrel state, and a green suite would hide it. The repo has
-  // been burned by exactly this class before (#16980, where a test parked the real ~/.claude
-  // hooks), so the destructive path refuses to resolve to a real home under test.
-  if (
-    !canDeleteShipItState({
-      hasPathOverride: shipItStatePathOverride !== null,
-      isUnderTest: Boolean(process.env.VITEST)
-    })
-  ) {
-    return
-  }
-  try {
-    unlinkSync(getShipItStatePath())
-    recordUpdaterLifecycle(
-      'shipit_state_cleared',
-      {},
-      {
-        level: 'warn',
-        message: 'Cleared a stale Squirrel install state left behind by a failed update'
-      }
-    )
-  } catch {
-    // Absent is the normal case; stale state only exists after an aborted install.
-  }
-}
-
-/**
  * Should this launch step aside so an in-flight update can finish?
  *
  * ShipIt refuses to swap the bundle while any instance of it runs, so merely *being* this
@@ -370,19 +313,25 @@ export function shouldExitForInFlightMacUpdateInstall(): boolean {
   const now = Date.now()
   const markers = readActiveMarkersForThisBundle()
   let shipItLiveness: 'live' | 'unverifiable' | 'exited' | undefined
-  const marker = selectInFlightMarker(
-    markers,
-    now,
-    (candidate) =>
-      candidate.fromVersion === runningVersion &&
-      candidate.targetVersion !== runningVersion &&
-      isAttemptInFlight({
-        marker: candidate,
-        now,
-        shipItLiveness: (shipItLiveness ??= getShipItLivenessForBundle(bundlePath)),
-        writerAlive: isProcessAlive(candidate.requestedByPid)
-      })
-  )
+  const processStarts = getProcessStartTimes(markers.map((marker) => marker.requestedByPid))
+  const marker = selectInFlightMarker(markers, now, (candidate) => {
+    if (candidate.fromVersion !== runningVersion || candidate.targetVersion === runningVersion) {
+      return false
+    }
+    const writerAlive = isRecordedProcessAlive(
+      candidate.requestedByPid,
+      candidate.requestedByStartedAtMs,
+      processStarts
+    )
+    return isAttemptInFlight({
+      marker: candidate,
+      now,
+      shipItLiveness: writerAlive
+        ? 'exited'
+        : (shipItLiveness ??= getShipItLivenessForBundle(bundlePath)),
+      writerAlive
+    })
+  })
   const decision = decideMacUpdateLaunch({
     marker,
     bundlePath,
@@ -404,12 +353,18 @@ export function shouldExitForInFlightMacUpdateInstall(): boolean {
   // exits, ShipIt cannot have spawned — which is what the wall-clock grace was standing in for.
   // Recheck after choosing a marker: a writer or installer can finish between the directory read
   // and this decision, and uncertain evidence must not make startup exit unnecessarily.
+  const refreshedProcessStarts = getProcessStartTimes([marker.requestedByPid])
+  const writerAlive = isRecordedProcessAlive(
+    marker.requestedByPid,
+    marker.requestedByStartedAtMs,
+    refreshedProcessStarts
+  )
   if (
     !isAttemptInFlight({
       marker,
       now: Date.now(),
-      shipItLiveness: getShipItLivenessForBundle(bundlePath),
-      writerAlive: isProcessAlive(marker.requestedByPid)
+      shipItLiveness: writerAlive ? 'exited' : getShipItLivenessForBundle(bundlePath),
+      writerAlive
     })
   ) {
     return false

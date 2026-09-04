@@ -221,14 +221,15 @@ describe('updater mac install handoff', () => {
 
       nativeDownloadedHandler?.()
 
-      await vi.waitFor(() => {
-        expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(false, true)
-      })
       expect(sendMock).toHaveBeenCalledWith('updater:status', {
-        state: 'downloading',
-        percent: 100,
-        version: '1.0.61'
+        state: 'downloaded',
+        version: '1.0.61',
+        releaseUrl: undefined
       })
+      await vi.waitFor(() => {
+        expect(sendMock).toHaveBeenCalledWith('updater:quitAndInstallRequested')
+      })
+      expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled()
     }
   )
 
@@ -271,6 +272,9 @@ describe('updater mac install handoff', () => {
       nativeDownloadedHandler?.()
       await vi.advanceTimersByTimeAsync(0)
 
+      expect(mainWindow.webContents.send).toHaveBeenCalledWith('updater:quitAndInstallRequested')
+      quitAndInstall()
+      await vi.advanceTimersByTimeAsync(100)
       expect(onBeforeQuit).toHaveBeenCalledTimes(1)
       expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled()
 
@@ -285,7 +289,7 @@ describe('updater mac install handoff', () => {
   )
 
   it.runIf(process.platform === 'darwin')(
-    'logs rejected deferred mac install handoffs without unhandled rejection',
+    'reports the update ready before a deferred renderer preparation fails',
     async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const reportDownloaded = vi.fn()
@@ -310,7 +314,7 @@ describe('updater mac install handoff', () => {
       )
       await Promise.resolve()
 
-      expect(reportDownloaded).not.toHaveBeenCalled()
+      expect(reportDownloaded).toHaveBeenCalledTimes(1)
       await vi.waitFor(() => {
         // Why: recordUpdaterLifecycle packs metadata into one console line.
         expect(warn).toHaveBeenCalledWith(

@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const { runProcessSyncMock } = vi.hoisted(() => ({ runProcessSyncMock: vi.fn() }))
 vi.mock('./child-process/run-process', () => ({ runProcessSync: runProcessSyncMock }))
 
-import { getShipItLivenessForBundle } from './shipit-liveness'
+import {
+  getProcessStartTimes,
+  getShipItLivenessForBundle,
+  isRecordedProcessAlive
+} from './shipit-liveness'
 
 const BUNDLE = '/Applications/Orca.app'
 const SHIPIT = `${BUNDLE}/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt`
@@ -89,5 +93,73 @@ describe('isShipItRunningForBundle', () => {
     expect(runProcessSyncMock).toHaveBeenCalledWith(
       expect.objectContaining({ program: '/bin/ps', timeoutMs: 2_000 })
     )
+  })
+})
+
+describe('process identity', () => {
+  it('recognizes the exact process that wrote a marker', () => {
+    runProcessSyncMock.mockReturnValue({
+      code: 0,
+      stdout: ' 4242 Thu Sep  3 12:34:56 2026\n',
+      stderr: '',
+      timedOut: false,
+      outputTruncated: false
+    })
+
+    const starts = getProcessStartTimes([4242])
+
+    expect(isRecordedProcessAlive(4242, Date.parse('Thu Sep 3 12:34:56 2026'), starts)).toBe(true)
+  })
+
+  it('does not mistake a recycled pid for the marker writer', () => {
+    runProcessSyncMock.mockReturnValue({
+      code: 0,
+      stdout: ' 4242 Thu Sep  3 12:44:56 2026\n',
+      stderr: '',
+      timedOut: false,
+      outputTruncated: false
+    })
+
+    const starts = getProcessStartTimes([4242])
+
+    expect(isRecordedProcessAlive(4242, Date.parse('Thu Sep 3 12:34:56 2026'), starts)).toBe(false)
+  })
+
+  it('batches marker writers into one bounded probe', () => {
+    runProcessSyncMock.mockReturnValue({
+      code: 0,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+      outputTruncated: false
+    })
+
+    getProcessStartTimes([42, 84, 42])
+
+    expect(runProcessSyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        program: '/bin/ps',
+        args: ['-p', '42,84', '-o', 'pid=,lstart='],
+        timeoutMs: 500
+      })
+    )
+  })
+
+  it('fails open when process identity cannot be verified', () => {
+    runProcessSyncMock.mockReturnValue({
+      code: 1,
+      stdout: '',
+      stderr: 'denied',
+      timedOut: false,
+      outputTruncated: false
+    })
+
+    expect(isRecordedProcessAlive(4242, Date.now(), getProcessStartTimes([4242]))).toBe(false)
+  })
+
+  it('does not probe when no marker exists', () => {
+    runProcessSyncMock.mockClear()
+    expect(getProcessStartTimes([])).toEqual(new Map())
+    expect(runProcessSyncMock).not.toHaveBeenCalled()
   })
 })

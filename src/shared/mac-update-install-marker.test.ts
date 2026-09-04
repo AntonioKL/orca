@@ -21,6 +21,7 @@ const marker = (overrides: Partial<MacUpdateInstallMarker> = {}): MacUpdateInsta
   fromVersion: '1.4.194',
   targetVersion: '1.4.195',
   requestedByPid: 4242,
+  requestedByStartedAtMs: NOW - 60_000,
   attemptId: 'a1b2c3d4e5f60718',
   createdAtMs: NOW - 5_000,
   ...overrides
@@ -126,6 +127,7 @@ describe('parseMacUpdateInstallMarker', () => {
     ['missing target version', { ...marker(), targetVersion: '' }],
     ['non-integer pid', { ...marker(), requestedByPid: 1.5 }],
     ['zero pid', { ...marker(), requestedByPid: 0 }],
+    ['invalid process start', { ...marker(), requestedByStartedAtMs: 0 }],
     ['no timestamp', { ...marker(), createdAtMs: 0 }],
     ['non-integer timestamp', { ...marker(), createdAtMs: 1.5 }],
     ['empty from version', { ...marker(), fromVersion: '' }],
@@ -150,6 +152,16 @@ describe('parseMacUpdateInstallMarker', () => {
     ['null', null]
   ])('rejects %s', (_label, value) => {
     expect(parseMacUpdateInstallMarker(value)).toBeNull()
+  })
+
+  it('accepts an old marker without process identity so mixed installed versions fail open', () => {
+    const { requestedByStartedAtMs: _omitted, ...oldMarker } = marker()
+    expect(parseMacUpdateInstallMarker(oldMarker)).toEqual(oldMarker)
+  })
+
+  it('accepts a kernel start time beyond wall-clock creation after a backwards clock step', () => {
+    const skewed = marker({ requestedByStartedAtMs: marker().createdAtMs + 60_000 })
+    expect(parseMacUpdateInstallMarker(skewed)).toEqual(skewed)
   })
 })
 

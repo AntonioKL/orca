@@ -13,7 +13,7 @@ export function registerMacUpdaterEvents({
   hasInstallableDownloadedVersion,
   getPendingInstallVersion,
   getKnownReleaseUrl,
-  performQuitAndInstall,
+  requestRendererQuitAndInstall,
   shouldDeferMacQuitForInstall,
   sendStatus
 }: {
@@ -21,14 +21,14 @@ export function registerMacUpdaterEvents({
   hasInstallableDownloadedVersion: () => boolean
   getPendingInstallVersion: () => string
   getKnownReleaseUrl: () => string | undefined
-  performQuitAndInstall: () => void | Promise<void>
+  requestRendererQuitAndInstall: () => void | Promise<void>
   shouldDeferMacQuitForInstall: () => boolean
   sendStatus: (status: UpdateStatus) => void
 }): void {
   if (process.platform === 'darwin') {
     nativeUpdater.on('update-downloaded', () => {
       const hasInstallableVersion = hasInstallableDownloadedVersion()
-      handleMacInstallerReady(hasInstallableVersion, performQuitAndInstall, () => {
+      handleMacInstallerReady(hasInstallableVersion, requestRendererQuitAndInstall, () => {
         sendStatus({
           state: 'downloaded',
           version: getPendingInstallVersion(),
@@ -213,6 +213,9 @@ export function handleMacInstallerReady(
   })
 
   if (installRequestedAfterSquirrelReady && hasNewerDownloadedVersion) {
+    installRequestedAfterSquirrelReady = false
+    // Why: a rejected renderer checkpoint must fall back to Ready to Install, not stick at 100%.
+    onReadyToReportDownloaded()
     void Promise.resolve()
       .then(() => onReadyToInstall())
       .catch((error) => {

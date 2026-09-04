@@ -197,7 +197,11 @@ export class UpdaterSetup extends UpdaterDownloadInstall {
         this.markUpdateAvailableEventPending(attemptId),
       markMissingManifestPrereleaseFallbackChecking: () =>
         this.markMissingManifestPrereleaseFallbackChecking(),
-      performQuitAndInstall: () => this.performQuitAndInstall(),
+      // Headless installs have no renderer state to checkpoint and retain their supervisor handoff.
+      requestRendererQuitAndInstall: () =>
+        this.updateInstallMode === 'interactive'
+          ? this.mainWindowRef?.webContents.send('updater:quitAndInstallRequested')
+          : this.performQuitAndInstall(),
       shouldDeferMacQuitForInstall: () => this.updateInstallMode === 'interactive',
       recordCompletedUpdateCheck: () => this.recordCompletedUpdateCheck(),
       restoreReleaseUpdateSource: () => this.restoreReleaseUpdateSource(),

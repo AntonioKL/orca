@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, unlinkSync } from 'node:fs'
 import {
+  MAC_UPDATE_INSTALL_MARKER_MAX_AGE_MS,
   decideMacUpdateLaunch,
   getMacUpdateInstallMarkerPath,
   readMacUpdateInstallMarkers,
@@ -9,7 +10,11 @@ import {
   selectInFlightMarker,
   type MacUpdateInstallMarker
 } from '../../shared/mac-update-install-marker'
-import { getShipItLivenessForBundle, isProcessAlive } from '../../shared/shipit-liveness'
+import {
+  getProcessStartTimes,
+  getShipItLivenessForBundle,
+  isRecordedProcessAlive
+} from '../../shared/shipit-liveness'
 
 import {
   readMacBundleVersion,
@@ -97,20 +102,30 @@ export async function awaitMacUpdateInstall(
   const currentVersion = await readMacBundleVersion(bundlePath)
   const now = Date.now()
   let shipItLiveness: 'live' | 'unverifiable' | 'exited' | undefined
+  const processStarts = getProcessStartTimes(markers.map((marker) => marker.requestedByPid))
   // Why inspect every attempt: a dead newer marker can otherwise mask an older writer that is
   // still in the pre-spawn window and must keep this launch out of the bundle.
-  const marker = selectInFlightMarker(
-    markers,
-    now,
-    (candidate) =>
-      (currentVersion === null || candidate.targetVersion !== currentVersion) &&
-      isAttemptInFlight({
-        marker: candidate,
-        now,
-        shipItLiveness: (shipItLiveness ??= getShipItLivenessForBundle(bundlePath)),
-        writerAlive: isProcessAlive(candidate.requestedByPid)
-      })
-  )
+  const marker = selectInFlightMarker(markers, now, (candidate) => {
+    if (
+      currentVersion !== null &&
+      (candidate.fromVersion !== currentVersion || candidate.targetVersion === currentVersion)
+    ) {
+      return false
+    }
+    const writerAlive = isRecordedProcessAlive(
+      candidate.requestedByPid,
+      candidate.requestedByStartedAtMs,
+      processStarts
+    )
+    return isAttemptInFlight({
+      marker: candidate,
+      now,
+      shipItLiveness: writerAlive
+        ? 'exited'
+        : (shipItLiveness ??= getShipItLivenessForBundle(bundlePath)),
+      writerAlive
+    })
+  })
   // Why only when a marker exists: refusing whenever the override is set would break dev and e2e
   // runs that never touch an install. The refusal is for the case that actually matters — an
   // install is pending and we cannot tell which bundle the override would open.
@@ -137,12 +152,18 @@ export async function awaitMacUpdateInstall(
 
   // Recheck after choosing a marker: a writer or installer can finish between the directory read
   // and this decision, and uncertain evidence must not make the CLI wait unnecessarily.
+  const refreshedProcessStarts = getProcessStartTimes([marker!.requestedByPid])
+  const writerAlive = isRecordedProcessAlive(
+    marker!.requestedByPid,
+    marker!.requestedByStartedAtMs,
+    refreshedProcessStarts
+  )
   if (
     !isAttemptInFlight({
       marker,
       now: Date.now(),
-      shipItLiveness: getShipItLivenessForBundle(bundlePath),
-      writerAlive: isProcessAlive(marker!.requestedByPid)
+      shipItLiveness: writerAlive ? 'exited' : getShipItLivenessForBundle(bundlePath),
+      writerAlive
     })
   ) {
     // Why leave the marker: deleting here loses the record of a failed install. After a silent
@@ -162,10 +183,16 @@ export async function awaitMacUpdateInstall(
   // was UNREADABLE and the baseline fell back to the attempt's own fromVersion. A change-based
   // wait would then never fire, because a same-version reinstall does not change the plist.
   const baseline = currentVersion ?? marker!.fromVersion
+  // A late CLI launch must not wait a fresh 11 minutes on a marker that is about to expire.
+  const markerWaitRemainingMs = Math.max(
+    0,
+    MAC_UPDATE_INSTALL_MARKER_MAX_AGE_MS - Math.max(0, Date.now() - marker!.createdAtMs)
+  )
+  const boundedWaitMs = Math.min(waitMs, markerWaitRemainingMs)
   const installed =
     targetVersion === baseline
-      ? await waitForMacBundleVersion(launchTarget, targetVersion, waitMs)
-      : await waitForMacBundleVersionChange(launchTarget, baseline, waitMs)
+      ? await waitForMacBundleVersion(launchTarget, targetVersion, boundedWaitMs)
+      : await waitForMacBundleVersionChange(launchTarget, baseline, boundedWaitMs)
   // Why not clear: a later launch no longer re-waits on a finished attempt — the shared core
   // returns not-in-flight once the writer and installer are both gone — so deleting here buys
   // nothing and would destroy the outcome the app's reconcile is about to report.
