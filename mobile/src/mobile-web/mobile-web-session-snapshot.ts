@@ -14,6 +14,7 @@ import {
   type MobileWebSessionTab
 } from '../../../src/shared/mobile-web/bridge-operation-contract'
 import { mobileWebPageBrowserUrl } from '../../../src/shared/mobile-web/browser-url-privacy'
+import { tabsWithinMobileWebSessionEventBudget } from './mobile-web-session-snapshot-event-budget'
 import type { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
 import type {
   MobileWebHostNativeChatBinding,
@@ -70,16 +71,20 @@ export function mobileWebSessionSnapshot(
       ? (tabs.find((tab) => tab.type === 'browser' && tab.isActive)?.id ?? null)
       : boundedNullableText(result.activeTabId, 512)
 
-  const parsed = MobileWebSessionSnapshotResultSchema.safeParse({
+  const envelope = {
     workspaceId: pageWorkspaceId,
     publicationEpoch: result.publicationEpoch,
     snapshotVersion: result.snapshotVersion,
     workspaceTransportState:
       result.workspaceTransportState === 'unavailable' ? 'unavailable' : 'available',
     activeTabId,
-    activeTabType: isTabType(result.activeTabType) ? result.activeTabType : null,
-    tabs,
-    truncated: result.tabs.length > tabs.length
+    activeTabType: isTabType(result.activeTabType) ? result.activeTabType : null
+  }
+  const boundedTabs = tabsWithinMobileWebSessionEventBudget(envelope, tabs)
+  const parsed = MobileWebSessionSnapshotResultSchema.safeParse({
+    ...envelope,
+    tabs: boundedTabs,
+    truncated: result.tabs.length > boundedTabs.length
   })
   if (!parsed.success) {
     throw new Error('mobile_web_session_snapshot_invalid')

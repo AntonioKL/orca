@@ -1,3 +1,7 @@
+import type {
+  MobileWebPostSubscriptionClosed,
+  MobileWebSubscriptionClosure
+} from './mobile-web-subscription-closure'
 import { Buffer } from 'buffer/'
 import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-web/bridge-contract'
 import {
@@ -41,6 +45,7 @@ export class MobileWebBrowserStreams {
         sequence: number,
         event: MobileWebBrowserEvent
       ) => Promise<void>
+      postClosed: MobileWebPostSubscriptionClosed
     }
   ) {}
 
@@ -107,7 +112,7 @@ export class MobileWebBrowserStreams {
     }
   }
 
-  cancel(subscriptionId: string): string | null {
+  cancel(subscriptionId: string, closure?: MobileWebSubscriptionClosure): string | null {
     const record = this.records.get(subscriptionId)
     if (!record) {
       return null
@@ -119,6 +124,9 @@ export class MobileWebBrowserStreams {
       record.unsubscribe()
     } catch {
       // The local record is already retired.
+    }
+    if (closure) {
+      this.options.postClosed(subscriptionId, closure)
     }
     return record.requestId
   }
@@ -206,7 +214,7 @@ export class MobileWebBrowserStreams {
         }
       })
       .catch(() => {
-        this.cancel(subscriptionId)
+        this.cancel(subscriptionId, { code: 'unavailable', retryable: true })
       })
   }
 

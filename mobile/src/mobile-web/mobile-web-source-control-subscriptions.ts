@@ -1,3 +1,7 @@
+import type {
+  MobileWebPostSubscriptionClosed,
+  MobileWebSubscriptionClosure
+} from './mobile-web-subscription-closure'
 import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-web/bridge-contract'
 import type { MobileWebSourceControlStatusInvalidation } from '../../../src/shared/mobile-web/source-control-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
@@ -30,6 +34,7 @@ export class MobileWebSourceControlSubscriptions {
         sequence: number,
         event: MobileWebSourceControlStatusInvalidation
       ) => Promise<void>
+      postClosed: MobileWebPostSubscriptionClosed
     }
   ) {}
 
@@ -75,7 +80,7 @@ export class MobileWebSourceControlSubscriptions {
     }
   }
 
-  cancel(subscriptionId: string): string | null {
+  cancel(subscriptionId: string, closure?: MobileWebSubscriptionClosure): string | null {
     const record = this.records.get(subscriptionId)
     if (!record) {
       return null
@@ -86,6 +91,9 @@ export class MobileWebSourceControlSubscriptions {
       record.unsubscribe()
     } catch {
       // The logical subscription is retired even if transport cleanup fails.
+    }
+    if (closure) {
+      this.options.postClosed(subscriptionId, closure)
     }
     return record.requestId
   }
@@ -116,7 +124,7 @@ export class MobileWebSourceControlSubscriptions {
 
   private receive(subscriptionId: string, record: SubscriptionRecord, value: unknown): void {
     if (!this.isAuthorized(record)) {
-      this.cancel(subscriptionId)
+      this.cancel(subscriptionId, { code: 'not_found', retryable: false })
       return
     }
     if (
@@ -128,7 +136,7 @@ export class MobileWebSourceControlSubscriptions {
       return
     }
     if (!isRecord(value)) {
-      this.cancel(subscriptionId)
+      this.cancel(subscriptionId, { code: 'invalid_message', retryable: false })
       return
     }
     if (value.type === 'starting' || value.type === 'ready') {
@@ -136,7 +144,7 @@ export class MobileWebSourceControlSubscriptions {
     }
     if (value.type === 'changed') {
       if (value.worktree !== `id:${record.hostWorkspaceId}` || !Array.isArray(value.events)) {
-        this.cancel(subscriptionId)
+        this.cancel(subscriptionId, { code: 'invalid_message', retryable: false })
         return
       }
       const overflow =
@@ -158,7 +166,7 @@ export class MobileWebSourceControlSubscriptions {
       )
       return
     }
-    this.cancel(subscriptionId)
+    this.cancel(subscriptionId, { code: 'invalid_message', retryable: false })
   }
 
   private enqueue(
@@ -179,7 +187,7 @@ export class MobileWebSourceControlSubscriptions {
           return
         }
         if (!this.isAuthorized(record)) {
-          this.cancel(subscriptionId)
+          this.cancel(subscriptionId, { code: 'not_found', retryable: false })
           return
         }
         await this.options.postEvent(subscriptionId, sequence, event)
@@ -188,7 +196,7 @@ export class MobileWebSourceControlSubscriptions {
         }
       })
       .catch(() => {
-        this.cancel(subscriptionId)
+        this.cancel(subscriptionId, { code: 'unavailable', retryable: true })
       })
   }
 

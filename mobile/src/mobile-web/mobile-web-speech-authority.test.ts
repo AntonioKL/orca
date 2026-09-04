@@ -13,7 +13,8 @@ describe('MobileWebSpeechAuthority', () => {
       subscriptionId: 'subscription-1',
       post: async (sequence, event) => {
         events.push({ sequence, event })
-      }
+      },
+      closed: vi.fn()
     })
     harness.sendRequest.mockImplementation(async (method) => {
       if (method === 'speech.dictation.finish') {
@@ -117,7 +118,8 @@ describe('MobileWebSpeechAuthority', () => {
     harness.authority.subscribe({
       requestId: 'request-1',
       subscriptionId: 'subscription-1',
-      post
+      post,
+      closed: vi.fn()
     })
     harness.sendRequest.mockResolvedValue(success({}))
     await harness.authority.start(harness.client)

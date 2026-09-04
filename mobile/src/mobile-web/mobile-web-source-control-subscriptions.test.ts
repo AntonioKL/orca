@@ -99,7 +99,8 @@ describe('MobileWebSourceControlSubscriptions', () => {
     const subscriptions = new MobileWebSourceControlSubscriptions({
       isActive: () => true,
       workspaceAuthority,
-      postEvent: vi.fn()
+      postEvent: vi.fn(),
+      postClosed: vi.fn()
     })
 
     subscriptions.start({
@@ -136,6 +137,24 @@ describe('MobileWebSourceControlSubscriptions', () => {
 
     expect(harness.unsubscribe).toHaveBeenCalledOnce()
     expect(harness.events).toEqual([])
+    // Without this frame the page keeps a live entry and freezes on its last status forever.
+    expect(harness.closures).toEqual([{ code: 'not_found', retryable: false }])
+  })
+
+  it('does not close the page subscription on the normal end-of-watch retirement', async () => {
+    const harness = createHarness()
+    harness.subscriptions.start({
+      requestId: 'request-1',
+      subscriptionId: 'subscription-1',
+      pageWorkspaceId: 'workspace-1',
+      hostWorkspaceId: 'workspace-1',
+      client: harness.client
+    })
+
+    harness.listener?.({ type: 'end' })
+    await vi.waitFor(() => expect(harness.unsubscribe).toHaveBeenCalledOnce())
+
+    expect(harness.closures).toEqual([])
   })
 })
 
@@ -147,11 +166,15 @@ function createHarness(authority = workspaceAuthority) {
     return unsubscribe
   })
   const events: { subscriptionId: string; sequence: number; event: unknown }[] = []
+  const closures: { code: string; retryable: boolean }[] = []
   const subscriptions = new MobileWebSourceControlSubscriptions({
     isActive: () => true,
     workspaceAuthority: authority,
     postEvent: async (subscriptionId, sequence, event) => {
       events.push({ subscriptionId, sequence, event })
+    },
+    postClosed: (_subscriptionId, closure) => {
+      closures.push(closure)
     }
   })
   return {
@@ -160,6 +183,7 @@ function createHarness(authority = workspaceAuthority) {
     subscribe,
     unsubscribe,
     events,
+    closures,
     get listener() {
       return listener
     }

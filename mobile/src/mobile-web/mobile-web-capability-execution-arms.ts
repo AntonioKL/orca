@@ -272,7 +272,8 @@ async function subscribeSpeech(args: Deps, request: SubscriptionRequest): Promis
   args.speechAuthority.subscribe({
     requestId: request.requestId,
     subscriptionId: request.subscriptionId,
-    post: (sequence, event) => args.postSpeechEvent(request.subscriptionId, sequence, event)
+    post: (sequence, event) => args.postSpeechEvent(request.subscriptionId, sequence, event),
+    closed: (closure) => args.postSpeechClosed(request.subscriptionId, closure)
   })
   return null
 }

@@ -1,3 +1,4 @@
+import type { MobileWebPostSubscriptionClosed } from './mobile-web-subscription-closure'
 import type { MobileWebBridgePageMessage } from '../../../src/shared/mobile-web/bridge-contract'
 import type { MobileWebSpeechEvent } from '../../../src/shared/mobile-web/speech-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
@@ -47,6 +48,7 @@ export type MobileWebCapabilityExecutionDependencies = {
     sequence: number,
     event: MobileWebSpeechEvent
   ) => Promise<void>
+  postSpeechClosed: MobileWebPostSubscriptionClosed
   workspaceSubscriptions: MobileWebWorkspaceSubscriptions
   terminalStreams: MobileWebTerminalStreams
   commitMessageGeneration: MobileWebCommitMessageGeneration

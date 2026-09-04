@@ -1,3 +1,4 @@
+import type { MobileWebSubscriptionClosure } from './mobile-web-subscription-closure'
 import type { MobileWebSpeechEvent } from '../../../src/shared/mobile-web/speech-operation-contract'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 
@@ -6,6 +7,7 @@ type SpeechSubscriber = {
   sequence: number
   delivery: Promise<void>
   post: (sequence: number, event: MobileWebSpeechEvent) => Promise<void>
+  closed: (closure: MobileWebSubscriptionClosure) => void
 }
 
 export class MobileWebSpeechSubscriptions {
@@ -16,6 +18,7 @@ export class MobileWebSpeechSubscriptions {
     requestId: string
     subscriptionId: string
     post: (sequence: number, event: MobileWebSpeechEvent) => Promise<void>
+    closed: (closure: MobileWebSubscriptionClosure) => void
   }): void {
     if (this.disposed || this.records.has(args.subscriptionId)) {
       throw new MobileWebBrokerError('invalid_request')
@@ -24,7 +27,8 @@ export class MobileWebSpeechSubscriptions {
       requestId: args.requestId,
       sequence: 0,
       delivery: Promise.resolve(),
-      post: args.post
+      post: args.post,
+      closed: args.closed
     })
   }
 
@@ -41,6 +45,7 @@ export class MobileWebSpeechSubscriptions {
         .catch(() => {
           if (this.records.get(subscriptionId) === record) {
             this.records.delete(subscriptionId)
+            record.closed({ code: 'unavailable', retryable: true })
           }
         })
     }

@@ -244,6 +244,19 @@ const ShellEventSchema = ShellEnvelopeSchema.extend({
   payload: z.unknown()
 }).strict()
 
+/**
+ * The terminal frame for a subscription. `response` is keyed by `requestId` and only reports the
+ * subscribe call itself; `event` carries values. Without this, a shell-side failure after the
+ * subscribe succeeded was unrepresentable, so the page held a live entry forever and its screen
+ * stayed on its last value with no error. Additive to bridge version 2 — a page built before it
+ * fails the union parse and ignores the frame, exactly as it ignores any unknown type.
+ */
+const ShellSubscriptionClosedSchema = ShellEnvelopeSchema.extend({
+  type: z.literal('subscriptionClosed'),
+  subscriptionId: SubscriptionIdSchema,
+  error: z.object({ code: MobileWebBridgeErrorCodeSchema, retryable: z.boolean() }).strict()
+}).strict()
+
 export const MobileWebBridgeShellMessageSchema = z.union([
   ShellInitSchema,
   ShellConnectionSchema,
@@ -251,7 +264,8 @@ export const MobileWebBridgeShellMessageSchema = z.union([
   ShellHardwareBackSchema,
   ShellSuccessResponseSchema,
   ShellErrorResponseSchema,
-  ShellEventSchema
+  ShellEventSchema,
+  ShellSubscriptionClosedSchema
 ])
 
 export type MobileWebBridgeErrorCode = z.infer<typeof MobileWebBridgeErrorCodeSchema>

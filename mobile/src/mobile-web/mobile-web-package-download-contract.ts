@@ -1,3 +1,5 @@
+import { isRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
+import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import {
   isMobileWebPackageErrorCode,
   type MobileWebPackageErrorCode
@@ -27,7 +29,11 @@ export type MobileWebPackageDownloadErrorCode =
   | MobileWebPackageErrorCode
 
 export class MobileWebPackageDownloadError extends Error {
-  constructor(readonly code: MobileWebPackageDownloadErrorCode) {
+  constructor(
+    readonly code: MobileWebPackageDownloadErrorCode,
+    /** The same request on a fresh logical session can still succeed. */
+    readonly retryable = false
+  ) {
     super(code)
     this.name = 'MobileWebPackageDownloadError'
   }
@@ -55,8 +61,13 @@ export async function requestMobileWebPackageResult(
   let response: RpcResponse
   try {
     response = await request(method, params)
-  } catch {
-    throw new MobileWebPackageDownloadError('host_error')
+  } catch (error) {
+    // Why: a relay/direct cutover rejects in-flight requests without changing connState, so no
+    // upstream effect re-runs the download. Mark it so the caller can re-issue on the new session.
+    throw new MobileWebPackageDownloadError(
+      'host_error',
+      isRpcDeliveryUnknown(error) || isLogicalClientCutoverError(error)
+    )
   }
   if (!response.ok) {
     const message = response.error.message

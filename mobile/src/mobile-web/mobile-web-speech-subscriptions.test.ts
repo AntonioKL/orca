@@ -15,7 +15,8 @@ describe('MobileWebSpeechSubscriptions', () => {
     subscriptions.start({
       requestId: 'request-1',
       subscriptionId: 'subscription-1',
-      post
+      post,
+      closed: vi.fn()
     })
 
     subscriptions.post({ status: 'recording' })
@@ -28,5 +29,22 @@ describe('MobileWebSpeechSubscriptions', () => {
     await Promise.resolve()
     expect(post).toHaveBeenCalledOnce()
     expect(post).toHaveBeenCalledWith(0, { status: 'recording' })
+  })
+
+  it('tells the page when a delivery failure retires the dictation stream', async () => {
+    const subscriptions = new MobileWebSpeechSubscriptions()
+    const closed = vi.fn()
+    subscriptions.start({
+      requestId: 'request-1',
+      subscriptionId: 'subscription-1',
+      post: () => Promise.reject(new Error('post failed')),
+      closed
+    })
+
+    subscriptions.post({ status: 'recording' })
+    await vi.waitFor(() => expect(closed).toHaveBeenCalledOnce())
+
+    expect(closed).toHaveBeenCalledWith({ code: 'unavailable', retryable: true })
+    expect(subscriptions.cancel('subscription-1')).toBeNull()
   })
 })

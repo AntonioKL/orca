@@ -21,6 +21,8 @@ import {
 
 const MOBILE_WEB_PACKAGE_READ_LIMITED_RETRIES = 4
 const MOBILE_WEB_PACKAGE_READ_LIMITED_BACKOFF_MS = 50
+const MOBILE_WEB_PACKAGE_CUTOVER_RETRIES = 4
+const MOBILE_WEB_PACKAGE_CUTOVER_BACKOFF_MS = 250
 
 type ChunkTask = { asset: MobileWebAsset; offset: number; expectedLength: number }
 type SettledChunk = { bytes: Uint8Array } | { failure: unknown }
@@ -160,6 +162,16 @@ async function fetchChunk<TCommit>(
       ) {
         onReadLimited()
         await sleep(MOBILE_WEB_PACKAGE_READ_LIMITED_BACKOFF_MS * (attempt + 1))
+        continue
+      }
+      // Why: a seamless cutover replaces the logical session without changing connState, so the
+      // request is dead but the download is not; the user should not have to tap Retry.
+      if (
+        error instanceof MobileWebPackageDownloadError &&
+        error.retryable &&
+        attempt < MOBILE_WEB_PACKAGE_CUTOVER_RETRIES
+      ) {
+        await sleep(MOBILE_WEB_PACKAGE_CUTOVER_BACKOFF_MS * (attempt + 1))
         continue
       }
       return { failure: error }

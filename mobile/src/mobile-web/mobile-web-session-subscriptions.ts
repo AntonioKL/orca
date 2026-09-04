@@ -1,3 +1,7 @@
+import type {
+  MobileWebPostSubscriptionClosed,
+  MobileWebSubscriptionClosure
+} from './mobile-web-subscription-closure'
 import type { MobileWebHostWorkspaceId } from './mobile-web-workspace-authority'
 import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-web/bridge-contract'
 import {
@@ -30,6 +34,7 @@ export class MobileWebSessionSubscriptions {
         sequence: number,
         snapshot: MobileWebSessionSnapshotResult
       ) => Promise<void>
+      postClosed: MobileWebPostSubscriptionClosed
       browserAuthority: MobileWebBrowserAuthority
       nativeChatAuthority: MobileWebNativeChatAuthority
     }
@@ -81,7 +86,7 @@ export class MobileWebSessionSubscriptions {
     }
   }
 
-  cancel(subscriptionId: string): string | null {
+  cancel(subscriptionId: string, closure?: MobileWebSubscriptionClosure): string | null {
     const record = this.records.get(subscriptionId)
     if (!record) {
       return null
@@ -92,6 +97,9 @@ export class MobileWebSessionSubscriptions {
       record.unsubscribe()
     } catch {
       // The local record is already retired; a broken transport teardown must not revive it.
+    }
+    if (closure) {
+      this.options.postClosed(subscriptionId, closure)
     }
     return record.requestId
   }
@@ -140,11 +148,13 @@ export class MobileWebSessionSubscriptions {
         this.options.nativeChatAuthority
       )
     } catch {
-      this.cancel(subscriptionId)
+      this.cancel(subscriptionId, { code: 'invalid_message', retryable: false })
       return
     }
+    // Why still here: the projection already trims tabs to fit, so this only fires on an envelope
+    // no bounded tab list can rescue — and now it says so instead of going quiet.
     if (encodedByteLength(snapshot) > MOBILE_WEB_SESSION_EVENT_MAX_BYTES) {
-      this.cancel(subscriptionId)
+      this.cancel(subscriptionId, { code: 'too_large', retryable: false })
       return
     }
     const sequence = record.sequence
@@ -160,7 +170,7 @@ export class MobileWebSessionSubscriptions {
         }
       })
       .catch(() => {
-        this.cancel(subscriptionId)
+        this.cancel(subscriptionId, { code: 'unavailable', retryable: true })
       })
   }
 }

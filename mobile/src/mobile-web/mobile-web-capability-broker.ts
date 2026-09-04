@@ -20,6 +20,7 @@ import { MobileWebCapabilityAuthorities } from './mobile-web-capability-authorit
 import type { MobileWebCapabilityBrokerOptions } from './mobile-web-capability-broker-options'
 import { MobileWebBrokerMessageSender } from './mobile-web-broker-message-sender'
 import { MobileWebBrokerReplayGuard } from './mobile-web-broker-replay-guard'
+import { mobileWebSubscriptionClosedPoster } from './mobile-web-subscription-closure'
 import { rememberMobileWebBrokerRoute } from './mobile-web-broker-route-memory'
 import { resolveMobileWebHostNavigationRoute } from './mobile-web-host-navigation-route'
 import {
@@ -243,6 +244,7 @@ export class MobileWebCapabilityBroker {
       speechAuthority: this.speechAuthority,
       postSpeechEvent: (subscriptionId, sequence, event) =>
         this.messages.event(subscriptionId, sequence, event),
+      postSpeechClosed: mobileWebSubscriptionClosedPoster(this.messages),
       workspaceSubscriptions: this.subscriptions.workspace,
       terminalStreams: this.terminalStreams,
       commitMessageGeneration: this.commitMessageGeneration,
