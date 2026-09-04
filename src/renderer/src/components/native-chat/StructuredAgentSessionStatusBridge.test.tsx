@@ -284,6 +284,125 @@ describe('StructuredAgentSessionStatusBridge', () => {
     await waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledOnce())
   })
 
+  it('does not settle a pending hidden send when the previous turn completes', async () => {
+    const firstTurnRunning = {
+      itemId: 'turn-a-running',
+      revision: 1,
+      sequence: 2,
+      observedAt: 2,
+      body: {
+        kind: 'status',
+        text: 'Working',
+        turnLifecycle: { turnId: 'turn-a', state: 'running' }
+      }
+    } as const
+    mocks.call.mockResolvedValue({
+      ...historyResult,
+      page: {
+        ...historyResult.page,
+        items: [userItem, firstTurnRunning],
+        window: {
+          ...historyResult.page.window,
+          newest: { epoch: 'epoch-1', sequence: 2 },
+          nextCursor: { epoch: 'epoch-1', sequence: 2 }
+        },
+        liveCursor: { epoch: 'epoch-1', sequence: 2 }
+      }
+    })
+    const view = render(<ActiveComposition />)
+
+    await waitFor(() =>
+      expect(Object.values(mocks.store?.getState().agentStatusByPaneKey ?? {})).toEqual([
+        expect.objectContaining({ state: 'working' })
+      ])
+    )
+    act(() => {
+      expect(retainPendingTurn).not.toBeNull()
+      retainPendingTurn?.('client-b')
+    })
+    view.rerender(<ActiveComposition isVisible={false} />)
+    await act(() => Promise.resolve())
+
+    const onEvent = mocks.subscribe.mock.calls[0]?.[2] as (event: unknown) => void
+    act(() =>
+      onEvent({
+        type: 'batch',
+        sessionId: 'session-1',
+        batch: {
+          cursor: { epoch: 'epoch-1', sequence: 3 },
+          items: [
+            {
+              itemId: 'turn-a-complete',
+              revision: 1,
+              sequence: 3,
+              observedAt: 3,
+              body: {
+                kind: 'status',
+                text: 'Done',
+                turnLifecycle: { turnId: 'turn-a', state: 'completed' }
+              }
+            }
+          ],
+          removedItemIds: [],
+          submissions: []
+        }
+      })
+    )
+
+    await act(() => Promise.resolve())
+    expect(mocks.unsubscribe).not.toHaveBeenCalled()
+
+    act(() =>
+      onEvent({
+        type: 'batch',
+        sessionId: 'session-1',
+        batch: {
+          cursor: { epoch: 'epoch-1', sequence: 4 },
+          items: [
+            {
+              itemId: 'turn-b-running',
+              revision: 1,
+              sequence: 4,
+              observedAt: 4,
+              body: {
+                kind: 'status',
+                text: 'Working',
+                turnLifecycle: { turnId: 'turn-b', state: 'running' }
+              }
+            }
+          ],
+          removedItemIds: [],
+          submissions: []
+        }
+      })
+    )
+
+    await waitFor(() =>
+      expect(Object.values(mocks.store?.getState().agentStatusByPaneKey ?? {})).toEqual([
+        expect.objectContaining({ state: 'working' })
+      ])
+    )
+    act(() =>
+      onEvent({
+        type: 'batch',
+        sessionId: 'session-1',
+        batch: {
+          cursor: { epoch: 'epoch-1', sequence: 5 },
+          items: [],
+          removedItemIds: ['turn-b-running'],
+          submissions: []
+        }
+      })
+    )
+
+    await waitFor(() =>
+      expect(Object.values(mocks.store?.getState().agentStatusByPaneKey ?? {})).toEqual([
+        expect.objectContaining({ state: 'done' })
+      ])
+    )
+    await waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledOnce())
+  })
+
   it('releases a hidden send whose running and settled lifecycle arrive together', async () => {
     const view = render(<ActiveComposition />)
     await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledOnce())

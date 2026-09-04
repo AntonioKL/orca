@@ -78,7 +78,7 @@ export function createStructuredAgentSessionPendingTurnRetentions(
       }
     }
     if (!activeTurnId) {
-      const claimedTurnIds = new Set<string>()
+      const claimedTurnIds = new Set(observedActiveTurnId ? [observedActiveTurnId] : [])
       for (const retention of retentions.values()) {
         if (retention.turnId !== null) {
           continue
