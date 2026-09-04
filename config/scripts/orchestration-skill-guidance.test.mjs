@@ -77,7 +77,8 @@ describe('orchestration kernel', () => {
       '## Conditional references'
     ]
 
-    expect(kernel.split('\n').length).toBeLessThanOrEqual(200)
+    // Why: 202 is the budget after the anti-loop nextAction rule; the kernel is always in context.
+    expect(kernel.split('\n').length).toBeLessThanOrEqual(202)
     for (let index = 1; index < headings.length; index += 1) {
       expect(kernel.indexOf(headings[index])).toBeGreaterThan(kernel.indexOf(headings[index - 1]))
     }
@@ -160,6 +161,9 @@ describe('orchestration kernel', () => {
     expect(kernel).toContain('`ORCA orchestration worker-list --json`')
     expect(kernel).toContain(
       '`projection.attention` categories, `projection.attention.requiresAction`, and literal `projection.nextAction` argv'
+    )
+    expect(kernel).toContain(
+      'An `inspect` `nextAction` on a `live` row with `attention.requiresAction` false is informational, not a command to re-run: keep waiting with `check --wait`'
     )
     expect(kernel).toContain('choose `worker-stop` or `worker-abandon`')
   })
