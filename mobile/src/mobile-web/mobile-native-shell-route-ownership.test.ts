@@ -70,9 +70,9 @@ describe('mobile native shell route ownership', () => {
     }
   })
 
-  it('opens terminal settings in the shell without clearing the hosted session', () => {
+  it('opens shell-owned screens without clearing the hosted session', () => {
     const settingsBranch = navigationAuthority.match(
-      /if \(destination === 'terminalSettings'\) \{([\s\S]*?)\n\s*\}/
+      /if \(isMobileWebNativeRoute\(destination\)\) \{([\s\S]*?)\n\s*\}/
     )?.[1]
     expect(settingsBranch).toContain('routeHandoffRef.current.record(requestId, destination)')
     expect(hybridShell).toContain('routeHandoffRef: nativeRouteHandoffRef')
@@ -82,6 +82,7 @@ describe('mobile native shell route ownership', () => {
     expect(brokerMessageHandoff).toContain('await view.deactivateSessionView()')
     expect(brokerMessageHandoff).toContain('setHostedViewActive: args.setHostedViewActive')
     expect(hybridShell).toContain("router.push('/terminal-settings')")
+    expect(hybridShell).toContain("pathname: '/connection-log'")
     expect(hybridShell).toContain('void view.activateSessionView(sessionId)')
     expect(hybridShell).toContain('return () => setHostedViewActive(false)')
     expect(settingsBranch).not.toContain('clearRoute')
@@ -93,6 +94,12 @@ describe('mobile native shell route ownership', () => {
     expect(hybridShell).toContain('!brokerRef.current')
     expect(hybridShell).toContain('void postInitRef.current()')
     expect(hybridShell).toContain('postInitRef.current = postInit')
+  })
+
+  it('replays the hosted route across a package swap instead of resetting per session', () => {
+    expect(hybridShell).toContain('useMobileWebResumeRouteMemory(selectedHostId)')
+    expect(hybridShell).toContain('resumeRoute: resumeRoute.current()')
+    expect(hybridShell).not.toMatch(/resumeRoute[\s\S]{0,80}\}, \[session\?\.sessionId\]\)/)
   })
 
   it('does not echo init after the hosted page acknowledges it', () => {

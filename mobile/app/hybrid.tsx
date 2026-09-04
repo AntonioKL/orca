@@ -28,6 +28,7 @@ import { useMobileWebAppForegroundAuthority } from '../src/mobile-web/use-mobile
 import { useMobileWebHostCatalog } from '../src/mobile-web/use-mobile-web-host-catalog'
 import { mobileWebDiagnosticsStore } from '../src/mobile-web/mobile-web-diagnostics-store'
 import { useMobileWebBridgeRuntimeRef } from '../src/mobile-web/use-mobile-web-bridge-runtime-ref'
+import { useMobileWebResumeRouteMemory } from '../src/mobile-web/use-mobile-web-resume-route-memory'
 import { useMobileWebHardwareBackHandoff } from '../src/mobile-web/use-mobile-web-hardware-back-handoff'
 import { MobileWebNativeRouteHandoff } from '../src/mobile-web/mobile-web-native-route-handoff'
 import { useMobileWebNavigationAuthority } from '../src/mobile-web/use-mobile-web-navigation-authority'
@@ -49,7 +50,6 @@ export default function HybridScreen() {
   const viewRef = useRef<MobileWebShellViewRef>(null)
   const activeSessionIdRef = useRef<string | undefined>(undefined)
   const initializedSessionRef = useRef<string | undefined>(undefined)
-  const resumeRouteRef = useRef<MobileWebResumeRoute>({ kind: 'workspaceList' })
   const healthDeadlineRef = useRef(new MobileWebHealthDeadline(10_000))
   const brokerRef = useRef<MobileWebCapabilityBroker | null>(null)
   const postInitRef = useRef<() => Promise<void>>(() => Promise.resolve())
@@ -64,6 +64,7 @@ export default function HybridScreen() {
   const [brokerSessionId, setBrokerSessionId] = useState<string>()
   const [hostedViewActive, setHostedViewActive] = useState(true)
   const selectHost = useCallback((hostId: string | undefined) => setSelectedHostId(hostId), [])
+  const resumeRoute = useMobileWebResumeRouteMemory(selectedHostId)
   const e2eHostId = useMobileWebE2eHostSelection(hosts, selectedHostId, selectHost)
   const { client, state } = useHostClient(selectedHostId)
   const closeHostClient = useForgetHostClient()
@@ -139,10 +140,6 @@ export default function HybridScreen() {
     }
   }, [params.hostId])
 
-  useEffect(() => {
-    resumeRouteRef.current = { kind: 'workspaceList' }
-  }, [session?.sessionId])
-
   // A view-epoch bump replaces the document, so every page-scoped grant retires with it.
   useEffect(() => {
     initializedSessionRef.current = undefined
@@ -206,7 +203,7 @@ export default function HybridScreen() {
         onTerminalResync: (reason) =>
           mobileWebDiagnosticsStore.terminalResync(selectedHost.id, reason),
         rememberRoute(route) {
-          resumeRouteRef.current = route
+          resumeRoute.remember(route)
         },
         rememberHostRoute: coldResumeRoute.rememberHostRoute,
         randomBytes: ExpoCrypto.getRandomBytes
@@ -216,6 +213,7 @@ export default function HybridScreen() {
       coldResumeRoute.rememberHostRoute,
       navigationAuthority,
       postToWeb,
+      resumeRoute,
       selectedHost?.deviceToken,
       selectedHost?.id,
       selectedHost?.publicKeyB64,
@@ -260,10 +258,10 @@ export default function HybridScreen() {
       hostDisplayName: hostName,
       reconnectAttempts: reconnects,
       lastConnectedAt: lastConnected,
-      resumeRoute: resumeRouteRef.current,
+      resumeRoute: resumeRoute.current(),
       grants: [...MOBILE_WEB_PRODUCTION_GRANTS]
     })
-  }, [hostName, lastConnected, onHealthTimeout, postToWeb, reconnects, session, state])
+  }, [hostName, lastConnected, onHealthTimeout, postToWeb, reconnects, resumeRoute, session, state])
   useEffect(() => {
     postInitRef.current = postInit
   }, [postInit])
@@ -320,13 +318,27 @@ export default function HybridScreen() {
             viewRef,
             routeHandoff: nativeRouteHandoffRef.current,
             setHostedViewActive,
-            navigateToTerminalSettings: () => router.push('/terminal-settings'),
-            onNavigationFailure: () => showWarning('Couldn’t open Terminal settings.')
+            navigateToNativeRoute: (destination) => {
+              if (destination === 'connectionLog') {
+                router.push({
+                  pathname: '/connection-log',
+                  params: { hostId: selectedHostId ?? '' }
+                })
+                return
+              }
+              router.push('/terminal-settings')
+            },
+            onNavigationFailure: (destination) =>
+              showWarning(
+                destination === 'connectionLog'
+                  ? 'Couldn’t open network diagnostics.'
+                  : 'Couldn’t open Terminal settings.'
+              )
           })
         }
       }
     },
-    [hardwareBackHandoff, markHealthy, postInit, router, session, showWarning]
+    [hardwareBackHandoff, markHealthy, postInit, router, selectedHostId, session, showWarning]
   )
   const shellContext = useMemo(
     () => (session ? { sessionId: session.sessionId, buildId: session.buildId } : null),
@@ -334,9 +346,10 @@ export default function HybridScreen() {
   )
 
   const getBroker = useCallback(() => brokerRef.current, [])
-  const rememberRoute = useCallback((route: MobileWebResumeRoute) => {
-    resumeRouteRef.current = route
-  }, [])
+  const rememberRoute = useCallback(
+    (route: MobileWebResumeRoute) => resumeRoute.remember(route),
+    [resumeRoute]
+  )
   useMobileWebNavigationIntentHandoff({
     hosts,
     hostsLoading,
