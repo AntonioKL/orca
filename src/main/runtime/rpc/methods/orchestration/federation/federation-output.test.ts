@@ -16,7 +16,7 @@ import type { OrchestrationEnvironmentTransport } from '../../../../orchestratio
 import type { RpcRequest } from '../../../core'
 import { RpcDispatcher } from '../../../dispatcher'
 import { ORCHESTRATION_METHODS } from '../../orchestration'
-import { registerFederatedReleaseRecoveryScenarios } from './federation-release-recovery-scenarios'
+import { registerFederatedReleaseRecoveryScenarios } from './federation-release-recovery-scenarios.test-support'
 
 describe('orchestration federated worker output', () => {
   const databases: OrchestrationDb[] = []

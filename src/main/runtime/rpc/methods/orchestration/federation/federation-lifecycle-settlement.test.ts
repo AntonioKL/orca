@@ -11,7 +11,7 @@ import type { OrchestrationEnvironmentTransport } from '../../../../orchestratio
 import { waitForFederatedLifecycleSettlement } from '../../../../orchestration/federation-lifecycle-settlement'
 import { RpcDispatcher } from '../../../dispatcher'
 import { ORCHESTRATION_METHODS } from '../../orchestration'
-import { createFederationWorkerStartRequest as startRequest } from './federation-test-request'
+import { createFederationWorkerStartRequest as startRequest } from './federation-request.test-support'
 
 describe('orchestration federation lifecycle settlement', () => {
   let homeDb: OrchestrationDb
