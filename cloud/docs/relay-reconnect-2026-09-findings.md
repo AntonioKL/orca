@@ -226,6 +226,12 @@ immediately so the bar can be re-tightened after the fleet is on the 500 ms lock
 - 06:23:16Z c7 instance restarted in place (MIG RECREATE keeps name/id relay-c7-bwjc / 4545742188814054238),
   pulled `relay@sha256:85bf6799…` 06:23:37Z, listening + readiness true 06:23:42Z. Apply step passed 06:24Z;
   verify step running. Isolate -> ready on new image took ~14 min end to end.
+- Post-restore c7 on new image (06:25:42–06:26:42Z): controls 143 -> 273 -> 377 refilling, sqlQueries
+  ~1,500/30 s, `sqlLatencyMsMax` 518 -> 1003 -> 1155 ms, still 55P03 `cell-inventory` retries. So the new
+  image alone does not remove lock waits; the request-path 500 ms cap from #18521 applies to the director's
+  paths, and cell-side `acquireActivity`/`activateControl` still ride the global lock (step 3 in next steps).
+  Watch: does c7's sqlLatencyMsMax settle below the old 1.0–1.2 s pin once refill finishes, and does c7 stop
+  appearing in `container die` (the real win: guardSessionTask).
 - Implication for the batch phase: every drain will push director concurrency past the monitor's 64 bar
   for ~1-2 min. The batch job rechecks safety *before* it drains (read-only step), so that is fine per wave,
   but never run a monitor dry-run concurrently with a wave, and prefer batches of 2 over 4 until the fleet
