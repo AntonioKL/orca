@@ -1,7 +1,10 @@
 import { useMemo, type RefObject } from 'react'
 import { leaveHostRoute } from '../host-route-exit'
 import { removeHostAndCloseClient } from '../transport/host-removal-lifecycle'
-import type { MobileWebNativeRouteHandoff } from './mobile-web-native-route-handoff'
+import {
+  isMobileWebNativeRoute,
+  type MobileWebNativeRouteHandoff
+} from './mobile-web-native-route-handoff'
 import type { MobileWebNavigationAuthority } from './mobile-web-navigation-operations'
 
 type MobileWebShellRouter = {
@@ -32,7 +35,8 @@ export function useMobileWebNavigationAuthority({
     }
     return {
       route(destination, requestId) {
-        if (destination === 'terminalSettings') {
+        // Shell-owned screens keep the hosted page mounted; only host exits clear it.
+        if (isMobileWebNativeRoute(destination)) {
           routeHandoffRef.current.record(requestId, destination)
           return
         }

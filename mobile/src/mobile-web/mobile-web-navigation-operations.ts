@@ -4,10 +4,11 @@ import {
   MobileWebNavigationRoutePayloadSchema
 } from '../../../src/shared/mobile-web/navigation-operation-contract'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import type { MobileWebNativeRoute } from './mobile-web-native-route-handoff'
 
 export type MobileWebNavigationAuthority = {
   route(
-    destination: 'hostPicker' | 'pairingRepair' | 'terminalSettings',
+    destination: 'hostPicker' | 'pairingRepair' | MobileWebNativeRoute,
     requestId: string
   ): void | Promise<void>
   reconnect(): void | Promise<void>

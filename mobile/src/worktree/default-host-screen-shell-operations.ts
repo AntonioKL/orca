@@ -30,6 +30,9 @@ export function useDefaultHostScreenShellOperations(args: {
           hostId: args.hostId
         })
       },
+      openConnectionDiagnostics() {
+        router.push({ pathname: '/connection-log', params: { hostId: args.hostId ?? '' } })
+      },
       openExternalUrl(url: string) {
         return MOBILE_WEB_NATIVE_CAPABILITY_AUTHORITY.openExternal(url)
       },

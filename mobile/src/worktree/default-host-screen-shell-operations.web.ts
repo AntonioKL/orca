@@ -7,6 +7,7 @@ const missingWebBinding = (): never => {
 const defaultWebHostScreenShellOperations: HostScreenShellOperations = {
   leaveHost: missingWebBinding,
   navigateFromHostList: missingWebBinding,
+  openConnectionDiagnostics: missingWebBinding,
   openExternalUrl: missingWebBinding,
   reconnect: missingWebBinding,
   repairPairing: missingWebBinding,

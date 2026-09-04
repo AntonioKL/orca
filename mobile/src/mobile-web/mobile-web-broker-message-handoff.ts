@@ -4,6 +4,7 @@ import type { MobileWebBridgePageMessage } from '../../../src/shared/mobile-web/
 import type { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
 import {
   completeMobileWebNativeRouteHandoffAfterResponse,
+  type MobileWebNativeRoute,
   type MobileWebNativeRouteHandoff
 } from './mobile-web-native-route-handoff'
 
@@ -15,8 +16,8 @@ export async function handleMobileWebBrokerMessage(args: {
   viewRef: RefObject<MobileWebShellViewRef | null>
   routeHandoff: MobileWebNativeRouteHandoff
   setHostedViewActive: (active: boolean) => void
-  navigateToTerminalSettings: () => void
-  onNavigationFailure: () => void
+  navigateToNativeRoute: (destination: MobileWebNativeRoute) => void
+  onNavigationFailure: (destination: MobileWebNativeRoute) => void
 }): Promise<void> {
   const broker = args.brokerRef.current
   await broker?.handle(args.message)
@@ -41,7 +42,7 @@ export async function handleMobileWebBrokerMessage(args: {
       await view.deactivateSessionView()
     },
     setHostedViewActive: args.setHostedViewActive,
-    navigate: args.navigateToTerminalSettings,
-    onFailure: args.onNavigationFailure
+    navigate: args.navigateToNativeRoute,
+    onFailure: (_error, destination) => args.onNavigationFailure(destination)
   })
 }

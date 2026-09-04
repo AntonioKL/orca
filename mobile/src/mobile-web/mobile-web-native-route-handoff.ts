@@ -1,4 +1,10 @@
-export type MobileWebNativeRoute = 'terminalSettings'
+const MOBILE_WEB_NATIVE_ROUTES = ['terminalSettings', 'connectionLog'] as const
+
+export type MobileWebNativeRoute = (typeof MOBILE_WEB_NATIVE_ROUTES)[number]
+
+export function isMobileWebNativeRoute(destination: string): destination is MobileWebNativeRoute {
+  return (MOBILE_WEB_NATIVE_ROUTES as readonly string[]).includes(destination)
+}
 
 export class MobileWebNativeRouteHandoff {
   private readonly pending = new Map<string, MobileWebNativeRoute>()
@@ -25,7 +31,7 @@ export function completeMobileWebNativeRouteHandoffAfterResponse(args: {
   deactivateSessionView: () => Promise<void>
   setHostedViewActive: (active: boolean) => void
   navigate: (destination: MobileWebNativeRoute) => void
-  onFailure?: (error: unknown) => void
+  onFailure?: (error: unknown, destination: MobileWebNativeRoute) => void
   schedule?: (callback: () => Promise<void>) => void
 }): boolean {
   const destination = args.handoff.consume(args.requestId)
@@ -47,7 +53,7 @@ export function completeMobileWebNativeRouteHandoffAfterResponse(args: {
       args.navigate(destination)
     } catch (error) {
       args.setHostedViewActive(true)
-      args.onFailure?.(error)
+      args.onFailure?.(error, destination)
     }
   })
   return true

@@ -17,6 +17,7 @@ describe('web host screen shell operations', () => {
     operations.navigateFromHostList('/h/opaque-host/tasks')
     operations.leaveHost()
     operations.repairPairing()
+    operations.openConnectionDiagnostics()
     await operations.openExternalUrl('https://example.com/source')
     await operations.reconnect()
     await operations.removeHost('native-public-key-must-not-cross')
@@ -24,6 +25,7 @@ describe('web host screen shell operations', () => {
     expect(navigate).toHaveBeenCalledWith('/h/opaque-host/tasks')
     expect(client.navigationRoute).toHaveBeenNthCalledWith(1, { destination: 'hostPicker' })
     expect(client.navigationRoute).toHaveBeenNthCalledWith(2, { destination: 'pairingRepair' })
+    expect(client.navigationRoute).toHaveBeenNthCalledWith(3, { destination: 'connectionLog' })
     expect(openExternal).toHaveBeenCalledWith('https://example.com/source')
     expect(client.navigationReconnect).toHaveBeenCalledWith()
     expect(client.navigationRemoveHost).toHaveBeenCalledWith({
