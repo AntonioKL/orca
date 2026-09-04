@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createOrchestrationWorkerReleaseHarness } from './orchestration-worker-release-test-harness'
+import { createOrchestrationWorkerReleaseHarness } from './orchestration-worker-release.test-support'
 
 describe('orchestration worker release inventory', () => {
   const h = createOrchestrationWorkerReleaseHarness()

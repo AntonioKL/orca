@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { OrcaRuntimeService } from '../../orca-runtime'
-import { createOrchestrationWorkerReleaseHarness } from './orchestration-worker-release-test-harness'
+import { createOrchestrationWorkerReleaseHarness } from './orchestration-worker-release.test-support'
 
 describe('orchestration worker release', () => {
   const h = createOrchestrationWorkerReleaseHarness()

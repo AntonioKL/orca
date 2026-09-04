@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createOrchestrationWorkerReleaseHarness } from './orchestration-worker-release-test-harness'
+import { createOrchestrationWorkerReleaseHarness } from './orchestration-worker-release.test-support'
 
 describe('workerRelease on a retained resource whose process exited', () => {
   const harness = createOrchestrationWorkerReleaseHarness()
