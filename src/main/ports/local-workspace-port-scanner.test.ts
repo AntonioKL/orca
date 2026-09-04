@@ -50,6 +50,35 @@ describe('local workspace port scanner parsing', () => {
     ])
   })
 
+  it('keeps the socket identity from lsof -F d and tolerates its absence', () => {
+    const ports = parseLsofListeningOutput(
+      [
+        'p123',
+        'cnode',
+        'f18',
+        'd0x469ca588d83e7924',
+        'n127.0.0.1:5173',
+        'f19',
+        'n127.0.0.1:5174',
+        'p456',
+        'cnginx',
+        'n*:8080'
+      ].join('\n')
+    )
+
+    expect(ports).toEqual([
+      {
+        pid: 123,
+        processName: 'node',
+        socketId: '0x469ca588d83e7924',
+        host: '127.0.0.1',
+        port: 5173
+      },
+      { pid: 123, processName: 'node', host: '127.0.0.1', port: 5174 },
+      { pid: 456, processName: 'nginx', host: '*', port: 8080 }
+    ])
+  })
+
   it('parses multiple lsof listening ports for the same process', () => {
     const ports = parseLsofListeningOutput(
       ['p123', 'cnode', 'n127.0.0.1:5173', 'n127.0.0.1:55173'].join('\n')
@@ -452,6 +481,60 @@ describe('scanWorkspacePorts with delayed process creation', () => {
     await scanWorkspacePorts(worktrees, urlWatcherStub())
 
     expect(runPortScanCommandMock).toHaveBeenCalledTimes(6)
+  })
+
+  it('re-probes when the same pid and name listen through a different socket', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    let socketId = '0x1'
+    runPortScanCommandMock.mockImplementation(async (command: string, args: string[]) => {
+      if (command === 'lsof' && args.includes('-iTCP')) {
+        return { stdout: `p123\ncnode\nf18\nd${socketId}\nn127.0.0.1:5173`, spawnMs: 5 }
+      }
+      if (command === 'lsof') {
+        return { stdout: ['p123', 'n/repo'].join('\n'), spawnMs: 5 }
+      }
+      return { stdout: '123 node /repo/server.js', spawnMs: 5 }
+    })
+
+    await scanWorkspacePorts(worktrees, urlWatcherStub())
+    await scanWorkspacePorts(worktrees, urlWatcherStub())
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(4)
+
+    // Same pid, name and address but a new kernel socket: a restarted process, not the cached one.
+    socketId = '0x2'
+    await scanWorkspacePorts(worktrees, urlWatcherStub())
+
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(7)
+  })
+
+  it('re-probes a remembered listener every tenth scan so a changed cwd cannot stay stale', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    let cwd = '/repo'
+    runPortScanCommandMock.mockImplementation(async (command: string, args: string[]) => {
+      if (command === 'lsof' && args.includes('-iTCP')) {
+        return { stdout: LSOF_LISTEN_OUTPUT, spawnMs: 5 }
+      }
+      if (command === 'lsof') {
+        return { stdout: ['p123', `n${cwd}`].join('\n'), spawnMs: 5 }
+      }
+      return { stdout: '123 node server.js', spawnMs: 5 }
+    })
+
+    await scanWorkspacePorts(worktrees, urlWatcherStub())
+    cwd = '/repo/worktrees/feature'
+    for (let scan = 2; scan <= 10; scan += 1) {
+      const cached = await scanWorkspacePorts(worktrees, urlWatcherStub())
+      expect(cached.ports[0]).toMatchObject({ owner: { worktreeId: 'repo::/repo' } })
+    }
+    // 3 for the first scan, then one listening command per cached scan.
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(12)
+
+    const reprobed = await scanWorkspacePorts(worktrees, urlWatcherStub())
+
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(15)
+    expect(reprobed.ports[0]).toMatchObject({
+      owner: { worktreeId: 'repo::/repo/worktrees/feature' }
+    })
   })
 
   // Regression for #11161 review: without carry-forward the panel moves every

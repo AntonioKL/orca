@@ -7,10 +7,14 @@ import {
 } from './workspace-port-scan-timeout-backoff'
 
 const SLOW_SPAWN_SKIP_METADATA_MS = 2_000
+/** Re-probe a remembered listener every Nth scan (~5 min at 30s) so a cwd change cannot go stale forever. */
+const METADATA_REPROBE_INTERVAL_SCANS = 10
 const commandTimeoutBackoff = new WorkspacePortScanTimeoutBackoff()
 let loggedWorkerUnavailable = false
 let skippedMetadataOnLastScan = false
-let lastListenerMetadata = new Map<string, ProcessMetadata>()
+let lastListenerMetadata = new Map<string, RememberedListenerMetadata>()
+let metadataScanSequence = 0
+let reusedListenerKeys = new Set<string>()
 
 export type WorkspacePortScanOptions = {
   requireMetadata?: boolean
@@ -21,6 +25,8 @@ export type RawListeningPort = {
   port: number
   pid?: number
   processName?: string
+  /** Kernel socket identity from `lsof -F d`; a new socket on the same pid:port gets a new one. */
+  socketId?: string
   commandLine?: string
   cwd?: string
 }
@@ -29,6 +35,11 @@ export type ProcessMetadata = {
   processName?: string
   commandLine?: string
   cwd?: string
+}
+
+type RememberedListenerMetadata = ProcessMetadata & {
+  socketId?: string
+  probedAtScan: number
 }
 
 export type NormalizedWorkspacePortProbe = {
@@ -58,6 +69,8 @@ export function resetWorkspacePortScanTimeoutBackoffForTests(): void {
   loggedWorkerUnavailable = false
   skippedMetadataOnLastScan = false
   lastListenerMetadata = new Map()
+  metadataScanSequence = 0
+  reusedListenerKeys = new Set()
 }
 
 export function shouldSkipMetadataCommands(
@@ -77,36 +90,55 @@ function listenerMetadataKey(port: RawListeningPort): string {
 }
 
 export function rememberListenerMetadata(ports: readonly RawListeningPort[]): void {
-  lastListenerMetadata = new Map(
-    ports.map((port) => [
-      listenerMetadataKey(port),
-      { processName: port.processName, commandLine: port.commandLine, cwd: port.cwd }
-    ])
-  )
+  const previous = lastListenerMetadata
+  lastListenerMetadata = new Map()
+  for (const port of ports) {
+    const key = listenerMetadataKey(port)
+    // Why: a reused entry keeps its original probe time so the staleness ceiling still expires it.
+    const probedAtScan = reusedListenerKeys.has(key)
+      ? (previous.get(key)?.probedAtScan ?? metadataScanSequence)
+      : metadataScanSequence
+    lastListenerMetadata.set(key, {
+      processName: port.processName,
+      socketId: port.socketId,
+      commandLine: port.commandLine,
+      cwd: port.cwd,
+      probedAtScan
+    })
+  }
+  reusedListenerKeys = new Set()
 }
 
 /**
  * Split listeners into those a previous scan already resolved and the pids still needing a probe.
  *
  * Why: the metadata commands are the expensive half of a macOS scan, and a listener that is still
- * the same process on the same address has the same command line and cwd it had 30s ago. The
- * remembered entry is only trusted when the process name from this scan's free `lsof -F c` field
- * still matches, so a recycled pid re-probes instead of inheriting the dead process's metadata.
+ * the same process on the same address has the same command line it had 30s ago. A remembered
+ * entry is only trusted when the free `lsof -F c` process name and `-F d` socket identity from
+ * this scan still match, so a recycled pid re-probes instead of inheriting the dead process's
+ * metadata; and every entry is re-probed after METADATA_REPROBE_INTERVAL_SCANS so a process that
+ * chdir'd while listening cannot keep a stale cwd forever.
  */
 export function partitionListenersNeedingMetadata(ports: readonly RawListeningPort[]): {
   hydrated: RawListeningPort[]
   pidsNeedingMetadata: Set<number>
 } {
+  metadataScanSequence += 1
+  reusedListenerKeys = new Set()
   const hydrated: RawListeningPort[] = []
   const pidsNeedingMetadata = new Set<number>()
   for (const port of ports) {
-    const remembered = lastListenerMetadata.get(listenerMetadataKey(port))
+    const key = listenerMetadataKey(port)
+    const remembered = lastListenerMetadata.get(key)
     // Why require commandLine: a probe that returned nothing must not be cached as an answer.
     if (
       remembered?.commandLine !== undefined &&
       remembered.processName === port.processName &&
+      remembered.socketId === port.socketId &&
+      metadataScanSequence - remembered.probedAtScan < METADATA_REPROBE_INTERVAL_SCANS &&
       port.pid !== undefined
     ) {
+      reusedListenerKeys.add(key)
       hydrated.push({
         ...port,
         commandLine: port.commandLine ?? remembered.commandLine,
