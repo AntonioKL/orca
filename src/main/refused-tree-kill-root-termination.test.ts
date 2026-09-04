@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { spawnMock, execFileMock } = vi.hoisted(() => ({
+const { spawnMock, execFileMock, queryWindowsProcessDescendantsMock } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
-  execFileMock: vi.fn()
+  execFileMock: vi.fn(),
+  queryWindowsProcessDescendantsMock: vi.fn()
 }))
 
 vi.mock('node:child_process', async (importOriginal) => ({
@@ -11,6 +12,9 @@ vi.mock('node:child_process', async (importOriginal) => ({
   execFile: execFileMock
 }))
 vi.mock('electron', () => ({ ipcMain: { handle: vi.fn(), on: vi.fn() } }))
+vi.mock('./providers/windows-foreground-process-rows', () => ({
+  queryWindowsProcessDescendants: queryWindowsProcessDescendantsMock
+}))
 
 import {
   getAppEnvironment,
@@ -21,7 +25,10 @@ import {
 import { installMainProcessTreeKillGate } from './own-chromium-tree-kill-guard'
 import { setProcessTreeKillGate } from '../shared/child-process/process-tree-kill-gate'
 import { resetSelfInitiatedTreeKillLogForTest } from './crash-reporting/self-initiated-tree-kill-log'
-import { clearCrashBreadcrumbsForTest } from './crash-reporting/crash-breadcrumb-store'
+import {
+  clearCrashBreadcrumbsForTest,
+  getCrashBreadcrumbSnapshot
+} from './crash-reporting/crash-breadcrumb-store'
 import { _resetTracerForTests, setActiveSink } from './observability/tracer'
 import { terminateNotebookProcessTree } from './ipc/notebook'
 import { killLocalPrecheckProcessTree } from './automations/precheck-runner'
@@ -30,6 +37,7 @@ import { killSpawnedCommandTree } from './git/command-runner/spawned-command-tre
 import { killCodexAppServerProcessTree } from './codex/codex-app-server-session'
 import { signalProcessTree } from '../shared/child-process/process-tree-termination'
 import { killSourceControlAgentProcess } from './text-generation/source-control-local-process'
+import { terminateCodexTurnProcesses } from './codex/codex-structured-turn-processes'
 
 /** A pid Electron reports as one of ours: every gate below must refuse it. */
 const RENDERER_PID = 1001
@@ -65,6 +73,7 @@ beforeEach(() => {
   installMainProcessTreeKillGate()
   spawnMock.mockReset()
   execFileMock.mockReset()
+  queryWindowsProcessDescendantsMock.mockReset()
   spawnMock.mockReturnValue({ on: vi.fn(), once: vi.fn(), unref: vi.fn(), kill: vi.fn() })
 })
 
@@ -148,21 +157,64 @@ describe('a refused tree-kill still terminates the root it owns', () => {
     expect(child.kill).toHaveBeenCalledWith('SIGKILL')
   })
 
-  it('kills the runProcess root on both arms of the shared choke point', async () => {
+  it('kills the runProcess root when the Windows arm of the shared choke point is refused', async () => {
     setPlatform('win32')
     const windowsChild = { pid: RENDERER_PID, kill: vi.fn(), exitCode: null, signalCode: null }
 
     await expect(signalProcessTree(windowsChild as never, 'SIGKILL')).resolves.toBe(false)
     expect(spawnMock).not.toHaveBeenCalled()
     expect(windowsChild.kill).toHaveBeenCalledWith('SIGKILL')
+  })
 
+  it('still signals the POSIX process group: a group only holds what Orca put in it', async () => {
+    // Same contract as main and as the other three POSIX group arms in main
+    // (claude-login, codex teardown, PTY sweep): record, never refuse. A stale
+    // `getAppMetrics()` entry must not orphan a macOS/Linux tree.
     setPlatform('linux')
     const posixChild = { pid: RENDERER_PID, kill: vi.fn(), exitCode: null, signalCode: null }
     const processKill = vi.spyOn(process, 'kill').mockImplementation(() => true)
 
-    await expect(signalProcessTree(posixChild as never, 'SIGKILL')).resolves.toBe(false)
-    expect(processKill).not.toHaveBeenCalled()
-    expect(posixChild.kill).toHaveBeenCalledWith('SIGKILL')
+    await expect(signalProcessTree(posixChild as never, 'SIGKILL')).resolves.toBe(true)
+    expect(processKill).toHaveBeenCalledWith(-RENDERER_PID, 'SIGKILL')
+    expect(posixChild.kill).not.toHaveBeenCalled()
+    expect(getCrashBreadcrumbSnapshot()).toEqual([
+      expect.objectContaining({
+        name: 'self_tree_kill',
+        data: expect.objectContaining({ pid: RENDERER_PID, scope: 'posix-process-group' })
+      })
+    ])
     processKill.mockRestore()
+  })
+})
+
+/**
+ * The one gated site with nothing to fall back to: the roots it kills are found
+ * by a process-table walk, not spawned here, so there is no child handle. A
+ * refusal must then be visible — the refusal crumb is written and the turn is
+ * reported as not cancelled — rather than resolving as if the tree had gone.
+ */
+describe('a refused tree-kill with no handle to fall back to', () => {
+  it('reports the codex turn as not cancelled and records the refused added root', async () => {
+    const appServerPid = 500
+    const addedRoot = {
+      pid: RENDERER_PID,
+      ppid: appServerPid,
+      name: 'node.exe',
+      command: 'node',
+      depth: 1
+    }
+    queryWindowsProcessDescendantsMock.mockResolvedValue([addedRoot])
+
+    await expect(
+      terminateCodexTurnProcesses(appServerPid, { platform: 'win32', identities: new Map() })
+    ).resolves.toBe(false)
+
+    expect(execFileMock).not.toHaveBeenCalled()
+    expect(getCrashBreadcrumbSnapshot()).toEqual([
+      expect.objectContaining({
+        name: 'self_tree_kill_refused_own_chromium',
+        data: expect.objectContaining({ pid: RENDERER_PID, site: 'codex-turn-added-roots' })
+      })
+    ])
   })
 })

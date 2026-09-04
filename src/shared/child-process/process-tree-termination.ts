@@ -20,7 +20,10 @@ const MAX_PS_OUTPUT_BYTES = 8 * 1024 * 1024
  * Both arms ask before walking the tree, so a refused pid never gets a
  * pid-addressed kill; that also means the recorded crumb says "about to kill",
  * not "killed". The root is still killed through its handle, which cannot reach
- * the recycled pid the refusal was about, so a refusal is never a leak.
+ * the recycled pid the refusal was about, so a refusal is never a leak. Main's
+ * gate only ever refuses the `win-taskkill-tree` scope — a POSIX group holds
+ * only what Orca put in it — so the POSIX refusal arm is the seam's contract,
+ * not something any installed gate exercises today.
  */
 export function signalProcessTree(child: ChildProcess, signal?: NodeJS.Signals): Promise<boolean> {
   if (!child.pid) {
