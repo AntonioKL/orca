@@ -15,7 +15,50 @@ function branchDisplayName(branch: string): string {
   return branch.replace(/^refs\/heads\//, '')
 }
 
+// Why cached: the right sidebar is always mounted, so this ran on every store write and rebuilt two
+// cache-key strings each time. Same single-entry, reference-keyed shape as selectFloatingVisibleTabCount.
+let activeChecksStatusCache: {
+  activeWorktreeId: ActiveChecksStatusState['activeWorktreeId']
+  worktreesByRepo: ActiveChecksStatusState['worktreesByRepo']
+  repos: ActiveChecksStatusState['repos']
+  prCache: ActiveChecksStatusState['prCache']
+  settings: ActiveChecksStatusState['settings']
+  hostedReviewCache: ActiveChecksStatusState['hostedReviewCache']
+  status: CheckStatus | null
+} | null = null
+
+/** @internal */
+export function clearActiveChecksStatusCacheForTests(): void {
+  activeChecksStatusCache = null
+}
+
 export function getActiveChecksStatus(state: ActiveChecksStatusState): CheckStatus | null {
+  const cached = activeChecksStatusCache
+  if (
+    cached &&
+    cached.activeWorktreeId === state.activeWorktreeId &&
+    cached.worktreesByRepo === state.worktreesByRepo &&
+    cached.repos === state.repos &&
+    cached.prCache === state.prCache &&
+    cached.settings === state.settings &&
+    cached.hostedReviewCache === state.hostedReviewCache
+  ) {
+    return cached.status
+  }
+  const status = computeActiveChecksStatus(state)
+  activeChecksStatusCache = {
+    activeWorktreeId: state.activeWorktreeId,
+    worktreesByRepo: state.worktreesByRepo,
+    repos: state.repos,
+    prCache: state.prCache,
+    settings: state.settings,
+    hostedReviewCache: state.hostedReviewCache,
+    status
+  }
+  return status
+}
+
+function computeActiveChecksStatus(state: ActiveChecksStatusState): CheckStatus | null {
   const activeWorktree = state.activeWorktreeId
     ? (getWorktreeMapFromState(state).get(state.activeWorktreeId) ?? null)
     : null
