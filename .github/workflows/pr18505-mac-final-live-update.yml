@@ -1,0 +1,86 @@
+name: PR 18505 final macOS packaged update QA
+
+on:
+  push:
+    branches:
+      - 'qa/pr18505-mac-final-update-1b30773'
+    paths:
+      - '.github/workflows/pr18505-mac-final-live-update.yml'
+      - 'tests/tools/pr18505-mac-final-live-update/**'
+
+permissions:
+  contents: read
+
+jobs:
+  final-to-higher:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      EXPECTED_HEAD: 1b3077382d1d77bb459ec6c937940d64f5fde812
+      SOURCE_TAG: v1.4.198-adhoc.20260904215141
+      SOURCE_VERSION: 1.4.198-adhoc.20260904215141
+      TARGET_TAG: v1.4.198-adhoc.20260904215158
+      TARGET_VERSION: 1.4.198-adhoc.20260904215158
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify QA-only commit parent
+        run: test "$(git rev-parse HEAD^)" = "$EXPECTED_HEAD"
+      - uses: ./.github/actions/install-node-dependencies
+      - name: Verify exact-head releases and download source package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/source artifacts/macos
+          case "$(uname -m)" in arm64) arch=arm64 ;; x86_64) arch=x64 ;; *) exit 1 ;; esac
+          for tag in "$SOURCE_TAG" "$TARGET_TAG"; do
+            release="$(gh release view "$tag" --repo stablyai/orca-adhoc --json name,body,isDraft,isPrerelease,assets)"
+            jq -e --arg sha "$EXPECTED_HEAD" --arg short "${EXPECTED_HEAD:0:7}" --arg asset "orca-macos-${arch}.dmg" \
+              '.isDraft == false and .isPrerelease == true and (.name | contains($short)) and (.body | contains($sha)) and (.assets | map(.name) | index($asset) != null)' <<<"$release" >/dev/null
+            printf '%s\n' "$release" >"artifacts/macos/release-${tag}.json"
+          done
+          gh release download "$SOURCE_TAG" --repo stablyai/orca-adhoc --pattern "orca-macos-${arch}.dmg" --dir artifacts/source
+          echo "MAC_ARCH=$arch" >> "$GITHUB_ENV"
+      - name: Install signed and notarized exact-head source
+        run: |
+          set -euo pipefail
+          test ! -e /Applications/Orca.app
+          mount="$RUNNER_TEMP/orca-source-dmg"
+          mkdir -p "$mount"
+          hdiutil attach "artifacts/source/orca-macos-${MAC_ARCH}.dmg" -nobrowse -readonly -mountpoint "$mount"
+          trap 'hdiutil detach "$mount" >/dev/null 2>&1 || true' EXIT
+          test -d "$mount/Orca.app"
+          sudo ditto "$mount/Orca.app" /Applications/Orca.app
+          sudo chown -R "$(id -u):$(id -g)" /Applications/Orca.app
+          codesign --verify --deep --strict --verbose=2 /Applications/Orca.app 2>&1 | tee artifacts/macos/codesign.txt
+          spctl --assess --type execute --verbose=4 /Applications/Orca.app 2>&1 | tee artifacts/macos/spctl.txt
+          xcrun stapler validate /Applications/Orca.app 2>&1 | tee artifacts/macos/stapler.txt
+          actual="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Orca.app/Contents/Info.plist)"
+          test "$actual" = "$SOURCE_VERSION"
+          printf '%s\n' "$actual" > artifacts/macos/source-bundle-version.txt
+          hdiutil detach "$mount"
+          trap - EXIT
+      - name: Exercise real ShipIt update under bounded CLI traffic
+        timeout-minutes: 25
+        run: node tests/tools/pr18505-mac-final-live-update/mac-final-live-update.mjs /Applications/Orca.app/Contents/MacOS/Orca "$TARGET_TAG" "$SOURCE_VERSION" "$TARGET_VERSION" artifacts/macos
+      - name: Preserve updater diagnostics
+        if: always()
+        run: |
+          set -u
+          mkdir -p artifacts/macos
+          {
+            find "$HOME/Library/Caches" -maxdepth 3 \( -iname '*ShipIt*' -o -iname 'attempt-*.json' -o -iname 'settled-*.json' \) -print 2>&1 || true
+            find "$GITHUB_WORKSPACE/artifacts/macos/profile/home/Library/Caches" -maxdepth 4 \( -iname '*ShipIt*' -o -iname 'attempt-*.json' -o -iname 'settled-*.json' \) -print 2>&1 || true
+          } > artifacts/macos/updater-cache-inventory.txt
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Orca.app/Contents/Info.plist > artifacts/macos/final-bundle-version.txt 2>&1 || true
+      - name: Upload macOS proof
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr18505-final-macos-packaged-update
+          path: artifacts/macos/**
+          retention-days: 14
+          if-no-files-found: error
