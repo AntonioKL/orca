@@ -6,6 +6,7 @@ import {
   type MobileWebBridgePageMessage,
   type MobileWebBridgeShellMessage
 } from '../../shared/mobile-web/bridge-contract'
+import { tolerantMobileWebShellPayload } from '../../shared/mobile-web/shell-payload-tolerance'
 import { MobileWebBridgeClientError } from './mobile-web-bridge-client-error'
 import { encodedMobileWebBridgeValueByteLength } from './mobile-web-bridge-request-encoding'
 import {
@@ -130,7 +131,8 @@ export class MobileWebOneShotRequestClient {
       )
       return true
     }
-    const parsed = pending.resultSchema.safeParse(message.payload)
+    // Shell->page: tolerate a newer shell's additive result rather than failing unretryably.
+    const parsed = tolerantMobileWebShellPayload(pending.resultSchema).safeParse(message.payload)
     if (!parsed.success) {
       this.finishWithError(
         message.requestId,

@@ -3,7 +3,7 @@ import {
   type MobileWebSourceControlCommitEntry
 } from '../../../src/shared/mobile-web/source-control-commit-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 
 export async function assertFreshMobileWebCommitSnapshot(
   client: RpcClient,
@@ -18,7 +18,7 @@ export async function assertFreshMobileWebCommitSnapshot(
     worktree: `id:${hostWorkspaceId}`
   })
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   assertMobileWebSourceControlCommitPreflight({
     result: response.result,

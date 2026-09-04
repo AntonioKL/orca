@@ -5,7 +5,7 @@ import {
   type MobileWebWorkspaceSnapshotResult
 } from '../../../src/shared/mobile-web/bridge-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { mobileWebEncodedByteLength } from './mobile-web-request-accounting'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 import { mobileWebWorkspaceSnapshotPage } from './mobile-web-workspace-snapshot'
@@ -66,7 +66,7 @@ export class MobileWebWorkspaceSnapshotPager {
       limit: MOBILE_WEB_WORKSPACE_LIST_LIMIT + 1
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     if (
       mobileWebEncodedByteLength(response.result) > MOBILE_WEB_WORKSPACE_HOST_SNAPSHOT_MAX_BYTES ||

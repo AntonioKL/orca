@@ -11,7 +11,7 @@ import type { Worktree } from '../worktree/workspace-list-types'
 import { deriveMobileAiVaultScopePaths } from '../agent-history/agent-history-scope-paths'
 import { MOBILE_AI_VAULT_CAPABILITY } from '../agent-history/agent-history-capability'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 import type { MobileWebAgentHistoryAuthority } from './mobile-web-agent-history-authority'
 import { mobileWebEncodedByteLength } from './mobile-web-request-accounting'
@@ -154,7 +154,7 @@ async function requestResult(
 ): Promise<unknown> {
   const response = await client.sendRequest(method, params)
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   return response.result
 }

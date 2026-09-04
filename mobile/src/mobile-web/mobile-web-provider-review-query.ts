@@ -7,7 +7,7 @@ import {
 import type { MobileWebProviderReview } from '../../../src/shared/mobile-web/provider-review-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import { mobileRepoSelectorFromWorktreeId } from '../source-control/mobile-hosted-review-service'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { sanitizeMobileWebProviderReviewDetails } from './mobile-web-provider-review-sanitizer'
 import {
   assertCurrentRepositoryIdentity,
@@ -91,7 +91,7 @@ async function queryCheckDetails(
     ...githubProviderReviewTarget(details)
   })
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   return MobileWebProviderReviewQueryResultSchema.parse({
     workspaceId: payload.workspaceId,

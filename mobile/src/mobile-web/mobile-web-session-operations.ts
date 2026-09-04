@@ -27,7 +27,7 @@ import {
   isMobileWebBrowserFileUrl
 } from './mobile-web-browser-file-url-confinement'
 import type { MobileWebNativeChatAuthority } from './mobile-web-native-chat-authority'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { mobileWebSessionSnapshot } from './mobile-web-session-snapshot'
 import { executeMobileWebSessionQuickCommandOperation } from './mobile-web-session-quick-command-operations'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
@@ -68,7 +68,7 @@ export async function executeMobileWebSessionOperation(args: {
     if (hostGatesRequest.success) {
       const response = await args.client.sendRequest('status.get')
       if (!response.ok) {
-        throw new MobileWebBrokerError('host_error')
+        throw mobileWebBrokerHostRpcError(response.error)
       }
       const status = response.result as { floatingWorkspaceEnabled?: unknown }
       const hostCapabilities = (parseRuntimeStatusCapabilities(response.result) ?? []).filter(
@@ -82,7 +82,7 @@ export async function executeMobileWebSessionOperation(args: {
     MobileWebSessionCapabilitiesPayloadSchema.parse(args.payload)
     const response = await args.client.sendRequest('status.get')
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     const capabilities = parseRuntimeStatusCapabilities(response.result) ?? []
     return MobileWebSessionCapabilitiesResultSchema.parse(
@@ -96,7 +96,7 @@ export async function executeMobileWebSessionOperation(args: {
       worktree: `id:${hostWorkspaceId}`
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return mobileWebSessionSnapshot(
       response.result,
@@ -127,7 +127,7 @@ export async function executeMobileWebSessionOperation(args: {
       navigation: 'caller'
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return mobileWebSessionSnapshot(
       response.result,
@@ -148,7 +148,7 @@ export async function executeMobileWebSessionOperation(args: {
       clientMutationId: args.requestId
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return sanitizeCreateResult(response.result, payload.workspaceId)
   }
@@ -173,7 +173,7 @@ export async function executeMobileWebSessionOperation(args: {
       clientMutationId: args.requestId
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return sanitizeCreateResult(response.result, payload.workspaceId)
   }
@@ -193,7 +193,7 @@ export async function executeMobileWebSessionOperation(args: {
       activate: true
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return sanitizeBrowserCreateResult(
       response.result,
@@ -211,7 +211,7 @@ export async function executeMobileWebSessionOperation(args: {
       reason: 'user'
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return sanitizeCloseResult(response.result, payload.workspaceId, payload.tabId)
   }

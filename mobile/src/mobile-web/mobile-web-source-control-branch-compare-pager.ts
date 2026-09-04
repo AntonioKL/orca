@@ -6,7 +6,7 @@ import {
 import { sha256 } from '@noble/hashes/sha256'
 import { Buffer } from 'buffer/'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { mobileWebEncodedByteLength } from './mobile-web-request-accounting'
 import { sanitizeMobileWebBranchCompare } from './mobile-web-source-control-history-sanitizers'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
@@ -117,7 +117,7 @@ export class MobileWebSourceControlBranchComparePager {
       baseRef: payload.baseRef
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     if (mobileWebEncodedByteLength(response.result) > HOST_RESULT_MAX_BYTES) {
       throw new MobileWebBrokerError('too_large')

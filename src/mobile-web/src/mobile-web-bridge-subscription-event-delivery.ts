@@ -1,3 +1,4 @@
+import { tolerantMobileWebShellPayload } from '../../shared/mobile-web/shell-payload-tolerance'
 import { MobileWebBridgeClientError } from './mobile-web-bridge-client-error'
 import type { MobileWebActiveSubscription } from './mobile-web-bridge-subscription-state'
 
@@ -17,7 +18,9 @@ export function deliverMobileWebSubscriptionEvent(
     fail(new MobileWebBridgeClientError('invalid_message', true))
     return
   }
-  const parsed = subscription.eventSchema.safeParse(message.payload)
+  // The shell that authored this event can be a newer release than the page reading it, and a
+  // schema failure here is permanent, so parse forgivingly in that direction only.
+  const parsed = tolerantMobileWebShellPayload(subscription.eventSchema).safeParse(message.payload)
   if (!parsed.success) {
     fail(new MobileWebBridgeClientError('invalid_message', false))
     return

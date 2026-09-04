@@ -23,7 +23,7 @@ import {
   type MobileAiVaultResumeProjectGroup,
   type MobileAiVaultResumeRepo
 } from '../agent-history/agent-history-resume-target'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import type { MobileWebAgentHistoryAuthority } from './mobile-web-agent-history-authority'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 
@@ -159,7 +159,7 @@ async function loadResumeMetadata(client: RpcClient): Promise<{
     requiredResult(client, 'worktree.ps', { limit: 10_000 })
   ])
   if (!repoResponse.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(repoResponse.error)
   }
   const repoResult = repoResponse.result as { repos?: MobileAiVaultResumeRepo[] }
   const folderWorkspaceResult = folderWorkspaceResponse as {
@@ -191,7 +191,7 @@ async function requiredResult(
 ): Promise<unknown> {
   const response = await client.sendRequest(method, params, { timeoutMs: RESUME_RPC_TIMEOUT_MS })
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   return response.result
 }

@@ -2,7 +2,8 @@
  * A paired client reaches `browser.tabCreate` with a caller-supplied URL, and the page it creates is
  * streamed back over `browser.screencast`. Without a fence, `file:///…/id_rsa` renders any file on
  * the host into the caller's frames. The native HTML-artifact open is the same call, so the fence
- * has to be a workspace-root containment check rather than a scheme ban.
+ * has to be a workspace-root containment check rather than a scheme ban. "Paired" is every
+ * authenticated paired socket — phone, web client, remote desktop, remote CLI — not just mobile.
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
@@ -171,6 +172,24 @@ describe('browser.tabCreate file: URLs from a paired client', () => {
       })
     ).rejects.toThrow(/remote workspace/)
     expect(createTab).not.toHaveBeenCalled()
+  })
+
+  // The gate is `caller.pairedDeviceId`, which `runtime-rpc-pairing.ts` mints for `scope: 'runtime'`
+  // as well as `'mobile'`. So it also governs the web client, a desktop paired to a remote runtime,
+  // and remote `orca browser tab create` — breadth as a decision, not a side effect.
+  it('applies the same fence to a runtime-scope paired client, not only a phone', async () => {
+    const { runtime, createTab } = createRuntime({ id: WT, path: WORKTREE_PATH })
+    const caller = { pairedDeviceId: 'device-2', clientKind: 'runtime' as const }
+
+    await expect(create(runtime, 'file:///tmp/secrets/id_rsa', caller)).rejects.toThrow(
+      /outside the requested workspace/
+    )
+    expect(createTab).not.toHaveBeenCalled()
+
+    await expect(
+      create(runtime, `file://${WORKTREE_PATH}/build/report.html`, caller)
+    ).resolves.toEqual({ browserPageId: 'page-new' })
+    expect(createTab).toHaveBeenCalledTimes(1)
   })
 
   it('leaves an unpaired local create alone', async () => {

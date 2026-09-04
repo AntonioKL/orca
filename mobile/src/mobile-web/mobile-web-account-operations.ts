@@ -8,7 +8,7 @@ import {
   MobileWebAccountSnapshotPayloadSchema
 } from '../../../src/shared/mobile-web/account-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { mobileWebAccountsSnapshot } from './mobile-web-account-presentation'
 import type { MobileWebNativeCapabilityAuthority } from './mobile-web-native-capability-authority'
 
@@ -61,11 +61,14 @@ export async function executeMobileWebAccountOperation(args: {
   throw new MobileWebBrokerError('unsupported_capability')
 }
 
-function requireSuccess(response: { ok: boolean }): asserts response is {
+function requireSuccess(response: {
+  ok: boolean
+  error?: { code?: unknown }
+}): asserts response is {
   ok: true
   result: unknown
 } {
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error ?? {})
   }
 }

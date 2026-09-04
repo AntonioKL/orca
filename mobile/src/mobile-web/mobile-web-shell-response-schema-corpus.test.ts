@@ -12,6 +12,7 @@ import {
 import { MobileWebBridgeSubscriptionClient } from '../../../src/mobile-web/src/mobile-web-bridge-subscription-client'
 import type { MobileWebBridgeSubscriptionSetup } from '../../../src/mobile-web/src/mobile-web-bridge-subscription-setup'
 import { MobileWebOneShotRequestClient } from '../../../src/mobile-web/src/mobile-web-one-shot-request-client'
+import { tolerantMobileWebShellPayload } from '../../../src/shared/mobile-web/shell-payload-tolerance'
 import { MOBILE_WEB_PRODUCTION_GRANTS } from './mobile-web-production-grants'
 
 const CONTEXT = {
@@ -68,9 +69,7 @@ describe('mobile web shell response schema corpus', () => {
   it('rejects invalid success payloads through every one-shot result schema', async () => {
     let caseCount = 0
     for (const { name, schema } of resultSchemas) {
-      const rejected = RESPONSE_PAYLOAD_CORPUS.filter(
-        (payload) => !schema.safeParse(payload).success
-      )
+      const rejected = RESPONSE_PAYLOAD_CORPUS.filter((payload) => pageRejects(schema, payload))
       expect(rejected.length, name).toBeGreaterThanOrEqual(8)
       for (const payload of rejected) {
         await expectOneShotRejection(schema, payload, name)
@@ -83,9 +82,7 @@ describe('mobile web shell response schema corpus', () => {
   it('retires every subscription after an invalid event payload', async () => {
     let caseCount = 0
     for (const { name, schema } of eventSchemas) {
-      const rejected = RESPONSE_PAYLOAD_CORPUS.filter(
-        (payload) => !schema.safeParse(payload).success
-      )
+      const rejected = RESPONSE_PAYLOAD_CORPUS.filter((payload) => pageRejects(schema, payload))
       expect(rejected.length, name).toBeGreaterThanOrEqual(8)
       for (const payload of rejected) {
         await expectSubscriptionRejection(schema, payload, name)
@@ -95,6 +92,12 @@ describe('mobile web shell response schema corpus', () => {
     expect(caseCount).toBeGreaterThanOrEqual(64)
   })
 })
+
+/** What the page actually applies to a shell payload, so "cannot parse" here is the page's verdict
+ * rather than the authoring schema's. */
+function pageRejects(schema: ZodType, payload: unknown): boolean {
+  return !tolerantMobileWebShellPayload(schema).safeParse(payload).success
+}
 
 function namedSchemas(suffix: 'ResultSchema' | 'EventSchema'): NamedSchema[] {
   const schemas: NamedSchema[] = []

@@ -1,6 +1,6 @@
 import type { RpcClient } from '../transport/rpc-client'
 import { activateMobileSessionFileTab } from '../session/mobile-session-file-tab-activation'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 
 export async function executeMobileWebFileOpenOperation(args: {
   client: RpcClient
@@ -13,7 +13,7 @@ export async function executeMobileWebFileOpenOperation(args: {
     relativePath: args.relativePath
   })
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   await activateMobileSessionFileTab({
     client: args.client,

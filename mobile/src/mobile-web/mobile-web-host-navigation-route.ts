@@ -1,7 +1,7 @@
 import { MOBILE_WEB_WORKSPACE_LIST_LIMIT } from '../../../src/shared/mobile-web/bridge-operation-contract'
 import type { MobileWebResumeRoute } from '../../../src/shared/mobile-web/bridge-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { mobileWebEncodedByteLength } from './mobile-web-request-accounting'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 
@@ -23,7 +23,7 @@ export async function resolveMobileWebHostNavigationRoute(
     limit: MOBILE_WEB_WORKSPACE_LIST_LIMIT + 1
   })
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   const result = response.result
   if (

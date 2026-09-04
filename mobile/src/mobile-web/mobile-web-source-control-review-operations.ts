@@ -17,7 +17,7 @@ import {
 import type { RpcClient } from '../transport/rpc-client'
 import { isMobileGitUnavailable } from '../source-control/mobile-git-status'
 import { activateMobileSessionFileTab } from '../session/mobile-session-file-tab-activation'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { sanitizeMobileWebSourceControlDiff } from './mobile-web-source-control-read-results'
 import {
   readMobileWebSourceControlReviewMetadata,
@@ -61,7 +61,7 @@ export async function executeMobileWebSourceControlReviewOperation(args: {
       ...(payload.baseRef ? { baseRef: payload.baseRef } : {})
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return readReviewLink(args.client, args.workspaceAuthority, payload.workspaceId)
   }
@@ -121,7 +121,7 @@ export async function executeMobileWebSourceControlReviewOperation(args: {
       client: { id: args.terminalClientId, type: 'mobile' }
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     const accepted = terminalSendAccepted(response.result)
     if (accepted === null) {
@@ -216,7 +216,7 @@ async function executeReviewDiff(
           staged: payload.scope === 'staged'
         })
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   const result = sanitizeMobileWebSourceControlDiff(response.result, {
     workspaceId: payload.workspaceId,

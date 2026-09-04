@@ -1,6 +1,6 @@
 import type { MobileWebProviderReview } from '../../../src/shared/mobile-web/provider-review-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { sanitizeMobileWebProviderReviewSummary } from './mobile-web-provider-review-sanitizer'
 import { readMobileWebSourceControlStatusIdentity } from './mobile-web-source-control-repository-state'
 import { assertMobileWebRepositoryIdentity } from './mobile-web-source-control-sync-preflight'
@@ -46,7 +46,7 @@ export async function readHostedReviewSummary(
     currentHeadOid: identity.expectedHead
   })
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   if (response.result === null) {
     return null

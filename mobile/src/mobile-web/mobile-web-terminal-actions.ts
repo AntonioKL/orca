@@ -1,6 +1,6 @@
 import type { MobileWebTerminalRequest } from '../../../src/shared/mobile-web/terminal-stream-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import type { MobileWebTerminalStreamRecord } from './mobile-web-terminal-flow-control'
 
 type MobileWebTerminalAction = Extract<
@@ -32,6 +32,6 @@ export async function runMobileWebTerminalAction(args: {
     })
   }
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
 }

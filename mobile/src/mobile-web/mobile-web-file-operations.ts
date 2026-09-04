@@ -23,7 +23,7 @@ import {
 } from '../../../src/shared/mobile-web/bridge-operation-contract'
 import type { MobileWebFileWriteResult } from '../../../src/shared/mobile-web/file-edit-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { executeMobileWebFileOpenOperation } from './mobile-web-file-open-operation'
 import { executeMobileWebFileWrite } from './mobile-web-file-write'
 import {
@@ -73,7 +73,7 @@ export async function executeMobileWebFileOperation(args: {
       relativePath: payload.relativePath
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return sanitizeReadResult(
       response.result,
@@ -90,7 +90,7 @@ export async function executeMobileWebFileOperation(args: {
       relativePath: payload.relativePath
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return sanitizeDirectoryResult(
       response.result,
@@ -109,7 +109,7 @@ export async function executeMobileWebFileOperation(args: {
       length: payload.length
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return sanitizeChunkResult(response.result, payload)
   }
@@ -143,7 +143,7 @@ async function listFiles(
     limit
   })
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   return sanitizeListResult(response.result, pageWorkspaceId, hostWorkspaceId, limit)
 }

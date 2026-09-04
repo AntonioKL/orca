@@ -20,7 +20,7 @@ import { isFloatingWorkspaceWorktreeId } from '../session/floating-workspace'
 import { getRepoIdFromMobileWorktreeId } from '../session/mobile-session-route-helpers'
 import { loadMobileNewTabAgentOptions } from '../session/mobile-new-tab-agent-loader'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import type {
   MobileWebHostWorkspaceId,
   MobileWebWorkspaceAuthority
@@ -47,7 +47,7 @@ export async function executeMobileWebSessionQuickCommandOperation(args: {
       mutation
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return projectQuickCommands(response.result, hostWorkspaceId, payload.workspaceId)
   }
@@ -89,7 +89,7 @@ async function quickCommandSnapshot(
 async function readQuickCommands(client: RpcClient): Promise<TerminalQuickCommand[]> {
   const response = await client.sendRequest('settings.getTerminalQuickCommands')
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   const commands = parseNormalizedTerminalQuickCommands(
     (response.result as { terminalQuickCommands?: unknown }).terminalQuickCommands
