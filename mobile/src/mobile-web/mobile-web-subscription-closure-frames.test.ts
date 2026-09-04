@@ -213,27 +213,32 @@ const LEDGER_CASES: LedgerCase[] = [
   }
 ]
 
+// Ledgers that retire on an unusable host message; browser drops the frame instead, so it is absent.
+const RETIRING_LEDGER_CASES = LEDGER_CASES.filter(
+  (ledger): ledger is LedgerCase & { invalidCode: 'invalid_message' } => ledger.invalidCode !== null
+)
+
 // Without a terminal frame the page keeps a live subscription and freezes on its last value.
 describe('shell subscription ledgers publish a closure frame when they retire early', () => {
-  for (const ledger of LEDGER_CASES) {
-    if (ledger.invalidCode) {
-      it(`closes the ${ledger.name} subscription on an unusable host message`, async () => {
-        const closures: [string, MobileWebSubscriptionClosure][] = []
-        const emit = await ledger.open({
-          isActive: () => true,
-          postEvent: async () => {},
-          postClosed: (subscriptionId, closure) => closures.push([subscriptionId, closure])
-        })
-
-        emit(ledger.invalid)
-
-        expect(closures).toEqual([
-          [SUBSCRIPTION_ID, { code: ledger.invalidCode, retryable: false }]
-        ])
+  it.each(RETIRING_LEDGER_CASES)(
+    'closes the $name subscription on an unusable host message',
+    async (ledger) => {
+      const closures: [string, MobileWebSubscriptionClosure][] = []
+      const emit = await ledger.open({
+        isActive: () => true,
+        postEvent: async () => {},
+        postClosed: (subscriptionId, closure) => closures.push([subscriptionId, closure])
       })
-    }
 
-    it(`closes the ${ledger.name} subscription when the page post fails`, async () => {
+      emit(ledger.invalid)
+
+      expect(closures).toEqual([[SUBSCRIPTION_ID, { code: ledger.invalidCode, retryable: false }]])
+    }
+  )
+
+  it.each(LEDGER_CASES)(
+    'closes the $name subscription when the page post fails',
+    async (ledger) => {
       const closures: [string, MobileWebSubscriptionClosure][] = []
       const emit = await ledger.open({
         isActive: () => true,
@@ -247,6 +252,6 @@ describe('shell subscription ledgers publish a closure frame when they retire ea
       await vi.waitFor(() => expect(closures).toHaveLength(1))
 
       expect(closures[0]).toEqual([SUBSCRIPTION_ID, { code: 'unavailable', retryable: true }])
-    })
-  }
+    }
+  )
 })
