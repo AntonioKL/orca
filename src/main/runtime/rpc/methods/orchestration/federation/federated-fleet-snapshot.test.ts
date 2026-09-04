@@ -252,18 +252,22 @@ describe('federated fleet snapshots', () => {
       now: 1
     })
 
-    applyFederatedFleetObservations(fleet, {
-      observations: new Map(),
-      errors: [
-        {
-          environmentId: 'environment-offline',
-          name: 'offline',
-          code: 'host_unavailable',
-          dispatchIds: ['dispatch-released']
-        }
-      ],
-      hosts: new Map([['dispatch-released', 'environment-offline']])
-    })
+    applyFederatedFleetObservations(
+      fleet,
+      {
+        observations: new Map(),
+        errors: [
+          {
+            environmentId: 'environment-offline',
+            name: 'offline',
+            code: 'host_unavailable',
+            dispatchIds: ['dispatch-released']
+          }
+        ],
+        hosts: new Map([['dispatch-released', 'environment-offline']])
+      },
+      new Map()
+    )
 
     expect(fleet.workers[0]).toMatchObject({
       host: { kind: 'remote', id: 'environment-offline' },

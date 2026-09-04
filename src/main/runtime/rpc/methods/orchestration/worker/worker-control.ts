@@ -5,9 +5,7 @@ import { OrchestrationError } from '../../../../orchestration/orchestration-erro
 import { defineMethod, type RpcMethod } from '../../../core'
 import { OptionalFiniteNumber, requiredString } from '../../../schemas'
 import {
-  callFederatedWorkerShow,
   exposeDispatchContext,
-  exposeFederatedWorkerObservation,
   exposeObservation,
   exposeWorker,
   inspectWorkerTerminal,
@@ -19,6 +17,7 @@ import { readArchivedWorkerOutput } from './worker-archive-read'
 import { readExactWorkerOutput } from './worker-output'
 import { exposeWorkerTerminalResource } from './worker-release-completion'
 import { readFederatedWorkerOutput } from '../federation/federated-worker-read'
+import { showFederatedWorker } from '../federation/federated-worker-show'
 const WorkerDispatchParams = z.object({ dispatch: requiredString('Missing --dispatch') })
 const WorkerReadParams = WorkerDispatchParams.extend({
   cursor: z.union([z.number().int().nonnegative(), z.string().min(1).max(2_048)]).optional(),
@@ -42,95 +41,13 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
       }
       const federated = db.getFederatedDispatch(params.dispatch)
       if (federated) {
-        if (!worker) {
-          throw new OrchestrationError(
-            'dispatch_not_found',
-            `Federated Worker Dispatch ${params.dispatch} has no worker record.`
-          )
-        }
-        const observationFence = db.captureFederatedDispatchObservationFence(params.dispatch)
-        if (!observationFence) {
-          throw new OrchestrationError(
-            'dispatch_not_found',
-            `Federated Worker Dispatch ${params.dispatch} has no observation projection.`
-          )
-        }
-        const server = resolvePinnedFederatedServer(runtime, federated)
-        runtime.ensureOrchestrationFederationRelay(dispatch.run_id)
-        const remote = await callFederatedWorkerShow(runtime, federated)
-        const attachment = remote.attachment
-        const settlementQueued =
-          attachment.state === 'succeeded' ||
-          (attachment.state === 'failed' && attachment.stage === 'worker_report_queued')
-        const observationProjected = db.projectFederatedDispatchObservation(
-          observationFence,
-          () => {
-            let projectedWorker = db.updateWorkerSetupEvidence({
-              dispatchId: params.dispatch,
-              setupState: attachment.setup_state,
-              effects: attachment.effects
-            }).worker
-            if (
-              attachment.state === 'stopped' &&
-              ['stopping', 'stop_unknown'].includes(projectedWorker.state)
-            ) {
-              projectedWorker = db.reconcileFederatedWorkerStop(params.dispatch)
-            } else if (
-              !settlementQueued &&
-              ['ready', 'failed', 'stopped', 'start_unknown'].includes(attachment.state)
-            ) {
-              projectedWorker = db.reconcileFederatedWorkerStart({
-                dispatchId: params.dispatch,
-                state: attachment.state as 'ready' | 'failed' | 'stopped' | 'start_unknown',
-                stage: attachment.stage,
-                lastError: attachment.last_error,
-                worktreeId: attachment.worktree_id,
-                terminalHandle: attachment.terminal_handle,
-                setupState: attachment.setup_state,
-                effects: attachment.effects,
-                residualResources: attachment.residualResources
-              })
-            }
-            if (
-              attachment.state === 'ready' &&
-              attachment.worktree_id &&
-              attachment.terminal_handle
-            ) {
-              db.updateFederatedDispatchResources({
-                dispatchId: params.dispatch,
-                remoteRuntimeEpoch: remote.runtimeEpoch,
-                worktreeId: attachment.worktree_id,
-                terminalHandle: attachment.terminal_handle
-              })
-            } else {
-              db.updateFederatedDispatchRuntimeEpoch(params.dispatch, remote.runtimeEpoch)
-            }
-            worker = projectedWorker
-          }
-        )
-        if (settlementQueued) {
-          await runtime
-            .syncOrchestrationFederatedDispatchAfterCurrent(params.dispatch)
-            .catch(() => undefined)
-        }
-        worker = db.getWorkerDispatch(params.dispatch)
-        if (!worker) {
-          throw new OrchestrationError(
-            'dispatch_not_found',
-            `Worker Dispatch ${params.dispatch} was not found after remote reconciliation.`
-          )
-        }
-        return {
-          dispatch: exposeDispatchContext(db.getDispatchContextById(params.dispatch) ?? dispatch),
-          worker: exposeWorker(worker),
-          projection: projectFleetWorker(runtime, db, params.dispatch),
-          server: { environmentId: server.environmentId, name: server.name },
-          remoteRuntimeEpoch:
-            db.getFederatedDispatch(params.dispatch)?.remote_runtime_epoch ??
-            (observationProjected ? remote.runtimeEpoch : null),
-          terminal: observationProjected ? remote.terminal : null,
-          observation: exposeFederatedWorkerObservation(remote.observation, observationProjected)
-        }
+        return showFederatedWorker({
+          runtime,
+          db,
+          dispatchId: params.dispatch,
+          dispatch,
+          federated
+        })
       }
       if (!worker) {
         return showContextOnlyWorker(runtime, db, dispatch)

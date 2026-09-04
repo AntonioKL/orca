@@ -97,7 +97,7 @@ export function exposeObservation(observation: Awaited<ReturnType<typeof inspect
   }
 }
 
-export function exposeContextOnlyWorker(dispatch: DispatchContextRow) {
+function exposeContextOnlyWorker(dispatch: DispatchContextRow) {
   return {
     dispatchId: dispatch.id,
     runtimeEpoch: null,
@@ -123,6 +123,9 @@ export function exposeDispatchContext(dispatch: DispatchContextRow) {
     id: dispatch.id,
     runId: dispatch.run_id,
     taskId: dispatch.task_id,
+    // Every shipped CLI prints `dispatch.task_id`, and mixed client/host versions are the
+    // normal state, so the rename ships beside the spelling old clients still read.
+    task_id: dispatch.task_id,
     contractVersion: dispatch.contract_version,
     assigneeHandle: dispatch.assignee_handle,
     assigneePaneKey: dispatch.assignee_pane_key,
@@ -187,25 +190,31 @@ export function exposeWorker(worker: WorkerDispatchRow) {
  * at a trust prompt inside a live pane read `live` here and `unverifiable` from
  * `worker-list` — and `worker-list`'s own `nextAction` pointed back at this command.
  */
-export function projectFleetWorker(
+export function projectFleetWorkerPage(
   runtime: OrcaRuntimeService,
   db: OrchestrationDb,
   dispatchId: string
-): OrchestrationFleetWorker | null {
+): ReturnType<typeof projectWorkerFleet> | null {
   const rows = db.listWorkerTerminalResources({ dispatchIds: [dispatchId], limit: 1 })
   if (rows.length === 0) {
     return null
   }
   const now = Date.now()
-  return (
-    projectWorkerFleet({
-      rows,
-      attentionFacts: db.getWorkerAttentionFactsForDispatches([dispatchId], now),
-      statuses: runtime.getOrchestrationFleetAgentStatusSnapshot(),
-      limit: 1,
-      now
-    }).workers[0] ?? null
-  )
+  return projectWorkerFleet({
+    rows,
+    attentionFacts: db.getWorkerAttentionFactsForDispatches([dispatchId], now),
+    statuses: runtime.getOrchestrationFleetAgentStatusSnapshot(),
+    limit: 1,
+    now
+  })
+}
+
+export function projectFleetWorker(
+  runtime: OrcaRuntimeService,
+  db: OrchestrationDb,
+  dispatchId: string
+): OrchestrationFleetWorker | null {
+  return projectFleetWorkerPage(runtime, db, dispatchId)?.workers[0] ?? null
 }
 
 export function exposeFederatedWorkerObservation(

@@ -18,10 +18,13 @@ export type WorkerAttentionFacts = {
   terminationReason: TerminalExitCause['kind'] | null
   isRoot: boolean
   workerState: WorkerDispatchState | null
+  workerStage: string | null
   dispatchStatus: DispatchStatus
   /** Execution host of the worker's terminal resource; a remote row with no connection id is
    *  unverifiable. `undefined` when no resource was ever materialized. */
   hostScope?: string | null
+  /** A released resource is an execution-host confirmation that the terminal is gone. */
+  releaseState?: string | null
 }
 
 export function getWorkerAttentionFactsForDispatches(
@@ -37,8 +40,9 @@ export function getWorkerAttentionFactsForDispatches(
   const rows = this.db
     .prepare(
       `SELECT d.id AS dispatch_id, d.task_id, d.status AS dispatch_status,
-              d.termination_reason, w.state AS worker_state, t.parent_id AS parent_task_id,
-              r.id AS resource_id, r.host_scope,
+              d.termination_reason, w.state AS worker_state, w.stage AS worker_stage,
+              t.parent_id AS parent_task_id,
+              r.id AS resource_id, r.host_scope, r.release_state,
               EXISTS (
                 SELECT 1 FROM question_threads q
                  WHERE q.dispatch_id = d.id AND q.status = 'pending'
@@ -65,9 +69,11 @@ export function getWorkerAttentionFactsForDispatches(
     dispatch_status: DispatchStatus
     termination_reason: TerminalExitCause['kind'] | null
     worker_state: WorkerDispatchState | null
+    worker_stage: string | null
     parent_task_id: string | null
     resource_id: string | null
     host_scope: string | null
+    release_state: string | null
     pending_input: number
     pending_approval: number
     pending_guidance: number
@@ -105,8 +111,11 @@ export function getWorkerAttentionFactsForDispatches(
           terminationReason: row.termination_reason,
           isRoot: row.parent_task_id === null,
           workerState: row.worker_state,
+          workerStage: row.worker_stage,
           dispatchStatus: row.dispatch_status,
-          ...(row.resource_id === null ? {} : { hostScope: row.host_scope })
+          ...(row.resource_id === null
+            ? {}
+            : { hostScope: row.host_scope, releaseState: row.release_state })
         }
       ]
     })

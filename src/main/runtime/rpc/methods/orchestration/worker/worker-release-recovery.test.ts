@@ -212,6 +212,17 @@ describe('orchestration worker release recovery', () => {
     expect(runtime.closeTerminal).not.toHaveBeenCalled()
   })
 
+  it('settles a disposed endpoint as released once the host certified the exit', async () => {
+    setup()
+    const { dispatchId } = await startSettledWorker()
+    vi.spyOn(runtime, 'getTerminalLivenessVerdict').mockReturnValue({ status: 'exited' })
+    vi.mocked(runtime.closeTerminal).mockRejectedValueOnce(new Error('Multiplexer disposed'))
+
+    await expect(
+      call('orchestration.workerRelease', { dispatch: dispatchId })
+    ).resolves.toMatchObject({ state: 'released', processAction: 'closed_exited_terminal' })
+  })
+
   it('defers instead of settling unknown while inventory is incomplete', async () => {
     setup()
     const { dispatchId } = await startSettledWorker()
