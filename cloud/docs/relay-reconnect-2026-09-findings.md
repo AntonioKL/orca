@@ -321,6 +321,15 @@ no `num_backends` point for the auth instance between 21:40 and 21:46 (every oth
 one; measured directly via the timeSeries API). A Google-side publish gap, not a database or monitor defect;
 the monitor's freeze-on-missing rule is correct. The 12–13Z monitor failures were a different cause (active
 probes reading 0 during the crash cascade). Re-dispatched at 21:50Z.
+Dry-run #2 (33922844671) froze at 21:52:21Z on `auth.health observed 0` — verdict read from the state.json
+artifact, not the log (the log only prints checkpoints). Auth served `/health` 200 continuously, including the
+21:52:05 probe. Cause: the probe requires `/health` AND `/ready` on the first attempt; auth has no `/ready`
+(404 by design), so every auth sample takes the forced 11 s retry, and on the third sample the retry fetch threw
+at the network layer on the runner (no request reached Cloud Run) and `check()` recorded the exception as
+health=false. Neither freeze was fleet health. Fix delegated (relay-ops: a thrown fetch is not a reading; auth
+does not require `/ready`). **Sequencing constraint for Roll 1:** monitor evidence must be < 5 min old at
+canary dispatch, so the owner's go must precede the dry-run, and a green dry-run must be followed by the
+canary dispatch immediately.
 
 stablyai/orca PR #18719 (3.2 + 4.3, desktop): the replay engine was not the refresh function but
 `RelayAuthCoordinator.scheduleRetry`, since `shouldRetryRelayConnectionError` treats any non-HTTP error
