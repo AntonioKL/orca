@@ -148,6 +148,17 @@ function nextAction(worker: FleetDurableWorker, liveness: FleetLiveness): FleetN
       argv: ['orchestration', 'worker-read', '--dispatch', worker.dispatchId]
     }
   }
+  // A running worker with a live verdict and nothing pending owes the coordinator
+  // nothing; `inspect` is the unknown-state bucket, and worker-show publishes this
+  // same projection, so pointing there was a self-loop on its own receipt.
+  if (
+    liveness.verdict === 'live' &&
+    worker.workerState === 'ready' &&
+    !worker.pendingInput &&
+    !worker.pendingApproval
+  ) {
+    return { kind: 'none', argv: [] }
+  }
   return {
     kind: 'inspect',
     argv: ['orchestration', 'worker-show', '--dispatch', worker.dispatchId]

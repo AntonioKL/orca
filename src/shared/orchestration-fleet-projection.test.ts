@@ -457,6 +457,17 @@ describe('fleet liveness and attention after a host verdict', () => {
     })
   })
 
+  it('asks nothing of a live running worker instead of looping on worker-show', () => {
+    const now = 10_000
+    const projected = projectOrchestrationFleet({
+      workers: [worker('1')],
+      statuses: [status('1', now - 1_000)],
+      now
+    })
+    expect(projected.workers[0]!.liveness.verdict).toBe('live')
+    expect(projected.workers[0]!.nextAction).toEqual({ kind: 'none', argv: [] })
+  })
+
   it('keeps an unverifiable worker on inspect: absence is never authority to stop', () => {
     const now = 10 * AGENT_STATUS_STALE_AFTER_MS
     const projected = projectOrchestrationFleet({
