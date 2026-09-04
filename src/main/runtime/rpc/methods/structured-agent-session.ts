@@ -19,6 +19,7 @@ import {
   supportsStructuredSessions
 } from './structured-agent-session-gate'
 import { STRUCTURED_AGENT_SESSION_HOLD_METHODS } from './structured-agent-session-hold'
+import { resolveUncommittedStructuredCreate } from './structured-agent-session-precommit-refusal'
 import {
   AttachParams,
   CancelParams,
@@ -62,57 +63,69 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
       if (params.envelope.expectedRuntimeFence !== null) {
         throw new Error('agent_session_operation_invalid')
       }
-      if ('worktree' in params) {
-        const intentFingerprint = computeAgentSessionPayloadFingerprint({
-          method: 'agentSession.create',
-          sessionId: params.envelope.sessionId,
-          fields: { worktree: params.worktree, agent: params.agent }
-        })
-        const conflict = agentSessionFingerprintConflict(params.envelope, intentFingerprint)
-        if (conflict) {
-          return { ok: false, refusal: conflict }
-        }
-        const resolved = await ctx.runtime.resolveStructuredAgentSessionCreateIntent(params)
-        const hostFingerprint = computeAgentSessionPayloadFingerprint({
-          method: 'agentSession.attach',
-          sessionId: params.envelope.sessionId,
-          fields: {
-            location: resolved.location,
-            provider: resolved.provider,
-            agent: resolved.agent,
-            accountHome: resolved.accountHome,
-            runtimeKind: resolved.runtimeKind,
-            expectedRuntimeFence: null
+      // Everything up to `attach` is pre-commit, and answers with a refusal rather than a throw so
+      // a client can tell "nothing was created" from "the outcome is unknown".
+      const prepared = await resolveUncommittedStructuredCreate(async () => {
+        if ('worktree' in params) {
+          const intentFingerprint = computeAgentSessionPayloadFingerprint({
+            method: 'agentSession.create',
+            sessionId: params.envelope.sessionId,
+            fields: { worktree: params.worktree, agent: params.agent }
+          })
+          const conflict = agentSessionFingerprintConflict(params.envelope, intentFingerprint)
+          if (conflict) {
+            return { refusal: conflict }
           }
-        })
+          const resolved = await ctx.runtime.resolveStructuredAgentSessionCreateIntent(params)
+          const hostFingerprint = computeAgentSessionPayloadFingerprint({
+            method: 'agentSession.attach',
+            sessionId: params.envelope.sessionId,
+            fields: {
+              location: resolved.location,
+              provider: resolved.provider,
+              agent: resolved.agent,
+              accountHome: resolved.accountHome,
+              runtimeKind: resolved.runtimeKind,
+              expectedRuntimeFence: null
+            }
+          })
+          await ensureHostInstalled(ctx)
+          return {
+            host: requireHost(ctx),
+            attachParams: {
+              ...resolved,
+              envelope: { ...params.envelope, payloadFingerprint: hostFingerprint }
+            },
+            tab: resolved.agent === 'codex' ? { workspaceId: resolved.location.workspaceId } : null
+          }
+        }
         await ensureHostInstalled(ctx)
-        const result = await requireHost(ctx).attach(callerFor(ctx), {
-          ...resolved,
-          envelope: { ...params.envelope, payloadFingerprint: hostFingerprint }
-        })
-        if (result.ok && resolved.agent === 'codex') {
-          try {
-            await ctx.runtime.publishStructuredAgentSessionTab({
-              workspaceId: resolved.location.workspaceId,
-              sessionId: result.value.sessionId,
-              agent: 'codex',
-              activate: true
-            })
-          } catch (error) {
-            console.warn('[agent-session] create committed before tab publication failed', error)
-            return {
-              ok: false,
-              refusal: {
-                code: 'agent_session_operation_unknown',
-                message: 'The Codex chat may have been created, but its tab could not be confirmed.'
-              }
+        return { host: requireHost(ctx), attachParams: params, tab: null }
+      })
+      if ('refusal' in prepared) {
+        return { ok: false, refusal: prepared.refusal }
+      }
+      const result = await prepared.host.attach(callerFor(ctx), prepared.attachParams)
+      if (result.ok && prepared.tab) {
+        try {
+          await ctx.runtime.publishStructuredAgentSessionTab({
+            workspaceId: prepared.tab.workspaceId,
+            sessionId: result.value.sessionId,
+            agent: 'codex',
+            activate: true
+          })
+        } catch (error) {
+          console.warn('[agent-session] create committed before tab publication failed', error)
+          return {
+            ok: false,
+            refusal: {
+              code: 'agent_session_operation_unknown',
+              message: 'The Codex chat may have been created, but its tab could not be confirmed.'
             }
           }
         }
-        return result
       }
-      await ensureHostInstalled(ctx)
-      return requireHost(ctx).attach(callerFor(ctx), params)
+      return result
     }
   }),
   defineMethod({
