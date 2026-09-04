@@ -95,10 +95,15 @@ describe('Claude effort the settings readback cannot report', () => {
   ): { session: ClaudeSession; calls: string[] } {
     return {
       session: {
-        options: new Map<string, string>(),
+        options: new Map<string, string>([['model', 'sonnet']]),
+        reportedOptions: {},
         optionMutationSequence: 0,
         confirmedOptions: new Set<string>(),
         connection: {
+          supportedModels: async () => {
+            calls.push('list_models')
+            return CATALOG
+          },
           applyFlagSettings: async (settings: { effortLevel?: string }) => {
             calls.push(`apply:${settings.effortLevel}`)
           },
@@ -124,7 +129,7 @@ describe('Claude effort the settings readback cannot report', () => {
 
     await expect(
       setClaudeStructuredOption(session, { key: 'effort', value: 'max' }, undefined)
-    ).resolves.toEqual({ effort: 'max' })
-    expect(calls).toEqual(['apply:max'])
+    ).resolves.toEqual({ model: 'sonnet', effort: 'max' })
+    expect(calls).toEqual(['list_models', 'apply:max'])
   })
 })

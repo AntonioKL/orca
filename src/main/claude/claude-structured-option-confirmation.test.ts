@@ -11,8 +11,16 @@ import { setClaudeStructuredOption } from './claude-structured-options'
 import type { ClaudeSession } from './claude-structured-session-state'
 import { PROVIDER_SESSION_ID, acquired, fakeClaude } from './claude-structured-session-test-support'
 
+/** Verbatim rows from Claude Code 2.1.260's list_models response: `haiku` really
+ *  does omit both effort keys, which is what makes an effort under it refusable. */
 const CATALOG = [
-  { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet' },
+  {
+    value: 'sonnet',
+    resolvedModel: 'claude-sonnet-5',
+    displayName: 'Sonnet',
+    supportsEffort: true,
+    supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max']
+  },
   { value: 'haiku', resolvedModel: 'claude-haiku-4-5-20251001', displayName: 'Haiku' }
 ]
 
@@ -155,10 +163,12 @@ describe('confirmation never outlives the write it belongs to', () => {
     const calls: string[] = []
     let reported = 'low'
     const session = {
-      options: new Map<string, string>(),
+      options: new Map<string, string>([['model', 'sonnet']]),
+      reportedOptions: {},
       optionMutationSequence: 0,
       confirmedOptions: new Set<string>(),
       connection: {
+        supportedModels: async () => CATALOG,
         applyFlagSettings: async (s: { effortLevel?: string }) => {
           calls.push(`apply:${s.effortLevel}`)
         },

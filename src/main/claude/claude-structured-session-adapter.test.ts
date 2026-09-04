@@ -82,8 +82,11 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
       options: { model: 'opus', effort: 'high' }
     })
 
-    expect(claude.connections[0].calls.slice(-3)).toEqual([
+    expect(claude.connections[0].calls.slice(-4)).toEqual([
       { subtype: 'set_model', params: { model: 'opus' } },
+      // The restored model's advertised levels gate the replay, so a stale effort
+      // is dropped rather than re-applied to a model with no effort control.
+      { subtype: 'list_models' },
       { subtype: 'apply_flag_settings', params: { settings: { effortLevel: 'high' } } },
       // The effort is only recorded once the child reports having adopted it.
       { subtype: 'get_settings' }
