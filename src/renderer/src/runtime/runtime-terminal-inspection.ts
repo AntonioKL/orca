@@ -169,7 +169,11 @@ export async function inspectRuntimeTerminalProcess(
         terminal,
         ...(options?.expectedIncarnationId
           ? { expectedIncarnationId: options.expectedIncarnationId }
-          : {})
+          : {}),
+        // Why forwarded: the close guards pass this so the host pays for a real child-process read.
+        // Dropped here, the host declines to scan and answers `unverifiable`, which the guard reads
+        // as running work -- a confirmation dialog on every idle close of a remote Windows pane.
+        ...(options?.scanChildProcesses === true ? { scanChildProcesses: true } : {})
       },
       { timeoutMs: 15_000 }
     )
