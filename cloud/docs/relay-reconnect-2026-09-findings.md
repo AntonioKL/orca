@@ -220,6 +220,9 @@ immediately so the bar can be re-tightened after the fleet is on the 500 ms lock
   at 01:31Z (4 cells) and 04:47Z (5 cells) with nothing rolling; the c7 drain's SQL load 6 min earlier may
   have nudged the pool timeouts but the class is pre-existing. c7 MIG RECREATING onto new template
   `…20260904061618…` = the expected image swap.
+- 06:20Z: 849 assign 503s. Closes 06:19:30–06:21: 162x1006 age<5min (hosts bouncing off the recreating
+  c27/c29), 73x4408 + 53x1006 in the 50-min age bin (Finding 3 rotation cohort). Not roll-caused.
+  c7 MIG `recreating=1` on the new template since 06:16:18Z; c27 and c29 MIGs also RECREATING (autoheal).
 - Implication for the batch phase: every drain will push director concurrency past the monitor's 64 bar
   for ~1-2 min. The batch job rechecks safety *before* it drains (read-only step), so that is fine per wave,
   but never run a monitor dry-run concurrently with a wave, and prefer batches of 2 over 4 until the fleet
