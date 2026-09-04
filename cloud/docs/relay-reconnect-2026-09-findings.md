@@ -43,7 +43,7 @@ ordinary (49/29/13 per min). Best reading: a ~5 s Postgres-side wait event share
 | Monitor dry-run #16 | Dispatched 12:38:57Z; froze at sample 1 (12:40:11Z): `cell.production-gce-c27.latency_ms` 2071 > 2000, a fifth distinct freeze signal, the probe's own round-trip absorbing a checkpoint sync. **Loop stopped by me at 12:41Z**: with the disk in the checkpoint loop (Finding 10) no bar can hold for 15 min, so further dry-runs only burn the shared rollout lease. 16 dry-runs: 1 pass, 15 freezes. Re-arm after the disk change lands. |
 | Cloud SQL checkpoint loop | **Broke on its own 12:39–12:45Z**: disk writes 48 -> 4 MB/s at 12:39 with transactions and network flat and no Cloud SQL operation; 12:40:17 checkpoint synced 0.047 s; 12:45:53 checkpoint was `time`-triggered again (first since 11:55) with sync 0.096 s and write spread over 269 s. Cause of the break unknown (most likely WAL fell back under `max_wal_size` once a burst of full-page writes aged out). It can re-enter the loop on the next large checkpoint; the disk-size fix remains the durable one. |
 | Monitor dry-run #17 | Dispatched ~12:49Z (all guards clean); froze at sample 1 (12:52:05Z): `director.errors` 4, from the c9/c22 crash loop that began 12:50:34, ~90 s after dispatch. Checkpoints stayed healthy (85 ms), so this is the old image's baseline crash rate, not the disk. 17 dry-runs: 1 pass, 16 freezes. |
-| Monitor dry-run #18 | Waiter re-armed 12:53Z: same guards plus a 45 s post-quiet recheck. Chains canary c7 on green. |
+| Monitor dry-run #18 | Waiter re-armed 12:53Z: same guards plus a 45 s post-quiet recheck. Chains canary c7 on green. Holding through the 12:50–12:53 cascade (c9, c22, c23 x7, c13, c10, c21). |
 | Gate decision | Owner asked at 09:36Z to choose: A keep looping / B recalibrate `directorErrors` 0 -> small n / C human bypass. Ten dry-runs, four froze on this bar. Recommendation B+A. Note: B alone would not have passed #9 or #10 (cell health probes and a 12-error burst); it fixes the single-500 false freezes (#7, #8) only. | |
 | Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
 | PR #18606 lock removal (root cause) | **Merged** 09:2xZ as 7b108abf71 after review, fix, re-verify; CI green | https://github.com/stablyai/orca/pull/18606 |
@@ -528,6 +528,20 @@ A second, flag-level lever is raising `max_wal_size` (default 1 GB) so timed che
 also a Cloud SQL instance setting in the owning Terraform root. Per the standing rule, not applied from
 this session. Until then the fleet-wide 4–6 s stalls recur on
 every slow checkpoint sync, the old-image cells die on each one, and no 15-min gate window will exist.
+
+## Finding 11 (2026-09-04 12:55Z): a second stall class, Cloud SQL proxy dial timeouts, independent of the checkpoint loop
+
+The 12:50:30–12:50:50 stall (every cell 3.7–3.9 s SQL max, six old-image cells died) happened with
+checkpoints healthy (85 ms) and disk at 6 MB/s, so it is not Finding 10. The cells' Cloud SQL Auth Proxy
+logged `failed to connect to instance: dial error: dial tcp 35.188.82.89:3307: i/o timeout`. Count of
+those per hour today: 08Z 1, 11Z 15, **12Z 416**; all of Sep 3: 4. Cloud SQL `up`/backends/connections
+did not blip. So new TCP connections to the instance's public IP on 3307 are timing out from the cells'
+proxies in bursts, which is exactly the "2 s connect timeout" the old image dies on. Query Insights for
+12:49–12:54 attributes 1,380 s of lock wait to the placement CTE (`WITH assignment_state AS
+MATERIALIZED …`) and 469 s to the single-row reservation UPDATE: the lock queue is the *consequence* of
+connections stalling mid-transaction, not the cause. Not chased further; candidates are the proxy's
+connection churn under the crash loops (each recreated cell opens a fresh pool) and the instance's
+public-IP path. Relay code cannot fix this; it is Cloud SQL / network.
 
 ## Roll inputs (verified by the read-only `verify` run)
 
