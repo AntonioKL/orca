@@ -7,7 +7,7 @@ import {
   readFileSync,
   writeFileSync
 } from 'node:fs'
-import { createRequire } from 'node:module'
+import { createRequire, isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -77,10 +77,13 @@ async function bundleHostTreeRemoval(outFile: string): Promise<void> {
       ssr: true,
       rollupOptions: {
         input: 'src/main/host-tree-removal.ts',
+        // Why mirror `isExternalMainModule` from electron.vite.config.ts exactly — CJS, and
+        // `original-fs` deliberately *not* externalized: the shipped bundle does not list it either,
+        // so if the archive-aware `rm` ever became a static import (or the bundler learned to fold
+        // `createRequire(...)('original-fs')`) production would silently degrade to the shimmed `fs`
+        // while a test that pre-externalized it kept passing.
         output: { format: 'cjs' },
-        // `original-fs` is Electron's unpatched `fs`; it only exists in the running binary.
-        external: (id: string) =>
-          id.startsWith('node:') || id === 'original-fs' || id === 'electron'
+        external: (id: string) => isBuiltin(id) || id === 'electron' || id.startsWith('electron/')
       }
     }
   })
