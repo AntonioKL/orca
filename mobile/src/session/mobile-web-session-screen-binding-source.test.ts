@@ -43,11 +43,8 @@ describe('mobile web session screen binding', () => {
     expect(hostedSessionRoute).toContain('lastConnectedAt={shell.lastConnectedAt}')
     expect(hostedSessionRoute).toContain('<SessionScreen')
     expect(nativeSessionRoute).toContain('export function SessionScreen(')
-    expect(nativeSessionRoute).not.toContain('Clipboard.setStringAsync')
-    expect(nativeSessionRoute).not.toContain('Linking.openURL')
-    expect(nativeSessionRoute).not.toContain("router.push('/terminal-settings')")
-    expect(nativeSessionRoute).not.toContain('@react-native-async-storage/async-storage')
-    expect(nativeSessionRoute).not.toContain("from '../../../../src/transport/host-store'")
+    // The native-only API bans moved to hosted-route-native-api-census.test.ts, which walks
+    // every module the hosted session route reaches rather than this fixed file list.
     expect(nativeSessionRoute).toContain('sessionDeviceOperations?.openTerminalSettings()')
     expect(nativeSessionRoute).toContain(
       'sessionDeviceOperations?.loadTerminalAccessoryPreferences()'

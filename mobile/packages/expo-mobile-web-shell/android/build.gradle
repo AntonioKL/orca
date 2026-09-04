@@ -37,6 +37,8 @@ afterEvaluate {
     classpath = debugUnitTest.get().classpath
   }
   debugUnitTest.configure {
-    finalizedBy processInterruptionTest
+    // Why: BuildConfig.DEBUG and ORCA_INSPECTABLE_RELEASE only take their shipped values in the
+    // release variant, so the debug-only CI command would never compile the shipping defaults.
+    finalizedBy processInterruptionTest, tasks.named('testReleaseUnitTest')
   }
 }
