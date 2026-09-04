@@ -218,7 +218,7 @@ export function useMobileNativeChatSession(args: {
           setLoadingEarlier(false)
           beforeOffsetRef.current = null
         }
-        setRead({ operations, identity, status: 'ready' })
+        setRead({ operations, identity, status: applied.pending ? 'awaiting-transcript' : 'ready' })
       },
       () => {
         if (!cancelled) {
@@ -317,7 +317,7 @@ export function useMobileNativeChatSession(args: {
     messages: visibleMessages,
     lifecycle,
     status,
-    transcriptLoading: status === 'loading',
+    transcriptLoading: status === 'loading' || status === 'awaiting-transcript',
     error,
     hasMore,
     loadingEarlier,

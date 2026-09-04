@@ -46,6 +46,7 @@ export function nativeHostSessionNativeChatOperations(
         'nativeChat.subscribe',
         {
           ...nativeChatReadParams(target, limit),
+          capabilities: { transcriptPending: 1 },
           subscriptionId: buildNativeChatSubscriptionId(target.agent, target.sessionId)
         },
         (value) => onEvent(value as Parameters<typeof onEvent>[0])

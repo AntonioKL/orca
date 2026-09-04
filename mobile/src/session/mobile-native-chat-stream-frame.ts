@@ -10,6 +10,7 @@ export type MobileNativeChatStreamFrame = {
   messages?: NativeChatMessage[]
   hasMore?: boolean
   beforeOffset?: number
+  pending?: boolean
   error?: string
   message?: string
   lifecycle?: NativeChatTurnLifecycle
@@ -26,6 +27,7 @@ export type AppliedMobileNativeChatFrame =
       cursorInvalidated?: boolean
       lifecycle?: NativeChatTurnLifecycle
       windowReplaced?: boolean
+      pending?: boolean
     }
 
 function replayRetainedTailStart(
@@ -82,6 +84,7 @@ export function applyMobileNativeChatStreamFrame(args: {
   if (!Array.isArray(frame.messages)) {
     return { kind: 'ignored' }
   }
+  const pending = frame.type === 'snapshot' && frame.pending === true
   const replayStartIndex =
     frame.type === 'snapshot' && !replaceSnapshot && merger.list.length > 0
       ? replayRetainedTailStart(merger, frame.messages, frame.hasMore)
@@ -93,6 +96,7 @@ export function applyMobileNativeChatStreamFrame(args: {
       messages: merger.list,
       hasMore: frame.hasMore,
       windowReplaced: true,
+      ...(pending ? { pending: true } : {}),
       ...(frame.beforeOffset == null ? {} : { beforeOffset: frame.beforeOffset }),
       ...(frame.lifecycle === undefined ? {} : { lifecycle: frame.lifecycle })
     }
@@ -104,6 +108,7 @@ export function applyMobileNativeChatStreamFrame(args: {
   return {
     kind: 'messages',
     messages,
+    ...(pending ? { pending: true } : {}),
     // Why: once the bounded live window drops its oldest row, the snapshot's
     // byte cursor no longer describes the oldest retained message.
     ...(cursorInvalidated ? { cursorInvalidated: true } : {}),
