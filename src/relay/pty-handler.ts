@@ -10,11 +10,11 @@ import type { RelayDispatcher, RequestContext } from './dispatcher'
 import {
   resolveDefaultShell,
   resolveProcessCwd,
-  processHasChildren,
   getForegroundProcessName,
   isProcessAlive,
   listShellProfiles
 } from './pty-shell-utils'
+import { inspectPtyChildProcesses, processHasChildren } from './pty-child-process-inspection'
 import { getRelayShellLaunchConfig, isRelayWslShell } from './pty-shell-launch'
 import { RetiredPaneSurfaceRegistry } from './retired-pane-surfaces'
 import { addWslEnvKeys } from '../shared/wsl-env'
@@ -55,6 +55,7 @@ import {
 import { isTuiAgent } from '../shared/tui-agent-config'
 import type { TuiAgent } from '../shared/tui-agent'
 import { forceKillPosixPtyProcessGroups } from '../main/pty/posix-pty-process-groups'
+import type { PtyChildProcessVerdict } from '../shared/terminal-process-inspection'
 import { terminatePtyJob } from '../main/windows/windows-pty-job'
 import { stripInheritedBuildModeEnv } from '../main/pty/build-mode-env'
 import { stripLegacyTerminalShimEnv } from '../main/pty/legacy-terminal-shim-dir'
@@ -2610,6 +2611,7 @@ export class PtyHandler {
   private async inspectProcess(params: Record<string, unknown>): Promise<{
     foregroundProcess: string | null
     hasChildProcesses: boolean
+    childProcessEvidence?: PtyChildProcessVerdict
     foregroundProcessEvidence?: RemoteForegroundEvidence
   }> {
     pruneRetiredPtyIncarnations(this.retiredIncarnations)
@@ -2720,24 +2722,34 @@ export class PtyHandler {
       evidence?.verdict === 'live'
         ? (evidence.processName ?? managed.pty.process) || null
         : managed.pty.process || null
+    // Derive child liveness from the same capture; do not fork a second process-table probe for
+    // each field/pane in an event burst.
+    //
+    // Why Windows is gated on the caller asking: this is the one field whose Windows answer costs
+    // a process-table read, and `inspectProcess` is the polled path (750ms/2000ms per tracked
+    // pane). A relay host has no `@vscode/windows-process-tree`, so the read falls back to the
+    // 1.36s CIM scan, and polling that would reinstate exactly the fork storm the shared table
+    // exists to prevent (#15209, #15036). Close and cleanup decisions ask for the scan by name;
+    // a poll gets the honest `unverifiable` instead of a fabricated negative.
+    // Why `tableUnavailable` first: it means the budgeted evidence read already gave up. Without
+    // this arm `inspectPtyChildProcesses` re-enters `getProcessTableSnapshot()` and joins the very
+    // capture this call just abandoned, blocking for all of it and spending the whole latency the
+    // budget exists to avoid. The destructive `pty.hasChildProcesses` RPC keeps its fresh probe.
+    const childProcessEvidence: PtyChildProcessVerdict = rows
+      ? rows.some((row) => row.ppid === managed.pty.pid)
+        ? 'children'
+        : 'no-children'
+      : tableUnavailable
+        ? 'unverifiable'
+        : process.platform === 'win32' && params.scanChildProcesses !== true
+          ? 'unverifiable'
+          : await inspectPtyChildProcesses(managed.pty.pid)
     return {
       foregroundProcess,
-      // Derive child liveness from the same capture; do not fork a second
-      // process-table probe for each field/pane in an event burst. Windows
-      // has no evidence capture, so preserve the compatibility child probe.
-      //
-      // Why the middle branch: `processHasChildren` reads the same shared capture with no budget
-      // of its own, so on a host slow enough to blow the evidence budget it would join the very
-      // capture this call just abandoned and block for all of it -- spending the whole latency
-      // the budget exists to avoid, on a compatibility field. `false` is what that helper already
-      // answers for an unreadable table, so this is the existing degraded answer reached promptly
-      // rather than a new one. The destructive gate is the separate `pty.hasChildProcesses` RPC,
-      // which keeps its unbudgeted fresh probe.
-      hasChildProcesses: rows
-        ? rows.some((row) => row.ppid === managed.pty.pid)
-        : tableUnavailable
-          ? false
-          : await processHasChildren(managed.pty.pid),
+      // `unverifiable` keeps spelling itself `false` on the compatibility field, which is what
+      // every client too old to read the verdict receives.
+      hasChildProcesses: childProcessEvidence === 'children',
+      childProcessEvidence,
       ...(evidence ? { foregroundProcessEvidence: evidence } : {})
     }
   }

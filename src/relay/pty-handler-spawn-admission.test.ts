@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import * as ptyChildProcessInspection from './pty-child-process-inspection'
 import * as ptyShellUtils from './pty-shell-utils'
 import * as processTableSnapshotReader from '../shared/process-table-snapshot-reader'
 
@@ -92,7 +93,7 @@ describe('PtyHandler', () => {
   })
 
   it('rescans the process table for a close decision but not for a poll', async () => {
-    const hasChildren = vi.mocked(ptyShellUtils.processHasChildren)
+    const hasChildren = vi.mocked(ptyChildProcessInspection.processHasChildren)
     const snapshot = vi
       .spyOn(processTableSnapshotReader, 'getStrictProcessTableSnapshotWithAge')
       .mockResolvedValue({
@@ -127,13 +128,13 @@ describe('PtyHandler', () => {
 
   it('does not re-enter the shared capture after the evidence read gave up on it', async () => {
     // The budget is worthless if the compatibility fields answer by joining the very capture the
-    // evidence read just abandoned: `processHasChildren` and `getForegroundProcessName` read the
-    // same TTL-shared table with no budget of their own, so on a slow host this call would still
-    // block for the whole capture -- once, and then once per managed PTY in the listing.
+    // evidence read just abandoned: `inspectPtyChildProcesses` and `getForegroundProcessName`
+    // read the same TTL-shared table with no budget of their own, so on a slow host this call
+    // would still block for the whole capture -- once, then once per managed PTY in the listing.
     const snapshot = vi
       .spyOn(processTableSnapshotReader, 'getStrictProcessTableSnapshotWithAge')
       .mockRejectedValue(new Error('process table unreadable: capture_over_budget'))
-    const hasChildren = vi.spyOn(ptyShellUtils, 'processHasChildren')
+    const hasChildren = vi.spyOn(ptyChildProcessInspection, 'inspectPtyChildProcesses')
     const foregroundName = vi.spyOn(ptyShellUtils, 'getForegroundProcessName')
 
     const { id } = (await spawnPty({ cols: 80, rows: 24 })) as { id: string }
@@ -142,6 +143,7 @@ describe('PtyHandler', () => {
 
     const inspection = (await dispatcher.callRequest('pty.inspectProcess', { id })) as {
       hasChildProcesses: boolean
+      childProcessEvidence?: string
       foregroundProcessEvidence?: { verdict: string; reason?: string }
     }
 
@@ -150,8 +152,9 @@ describe('PtyHandler', () => {
     // The verdict the gates already handle, reached promptly instead of late.
     expect(inspection.foregroundProcessEvidence?.verdict).toBe('unverifiable')
     expect(inspection.foregroundProcessEvidence?.reason).toBe('process_table_unreadable')
-    // `false` is what the child probe itself answers for an unreadable table; this is that same
-    // degraded answer without the wait, not a new claim about the pane.
+    // The honest verdict rather than a fabricated negative, reached without the wait. The
+    // compatibility boolean still spells `unverifiable` as `false` for older clients.
+    expect(inspection.childProcessEvidence).toBe('unverifiable')
     expect(inspection.hasChildProcesses).toBe(false)
 
     const listing = (await dispatcher.callRequest('pty.listProcesses', {})) as {
