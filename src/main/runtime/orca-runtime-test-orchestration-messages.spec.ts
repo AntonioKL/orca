@@ -56,10 +56,19 @@ export class InMemoryOrchestrationMessages {
       .sort((a, b) => a.sequence - b.sequence)
   }
 
-  getUndeliveredUnreadMessages(toHandle: string, types?: MessageType[]): MessageRow[] {
-    return this.getUnreadMessages(toHandle, types).filter(
-      (message) => !message.delivered_at && (message.pointer_enter_pending ?? 0) === 0
+  getUndeliveredUnreadMessages(
+    toHandle: string,
+    types?: MessageType[],
+    options?: { excludeTypes?: readonly string[]; limit?: number }
+  ): MessageRow[] {
+    const excluded = new Set(options?.excludeTypes ?? [])
+    const rows = this.getUnreadMessages(toHandle, types).filter(
+      (message) =>
+        !message.delivered_at &&
+        (message.pointer_enter_pending ?? 0) === 0 &&
+        !excluded.has(message.type)
     )
+    return options?.limit === undefined ? rows : rows.slice(0, Math.max(1, options.limit))
   }
 
   getUndeliveredUnreadMailboxHandles(): string[] {

@@ -405,4 +405,55 @@ describe('OrchestrationDb version-skew migration', () => {
     expect(db.db.prepare('SELECT * FROM lifecycle_transition_receipts').all()).toEqual([])
     expect(db.db.prepare('SELECT * FROM attempt_observation_facts').all()).toEqual([])
   })
+  it('repairs a v33 schema missing the pointer-enter column', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-db-version-skew-v33-pointer-'))
+    const dbPath = join(tempDir, 'orchestration.db')
+    db = new OrchestrationDb(dbPath)
+    db.close()
+    db = undefined
+
+    const raw = new Database(dbPath)
+    raw.exec(
+      'DROP INDEX IF EXISTS idx_messages_pending_pointer_enter; ALTER TABLE messages DROP COLUMN pointer_enter_pending;'
+    )
+    raw.pragma('user_version = 33')
+    expect(resolveOrchestrationMigrationStartVersion(raw, 33, SCHEMA_VERSION)).toBe(6)
+    raw.close()
+
+    db = new OrchestrationDb(dbPath)
+    expect(
+      (db.db.pragma('table_info(messages)') as { name: string }[]).map(({ name }) => name)
+    ).toContain('pointer_enter_pending')
+  })
+
+  it('indexes pending pointer Enters on the predicate their query uses', () => {
+    db = new OrchestrationDb(':memory:')
+    const index = db.db
+      .prepare("SELECT sql FROM sqlite_master WHERE name = 'idx_messages_pending_pointer_enter'")
+      .get() as { sql: string } | undefined
+
+    expect(index?.sql).toContain('pointer_enter_pending > 0')
+  })
+
+  it('keeps a downgraded binary able to write Deliveries against a v34 database', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-db-downgrade-delivery-'))
+    db = new OrchestrationDb(join(tempDir, 'orchestration.db'))
+    const run = db.createRun({
+      objective: 'downgrade',
+      coordinatorHandle: 'term_coord',
+      coordinatorPaneKey: 'tab_c:aaaaaaaa-aaaa-4aaa-8aaa-000000000009'
+    })
+    // Verbatim statement shape from a pre-v34 binary, which does not know mailbox_handle.
+    const insertLegacyDelivery = (id: string): void => {
+      db!.db
+        .prepare(
+          'INSERT INTO deliveries (id, run_id, consumer_generation, message_ids) VALUES (?, ?, ?, ?)'
+        )
+        .run(id, run.id, 1, '[]')
+    }
+
+    expect(() => insertLegacyDelivery('delivery_old_binary')).not.toThrow()
+    // A second outstanding legacy row must not collide on the empty mailbox handle either.
+    expect(() => insertLegacyDelivery('delivery_old_binary_2')).not.toThrow()
+  })
 })
