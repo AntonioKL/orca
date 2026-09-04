@@ -1,5 +1,8 @@
 import type { MobileWebHostWorkspaceId } from './mobile-web-workspace-authority'
-import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-web/bridge-contract'
+import {
+  MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS,
+  type MobileWebBridgeErrorCode
+} from '../../../src/shared/mobile-web/bridge-contract'
 import {
   MOBILE_WEB_SESSION_EVENT_MAX_BYTES,
   type MobileWebSessionSnapshotResult
@@ -28,6 +31,11 @@ export class MobileWebSessionSubscriptions {
         subscriptionId: string,
         sequence: number,
         snapshot: MobileWebSessionSnapshotResult
+      ) => Promise<void>
+      postError: (
+        requestId: string,
+        code: MobileWebBridgeErrorCode,
+        retryable: boolean
       ) => Promise<void>
       browserAuthority: MobileWebBrowserAuthority
       nativeChatAuthority: MobileWebNativeChatAuthority
@@ -139,11 +147,11 @@ export class MobileWebSessionSubscriptions {
         this.options.nativeChatAuthority
       )
     } catch {
-      this.cancel(subscriptionId)
+      this.fail(subscriptionId, 'host_error', true)
       return
     }
     if (encodedByteLength(snapshot) > MOBILE_WEB_SESSION_EVENT_MAX_BYTES) {
-      this.cancel(subscriptionId)
+      this.fail(subscriptionId, 'too_large', false)
       return
     }
     const sequence = record.sequence
@@ -159,8 +167,17 @@ export class MobileWebSessionSubscriptions {
         }
       })
       .catch(() => {
-        this.cancel(subscriptionId)
+        this.fail(subscriptionId, 'unavailable', true)
       })
+  }
+
+  // Why: the page waits on this stream to leave its loading state, so a shell-side
+  // drop it never hears about strands the session screen on the spinner forever.
+  private fail(subscriptionId: string, code: MobileWebBridgeErrorCode, retryable: boolean): void {
+    const requestId = this.cancel(subscriptionId)
+    if (requestId) {
+      void this.options.postError(requestId, code, retryable)
+    }
   }
 }
 

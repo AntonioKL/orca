@@ -1,8 +1,10 @@
+import { useCallback } from 'react'
 import { Platform } from 'react-native'
 import { classifyConnection, verdictDisplayLabel } from '../transport/connection-health'
 import { computeActiveTerminalKeyboardLift } from '../terminal/terminal-keyboard-avoidance-lift'
 import { useInitialSessionTerminalAutoCreate } from './use-initial-session-terminal-autocreate'
 import { MOBILE_SESSION_STATUS_LABELS } from './mobile-session-route-helpers'
+import { sessionTabsLoadSurface } from './session-tabs-load-surface'
 import type { MobileSessionBulkCloseModel } from './use-mobile-session-bulk-close'
 
 export function useMobileSessionPresentation(scope: MobileSessionBulkCloseModel) {
@@ -30,9 +32,23 @@ export function useMobileSessionPresentation(scope: MobileSessionBulkCloseModel)
     handleCreateTerminal,
     visibleTabs,
     sessionTabOperations,
-    setCreateError
+    setCreateError,
+    sessionTabsLoadFailure,
+    clearSessionTabsLoadFailure,
+    fetchSessionTabs
   } = scope
-  const showLoadingState = connState === 'connected' && !terminalsLoaded && visibleTabs.length === 0
+  const tabsLoadSurface = sessionTabsLoadSurface({
+    connected: connState === 'connected',
+    terminalsLoaded,
+    visibleTabCount: visibleTabs.length,
+    failure: sessionTabsLoadFailure
+  })
+  const showLoadingState = tabsLoadSurface === 'loading'
+  const showTabsLoadError = tabsLoadSurface === 'error'
+  const retryTabsLoad = useCallback(() => {
+    clearSessionTabsLoadFailure()
+    void fetchSessionTabs()
+  }, [clearSessionTabsLoadFailure, fetchSessionTabs])
   const showEmptyState =
     connState === 'connected' && terminalsLoaded && visibleTabs.length === 0 && !activeHandle
 
@@ -66,11 +82,13 @@ export function useMobileSessionPresentation(scope: MobileSessionBulkCloseModel)
 
   const terminalSummary =
     connState === 'connected'
-      ? showLoadingState
-        ? 'Loading tabs'
-        : visibleTabs.length === 1
-          ? '1 tab'
-          : `${visibleTabs.length} tabs`
+      ? showTabsLoadError
+        ? 'Tabs unavailable'
+        : showLoadingState
+          ? 'Loading tabs'
+          : visibleTabs.length === 1
+            ? '1 tab'
+            : `${visibleTabs.length} tabs`
       : showConnectionRetry
         ? `${verdictDisplayLabel(connectionVerdict)} — tap to retry`
         : MOBILE_SESSION_STATUS_LABELS[connState]
@@ -93,6 +111,8 @@ export function useMobileSessionPresentation(scope: MobileSessionBulkCloseModel)
   }
   return {
     showLoadingState,
+    showTabsLoadError,
+    retryTabsLoad,
     showEmptyState,
     connectionVerdict,
     showConnectionRetry,

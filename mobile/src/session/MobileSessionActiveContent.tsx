@@ -73,6 +73,8 @@ export function MobileSessionActiveContent({
     isPendingTerminalRecoveryParked,
     retryPendingTerminalRecovery,
     showLoadingState,
+    showTabsLoadError,
+    retryTabsLoad,
     showEmptyState,
     keyboardLift,
     activeTerminalKeyboardLift,
@@ -85,6 +87,15 @@ export function MobileSessionActiveContent({
   return showLoadingState ? (
     <View style={styles.emptyState}>
       <ActivityIndicator size="small" color={colors.textSecondary} />
+    </View>
+  ) : showTabsLoadError ? (
+    <View style={styles.emptyState}>
+      <Text style={styles.emptyText}>Tabs failed to load</Text>
+      <View style={styles.emptyActions}>
+        <Pressable style={styles.createButton} onPress={retryTabsLoad}>
+          <Text style={styles.createButtonText}>Retry</Text>
+        </Pressable>
+      </View>
     </View>
   ) : showEmptyState ? (
     <View style={styles.emptyState}>
