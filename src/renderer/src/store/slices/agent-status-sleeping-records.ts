@@ -137,6 +137,13 @@ export function removeSleepingRecordsReplacedByManualWorktreeSleep(
     // Why: a repeat sleep must not delete a durable record this capture cannot re-derive — the
     // pane was never woken, so it has no live status row to rebuild it from (#11598).
     if (!replacements?.[paneKey] && isDurableSleepingCapture(record)) {
+      if (record.state === 'done' && record.restoreOnTabOpenOnly !== true) {
+        if (next === records) {
+          next = { ...records }
+        }
+        next[paneKey] = { ...record, restoreOnTabOpenOnly: true }
+        changed = true
+      }
       continue
     }
     if (next === records) {

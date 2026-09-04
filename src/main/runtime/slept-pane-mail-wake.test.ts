@@ -169,6 +169,34 @@ describe('mail addressed to a listed slept pane', () => {
     }
   })
 
+  it('does not lose a wake sent while the renderer graph is reloading', async () => {
+    vi.useFakeTimers()
+    try {
+      const { runtime, db, handle, tabMountSends } = await sleptPaneRuntime(sleepingRecord())
+      db.setRun({ id: 'run_test', coordinator_handle: handle, coordinator_pane_key: PANE_KEY })
+      expect(runtime.markRendererReloading(1)).not.toBeNull()
+      db.insertMessage({
+        from: 'term_worker',
+        to: 'run:run_test',
+        subject: 'worker done',
+        type: 'worker_done'
+      })
+      runtime.notifyMessageArrived('run:run_test', 'worker_done')
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(1_500)
+
+      expect(tabMountSends).toEqual([])
+
+      runtime.markGraphReady(1)
+      await vi.advanceTimersByTimeAsync(1_500)
+
+      expect(tabMountSends).toHaveLength(1)
+      db.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('wakes the pane the listing just made addressable', async () => {
     const { runtime, db, handle, resumable, connected, tabMountSends } =
       await sleptPaneRuntime(sleepingRecord())

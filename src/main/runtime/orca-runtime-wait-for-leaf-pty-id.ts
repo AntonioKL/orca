@@ -110,6 +110,11 @@ export class OrcaRuntimeWithWaitForLeafPtyId extends OrcaRuntimeWithRestoreLiveP
     if (!args.worktreeId || (!args.tabId && !args.ptyId)) {
       return false
     }
+    // Why: webContents.send can accept the event while a renderer reload has no
+    // graph/listener to consume it; report failure so graph-ready redrives mail wakes.
+    if (isInboundMessageTabMount(args.intent) && this.graphStatus !== 'ready') {
+      return false
+    }
     // Why: opening a tab is the documented wake gesture for a pane the user slept
     // (#11598), so only an inbound message may be refused for one.
     if (
