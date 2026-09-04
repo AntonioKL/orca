@@ -9,9 +9,13 @@ import type { ProjectHostSetupOption } from '@/lib/project-host-setup-options'
 // so this only moves when the composer actually reaches for the chunk.
 const chunk = vi.hoisted(() => ({ loads: 0 }))
 
+// Renders a marker unconditionally so the "warming did not mount it" assertion below can
+// actually fail; a `() => null` stub would make that check vacuous.
 vi.mock('@/components/new-workspace/SetProjectLocationDialog', () => {
   chunk.loads += 1
-  return { SetProjectLocationDialog: () => null }
+  return {
+    SetProjectLocationDialog: () => <div data-testid="set-project-location-dialog" />
+  }
 })
 
 vi.mock('@/store', () => ({
