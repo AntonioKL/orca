@@ -33,7 +33,13 @@ type AssetRangeReader = (path: string, offset: number, length: number) => Promis
 type MobileWebPackageAssetsOptions = {
   resolveRoot?: () => string
   readAssetRange?: AssetRangeReader
+  gzipCacheMaxBytes?: number
 }
+
+// Why: `length` is client-chosen, so one source byte can be cached under eight keys and
+// the fingerprint that clears the map never changes on a shipped desktop. Bound the
+// retained total instead, evicting least-recently-used first.
+const GZIP_CACHE_MAX_BYTES = 16 * 1024 * 1024
 
 export class MobileWebPackageAssets {
   private readonly resolveRoot: () => string
@@ -46,10 +52,13 @@ export class MobileWebPackageAssets {
   } | null = null
   private readonly readStates = new Map<string, PackageReadState>()
   private readonly gzipChunks = new Map<string, Buffer>()
+  private gzipChunkBytes = 0
+  private readonly gzipCacheMaxBytes: number
 
   constructor(options: MobileWebPackageAssetsOptions = {}) {
     this.resolveRoot = options.resolveRoot ?? resolveMobileWebPackageRoot
     this.readAssetRange = options.readAssetRange ?? readAssetRange
+    this.gzipCacheMaxBytes = options.gzipCacheMaxBytes ?? GZIP_CACHE_MAX_BYTES
   }
 
   async getManifest(): Promise<MobileWebPackageManifestResponse> {
@@ -131,6 +140,7 @@ export class MobileWebPackageAssets {
     try {
       const verified = await promise
       this.gzipChunks.clear()
+      this.gzipChunkBytes = 0
       this.cached = { fingerprint, package: verified }
       return verified
     } finally {
@@ -146,7 +156,7 @@ export class MobileWebPackageAssets {
   ): Promise<MobileWebPackageGzipAssetChunk> {
     const requestedLength = params.length ?? MOBILE_WEB_PACKAGE_CHUNK_BYTES
     const key = `${params.buildId}:${params.path}:${params.offset}:${requestedLength}`
-    const cached = this.gzipChunks.get(key)
+    const cached = this.readGzipChunk(key)
     if (cached) {
       throwIfAborted(options.signal)
       const verified = await this.getVerifiedPackage()
@@ -163,7 +173,7 @@ export class MobileWebPackageAssets {
     }
     const read = await this.readVerifiedRange(params, options, requestedLength)
     const compressed = gzipSync(read.bytes, { level: 6 })
-    this.gzipChunks.set(key, compressed)
+    this.storeGzipChunk(key, compressed)
     return this.gzipResponse(
       read.buildId,
       read.asset,
@@ -171,6 +181,37 @@ export class MobileWebPackageAssets {
       read.bytes.byteLength,
       compressed
     )
+  }
+
+  /** Reading marks the entry most-recently-used; Map iteration is insertion-ordered. */
+  private readGzipChunk(key: string): Buffer | undefined {
+    const cached = this.gzipChunks.get(key)
+    if (!cached) {
+      return undefined
+    }
+    this.gzipChunks.delete(key)
+    this.gzipChunks.set(key, cached)
+    return cached
+  }
+
+  private storeGzipChunk(key: string, compressed: Buffer): void {
+    if (compressed.byteLength > this.gzipCacheMaxBytes) {
+      return
+    }
+    const previous = this.gzipChunks.get(key)
+    if (previous) {
+      this.gzipChunks.delete(key)
+      this.gzipChunkBytes -= previous.byteLength
+    }
+    this.gzipChunks.set(key, compressed)
+    this.gzipChunkBytes += compressed.byteLength
+    for (const [oldest, bytes] of this.gzipChunks) {
+      if (this.gzipChunkBytes <= this.gzipCacheMaxBytes) {
+        return
+      }
+      this.gzipChunks.delete(oldest)
+      this.gzipChunkBytes -= bytes.byteLength
+    }
   }
 
   private gzipResponse(
