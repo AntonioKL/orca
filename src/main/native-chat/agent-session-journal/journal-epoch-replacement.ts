@@ -20,7 +20,7 @@ import {
 import { checkpointJournalWal, reclaimJournalDatabaseSpace } from './journal-database-space'
 import { assertEpochTransactionFits } from './journal-epoch-rollover'
 import type { JournalLoad } from './journal-open'
-import { journalDirectoryBytes } from './journal-physical-quota'
+import { runJournalPostCommit } from './journal-post-commit'
 import {
   applyJournalRow,
   blobDigestsInBody,
@@ -58,7 +58,9 @@ export async function replaceJournalEpoch(input: {
   budget: JournalAppendBudget
   now: () => number
   mintEpoch: () => string
+  /** Called the instant the transaction commits, before any fallible follow-up. */
   onPublished: (loaded: JournalLoad) => void
+  setPhysicalBytes: (bytes: number) => void
 }): Promise<void> {
   const epoch = input.mintEpoch()
   const state = createJournalReducerState(input.identity.sessionId, epoch)
@@ -88,7 +90,7 @@ export async function replaceJournalEpoch(input: {
   // The replacement needs room for the new content alongside the old: it
   // publishes atomically, so a session whose replacement does not fit is
   // refused and the live epoch is left exactly as it was.
-  await assertEpochTransactionFits({
+  const committed = await assertEpochTransactionFits({
     journalDir: input.journalDir,
     dbPath: input.dbPath,
     sessionId: input.identity.sessionId,
@@ -128,23 +130,35 @@ export async function replaceJournalEpoch(input: {
     throw error
   }
 
-  checkpointJournalWal(input.db)
-  await reclaimJournalDatabaseSpace({
-    db: input.db,
-    journalDir: input.journalDir,
-    dbPath: input.dbPath,
-    maxBytes: input.budget.maxSessionBytes,
-    pageSize: input.pageSize
-  })
-  await pruneJournalBlobs(input.journalDir, replacementRetainedBlobDigests(state, rows))
+  // COMMIT landed: on disk the superseded rows are gone and this epoch is the
+  // live one. The caller adopts that BEFORE reclamation, blob pruning and
+  // measurement, or a failure in any of them leaves the live store writing into
+  // an epoch whose rows were just deleted and moving the projection back onto it.
   state.oldestSequence = 1
   input.onPublished({
     state,
     readOnly: false,
     corrupt: false,
     malformedRows: 0,
-    sizeBytes: await journalDirectoryBytes(input.journalDir)
+    sizeBytes: committed
   })
+
+  const settled = await runJournalPostCommit({
+    journalDir: input.journalDir,
+    projectedBytes: committed,
+    housekeeping: async () => {
+      checkpointJournalWal(input.db)
+      await reclaimJournalDatabaseSpace({
+        db: input.db,
+        journalDir: input.journalDir,
+        dbPath: input.dbPath,
+        maxBytes: input.budget.maxSessionBytes,
+        pageSize: input.pageSize
+      })
+      await pruneJournalBlobs(input.journalDir, replacementRetainedBlobDigests(state, rows))
+    }
+  })
+  input.setPhysicalBytes(settled.physicalBytes)
 }
 
 function replacementRetainedBlobDigests(

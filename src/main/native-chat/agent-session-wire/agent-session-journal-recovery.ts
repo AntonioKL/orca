@@ -14,6 +14,7 @@ import {
   type AgentSessionJournalIdentity,
   type AgentSessionProviderHandle
 } from '../../../shared/agent-session-journal-types'
+import { agentSessionJournalCloseRetries } from '../agent-session-journal/journal-close-retry'
 import { importLegacyTranscriptIntoJournal } from '../agent-session-journal/journal-legacy-import'
 import { loadJournal } from '../agent-session-journal/journal-open'
 import type { AgentSessionJournal } from '../agent-session-journal/journal-store'
@@ -77,7 +78,8 @@ export async function openAgentSessionJournalWithRecovery(input: {
 
 /** `importLegacyTranscriptIntoJournal` can THROW rather than report `ok: false`
  *  — a journal write failure, for instance — and nothing else holds a reference
- *  to the journal this function just opened. */
+ *  to the journal this function just opened. A close that rejects is retryable,
+ *  so the journal is retained rather than dropped with its handle still open. */
 async function rehydrateOrClose(
   input: {
     identity: AgentSessionJournalIdentity
@@ -90,7 +92,7 @@ async function rehydrateOrClose(
   try {
     return await rehydrate({ ...input, journal, trigger })
   } catch (error) {
-    await journal.close().catch(() => undefined)
+    await agentSessionJournalCloseRetries.closeOrRetain(journal)
     throw error
   }
 }

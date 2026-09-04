@@ -12,10 +12,42 @@ import {
   JOURNAL_MIN_SESSION_BYTES,
   reclaimJournalDatabaseSpace
 } from './journal-database-space'
+import { JOURNAL_MAX_EPOCH_BYTES, JOURNAL_MAX_SESSION_ID_BYTES } from './journal-key-bounds'
 import { journalDatabaseFile } from './journal-paths'
 import { journalDirectoryBytes } from './journal-physical-quota'
-import { deleteAllJournalRows, journalFreelistCount } from './journal-row-table'
-import { MAX_JOURNAL_LIFECYCLE_BATCH_BYTES } from './journal-row-schema'
+import {
+  deleteAllJournalRows,
+  insertJournalRow,
+  journalFreelistCount,
+  upsertJournalSessionRow
+} from './journal-row-table'
+import {
+  journalRowByteLength,
+  MAX_JOURNAL_LIFECYCLE_BATCH_BYTES,
+  type JournalRow
+} from './journal-row-schema'
+import { AGENT_SESSION_JOURNAL_SCHEMA_VERSION } from '../../../shared/agent-session-journal-types'
+
+// The keys are charged at their MAXIMUM admitted size, so the sweep runs at that
+// maximum: `session_id` and `epoch` are stored in `journal_rows`, in its
+// primary-key index, and again in the `journal_sessions` projection, and none of
+// them appears in `row_json`.
+const MAX_SESSION_ID = 'S'.repeat(JOURNAL_MAX_SESSION_ID_BYTES)
+const MAX_EPOCH = 'E'.repeat(JOURNAL_MAX_EPOCH_BYTES)
+
+function sweepRow(seq: number, textBytes: number): JournalRow {
+  return {
+    v: AGENT_SESSION_JOURNAL_SCHEMA_VERSION,
+    epoch: MAX_EPOCH,
+    seq,
+    fence: 0,
+    ts: 1,
+    kind: 'item',
+    itemId: 'item-1',
+    revision: 1,
+    body: { kind: 'status', text: 'x'.repeat(textBytes) }
+  }
+}
 
 let root: string
 let dbPath: string
@@ -29,18 +61,19 @@ async function fileSize(path: string): Promise<number> {
   }
 }
 
-/** Writes one transaction of `sizes` rows and returns the largest directory
- *  footprint it reached, including the moment the WAL and the database hold the
- *  same pages at once. */
-async function observedPeakDelta(sizes: readonly number[], firstSeq: number): Promise<number> {
+/** Runs the EXACT production transaction — the same row insert and the same
+ *  session-projection upsert, at maximum admitted key sizes — and returns the
+ *  largest directory footprint it reached, including the moment the WAL and the
+ *  database hold the same pages at once. */
+async function observedPeakDelta(rows: readonly JournalRow[]): Promise<number> {
   const before = await journalDirectoryBytes(root)
-  const insert = opened.db.prepare(
-    'INSERT INTO journal_rows (session_id, epoch, seq, ts, row_json) VALUES (?, ?, ?, ?, ?)'
-  )
   opened.db.exec('BEGIN IMMEDIATE')
-  sizes.forEach((bytes, index) => {
-    insert.run('session-1', 'epoch-1', firstSeq + index, 1, 'x'.repeat(bytes))
-  })
+  for (const row of rows) {
+    insertJournalRow(opened.db, MAX_SESSION_ID, row)
+  }
+  // The projection upsert the charge sweep used to omit; it writes its own copy
+  // of both keys into a second table and a second index.
+  upsertJournalSessionRow(opened.db, MAX_SESSION_ID, MAX_EPOCH, 1)
   opened.db.exec('COMMIT')
   const committed = await journalDirectoryBytes(root)
   const walAfterCommit = await fileSize(`${dbPath}-wal`)
@@ -69,10 +102,10 @@ afterEach(async () => {
 describe('journalTxnPhysicalCost', () => {
   it('is the documented page arithmetic at the default page size', () => {
     expect(journalWalFrameBytes(4096)).toBe(4120)
-    expect(journalTxnPhysicalCost([120], 4096)).toBe(222_480)
-    expect(journalTxnPhysicalCost([32 * 1024], 4096)).toBe(288_400)
-    expect(journalTxnPhysicalCost([64 * 1024], 4096)).toBe(354_320)
-    expect(journalTxnPhysicalCost([128 * 1024], 4096)).toBe(486_160)
+    expect(journalTxnPhysicalCost([120], 4096)).toBe(247_200)
+    expect(journalTxnPhysicalCost([32 * 1024], 4096)).toBe(313_120)
+    expect(journalTxnPhysicalCost([64 * 1024], 4096)).toBe(379_040)
+    expect(journalTxnPhysicalCost([128 * 1024], 4096)).toBe(510_880)
   })
 
   it('is monotone non-decreasing in row bytes, which is what a reservation rests on', () => {
@@ -121,8 +154,9 @@ describe('journalTxnPhysicalCost', () => {
         // ones run once a pass because each costs its own size on disk.
         const repeats = sizes[0] <= 1_048_576 ? 3 : 1
         for (let repeat = 0; repeat < repeats; repeat += 1) {
-          const charge = journalTxnPhysicalCost(sizes, opened.pageSize)
-          const observed = await observedPeakDelta(sizes, seq)
+          const rows = sizes.map((bytes, index) => sweepRow(seq + index, bytes))
+          const charge = journalTxnPhysicalCost(rows.map(journalRowByteLength), opened.pageSize)
+          const observed = await observedPeakDelta(rows)
           seq += sizes.length
           if (charge < observed) {
             misses.push({ pass, rows: sizes.length, first: sizes[0], charge, observed })

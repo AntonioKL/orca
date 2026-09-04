@@ -1,0 +1,56 @@
+// Bringing a store's in-memory state up from disk.
+//
+// Split out of the store for the same reason its collaborators were: this is the
+// ORDERING between replay, suffix repair, quota rebuild and disclosure, and none
+// of it belongs to the store's public surface. Every step here reads or writes
+// through the same host the collaborators use, so the store keeps the state and
+// this owns the sequence.
+
+import type { JournalEpochController } from './journal-epoch-controller'
+import type { JournalLifecycleAdmission } from './journal-lifecycle-admission'
+import { replayJournal } from './journal-open'
+import type { JournalStoreHost } from './journal-store-collaborators'
+import { openJournalStoreState } from './journal-store-open'
+import { quarantineJournalSuffix } from './journal-suffix-quarantine'
+
+export function restoreJournalStore(
+  host: JournalStoreHost,
+  collaborators: {
+    epochController: JournalEpochController
+    lifecycleAdmission: JournalLifecycleAdmission
+  }
+): Promise<void> {
+  return openJournalStoreState({
+    journalDir: host.journalDir,
+    sessionId: host.identity.sessionId,
+    loaded: host.loaded(),
+    replay: () => {
+      const opened = host.database()
+      return replayJournal(opened.db, opened.readOnly, host.identity.sessionId)
+    },
+    quarantineSuffix: (fromSeq) =>
+      quarantineJournalSuffix({
+        db: host.database().db,
+        dbPath: host.dbPath,
+        journalDir: host.journalDir,
+        pageSize: host.database().pageSize,
+        sessionId: host.identity.sessionId,
+        epoch: host.state().epoch,
+        fromSeq,
+        maxBytes: host.budget.maxSessionBytes,
+        now: host.now()
+      }),
+    start: () => collaborators.epochController.start('session_created', 0),
+    adopt: host.adopt,
+    snapshot: () => host.journal().snapshot(),
+    rebuildLifecycle: (snapshot, bytes) =>
+      collaborators.lifecycleAdmission.rebuild(snapshot, bytes),
+    appendDisclosure: (identity, body, fence) =>
+      host.journal().appendItem(identity, body, { fence }),
+    highestFence: () => host.state().highestFence,
+    malformedRows: host.malformedRows,
+    readOnly: host.readOnly,
+    setPhysicalBytes: host.setPhysicalBytes,
+    setQuarantinedRows: host.setQuarantinedRows
+  })
+}

@@ -19,6 +19,7 @@ import {
   type JournalReducerState
 } from './journal-reducer'
 import { JournalRowWriter } from './journal-row-writer'
+import { restoreJournalStore } from './journal-store-restore'
 import type { JournalRow } from './journal-row-schema'
 import type { AgentSessionJournal } from './journal-store'
 import type { JournalBlobInput } from './journal-store-contracts'
@@ -39,6 +40,11 @@ export type JournalStoreHost = {
   cursor: () => AgentJournalCursor
   adopt: (loaded: JournalLoad) => void
   commit: (row: JournalRow, physicalBytes: number) => void
+  setPhysicalBytes: (bytes: number) => void
+  /** A caller-supplied load, which suppresses replay entirely when present. */
+  loaded: () => JournalLoad | null | undefined
+  malformedRows: () => number
+  setQuarantinedRows: (count: number) => void
   journal: () => AgentSessionJournal
   enqueue: (
     build: (seq: number, ts: number) => JournalRow,
@@ -52,6 +58,9 @@ export type JournalStoreCollaborators = {
   epochController: JournalEpochController
   itemAppender: JournalItemAppender
   lifecycleBatchAppender: JournalLifecycleBatchAppender
+  /** Restores the store's state from disk. Owned here because it needs the same
+   *  collaborators the constructor just built. */
+  restore: () => Promise<void>
 }
 
 export function createJournalStoreCollaborators(host: JournalStoreHost): JournalStoreCollaborators {
@@ -62,8 +71,26 @@ export function createJournalStoreCollaborators(host: JournalStoreHost): Journal
     host.budget.maxAppendsPerWindow,
     () => host.database().pageSize
   )
+  const epochController = new JournalEpochController({
+    identity: host.identity,
+    journalDir: host.journalDir,
+    dbPath: host.dbPath,
+    budget: host.budget,
+    now: host.now,
+    mintEpoch: host.mintEpoch,
+    serialize: host.serialize,
+    database: host.database,
+    readOnly: host.readOnly,
+    setReadOnly: host.setReadOnly,
+    highestFence: () => host.state().highestFence,
+    cursor: host.cursor,
+    adopt: host.adopt,
+    setPhysicalBytes: host.setPhysicalBytes
+  })
   return {
     lifecycleAdmission,
+    epochController,
+    restore: () => restoreJournalStore(host, { epochController, lifecycleAdmission }),
     rowWriter: new JournalRowWriter({
       journalDir: host.journalDir,
       dbPath: host.dbPath,
@@ -77,22 +104,8 @@ export function createJournalStoreCollaborators(host: JournalStoreHost): Journal
       highestFence: () => host.state().highestFence,
       nextSequence: () => host.state().lastSequence + 1,
       referencedBlobDigests: () => referencedBlobDigests(host.state()),
-      commit: host.commit
-    }),
-    epochController: new JournalEpochController({
-      identity: host.identity,
-      journalDir: host.journalDir,
-      dbPath: host.dbPath,
-      budget: host.budget,
-      now: host.now,
-      mintEpoch: host.mintEpoch,
-      serialize: host.serialize,
-      database: host.database,
-      readOnly: host.readOnly,
-      setReadOnly: host.setReadOnly,
-      highestFence: () => host.state().highestFence,
-      cursor: host.cursor,
-      adopt: host.adopt
+      commit: host.commit,
+      setPhysicalBytes: host.setPhysicalBytes
     }),
     itemAppender: new JournalItemAppender({
       journal: host.journal,

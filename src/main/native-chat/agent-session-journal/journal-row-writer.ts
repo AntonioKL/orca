@@ -13,6 +13,7 @@ import {
 } from './journal-database-space'
 import { blobDigestsInBody } from './journal-reducer'
 import { journalDirectoryBytes } from './journal-physical-quota'
+import { runJournalPostCommit } from './journal-post-commit'
 import type { JournalLifecycleAdmission } from './journal-lifecycle-admission'
 import { insertJournalRow, upsertJournalSessionRow } from './journal-row-table'
 import { journalRowByteLength, type JournalRow } from './journal-row-schema'
@@ -38,6 +39,7 @@ export type JournalRowWriterDeps = {
   nextSequence: () => number
   referencedBlobDigests: () => ReadonlySet<string>
   commit: (row: JournalRow, physicalBytes: number) => void
+  setPhysicalBytes: (bytes: number) => void
 }
 
 export class JournalRowWriter {
@@ -96,8 +98,17 @@ export class JournalRowWriter {
       // The trailing checkpoint is what leaves the WAL empty for the next
       // admission check; the counter is set from the measurement, never accrued.
       checkpointJournalWal(db)
-      this.deps.commit(row, await journalDirectoryBytes(this.deps.journalDir))
+      // COMMIT landed, so the row is durable: adopt it before anything that can
+      // fail. Rejecting here instead would leave the next append reusing a
+      // sequence the table already holds.
+      const projected = measured + blobBytes(newBlobs) + rowCostBytes
+      this.deps.commit(row, projected)
       this.deps.lifecycleAdmission.commit(admission)
+      const settled = await runJournalPostCommit({
+        journalDir: this.deps.journalDir,
+        projectedBytes: projected
+      })
+      this.deps.setPhysicalBytes(settled.physicalBytes)
       return row
     })
   }
@@ -111,13 +122,9 @@ export class JournalRowWriter {
     },
     admission: { protectedBytes: number }
   ): number {
-    const blobBytes = input.newBlobs.reduce(
-      (total, blob) => total + Buffer.byteLength(blob.payload, 'utf8'),
-      0
-    )
     return (
       input.measured +
-      blobBytes +
+      blobBytes(input.newBlobs) +
       admission.protectedBytes +
       journalReclaimBandBytes(input.measured, input.pageSize) +
       input.walBytes
@@ -176,6 +183,10 @@ export class JournalRowWriter {
     }
     return protectedSet
   }
+}
+
+function blobBytes(blobs: readonly JournalBlob[]): number {
+  return blobs.reduce((total, blob) => total + Buffer.byteLength(blob.payload, 'utf8'), 0)
 }
 
 async function uniqueNewBlobs(

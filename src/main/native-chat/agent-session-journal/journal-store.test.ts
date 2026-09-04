@@ -203,7 +203,7 @@ describe('replay', () => {
     expect(reopened.snapshot().items).toHaveLength(0)
   })
 
-  it('preserves the intact prefix and drops a corrupt suffix', async () => {
+  it('preserves the intact prefix and SETS ASIDE the rejected suffix', async () => {
     const journal = await open()
     for (let index = 0; index < 4; index += 1) {
       await journal.appendItem(item(index), body(`m${index}`), { fence: 1 })
@@ -217,12 +217,14 @@ describe('replay', () => {
     const reopened = await open()
     expect(reopened.epoch).toBe(before)
     expect(reopened.snapshot().items.map((entry) => entry.body)).toEqual([body('m0')])
-    // The hole is gone rather than set aside: with one database per session the
-    // unusable suffix has no bytes left to quarantine.
     await withJournalDatabase(root, (db) => {
       const rows = db.prepare('SELECT seq FROM journal_rows ORDER BY seq').all()
       expect(rows.map((row) => (row as { seq: number }).seq)).toEqual([1, 2])
     })
+    // Sequences 4 and 5 are VALID rows that the gap at 3 made unreplayable. They
+    // leave the live epoch and stay recoverable rather than being destroyed.
+    expect(reopened.repair).toEqual({ malformedRows: 0, quarantinedRows: 2 })
+    expect(reopened.recoverQuarantinedRows().map((row) => row.seq)).toEqual([4, 5])
   })
 })
 

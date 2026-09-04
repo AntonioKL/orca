@@ -18,6 +18,7 @@ import {
 import type { JournalLoad } from './journal-open'
 import { DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
 import { journalDirectoryBytes } from './journal-physical-quota'
+import { runJournalPostCommit } from './journal-post-commit'
 import { applyJournalRow, createJournalReducerState } from './journal-reducer'
 import {
   deleteAllJournalRows,
@@ -40,7 +41,10 @@ export async function publishNewEpoch(input: {
   fence: number
   now: number
   maxSessionBytes?: number
-}): Promise<JournalLoad> {
+  /** Called the instant the transaction commits, before any fallible follow-up. */
+  onPublished: (loaded: JournalLoad) => void
+  setPhysicalBytes: (bytes: number) => void
+}): Promise<void> {
   const row: JournalRow = {
     kind: 'epoch',
     reason: input.reason,
@@ -52,7 +56,7 @@ export async function publishNewEpoch(input: {
     ts: input.now
   }
   const maxSessionBytes = input.maxSessionBytes ?? DEFAULT_JOURNAL_PAYLOAD_LIMITS.maxSessionBytes
-  await assertEpochTransactionFits({ ...input, maxSessionBytes, rows: [row] })
+  const committed = await assertEpochTransactionFits({ ...input, maxSessionBytes, rows: [row] })
 
   input.db.exec('BEGIN IMMEDIATE')
   try {
@@ -64,31 +68,47 @@ export async function publishNewEpoch(input: {
     input.db.exec('ROLLBACK')
     throw error
   }
-  // Without reclamation the discarded pages sit on the freelist and the file
-  // stays exactly as large as it was.
-  checkpointJournalWal(input.db)
-  await reclaimJournalDatabaseSpace({
-    db: input.db,
-    journalDir: input.journalDir,
-    dbPath: input.dbPath,
-    maxBytes: maxSessionBytes,
-    pageSize: input.pageSize
-  })
 
+  // COMMIT landed: on disk the superseded prefix is gone and this epoch is the
+  // live one. The caller adopts that BEFORE reclamation and measurement, or a
+  // failure in either leaves the store writing into an epoch that no longer
+  // exists and moving the projection back onto it.
   const state = createJournalReducerState(input.sessionId, input.epoch)
   applyJournalRow(state, row)
   state.oldestSequence = 1
-  return {
+  input.onPublished({
     state,
     readOnly: false,
     corrupt: false,
     malformedRows: 0,
-    sizeBytes: await journalDirectoryBytes(input.journalDir)
-  }
+    sizeBytes: committed
+  })
+
+  const settled = await runJournalPostCommit({
+    journalDir: input.journalDir,
+    projectedBytes: committed,
+    // Without reclamation the discarded pages sit on the freelist and the file
+    // stays exactly as large as it was.
+    housekeeping: async () => {
+      checkpointJournalWal(input.db)
+      await reclaimJournalDatabaseSpace({
+        db: input.db,
+        journalDir: input.journalDir,
+        dbPath: input.dbPath,
+        maxBytes: maxSessionBytes,
+        pageSize: input.pageSize
+      })
+    }
+  })
+  input.setPhysicalBytes(settled.physicalBytes)
 }
 
 /** Charges the candidate transaction's own page cost, plus the band the
- *  shrinking operations need and any WAL a blocked checkpoint deferred. */
+ *  shrinking operations need and any WAL a blocked checkpoint deferred.
+ *  Returns the footprint the COMMIT itself can reach — the measurement plus the
+ *  transaction's own charge — which is what a caller adopts when the
+ *  post-commit scan cannot run. The band and the deferred WAL are admission
+ *  terms, not committed bytes, so neither is in that answer. */
 export async function assertEpochTransactionFits(input: {
   journalDir: string
   dbPath: string
@@ -97,12 +117,14 @@ export async function assertEpochTransactionFits(input: {
   maxSessionBytes: number
   rows: readonly JournalRow[]
   additionalBytes?: number
-}): Promise<void> {
+}): Promise<number> {
   const measured = await journalDirectoryBytes(input.journalDir)
-  const projected =
+  const committed =
     measured +
     (input.additionalBytes ?? 0) +
-    journalTxnPhysicalCost(input.rows.map(journalRowByteLength), input.pageSize) +
+    journalTxnPhysicalCost(input.rows.map(journalRowByteLength), input.pageSize)
+  const projected =
+    committed +
     journalReclaimBandBytes(measured, input.pageSize) +
     (await journalWalBytes(input.dbPath))
   if (projected > input.maxSessionBytes) {
@@ -111,4 +133,5 @@ export async function assertEpochTransactionFits(input: {
       `agent-session journal for ${input.sessionId} reached its ${input.maxSessionBytes}-byte physical bound`
     )
   }
+  return committed
 }

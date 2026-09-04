@@ -29,26 +29,27 @@ export class JournalEpochController {
       highestFence: () => number
       cursor: () => AgentJournalCursor
       adopt: (loaded: JournalLoad) => void
+      setPhysicalBytes: (bytes: number) => void
     }
   ) {}
 
   async start(reason: AgentJournalEpochReason, fence: number): Promise<void> {
     const { db, pageSize } = this.deps.database()
-    this.deps.adopt(
-      await publishNewEpoch({
-        db,
-        pageSize,
-        journalDir: this.deps.journalDir,
-        dbPath: this.deps.dbPath,
-        sessionId: this.deps.identity.sessionId,
-        providerHandle: this.deps.identity.providerHandle,
-        epoch: this.deps.mintEpoch(),
-        reason,
-        fence,
-        now: this.deps.now(),
-        maxSessionBytes: this.deps.budget.maxSessionBytes
-      })
-    )
+    await publishNewEpoch({
+      db,
+      pageSize,
+      journalDir: this.deps.journalDir,
+      dbPath: this.deps.dbPath,
+      sessionId: this.deps.identity.sessionId,
+      providerHandle: this.deps.identity.providerHandle,
+      epoch: this.deps.mintEpoch(),
+      reason,
+      fence,
+      now: this.deps.now(),
+      maxSessionBytes: this.deps.budget.maxSessionBytes,
+      onPublished: this.deps.adopt,
+      setPhysicalBytes: this.deps.setPhysicalBytes
+    })
   }
 
   /**
@@ -89,7 +90,8 @@ export class JournalEpochController {
         budget: this.deps.budget.fork(),
         now: this.deps.now,
         mintEpoch: this.deps.mintEpoch,
-        onPublished: this.deps.adopt
+        onPublished: this.deps.adopt,
+        setPhysicalBytes: this.deps.setPhysicalBytes
       })
       return this.deps.cursor()
     })

@@ -137,6 +137,7 @@ describe('journal row writer', () => {
       () => database.pageSize
     )
     let nextSequence = 1
+    let physicalBytes = 0
     const committedRows: JournalRow[] = []
     const writer = new JournalRowWriter({
       journalDir: root,
@@ -154,10 +155,14 @@ describe('journal row writer', () => {
       commit: (committed, nextPhysicalBytes) => {
         overrides.commit?.(committed, nextPhysicalBytes)
         committedRows.push(committed)
+        physicalBytes = nextPhysicalBytes
         nextSequence = committed.seq + 1
+      },
+      setPhysicalBytes: (bytes) => {
+        physicalBytes = bytes
       }
     })
-    return { writer, lifecycleAdmission, committedRows }
+    return { writer, lifecycleAdmission, committedRows, physical: () => physicalBytes }
   }
 
   it('rolls the transaction back and sets no latch when the insert fails', async () => {

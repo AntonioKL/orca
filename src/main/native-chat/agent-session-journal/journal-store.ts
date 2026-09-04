@@ -11,12 +11,14 @@ import type {
   AgentSessionJournalIdentity
 } from '../../../shared/agent-session-journal-types'
 import { agentJournalItemKey } from '../../../shared/agent-session-journal-item-key'
+import { agentSessionJournalCloseRetries } from './journal-close-retry'
 import { openJournalDatabase, type OpenJournalDatabase } from './journal-database'
 import type { JournalReplacementItem } from './journal-epoch-replacement'
 import { readJournalSince } from './journal-cursor'
-import { readJournalRowsAfterCursor, replayJournal, type JournalLoad } from './journal-open'
+import { readJournalRowsAfterCursor, type JournalLoad } from './journal-open'
 import { journalDatabaseFile } from './journal-paths'
 import { DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
+import { assertJournalKeyBytes } from './journal-key-bounds'
 import { markJournalPendingSubmissionsUnknown } from './journal-pending-submission-recovery'
 import { journalDirectoryBytes } from './journal-physical-quota'
 import {
@@ -53,10 +55,9 @@ import { createJournalStoreCollaborators } from './journal-store-collaborators'
 import {
   assertJournalOpenCapacity,
   ensureJournalDir,
-  journalStoreLoadedFields,
-  openJournalStoreState,
-  truncateJournalSuffix
+  journalStoreLoadedFields
 } from './journal-store-open'
+import { readJournalQuarantinedRows } from './journal-row-table'
 import type { JournalItemAppender } from './journal-item-appender'
 import type { JournalLifecycleBatchAppender } from './journal-lifecycle-batch-appender'
 
@@ -75,6 +76,7 @@ export class AgentSessionJournal {
   private sizeBytes = 0
   private readOnly = false
   private malformedRows = 0
+  private quarantinedRows = 0
   private database: OpenJournalDatabase | null = null
   private readonly queue: JournalWriteQueue
   private readonly closer: JournalConnectionCloser
@@ -83,6 +85,7 @@ export class AgentSessionJournal {
   private readonly epochController: JournalEpochController
   private readonly itemAppender: JournalItemAppender
   private readonly lifecycleBatchAppender: JournalLifecycleBatchAppender
+  private readonly restore: () => Promise<void>
 
   constructor(options: AgentSessionJournalOptions) {
     this.identity = options.identity
@@ -93,7 +96,15 @@ export class AgentSessionJournal {
       options.limits ?? DEFAULT_JOURNAL_PAYLOAD_LIMITS
     )
     this.now = options.now ?? (() => Date.now())
-    this.mintEpoch = options.mintEpoch ?? randomUUID
+    const mintEpoch = options.mintEpoch ?? randomUUID
+    // Both keys are stored outside `row_json`, so the charge can only be honest
+    // if the boundary refuses one larger than the charge assumes.
+    assertJournalKeyBytes({ sessionId: options.identity.sessionId })
+    this.mintEpoch = () => {
+      const epoch = mintEpoch()
+      assertJournalKeyBytes({ sessionId: options.identity.sessionId, epoch })
+      return epoch
+    }
     this.loaded = options.loaded
     this.state = createJournalReducerState(options.identity.sessionId, '')
     // Serializes sequence assignment with the durable write behind it.
@@ -122,6 +133,14 @@ export class AgentSessionJournal {
         applyJournalRow(this.state, row)
         this.sizeBytes = physicalBytes
       },
+      setPhysicalBytes: (bytes) => {
+        this.sizeBytes = bytes
+      },
+      loaded: () => this.loaded,
+      malformedRows: () => this.malformedRows,
+      setQuarantinedRows: (count) => {
+        this.quarantinedRows = count
+      },
       journal: () => this,
       enqueue: (build, blobs) => this.enqueue(build, blobs)
     })
@@ -130,6 +149,7 @@ export class AgentSessionJournal {
     this.epochController = collaborators.epochController
     this.itemAppender = collaborators.itemAppender
     this.lifecycleBatchAppender = collaborators.lifecycleBatchAppender
+    this.restore = collaborators.restore
   }
 
   get isReadOnly(): boolean {
@@ -144,6 +164,19 @@ export class AgentSessionJournal {
     return this.journalDir
   }
 
+  /** What the last open's repair did. `quarantinedRows` is the count set aside
+   *  rather than destroyed; `recoverQuarantinedRows` reads them back verbatim. */
+  get repair(): { malformedRows: number; quarantinedRows: number } {
+    return { malformedRows: this.malformedRows, quarantinedRows: this.quarantinedRows }
+  }
+
+  /** The rejected suffix, exactly as it was stored. Orca-owned submission,
+   *  receipt and lifecycle rows live here after a repair, and no provider
+   *  transcript can reconstruct their identity. */
+  recoverQuarantinedRows(): { epoch: string; seq: number; ts: number; rowJson: string }[] {
+    return readJournalQuarantinedRows(this.requireDatabase().db, this.identity.sessionId)
+  }
+
   async open(): Promise<void> {
     await ensureJournalDir(this.journalDir)
     await assertJournalOpenCapacity({
@@ -153,41 +186,13 @@ export class AgentSessionJournal {
     })
     this.database = openJournalDatabase(this.dbPath)
     try {
-      await openJournalStoreState({
-        journalDir: this.journalDir,
-        sessionId: this.identity.sessionId,
-        loaded: this.loaded,
-        replay: () => {
-          const opened = this.requireDatabase()
-          return replayJournal(opened.db, opened.readOnly, this.identity.sessionId)
-        },
-        truncateSuffix: (fromSeq) =>
-          truncateJournalSuffix({
-            db: this.requireDatabase().db,
-            dbPath: this.dbPath,
-            journalDir: this.journalDir,
-            pageSize: this.requireDatabase().pageSize,
-            sessionId: this.identity.sessionId,
-            epoch: this.state.epoch,
-            fromSeq,
-            maxBytes: this.budget.maxSessionBytes
-          }),
-        start: () => this.epochController.start('session_created', 0),
-        adopt: (loaded) => this.adoptLoadedJournal(loaded),
-        snapshot: this.snapshot,
-        rebuildLifecycle: (snapshot, bytes) => this.lifecycleAdmission.rebuild(snapshot, bytes),
-        appendDisclosure: (identity, body, fence) => this.appendItem(identity, body, { fence }),
-        highestFence: () => this.state.highestFence,
-        malformedRows: () => this.malformedRows,
-        readOnly: () => this.readOnly,
-        setPhysicalBytes: (bytes) => {
-          this.sizeBytes = bytes
-        }
-      })
+      await this.restore()
     } catch (error) {
       // Nothing else holds a reference to this connection, so a throw here is
-      // the leak site unless the store releases it itself.
-      await this.close().catch(() => undefined)
+      // the leak site unless the store releases it itself — and a close that
+      // REJECTS has not released it, so the store is retained for a later retry
+      // instead of being dropped with its handle open.
+      await agentSessionJournalCloseRetries.closeOrRetain(this)
       throw error
     }
   }

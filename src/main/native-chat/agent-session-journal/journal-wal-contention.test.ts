@@ -6,7 +6,7 @@
 // with the database growth it already copied — so reading the settled size
 // alone under-charges by up to the whole WAL.
 
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -133,7 +133,12 @@ describe('the bound holds while a checkpoint cannot run', () => {
     ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
 
     releaseReader()
+    // The writer still holds `journal.db`. POSIX unlinks an open database
+    // happily; Windows refuses, so the handle is released BEFORE the removal
+    // and the removal itself is the assertion that nothing else holds it.
+    await journal.close()
     await rm(root, { recursive: true, force: true })
+    await expect(stat(root)).rejects.toMatchObject({ code: 'ENOENT' })
     root = await mkdtemp(join(tmpdir(), 'orca-journal-wal-'))
     const uncontended = await openJournal()
     const control = await appendTail(uncontended, new JournalPeakSampler(root), 120, 40_000, 1)

@@ -6,6 +6,7 @@
 // with the global runtime reference already cleared — the one state from which
 // nothing can ever close them.
 
+import { agentSessionJournalCloseRetries } from '../agent-session-journal/journal-close-retry'
 import type { StructuredAgentSessionHostSession } from './structured-agent-session-host-types'
 
 export type StructuredAgentSessionTeardownPhase = {
@@ -41,6 +42,10 @@ export async function tearDownStructuredAgentSessionHost(input: {
     }
     failures.push(result.reason)
   })
+
+  // Journals an earlier failure path could not close are retried HERE, which is
+  // the only place that owns them once their caller has unwound.
+  failures.push(...(await agentSessionJournalCloseRetries.retryAll()))
 
   if (failures.length > 0) {
     throw new AggregateError(failures, 'agent session host teardown failed')

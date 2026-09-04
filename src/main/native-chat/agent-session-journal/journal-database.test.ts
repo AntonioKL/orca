@@ -12,8 +12,9 @@ import { JOURNAL_DB_SCHEMA_VERSION } from './journal-database-schema'
 import { journalDatabaseFile } from './journal-paths'
 import {
   deleteAllJournalRows,
-  deleteJournalRowSuffixChunk,
   insertJournalRow,
+  moveJournalRowSuffixChunkToQuarantine,
+  readJournalQuarantinedRows,
   readJournalEpochRows,
   readJournalRowsAfter,
   readJournalSessionEpoch,
@@ -151,10 +152,21 @@ describe('journal row statements', () => {
         4, 5
       ])
 
-      deleteJournalRowSuffixChunk(db, 'session-1', 'epoch-1', 4)
+      // The suffix leaves `journal_rows` and lands in `journal_quarantine`; the
+      // chunk is one transaction, so it can never be half-done.
+      expect(
+        moveJournalRowSuffixChunkToQuarantine({
+          db,
+          sessionId: 'session-1',
+          epoch: 'epoch-1',
+          floorSeq: 4,
+          quarantinedAt: 99
+        })
+      ).toBe(2)
       expect(readJournalEpochRows(db, 'session-1', 'epoch-1').map((row) => row.seq)).toEqual([
         1, 2, 3
       ])
+      expect(readJournalQuarantinedRows(db, 'session-1').map((row) => row.seq)).toEqual([4, 5])
       expect(readJournalEpochRows(db, 'session-1', 'epoch-old')).toHaveLength(1)
 
       deleteAllJournalRows(db)

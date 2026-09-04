@@ -19,6 +19,7 @@ import {
 import { refuseAgentSessionMutation } from './structured-agent-session-mutation-admission'
 import type { StructuredAgentSessionAttachContext } from './structured-agent-session-attach-context'
 import type { DeferredStructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
+import { agentSessionJournalCloseRetries } from '../agent-session-journal/journal-close-retry'
 import type { AgentSessionJournal } from '../agent-session-journal/journal-store'
 
 export function attachStructuredAgentSession(
@@ -92,12 +93,20 @@ export function attachStructuredAgentSession(
             context.subscribers.publish(sessionId, attached.journal)
           )
         } catch (error) {
-          await attached.journal.close().catch(() => undefined)
+          await agentSessionJournalCloseRetries.closeOrRetain(attached.journal)
           throw error
         }
-        // Site 10: a `set` over a live entry would orphan its handle.
+        // Site 10: a `set` over a live entry would orphan its handle — and a
+        // close that REJECTED did not release it. The replacement is therefore
+        // ABORTED rather than completed over a handle nothing can reach again:
+        // `previous` stays indexed, so teardown still owns it and can retry.
         if (previous && previous.journal !== attached.journal) {
-          await previous.journal.close().catch(() => undefined)
+          try {
+            await previous.journal.close()
+          } catch (error) {
+            await agentSessionJournalCloseRetries.closeOrRetain(attached.journal)
+            throw error
+          }
         }
         context.sessions.set(sessionId, {
           journal: attached.journal,

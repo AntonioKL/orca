@@ -8,6 +8,7 @@
 import { stat } from 'node:fs/promises'
 import type Database from '../../sqlite/sync-database'
 import { JOURNAL_BUSY_TIMEOUT_MS } from './journal-database'
+import { JOURNAL_ROW_KEY_BYTES } from './journal-key-bounds'
 import { journalDirectoryBytes } from './journal-physical-quota'
 import { journalFreelistCount } from './journal-row-table'
 
@@ -22,7 +23,7 @@ import { journalFreelistCount } from './journal-row-table'
 export const JOURNAL_TXN_FIXED_PAGES = 24
 
 /** An open, empty journal costs 57,344 bytes before a single row exists; the
- *  smallest append costs 222,480 more and the reclaim band 65,920. Below this a
+ *  smallest append costs 247,200 more and the reclaim band 65,920. Below this a
  *  journal cannot open, hold one row, and still reclaim. */
 export const JOURNAL_MIN_SESSION_BYTES = 524_288
 
@@ -46,11 +47,16 @@ export function journalTxnPhysicalCost(
   const usable = pageSize - 4
   let dataPages = 0
   for (const bytes of rowJsonByteLengths) {
-    // Overflow chain plus the leaf cell that heads it.
-    dataPages += Math.ceil(Math.max(bytes, 0) / usable) + 1
+    // Overflow chain plus the leaf cell that heads it. The key bytes are added
+    // because `(session_id, epoch)` is stored per row in BOTH the table and the
+    // primary-key index and appears nowhere in `row_json`.
+    dataPages += Math.ceil((Math.max(bytes, 0) + JOURNAL_ROW_KEY_BYTES) / usable) + 1
   }
+  // Every journal transaction also upserts the `journal_sessions` projection,
+  // which stores its own bounded copy of both keys in a table and an index.
+  const projectionPages = Math.ceil(JOURNAL_ROW_KEY_BYTES / usable) + 2
   // `dataPages / 256` covers the pointer-map pages `auto_vacuum` maintains.
-  const pages = dataPages + JOURNAL_TXN_FIXED_PAGES + Math.ceil(dataPages / 256)
+  const pages = dataPages + projectionPages + JOURNAL_TXN_FIXED_PAGES + Math.ceil(dataPages / 256)
   return 2 * journalWalFrameBytes(pageSize) * pages
 }
 
@@ -66,8 +72,15 @@ export function journalReclaimBandBytes(measured: number, pageSize: number): num
 export async function journalWalBytes(dbPath: string): Promise<number> {
   try {
     return (await stat(`${dbPath}-wal`)).size
-  } catch {
-    return 0
+  } catch (error) {
+    // ENOENT is the only answer that PROVES nothing is deferred. A permission,
+    // I/O or transient metadata failure is unknown state, and reporting it as
+    // zero both undercharges admission and lets reclamation run on a false
+    // empty-WAL predicate — so everything else fails closed.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return 0
+    }
+    throw error
   }
 }
 

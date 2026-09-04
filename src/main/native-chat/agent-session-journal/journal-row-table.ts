@@ -21,6 +21,16 @@ WHERE session_id = ? AND epoch = ? ORDER BY seq ASC`
 const SELECT_ROWS_AFTER = `SELECT epoch, seq, ts, row_json FROM journal_rows
 WHERE session_id = ? AND epoch = ? AND seq > ? ORDER BY seq ASC`
 const DELETE_SUFFIX = 'DELETE FROM journal_rows WHERE session_id = ? AND epoch = ? AND seq >= ?'
+const SELECT_SUFFIX_LENGTHS = `SELECT length(row_json) AS bytes FROM journal_rows
+WHERE session_id = ? AND epoch = ? AND seq >= ? ORDER BY seq ASC`
+// `INSERT OR REPLACE`, so a repair interrupted between chunks resumes instead of
+// failing on the rows it already preserved.
+const QUARANTINE_SUFFIX = `INSERT OR REPLACE INTO journal_quarantine
+  (session_id, epoch, seq, ts, row_json, quarantined_at)
+SELECT session_id, epoch, seq, ts, row_json, ? FROM journal_rows
+WHERE session_id = ? AND epoch = ? AND seq >= ?`
+const SELECT_QUARANTINED = `SELECT epoch, seq, ts, row_json FROM journal_quarantine
+WHERE session_id = ? ORDER BY epoch ASC, seq ASC`
 
 export function readJournalSessionEpoch(db: Database.Database, sessionId: string): string | null {
   const row = db.prepare(SELECT_SESSION).get(sessionId) as { epoch?: string } | undefined
@@ -73,15 +83,55 @@ export function deleteAllJournalRows(db: Database.Database): void {
   db.exec('DELETE FROM journal_rows')
 }
 
-/** One descending chunk of a malformed suffix. A suffix delete leaves a valid
- *  prefix at every commit, so chunking needs no atomicity it does not have. */
-export function deleteJournalRowSuffixChunk(
+/** Row-body lengths of a rejected suffix, in sequence order. The quarantine
+ *  charges the copy from these before it writes a byte of it. */
+export function countJournalRowSuffix(
   db: Database.Database,
   sessionId: string,
   epoch: string,
+  fromSeq: number
+): { rowJsonByteLengths: number[] } {
+  const rows = db.prepare(SELECT_SUFFIX_LENGTHS).all(sessionId, epoch, fromSeq) as {
+    bytes: number
+  }[]
+  return { rowJsonByteLengths: rows.map((row) => row.bytes) }
+}
+
+/**
+ * One descending chunk of a rejected suffix, PRESERVED and then removed inside a
+ * single transaction. The copy and the delete cannot be separated by a crash,
+ * which is the whole reason the repair is not two statements at the call site.
+ */
+export function moveJournalRowSuffixChunkToQuarantine(input: {
+  db: Database.Database
+  sessionId: string
+  epoch: string
   floorSeq: number
-): void {
-  db.prepare(DELETE_SUFFIX).run(sessionId, epoch, floorSeq)
+  quarantinedAt: number
+}): number {
+  input.db.exec('BEGIN IMMEDIATE')
+  try {
+    input.db
+      .prepare(QUARANTINE_SUFFIX)
+      .run(input.quarantinedAt, input.sessionId, input.epoch, input.floorSeq)
+    const deleted = input.db
+      .prepare(DELETE_SUFFIX)
+      .run(input.sessionId, input.epoch, input.floorSeq)
+    input.db.exec('COMMIT')
+    return Number(deleted.changes ?? 0)
+  } catch (error) {
+    input.db.exec('ROLLBACK')
+    throw error
+  }
+}
+
+/** Everything a repair set aside for this session, newest epoch last. The rows
+ *  stay verbatim, so a later build that can parse them can replay them. */
+export function readJournalQuarantinedRows(
+  db: Database.Database,
+  sessionId: string
+): JournalStoredRow[] {
+  return toStoredRows(db.prepare(SELECT_QUARANTINED).all(sessionId))
 }
 
 export function journalFreelistCount(db: Database.Database): number {

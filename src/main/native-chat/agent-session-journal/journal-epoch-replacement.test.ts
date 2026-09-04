@@ -51,6 +51,7 @@ function replace(input: {
   items: Parameters<typeof replaceJournalEpoch>[0]['items']
   maxSessionBytes?: number
   onPublished?: (loaded: JournalLoad) => void
+  setPhysicalBytes?: (bytes: number) => void
 }): Promise<void> {
   return replaceJournalEpoch({
     db: database.db,
@@ -67,7 +68,8 @@ function replace(input: {
     }),
     now,
     mintEpoch: () => `epoch-${clock}`,
-    onPublished: input.onPublished ?? (() => undefined)
+    onPublished: input.onPublished ?? (() => undefined),
+    setPhysicalBytes: input.setPhysicalBytes ?? (() => undefined)
   })
 }
 
