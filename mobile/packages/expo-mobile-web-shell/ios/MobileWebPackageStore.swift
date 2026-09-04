@@ -270,8 +270,16 @@ final class MobileWebPackageStore {
         throw MobileWebStoreError("mobile_web_generation_commit_failed")
       }
       do {
+        var reuseExisting = false
         if fileManager.fileExists(atPath: destination.path) {
-          try verifyCommittedGeneration(destination, manifest: stage.manifest)
+          let existing = try? verifyGeneration(destination)
+          reuseExisting = existing?.buildId == stage.manifest.buildId
+          if !reuseExisting {
+            // A verified re-download must repair corrupt assets and persisted manifests.
+            try removeMobileWebCacheTree(destination, within: root)
+          }
+        }
+        if reuseExisting {
           try removeMobileWebCacheTree(stage.root, within: root)
         } else {
           try fileManager.moveItem(at: stage.root, to: destination)

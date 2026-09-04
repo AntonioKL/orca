@@ -23,6 +23,7 @@ enum MobileWebPackageStoreTests {
     try deletesInterruptedStage(root: root.appendingPathComponent("interrupted"))
     try rejectsOversizedEncodedChunks(root: root.appendingPathComponent("chunk-limit"))
     try rejectsIncompleteAndCorruptGeneration(root: root.appendingPathComponent("corrupt"))
+    try repairsRedownloadedGeneration(root: root.appendingPathComponent("repair"))
     try rejectsOversizedPersistedFiles(root: root.appendingPathComponent("persisted-limits"))
     try activatesAndRecoversPreviousGeneration(root: root.appendingPathComponent("rollback"))
     try fallsBackFromCorruptActiveGeneration(root: root.appendingPathComponent("corrupt-active"))
@@ -418,6 +419,37 @@ enum MobileWebPackageStoreTests {
         )
       }
     )
+  }
+
+  private static func repairsRedownloadedGeneration(root: URL) throws {
+    let store = MobileWebPackageStore(cacheRoot: root)
+    let fixture = try packageFixture()
+    try stagePackage(store: store, host: "paired-host", fixture: fixture)
+    let session = try store.openSession(
+      hostIdentity: "paired-host", buildId: fixture.buildId, bridgeVersion: 1
+    )
+    _ = try store.markSessionHealthy(sessionId: session["sessionId"]!)
+    let generation = root
+      .appendingPathComponent(sha256Hex(Data("paired-host".utf8)))
+      .appendingPathComponent("generations")
+      .appendingPathComponent(fixture.buildId)
+    for path in ["index.html", "manifest.json", "canonical-manifest.json"] {
+      try Data("corrupt".utf8).write(to: generation.appendingPathComponent(path))
+      precondition(throwsError {
+        _ = try store.openSession(
+          hostIdentity: "paired-host", buildId: nil, bridgeVersion: 1
+        )
+      })
+      try stagePackage(store: store, host: "paired-host", fixture: fixture)
+      let restored = try store.openSession(
+        hostIdentity: "paired-host", buildId: nil, bridgeVersion: 1
+      )
+      let asset = try store.readAsset(sessionId: restored["sessionId"]!, path: "index.html")
+      precondition(asset.data == fixture.bytes)
+      let liveAsset = try store.readAsset(sessionId: session["sessionId"]!, path: "index.html")
+      precondition(liveAsset.data == fixture.bytes)
+      store.closeSession(sessionId: restored["sessionId"]!)
+    }
   }
 
   private static func rejectsOversizedPersistedFiles(root: URL) throws {

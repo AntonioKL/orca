@@ -214,11 +214,21 @@ internal class MobileWebPackageStore internal constructor(
     }
     val destination = File(generations, stage.manifest.buildId)
     try {
+      var reuseExisting = false
       if (destination.exists()) {
         require(isMobileWebUnlinkedPath(destination, cacheRoot)) {
           "mobile_web_generation_commit_failed"
         }
-        verifyCommittedGeneration(destination, stage.manifest)
+        val existing = runCatching { verifyGeneration(destination) }.getOrNull()
+        reuseExisting = existing?.buildId == stage.manifest.buildId
+        if (!reuseExisting) {
+          // A verified re-download must repair corrupt assets and persisted manifests.
+          require(removeMobileWebCacheTree(destination, cacheRoot)) {
+            "mobile_web_generation_commit_failed"
+          }
+        }
+      }
+      if (reuseExisting) {
         require(removeMobileWebCacheTree(stage.root, cacheRoot)) {
           "mobile_web_stage_cleanup_failed"
         }

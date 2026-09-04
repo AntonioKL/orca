@@ -20,6 +20,28 @@ class MobileWebPackageStoreTest {
   val temporary = TemporaryFolder()
 
   @Test
+  fun repairsRedownloadedGeneration() {
+    val root = temporary.newFolder()
+    val store = jvmMobileWebPackageStore(root)
+    val fixture = packageFixture()
+    stagePackage(store, "paired-host", fixture)
+    val sessionId = store.openSession("paired-host", fixture.buildId, 1).getValue("sessionId")
+    store.markSessionHealthy(sessionId)
+    val generation = File(root, "${sha256Hex("paired-host".toByteArray())}/generations/${fixture.buildId}")
+    for (path in listOf("index.html", "manifest.json", "canonical-manifest.json")) {
+      File(generation, path).writeText("corrupt")
+      assertThrows(IllegalArgumentException::class.java) {
+        store.openSession("paired-host", null, 1)
+      }
+      stagePackage(store, "paired-host", fixture)
+      val restored = store.openSession("paired-host", null, 1).getValue("sessionId")
+      assertArrayEquals(fixture.bytes, store.readAsset(restored, "index.html").bytes)
+      assertArrayEquals(fixture.bytes, store.readAsset(sessionId, "index.html").bytes)
+      store.closeSession(restored)
+    }
+  }
+
+  @Test
   fun stagesAndReadsOnlyTheExactVerifiedGeneration() {
     val root = temporary.newFolder()
     val store = jvmMobileWebPackageStore(root)
