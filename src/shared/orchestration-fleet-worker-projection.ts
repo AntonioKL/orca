@@ -12,7 +12,7 @@ import type {
 const FLEET_STATUS_FUTURE_TOLERANCE_MS = 5_000
 
 /** Everything the liveness verdict reads, so every surface can share one projection. */
-export type FleetLivenessSubject = {
+type FleetLivenessSubject = {
   workerStage?: string | null
   workerState?: string | null
   terminationReason?: FleetDurableWorker['terminationReason']
@@ -38,7 +38,7 @@ function hasCertifiedExit(worker: FleetLivenessSubject): boolean {
 
 /** `receivedAt` is the DELIVERY clock: a relay reconnect replays a cached row and restamps it,
  *  so measuring staleness against it makes an hour-old agent read live. */
-export function agentStatusFleetObservedAt(status: AgentStatusIpcPayload): number {
+function agentStatusFleetObservedAt(status: AgentStatusIpcPayload): number {
   return status.evidenceObservedAt ?? status.receivedAt
 }
 

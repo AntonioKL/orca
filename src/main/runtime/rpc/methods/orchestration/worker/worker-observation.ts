@@ -97,7 +97,7 @@ export function exposeObservation(observation: Awaited<ReturnType<typeof inspect
   }
 }
 
-export function exposeContextOnlyWorker(dispatch: DispatchContextRow) {
+function exposeContextOnlyWorker(dispatch: DispatchContextRow) {
   return {
     dispatchId: dispatch.id,
     runtimeEpoch: null,

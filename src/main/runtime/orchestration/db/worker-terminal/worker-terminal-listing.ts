@@ -14,14 +14,12 @@ import {
 } from './worker-terminal-attention-query'
 import {
   countWorkerTerminalInventory,
-  countWorkerTerminalResources,
   scanWorkerTerminalStates
 } from './worker-terminal-inventory-counts'
 import { markWorkerTerminalUserOwned } from './worker-terminal-user-takeover'
 
 export {
   countWorkerTerminalInventory,
-  countWorkerTerminalResources,
   getWorkerAttentionFacts,
   getWorkerAttentionFactsForDispatches,
   markWorkerTerminalUserOwned
@@ -278,7 +276,6 @@ export type WorkerTerminalListingMethods = {
   listWorkerTerminalResources: typeof listWorkerTerminalResources
   getWorkerTerminalListingSnapshot: typeof getWorkerTerminalListingSnapshot
   getWorkerTerminalOrderingKey: typeof getWorkerTerminalOrderingKey
-  countWorkerTerminalResources: typeof countWorkerTerminalResources
   countWorkerTerminalInventory: typeof countWorkerTerminalInventory
   getWorkerAttentionFacts: typeof getWorkerAttentionFacts
   getWorkerAttentionFactsForDispatches: typeof getWorkerAttentionFactsForDispatches
@@ -291,7 +288,6 @@ export function attachWorkerTerminalListing(ctor: { prototype: object }): void {
     listWorkerTerminalResources,
     getWorkerTerminalListingSnapshot,
     getWorkerTerminalOrderingKey,
-    countWorkerTerminalResources,
     countWorkerTerminalInventory,
     getWorkerAttentionFacts,
     getWorkerAttentionFactsForDispatches
