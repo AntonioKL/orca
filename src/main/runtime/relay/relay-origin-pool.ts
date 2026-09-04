@@ -9,6 +9,15 @@ import { RelayHttpError, requestRelayAssignment, type RelayAssignment } from './
 import type { RelayBrokerStatus, RelayIdentity } from './relay-session-broker-contract'
 import type { RelayRegion } from './relay-region-preference'
 
+// Why: every host whose lease expires in the same minute rebinds in the same
+// minute, and each rebind takes the relay's contended cell-inventory lock. A
+// cell recreate re-homes hundreds of hosts at once and pins that cohort to one
+// phase for the life of the process (observed 2026-09-04: ~1k rebinds in 3s
+// every ~54 min). A wide early window spreads each cycle; the floor keeps the
+// rebind clear of the relay's expiry sweep even under a slow director.
+const CONTROL_ROTATION_EARLY_MIN_MS = 60_000
+const CONTROL_ROTATION_EARLY_JITTER_MS = 5 * 60_000
+
 type RelayOriginPoolOptions = {
   directorUrl: string
   relayHostId: string
@@ -244,7 +253,8 @@ export class RelayOriginPool {
     }
     const now = (this.options.now ?? Date.now)()
     const random = this.options.random ?? Math.random
-    const earlyMs = 60_000 + Math.floor(random() * 60_001)
+    const earlyMs =
+      CONTROL_ROTATION_EARLY_MIN_MS + Math.floor(random() * (CONTROL_ROTATION_EARLY_JITTER_MS + 1))
     const delay = Math.max(0, origin.controlLeaseExpiresAt - earlyMs - now)
     this.rotationTimer = setTimeout(() => void this.rebindActiveControl(origin), delay)
   }

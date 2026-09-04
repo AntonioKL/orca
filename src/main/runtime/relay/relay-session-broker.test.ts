@@ -486,6 +486,59 @@ describe('RelaySessionBroker lifecycle ownership', () => {
   })
 })
 
+describe('RelaySessionBroker control rotation spreading', () => {
+  beforeEach(() => {
+    fakes.controls.length = 0
+    fakes.transports.length = 0
+    fakes.controlConnect.mockReset()
+    fakes.exchange.mockReset().mockResolvedValue({ relayToken: 'relay-jwt', expiresAt: 10_000_000 })
+    fakes.assign.mockReset().mockResolvedValue({
+      cellUrl: 'https://relay.example.test',
+      assignmentEpoch: 1,
+      leaseExpiresAt: 10_000_000
+    })
+  })
+
+  // Incident 2026-09-04 00:50Z: ~1k hosts re-homed by one cell recreate rebound
+  // together every ~54 min, each rebind taking the relay's cell-inventory lock.
+  it('spreads same-lease hosts across a multi-minute window instead of one minute', async () => {
+    vi.useFakeTimers()
+    try {
+      const leaseExpiresAt = 55 * 60_000
+      const ack: RelayHostHelloAckMessage = {
+        type: 'host-hello-ack',
+        v: 1,
+        generation: 1,
+        controlResumeSecret: 'R'.repeat(43),
+        leaseExpiresAt,
+        activeConnIds: [],
+        pendingConns: []
+      }
+      fakes.controlConnect.mockResolvedValue(ack)
+      const earliest = await RelaySessionBroker.connect(brokerOptions({ random: () => 0.999999 }))
+      const latest = await RelaySessionBroker.connect(brokerOptions({ random: () => 0 }))
+      expect(fakes.controls).toHaveLength(2)
+
+      // The widest early roll rebinds ~6 min before expiry; the narrowest at 1 min.
+      await vi.advanceTimersByTimeAsync(leaseExpiresAt - 6 * 60_000 - 1)
+      expect(fakes.controls).toHaveLength(2)
+      await vi.advanceTimersByTimeAsync(2)
+      expect(fakes.controls).toHaveLength(3)
+      expect(fakes.controls[2]!.options.previousGeneration).toBe(1)
+
+      await vi.advanceTimersByTimeAsync(4 * 60_000 + 59_000)
+      expect(fakes.controls).toHaveLength(3)
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(fakes.controls).toHaveLength(4)
+
+      earliest.closeNow()
+      latest.closeNow()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 function brokerBasisIds(broker: RelaySessionBroker): string[] {
   const pool = (broker as unknown as { originPool: unknown }).originPool
   return [...(pool as { basisOrigins: Map<string, unknown> }).basisOrigins.keys()]

@@ -78,6 +78,7 @@ export function createRelayServer(
   database: RelayDatabase,
   options: {
     now?: () => number
+    random?: () => number
     connectionLedgerLimits?: { hardCap: number; controlReserve: number }
     cellIncarnation?: string
   } = {}
@@ -113,7 +114,8 @@ export function createRelayServer(
     assignments,
     queuedBytes,
     observability,
-    options.now
+    options.now,
+    options.random
   )
   const app = createRelayApp(config, {
     store,

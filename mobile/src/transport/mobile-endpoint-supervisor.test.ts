@@ -228,6 +228,32 @@ describe('mobile endpoint supervisor', () => {
     supervisor.stop()
   })
 
+  it('does not block relay recovery behind a direct probe stuck in its redial loop', async () => {
+    const logical = new FakeLogicalClient('connected', 'relay')
+    const direct = new FakeSession('connecting')
+    const openRelay = vi.fn(() => new FakeRelaySession('connected'))
+    const deps = dependencies({ openDirect: vi.fn(() => direct), openRelay })
+    const supervisor = new MobileEndpointSupervisor(logical, host, deps)
+    await supervisor.start()
+
+    // Foreground return: the probe dials direct at once, the dead LAN answers with
+    // an instant 1006, and the direct client enters its 500/1000/2000ms backoff.
+    supervisor.setForeground(false)
+    supervisor.setForeground(true)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(deps.openDirect).toHaveBeenCalledOnce()
+    direct.publishState('reconnecting')
+    logical.publishState('disconnected')
+
+    // Relay recovery must not wait out the probe's 12s bound.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(openRelay).toHaveBeenCalledOnce()
+    expect(direct.close).toHaveBeenCalled()
+    expect(logical.getState()).toBe('connected')
+    expect(logical.getActivePath()).toBe('relay')
+    supervisor.stop()
+  })
+
   it('backs off a close from the active relay before opening its replacement', async () => {
     const logical = new FakeLogicalClient('disconnected', 'lan')
     const openRelay = vi
