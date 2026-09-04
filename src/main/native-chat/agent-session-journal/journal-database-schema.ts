@@ -18,6 +18,13 @@
  *  body version (`JournalRow.v`): a newer build can change either alone. */
 export const JOURNAL_DB_SCHEMA_VERSION = 2
 
+/** Where the v1 sequence-keyed quarantine is parked at migration. Its rows are
+ *  NOT copied forward: a quarantine holds whole rejected rows and can be
+ *  megabytes, and duplicating it inside one transaction doubled the database
+ *  past the physical bound that is supposed to be unbreachable. The table is
+ *  renamed, frozen and read alongside the surrogate-keyed one instead. */
+export const LEGACY_QUARANTINE_TABLE = 'journal_quarantine_v1'
+
 export function createJournalTablesSql(): string {
   return `
 CREATE TABLE IF NOT EXISTS journal_rows (

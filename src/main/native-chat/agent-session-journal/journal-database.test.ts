@@ -1,15 +1,23 @@
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from '../../sqlite/sync-database'
 import {
   JOURNAL_BUSY_TIMEOUT_MS,
   journalPragmaNumber,
   openJournalDatabase
 } from './journal-database'
-import { JOURNAL_DB_SCHEMA_VERSION } from './journal-database-schema'
+import {
+  createJournalTablesSql,
+  JOURNAL_DB_SCHEMA_VERSION,
+  LEGACY_QUARANTINE_TABLE
+} from './journal-database-schema'
+import { JOURNAL_MIN_SESSION_BYTES } from './journal-database-space'
 import { journalDatabaseFile } from './journal-paths'
+import { DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
+import { journalDirectoryBytes } from './journal-physical-quota'
+import { createTrackedJournalOpener } from './journal-store-test-open'
 import {
   deleteAllJournalRows,
   insertJournalRow,
@@ -21,7 +29,20 @@ import {
   upsertJournalSessionRow
 } from './journal-row-table'
 import type { JournalRow } from './journal-row-schema'
-import { AGENT_SESSION_JOURNAL_SCHEMA_VERSION } from '../../../shared/agent-session-journal-types'
+import {
+  AGENT_SESSION_JOURNAL_SCHEMA_VERSION,
+  type AgentSessionJournalIdentity
+} from '../../../shared/agent-session-journal-types'
+
+const IDENTITY: AgentSessionJournalIdentity = {
+  sessionId: 'session-1',
+  workspaceId: 'ws-1',
+  hostId: 'host-1',
+  agent: 'codex',
+  providerHandle: { kind: 'codex', threadId: 'thread-1' }
+}
+
+const journals = createTrackedJournalOpener()
 
 let root: string
 let dbPath: string
@@ -45,8 +66,42 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
+  await journals.closeAll()
   await rm(root, { recursive: true, force: true })
 })
+
+/** A journal exactly as v1 left it: the same rows, and a quarantine keyed on
+ *  `(session_id, epoch, seq)` holding one oversized rejected row. */
+function seedV1JournalWithQuarantine(quarantineBytes: number): void {
+  const seeded = new Database(dbPath)
+  seeded.pragma('auto_vacuum = INCREMENTAL')
+  seeded.pragma('journal_mode = WAL')
+  seeded.exec(createJournalTablesSql())
+  seeded.exec('DROP TABLE journal_quarantine')
+  seeded.exec(`CREATE TABLE journal_quarantine (
+  session_id     TEXT    NOT NULL,
+  epoch          TEXT    NOT NULL,
+  seq            INTEGER NOT NULL,
+  ts             INTEGER NOT NULL,
+  row_json       TEXT    NOT NULL,
+  quarantined_at INTEGER NOT NULL,
+  PRIMARY KEY (session_id, epoch, seq)
+)`)
+  insertJournalRow(seeded, 'session-1', epochRow(1))
+  upsertJournalSessionRow(seeded, 'session-1', 'epoch-1', 1)
+  seeded
+    .prepare('INSERT INTO journal_quarantine VALUES (?, ?, ?, ?, ?, ?)')
+    .run('session-1', 'epoch-1', 2, 7, legacyQuarantineJson(quarantineBytes), 11)
+  seeded.pragma('user_version = 1')
+  seeded.pragma('wal_checkpoint(TRUNCATE)')
+  seeded.close()
+}
+
+function legacyQuarantineJson(bytes: number): string {
+  const empty = JSON.stringify({ kind: 'item', pad: '' })
+  return `${empty.slice(0, -2)}${'x'.repeat(Math.max(bytes - empty.length, 0))}"}`
+}
 
 describe('journal database open', () => {
   it('creates both tables and reads back every load-bearing pragma', () => {
@@ -245,6 +300,93 @@ describe('journal row statements', () => {
       ).toMatchObject({ total: 1 })
     } finally {
       opened.db.close()
+    }
+  })
+})
+
+// A quarantine holds whole rejected rows, so it can be megabytes. Copying it
+// forward doubled the database inside one transaction, left the source pages on
+// the freelist, and the NEXT open then refused the session it had just migrated.
+describe('a v1 quarantine migration', () => {
+  const LEGACY_ROW_BYTES = 4 * 1024 * 1024
+
+  it('carries a large legacy quarantine across without breaching the session bound', async () => {
+    seedV1JournalWithQuarantine(LEGACY_ROW_BYTES)
+    const before = await journalDirectoryBytes(root)
+    expect(before).toBeGreaterThan(LEGACY_ROW_BYTES)
+    // A bound that admits the journal as it stands, and nothing like a copy of it.
+    const limits = {
+      ...DEFAULT_JOURNAL_PAYLOAD_LIMITS,
+      maxSessionBytes: before + JOURNAL_MIN_SESSION_BYTES
+    }
+
+    const migrated = await journals.open({ identity: IDENTITY, journalDir: root, limits })
+    expect(migrated.recoverQuarantinedRows()).toHaveLength(1)
+    await migrated.close()
+    expect(await journalDirectoryBytes(root)).toBeLessThanOrEqual(limits.maxSessionBytes)
+
+    // Same bound, next launch: a migration that strands the session is the same
+    // outage as one that loses it.
+    const reopened = await journals.open({ identity: IDENTITY, journalDir: root, limits })
+    expect(reopened.recoverQuarantinedRows()[0]?.rowJson).toHaveLength(LEGACY_ROW_BYTES)
+    await reopened.close()
+  })
+
+  it('reads both quarantine generations after the rekey', () => {
+    seedV1JournalWithQuarantine(64)
+    const opened = openJournalDatabase(dbPath)
+    try {
+      expect(
+        opened.db
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+          .get(LEGACY_QUARANTINE_TABLE)
+      ).toBeTruthy()
+      insertJournalRow(opened.db, 'session-1', epochRow(2))
+      moveJournalRowSuffixChunkToQuarantine({
+        db: opened.db,
+        sessionId: 'session-1',
+        epoch: 'epoch-1',
+        floorSeq: 2,
+        quarantinedAt: 12
+      })
+      // The frozen v1 row and the new one share `(epoch, seq)`; both are read.
+      expect(readJournalQuarantinedRows(opened.db, 'session-1').map((row) => row.seq)).toEqual([
+        2, 2
+      ])
+    } finally {
+      opened.db.close()
+    }
+  })
+
+  // Creating the tables outside the migration transaction left a v2-shaped
+  // database still reporting version 0, which an older build does not latch
+  // read-only: it stamps its own version on and writes through v1 SQL.
+  it('publishes no table until the version bump commits with it', () => {
+    const original = Database.prototype.pragma
+    const pragma = vi.spyOn(Database.prototype, 'pragma').mockImplementation(function (
+      this: Database.Database,
+      sql: string,
+      options?: { simple?: boolean }
+    ) {
+      if (sql.startsWith('user_version =')) {
+        throw new Error('crash before the version is published')
+      }
+      return original.call(this, sql, options)
+    })
+
+    expect(() => openJournalDatabase(dbPath)).toThrow('crash before the version is published')
+    pragma.mockRestore()
+
+    const inspected = new Database(dbPath)
+    try {
+      expect(inspected.pragma('user_version', { simple: true })).toBe(0)
+      expect(
+        inspected
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'journal_rows'")
+          .get()
+      ).toBeUndefined()
+    } finally {
+      inspected.close()
     }
   })
 })

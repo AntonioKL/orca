@@ -138,6 +138,9 @@ export class AgentSessionJournal {
       },
       loaded: () => this.loaded,
       malformedRows: () => this.malformedRows,
+      setMalformedRows: (count) => {
+        this.malformedRows = count
+      },
       setQuarantinedRows: (count) => {
         this.quarantinedRows = count
       },

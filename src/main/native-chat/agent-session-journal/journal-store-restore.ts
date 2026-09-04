@@ -41,6 +41,11 @@ export function restoreJournalStore(
         now: host.now()
       }),
     start: () => collaborators.epochController.start('session_created', 0),
+    // `unreconcilable_prefix` is the durable statement that this epoch exists
+    // because a repair emptied one: replay reads it back and keeps asking for
+    // provider history until the timeline is rebuilt or the session writes.
+    publishRepairEpoch: () =>
+      collaborators.epochController.start('unreconcilable_prefix', host.state().highestFence),
     adopt: host.adopt,
     snapshot: () => host.journal().snapshot(),
     rebuildLifecycle: (snapshot, bytes) =>
@@ -49,6 +54,7 @@ export function restoreJournalStore(
       host.journal().appendItem(identity, body, { fence }),
     highestFence: () => host.state().highestFence,
     malformedRows: host.malformedRows,
+    setMalformedRows: host.setMalformedRows,
     readOnly: host.readOnly,
     setPhysicalBytes: host.setPhysicalBytes,
     setQuarantinedRows: host.setQuarantinedRows

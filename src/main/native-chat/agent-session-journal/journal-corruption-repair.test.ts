@@ -29,6 +29,7 @@ import { journalDirectoryBytes } from './journal-physical-quota'
 import { JournalPeakSampler } from './journal-quota-test-peak'
 import { countJournalRowSuffix } from './journal-row-table'
 import { parseJournalRow, type JournalRow } from './journal-row-schema'
+import { loadJournal } from './journal-open'
 import type { openAgentSessionJournal } from './journal-store-factory'
 import { createTrackedJournalOpener } from './journal-store-test-open'
 
@@ -74,6 +75,18 @@ async function withJournalDatabase(run: (db: Database.Database) => void): Promis
   } finally {
     opened.db.close()
   }
+}
+
+/** The row replay anchors on, parsed exactly as replay parses it. */
+function firstLiveRow(): Promise<JournalRow | null> {
+  let row: JournalRow | null = null
+  return withJournalDatabase((db) => {
+    const stored = db.prepare('SELECT row_json FROM journal_rows ORDER BY seq LIMIT 1').get() as
+      | { row_json: string }
+      | undefined
+    const parsed = stored ? parseJournalRow(stored.row_json) : null
+    row = parsed?.ok ? parsed.row : null
+  }).then(() => row)
 }
 
 function liveSequences(): Promise<number[]> {
@@ -164,7 +177,10 @@ describe('a sequence gap', () => {
     })
 
     const reopened = await open()
-    expect(await liveSequences()).toEqual([1, 2, 3])
+    // 1..3 is the surviving prefix; 4 is the disclosure the repair appends. A
+    // gap sets aside valid rows and no line was unreadable, so this is the case
+    // that used to hide the repair entirely.
+    expect(await liveSequences()).toEqual([1, 2, 3, 4])
     expect(reopened.repair).toEqual({ malformedRows: 0, quarantinedRows: 2 })
     expect(recovered(reopened).map((row) => (row.kind === 'item' ? row.body : null))).toEqual([
       body('m3'),
@@ -291,8 +307,38 @@ describe('a missing epoch row', () => {
 
     const reopened = await open()
     expect(reopened.repair).toEqual({ malformedRows: 0, quarantinedRows: 3 })
-    expect(await liveSequences()).toEqual([])
     expect(recovered(reopened).map((row) => row.kind)).toEqual(['item', 'submission', 'dispatch'])
+
+    // The epoch cannot be left row-less. An ordinary append would then take
+    // sequence 1, replay would call that non-epoch row a clean timeline, and the
+    // rows above would stay in quarantine with nothing left asking for them.
+    expect(await liveSequences()).toEqual([1, 2])
+    const anchor = await firstLiveRow()
+    expect(anchor).toMatchObject({ kind: 'epoch', reason: 'unreconcilable_prefix' })
+    expect(reopened.snapshot().items.some((entry) => entry.body.kind === 'status')).toBe(true)
+  })
+
+  // The repair epoch is a placeholder for history it could not rebuild. Left
+  // clean it would end automatic recovery: the provider transcript is never
+  // consulted again and the quarantined rows never come back.
+  it('keeps asking for provider history until the epoch has content of its own', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('anchor'), { fence: 1 })
+    await journal.close()
+    await withJournalDatabase((db) => {
+      db.prepare('DELETE FROM journal_rows WHERE seq = ?').run(1)
+    })
+
+    const repaired = await open()
+    await repaired.close()
+    expect(await loadJournal(root, IDENTITY.sessionId)).toMatchObject({ corrupt: true })
+
+    // A session that writes into the epoch owns it: its own rows are not a
+    // repair placeholder, and a later import must not replace them.
+    const writable = await open()
+    await writable.appendItem(item(1), body('typed after the repair'), { fence: 1 })
+    await writable.close()
+    expect(await loadJournal(root, IDENTITY.sessionId)).toMatchObject({ corrupt: false })
   })
 })
 
@@ -311,7 +357,8 @@ describe('a second repair in the same epoch', () => {
 
     const repaired = await open()
     expect(repaired.repair.quarantinedRows).toBe(1)
-    // The live epoch is back to its anchor row, so these reuse sequences 2 and 3.
+    // The live epoch is back to its anchor plus the repair disclosure, so these
+    // reuse sequences 3 and 4 — and 3 is the sequence the first repair set aside.
     await repaired.appendItem(item(2), body('reused'), { fence: 1 })
     await repaired.appendItem(item(3), body('survives second fault'), { fence: 1 })
     await repaired.close()
@@ -320,14 +367,15 @@ describe('a second repair in the same epoch', () => {
     })
 
     const twice = await open()
-    expect(twice.repair.quarantinedRows).toBe(1)
+    expect(twice.repair.quarantinedRows).toBe(2)
+    // Both generations of sequence 3 are here: the surrogate key kept the first.
     expect(
       recovered(twice).map((row) =>
         row.kind === 'item' && row.body.kind === 'message' && row.body.blocks[0]?.type === 'text'
           ? row.body.blocks[0].text
           : null
       )
-    ).toEqual(['survives first fault', 'survives second fault'])
+    ).toEqual(['survives first fault', 'reused', 'survives second fault'])
   })
 })
 

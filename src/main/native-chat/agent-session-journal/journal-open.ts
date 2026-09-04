@@ -22,6 +22,7 @@ import {
   readJournalRowsAfter,
   readJournalSessionEpoch
 } from './journal-row-table'
+import { JOURNAL_REPAIR_DISCLOSURE_ITEM_ID } from './journal-repair-disclosure'
 import { parseJournalRow, type JournalRow } from './journal-row-schema'
 
 /** Every epoch row is sequence 1, and no compaction moves that floor. */
@@ -97,19 +98,48 @@ export function replayJournal(
       rows.length = firstBad
     }
   }
+  // Contiguity from 1 is not the whole invariant: sequence 1 has to BE the epoch
+  // row. An ordinary row there is an epoch nothing anchors, and replaying it as
+  // clean is how a repaired journal silently adopts a timeline whose real
+  // history is sitting in quarantine.
+  if (rows.length > 0 && rows[0]?.kind !== 'epoch') {
+    truncateFrom = rows[0]?.seq ?? truncateFrom
+    rows.length = 0
+  }
   for (const row of rows) {
     applyJournalRow(state, row)
   }
   state.oldestSequence = FIRST_JOURNAL_SEQUENCE
 
+  // A latched journal reduces to nothing by design; only a writable one can be
+  // held to the anchor.
+  const unanchored = !latched && rows[0]?.kind !== 'epoch'
   return {
     state,
     readOnly: latched,
-    corrupt: Boolean(gap) || malformedRows > 0,
+    corrupt: Boolean(gap) || malformedRows > 0 || unanchored || awaitsProviderHistory(rows),
     malformedRows,
     sizeBytes: 0,
     ...(truncateFrom !== undefined && !latched ? { truncateFrom } : {})
   }
+}
+
+/**
+ * The epoch a total repair published, still holding nothing but its own anchor
+ * and disclosure. The rows it set aside were never reconstructed, so provider
+ * history has to be retried rather than this being called a clean timeline. The
+ * moment the session writes content of its own the epoch is its own history and
+ * the retry stops.
+ */
+function awaitsProviderHistory(rows: readonly JournalRow[]): boolean {
+  const anchor = rows[0]
+  if (anchor?.kind !== 'epoch' || anchor.reason !== 'unreconcilable_prefix') {
+    return false
+  }
+  return rows.every(
+    (row) =>
+      row === anchor || (row.kind === 'item' && row.itemId === JOURNAL_REPAIR_DISCLOSURE_ITEM_ID)
+  )
 }
 
 /** Rows after a cursor, in sequence order. Stops at the first row this build

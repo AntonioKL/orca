@@ -7,7 +7,11 @@
 
 import Database from '../../sqlite/sync-database'
 import { hardenSqliteDatabaseFiles } from '../../sqlite/harden-database-files'
-import { createJournalTablesSql, JOURNAL_DB_SCHEMA_VERSION } from './journal-database-schema'
+import {
+  createJournalTablesSql,
+  JOURNAL_DB_SCHEMA_VERSION,
+  LEGACY_QUARANTINE_TABLE
+} from './journal-database-schema'
 
 export const JOURNAL_BUSY_TIMEOUT_MS = 5000
 
@@ -45,7 +49,6 @@ export function openJournalDatabase(dbPath: string): OpenJournalDatabase {
   let transferred = false
   try {
     configureJournalPragmas(probe)
-    probe.exec(createJournalTablesSql())
     migrateJournalDatabase(probe, stored)
     hardenSqliteDatabaseFiles(dbPath)
     const opened = {
@@ -84,14 +87,20 @@ function configureJournalPragmas(db: Database.Database): void {
   db.pragma('wal_autocheckpoint = 0')
 }
 
-/** Bumps `user_version` only on success, so the database is never half-migrated. */
+/**
+ * Table creation and the `user_version` bump are ONE transaction. Creating the
+ * tables first left a v2-shaped database still reporting version 0, which an
+ * older build does not latch read-only: it stamped its own version on and wrote
+ * into the surrogate-keyed table through v1 SQL.
+ */
 function migrateJournalDatabase(db: Database.Database, stored: number): void {
   if (stored >= JOURNAL_DB_SCHEMA_VERSION) {
     return
   }
   db.exec('BEGIN IMMEDIATE')
   try {
-    rekeyQuarantineOnSurrogate(db)
+    db.exec(createJournalTablesSql())
+    freezeSequenceKeyedQuarantine(db)
     db.pragma(`user_version = ${JOURNAL_DB_SCHEMA_VERSION}`)
     db.exec('COMMIT')
   } catch (error) {
@@ -103,19 +112,19 @@ function migrateJournalDatabase(db: Database.Database, stored: number): void {
 /**
  * v1 keyed `journal_quarantine` on `(session_id, epoch, seq)`, which a second
  * repair in the same epoch overwrote once the live journal reused the sequences
- * the first repair freed. Rebuild it on the surrogate key, carrying every row
- * across in its existing order.
+ * the first repair freed.
+ *
+ * The rows are not copied onto the new key. A quarantine holds whole rejected
+ * rows, so copying one is unbounded work charged to nobody: a single 8 MiB row
+ * nearly doubled the database, and the pages the dropped table freed only ever
+ * reached the freelist. The v1 table is renamed and left alone — reads take the
+ * union, and every write after this lands on the surrogate-keyed table.
  */
-function rekeyQuarantineOnSurrogate(db: Database.Database): void {
+function freezeSequenceKeyedQuarantine(db: Database.Database): void {
   const columns = db.pragma('table_info(journal_quarantine)') as { name: string }[]
   if (columns.some((column) => column.name === 'quarantine_id')) {
     return
   }
-  db.exec('ALTER TABLE journal_quarantine RENAME TO journal_quarantine_seq_keyed')
+  db.exec(`ALTER TABLE journal_quarantine RENAME TO ${LEGACY_QUARANTINE_TABLE}`)
   db.exec(createJournalTablesSql())
-  db.exec(`INSERT INTO journal_quarantine
-  (session_id, epoch, seq, ts, row_json, quarantined_at)
-SELECT session_id, epoch, seq, ts, row_json, quarantined_at
-FROM journal_quarantine_seq_keyed ORDER BY epoch ASC, seq ASC`)
-  db.exec('DROP TABLE journal_quarantine_seq_keyed')
 }

@@ -6,6 +6,7 @@
 // Columns are always named: `SELECT *` is uncacheable and can drop a column.
 
 import type Database from '../../sqlite/sync-database'
+import { LEGACY_QUARANTINE_TABLE } from './journal-database-schema'
 import { serializeJournalRow, type JournalRow } from './journal-row-schema'
 
 export type JournalStoredRow = { epoch: string; seq: number; ts: number; rowJson: string }
@@ -36,6 +37,11 @@ SELECT session_id, epoch, seq, ts, row_json, ? FROM journal_rows
 WHERE session_id = ? AND epoch = ? AND seq >= ?`
 const SELECT_QUARANTINED = `SELECT epoch, seq, ts, row_json FROM journal_quarantine
 WHERE session_id = ? ORDER BY epoch ASC, seq ASC, quarantine_id ASC`
+// The v1 quarantine is renamed rather than copied forward, so a migrated
+// database holds two generations and a read that names only one loses the older.
+const SELECT_LEGACY_QUARANTINED = `SELECT epoch, seq, ts, row_json FROM ${LEGACY_QUARANTINE_TABLE}
+WHERE session_id = ? ORDER BY epoch ASC, seq ASC`
+const SELECT_TABLE = "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?"
 
 export function readJournalSessionEpoch(db: Database.Database, sessionId: string): string | null {
   const row = db.prepare(SELECT_SESSION).get(sessionId) as { epoch?: string } | undefined
@@ -136,7 +142,16 @@ export function readJournalQuarantinedRows(
   db: Database.Database,
   sessionId: string
 ): JournalStoredRow[] {
-  return toStoredRows(db.prepare(SELECT_QUARANTINED).all(sessionId))
+  // Oldest generation first: the frozen v1 rows were quarantined before any row
+  // the surrogate key orders.
+  const legacy = hasLegacyQuarantineTable(db)
+    ? toStoredRows(db.prepare(SELECT_LEGACY_QUARANTINED).all(sessionId))
+    : []
+  return [...legacy, ...toStoredRows(db.prepare(SELECT_QUARANTINED).all(sessionId))]
+}
+
+function hasLegacyQuarantineTable(db: Database.Database): boolean {
+  return db.prepare(SELECT_TABLE).get(LEGACY_QUARANTINE_TABLE) !== undefined
 }
 
 export function journalFreelistCount(db: Database.Database): number {

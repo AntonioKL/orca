@@ -3,6 +3,7 @@ import type { AgentJournalSnapshot } from '../../../shared/agent-session-journal
 import type { JournalLoad } from './journal-open'
 import { JOURNAL_MIN_SESSION_BYTES } from './journal-database-space'
 import { assertJournalPhysicalCapacity, journalDirectoryBytes } from './journal-physical-quota'
+import { journalRepairDisclosure, type JournalRepairDisclosure } from './journal-repair-disclosure'
 import type { JournalSuffixQuarantine } from './journal-suffix-quarantine'
 
 export async function ensureJournalDir(journalDir: string): Promise<void> {
@@ -28,31 +29,6 @@ export function journalStoreLoadedFields(loaded: JournalLoad) {
   }
 }
 
-/** The disclosure row for a repair. Rows the repair rejected are SET ASIDE, not
- *  destroyed, and saying so is the difference between "your history is gone" and
- *  "your history is not being shown". */
-export function journalRepairDisclosure(input: {
-  malformedRows: number
-  quarantinedRows: number
-}): {
-  identity: { provider: 'orca'; clientMessageId: string }
-  body: { kind: 'status'; text: string }
-} {
-  const lines = `${input.malformedRows} journal line${input.malformedRows === 1 ? '' : 's'}`
-  const preserved =
-    input.quarantinedRows > 0
-      ? `; ${input.quarantinedRows} row${input.quarantinedRows === 1 ? '' : 's'} after it were set aside and remain recoverable`
-      : ''
-  return {
-    // One stable identity, so a reopen upserts the same row instead of adding one.
-    identity: { provider: 'orca', clientMessageId: 'journal-malformed-lines' },
-    body: {
-      kind: 'status',
-      text: `${lines} could not be read${preserved}`
-    }
-  }
-}
-
 export async function openJournalStoreState(input: {
   journalDir: string
   sessionId: string
@@ -63,13 +39,16 @@ export async function openJournalStoreState(input: {
   adopt: (loaded: JournalLoad) => void
   snapshot: () => AgentJournalSnapshot
   rebuildLifecycle: (snapshot: AgentJournalSnapshot, physicalBytes: number) => void
+  /** Republishes an anchor row for an epoch a repair emptied. */
+  publishRepairEpoch: () => Promise<void>
   appendDisclosure: (
-    identity: ReturnType<typeof journalRepairDisclosure>['identity'],
-    body: ReturnType<typeof journalRepairDisclosure>['body'],
+    identity: JournalRepairDisclosure['identity'],
+    body: JournalRepairDisclosure['body'],
     fence: number
   ) => Promise<unknown>
   highestFence: () => number
   malformedRows: () => number
+  setMalformedRows: (count: number) => void
   readOnly: () => boolean
   setPhysicalBytes: (bytes: number) => void
   setQuarantinedRows: (count: number) => void
@@ -88,6 +67,16 @@ export async function openJournalStoreState(input: {
     quarantinedRows = (await input.quarantineSuffix(loaded.truncateFrom)).quarantinedRows
     input.setQuarantinedRows(quarantinedRows)
   }
+  // A repair that took every live row leaves the epoch with no anchor. Publish
+  // one before anything can append into it: an ordinary row at sequence 1 would
+  // replay as a clean timeline and strand the quarantined history behind it.
+  if (!loaded.readOnly && loaded.state.lastSequence === 0) {
+    await input.publishRepairEpoch()
+    // The replacement epoch adopts a clean load; what this open's repair did is
+    // still the answer `repair` and the disclosure below owe the caller.
+    input.setMalformedRows(loaded.malformedRows)
+    input.setQuarantinedRows(quarantinedRows)
+  }
   const physicalBytes = await journalDirectoryBytes(input.journalDir)
   input.setPhysicalBytes(physicalBytes)
   // A future-schema/read-only journal is inspection-only. Its reduced state is
@@ -96,7 +85,9 @@ export async function openJournalStoreState(input: {
   if (!loaded.readOnly) {
     input.rebuildLifecycle(input.snapshot(), physicalBytes)
   }
-  if (input.malformedRows() > 0 && !input.readOnly()) {
+  // Rows set aside by a gap are perfectly valid and no line was unreadable, so
+  // gating on `malformedRows` alone hid the repair that removes the most.
+  if ((input.malformedRows() > 0 || quarantinedRows > 0) && !input.readOnly()) {
     const disclosure = journalRepairDisclosure({
       malformedRows: input.malformedRows(),
       quarantinedRows

@@ -44,6 +44,7 @@ export type JournalStoreHost = {
   /** A caller-supplied load, which suppresses replay entirely when present. */
   loaded: () => JournalLoad | null | undefined
   malformedRows: () => number
+  setMalformedRows: (count: number) => void
   setQuarantinedRows: (count: number) => void
   journal: () => AgentSessionJournal
   enqueue: (

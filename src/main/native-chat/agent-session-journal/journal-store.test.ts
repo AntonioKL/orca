@@ -216,10 +216,14 @@ describe('replay', () => {
 
     const reopened = await open()
     expect(reopened.epoch).toBe(before)
-    expect(reopened.snapshot().items.map((entry) => entry.body)).toEqual([body('m0')])
+    // The surviving item, plus the status row disclosing what was set aside.
+    expect(reopened.snapshot().items.map((entry) => entry.body)).toEqual([
+      body('m0'),
+      { kind: 'status', text: expect.stringContaining('set aside') }
+    ])
     await withJournalDatabase(root, (db) => {
       const rows = db.prepare('SELECT seq FROM journal_rows ORDER BY seq').all()
-      expect(rows.map((row) => (row as { seq: number }).seq)).toEqual([1, 2])
+      expect(rows.map((row) => (row as { seq: number }).seq)).toEqual([1, 2, 3])
     })
     // Sequences 4 and 5 are VALID rows that the gap at 3 made unreplayable. They
     // leave the live epoch and stay recoverable rather than being destroyed.
