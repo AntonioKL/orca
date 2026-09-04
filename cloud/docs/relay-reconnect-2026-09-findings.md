@@ -174,7 +174,27 @@ The same-cap roll is blocked only by the monitor gate, and the gate is blocked b
 My recommendation: B, with the number chosen from the table in Finding 5 and the roll following
 immediately so the bar can be re-tightened after the fleet is on the 500 ms lock wait.
 
-## Recommended next steps (in order)
+## Plan agreed with the owner (2026-09-04 ~06:45Z), in execution order
+
+Owner: "feel free to improve operations to make things more effective ... continue driving everything e2e
+until this process is complete." Owner has had multi-day experiences with cell rolls and does not want a
+9-hour sequential roll.
+
+1. **Lock-removal PR** (root cause). Make `activateControl` superseded-control cleanup, `acquireActivity`
+   existing-lease branch, and `changeActivity` use the existing single-row
+   `adjustCellReservationAtomically` instead of the 23-row `lockCellInventory`. Keep the global lock only
+   for placement (`resolve`/assignment) and sweeps. Real-Postgres contention test on port 55440.
+2. **Faster same-cap rollout workflow.** (a) paced drain instead of `graceMs: 0` so a cell's ~800 hosts
+   re-dial over minutes, not one second (director cap is 5 x 80 = 400 in-flight); (b) cells in a batch run
+   in parallel once drains are paced; (c) post-canary batches use a short freshness check instead of a new
+   15-min dry-run, since the in-job safety recheck already runs before each drain; (d) job timeout > 75 min.
+   Target: 22 cells in ~6 batches x ~25 min.
+3. **Build image** with (1) merged, then one roll of the fleet with (2). Asia cells c27/c28/c29 first.
+4. Re-tighten the monitor retries bar; recalibrate the Terraform exhausted alert.
+5. Consider deleting the 55-min control lease rebind entirely (no recorded reason; liveness is the 75 s
+   watchdog + 90 s activity lease). Separate PR after (1) so its effect is measurable.
+
+## Recommended next steps (superseded by the plan above; kept for history)
 
 1. Resolve the gate decision above, then: monitor dry-run -> c7 `canary-apply` only -> verify -> stop.
    Each rolled cell leaves the Finding 6 crash class.
