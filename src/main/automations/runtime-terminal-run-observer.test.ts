@@ -163,6 +163,7 @@ describe('createRuntimeAutomationRunTerminalObserver', () => {
 
     await vi.advanceTimersByTimeAsync(2 * 60 * 1000 + 1_000)
     expect(run.settled[0]?.status).toBe('dispatch_failed')
+    expect(run.settled[0]?.observationVerdict).toBe('unverifiable')
     expect(run.settled[0]?.error).toContain('never started')
     await run.promise
   })
@@ -187,6 +188,7 @@ describe('createRuntimeAutomationRunTerminalObserver', () => {
 
     await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000 + RUNTIME_TUI_IDLE_TIMEOUT_MS)
     expect(run.settled[0]?.status).toBe('dispatch_failed')
+    expect(run.settled[0]?.observationVerdict).toBe('unverifiable')
     expect(run.settled[0]?.error).toContain('without a completion signal')
     // 6h of 5-minute waits, not an unbounded re-arm.
     expect(runtime.waitCalls()).toBeLessThanOrEqual(80)

@@ -140,6 +140,7 @@ async function buildUnobservedObservation(
 ): Promise<AutomationRunCompletionObservation> {
   return {
     status: 'dispatch_failed',
+    observationVerdict: 'unverifiable',
     outputSnapshot: await readTerminalSnapshot(runtime, handle),
     error
   }

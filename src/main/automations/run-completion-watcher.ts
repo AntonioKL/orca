@@ -1,5 +1,6 @@
 import {
   isFinalAutomationRunStatus,
+  type AutomationRunObservationVerdict,
   type AutomationDispatchResult,
   type AutomationRun,
   type AutomationRunOutputSnapshot
@@ -8,6 +9,7 @@ import { RetainedRunReconciler } from './retained-run-reconciliation'
 
 export type AutomationRunCompletionObservation = {
   status: 'completed' | 'dispatch_failed'
+  observationVerdict?: AutomationRunObservationVerdict | null
   outputSnapshot?: AutomationRunOutputSnapshot | null
   error?: string | null
 }
@@ -63,6 +65,7 @@ export class AutomationRunCompletionWatcher {
       strand: (run) => {
         void this.finalize(run, {
           status: 'dispatch_failed',
+          observationVerdict: 'unverifiable',
           error: describeStrandedAutomationRun(run)
         }).catch((error) => {
           console.error('[automations] failed to reconcile stranded run:', error)
@@ -120,7 +123,11 @@ export class AutomationRunCompletionWatcher {
       if (controller.signal.aborted) {
         return
       }
-      observation = { status: 'dispatch_failed', error: describeObservationError(error) }
+      observation = {
+        status: 'dispatch_failed',
+        observationVerdict: 'unverifiable',
+        error: describeObservationError(error)
+      }
     }
     try {
       await this.finalize(run, observation)
@@ -171,6 +178,7 @@ export class AutomationRunCompletionWatcher {
     await this.markDispatchResult({
       runId: run.id,
       status: observation.status,
+      observationVerdict: observation.observationVerdict ?? null,
       workspaceId: current.workspaceId,
       terminalSessionId: current.terminalSessionId,
       terminalPaneKey: current.terminalPaneKey,

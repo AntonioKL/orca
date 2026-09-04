@@ -244,6 +244,7 @@ describe('reconciling retained runs against a graph that has not published yet',
     await vi.advanceTimersByTimeAsync(AFTER_SETTLE_MS)
 
     expect(readRun(store, automation.id, retained.id).status).toBe('dispatch_failed')
+    expect(readRun(store, automation.id, retained.id).observationVerdict).toBe('unverifiable')
     expect(readRun(store, automation.id, retained.id).error).toBe(
       'Orca lost the terminal for this run before it reported completion.'
     )
