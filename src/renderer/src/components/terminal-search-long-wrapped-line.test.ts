@@ -19,7 +19,8 @@ import { safeFind } from './terminal-search-safe-find'
  *
  * Mechanism, in @xterm/addon-search's SearchEngine (patched in
  * config/patches/@xterm__addon-search@*.patch, generated from the source patch
- * under config/patches/xterm-src/): `_findInLine` rewound to the first row of a
+ * under config/patches/xterm-src/; submitted upstream as
+ * https://github.com/xtermjs/xterm.js/pull/6149): `_findInLine` rewound to the first row of a
  * wrapped line by calling itself once per wrapped row, so recursion depth equals
  * the number of screen rows the logical line occupies. Scrollback reaches
  * DESKTOP_TERMINAL_SCROLLBACK_ROWS_MAX rows, which is far past V8's stack.
