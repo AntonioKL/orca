@@ -97,19 +97,45 @@ function currentModelId(models: ListedModel[], reportedModel: string | undefined
 }
 
 /**
- * The effort levels the session's current model advertises, or null when nothing
- * identified it. `apply_flag_settings` accepts and stores any level for a model
- * with no effort control, so the catalog is the only evidence of a refusal — and
- * an absent or unlisted one is not evidence, or a live CLI that predates
- * `list_models` would have every effort refused under it.
+ * The model the session is running. A report the CLI made after the last write
+ * outranks the write: it names the model the session ran. An older one does not
+ * — a model set between turns has no report yet, and deferring to the previous
+ * turn's would flip the pill back.
+ *
+ * Sole resolver of that question: every surface that acts on "the current model"
+ * — the pill, the effort guard, the rejection it names — reads it here, so two
+ * of them cannot answer it differently and offer an effort a third then refuses.
+ */
+export function readClaudeCurrentModel(session: ClaudeSession): {
+  id: string | undefined
+  confirmed: boolean
+} {
+  const confirmed =
+    session.reportedModelMutation === session.optionMutationSequence &&
+    session.reportedOptions.model !== undefined
+  return {
+    id: confirmed
+      ? session.reportedOptions.model
+      : (session.options.get('model') ?? session.reportedOptions.model),
+    confirmed
+  }
+}
+
+/**
+ * The effort levels the session's current model advertises, with the catalog id
+ * that matched so a refusal names the model the pill shows. Levels are null when
+ * nothing identified the model: `apply_flag_settings` accepts and stores any
+ * level for a model with no effort control, so the catalog is the only evidence
+ * of a refusal — and an absent or unlisted one is not evidence, or a live CLI
+ * that predates `list_models` would have every effort refused under it.
  */
 export async function readClaudeModelEffortLevels(
   session: ClaudeSession,
   timeoutMs: number | undefined
-): Promise<ReadonlySet<string> | null> {
-  const modelId = session.options.get('model') ?? session.reportedOptions.model
+): Promise<{ modelId: string | undefined; levels: ReadonlySet<string> | null }> {
+  const modelId = readClaudeCurrentModel(session).id
   if (!modelId) {
-    return null
+    return { modelId, levels: null }
   }
   const catalog = await session.connection.supportedModels({ timeoutMs }).catch(() => null)
   const matched = catalog
@@ -117,7 +143,10 @@ export async function readClaudeModelEffortLevels(
         (model) => model.id === modelId || model.resolvedModel === modelId
       )
     : undefined
-  return matched ? new Set(matched.efforts.map((choice) => choice.value)) : null
+  return {
+    modelId: matched?.id ?? modelId,
+    levels: matched ? new Set(matched.efforts.map((choice) => choice.value)) : null
+  }
 }
 
 export async function readClaudeStructuredSessionOptions(
@@ -127,22 +156,14 @@ export async function readClaudeStructuredSessionOptions(
   const catalog = await session.connection.supportedModels({ timeoutMs }).catch(() => null)
   const discovered = listedModels(catalog ? { models: catalog } : null)
   const models = discovered.length > 0 ? discovered : seedModels()
-  // A report the CLI made after the last write outranks the write: it names the
-  // model the session ran. An older one does not — a model set between turns has
-  // no report yet, and deferring to the previous turn's would flip the pill back.
-  const confirmedModel =
-    session.reportedModelMutation === session.optionMutationSequence &&
-    session.reportedOptions.model !== undefined
-  const reportedModel = confirmedModel
-    ? (session.reportedOptions.model ?? session.options.get('model'))
-    : (session.options.get('model') ?? session.reportedOptions.model)
-  const model = currentModelId(models, reportedModel)
+  const current = readClaudeCurrentModel(session)
+  const model = currentModelId(models, current.id)
   if (!models.some((entry) => entry.id === model)) {
     models.push({ id: model, label: model, isDefault: false, efforts: [], resolvedModel: null })
   }
   const effort = session.options.get('effort') ?? session.reportedOptions.effort
   const confirmed = [
-    ...(confirmedModel ? ['model'] : []),
+    ...(current.confirmed ? ['model'] : []),
     ...(effort && session.confirmedOptions.has('effort') ? ['effort'] : [])
   ]
   return {

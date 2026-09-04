@@ -5,6 +5,7 @@ import {
   isAgentSessionOptionRejectedError
 } from '../native-chat/agent-session-wire/structured-agent-session-option-error'
 import {
+  readClaudeCurrentModel,
   readClaudeModelEffortLevels,
   readClaudeSettingsEffort
 } from './claude-structured-session-options'
@@ -58,14 +59,22 @@ export async function setClaudeStructuredOption(
   // read the acceptance back as adoption. Refused here, restore drops the stale
   // value instead of replaying it onto a model that cannot use it.
   if (input.key === 'effort') {
-    const levels = await readClaudeModelEffortLevels(session, timeoutMs)
+    const { modelId, levels } = await readClaudeModelEffortLevels(session, timeoutMs)
     if (levels && !levels.has(input.value)) {
       throw new AgentSessionOptionRejectedError(
-        `claude model ${session.options.get('model') ?? session.reportedOptions.model} does not accept effort ${input.value}`
+        `claude model ${modelId} does not accept effort ${input.value}`
       )
     }
   }
+  const modelWasConfirmed = readClaudeCurrentModel(session).confirmed
   const mutationSequence = ++session.optionMutationSequence
+  // Only a model write can stale the model report — an effort or permission-mode
+  // write does not change what the child is running. Leaving the stamp behind
+  // would drop the session back to the written model and refuse, on the next
+  // effort write, a level the model actually running advertises.
+  if (modelWasConfirmed && input.key !== 'model') {
+    session.reportedModelMutation = mutationSequence
+  }
   try {
     await apply()
   } catch (error) {
@@ -100,6 +109,12 @@ export async function setClaudeStructuredOption(
     session.confirmedOptions.add(input.key)
   } else {
     session.confirmedOptions.delete(input.key)
+  }
+  // The effort readback was taken under the old model, so a model switch retires
+  // it: the child keeps the value but nothing has reported the new model holding
+  // it, and vouching for it would show a confirmed effort no readback covers.
+  if (input.key === 'model') {
+    session.confirmedOptions.delete('effort')
   }
   return Object.fromEntries(session.options)
 }

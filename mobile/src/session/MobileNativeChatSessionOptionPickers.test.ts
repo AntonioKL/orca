@@ -262,19 +262,23 @@ describe('MobileNativeChatSessionOptionPickers', () => {
     expect(captions.length > 0).toBe(scenario.caption)
   })
 
-  it('does not caption a reported value on either transport', async () => {
-    mount([MODEL_DESCRIPTOR, { ...EFFORT_DESCRIPTOR, valueSource: 'reported' }])
-    await act(async () => pill('Model').props.onPress())
-    await act(async () => rowByText('Effort').props.onPress())
-    expect(
-      renderer!.root
-        .findAll((node) => node.type === 'Text')
-        .some(
-          (node) =>
-            (node.props as { children?: unknown }).children === 'Sent to the agent — not confirmed'
-        )
-    ).toBe(false)
-  })
+  it.each(['catalog', 'agent-session'] as const)(
+    'does not caption a reported value on the %s transport',
+    async (transport) => {
+      mount([MODEL_DESCRIPTOR, { ...EFFORT_DESCRIPTOR, valueSource: 'reported', transport }])
+      await act(async () => pill('Model').props.onPress())
+      await act(async () => rowByText('Effort').props.onPress())
+      expect(
+        renderer!.root
+          .findAll((node) => node.type === 'Text')
+          .some(
+            (node) =>
+              (node.props as { children?: unknown }).children ===
+              'Sent to the agent — not confirmed'
+          )
+      ).toBe(false)
+    }
+  )
 
   it('locks the pills while the agent is working', () => {
     mount([MODEL_DESCRIPTOR, EFFORT_DESCRIPTOR], true)
