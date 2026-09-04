@@ -7,14 +7,12 @@ import type {
   AgentSessionJournalIdentity
 } from '../../../shared/agent-session-journal-types'
 import type { JournalLoad } from './journal-open'
-import type { JournalPayloadLimits } from './journal-payload-bounds'
 import type { JournalLifecycleMutationInput } from './journal-row-builders'
 import type { JournalRow } from './journal-row-schema'
 
 export type AgentSessionJournalOptions = {
   identity: AgentSessionJournalIdentity
   journalDir: string
-  limits?: JournalPayloadLimits
   now?: () => number
   mintEpoch?: () => string
   /** A caller that already loaded the journal can avoid reading the same files again. */
@@ -41,7 +39,6 @@ export type JournalAppendResult = {
 }
 
 export type JournalItemAppendOptions = { fence: number; observedAt?: number; recovered?: true }
-export type JournalBlobInput = { digest: string; payload: string }
 export type JournalTombstoneInput = { fence: number }
 
 export type JournalLifecycleBatchInput = {

@@ -1,147 +1,28 @@
 import type Database from '../../sqlite/sync-database'
-import {
-  journalBlobFileSize,
-  pruneJournalBlobs,
-  putJournalBlob,
-  removeJournalBlob
-} from './journal-blob-store'
-import {
-  checkpointJournalWal,
-  journalReclaimBandBytes,
-  journalTxnPhysicalCost,
-  journalWalBytes
-} from './journal-database-space'
-import { blobDigestsInBody } from './journal-reducer'
-import { journalDirectoryBytes } from './journal-physical-quota'
-import { runJournalPostCommit } from './journal-post-commit'
-import type { JournalLifecycleAdmission } from './journal-lifecycle-admission'
 import { insertJournalRow, upsertJournalSessionRow } from './journal-row-table'
-import { journalRowByteLength, type JournalRow } from './journal-row-schema'
-import {
-  assertJournalFence,
-  assertJournalWritable,
-  type JournalAppendBudget
-} from './journal-write-guards'
-
-type JournalBlob = { digest: string; payload: string }
+import type { JournalRow } from './journal-row-schema'
+import { assertJournalFence, assertJournalWritable } from './journal-write-guards'
 
 export type JournalRowWriterDeps = {
-  journalDir: string
-  dbPath: string
   sessionId: string
-  budget: JournalAppendBudget
-  lifecycleAdmission: JournalLifecycleAdmission
   now: () => number
   serialize: <T>(run: () => Promise<T>) => Promise<T>
-  database: () => { db: Database.Database; pageSize: number }
+  database: () => { db: Database.Database }
   readOnly: () => boolean
   highestFence: () => number
   nextSequence: () => number
-  referencedBlobDigests: () => ReadonlySet<string>
-  commit: (row: JournalRow, physicalBytes: number) => void
-  setPhysicalBytes: (bytes: number) => void
+  commit: (row: JournalRow) => void
 }
 
 export class JournalRowWriter {
   constructor(private readonly deps: JournalRowWriterDeps) {}
 
-  enqueue(
-    build: (seq: number, ts: number) => JournalRow,
-    blobs: readonly JournalBlob[] = []
-  ): Promise<JournalRow> {
+  enqueue(build: (seq: number, ts: number) => JournalRow): Promise<JournalRow> {
     return this.deps.serialize(async () => {
       assertJournalWritable(this.deps.readOnly(), this.deps.sessionId)
-      const ts = this.deps.now()
-      const row = build(this.deps.nextSequence(), ts)
+      const row = build(this.deps.nextSequence(), this.deps.now())
       assertJournalFence(row.fence, this.deps.highestFence())
-      const { db, pageSize } = this.deps.database()
-      const rowCostBytes = journalTxnPhysicalCost([journalRowByteLength(row)], pageSize)
-
-      let measured = await journalDirectoryBytes(this.deps.journalDir)
-      const admission = this.deps.lifecycleAdmission.prepare(row, measured)
-      let newBlobs = await uniqueNewBlobs(this.deps.journalDir, blobs)
-      let walBytes = await journalWalBytes(this.deps.dbPath)
-      let effectiveSize = this.effectiveSize({ measured, newBlobs, walBytes, pageSize }, admission)
-
-      if (this.deps.budget.wouldExceedSize(rowCostBytes, effectiveSize)) {
-        // Budget pressure. No row is ever shed inside an epoch, so what is left
-        // to shed is unreferenced BLOB bytes — the unbounded byte source. The
-        // protected set must include this row's own digests: content addressing
-        // never rewrites a digest already on disk, so pruning on live reducer
-        // state alone deletes the blob this very append is about to cite.
-        await pruneJournalBlobs(this.deps.journalDir, this.protectedDigests(row, blobs))
-        newBlobs = await uniqueNewBlobs(this.deps.journalDir, blobs)
-        checkpointJournalWal(db)
-        measured = await journalDirectoryBytes(this.deps.journalDir)
-        walBytes = await journalWalBytes(this.deps.dbPath)
-        effectiveSize = this.effectiveSize({ measured, newBlobs, walBytes, pageSize }, admission)
-      }
-
-      const lifecycleRateCheckpoint = admission.lifecycleCovered
-        ? this.deps.budget.checkpoint()
-        : null
-      const appendRateCheckpoint = this.deps.budget.checkpoint()
-      try {
-        if (admission.lifecycleCovered) {
-          this.deps.budget.assertReservedLifecycle(rowCostBytes, effectiveSize)
-        } else {
-          this.deps.budget.assert(rowCostBytes, ts, effectiveSize)
-        }
-        await this.commitFiles(db, row, newBlobs)
-      } catch (error) {
-        if (lifecycleRateCheckpoint) {
-          this.deps.budget.restore(lifecycleRateCheckpoint)
-        }
-        this.deps.budget.restore(appendRateCheckpoint)
-        throw error
-      }
-      // The trailing checkpoint is what leaves the WAL empty for the next
-      // admission check; the counter is set from the measurement, never accrued.
-      checkpointJournalWal(db)
-      // COMMIT landed, so the row is durable: adopt it before anything that can
-      // fail. Rejecting here instead would leave the next append reusing a
-      // sequence the table already holds.
-      const projected = measured + blobBytes(newBlobs) + rowCostBytes
-      this.deps.commit(row, projected)
-      this.deps.lifecycleAdmission.commit(admission)
-      const settled = await runJournalPostCommit({
-        journalDir: this.deps.journalDir,
-        projectedBytes: projected
-      })
-      this.deps.setPhysicalBytes(settled.physicalBytes)
-      return row
-    })
-  }
-
-  private effectiveSize(
-    input: {
-      measured: number
-      newBlobs: readonly JournalBlob[]
-      walBytes: number
-      pageSize: number
-    },
-    admission: { protectedBytes: number }
-  ): number {
-    return (
-      input.measured +
-      blobBytes(input.newBlobs) +
-      admission.protectedBytes +
-      journalReclaimBandBytes(input.measured, input.pageSize) +
-      input.walBytes
-    )
-  }
-
-  private async commitFiles(
-    db: Database.Database,
-    row: JournalRow,
-    blobs: readonly JournalBlob[]
-  ): Promise<void> {
-    const persisted: string[] = []
-    try {
-      for (const blob of blobs) {
-        await putJournalBlob(this.deps.journalDir, blob.digest, blob.payload)
-        persisted.push(blob.digest)
-      }
+      const { db } = this.deps.database()
       db.exec('BEGIN IMMEDIATE')
       try {
         insertJournalRow(db, this.deps.sessionId, row)
@@ -151,54 +32,11 @@ export class JournalRowWriter {
         db.exec('ROLLBACK')
         throw error
       }
-    } catch (error) {
-      // Every digest in `persisted` was absent from disk before this append, so
-      // removing the unreferenced ones returns the directory to its prior state.
-      const retained = this.deps.referencedBlobDigests()
-      for (const digest of persisted) {
-        if (!retained.has(digest)) {
-          await removeJournalBlob(this.deps.journalDir, digest)
-        }
-      }
-      throw error
-    }
+      // COMMIT landed, so the row is durable: adopt it before anything that can
+      // fail. Rejecting here instead would leave the next append reusing a
+      // sequence the table already holds.
+      this.deps.commit(row)
+      return row
+    })
   }
-
-  /** Live reducer digests ∪ every digest the candidate row carries — its
-   *  `blobs` argument AND its own body, because a row can cite a digest that is
-   *  not in that argument at all. */
-  private protectedDigests(row: JournalRow, blobs: readonly JournalBlob[]): Set<string> {
-    const protectedSet = new Set(this.deps.referencedBlobDigests())
-    for (const blob of blobs) {
-      protectedSet.add(blob.digest)
-    }
-    if (row.kind === 'item') {
-      blobDigestsInBody(row.body, protectedSet)
-    } else if (row.kind === 'lifecycle-batch') {
-      for (const mutation of row.mutations) {
-        if (mutation.kind === 'item') {
-          blobDigestsInBody(mutation.body, protectedSet)
-        }
-      }
-    }
-    return protectedSet
-  }
-}
-
-function blobBytes(blobs: readonly JournalBlob[]): number {
-  return blobs.reduce((total, blob) => total + Buffer.byteLength(blob.payload, 'utf8'), 0)
-}
-
-async function uniqueNewBlobs(
-  journalDir: string,
-  blobs: readonly JournalBlob[]
-): Promise<JournalBlob[]> {
-  const unique = new Map(blobs.map((blob) => [blob.digest, blob]))
-  const result: JournalBlob[] = []
-  for (const blob of unique.values()) {
-    if ((await journalBlobFileSize(journalDir, blob.digest)) === null) {
-      result.push(blob)
-    }
-  }
-  return result
 }

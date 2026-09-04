@@ -68,16 +68,14 @@ export async function appendLegacyTranscriptMessages(input: {
 }): Promise<number> {
   let appended = 0
   for (const message of input.messages) {
-    const mapped = legacyItemBody(message, DEFAULT_JOURNAL_PAYLOAD_LIMITS)
-    await input.journal.appendItemWithBlobs(
+    await input.journal.appendItem(
       {
         provider: 'legacy',
         agent: input.agent,
         sessionId: input.sessionId,
         recordId: message.id
       },
-      mapped.body,
-      mapped.blobs,
+      legacyItemBody(message, DEFAULT_JOURNAL_PAYLOAD_LIMITS),
       { fence: input.fence, observedAt: message.timestamp ?? undefined }
     )
     appended += 1
@@ -141,18 +139,16 @@ export async function importLegacyTranscriptIntoJournal(input: {
     if (!identity) {
       continue
     }
-    const mapped = legacyItemBody(message, limits)
     replacement.push({
       identity,
-      body: mapped.body,
-      blobs: mapped.blobs,
+      body: legacyItemBody(message, limits),
       observedAt: message.timestamp ?? undefined
     })
   }
   // A transcript that decodes to nothing reconstructs nothing, and an empty
   // replacement is not a harmless no-op: it would delete the repair's anchor and
-  // its disclosure, leaving the quarantined rows with nothing asking for them
-  // again. The epoch stands so a later read can still rebuild it.
+  // its disclosure, leaving nothing to ask for the history again. The epoch
+  // stands so a later read can still rebuild it.
   if (replacement.length === 0) {
     const current = input.journal.cursor()
     return { ok: true, epoch: current.epoch, cursor: current, imported: 0, replaced: false }
@@ -220,11 +216,6 @@ async function decodeWithIdentities(input: {
   return { messages, identities }
 }
 
-type MappedLegacyItem = {
-  body: AgentJournalItemBody
-  blobs: { digest: string; payload: string }[]
-}
-
 /**
  * A message whose only content is a tool invocation becomes a tool-call item so
  * the reducer renders it as one. Everything else stays a message item with its
@@ -233,42 +224,32 @@ type MappedLegacyItem = {
 function legacyItemBody(
   message: NativeChatMessage,
   limits: JournalPayloadLimits
-): MappedLegacyItem {
+): AgentJournalItemBody {
   const only = message.blocks.length === 1 ? message.blocks[0] : undefined
   if (only?.type === 'tool-call') {
+    // Legacy transcripts are untrusted and can contain arbitrarily large tool
+    // arguments. Keep them on the same bounded path as live events before the
+    // replacement epoch is published.
     return {
-      // Legacy transcripts are untrusted and can contain arbitrarily large
-      // tool arguments. Keep them on the same bounded path as live events
-      // before the replacement epoch is staged or published.
-      body: {
-        kind: 'tool-call',
-        name: only.name,
-        input: boundToolInput(only.input, limits),
-        state: 'completed'
-      },
-      blobs: []
+      kind: 'tool-call',
+      name: only.name,
+      input: boundToolInput(only.input, limits),
+      state: 'completed'
     }
   }
   if (only?.type === 'tool-result') {
-    const output = boundPayload(only.output, limits)
     return {
-      body: {
-        kind: 'tool-call',
-        name: 'tool-result',
-        input: null,
-        state: only.isError ? 'failed' : 'completed',
-        output
-      },
-      blobs: output.truncated ? [{ digest: output.digest, payload: only.output }] : []
+      kind: 'tool-call',
+      name: 'tool-result',
+      input: null,
+      state: only.isError ? 'failed' : 'completed',
+      output: boundPayload(only.output, limits)
     }
   }
   return {
-    body: {
-      kind: 'message',
-      role: message.role,
-      blocks: message.blocks.map((block) => boundBlock(block, limits))
-    },
-    blobs: []
+    kind: 'message',
+    role: message.role,
+    blocks: message.blocks.map((block) => boundBlock(block, limits))
   }
 }
 

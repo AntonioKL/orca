@@ -9,18 +9,17 @@
 import { access, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   AgentJournalItemBody,
   AgentJournalItemIdentity,
   AgentSessionJournalIdentity
 } from '../../../shared/agent-session-journal-types'
+import Database from '../../sqlite/sync-database'
 import { openJournalDatabase } from './journal-database'
 import { JOURNAL_DB_SCHEMA_VERSION } from './journal-database-schema'
-import { JOURNAL_MIN_SESSION_BYTES } from './journal-database-space'
 import { loadJournal } from './journal-open'
 import { journalDatabaseFile } from './journal-paths'
-import { DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
 import { createTrackedJournalOpener } from './journal-store-test-open'
 
 const IDENTITY: AgentSessionJournalIdentity = {
@@ -142,34 +141,21 @@ describe('failure paths inside the open call', () => {
   // connection exists, which is what lets the factory need no `finally`.
   it('leaves nothing open when a post-connection step of open() throws', async () => {
     const journal = await journals.open({ identity: IDENTITY, journalDir: root })
-    for (let ordinal = 1; ordinal <= 4; ordinal += 1) {
-      await journal.appendItem(item(ordinal), runningTool(), { fence: 1 })
-    }
+    await journal.appendItem(item(1), runningTool(), { fence: 1 })
     await journal.close()
 
-    // The lifecycle rebuild cannot fit four running-tool reservations at the
-    // substrate floor, so it throws after the connection is already open.
-    await expect(
-      journals.open({
-        identity: IDENTITY,
-        journalDir: root,
-        limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: JOURNAL_MIN_SESSION_BYTES }
-      })
-    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
+    // Replay runs after the connection is open, so a read it cannot serve
+    // throws with the handle already held.
+    const exec = vi.spyOn(Database.prototype, 'prepare').mockImplementation(() => {
+      throw new Error('replay cannot read this journal')
+    })
+    try {
+      await expect(journals.open({ identity: IDENTITY, journalDir: root })).rejects.toThrow(
+        'replay cannot read this journal'
+      )
+    } finally {
+      exec.mockRestore()
+    }
     await expectNothingHoldsTheDirectory()
-  })
-
-  it('leaves nothing open when the quota is below the substrate floor', async () => {
-    await expect(
-      journals.open({
-        identity: IDENTITY,
-        journalDir: root,
-        limits: {
-          ...DEFAULT_JOURNAL_PAYLOAD_LIMITS,
-          maxSessionBytes: JOURNAL_MIN_SESSION_BYTES - 1
-        }
-      })
-    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
-    expect(await exists(journalDatabaseFile(root))).toBe(false)
   })
 })

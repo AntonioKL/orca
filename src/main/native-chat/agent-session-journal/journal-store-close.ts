@@ -13,13 +13,11 @@
 //  4. Fulfilled is TERMINAL; rejected is not. A later call after fulfilment is a
 //     genuine no-op — `DatabaseSync.close()` throws `ERR_INVALID_STATE` on a
 //     second call, so re-entering after success is the bug, not the fix.
-//  5. The pre-release checkpoint carries a completion flag; the release itself
-//     is LAST and deliberately unguarded. There is no way to ask whether a
+//  5. The release is deliberately unguarded. There is no way to ask whether a
 //     `db.close()` that threw released the handle first, and guarding the step
 //     would skip it on retry — guaranteeing a permanent leak in exactly the case
 //     where it did not release.
 
-import { checkpointJournalWal } from './journal-database-space'
 import { AgentSessionJournalError } from './journal-write-guards'
 import type Database from '../../sqlite/sync-database'
 
@@ -59,7 +57,6 @@ export class JournalWriteQueue {
 
 export class JournalConnectionCloser {
   private released = false
-  private checkpointed = false
   private inFlight: Promise<void> | null = null
 
   constructor(
@@ -102,13 +99,8 @@ export class JournalConnectionCloser {
     if (!db) {
       return
     }
-    if (!this.checkpointed) {
-      // Swallowed by design: a busy checkpoint returns the same answer whether
-      // it waits or not, and there is nothing to gain by failing a close over
-      // it. The flag keeps a retry from re-issuing it on a released handle.
-      this.checkpointed = true
-      checkpointJournalWal(db)
-    }
+    // SQLite checkpoints and removes the WAL itself when the last connection to
+    // the database closes.
     db.close()
   }
 }

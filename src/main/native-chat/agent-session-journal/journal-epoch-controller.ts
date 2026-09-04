@@ -7,55 +7,40 @@ import { replaceJournalEpoch, type JournalReplacementItem } from './journal-epoc
 import { publishNewEpoch } from './journal-epoch-rollover'
 import type { JournalLoad } from './journal-open'
 import type { AgentJournalEpochReason } from './journal-row-schema'
-import {
-  assertJournalFence,
-  assertJournalWritable,
-  type JournalAppendBudget
-} from './journal-write-guards'
+import { assertJournalFence, assertJournalWritable } from './journal-write-guards'
 
 export class JournalEpochController {
   constructor(
     private readonly deps: {
       identity: AgentSessionJournalIdentity
-      journalDir: string
-      dbPath: string
-      budget: JournalAppendBudget
       now: () => number
       mintEpoch: () => string
       serialize: <T>(run: () => Promise<T>) => Promise<T>
-      database: () => { db: Database.Database; pageSize: number }
+      database: () => { db: Database.Database }
       readOnly: () => boolean
       setReadOnly: (readOnly: boolean) => void
       highestFence: () => number
       cursor: () => AgentJournalCursor
       adopt: (loaded: JournalLoad) => void
-      setPhysicalBytes: (bytes: number) => void
     }
   ) {}
 
-  async start(reason: AgentJournalEpochReason, fence: number): Promise<void> {
-    const { db, pageSize } = this.deps.database()
-    await publishNewEpoch({
-      db,
-      pageSize,
-      journalDir: this.deps.journalDir,
-      dbPath: this.deps.dbPath,
+  start(reason: AgentJournalEpochReason, fence: number): void {
+    publishNewEpoch({
+      db: this.deps.database().db,
       sessionId: this.deps.identity.sessionId,
       providerHandle: this.deps.identity.providerHandle,
       epoch: this.deps.mintEpoch(),
       reason,
       fence,
       now: this.deps.now(),
-      maxSessionBytes: this.deps.budget.maxSessionBytes,
-      onPublished: this.deps.adopt,
-      setPhysicalBytes: this.deps.setPhysicalBytes
+      onPublished: this.deps.adopt
     })
   }
 
   /**
    * Every reason takes the same writable guard. A latched store refuses a roll
-   * like any other write: with the byte-copy quarantine gone there is nothing
-   * for `schema_unreadable` to do differently, and it has no production caller.
+   * like any other write, and `schema_unreadable` has no production caller.
    *
    * Serialized like every other write, so the discard cannot land between an
    * admitted append's sequence assignment and its commit.
@@ -63,7 +48,7 @@ export class JournalEpochController {
   roll(reason: AgentJournalEpochReason, fence: number): Promise<AgentJournalCursor> {
     return this.deps.serialize(async () => {
       assertJournalWritable(this.deps.readOnly(), this.deps.identity.sessionId)
-      await this.start(reason, fence)
+      this.start(reason, fence)
       this.deps.setReadOnly(false)
       return this.deps.cursor()
     })
@@ -77,21 +62,15 @@ export class JournalEpochController {
     return this.deps.serialize(async () => {
       assertJournalWritable(this.deps.readOnly(), this.deps.identity.sessionId)
       assertJournalFence(fence, this.deps.highestFence())
-      const { db, pageSize } = this.deps.database()
-      await replaceJournalEpoch({
-        db,
-        pageSize,
-        journalDir: this.deps.journalDir,
-        dbPath: this.deps.dbPath,
+      replaceJournalEpoch({
+        db: this.deps.database().db,
         identity: this.deps.identity,
         reason,
         fence,
         items,
-        budget: this.deps.budget.fork(),
         now: this.deps.now,
         mintEpoch: this.deps.mintEpoch,
-        onPublished: this.deps.adopt,
-        setPhysicalBytes: this.deps.setPhysicalBytes
+        onPublished: this.deps.adopt
       })
       return this.deps.cursor()
     })

@@ -2,19 +2,18 @@
 // results by identity read off the same raw lines. Fixtures are shaped like the
 // files the providers actually write.
 
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { agentJournalItemKey } from '../../../shared/agent-session-journal-item-key'
 import type { AgentSessionJournalIdentity } from '../../../shared/agent-session-journal-types'
-import { JOURNAL_BLOB_DIR, readJournalBlob } from './journal-blob-store'
 import { createLegacyIdentityTracker } from './journal-legacy-identity'
 import {
   appendLegacyTranscriptMessages,
   importLegacyTranscriptIntoJournal
 } from './journal-legacy-import'
-import { boundPayload, DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
+import { DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
 import { openAgentSessionJournal } from './journal-store-factory'
 import type { AgentSessionJournal } from './journal-store'
 
@@ -387,7 +386,7 @@ describe('codex import', () => {
 })
 
 describe('payload bounds on import', () => {
-  it('marks a clipped tool result and parks the remainder in the blob store', async () => {
+  it('marks a clipped tool result and discards the remainder', async () => {
     const output = 'y'.repeat(64 * 1024)
     const filePath = await writeFixture('claude-big.jsonl', [
       {
@@ -421,166 +420,13 @@ describe('payload bounds on import', () => {
     expect(body.output.truncated).toBe(true)
     expect(body.output.byteLength).toBe(64 * 1024)
     expect(body.output.head).toHaveLength(1_024)
-    expect(await readJournalBlob(root, body.output.digest)).toBe(output)
-  })
-
-  it('deduplicates staged blobs while importing a replacement epoch', async () => {
-    const journalDir = join(root, 'dedupe-journal')
-    const limits = {
-      ...DEFAULT_JOURNAL_PAYLOAD_LIMITS,
-      inlineHeadBytes: 512,
-      maxSessionBytes: 512 * 1024
-    }
-    const output = 'd'.repeat(32 * 1024)
-    const bounded = boundPayload(output, limits)
-    const toolResultLine = (uuid: string) => ({
-      parentUuid: null,
-      isSidechain: false,
-      type: 'user',
-      message: {
-        role: 'user',
-        content: [{ type: 'tool_result', tool_use_id: `toolu_${uuid}`, content: output }]
-      },
-      uuid,
-      timestamp: '2026-08-05T10:00:09.000Z',
-      sessionId: CLAUDE_SESSION
-    })
-    const filePath = await writeFixture('claude-duplicate-blobs.jsonl', [
-      toolResultLine('aa11bb22-cc33-4d44-8e55-6f7788990011'),
-      toolResultLine('bb22cc33-dd44-4e55-8f66-778899001122')
-    ])
-    const journal = await open('claude', CLAUDE_SESSION, {
-      journalDir,
-      limits
-    })
-
-    await importLegacyTranscriptIntoJournal({
-      journal,
-      agent: 'claude',
-      sessionId: CLAUDE_SESSION,
-      fence: 1,
-      options: { filePath, limits }
-    })
-
-    expect(await readJournalBlob(journalDir, bounded.digest)).toBe(output)
-    expect(await readdir(join(journalDir, JOURNAL_BLOB_DIR))).toEqual([bounded.digest])
-    expect(
-      journal
-        .snapshot()
-        .items.map((item) => (item.body.kind === 'tool-call' ? item.body.output?.digest : null))
-    ).toEqual([bounded.digest, bounded.digest])
-  })
-
-  it('prunes root-level blobs made stale by a later legacy import', async () => {
-    const journalDir = join(root, 'prune-journal')
-    const limits = {
-      ...DEFAULT_JOURNAL_PAYLOAD_LIMITS,
-      inlineHeadBytes: 512,
-      maxSessionBytes: 512 * 1024
-    }
-    const output = 's'.repeat(32 * 1024)
-    const bounded = boundPayload(output, limits)
-    const first = await writeFixture('claude-stale-blob.jsonl', [
-      {
-        parentUuid: null,
-        isSidechain: false,
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [{ type: 'tool_result', tool_use_id: 'toolu_stale', content: output }]
-        },
-        uuid: 'aa11bb22-cc33-4d44-8e55-6f7788990011',
-        timestamp: '2026-08-05T10:00:09.000Z',
-        sessionId: CLAUDE_SESSION
-      }
-    ])
-    const second = await writeFixture('claude-without-blob.jsonl', [
-      {
-        parentUuid: null,
-        isSidechain: false,
-        type: 'assistant',
-        message: { role: 'assistant', content: [{ type: 'text', text: 'replacement' }] },
-        uuid: 'cc33dd44-ee55-4666-8777-889900112233',
-        timestamp: '2026-08-05T10:00:10.000Z',
-        sessionId: CLAUDE_SESSION
-      }
-    ])
-    const journal = await open('claude', CLAUDE_SESSION, {
-      journalDir,
-      limits
-    })
-
-    await importLegacyTranscriptIntoJournal({
-      journal,
-      agent: 'claude',
-      sessionId: CLAUDE_SESSION,
-      fence: 1,
-      options: { filePath: first, limits }
-    })
-    expect(await readJournalBlob(journalDir, bounded.digest)).toBe(output)
-
-    await importLegacyTranscriptIntoJournal({
-      journal,
-      agent: 'claude',
-      sessionId: CLAUDE_SESSION,
-      fence: 2,
-      options: { filePath: second, limits }
-    })
-
-    expect(await readJournalBlob(journalDir, bounded.digest)).toBeNull()
-    expect(journal.snapshot().items[0]?.body).toMatchObject({
-      kind: 'message',
-      blocks: [{ type: 'text', text: 'replacement' }]
-    })
-  })
-
-  it('uses managed catch-up appends when a tool-result blob exceeds quota', async () => {
-    const journalDir = join(root, 'catchup-journal')
-    const limits = {
-      ...DEFAULT_JOURNAL_PAYLOAD_LIMITS,
-      inlineHeadBytes: 128,
-      maxSessionBytes: 1024 * 1024
-    }
-    const journal = await open('codex', CODEX_SESSION, { journalDir, limits })
-    const output = 'z'.repeat(4 * 1024 * 1024)
-    const bounded = boundPayload(output, limits)
-
-    await expect(
-      appendLegacyTranscriptMessages({
-        journal,
-        agent: 'codex',
-        sessionId: CODEX_SESSION,
-        fence: 1,
-        messages: [
-          {
-            id: 'catchup-tool-output',
-            role: 'tool',
-            blocks: [{ type: 'tool-result', output }],
-            timestamp: 1_800_000_000_000,
-            source: 'transcript'
-          }
-        ]
-      })
-    ).resolves.toBe(1)
-
-    // The oversized remainder never reaches disk, and the item that lands says
-    // so instead of silently claiming a truncated output is the whole thing.
-    expect(await readJournalBlob(journalDir, bounded.digest)).toBeNull()
-    expect(journal.snapshot().items.map((item) => item.body.kind)).toEqual(['tool-call', 'status'])
-    expect(journal.snapshot().items.at(-1)?.body).toMatchObject({
-      kind: 'status',
-      text: 'The tool completed, but its output could not be retained within the session storage limit.'
-    })
   })
 })
 
 describe('import failures', () => {
   it('rejects a legacy source above the fixed 16 MiB import cap before decoding', async () => {
     const journalDir = join(root, 'oversized-source-journal')
-    const journal = await open('claude', CLAUDE_SESSION, {
-      journalDir,
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 256 * 1024 * 1024 }
-    })
+    const journal = await open('claude', CLAUDE_SESSION, { journalDir })
     const filePath = join(root, 'oversized-source.jsonl')
     await writeFile(filePath, 'x'.repeat(16 * 1024 * 1024 + 1), 'utf8')
     const epoch = journal.epoch
@@ -601,105 +447,10 @@ describe('import failures', () => {
     expect(journal.snapshot().items).toEqual([])
   })
 
-  it('keeps the live epoch intact when a staged rebuild runs out of budget', async () => {
-    const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 1024 * 1024 }
-    const journal = await open('codex', CODEX_SESSION, { limits })
-    await appendLegacyTranscriptMessages({
-      journal,
-      agent: 'codex',
-      sessionId: CODEX_SESSION,
-      fence: 1,
-      messages: [
-        {
-          id: 'durable-prefix',
-          role: 'assistant',
-          blocks: [{ type: 'text', text: 'keep me' }],
-          timestamp: 1_800_000_000_000,
-          source: 'transcript'
-        }
-      ]
-    })
-    const filePath = await writeFixture('oversized-rollout.jsonl', [
-      CODEX_LINES[0],
-      CODEX_LINES[1],
-      CODEX_LINES[2],
-      {
-        type: 'event_msg',
-        timestamp: '2026-08-05T10:00:03.000Z',
-        payload: { type: 'agent_message', message: 'x'.repeat(4 * 1024 * 1024) }
-      }
-    ])
-    const epoch = journal.epoch
-    const before = journal.snapshot()
-
-    await expect(
-      importLegacyTranscriptIntoJournal({
-        journal,
-        agent: 'codex',
-        sessionId: CODEX_SESSION,
-        fence: 1,
-        options: { filePath, limits }
-      })
-    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
-    expect(journal.epoch).toBe(epoch)
-    // The refused replacement rolled back whole: the live epoch is byte-identical.
-    expect(journal.snapshot()).toEqual(before)
-    expect(journal.snapshot().items[0]?.body).toMatchObject({
-      kind: 'message',
-      blocks: [{ type: 'text', text: 'keep me' }]
-    })
-  })
-
-  it('cleans staged replacement blobs when legacy import exceeds physical quota', async () => {
-    const journalDir = join(root, 'replacement-journal')
-    const limits = {
-      ...DEFAULT_JOURNAL_PAYLOAD_LIMITS,
-      inlineHeadBytes: 128,
-      maxSessionBytes: 1024 * 1024
-    }
-    const journal = await open('claude', CLAUDE_SESSION, { journalDir, limits })
-    const output = 'q'.repeat(4 * 1024 * 1024)
-    const bounded = boundPayload(output, limits)
-    const filePath = await writeFixture('oversized-tool-result.jsonl', [
-      {
-        parentUuid: null,
-        isSidechain: false,
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [{ type: 'tool_result', tool_use_id: 'toolu_oversized', content: output }]
-        },
-        uuid: 'ba11ad00-1111-4222-8333-444455556666',
-        timestamp: '2026-08-05T10:00:09.000Z',
-        sessionId: CLAUDE_SESSION
-      }
-    ])
-    const epoch = journal.epoch
-
-    await expect(
-      importLegacyTranscriptIntoJournal({
-        journal,
-        agent: 'claude',
-        sessionId: CLAUDE_SESSION,
-        fence: 1,
-        options: { filePath, limits }
-      })
-    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
-
-    expect(journal.epoch).toBe(epoch)
-    expect(await readJournalBlob(journalDir, bounded.digest)).toBeNull()
-    // A ROLLBACK covers rows and nothing at all for files: the blobs written
-    // ahead of the refused transaction must be removed by hand.
-    expect(await readdir(join(journalDir, JOURNAL_BLOB_DIR)).catch(() => [])).toEqual([])
-  })
-
   it('bounds oversized legacy tool-call input before journal publication', async () => {
     const journalDir = join(root, 'bounded-tool-input-journal')
     const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, inlineHeadBytes: 64 }
-    const journal = await open('claude', CLAUDE_SESSION, {
-      journalDir,
-      limits
-    })
+    const journal = await open('claude', CLAUDE_SESSION, { journalDir })
     const filePath = await writeFixture('oversized-tool-input.jsonl', [
       {
         parentUuid: null,

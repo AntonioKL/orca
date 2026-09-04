@@ -6,7 +6,6 @@
 // Columns are always named: `SELECT *` is uncacheable and can drop a column.
 
 import type Database from '../../sqlite/sync-database'
-import { LEGACY_QUARANTINE_TABLE } from './journal-database-schema'
 import { serializeJournalRow, type JournalRow } from './journal-row-schema'
 
 export type JournalStoredRow = { epoch: string; seq: number; ts: number; rowJson: string }
@@ -22,26 +21,6 @@ WHERE session_id = ? AND epoch = ? ORDER BY seq ASC`
 const SELECT_ROWS_AFTER = `SELECT epoch, seq, ts, row_json FROM journal_rows
 WHERE session_id = ? AND epoch = ? AND seq > ? ORDER BY seq ASC`
 const DELETE_SUFFIX = 'DELETE FROM journal_rows WHERE session_id = ? AND epoch = ? AND seq >= ?'
-// `CAST(... AS BLOB)`, because `length()` on a TEXT value counts CHARACTERS and
-// the physical charge is byte arithmetic — a multibyte suffix was charged at a
-// third of what it writes.
-const SELECT_SUFFIX_LENGTHS = `SELECT length(CAST(row_json AS BLOB)) AS bytes FROM journal_rows
-WHERE session_id = ? AND epoch = ? AND seq >= ? ORDER BY seq ASC`
-// A plain INSERT: the quarantine is append-only across repair generations, and
-// the live epoch reuses the sequences an earlier repair freed. The copy and the
-// source delete share one transaction, so a crash between chunks cannot leave a
-// half-copied chunk for a resume to duplicate.
-const QUARANTINE_SUFFIX = `INSERT INTO journal_quarantine
-  (session_id, epoch, seq, ts, row_json, quarantined_at)
-SELECT session_id, epoch, seq, ts, row_json, ? FROM journal_rows
-WHERE session_id = ? AND epoch = ? AND seq >= ?`
-const SELECT_QUARANTINED = `SELECT epoch, seq, ts, row_json FROM journal_quarantine
-WHERE session_id = ? ORDER BY epoch ASC, seq ASC, quarantine_id ASC`
-// The v1 quarantine is renamed rather than copied forward, so a migrated
-// database holds two generations and a read that names only one loses the older.
-const SELECT_LEGACY_QUARANTINED = `SELECT epoch, seq, ts, row_json FROM ${LEGACY_QUARANTINE_TABLE}
-WHERE session_id = ? ORDER BY epoch ASC, seq ASC`
-const SELECT_TABLE = "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?"
 
 export function readJournalSessionEpoch(db: Database.Database, sessionId: string): string | null {
   const row = db.prepare(SELECT_SESSION).get(sessionId) as { epoch?: string } | undefined
@@ -94,68 +73,15 @@ export function deleteAllJournalRows(db: Database.Database): void {
   db.exec('DELETE FROM journal_rows')
 }
 
-/** Physical row-body byte lengths of a rejected suffix, in sequence order. The
- *  quarantine charges the copy from these before it writes a byte of it. */
-export function countJournalRowSuffix(
+/** Drop the rejected suffix a repair found, from `fromSeq` to the tip. */
+export function deleteJournalRowSuffix(
   db: Database.Database,
   sessionId: string,
   epoch: string,
   fromSeq: number
-): { rowJsonByteLengths: number[] } {
-  const rows = db.prepare(SELECT_SUFFIX_LENGTHS).all(sessionId, epoch, fromSeq) as {
-    bytes: number
-  }[]
-  return { rowJsonByteLengths: rows.map((row) => row.bytes) }
-}
-
-/**
- * One descending chunk of a rejected suffix, PRESERVED and then removed inside a
- * single transaction. The copy and the delete cannot be separated by a crash,
- * which is the whole reason the repair is not two statements at the call site.
- */
-export function moveJournalRowSuffixChunkToQuarantine(input: {
-  db: Database.Database
-  sessionId: string
-  epoch: string
-  floorSeq: number
-  quarantinedAt: number
-}): number {
-  input.db.exec('BEGIN IMMEDIATE')
-  try {
-    input.db
-      .prepare(QUARANTINE_SUFFIX)
-      .run(input.quarantinedAt, input.sessionId, input.epoch, input.floorSeq)
-    const deleted = input.db
-      .prepare(DELETE_SUFFIX)
-      .run(input.sessionId, input.epoch, input.floorSeq)
-    input.db.exec('COMMIT')
-    return Number(deleted.changes ?? 0)
-  } catch (error) {
-    input.db.exec('ROLLBACK')
-    throw error
-  }
-}
-
-/** Everything a repair set aside for this session, newest epoch last. The rows
- *  stay verbatim, so a later build that can parse them can replay them. */
-export function readJournalQuarantinedRows(
-  db: Database.Database,
-  sessionId: string
-): JournalStoredRow[] {
-  // Oldest generation first: the frozen v1 rows were quarantined before any row
-  // the surrogate key orders.
-  const legacy = hasLegacyQuarantineTable(db)
-    ? toStoredRows(db.prepare(SELECT_LEGACY_QUARANTINED).all(sessionId))
-    : []
-  return [...legacy, ...toStoredRows(db.prepare(SELECT_QUARANTINED).all(sessionId))]
-}
-
-function hasLegacyQuarantineTable(db: Database.Database): boolean {
-  return db.prepare(SELECT_TABLE).get(LEGACY_QUARANTINE_TABLE) !== undefined
-}
-
-export function journalFreelistCount(db: Database.Database): number {
-  return Number(db.pragma('freelist_count', { simple: true }) ?? 0)
+): number {
+  const deleted = db.prepare(DELETE_SUFFIX).run(sessionId, epoch, fromSeq)
+  return Number(deleted.changes ?? 0)
 }
 
 function toStoredRows(rows: readonly unknown[]): JournalStoredRow[] {
@@ -163,19 +89,4 @@ function toStoredRows(rows: readonly unknown[]): JournalStoredRow[] {
     const record = entry as { epoch: string; seq: number; ts: number; row_json: string }
     return { epoch: record.epoch, seq: record.seq, ts: record.ts, rowJson: record.row_json }
   })
-}
-
-/** Highest sequence in an epoch. The only caller is malformed-suffix
- *  truncation, which walks its chunks down from the tip. */
-export function readJournalEpochTipSequence(
-  db: Database.Database,
-  sessionId: string,
-  epoch: string
-): number {
-  const row = db
-    .prepare(
-      'SELECT seq FROM journal_rows WHERE session_id = ? AND epoch = ? ORDER BY seq DESC LIMIT 1'
-    )
-    .get(sessionId, epoch) as { seq?: number } | undefined
-  return row?.seq ?? 0
 }

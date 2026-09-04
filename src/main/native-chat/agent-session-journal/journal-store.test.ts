@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -11,7 +11,6 @@ import {
   boundJournalKeyComponent,
   MAX_JOURNAL_KEY_COMPONENT_CHARS
 } from '../../../shared/agent-session-journal-item-key'
-import { readJournalBlob } from './journal-blob-store'
 import { loadJournal } from './journal-open'
 import {
   boundInlineText,
@@ -19,17 +18,9 @@ import {
   DEFAULT_JOURNAL_PAYLOAD_LIMITS
 } from './journal-payload-bounds'
 import { journalDatabaseFile, journalDirectoryFor, journalPathSegment } from './journal-paths'
-import { journalDirectoryBytes } from './journal-physical-quota'
-import type { JournalLifecycleMutationInput } from './journal-row-builders'
 import { AgentSessionJournalError, type AgentSessionJournal } from './journal-store'
 import type { openAgentSessionJournal } from './journal-store-factory'
 import { createTrackedJournalOpener } from './journal-store-test-open'
-import {
-  journalReservationPhysicalBytes,
-  JOURNAL_DISPATCH_RESERVATION_BYTES,
-  JOURNAL_ITEM_TERMINAL_RESERVATION_BYTES,
-  JOURNAL_TURN_TERMINAL_RESERVATION_BYTES
-} from './journal-lifecycle-capacity'
 import type Database from '../../sqlite/sync-database'
 
 const IDENTITY: AgentSessionJournalIdentity = {
@@ -203,7 +194,7 @@ describe('replay', () => {
     expect(reopened.snapshot().items).toHaveLength(0)
   })
 
-  it('preserves the intact prefix and SETS ASIDE the rejected suffix', async () => {
+  it('keeps the intact prefix and drops the rejected suffix', async () => {
     const journal = await open()
     for (let index = 0; index < 4; index += 1) {
       await journal.appendItem(item(index), body(`m${index}`), { fence: 1 })
@@ -216,19 +207,14 @@ describe('replay', () => {
 
     const reopened = await open()
     expect(reopened.epoch).toBe(before)
-    // The surviving item, plus the status row disclosing what was set aside.
-    expect(reopened.snapshot().items.map((entry) => entry.body)).toEqual([
-      body('m0'),
-      { kind: 'status', text: expect.stringContaining('set aside') }
-    ])
+    expect(reopened.snapshot().items.map((entry) => entry.body)).toEqual([body('m0')])
+    // Sequences 4 and 5 are VALID rows that the gap at 3 made unreplayable.
+    // Nothing preserves them; recovery rebuilds the epoch from provider history.
     await withJournalDatabase(root, (db) => {
       const rows = db.prepare('SELECT seq FROM journal_rows ORDER BY seq').all()
-      expect(rows.map((row) => (row as { seq: number }).seq)).toEqual([1, 2, 3])
+      expect(rows.map((row) => (row as { seq: number }).seq)).toEqual([1, 2])
     })
-    // Sequences 4 and 5 are VALID rows that the gap at 3 made unreplayable. They
-    // leave the live epoch and stay recoverable rather than being destroyed.
-    expect(reopened.repair).toEqual({ malformedRows: 0, quarantinedRows: 2 })
-    expect(reopened.recoverQuarantinedRows().map((row) => row.seq)).toEqual([4, 5])
+    expect(reopened.repair).toEqual({ malformedRows: 0 })
   })
 })
 
@@ -256,244 +242,9 @@ describe('bounds', () => {
     expect(bounded.head).toBe('small')
     expect(boundInlineText('small', DEFAULT_JOURNAL_PAYLOAD_LIMITS).text).toBe('small')
   })
-
-  it('refuses a single row larger than the per-session size bound', async () => {
-    const journal = await open({
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 1024 * 1024 }
-    })
-    await expect(
-      journal.appendItem(item(0), body('x'.repeat(4 * 1024 * 1024)), { fence: 1 })
-    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
-  })
-
-  it('refuses an append past the per-session size bound', async () => {
-    const journal = await open({
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 1024 * 1024 }
-    })
-    await expect(
-      (async () => {
-        for (let index = 0; index < 200; index += 1) {
-          await journal.appendItem(item(index), body('x'.repeat(20_000)), { fence: 1 })
-        }
-      })()
-    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
-  })
-
-  it('refuses an append past the per-window rate bound', async () => {
-    const journal = await open({
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxAppendsPerWindow: 3, appendWindowMs: 60_000 }
-    })
-    await expect(
-      (async () => {
-        for (let index = 0; index < 10; index += 1) {
-          await journal.appendItem(item(index), body('x'), { fence: 1 })
-        }
-      })()
-    ).rejects.toMatchObject({ code: 'journal_rate_exceeded' })
-  })
-
-  it('charges unique blobs and abandoned write temps to one physical quota', async () => {
-    const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 1024 * 1024 }
-    const journal = await open({ limits })
-    const payload = 'z'.repeat(1_200)
-    const bounded = boundPayload(payload, { ...limits, inlineHeadBytes: 8 })
-    const toolBody: AgentJournalItemBody = {
-      kind: 'tool-call',
-      name: 'command',
-      input: {},
-      state: 'completed',
-      output: bounded
-    }
-
-    await journal.appendItemWithBlobs(item(1), toolBody, [{ digest: bounded.digest, payload }], {
-      fence: 1
-    })
-    const afterFirst = await journalDirectoryBytes(root)
-    await journal.appendItemWithBlobs(item(2), toolBody, [{ digest: bounded.digest, payload }], {
-      fence: 1
-    })
-    const afterDuplicate = await journalDirectoryBytes(root)
-
-    expect(afterDuplicate - afterFirst).toBeLessThan(payload.length)
-    expect(await readdir(join(root, 'blobs'))).toEqual([bounded.digest])
-    expect(afterDuplicate).toBeLessThanOrEqual(limits.maxSessionBytes)
-
-    await journal.close()
-    await writeFile(join(root, 'blobs.abandoned.tmp'), 's'.repeat(2_000), 'utf8')
-    const physical = await journalDirectoryBytes(root)
-    await expect(
-      open({ limits: { ...limits, maxSessionBytes: physical - 1 } })
-    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
-  })
-
-  it('uses a running tool reservation when its authoritative blob cannot fit', async () => {
-    const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 2 * 1024 * 1024 }
-    const journal = await open({ limits })
-    await journal.appendItem(
-      item(1),
-      { kind: 'tool-call', name: 'command', input: {}, state: 'running' },
-      { fence: 1 }
-    )
-    // Put the journal under real pressure before offering the authoritative
-    // output, so the refusal below is the quota's and not an empty-journal edge.
-    for (let ordinal = 10; ordinal < 40; ordinal += 1) {
-      try {
-        await journal.appendItem(item(ordinal), body('f'.repeat(20_000)), { fence: 1 })
-      } catch (error) {
-        expect(error).toMatchObject({ code: 'journal_bound_exceeded' })
-        break
-      }
-    }
-    const payload = 'o'.repeat(4 * 1024 * 1024)
-    const bounded = boundPayload(payload, { ...limits, inlineHeadBytes: 16 * 1024 })
-
-    await journal.appendItemWithBlobs(
-      item(1),
-      {
-        kind: 'tool-call',
-        name: 'command',
-        input: {},
-        state: 'completed',
-        output: bounded
-      },
-      [{ digest: bounded.digest, payload }],
-      { fence: 1 }
-    )
-
-    const tool = journal.snapshot().items.find((entry) => entry.itemId.includes('turn-1:1'))
-    expect(tool?.body).toEqual({
-      kind: 'tool-call',
-      name: 'command',
-      input: {},
-      state: 'completed'
-    })
-    expect(
-      journal
-        .snapshot()
-        .items.some(
-          (entry) =>
-            entry.body.kind === 'status' && entry.body.text.includes('could not be retained')
-        )
-    ).toBe(true)
-    expect(await readJournalBlob(root, bounded.digest)).toBeNull()
-    expect(journal.lifecycleCapacityState()).toEqual({ reservedBytes: 0, reservedAppendSlots: 0 })
-  })
-
-  it('keeps cached physical bytes aligned after blob dedupe and an epoch roll', async () => {
-    const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 1024 * 1024 }
-    const journal = await open({ limits })
-    const payload = 'p'.repeat(20_000)
-    const bounded = boundPayload(payload, { ...limits, inlineHeadBytes: 8 })
-    const toolBody: AgentJournalItemBody = {
-      kind: 'tool-call',
-      name: 'command',
-      input: {},
-      state: 'completed',
-      output: bounded
-    }
-
-    await journal.appendItemWithBlobs(item(1), toolBody, [{ digest: bounded.digest, payload }], {
-      fence: 1
-    })
-    await journal.appendItemWithBlobs(item(2), toolBody, [{ digest: bounded.digest, payload }], {
-      fence: 1
-    })
-    await journal.replaceEpochItems('handle_forked', 1, [
-      { identity: item(1), body: toolBody, blobs: [{ digest: bounded.digest, payload }] }
-    ])
-    const rolledBytes = await journalDirectoryBytes(root)
-    expect(rolledBytes).toBeLessThan(limits.maxSessionBytes)
-
-    await journal.appendItem(item(3), body('after the roll'), { fence: 1 })
-
-    expect(await journalDirectoryBytes(root)).toBeLessThanOrEqual(limits.maxSessionBytes)
-    expect(await readdir(join(root, 'blobs'))).toEqual([bounded.digest])
-  })
 })
 
 describe('lifecycle batches', () => {
-  it('uses a reserved append slot after ordinary rate pressure', async () => {
-    const journal = await open({
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxAppendsPerWindow: 1, appendWindowMs: 60_000 }
-    })
-    const identity: AgentJournalItemIdentity = {
-      provider: 'orca',
-      clientMessageId: 'reserved-prompt'
-    }
-    const pending: AgentJournalItemBody = {
-      kind: 'approval',
-      title: 'Run a command?',
-      detail: null,
-      options: [{ id: 'accept', label: 'Allow' }],
-      resolution: { state: 'pending', selectedOptionId: null, resolvedBy: null, resolvedAt: null }
-    }
-
-    // The pending row spends the only ordinary slot while reserving its
-    // terminal append slot for recovery.
-    await journal.appendLifecycleBatch({
-      settlementId: 'reserved-start',
-      fence: 1,
-      mutations: [{ kind: 'item', identity, body: pending }]
-    })
-    await expect(
-      journal.appendItem(
-        identity,
-        {
-          ...pending,
-          resolution: {
-            state: 'resolved',
-            selectedOptionId: 'accept',
-            resolvedBy: 'test',
-            resolvedAt: 1
-          }
-        },
-        { fence: 1 }
-      )
-    ).resolves.toBeDefined()
-  })
-
-  it('rate-limits an unreserved lifecycle batch', async () => {
-    const journal = await open({
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxAppendsPerWindow: 1, appendWindowMs: 60_000 }
-    })
-    const mutation = (id: string): JournalLifecycleMutationInput => ({
-      kind: 'item',
-      identity: { provider: 'orca', clientMessageId: id },
-      body: { kind: 'status', text: 'provider diagnostic' }
-    })
-    await journal.appendLifecycleBatch({
-      settlementId: 'unreserved-1',
-      fence: 1,
-      mutations: [mutation('one')]
-    })
-    await expect(
-      journal.appendLifecycleBatch({
-        settlementId: 'unreserved-2',
-        fence: 1,
-        mutations: [mutation('two')]
-      })
-    ).rejects.toMatchObject({ code: 'journal_rate_exceeded' })
-  })
-
-  it('rebuilds dispatch and turn reservations for pending submissions after reopen', async () => {
-    const journal = await open()
-    await journal.appendSubmission({
-      clientMessageId: 'pending-send',
-      payloadFingerprint: 'fingerprint',
-      body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'hello' }] },
-      fence: 1
-    })
-
-    const reopened = await open()
-    expect(reopened.lifecycleCapacityState()).toEqual({
-      // Reservations are held in the page currency the write path is charged in.
-      reservedBytes:
-        journalReservationPhysicalBytes(JOURNAL_DISPATCH_RESERVATION_BYTES, 4096) +
-        journalReservationPhysicalBytes(JOURNAL_TURN_TERMINAL_RESERVATION_BYTES, 4096),
-      reservedAppendSlots: 2
-    })
-  })
-
   it('deduplicates concurrent submissions before appending a second row', async () => {
     const journal = await open()
     const input = {
@@ -564,53 +315,6 @@ describe('lifecycle batches', () => {
         )
     ).toBe(false)
   })
-
-  it('reserves and releases terminal prompts created inside lifecycle batches', async () => {
-    const journal = await open()
-    const identity: AgentJournalItemIdentity = { provider: 'orca', clientMessageId: 'prompt-1' }
-    const pending: AgentJournalItemBody = {
-      kind: 'approval',
-      title: 'Run a command?',
-      detail: null,
-      options: [{ id: 'accept', label: 'Allow' }],
-      resolution: {
-        state: 'pending',
-        selectedOptionId: null,
-        resolvedBy: null,
-        resolvedAt: null
-      }
-    }
-
-    await journal.appendLifecycleBatch({
-      settlementId: 'prompt-start',
-      fence: 1,
-      mutations: [{ kind: 'item', identity, body: pending }]
-    })
-
-    expect(journal.lifecycleCapacityState()).toEqual({
-      reservedBytes: journalReservationPhysicalBytes(JOURNAL_ITEM_TERMINAL_RESERVATION_BYTES, 4096),
-      reservedAppendSlots: 1
-    })
-
-    await journal.appendItem(
-      identity,
-      {
-        ...pending,
-        resolution: {
-          state: 'resolved',
-          selectedOptionId: 'accept',
-          resolvedBy: 'test',
-          resolvedAt: tick()
-        }
-      },
-      { fence: 1 }
-    )
-
-    expect(journal.lifecycleCapacityState()).toEqual({
-      reservedBytes: 0,
-      reservedAppendSlots: 0
-    })
-  })
 })
 
 describe('journal location', () => {
@@ -635,7 +339,7 @@ describe('journal location', () => {
 })
 
 describe('on-disk layout', () => {
-  it('keeps the session database beside its blob store', async () => {
+  it('keeps the session database and its projection in one directory', async () => {
     const journal: AgentSessionJournal = await open()
     await journal.appendItem(item(0), body('a'), { fence: 1 })
     expect(await readdir(root)).toContain('journal.db')

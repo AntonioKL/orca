@@ -17,10 +17,7 @@ import type { JournalReplacementItem } from './journal-epoch-replacement'
 import { readJournalSince } from './journal-cursor'
 import { readJournalRowsAfterCursor, type JournalLoad } from './journal-open'
 import { journalDatabaseFile } from './journal-paths'
-import { DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
-import { assertJournalKeyBytes } from './journal-key-bounds'
 import { markJournalPendingSubmissionsUnknown } from './journal-pending-submission-recovery'
-import { journalDirectoryBytes } from './journal-physical-quota'
 import {
   applyJournalRow,
   createJournalReducerState,
@@ -36,7 +33,6 @@ import {
 import type {
   AgentSessionJournalOptions,
   JournalAppendResult,
-  JournalBlobInput,
   JournalItemAppendOptions,
   JournalLifecycleBatchInput,
   JournalReadSince,
@@ -45,19 +41,12 @@ import type {
   ResolveDispatchInput
 } from './journal-store-contracts'
 import type { AgentJournalEpochReason, JournalRow } from './journal-row-schema'
-import { AgentSessionJournalError, JournalAppendBudget } from './journal-write-guards'
-import type { JournalLifecycleReservation } from './journal-lifecycle-capacity'
-import type { JournalLifecycleAdmission } from './journal-lifecycle-admission'
+import { AgentSessionJournalError } from './journal-write-guards'
 import type { JournalRowWriter } from './journal-row-writer'
 import type { JournalEpochController } from './journal-epoch-controller'
 import { JournalConnectionCloser, JournalWriteQueue } from './journal-store-close'
 import { createJournalStoreCollaborators } from './journal-store-collaborators'
-import {
-  assertJournalOpenCapacity,
-  ensureJournalDir,
-  journalStoreLoadedFields
-} from './journal-store-open'
-import { readJournalQuarantinedRows } from './journal-row-table'
+import { ensureJournalDir, journalStoreLoadedFields } from './journal-store-open'
 import type { JournalItemAppender } from './journal-item-appender'
 import type { JournalLifecycleBatchAppender } from './journal-lifecycle-batch-appender'
 
@@ -67,20 +56,16 @@ export class AgentSessionJournal {
   private readonly identity: AgentSessionJournalIdentity
   private readonly journalDir: string
   private readonly dbPath: string
-  private readonly budget: JournalAppendBudget
   private readonly now: () => number
   private readonly mintEpoch: () => string
   private readonly loaded: JournalLoad | null | undefined
 
   private state: JournalReducerState
-  private sizeBytes = 0
   private readOnly = false
   private malformedRows = 0
-  private quarantinedRows = 0
   private database: OpenJournalDatabase | null = null
   private readonly queue: JournalWriteQueue
   private readonly closer: JournalConnectionCloser
-  private readonly lifecycleAdmission: JournalLifecycleAdmission
   private readonly rowWriter: JournalRowWriter
   private readonly epochController: JournalEpochController
   private readonly itemAppender: JournalItemAppender
@@ -91,20 +76,8 @@ export class AgentSessionJournal {
     this.identity = options.identity
     this.journalDir = options.journalDir
     this.dbPath = journalDatabaseFile(options.journalDir)
-    this.budget = new JournalAppendBudget(
-      options.identity.sessionId,
-      options.limits ?? DEFAULT_JOURNAL_PAYLOAD_LIMITS
-    )
     this.now = options.now ?? (() => Date.now())
-    const mintEpoch = options.mintEpoch ?? randomUUID
-    // Both keys are stored outside `row_json`, so the charge can only be honest
-    // if the boundary refuses one larger than the charge assumes.
-    assertJournalKeyBytes({ sessionId: options.identity.sessionId })
-    this.mintEpoch = () => {
-      const epoch = mintEpoch()
-      assertJournalKeyBytes({ sessionId: options.identity.sessionId, epoch })
-      return epoch
-    }
+    this.mintEpoch = options.mintEpoch ?? randomUUID
     this.loaded = options.loaded
     this.state = createJournalReducerState(options.identity.sessionId, '')
     // Serializes sequence assignment with the durable write behind it.
@@ -116,8 +89,6 @@ export class AgentSessionJournal {
     const collaborators = createJournalStoreCollaborators({
       identity: this.identity,
       journalDir: this.journalDir,
-      dbPath: this.dbPath,
-      budget: this.budget,
       now: this.now,
       mintEpoch: this.mintEpoch,
       serialize: (run) => this.queue.serialize(run),
@@ -129,25 +100,15 @@ export class AgentSessionJournal {
       },
       cursor: this.cursor,
       adopt: (loaded) => this.adoptLoadedJournal(loaded),
-      commit: (row, physicalBytes) => {
-        applyJournalRow(this.state, row)
-        this.sizeBytes = physicalBytes
-      },
-      setPhysicalBytes: (bytes) => {
-        this.sizeBytes = bytes
-      },
+      commit: (row) => applyJournalRow(this.state, row),
       loaded: () => this.loaded,
       malformedRows: () => this.malformedRows,
       setMalformedRows: (count) => {
         this.malformedRows = count
       },
-      setQuarantinedRows: (count) => {
-        this.quarantinedRows = count
-      },
       journal: () => this,
-      enqueue: (build, blobs) => this.enqueue(build, blobs)
+      enqueue: (build) => this.enqueue(build)
     })
-    this.lifecycleAdmission = collaborators.lifecycleAdmission
     this.rowWriter = collaborators.rowWriter
     this.epochController = collaborators.epochController
     this.itemAppender = collaborators.itemAppender
@@ -167,26 +128,13 @@ export class AgentSessionJournal {
     return this.journalDir
   }
 
-  /** What the last open's repair did. `quarantinedRows` is the count set aside
-   *  rather than destroyed; `recoverQuarantinedRows` reads them back verbatim. */
-  get repair(): { malformedRows: number; quarantinedRows: number } {
-    return { malformedRows: this.malformedRows, quarantinedRows: this.quarantinedRows }
-  }
-
-  /** The rejected suffix, exactly as it was stored. Orca-owned submission,
-   *  receipt and lifecycle rows live here after a repair, and no provider
-   *  transcript can reconstruct their identity. */
-  recoverQuarantinedRows(): { epoch: string; seq: number; ts: number; rowJson: string }[] {
-    return readJournalQuarantinedRows(this.requireDatabase().db, this.identity.sessionId)
+  /** What the last open's repair did. */
+  get repair(): { malformedRows: number } {
+    return { malformedRows: this.malformedRows }
   }
 
   async open(): Promise<void> {
     await ensureJournalDir(this.journalDir)
-    await assertJournalOpenCapacity({
-      journalDir: this.journalDir,
-      sessionId: this.identity.sessionId,
-      maxBytes: this.budget.maxSessionBytes
-    })
     this.database = openJournalDatabase(this.dbPath)
     try {
       await this.restore()
@@ -226,24 +174,6 @@ export class AgentSessionJournal {
 
   canonicalItemId = (itemId: string): string => resolveJournalItemId(this.state, itemId)
 
-  reserveLifecycleCapacity(token: JournalLifecycleReservation): Promise<boolean> {
-    return this.serializeCapacityMutation(async () => {
-      this.sizeBytes = await journalDirectoryBytes(this.journalDir)
-      return this.lifecycleAdmission.reserve(token, this.sizeBytes)
-    })
-  }
-
-  transferLifecycleCapacity(fromId: string, toId: string): Promise<boolean> {
-    return this.serializeCapacityMutation(() => this.lifecycleAdmission.transfer(fromId, toId))
-  }
-
-  releaseLifecycleCapacity(id: string): Promise<void> {
-    return this.serializeCapacityMutation(() => this.lifecycleAdmission.release(id))
-  }
-
-  lifecycleCapacityState = (): { reservedBytes: number; reservedAppendSlots: number } =>
-    this.lifecycleAdmission.state
-
   readSince(cursor: AgentJournalCursor): JournalReadSince {
     return readJournalSince(
       {
@@ -270,16 +200,6 @@ export class AgentSessionJournal {
     options: JournalItemAppendOptions = { fence: 0 }
   ): Promise<JournalAppendResult> {
     return this.itemAppender.append(identity, body, options)
-  }
-
-  /** Blob-before-row admission on the same serialized path as sequence assignment. */
-  appendItemWithBlobs(
-    identity: AgentJournalItemIdentity,
-    body: AgentJournalItemBody,
-    blobs: readonly JournalBlobInput[],
-    options: JournalItemAppendOptions = { fence: 0 }
-  ): Promise<JournalAppendResult> {
-    return this.itemAppender.appendWithBlobs(identity, body, blobs, options)
   }
 
   appendTombstone(
@@ -360,13 +280,7 @@ export class AgentSessionJournal {
    * SAME reducer replay uses — all inside one serialized step, so concurrent
    * callers cannot interleave and mint the same sequence.
    */
-  private enqueue(
-    build: (seq: number, ts: number) => JournalRow,
-    blobs: readonly JournalBlobInput[] = []
-  ): Promise<JournalRow> {
-    return this.rowWriter.enqueue(build, blobs)
+  private enqueue(build: (seq: number, ts: number) => JournalRow): Promise<JournalRow> {
+    return this.rowWriter.enqueue(build)
   }
-
-  private serializeCapacityMutation = <T>(runMutation: () => Promise<T> | T): Promise<T> =>
-    this.queue.serialize(async () => runMutation())
 }

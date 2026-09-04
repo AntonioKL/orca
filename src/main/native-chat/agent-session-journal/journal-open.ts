@@ -11,7 +11,6 @@ import type Database from '../../sqlite/sync-database'
 import { findSequenceGap } from './journal-cursor'
 import { openJournalDatabase } from './journal-database'
 import { journalDatabaseFile } from './journal-paths'
-import { journalDirectoryBytes } from './journal-physical-quota'
 import {
   applyJournalRow,
   createJournalReducerState,
@@ -37,7 +36,6 @@ export type JournalLoad = {
   /** Rows skipped because their body failed to parse (future-version rows are
    *  `readOnly`, never counted here). The store discloses these in the timeline. */
   malformedRows: number
-  sizeBytes: number
   /** Directory-internal: the first sequence of an unusable suffix. The store
    *  deletes from here before it accepts a write; a probe leaves it alone. */
   truncateFrom?: number
@@ -85,7 +83,7 @@ export function replayJournal(
   // Anchored at 1, never at the first row that HAPPENS to remain: nothing trims
   // a prefix, so a missing epoch row is a hole like any other and everything
   // behind it is unanchored. Validating from `rows[0].seq` would call the
-  // leftovers contiguous and leave them out of the quarantine that runs before
+  // leftovers contiguous and leave them out of the repair that runs before
   // provider history replaces the epoch.
   const gap = findSequenceGap(
     rows.map((row) => row.seq),
@@ -101,7 +99,7 @@ export function replayJournal(
   // Contiguity from 1 is not the whole invariant: sequence 1 has to BE the epoch
   // row. An ordinary row there is an epoch nothing anchors, and replaying it as
   // clean is how a repaired journal silently adopts a timeline whose real
-  // history is sitting in quarantine.
+  // history was never rebuilt.
   if (rows.length > 0 && rows[0]?.kind !== 'epoch') {
     truncateFrom = rows[0]?.seq ?? truncateFrom
     rows.length = 0
@@ -119,14 +117,13 @@ export function replayJournal(
     readOnly: latched,
     corrupt: Boolean(gap) || malformedRows > 0 || unanchored || awaitsProviderHistory(rows),
     malformedRows,
-    sizeBytes: 0,
     ...(truncateFrom !== undefined && !latched ? { truncateFrom } : {})
   }
 }
 
 /**
  * The epoch a total repair published, still holding nothing but its own anchor
- * and disclosure. The rows it set aside were never reconstructed, so provider
+ * and disclosure. The rows it dropped were never reconstructed, so provider
  * history has to be retried rather than this being called a clean timeline. The
  * moment the session writes content of its own the epoch is its own history and
  * the retry stops.
@@ -163,18 +160,14 @@ export function readJournalRowsAfterCursor(
 
 /** Standalone probe. Opens its own connection and closes it before returning,
  *  so a caller holding only the returned value holds no handle. */
-export async function loadJournal(
-  journalDir: string,
-  sessionId: string
-): Promise<JournalLoad | null> {
+export function loadJournal(journalDir: string, sessionId: string): JournalLoad | null {
   const dbPath = journalDatabaseFile(journalDir)
   if (!existsSync(dbPath)) {
     return null
   }
   const opened = openJournalDatabase(dbPath)
   try {
-    const load = replayJournal(opened.db, opened.readOnly, sessionId)
-    return load ? { ...load, sizeBytes: await journalDirectoryBytes(journalDir) } : null
+    return replayJournal(opened.db, opened.readOnly, sessionId)
   } finally {
     opened.db.close()
   }
@@ -185,7 +178,6 @@ function emptyReadOnlyLoad(sessionId: string): JournalLoad {
     state: createJournalReducerState(sessionId, ''),
     readOnly: true,
     corrupt: false,
-    malformedRows: 0,
-    sizeBytes: 0
+    malformedRows: 0
   }
 }

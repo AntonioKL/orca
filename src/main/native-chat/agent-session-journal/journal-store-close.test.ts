@@ -108,7 +108,6 @@ describe('closed-state admission happens at enqueue', () => {
       )
     const refusals = [
       settle(journal.appendItem(item(1), body('after'), { fence: 1 })),
-      settle(journal.appendItemWithBlobs(item(2), body('after'), [], { fence: 1 })),
       settle(journal.appendTombstone(item(3), { fence: 1 })),
       settle(
         journal.appendSubmission({
@@ -127,10 +126,7 @@ describe('closed-state admission happens at enqueue', () => {
         })
       ),
       settle(journal.rollEpoch('handle_forked', 1)),
-      settle(journal.replaceEpochItems('handle_forked', 1, [])),
-      settle(journal.reserveLifecycleCapacity({ id: 'r', bytes: 1024, appendSlots: 1 })),
-      settle(journal.transferLifecycleCapacity('r', 's')),
-      settle(journal.releaseLifecycleCapacity('r'))
+      settle(journal.replaceEpochItems('handle_forked', 1, []))
     ]
     for (const refusal of refusals) {
       expect(await refusal).toMatchObject({ code: 'journal_closed' })

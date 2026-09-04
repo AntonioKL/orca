@@ -25,7 +25,6 @@ import type {
 import { attachFingerprintFields } from '../native-chat/agent-session-wire/structured-agent-session-attach'
 import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import { journalDirectoryFor } from '../native-chat/agent-session-journal/journal-paths'
-import { readJournalBlob } from '../native-chat/agent-session-journal/journal-blob-store'
 import { appendLegacyTranscriptMessages } from '../native-chat/agent-session-journal/journal-legacy-import'
 import type { AgentSessionJournal } from '../native-chat/agent-session-journal/journal-store'
 import { createTrackedJournalOpener } from '../native-chat/agent-session-journal/journal-store-test-open'
@@ -803,7 +802,6 @@ describe('a structured codex session over agentSession.*', () => {
     const item = journal.snapshot().items.find((candidate) => candidate.body?.kind === 'tool-call')
     const bounded = item?.body?.kind === 'tool-call' ? item.body.output : undefined
     expect(bounded).toMatchObject({ truncated: true, byteLength: Buffer.byteLength(output) })
-    expect(await readJournalBlob(journal.directory, bounded?.digest ?? '')).toBe(output)
   })
 
   it('keeps an answered prompt resolved after the provider exits', async () => {
