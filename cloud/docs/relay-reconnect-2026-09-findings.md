@@ -235,9 +235,22 @@ Changes, smallest first:
    requirement for `canary-apply`. Change lands in `relay-monitor-evidence.mjs verify-authority` +
    `relay-production-same-cap-wave.mjs` + their node:test suites.
 
-Expected: batch of 4 = max(cell) ~ 17 min + 1 min gate = ~18 min. 22 cells = 6 batches = ~2 h, with
-one 15-min dry-run at the start instead of six. Order: (3) and (2) are workflow/script only and can ship
-now; (1) needs the relay image rebuilt, which the lock-fix PR forces anyway.
+**Correction after reading the cell job (07:35Z):** (2) parallel cells is not a flag flip. Each cell job
+asserts the exact selector generation `expected + 2 x wave-index` and exact memberships derived from
+predecessors having completed (`ISOLATED_*`/`RESTORED_*` in the job, `applyExactAdmissionSelector`
+compare-and-swap), and all cells share one Terraform state lock. Making that concurrent means a batch-level
+isolate/restore in the gate and a rewrite of the 650-line job's expectations. That is the multi-day trap
+the owner described. Deferred.
+
+What is cheap and removes most of the wall-clock: (3). The per-batch 15-min dry-run costs 15 min each
+*and* fails ~50% of the time on old-image crashes, which is where hours go. Implement: `batch-apply` with a
+verified canary authority accepts a passed dry-run up to 6 h old and may re-use one already consumed
+(the consumed-marker check exists to stop replaying stale evidence; the canary binding plus the in-job
+live preflight at drain time replace it). Files: `relay-monitor-evidence.mjs` (`--after-canary`),
+`incident-live-preflight-cli.ts` (same flag), the same-cap workflow + job, and both test suites.
+Revised expectation: 22 cells = 6 sequential batches x ~70 min = ~7 h wall-clock but *unattended-safe*
+and with one dry-run total, versus today's 6 dry-runs at ~50% each. (1) paced drain rides the lock-fix
+image.
 
 ## Recommended next steps (superseded by the plan above; kept for history)
 
