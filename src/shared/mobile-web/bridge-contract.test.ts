@@ -371,26 +371,30 @@ describe('mobile web bridge shell contract', () => {
     ).toEqual({ ok: false, error: 'too_large' })
   })
 
+  // Stripped rather than rejected: `init` carries every grant, so dropping the frame over one
+  // undeclared key from a newer shell costs the page every capability. The key is still never
+  // readable by the page, which is the whole point of the fence.
   it.each(['hostId', 'hostIdentity', 'publicKeyB64', 'deviceToken', 'endpoint', 'credential'])(
-    'rejects privileged %s state from the initial page message',
+    'strips privileged %s state from the initial page message',
     (field) => {
-      expect(
-        parseMobileWebBridgeInitialMessage(
-          JSON.stringify({
-            version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-            type: 'init',
-            shellSessionId: SHELL_SESSION_ID,
-            buildId: BUILD_ID,
-            connection: 'connected',
-            grants: [operationGrant()],
-            [field]: 'credential-secret'
-          })
-        )
-      ).toEqual({ ok: false, error: 'invalid_message' })
+      const parsed = parseMobileWebBridgeInitialMessage(
+        JSON.stringify({
+          version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+          type: 'init',
+          shellSessionId: SHELL_SESSION_ID,
+          buildId: BUILD_ID,
+          connection: 'connected',
+          grants: [operationGrant()],
+          [field]: 'credential-secret'
+        })
+      )
+
+      expect(parsed).toMatchObject({ ok: true })
+      expect(parsed.ok && parsed.value).not.toHaveProperty(field)
     }
   )
 
-  it('rejects unbounded or host-shaped resume routes', () => {
+  it('rejects unbounded resume routes and strips host-shaped ones', () => {
     const base = {
       version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
       type: 'init',
@@ -410,7 +414,21 @@ describe('mobile web bridge shell contract', () => {
       }).success
     ).toBe(false)
     expect(
-      MobileWebBridgeShellMessageSchema.safeParse({
+      parseMobileWebBridgeShellMessage(
+        JSON.stringify({
+          ...base,
+          resumeRoute: {
+            kind: 'session',
+            workspaceId: 'opaque-workspace',
+            workspaceName: 'x'.repeat(241)
+          }
+        }),
+        CONTEXT
+      )
+    ).toEqual({ ok: false, error: 'invalid_message' })
+
+    const parsed = parseMobileWebBridgeShellMessage(
+      JSON.stringify({
         ...base,
         resumeRoute: {
           kind: 'session',
@@ -418,8 +436,16 @@ describe('mobile web bridge shell contract', () => {
           workspaceName: 'Feature',
           hostPath: '/private/worktree'
         }
-      }).success
-    ).toBe(false)
+      }),
+      CONTEXT
+    )
+    expect(parsed).toMatchObject({ ok: true })
+    expect(parsed.ok && parsed.value).toMatchObject({
+      resumeRoute: { kind: 'session', workspaceName: 'Feature' }
+    })
+    expect(parsed.ok && (parsed.value as { resumeRoute: object }).resumeRoute).not.toHaveProperty(
+      'hostPath'
+    )
   })
 
   it('bounds the optional local host display name', () => {
@@ -599,12 +625,21 @@ describe('mobile web bridge shell contract', () => {
       error: { code: 'host_error', retryable: true }
     }
     expect(MobileWebBridgeShellMessageSchema.safeParse(response).success).toBe(true)
-    expect(
-      MobileWebBridgeShellMessageSchema.safeParse({
+
+    // The message is stripped rather than fatal, so the page keeps the error code it can act on
+    // and still cannot read the host path inside the message.
+    const parsed = parseMobileWebBridgeShellMessage(
+      JSON.stringify({
         ...response,
         error: { ...response.error, message: '/private/path: permission denied' }
-      }).success
-    ).toBe(false)
+      }),
+      CONTEXT
+    )
+    expect(parsed).toMatchObject({ ok: true })
+    expect(parsed.ok && parsed.value).toMatchObject({
+      error: { code: 'host_error', retryable: true }
+    })
+    expect(parsed.ok && (parsed.value as { error: object }).error).not.toHaveProperty('message')
   })
 
   it('parses matching shell events and rejects stale subscription events', () => {

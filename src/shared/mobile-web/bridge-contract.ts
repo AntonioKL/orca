@@ -17,7 +17,8 @@ import {
   type MobileWebBridgeMessageContext,
   type MobileWebBridgeMessageParseResult
 } from './bridge-message-parser'
-import { MobileWebWorkspaceIdSchema } from './workspace-operation-contract'
+import { MobileWebNavigationRouteSchema, MobileWebResumeRouteSchema } from './bridge-route-contract'
+import { tolerantMobileWebShellPayload } from './shell-payload-tolerance'
 
 export {
   isMobileWebBridgeOperation,
@@ -36,6 +37,8 @@ export {
   MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS
 } from './bridge-limits'
 export { MOBILE_WEB_BRIDGE_PROTOCOL_VERSION } from './bridge-protocol-version'
+export { MobileWebNavigationRouteSchema, MobileWebResumeRouteSchema } from './bridge-route-contract'
+export type { MobileWebNavigationRoute, MobileWebResumeRoute } from './bridge-route-contract'
 
 const MobileWebBridgeOperationShape = {
   capability: MobileWebBridgeCapabilitySchema,
@@ -91,38 +94,6 @@ const PageHardwareBackResultSchema = PageEnvelopeSchema.extend({
   sequence: SequenceSchema,
   handled: z.boolean()
 }).strict()
-
-const MobileWebWorkspaceListRouteSchema = z
-  .object({
-    kind: z.literal('workspaceList'),
-    notice: z.literal('worktree-missing').optional()
-  })
-  .strict()
-const MobileWebSessionRouteSchema = z
-  .object({
-    kind: z.literal('session'),
-    workspaceId: MobileWebWorkspaceIdSchema,
-    workspaceName: z.string().max(240)
-  })
-  .strict()
-
-export const MobileWebResumeRouteSchema = z.discriminatedUnion('kind', [
-  MobileWebWorkspaceListRouteSchema,
-  MobileWebSessionRouteSchema
-])
-
-export const MobileWebNavigationRouteSchema = z.discriminatedUnion('kind', [
-  MobileWebWorkspaceListRouteSchema,
-  MobileWebSessionRouteSchema,
-  z
-    .object({
-      kind: z.literal('tasks'),
-      taskSource: z.enum(['github', 'gitlab', 'linear']).optional()
-    })
-    .strict(),
-  z.object({ kind: z.literal('accounts') }).strict(),
-  z.object({ kind: z.literal('newWorkspace') }).strict()
-])
 
 const PageRouteStateSchema = PageEnvelopeSchema.extend({
   type: z.literal('routeState'),
@@ -271,8 +242,6 @@ export const MobileWebBridgeShellMessageSchema = z.union([
 export type MobileWebBridgeErrorCode = z.infer<typeof MobileWebBridgeErrorCodeSchema>
 export type MobileWebBridgePageMessage = z.infer<typeof MobileWebBridgePageMessageSchema>
 export type MobileWebBridgeShellMessage = z.infer<typeof MobileWebBridgeShellMessageSchema>
-export type MobileWebNavigationRoute = z.infer<typeof MobileWebNavigationRouteSchema>
-export type MobileWebResumeRoute = z.infer<typeof MobileWebResumeRouteSchema>
 
 export type { MobileWebBridgeMessageContext } from './bridge-message-parser'
 export type MobileWebBridgeParseResult<T> = MobileWebBridgeMessageParseResult<T>
@@ -284,17 +253,28 @@ export function parseMobileWebBridgePageMessage(
   return parseMobileWebBridgeMessage(raw, expected, MobileWebBridgePageMessageSchema)
 }
 
+/**
+ * Shell->page frames are authored by an APK that can be newer than the page reading them, and a
+ * frame the page cannot parse is dropped whole — for `init` that is every capability lost, not one
+ * field. Parsing through the tolerant view strips a key the page does not declare instead of
+ * failing the frame, which also keeps the PII fence: an undeclared `hostPath` or raw error
+ * `message` never reaches the page either way. Page->shell stays strict; the shell is the
+ * authority there.
+ */
+const TolerantShellMessageSchema = tolerantMobileWebShellPayload(MobileWebBridgeShellMessageSchema)
+const TolerantShellInitSchema = tolerantMobileWebShellPayload(ShellInitSchema)
+
 export function parseMobileWebBridgeShellMessage(
   raw: string,
   expected: MobileWebBridgeMessageContext
 ): MobileWebBridgeParseResult<MobileWebBridgeShellMessage> {
-  return parseMobileWebBridgeMessage(raw, expected, MobileWebBridgeShellMessageSchema)
+  return parseMobileWebBridgeMessage(raw, expected, TolerantShellMessageSchema)
 }
 
 export function parseMobileWebBridgeInitialMessage(
   raw: string
 ): MobileWebBridgeParseResult<z.infer<typeof ShellInitSchema>> {
-  return parseMobileWebBridgeMessageDocument(raw, ShellInitSchema)
+  return parseMobileWebBridgeMessageDocument(raw, TolerantShellInitSchema)
 }
 
 function validateRequestOperation(
