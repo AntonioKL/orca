@@ -2,6 +2,7 @@
 import { OrcaRuntimeWithRestoreLivePairedRendererSessionOwnedMobileTerminals } from './orca-runtime-restore-live-paired-renderer-session-owned-mobile-terminals'
 import type { TerminalOscLinkRange } from '../../shared/terminal-osc-link-ranges'
 import {
+  isDurableSleepingCapture,
   mayBackgroundWakeSleepingAgentSession,
   type SleepingAgentSessionRecord
 } from '../../shared/agent-session-resume'
@@ -129,6 +130,23 @@ export class OrcaRuntimeWithWaitForLeafPtyId extends OrcaRuntimeWithRestoreLiveP
 
   findSleepingAgentRecordForPane(paneKey: string): SleepingAgentSessionRecord | undefined {
     return findSleepingAgentSessionRecord(this.workspaceSessions.listSessions(), paneKey)
+  }
+
+  /**
+   * The pane behind a handle whose process is gone but whose resume record can
+   * bring it back, plus whether inbound mail may wake it on its own. Lets a
+   * sender tell "asleep, will read this later" from "gone, nothing to talk to".
+   */
+  getResumableSleptRecipientPane(handle: string): { paneKey: string; autoWakes: boolean } | null {
+    if (this.getLiveTerminalPaneKey(handle)) {
+      return null
+    }
+    const paneKey = this.getTerminalPaneKey(handle)
+    const record = paneKey ? this.findSleepingAgentRecordForPane(paneKey) : undefined
+    if (!paneKey || !record || !isDurableSleepingCapture(record)) {
+      return null
+    }
+    return { paneKey, autoWakes: mayBackgroundWakeSleepingAgentSession(record) }
   }
 
   protected mayBackgroundWakeSleepingPane(paneKey: string): boolean {

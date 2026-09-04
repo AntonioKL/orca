@@ -73,6 +73,12 @@ export type SleepingAgentSessionRecord = {
   restoreOnTabOpenOnly?: boolean
 }
 
+// Why: `live`/legacy rows are provisional checkpoints a fresh capture supersedes; an explicit
+// sleep or quit capture is the pane's only resume handle once its live row is gone.
+export function isDurableSleepingCapture(record: SleepingAgentSessionRecord): boolean {
+  return record.origin === 'worktree-sleep' || record.origin === 'quit'
+}
+
 /**
  * Whether a background actor — inbound orchestration mail — may respawn this
  * slept pane without anyone asking.

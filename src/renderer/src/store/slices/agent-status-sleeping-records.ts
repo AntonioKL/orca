@@ -4,11 +4,14 @@ import {
   agentProviderSessionsEqual,
   getAgentResumeArgv,
   isResumableTuiAgent,
+  isDurableSleepingCapture,
   type SleepingAgentLaunchConfig,
   type SleepingAgentSessionRecord
 } from '../../../../shared/agent-session-resume'
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import { findTabForAgentEntry } from './agent-status-pane-key-tab-binding'
+
+export { isDurableSleepingCapture }
 
 export function copyLaunchConfig(config: SleepingAgentLaunchConfig): SleepingAgentLaunchConfig {
   return {
@@ -90,12 +93,6 @@ export function markManualSleepLazyRestore(record: SleepingAgentSessionRecord): 
   if (record.state === 'done') {
     record.restoreOnTabOpenOnly = true
   }
-}
-
-// Why: `live`/legacy rows are provisional checkpoints a fresh capture supersedes; an explicit
-// sleep or quit capture is the pane's only resume handle once its live row is gone.
-export function isDurableSleepingCapture(record: SleepingAgentSessionRecord): boolean {
-  return record.origin === 'worktree-sleep' || record.origin === 'quit'
 }
 
 // Why: manual sleep kills the pty either way, so the record carries resume identity, not the dead
