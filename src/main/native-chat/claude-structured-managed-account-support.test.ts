@@ -70,10 +70,11 @@ describe('structuredClaudeMatchesActiveManagedAccount', () => {
     ).toBe(false)
   })
 
-  /** Absent is not empty. An empty array is a real answer — the user has no managed accounts, so
-   *  nothing claims an identity and the ambient path is legitimate. Settings with no accounts field
-   *  are settings we failed to parse, which is the same epistemic state as unreadable. */
-  it('separates an empty account list from an absent one', () => {
+  /** Absent and empty are the same answer: this user has no managed Claude accounts, so nothing
+   *  claims an identity and the ambient path is legitimate. Only settings that cannot be READ are
+   *  unknown. Treating a missing key as unknown strands profiles that simply never wrote it — the
+   *  auth policy's own predicate takes `(accounts ?? [])` for exactly this reason. */
+  it('treats an absent account list the same as an empty one', () => {
     expect(
       structuredClaudeMatchesActiveManagedAccount(settings({ claudeManagedAccounts: [] }))
     ).toBe(true)
@@ -81,7 +82,7 @@ describe('structuredClaudeMatchesActiveManagedAccount', () => {
       structuredClaudeMatchesActiveManagedAccount({
         activeClaudeManagedAccountId: null
       } as unknown as ClaudeManagedAccountGateSettings)
-    ).toBe(false)
+    ).toBe(true)
   })
 
   it('fails closed when the settings cannot be read at all', () => {

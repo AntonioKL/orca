@@ -20,18 +20,20 @@ export type ClaudeManagedAccountGateSettings = Pick<
  * lets the two disagree, and a session admitted by this gate would then run under a policy computed
  * from a different account than the one approved here.
  *
- * Unknown answers refuse: an install with no managed accounts claims no identity and is fine, but a
- * selection this cannot resolve is not evidence that the ambient identity is right.
+ * Unknown answers refuse, and only genuinely unknown ones: settings that cannot be read at all, or
+ * an active selection this cannot resolve. An install with no managed accounts — the list empty or
+ * never written — claims no identity and is fine.
  */
 export function structuredClaudeMatchesActiveManagedAccount(
   settings: ClaudeManagedAccountGateSettings | null | undefined
 ): boolean {
-  const accounts = settings?.claudeManagedAccounts
-  // Absent is not empty: an empty list is a real "no managed accounts" answer, but a missing field
-  // is settings we failed to parse, which is the same unknown as unreadable. Do not merge these.
-  if (!settings || !Array.isArray(accounts)) {
+  if (!settings) {
     return false
   }
+  // Absent is the same answer as empty — this user has no managed Claude accounts, so nothing
+  // claims an identity and ambient auth is the truth. Only settings that cannot be READ are
+  // unknown, and those refuse above. The auth policy reads the list the same way.
+  const accounts = settings.claudeManagedAccounts ?? []
   if (accounts.length === 0) {
     return true
   }
