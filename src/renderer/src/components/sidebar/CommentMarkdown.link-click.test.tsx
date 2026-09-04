@@ -300,6 +300,46 @@ describe('CommentMarkdown link click handler', () => {
     expect(container.textContent).toContain('/tmp/$draft/report.html')
   })
 
+  it('links paths before common sentence punctuation', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content="Open src/foo.ts! Read docs/guide.md? View assets/report.pdf—then continue."
+          onLinkClick={vi.fn()}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    expect(Array.from(container.querySelectorAll('a')).map((anchor) => anchor.textContent)).toEqual(
+      ['src/foo.ts', 'docs/guide.md', 'assets/report.pdf']
+    )
+  })
+
+  it('does not link partial paths across unsupported punctuation', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content="Leave src/foo.ts!draft/file.html, src/foo.ts—draft/file.html."
+          onLinkClick={vi.fn()}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    expect(container.querySelectorAll('a')).toHaveLength(0)
+  })
+
   it('prevents the default action for an unresolved internal file href', () => {
     const onLinkClick = vi.fn()
     container = document.createElement('div')

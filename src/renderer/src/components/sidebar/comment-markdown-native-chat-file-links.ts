@@ -29,13 +29,43 @@ function isLinkifiableFile(link: ParsedTerminalFileLink, requireSeparator: boole
 
 const SAFE_LEADING_BOUNDARY_PATTERN = /[\s([{'",;]/
 const SAFE_TRAILING_BOUNDARY_PATTERN = /[\s)\]}>'",;.:]/
+const SENTENCE_PATH_PUNCTUATION_PATTERN = /\.[\p{L}\p{N}][\p{L}\p{N}\p{M}_+-]*([!?—])/gu
+const MAX_DASHED_PROSE_WORD_LENGTH = 32
+
+function hasBoundedProseAfterDash(value: string, startIndex: number): boolean {
+  const endIndex = Math.min(value.length, startIndex + MAX_DASHED_PROSE_WORD_LENGTH)
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const char = value[index]
+    if (!char || SAFE_TRAILING_BOUNDARY_PATTERN.test(char)) {
+      return true
+    }
+    if (char === '/' || char === '\\') {
+      return false
+    }
+  }
+  return endIndex === value.length
+}
+
+function isSafeTrailingBoundary(value: string, endIndex: number): boolean {
+  const boundary = value[endIndex]
+  if (boundary === undefined || SAFE_TRAILING_BOUNDARY_PATTERN.test(boundary)) {
+    return true
+  }
+  if (boundary === '!' || boundary === '?') {
+    const next = value[endIndex + 1]
+    return next === undefined || SAFE_TRAILING_BOUNDARY_PATTERN.test(next)
+  }
+  if (boundary === '—') {
+    return hasBoundedProseAfterDash(value, endIndex + 1)
+  }
+  return false
+}
 
 function hasPartialPathBoundary(value: string, link: ParsedTerminalFileLink): boolean {
   const before = value[link.startIndex - 1]
-  const after = value[link.endIndex]
   return (
     (before !== undefined && !SAFE_LEADING_BOUNDARY_PATTERN.test(before)) ||
-    (after !== undefined && !SAFE_TRAILING_BOUNDARY_PATTERN.test(after))
+    !isSafeTrailingBoundary(value, link.endIndex)
   )
 }
 
@@ -71,7 +101,7 @@ function splitProseJoinedLinks(link: ParsedTerminalFileLink): ParsedTerminalFile
   return hasBareWord || tokenLinks.length > 1 ? tokenLinks : [link]
 }
 
-function splitTextNode(value: string): MarkdownNode[] {
+function splitTextSegment(value: string): MarkdownNode[] {
   const links = extractTerminalFileLinks(value)
     .filter((link) => !hasPartialPathBoundary(value, link))
     .filter((link) => isLinkifiableFile(link, true))
@@ -95,6 +125,25 @@ function splitTextNode(value: string): MarkdownNode[] {
   if (cursor < value.length) {
     children.push({ type: 'text', value: value.slice(cursor) })
   }
+  return children
+}
+
+function splitTextNode(value: string): MarkdownNode[] {
+  const children: MarkdownNode[] = []
+  let cursor = 0
+  for (const match of value.matchAll(SENTENCE_PATH_PUNCTUATION_PATTERN)) {
+    const punctuationIndex = (match.index ?? 0) + match[0].length - 1
+    if (!isSafeTrailingBoundary(value, punctuationIndex)) {
+      continue
+    }
+    children.push(...splitTextSegment(value.slice(cursor, punctuationIndex)))
+    children.push({ type: 'text', value: value[punctuationIndex] })
+    cursor = punctuationIndex + 1
+  }
+  if (cursor === 0) {
+    return splitTextSegment(value)
+  }
+  children.push(...splitTextSegment(value.slice(cursor)))
   return children
 }
 
