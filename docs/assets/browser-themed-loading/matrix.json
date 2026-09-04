@@ -1,0 +1,41 @@
+[
+  {
+    "label": "baseline",
+    "status": 1,
+    "passed": 11,
+    "total": 19,
+    "failed": [
+      "pre-attach",
+      "dark-held",
+      "dark-again-held",
+      "system-dark-held",
+      "committed-empty",
+      "recovery-held",
+      "new-tab",
+      "new-tab-first-navigation-held"
+    ]
+  },
+  {
+    "label": "candidate",
+    "status": 0,
+    "passed": 19,
+    "total": 19,
+    "failed": []
+  },
+  {
+    "label": "reverted",
+    "status": 1,
+    "passed": 11,
+    "total": 19,
+    "failed": [
+      "pre-attach",
+      "dark-held",
+      "dark-again-held",
+      "system-dark-held",
+      "committed-empty",
+      "recovery-held",
+      "new-tab",
+      "new-tab-first-navigation-held"
+    ]
+  }
+]

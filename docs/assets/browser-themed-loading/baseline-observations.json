@@ -1,0 +1,515 @@
+[
+  {
+    "phase": "pre-attach",
+    "attached": false,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": false,
+    "url": "",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": false,
+    "statePass": false,
+    "pass": false
+  },
+  {
+    "phase": "dark-held",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": true,
+    "url": "",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": false,
+    "statePass": false,
+    "pass": false
+  },
+  {
+    "phase": "light-held",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(255, 255, 255)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": true,
+    "url": "",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": true,
+    "statePass": true,
+    "pass": true
+  },
+  {
+    "phase": "dark-again-held",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": true,
+    "url": "",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": false,
+    "statePass": false,
+    "pass": false
+  },
+  {
+    "phase": "system-light-held",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(255, 255, 255)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": true,
+    "url": "",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": true,
+    "statePass": true,
+    "pass": true
+  },
+  {
+    "phase": "system-dark-held",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": true,
+    "url": "",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": false,
+    "statePass": false,
+    "pass": false
+  },
+  {
+    "phase": "committed-empty",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": true,
+    "url": "http://127.0.0.1:59267/held",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": false,
+    "statePass": false,
+    "pass": false
+  },
+  {
+    "phase": "unstyled-painted",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": false,
+    "url": "http://127.0.0.1:59267/held",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": true,
+    "statePass": true,
+    "pass": true
+  },
+  {
+    "phase": "unstyled-light",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(255, 255, 255)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": false,
+    "url": "http://127.0.0.1:59267/held",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": true,
+    "statePass": true,
+    "pass": true
+  },
+  {
+    "phase": "reload-retained",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": true,
+    "url": "http://127.0.0.1:59267/held",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": true,
+    "statePass": true,
+    "pass": true
+  },
+  {
+    "phase": "unpark-retained",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": false,
+    "url": "http://127.0.0.1:59267/held",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": true,
+    "statePass": true,
+    "pass": true
+  },
+  {
+    "phase": "recovery-held",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": true,
+    "url": "http://127.0.0.1:59267/held",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": false,
+    "statePass": false,
+    "pass": false
+  },
+  {
+    "phase": "recovery-painted",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": false,
+    "url": "http://127.0.0.1:59267/held",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": true,
+    "statePass": true,
+    "pass": true
+  },
+  {
+    "phase": "new-tab",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": false,
+    "url": "data:text/html,",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [251, 251, 251],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": false,
+    "statePass": false,
+    "pass": false
+  },
+  {
+    "phase": "new-tab-first-navigation-held",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": true,
+    "url": "data:text/html,",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": false,
+    "statePass": false,
+    "pass": false
+  },
+  {
+    "phase": "new-tab-painted",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": false,
+    "url": "http://127.0.0.1:59267/held",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": true,
+    "statePass": true,
+    "pass": true
+  },
+  {
+    "phase": "network-error",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "none",
+    "loading": false,
+    "url": "http://127.0.0.1:59267/fail",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [10, 10, 10],
+      [10, 10, 10],
+      [10, 10, 10],
+      [10, 10, 10],
+      [10, 10, 10],
+      [10, 10, 10]
+    ],
+    "pixelPass": true,
+    "statePass": true,
+    "pass": true
+  },
+  {
+    "phase": "network-retry-held",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "none",
+    "loading": true,
+    "url": "http://127.0.0.1:59267/fail",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [10, 10, 10],
+      [10, 10, 10],
+      [10, 10, 10],
+      [10, 10, 10],
+      [10, 10, 10],
+      [10, 10, 10]
+    ],
+    "pixelPass": true,
+    "statePass": true,
+    "pass": true
+  },
+  {
+    "phase": "network-retry-painted",
+    "attached": true,
+    "background": "rgb(255, 255, 255)",
+    "theme": "rgb(10, 10, 10)",
+    "visibility": "visible",
+    "display": "flex",
+    "loading": false,
+    "url": "http://127.0.0.1:59267/fail",
+    "rect": {
+      "x": 281,
+      "y": 87,
+      "width": 1097,
+      "height": 917
+    },
+    "samples": [
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255],
+      [255, 255, 255]
+    ],
+    "pixelPass": true,
+    "statePass": true,
+    "pass": true
+  }
+]
