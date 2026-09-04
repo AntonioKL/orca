@@ -36,7 +36,7 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 2. Merged PR #18580 and #18581 to main (monitor bar + docs).
 2b. Merged PR #18606 to main (relay lock change; no serving effect until the image is deployed).
 2c. Dispatched `cloud-publish-relay-production` for 7b108abf71 (builds and pushes an image; changes nothing serving). Done: 519f4914.
-2d. Dispatched `cloud-deploy-relay-production-director` on 519f4914 (preserve placement, no prune, rehome gen 12). Moves 100% director traffic to the new revision after health verification.
+2d. Dispatched `cloud-deploy-relay-production-director` on 519f4914 (preserve placement, no prune, rehome gen 12). Succeeded 08:45Z; serving revision 00570-siv. Rollback: `gcloud run services update-traffic orca-cloud-relay --region us-central1 --to-revisions orca-cloud-relay-00565-fes=100` (85bf6799, still Ready). Not needed so far.
 3. 2026-09-04 06:07:15Z: dispatched `cloud-deploy-relay-production-same-cap` `canary-apply` for production-gce-c7 only (run 33843071283). Completed successfully 06:26Z: c7 isolated, drained (807 controls re-dialed), template + MIG rolled to 85bf6799, verified, restored to general admission. Selector generation advanced 110 -> 112 (isolate + restore).
 4. Nothing else. Both monitor dispatches were `mode=dry-run` (read-only). The same-cap dispatch was `mode=verify` (read-only, confirmed by step gates `if: inputs.mode != 'verify'` on every mutating step).
 
