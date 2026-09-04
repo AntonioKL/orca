@@ -25,7 +25,8 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | PR #18581 doc reconcile (Aug 23 figure: 2,200–3,000 raw log lines vs 1,510 on the gate metric) | **Merged** | https://github.com/stablyai/orca/pull/18581 |
 | Same-cap `verify` c7 target=519f4914 rollback=85bf6799, gen 112 | **Passed** (read-only) | run 33856355648 |
 | Monitor dry-run #7 (gen 112) | Froze at sample 1 (09:05:31Z): `director.errors` 4 > 0, the four 2.0 s pg-connect 500s from the 09:00 cascade still inside the 5-min delta window. Dispatched 4 min too early. | run 33856521278 |
-| Monitor dry-run #8 (gen 112) | Dispatched 09:09:04Z after 6 quiet min (no director 500, no cell die); verdict ~09:27Z. A waiter auto-dispatches the c7 canary on success (evidence < 5 min rule). | run 33856905229 |
+| Monitor dry-run #8 (gen 112) | Green for 15 of 16 samples (09:09:38–09:24), froze on the final sample 09:25:22Z: `director.errors` 1 > 0. The one 500 was `/v1/admin/evacuation-status` at 09:23:50Z, 2.01 s latency = director pg-connect timeout, called by **the monitor's own collector** (`incident-monitor-sources.ts:492`). First evacuation-status 500 since Sep 1. The gate froze on a request it made itself. | run 33856905229 |
+| Monitor dry-run #9 (gen 112) | Armed: waiter dispatches after 6 quiet min, then auto-canary c7 on green | |
 | Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
 | PR #18606 lock removal (root cause) | **Merged** 09:2xZ as 7b108abf71 after review, fix, re-verify; CI green | https://github.com/stablyai/orca/pull/18606 |
 | Image publish for 7b108abf71 | **Done** 08:36:49Z run 33854111305: `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` | |
@@ -385,6 +386,14 @@ Director 500s: 4 in the 09:00 window, all 2.0 s latency on `/v1/assign` or `/v1/
 timeout surfacing as a 500. Pre-existing (Sep 3: 03h/08h/16h one each, same 2.0 s shape; 06:09Z today on
 the old image during the c7 drain). The monitor's `directorErrors: 0` bar freezes on any of these, so a
 dry-run needs a 15-min window with none; at ~1 per cascade that is a real but modest constraint.
+
+**Gate observation (09:26Z):** `directorErrors: 0` counts every non-503 5xx on the director, including
+the monitor's own admin calls. The director on 519f4914 still sees an occasional 2.0 s pg-pool connect
+timeout (~1 per 20 min under today's Cloud SQL load), which surfaces as a 500 on whichever request drew
+it. Two consecutive dry-runs (#7, #8) froze on exactly this: one, isolated, 2 s 500. That bar was set for
+"unexpected director 5xx"; a single connect timeout that the client retries is not an incident. Candidate
+recalibration (own PR, not done): `directorErrors` 0 -> 2 per 5 min, or exclude the monitor's own
+user-agent. Not changing it unasked; noting that at ~3 per hour the 15-min gate passes ~1 in 2 attempts.
 
 ## Roll inputs (verified by the read-only `verify` run)
 
