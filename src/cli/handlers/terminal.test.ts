@@ -316,6 +316,43 @@ describe('terminal send CLI', () => {
     )
   })
 
+  it('carries the swallowed-Enter warning into the --json receipt', async () => {
+    const call = vi.fn().mockResolvedValue({
+      result: {
+        send: {
+          handle: 'term-1',
+          accepted: true,
+          bytesWritten: 7,
+          prompt: {
+            requestId: 'prompt-swallowed',
+            stages: ['input_accepted'],
+            provider: 'claude',
+            observation: 'supported',
+            processIncarnation: 'inc-1',
+            generation: 1,
+            baselineWorkingSequence: 0
+          }
+        }
+      }
+    })
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await TERMINAL_HANDLERS['terminal send']({
+      flags: new Map<string, string | true>([
+        ['terminal', 'term-1'],
+        ['text', 'review'],
+        ['enter', true]
+      ]),
+      client: promptClient(call, true),
+      cwd: '/tmp/worktree',
+      json: true
+    })
+
+    expect(JSON.parse(String(log.mock.calls[0]?.[0])).result.warnings).toEqual([
+      expect.stringContaining('no turn start was observed')
+    ])
+  })
+
   it('explains that Structured Chat blocked a refused send and how to recover', async () => {
     const call = vi.fn().mockResolvedValue({
       result: {

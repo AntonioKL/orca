@@ -1,12 +1,14 @@
 import type { RuntimeTerminalSend } from '../../shared/runtime-types'
 import { TERMINAL_PROMPT_DELIVERY_RUNTIME_CAPABILITY } from '../../shared/protocol-version'
 import type { CommandHandler } from '../dispatch'
-import { formatTerminalSend, printResult } from '../format'
+import { formatTerminalSend, printResult, terminalSendWarnings } from '../format'
 import { getOptionalPositiveIntegerFlag, getOptionalStringFlag } from '../flags'
 import { readRetryRequestFlag } from '../retry-request-flag'
 import { RuntimeClientError } from '../runtime-client'
 import { attachUnverifiedTerminalPromptRecovery } from '../runtime/terminal-prompt-mutation-recovery'
 import { getTerminalHandle } from '../selectors'
+
+type TerminalSendResult = { send: RuntimeTerminalSend; warnings?: string[] }
 
 export const terminalSendHandler: CommandHandler = async ({ flags, client, cwd, json }) => {
   const text = getOptionalStringFlag(flags, 'text')
@@ -75,8 +77,8 @@ export const terminalSendHandler: CommandHandler = async ({ flags, client, cwd, 
       ? { legacyTerminalPrompt: true as const }
       : undefined
   const result = options
-    ? await client.call<{ send: RuntimeTerminalSend }>('terminal.send', params, options)
-    : await client.call<{ send: RuntimeTerminalSend }>('terminal.send', params)
+    ? await client.call<TerminalSendResult>('terminal.send', params, options)
+    : await client.call<TerminalSendResult>('terminal.send', params)
   const missingPromptReceipt =
     promptCandidate && result.result.send.accepted && !result.result.send.prompt
   if (missingPromptReceipt && promptDeliverySupported) {
@@ -98,7 +100,13 @@ export const terminalSendHandler: CommandHandler = async ({ flags, client, cwd, 
       baselineWorkingSequence: 0
     }
   }
-  printResult(result, json, formatTerminalSend)
+  // Why: the delivery warnings only existed in the text formatter, so --json callers never saw them.
+  const warnings = terminalSendWarnings(result.result.send)
+  printResult(
+    warnings.length > 0 ? { ...result, result: { ...result.result, warnings } } : result,
+    json,
+    formatTerminalSend
+  )
   if (!result.result.send.accepted) {
     process.exitCode = 1
   }

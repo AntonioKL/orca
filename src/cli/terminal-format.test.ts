@@ -124,6 +124,31 @@ describe('formatTerminalSend', () => {
     expect(output).toContain(nextStep)
   })
 
+  it.each([
+    { provider: 'claude' as const, expected: 'no turn start was observed' },
+    { provider: 'unsupported' as const, expected: 'this provider cannot report delivery' },
+    { provider: 'old-host' as const, expected: 'predates durable prompt receipts' }
+  ])('warns per provider when delivery was not observed ($provider)', ({ provider, expected }) => {
+    const output = formatTerminalSend({
+      send: {
+        handle: 'term_worker',
+        accepted: true,
+        bytesWritten: 8,
+        prompt: {
+          requestId: 'prompt-unobserved',
+          stages: ['input_accepted'],
+          provider,
+          observation: 'unsupported',
+          processIncarnation: 'inc-1',
+          generation: 1,
+          baselineWorkingSequence: 0
+        }
+      }
+    })
+
+    expect(output).toContain(expected)
+  })
+
   it('names the next command when a supported send never reached turn_started', () => {
     const output = formatTerminalSend({
       send: {

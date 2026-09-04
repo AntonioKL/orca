@@ -186,16 +186,21 @@ export function formatTerminalSend(result: { send: RuntimeTerminalSend }): strin
   if (!prompt) {
     return `Sent ${result.send.bytesWritten} bytes to ${result.send.handle}.`
   }
-  const warning = formatTerminalPromptObservationWarning(prompt)
   return [
     `Prompt ${prompt.requestId} on ${result.send.handle}: ${prompt.stages.join(' -> ')}.`,
     `provider: ${prompt.provider}`,
     `delivery observation: ${prompt.observation}`,
-    ...(warning ? [`warning: ${warning}`] : [])
+    ...terminalSendWarnings(result.send).map((warning) => `warning: ${warning}`)
   ].join('\n')
 }
 
-function formatTerminalPromptObservationWarning(
+/** The same warnings the text formatter prints, so a --json caller sees them too. */
+export function terminalSendWarnings(send: RuntimeTerminalSend): string[] {
+  const warning = send.accepted && send.prompt ? promptObservationWarning(send.prompt) : null
+  return warning ? [warning] : []
+}
+
+function promptObservationWarning(
   prompt: NonNullable<RuntimeTerminalSend['prompt']>
 ): string | null {
   if (prompt.observation === 'permission') {
@@ -204,13 +209,17 @@ function formatTerminalPromptObservationWarning(
   if (prompt.observation === 'incarnation_replaced') {
     return 'delivery was not observed because the terminal process was replaced. Inspect the current terminal before sending a new prompt; do not retry with this request ID.'
   }
+  // Ordered before the unsupported arm: an agent provider that never reached turn_started
+  // needs the swallowed-Enter recovery even if this host could not observe the submit.
+  if (prompt.provider !== 'unsupported' && prompt.provider !== 'old-host') {
+    return prompt.stages.includes('turn_started')
+      ? null
+      : `input was accepted but no turn start was observed, so the Enter may have been swallowed. Confirm delivery by reissuing the exact command with --retry-request ${prompt.requestId} --wait-submit <seconds>; the same request ID replays the receipt instead of sending the prompt again.`
+  }
   if (prompt.observation === 'unsupported') {
     return prompt.provider === 'old-host'
       ? 'this host predates durable prompt receipts. Update Orca on the execution host, and inspect the terminal before retrying an ambiguous send.'
       : 'input was accepted, but this provider cannot report delivery. Inspect the terminal before retrying.'
-  }
-  if (!prompt.stages.includes('turn_started')) {
-    return `input was accepted but no turn start was observed, so the Enter may have been swallowed. Confirm delivery by reissuing the exact command with --retry-request ${prompt.requestId} --wait-submit <seconds>; the same request ID replays the receipt instead of sending the prompt again.`
   }
   return null
 }

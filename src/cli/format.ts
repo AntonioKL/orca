@@ -46,7 +46,8 @@ export {
   formatTerminalSend,
   formatTerminalShow,
   formatTerminalSplit,
-  formatTerminalWait
+  formatTerminalWait,
+  terminalSendWarnings
 } from './terminal-format'
 export {
   formatAutomationList,
