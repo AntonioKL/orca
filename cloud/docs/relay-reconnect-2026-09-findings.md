@@ -309,6 +309,14 @@ orca-cloud PR #474 (branch `auth-revoke-only-live-tokens`): caps → 20, disk 25
 Terraform, partial index in the schema, `already-revoked` short-circuit. Do not deploy auth to any environment
 with a large `refresh_tokens` before building the index concurrently there.
 
+**Wave 1 of the roadmap (2026-09-04 21:35Z onward):** five Opus agents in isolated worktrees: 3.1 grace window
+(orca-cloud), 4.1+2.3 relay locks + pool timeout, 3.2+4.3 desktop refresh/jitter, 5.1+5.4 observability,
+2.1 private IP (plan only, both repos). First back: stablyai/orca PR #18717 (crash alert + dashboard). Its key
+finding: cell exits log to `cos_system` with uppercase `jsonPayload.MESSAGE` and `SYSLOG_IDENTIFIER=docker`,
+so every earlier `jsonPayload.message:"container die"` count in this doc that read 0 was querying the wrong
+field. Verified: 87 exits 12–13Z on the agent's filter, 0 in the last 6 h. Monitor dry-run 33922255205
+dispatched 21:41Z as the Roll 1 gate.
+
 **Landing (2026-09-04 20:50Z–21:02Z, owner: "if you are confident the cloud changes are valid, you can land them"):**
 
 - Merged: orca-cloud #474, #475, #476; stablyai/orca #18693, #18694, #18698. Neither repo has branch
