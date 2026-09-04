@@ -564,8 +564,15 @@ jobs:
             # strictly increase over the latest published stable (prerelease
             # identifiers ignored for the comparison).
             if ! semver_gt "$explicit" "$latest_stable"; then
-              echo "::error::Refusing explicit version $explicit: not greater than latest stable $latest_stable." >&2
-              exit 1
+              # Recover the exact unpublished package-floor tag without
+              # allowing an arbitrary version reuse. This is the safe case
+              # created when a prior release cut pushed the tag and was then
+              # canceled before artifact completion.
+              if [[ "$explicit" != "${package_stable:-}" ]] || ! git rev-parse "v$explicit" >/dev/null 2>&1; then
+                echo "::error::Refusing explicit version $explicit: not greater than latest stable $latest_stable." >&2
+                exit 1
+              fi
+              echo "Recovering unpublished package-floor tag v$explicit"
             fi
             # Why a second gate for prereleases: semver_gt compares through
             # strip_pre(), so the stable-line check reads 1.4.156-rc.0 as
