@@ -16,9 +16,7 @@ export const SESSION_TAB_CLOSE_METHODS: RpcAnyMethod[] = [
           await context.runtime.listMobileSessionTabs(params.worktree, context.pairedDeviceId),
           context.clientKind,
           context.clientCapabilities,
-          context.clientKind === 'mobile'
-            ? isStructuredNativeChatEnabled(context.runtime)
-            : undefined
+          isStructuredNativeChatEnabled(context.runtime)
         )
         assertProjectedSessionTabVisible(visible, params.tabId)
       }
@@ -85,9 +83,7 @@ export const SESSION_TAB_CLOSE_METHODS: RpcAnyMethod[] = [
           await context.runtime.listMobileSessionTabs(params.worktree, context.pairedDeviceId),
           context.clientKind,
           context.clientCapabilities,
-          context.clientKind === 'mobile'
-            ? isStructuredNativeChatEnabled(context.runtime)
-            : undefined
+          isStructuredNativeChatEnabled(context.runtime)
         )
         assertProjectedSessionTabVisible(visible, params.tabId)
       }

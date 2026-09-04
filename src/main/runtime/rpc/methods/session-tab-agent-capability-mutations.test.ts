@@ -129,6 +129,7 @@ function createFixture(capabilities: RuntimeCapability[]) {
   }
   const runtime = {
     getRuntimeId: () => 'test-runtime',
+    getClientSettings: vi.fn(() => ({ experimentalStructuredNativeChat: true })),
     listMobileSessionTabs: vi.fn().mockResolvedValue(snapshot),
     ...calls
   } as unknown as OrcaRuntimeService

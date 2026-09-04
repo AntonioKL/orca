@@ -86,6 +86,10 @@ beforeEach(async () => {
   })
   setStructuredAgentSessionHost(host)
   runtime = new OrcaRuntimeService()
+  // The structured surface is settings-gated for every caller, in-process included.
+  vi.spyOn(runtime, 'getClientSettings').mockReturnValue({
+    experimentalStructuredNativeChat: true
+  } as ReturnType<OrcaRuntimeService['getClientSettings']>)
   dispatcher = new RpcDispatcher({ runtime, methods: STRUCTURED_AGENT_SESSION_METHODS })
   expect(await host.attach({ callerKey: 'client-1' }, hostTestAttachParams(null))).toMatchObject({
     ok: true
