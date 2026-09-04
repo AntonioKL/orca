@@ -19,8 +19,11 @@
 // when its quarantine did not fit.
 
 import type Database from '../../sqlite/sync-database'
-import { checkpointJournalWal, reclaimJournalDatabaseSpace } from './journal-database-space'
-import { journalTxnPhysicalCost } from './journal-database-space'
+import {
+  checkpointJournalWal,
+  journalTxnPhysicalCost,
+  reclaimJournalDatabaseSpace
+} from './journal-database-space'
 import { assertJournalPhysicalCapacity } from './journal-physical-quota'
 import {
   countJournalRowSuffix,
