@@ -39,7 +39,11 @@ export function structuredClaudeMatchesActiveManagedAccount(
   }
   const activeHostId = getSelectedClaudeAccountIdForTarget(settings, { runtime: 'host' })
   if (!activeHostId) {
-    return false
+    // Nothing selected for the host runtime is two different states that the settings cannot tell
+    // apart after the fact: honest deselection, where ambient auth is the truth and the UI names no
+    // identity, and the WSL-only case, where the prune emptied the host slot and persisted null
+    // while the UI still names the WSL account. The presence of any WSL-bound account decides.
+    return !accounts.some((candidate) => candidate.managedAuthRuntime === 'wsl')
   }
   const active = accounts.find((candidate) => candidate.id === activeHostId)
   return active ? active.managedAuthRuntime !== 'wsl' : false
