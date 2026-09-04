@@ -254,7 +254,7 @@ describe('Cmd+J quick action context', () => {
     expect(context.isLoading).toBe(true)
   })
 
-  it('does not expose chat split actions outside the workspace surface', () => {
+  it('exposes chat split actions only on the workspace surface', () => {
     const worktree = {
       id: 'wt-1',
       repoId: 'repo-1',
@@ -294,18 +294,20 @@ describe('Cmd+J quick action context', () => {
       settings: null
     } as unknown as AppState
 
-    const context = buildCmdJQuickActionContext({
-      state,
-      activeGroupSnapshot: null,
-      openNewBrowserTab: async () => {},
-      openNewMarkdownFile: async () => {},
-      openNewTerminalTab: async () => {},
-      openCreateWorkspace: () => {},
-      deleteActiveWorkspace: () => {},
-      openAddQuickCommand: () => {}
-    })
+    const buildContext = (activeView: AppState['activeView']) =>
+      buildCmdJQuickActionContext({
+        state: { ...state, activeView },
+        activeGroupSnapshot: null,
+        openNewBrowserTab: async () => {},
+        openNewMarkdownFile: async () => {},
+        openNewTerminalTab: async () => {},
+        openCreateWorkspace: () => {},
+        deleteActiveWorkspace: () => {},
+        openAddQuickCommand: () => {}
+      })
 
-    expect(context.canSplitActiveChat).toBe(false)
+    expect(buildContext('terminal').canSplitActiveChat).toBe(true)
+    expect(buildContext('settings').canSplitActiveChat).toBe(false)
   })
 
   it('runtime re-check returns unavailable without invoking the action helper', async () => {
