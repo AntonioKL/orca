@@ -128,7 +128,7 @@ export function webHostSessionNativeChatOperations(
       }
       return { status: result.status }
     },
-    async pasteImages(target, references, deadline) {
+    async pasteImages(target, references, deadline, followedByText) {
       const budget = bridgeBudget(deadline)
       if (!budget) {
         return false
@@ -138,7 +138,8 @@ export function webHostSessionNativeChatOperations(
           await client.nativeChat.pasteImages(
             bridgeTarget(target, {
               references: [...references],
-              deadline: budget.deadline
+              deadline: budget.deadline,
+              ...(followedByText ? { followedByText } : {})
             }),
             { timeoutMs: budget.timeoutMs }
           )

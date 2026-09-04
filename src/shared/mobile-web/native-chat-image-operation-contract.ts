@@ -47,7 +47,10 @@ export const MobileWebNativeChatPasteImagesPayloadSchema = z
     references: z
       .array(MobileWebNativeChatImageIdSchema)
       .min(1)
-      .max(MOBILE_WEB_NATIVE_CHAT_IMAGE_LIMIT)
+      .max(MOBILE_WEB_NATIVE_CHAT_IMAGE_LIMIT),
+    // Why: a paste followed by typed text needs a trailing separator so the text cannot glue onto
+    // the path. Optional and only sent when true, so an older strict shell never sees it.
+    followedByText: z.boolean().optional()
   })
   .strict()
 export const MobileWebNativeChatPasteImagesResultSchema = z.object({ pasted: z.boolean() }).strict()

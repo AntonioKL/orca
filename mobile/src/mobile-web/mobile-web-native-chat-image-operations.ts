@@ -86,6 +86,7 @@ export async function executeMobileWebNativeChatImageOperation(args: {
         terminal: binding.hostTerminalId!,
         deviceToken: args.terminalClientId,
         imagePaths,
+        followedByText: payload.followedByText === true,
         deadline: payload.deadline,
         assertCurrent: () =>
           assertCurrentMobileWebNativeChatPageBinding(

@@ -82,7 +82,7 @@ describe('hosted native-chat image attachments', () => {
     await act(async () => {
       expect(await hook!.sendNativeChat('inspect')).toBe(true)
     })
-    expect(pasteImages).toHaveBeenCalledWith(TARGET, [REFERENCE], expect.any(Number))
+    expect(pasteImages).toHaveBeenCalledWith(TARGET, [REFERENCE], expect.any(Number), true)
     expect(baseSend).toHaveBeenCalledWith('inspect', [PREVIEW], expect.any(Number))
     expect(releaseImages).toHaveBeenCalledWith(TARGET, [REFERENCE])
     expect(hook!.attachments).toEqual([])

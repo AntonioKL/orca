@@ -80,6 +80,44 @@ describe('hosted native-chat deadlines', () => {
     expect(pasteImages).not.toHaveBeenCalled()
   })
 
+  it('forwards the following-text hint only when typed text follows the paste', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000)
+    const pasteImages = vi.fn().mockResolvedValue({ pasted: true })
+    const client = { nativeChat: { pasteImages } } as unknown as MobileWebBridgeClient
+    const operations = webHostSessionNativeChatOperations(client)
+
+    await expect(operations.pasteImages!(TARGET, ['opaque-image'], 20_000, true)).resolves.toBe(
+      true
+    )
+    await expect(operations.pasteImages!(TARGET, ['opaque-image'], 20_000, false)).resolves.toBe(
+      true
+    )
+
+    // Why: an older strict shell rejects unknown keys, so the flag rides only when it is true.
+    expect(pasteImages).toHaveBeenNthCalledWith(
+      1,
+      {
+        workspaceId: 'workspace',
+        sessionId: 'native_chat_session',
+        references: ['opaque-image'],
+        deadline: 20_000,
+        followedByText: true
+      },
+      { timeoutMs: 10_000 }
+    )
+    expect(pasteImages).toHaveBeenNthCalledWith(
+      2,
+      {
+        workspaceId: 'workspace',
+        sessionId: 'native_chat_session',
+        references: ['opaque-image'],
+        deadline: 20_000
+      },
+      { timeoutMs: 10_000 }
+    )
+  })
+
   it('clears a stale hosted composer only after the shell accepts preparation', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(10_000)

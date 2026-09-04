@@ -82,6 +82,7 @@ export async function executeMobileWebNativeChatTerminalOperation(args: {
       terminal: binding.hostTerminalId!,
       deviceToken: args.terminalClientId,
       imagePaths: [],
+      followedByText: false,
       deadline: payload.deadline,
       assertCurrent: () => assertCurrentBinding(args, payload, binding)
     })

@@ -69,7 +69,8 @@ export type HostSessionNativeChatOperations = {
   pasteImages?(
     target: HostSessionNativeChatTarget,
     references: readonly string[],
-    deadline?: number
+    deadline?: number,
+    followedByText?: boolean
   ): Promise<boolean>
   releaseImages?(target: HostSessionNativeChatTarget, references: readonly string[]): Promise<void>
   searchFiles(target: HostSessionNativeChatTarget, query: string): Promise<string[]>

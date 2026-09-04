@@ -24,6 +24,7 @@ const value: RpcClientContextValue = {
   getActivePath: () => 'lan',
   getPendingPath: () => null,
   isPairingRejected: () => false,
+  isHostSignedOut: () => false,
   subscribeHostState: () => noop,
   getAllClients: () => [],
   subscribeAllHosts: () => noop,

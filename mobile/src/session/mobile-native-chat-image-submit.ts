@@ -65,6 +65,7 @@ export async function sendMobileNativeChatWithImages(args: {
   }
   try {
     const references = args.pendingImages.map((attachment) => attachment.path)
+    const followedByText = args.text.trim().length > 0
     const seededLaunchDraft = args.readSeededLaunchDraft()
     const pasted = args.client
       ? await pasteMobileNativeChatImagePaths({
@@ -72,12 +73,13 @@ export async function sendMobileNativeChatWithImages(args: {
           terminal: handle,
           deviceToken: args.deviceTokenRef.current,
           imagePaths: references,
+          followedByText,
           deadline,
           ...(seededLaunchDraft
             ? { clearInput: buildAgentTuiClearInputForText(seededLaunchDraft) }
             : {})
         })
-      : await args.operations!.pasteImages!(target!, references, deadline)
+      : await args.operations!.pasteImages!(target!, references, deadline, followedByText)
     if (!pasted) {
       markMobileNativeChatInputStale(handle)
       args.onError?.()
