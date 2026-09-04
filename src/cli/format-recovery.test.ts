@@ -43,6 +43,51 @@ describe('worktree selector recovery', () => {
     log.mockRestore()
   })
 
+  it('keeps the selector grammar when the error already carries mutation recovery data', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    reportCliError(
+      new RuntimeRpcFailureError({
+        id: 'req_selector',
+        ok: false,
+        error: {
+          code: 'selector_not_found',
+          message: 'selector_not_found',
+          // The mutation-recovery layer already attached its request id.
+          data: { orchestrationRequestId: 'req_abc', nextSteps: ['Run request-show first.'] }
+        },
+        _meta: { runtimeId: 'runtime_local' }
+      }),
+      true,
+      { commandPath: ['orchestration', 'worker-start'], worktreeSelector: 'bare-repo-id' }
+    )
+
+    expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toMatchObject({
+      error: {
+        data: {
+          orchestrationRequestId: 'req_abc',
+          selector: 'bare-repo-id',
+          validSelectorForms: expect.arrayContaining(['current']),
+          nextSteps: expect.arrayContaining(['Run request-show first.'])
+        }
+      }
+    })
+    log.mockRestore()
+  })
+
+  it('keeps both recoveries in the text message for a local selector error', () => {
+    const output = formatCliError(
+      new RuntimeClientError('selector_not_found', 'selector_not_found', {
+        orchestrationRequestId: 'req_abc',
+        nextSteps: ['Run request-show first.']
+      }),
+      { worktreeSelector: 'bare-repo-id' }
+    )
+
+    expect(output).toContain('Valid selector forms:')
+    expect(output).toContain('Run request-show first.')
+  })
+
   it('stays silent when no worktree selector was passed', () => {
     expect(formatCliError(selectorNotFound(), { commandPath: ['worktree', 'show'] })).toBe(
       'selector_not_found'

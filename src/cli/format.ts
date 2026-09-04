@@ -81,6 +81,13 @@ function selectorRecovery(code: string | undefined, context: CliErrorContext) {
     : undefined
 }
 
+function errorData(error: unknown): unknown {
+  if (error instanceof RuntimeRpcFailureError) {
+    return error.response.error.data
+  }
+  return error instanceof RuntimeClientError ? error.data : undefined
+}
+
 function errorCode(error: unknown): string | undefined {
   if (error instanceof RuntimeRpcFailureError) {
     return error.response.error.code
@@ -104,7 +111,10 @@ export function formatCliError(error: unknown, context: CliErrorContext = {}): s
   const message = error instanceof Error ? error.message : String(error)
   const selector = selectorRecovery(errorCode(error), context)
   if (selector) {
-    return formatMessageWithNextSteps(message, selector.nextSteps)
+    return formatMessageWithNextSteps(
+      message,
+      nextStepsFromData(mergeSelectorRecovery(errorData(error), selector))
+    )
   }
   if (error instanceof RuntimeClientError && error.code === 'runtime_unavailable') {
     if (hasOrchestrationRequestId(error.data)) {
@@ -158,7 +168,13 @@ export function reportCliError(error: unknown, json: boolean, context: CliErrorC
       console.log(
         JSON.stringify(
           selector
-            ? { ...response, error: { ...response.error, data: response.error.data ?? selector } }
+            ? {
+                ...response,
+                error: {
+                  ...response.error,
+                  data: mergeSelectorRecovery(response.error.data, selector)
+                }
+              }
             : response,
           null,
           2
@@ -214,6 +230,24 @@ function formatMessageWithNextSteps(message: string, nextSteps: readonly string[
   return `${message}\n${nextSteps.map((step) => `Next step: ${step}`).join('\n')}`
 }
 
+/** Why merge: a mutation error already carries its request id, and `??` dropped the selector grammar. */
+function mergeSelectorRecovery(
+  data: unknown,
+  selector: ReturnType<typeof selectorRecovery>
+): unknown {
+  if (!selector) {
+    return data
+  }
+  if (data === null || typeof data !== 'object') {
+    return selector
+  }
+  return {
+    ...selector,
+    ...data,
+    nextSteps: [...selector.nextSteps, ...nextStepsFromData(data)]
+  }
+}
+
 function nextStepsFromData(data: unknown): string[] {
   if (
     data &&
@@ -228,11 +262,11 @@ function nextStepsFromData(data: unknown): string[] {
 }
 
 function localCliErrorData(error: unknown, context: CliErrorContext): unknown {
+  const selector = selectorRecovery(errorCode(error), context)
   // Why: error-specific recovery must win over the generic computer fallback.
   if (error instanceof RuntimeClientError && error.data !== undefined) {
-    return error.data
+    return mergeSelectorRecovery(error.data, selector)
   }
-  const selector = selectorRecovery(errorCode(error), context)
   if (selector) {
     return selector
   }
