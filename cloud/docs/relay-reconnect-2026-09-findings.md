@@ -25,7 +25,8 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | PR #18581 doc reconcile (Aug 23 figure: 2,200–3,000 raw log lines vs 1,510 on the gate metric) | **Merged** | https://github.com/stablyai/orca/pull/18581 |
 | Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
 | PR #18606 lock removal (root cause) | **Merged** 09:2xZ as 7b108abf71 after review, fix, re-verify; CI green | https://github.com/stablyai/orca/pull/18606 |
-| Image publish for 7b108abf71 | Dispatched (see next row once digest resolves) | `cloud-publish-relay-production.yml` |
+| Image publish for 7b108abf71 | **Done** 08:36:49Z run 33854111305: `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` | |
+| Director deploy on 519f4914 | Dispatched ~08:40Z (blue/green; prior revision 00565-fes on 85bf6799 kept as rollback) | `cloud-deploy-relay-production-director.yml` |
 | c7 on new image, 2 h in | 817 controls, **0 container die** since restore (was ~1 per 15 min on old image); `sqlLatencyMsMax` still 1.0 s = lock wait unchanged, which #18606 targets | |
 | Terraform alert `relay_postgres_retry_exhausted` at `> 0` | Firing continuously since #18521; recalibration not done (own change) | `cloud/infra/terraform/relay-observability.tf:447,469` |
 
@@ -34,7 +35,8 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 1. Merged PR #18569 to main (code/docs only).
 2. Merged PR #18580 and #18581 to main (monitor bar + docs).
 2b. Merged PR #18606 to main (relay lock change; no serving effect until the image is deployed).
-2c. Dispatched `cloud-publish-relay-production` for 7b108abf71 (builds and pushes an image; changes nothing serving).
+2c. Dispatched `cloud-publish-relay-production` for 7b108abf71 (builds and pushes an image; changes nothing serving). Done: 519f4914.
+2d. Dispatched `cloud-deploy-relay-production-director` on 519f4914 (preserve placement, no prune, rehome gen 12). Moves 100% director traffic to the new revision after health verification.
 3. 2026-09-04 06:07:15Z: dispatched `cloud-deploy-relay-production-same-cap` `canary-apply` for production-gce-c7 only (run 33843071283). Completed successfully 06:26Z: c7 isolated, drained (807 controls re-dialed), template + MIG rolled to 85bf6799, verified, restored to general admission. Selector generation advanced 110 -> 112 (isolate + restore).
 4. Nothing else. Both monitor dispatches were `mode=dry-run` (read-only). The same-cap dispatch was `mode=verify` (read-only, confirmed by step gates `if: inputs.mode != 'verify'` on every mutating step).
 
@@ -346,7 +348,8 @@ image.
 
 ## Roll inputs (verified by the read-only `verify` run)
 
-- target-image-digest `sha256:85bf67993869a769642995d0863f4c2b6b569c3850c2d8390ec2ca5f2b179e28`
+- target-image-digest `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` (lock fix; supersedes 85bf6799 as target)
+- previous target `sha256:85bf67993869a769642995d0863f4c2b6b569c3850c2d8390ec2ca5f2b179e28` (c7 is on this; use as c7's rollback)
 - rollback-image-digest `sha256:5aedbca5c86de24c8b4d4bf7e3b444b76c712f281ede916cb9d90f70cad1e563`
 - target/rollback rehome protocol 1 / 1; expected-rehome-generation 12; selector generation 110
 - existing-only c1,c11,c12,c2,c3,c4,c5,c6; migration-only c17,c18; general c10,c13–c16,c19–c29,c7,c8,c9
