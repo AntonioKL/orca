@@ -397,6 +397,14 @@ pre-existing drift in the relay root (unapplied since the region work), not some
 needs its own reviewed apply in a quiet window, ideally with the runtime-metric replacement acknowledged as
 intentional. Dashboard apply waits on that.
 
+**Wave 1 closed 22:20Z.** Merged: orca-cloud #478 (grace window); stablyai/orca #18717 (crash alert +
+dashboard TF), #18719 (desktop no-replay + jitter), #18720 (private-IP flag, off), #18722 (relay per-cell
+locks + pool timeout), #18723 (monitor probe fix). Applied to production: cell-exit log metric + alert policy.
+Held for owner: orca-cloud #477 private IP (restart, one-way); the dashboard apply (behind the runtime-metric
+label drift); the auth deploy carrying #478; Roll 1. Every wave-1 code change now sits on main un-deployed:
+the next relay image build carries #18722 + #18723's monitor runs at main head already; the next auth deploy
+carries #478.
+
 **Landing (2026-09-04 20:50Z–21:02Z, owner: "if you are confident the cloud changes are valid, you can land them"):**
 
 - Merged: orca-cloud #474, #475, #476; stablyai/orca #18693, #18694, #18698. Neither repo has branch
