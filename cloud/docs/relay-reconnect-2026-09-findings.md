@@ -387,7 +387,8 @@ SQL CPU 0.84 -> 0.78 in the preceding minutes, director concurrency 18–22 (idl
 *without* a database or director spike. Fleet had just recovered to 13,015. Cadence today: 01:31 (4),
 04:47 (5), 08:40 (10), 09:00 (5), 09:31 (c13, c23), 09:34 (c23 again, c14, c20, c9; c14/c20 crash-looping),
 09:39 (c21, c24), 09:55 (c16, c8), 09:59 (c20), 10:05 (c8, c20), 10:19 (c16 stalled, no crash), then a 58-min
-lull, 11:04 (c9; c28 died 13x in 4 min, autoheal recreate 11:09Z, its 3rd recreate today).
+lull, 11:04 (c9; c28 died 13x in 4 min, autoheal recreate 11:09Z, its 3rd recreate today), 11:17 (c10, c28
+again, c22, c23, c14 x9 looping; 23 dies in ~90 s; fleet 13.3k -> 10.8k). Waiter #14 held throughout.
 Director concurrency pinned at 85 for 09:32–09:33; 503s 4,141 and 4,396 per minute. 09:39: c21, c24
 (2,870 503s). Crashes per instance 08:10–09:40Z: c28 x14, c27 x5, c23 x5, c22 x4, c14 x4, c13/c20 x3,
 then c26/c9/c24/c16/c8 x2. Mean gap between cascades since 08:40: ~12 min. Every 15-min gate attempt
