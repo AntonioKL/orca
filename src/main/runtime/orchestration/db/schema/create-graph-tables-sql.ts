@@ -149,6 +149,10 @@ CREATE TABLE IF NOT EXISTS dispatch_contexts (
   -- R1 identity facts; nullable when legacy provenance was never proven.
   retry_of_dispatch_id TEXT,
   creator_dispatch_id TEXT,
+  -- Who created this row. A row whose creator is its own assignee is bookkeeping, not delegation,
+  -- so it must not count as a nesting parent. Null on rows written before v37 and for Orca's loop.
+  creator_handle      TEXT,
+  creator_pane_key    TEXT,
   host_scope          TEXT,
   status              TEXT NOT NULL DEFAULT 'pending'
     CHECK(status IN ('pending', 'dispatched', 'completed', 'failed', 'circuit_broken')),

@@ -28,6 +28,29 @@ export type DispatchCreator =
       processIncarnation?: string
     }
 
+/** Creator identity to persist on a new row, so depth can later tell delegation from bookkeeping. */
+export function recordedCreatorIdentity(creator: DispatchCreator): {
+  creatorHandle: string | null
+  creatorPaneKey: string | null
+} {
+  if (creator.kind === 'system') {
+    return { creatorHandle: null, creatorPaneKey: null }
+  }
+  return { creatorHandle: creator.handle, creatorPaneKey: creator.paneKey ?? null }
+}
+
+/**
+ * A row whose creator is its own assignee: a coordinator recording context against its own
+ * terminal. Nothing was delegated, so it is not a nesting parent. Rows written before v37 record
+ * no creator and keep counting, which is the pre-v37 answer and fails closed.
+ */
+function isSelfCreatedDispatch(row: DispatchContextRow): boolean {
+  if (row.creator_pane_key && row.assignee_pane_key) {
+    return isEquivalentPaneKey(row.creator_pane_key, row.assignee_pane_key)
+  }
+  return row.creator_handle != null && row.creator_handle === row.assignee_handle
+}
+
 /**
  * Attachment states in which the worker may still be running.
  *
@@ -64,7 +87,7 @@ export function resolveCreatorDepth(this: OrchestrationDb, creator: DispatchCrea
   const local = this.findActiveDispatchForAssignee(creator.handle, creator.paneKey) as
     | DispatchContextRow
     | undefined
-  if (local) {
+  if (local && !isSelfCreatedDispatch(local)) {
     depths.push(local.depth)
   }
 
@@ -86,7 +109,9 @@ export function resolveCreatorDispatchId(
   if (creator.kind === 'system') {
     return null
   }
-  const local = this.findActiveDispatchForAssignee(creator.handle, creator.paneKey)
+  const own = this.findActiveDispatchForAssignee(creator.handle, creator.paneKey)
+  // Why: a self-dispatch is not a parent Attempt, so it must not be stamped as the child's creator.
+  const local = own && !isSelfCreatedDispatch(own) ? own : undefined
   const remote = findPotentiallyLiveAttachmentsForCreator.call(this, creator)
   if ((local ? 1 : 0) + remote.length !== 1) {
     return null

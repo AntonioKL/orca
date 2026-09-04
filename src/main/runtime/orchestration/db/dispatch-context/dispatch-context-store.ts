@@ -5,7 +5,7 @@ import { CURRENT_CONTRACT_VERSION } from '../contract-constants'
 import { generateId } from '../generated-id'
 import { paneKeyMatchSuffix } from '../pane-key-match'
 import { claimDispatchContextRow } from '../dispatch-row-writer'
-import type { DispatchCreator } from '../dispatch-depth'
+import { recordedCreatorIdentity, type DispatchCreator } from '../dispatch-depth'
 import type { OrchestrationDb } from '../orchestration-db'
 import { transitionLifecycleWithDb } from '../lifecycle-transition'
 
@@ -62,6 +62,7 @@ export function createDispatchContext(
       assigneePaneKey: assigneePaneKey ?? null,
       processIncarnation: processIncarnation ?? null,
       creatorDispatchId,
+      ...recordedCreatorIdentity(params.creator),
       priorFailures,
       depth,
       taskId,
