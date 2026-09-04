@@ -259,6 +259,28 @@ describe('mobile web package downloader', () => {
       downloadMobileWebPackage(request, stager, { shellBridgeVersion: 1 })
     ).rejects.toEqual(new MobileWebPackageDownloadError('host_method_unavailable'))
   })
+  // A relay/direct cutover rejects in-flight requests without changing connState, so no effect
+  // upstream re-runs the download: without a retry here the user is left tapping Retry by hand.
+  it('rides out a logical-session cutover on the manifest read and on a chunk read', async () => {
+    const fixture = createFixture({ manifestCutoverFailures: 1, chunkCutoverFailures: 1 })
+    const stager = createStager()
+
+    const result = await downloadMobileWebPackage(fixture.request, stager, {
+      shellBridgeVersion: 1
+    })
+
+    expect(result.manifest).toEqual(fixture.manifest)
+    expect(stager.commit).toHaveBeenCalledOnce()
+    expect(stager.abort).not.toHaveBeenCalled()
+  })
+
+  it('still fails when the cutovers outlast the bounded retry', async () => {
+    const fixture = createFixture({ manifestCutoverFailures: 99 })
+
+    await expect(
+      downloadMobileWebPackage(fixture.request, createStager(), { shellBridgeVersion: 1 })
+    ).rejects.toMatchObject({ code: 'host_error' })
+  })
 })
 
 function createFixture(
@@ -271,6 +293,8 @@ function createFixture(
     gzipOversizedOutput?: boolean
     invalidBuildIdentity?: boolean
     afterFirstChunk?: () => void
+    manifestCutoverFailures?: number
+    chunkCutoverFailures?: number
   } = {}
 ): Fixture {
   const document = Buffer.from('<!doctype html><title>Orca</title>')
@@ -299,14 +323,24 @@ function createFixture(
     [assets.find((candidate) => candidate.role === 'script')!.path, script]
   ])
   let chunkCount = 0
+  let manifestCutovers = 0
+  let chunkCutovers = 0
   const request = vi.fn(async (method: string, params?: unknown): Promise<RpcResponse> => {
     if (method === 'mobileWeb.package.manifest') {
+      if (manifestCutovers < (options.manifestCutoverFailures ?? 0)) {
+        manifestCutovers += 1
+        throw new Error('RPC interrupted by connection migration')
+      }
       return success({
         manifest: options.invalidBuildIdentity
           ? { ...manifest, buildId: 'f'.repeat(64) }
           : manifest,
         chunkBytes: MOBILE_WEB_PACKAGE_CHUNK_BYTES
       })
+    }
+    if (chunkCutovers < (options.chunkCutoverFailures ?? 0)) {
+      chunkCutovers += 1
+      throw new Error('RPC interrupted by connection migration')
     }
     const assetParams = params as { buildId: string; path: string; offset: number }
     const bytes = bytesByPath.get(assetParams.path)!

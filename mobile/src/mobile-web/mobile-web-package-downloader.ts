@@ -17,6 +17,9 @@ import {
   type MobileWebPackageStager
 } from './mobile-web-package-download-contract'
 
+const MOBILE_WEB_PACKAGE_MANIFEST_CUTOVER_RETRIES = 4
+const MOBILE_WEB_PACKAGE_MANIFEST_CUTOVER_BACKOFF_MS = 250
+
 export {
   MOBILE_WEB_PACKAGE_DOWNLOAD_ERROR_CODES,
   MobileWebPackageDownloadError,
@@ -82,10 +85,7 @@ export async function downloadMobileWebPackage<TCommit>(
   }
 ): Promise<ReusedOrDownloadedMobileWebPackage<TCommit>> {
   throwIfAborted(options.signal)
-  const manifestResponse = await requestMobileWebPackageResult(
-    request,
-    'mobileWeb.package.manifest'
-  )
+  const manifestResponse = await readManifestAcrossCutovers(request, options.signal)
   throwIfAborted(options.signal)
   const parsedManifest = MobileWebPackageManifestResponseSchema.safeParse(manifestResponse)
   if (!parsedManifest.success) {
@@ -165,5 +165,30 @@ function sha256Hex(bytes: Uint8Array): string {
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) {
     throw new MobileWebPackageDownloadError('cancelled')
+  }
+}
+
+// Why: the manifest read is the one request a cutover can kill before any chunk exists to retry,
+// and nothing upstream re-runs the download when connState never changed.
+async function readManifestAcrossCutovers(
+  request: MobileWebPackageRequest,
+  signal: AbortSignal | undefined
+): Promise<unknown> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await requestMobileWebPackageResult(request, 'mobileWeb.package.manifest')
+    } catch (error) {
+      if (
+        !(error instanceof MobileWebPackageDownloadError) ||
+        !error.retryable ||
+        attempt >= MOBILE_WEB_PACKAGE_MANIFEST_CUTOVER_RETRIES
+      ) {
+        throw error
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, MOBILE_WEB_PACKAGE_MANIFEST_CUTOVER_BACKOFF_MS * (attempt + 1))
+      )
+      throwIfAborted(signal)
+    }
   }
 }
