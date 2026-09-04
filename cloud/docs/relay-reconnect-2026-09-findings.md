@@ -26,7 +26,7 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
 | PR #18606 lock removal (root cause) | **Merged** 09:2xZ as 7b108abf71 after review, fix, re-verify; CI green | https://github.com/stablyai/orca/pull/18606 |
 | Image publish for 7b108abf71 | **Done** 08:36:49Z run 33854111305: `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` | |
-| Director deploy on 519f4914 | Dispatched 08:37:45Z run 33854355791 (blue/green; prior revision 00565-fes on 85bf6799 kept as rollback). Note: `predecessor-image-digest` is a required input even with bootstrap=false; pass the serving digest. | `cloud-deploy-relay-production-director.yml` |
+| Director deploy on 519f4914 | **Succeeded** 08:45Z run 33854355791; serving `orca-cloud-relay-00570-siv`, rollback tag on 00569-ret (also 519f4914), 00565-fes (85bf6799) still deployable. Dispatched 08:37:45Z (blue/green; prior revision 00565-fes on 85bf6799 kept as rollback). Note: `predecessor-image-digest` is a required input even with bootstrap=false; pass the serving digest. | `cloud-deploy-relay-production-director.yml` |
 | c7 on new image, 2 h in | 817 controls, **0 container die** since restore (was ~1 per 15 min on old image); `sqlLatencyMsMax` still 1.0 s = lock wait unchanged, which #18606 targets | |
 | Terraform alert `relay_postgres_retry_exhausted` at `> 0` | Firing continuously since #18521; recalibration not done (own change) | `cloud/infra/terraform/relay-observability.tf:447,469` |
 
@@ -346,6 +346,21 @@ image.
 3. Cells: same-cap `verify` c7 with target=<new>, rollback=85bf6799; fresh dry-run; `canary-apply` c7;
    then batches (3 per batch, Asia c27/c29/c28 first). Each batch: new dry-run unless the batch-reuse
    change (design section above) has shipped.
+
+## Finding 8 (2026-09-04 08:40Z): ten-cell crash cascade during the director deploy, not caused by it
+
+Timeline: candidate revision 00570-siv created 08:38:39Z, first log 08:39:20Z; traffic still 100% on
+00565-fes through 08:43 (assign logs by revision). Cell crashes: c28 (5031087219978409220) looped 08:37:55–
+08:40:07 (9x), then at 08:40:20–08:40:45Z **ten** instances died within 25 s (c10 2803…, 5110…, 532…, 5464…,
+7536…, 7726…, 8671…, 8928…, 8966…). All old-image `beginProof` pg-pool timeouts. Fleet controls 13,423 ->
+6,157 by 08:43; assign 503s 3,912 (08:42) and 4,624 (08:43) per minute, director concurrency 85 (cap 80),
+Cloud Run autoscaled 5 -> 10 instances, Cloud SQL CPU 0.55 -> 0.99. Deploy finished cleanly at 08:45Z with
+the new director taking the tail of the storm; by 08:46 503s were ~30/15 s, controls 7,913 and rising,
+director lock retries 29/min (vs 105–157/min pre-deploy) and exhausted 2/min (vs 65/min at 08:36).
+Same class as 01:31Z (4 cells) and 04:47Z (5 cells) today; this was the biggest. c7, on the new image
+since 06:25Z, did not crash. What triggered the pool timeouts fleet-wide at 08:40 is not established; Cloud
+SQL CPU was 0.78–0.88 in the minutes before, the highest of the day, so the cells' 2 s connect timeout is
+the plausible tipping point under a busy database. Every cell still on 5aedbca5 remains exposed to this.
 
 ## Roll inputs (verified by the read-only `verify` run)
 
