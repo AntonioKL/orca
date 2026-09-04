@@ -6,6 +6,7 @@ import {
 } from '../../shared/structured-agent-session-options'
 import { CLAUDE_SESSION_OPTION_CATALOG } from '../../shared/agent-session-option-catalog-claude-codex'
 import type { AgentSessionOptionsResult } from '../../shared/agent-session-wire'
+import type { SessionOptionDescriptor } from '../../shared/native-chat-session-options'
 import { setClaudeStructuredOption } from './claude-structured-options'
 import type { ClaudeSession } from './claude-structured-session-state'
 import { PROVIDER_SESSION_ID, acquired, fakeClaude } from './claude-structured-session-test-support'
@@ -26,19 +27,28 @@ function initFrame(model: string): Record<string, unknown> {
   }
 }
 
-/** Source the pill reads: 'dispatched' is the one that renders the hedge. */
-function modelSource(result: AgentSessionOptionsResult): string | undefined {
+function modelPill(result: AgentSessionOptionsResult): SessionOptionDescriptor | undefined {
   const state = applyStructuredAgentSessionOptions(
     createStructuredAgentSessionOptionState('claude'),
     CLAUDE_SESSION_OPTION_CATALOG,
     result
   )
   return structuredAgentSessionOptionSnapshot(state).find((d) => d.category === 'model')
-    ?.valueSource
+}
+
+/** Provenance the record keeps. Nothing renders it — the pill shows the value
+ *  either way, and a report that disagrees is what corrects it. */
+function modelSource(result: AgentSessionOptionsResult): string | undefined {
+  return modelPill(result)?.valueSource
+}
+
+function modelValue(result: AgentSessionOptionsResult): string | undefined {
+  const kind = modelPill(result)?.kind
+  return kind?.type === 'select' ? kind.currentValue : undefined
 }
 
 describe('structured option confirmation reaches the pill', () => {
-  it('leaves a just-set model hedged until a turn reports it', async () => {
+  it('shows a just-set model before any turn reports it', async () => {
     const claude = fakeClaude({
       initModel: 'claude-sonnet-5',
       routes: { list_models: () => CATALOG }
@@ -51,7 +61,7 @@ describe('structured option confirmation reaches the pill', () => {
     expect(modelSource(result)).toBe('dispatched')
   })
 
-  it('clears the hedge once the provider reports the model back', async () => {
+  it('marks the model reported once the provider names it back', async () => {
     const claude = fakeClaude({
       initModel: 'claude-sonnet-5',
       routes: { list_models: () => CATALOG }
@@ -65,7 +75,7 @@ describe('structured option confirmation reaches the pill', () => {
     expect(modelSource(result)).toBe('reported')
   })
 
-  it('keeps an effort the readback could not take hedged', async () => {
+  it('records an effort the readback could not take without confirming it', async () => {
     const claude = fakeClaude({
       initModel: 'claude-sonnet-5',
       settings: { applied: {}, effective: {}, sources: {} },
@@ -95,14 +105,48 @@ describe('structured option confirmation reaches the pill', () => {
   })
 
   it('treats a host that reports no confirmation as unconfirmed', () => {
-    // Wire compatibility: an older host omits `confirmed` entirely; the client must
-    // keep hedging rather than read the absence as a provider report.
-    expect(
-      modelSource({
-        models: [{ id: 'haiku', label: 'Haiku', isDefault: false, efforts: [] }],
-        current: { model: 'haiku' }
-      })
-    ).toBe('dispatched')
+    // Wire compatibility: an older host omits `confirmed` entirely. Absence must
+    // read as unconfirmed provenance, and the pill still shows the host's value.
+    const result = {
+      models: [{ id: 'haiku', label: 'Haiku', isDefault: false, efforts: [] }],
+      current: { model: 'haiku' }
+    }
+    expect(modelSource(result)).toBe('dispatched')
+    expect(modelValue(result)).toBe('haiku')
+  })
+})
+
+describe('the provider report corrects the pill', () => {
+  it('moves the pill to the model the turn actually ran', async () => {
+    const claude = fakeClaude({
+      initModel: 'claude-sonnet-5',
+      routes: { list_models: () => CATALOG }
+    })
+    const adapter = await acquired(claude)
+    await adapter.setOption({ sessionId: 'session-1', key: 'model', value: 'haiku', fence: 7 })
+    expect(modelValue(await adapter.readOptions({ sessionId: 'session-1', fence: 7 }))).toBe(
+      'haiku'
+    )
+
+    claude.connections[0]!.handlers.onMessage?.(initFrame('claude-sonnet-5'))
+
+    const corrected = await adapter.readOptions({ sessionId: 'session-1', fence: 7 })
+    expect(modelValue(corrected)).toBe('sonnet')
+    expect(corrected.current.confirmed).toContain('model')
+  })
+
+  it('lets a newer write outrank the report it precedes', async () => {
+    const claude = fakeClaude({
+      initModel: 'claude-sonnet-5',
+      routes: { list_models: () => CATALOG }
+    })
+    const adapter = await acquired(claude)
+    claude.connections[0]!.handlers.onMessage?.(initFrame('claude-sonnet-5'))
+    await adapter.setOption({ sessionId: 'session-1', key: 'model', value: 'haiku', fence: 7 })
+
+    const result = await adapter.readOptions({ sessionId: 'session-1', fence: 7 })
+    expect(modelValue(result)).toBe('haiku')
+    expect(result.current.confirmed ?? []).not.toContain('model')
   })
 })
 

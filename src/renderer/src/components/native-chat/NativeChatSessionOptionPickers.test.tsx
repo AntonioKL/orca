@@ -342,7 +342,9 @@ describe('NativeChatSessionOptionPickers', () => {
     expect(screen.queryByRole('button', { name: /^Effort/ })).toBeNull()
   })
 
-  it('shows the unconfirmed hint for dispatched values', () => {
+  // The pill shows the picked value straight away; a provider report is what
+  // corrects it, so an unsent-yet-unreported value gets no separate hedge line.
+  it('tooltips a dispatched value with the category alone', () => {
     render(
       <NativeChatSessionOptionPickers
         surface={surface}
@@ -350,7 +352,8 @@ describe('NativeChatSessionOptionPickers', () => {
         isWorking={false}
       />
     )
-    expect(screen.getByText('Sent to the agent — not confirmed')).not.toBeNull()
+    expect(screen.getByText('Model')).not.toBeNull()
+    expect(screen.queryByText(/not confirmed/)).toBeNull()
   })
 
   it('renders agent-picker routes as one action instead of radio choices', async () => {
@@ -463,26 +466,7 @@ describe('NativeChatSessionOptionPickers', () => {
     await waitFor(() => expect(setOption).toHaveBeenCalledWith('thinking', false))
   })
 
-  it('does not show unconfirmed for applied flip-only booleans', () => {
-    render(
-      <NativeChatSessionOptionPickers
-        surface={surface}
-        snapshot={[
-          model(),
-          {
-            ...fast,
-            kind: { type: 'boolean', currentValue: true },
-            // Why: flip-only tracks as applied — never a healable dispatched state.
-            valueSource: 'applied'
-          }
-        ]}
-        isWorking={false}
-      />
-    )
-    expect(screen.queryByText('Sent to the agent — not confirmed')).toBeNull()
-  })
-
-  it('shows unconfirmed for confirmable dispatched booleans', () => {
+  it('tooltips a dispatched option pill with the category alone', () => {
     render(
       <NativeChatSessionOptionPickers
         surface={surface}
@@ -500,6 +484,7 @@ describe('NativeChatSessionOptionPickers', () => {
         isWorking={false}
       />
     )
-    expect(screen.getByText('Sent to the agent — not confirmed')).not.toBeNull()
+    expect(screen.getAllByText('Thinking').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/not confirmed/)).toBeNull()
   })
 })

@@ -37,32 +37,11 @@ export type NativeChatSessionOptionPickersProps = {
   pickerRequest?: NativeChatOptionPickerRequest | null
 }
 
-function PickerTooltipContent(props: {
-  label: string
-  disabledReason?: string | null
-  dispatched: boolean
-}): React.JSX.Element {
-  return (
-    <div className="space-y-0.5">
-      <div>{props.disabledReason ?? props.label}</div>
-      {props.dispatched ? (
-        <div>
-          {translate(
-            'components.native-chat.composer.sentNotConfirmed',
-            'Sent to the agent — not confirmed'
-          )}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
 function PickerTrigger(props: {
   label: string
   tooltipLabel: string
   disabled: boolean
   disabledReason?: string | null
-  dispatched: boolean
 }): React.JSX.Element {
   // Why: value-only visible text must still include the category in the
   // accessible name (WCAG 2.5.3 Label in Name / voice control).
@@ -90,11 +69,7 @@ function PickerTrigger(props: {
         </DropdownMenuTrigger>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={4}>
-        <PickerTooltipContent
-          label={props.tooltipLabel}
-          disabledReason={props.disabledReason}
-          dispatched={props.dispatched}
-        />
+        {props.disabledReason ?? props.tooltipLabel}
       </TooltipContent>
     </Tooltip>
   )
@@ -250,7 +225,6 @@ function NativeChatSessionOptionPickersInner({
             tooltipLabel={optionsTooltip}
             disabled={isWorking || pendingId !== null}
             disabledReason={optionsReason}
-            dispatched={options.some((descriptor) => descriptor.valueSource === 'dispatched')}
           />
           <DropdownMenuContent align="start" side="top" collisionPadding={8} className="w-60">
             {options.map((descriptor, index) => {
@@ -283,7 +257,6 @@ function NativeChatSessionOptionPickersInner({
           tooltipLabel={modelTooltip}
           disabled={isWorking || pendingId !== null}
           disabledReason={modelReason}
-          dispatched={model.valueSource === 'dispatched'}
         />
         <DropdownMenuContent align="start" side="top" collisionPadding={8} className="w-64">
           {modelReason && !model.settable ? (

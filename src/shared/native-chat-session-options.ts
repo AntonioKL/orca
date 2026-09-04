@@ -7,7 +7,9 @@ export type SessionOptionSelectChoice = {
 }
 
 /** `default` is the catalog's own value shown before anything is observed —
- *  truthful to display, but never evidence about a running agent. */
+ *  truthful to display, but never evidence about a running agent. `dispatched`
+ *  is provenance only: the pill shows a sent value the same as a reported one,
+ *  and a later report that disagrees is what corrects it. */
 export type SessionOptionValueSource = 'applied' | 'dispatched' | 'reported' | 'default' | 'unknown'
 
 /** Closed set of reasons an option is not settable in the current mode. A key

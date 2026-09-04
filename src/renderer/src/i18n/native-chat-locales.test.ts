@@ -53,8 +53,7 @@ describe('native chat locale copy', () => {
         'sessionOptions',
         'chooseInAgentPicker',
         'toggleOption',
-        'valueUnknown',
-        'sentNotConfirmed'
+        'valueUnknown'
       ] as const) {
         expect(composer[key].trim()).not.toBe('')
         expect(composer[key]).not.toBe(englishComposer[key])

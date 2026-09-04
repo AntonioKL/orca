@@ -14645,7 +14645,6 @@
         "toggleOption": "切换{{value0}}",
         "pillAccessibleName": "{{value0}} {{value1}}",
         "valueUnknown": "当前值未知 — 请选择开或关",
-        "sentNotConfirmed": "已发送给智能体 — 尚未确认",
         "setWhenSessionStarts": "请在会话开始时设置。",
         "availableAfterSessionStarts": "会话开始后可用。",
         "optionUpdateFailed": "无法更新选项",

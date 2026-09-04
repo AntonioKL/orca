@@ -14589,7 +14589,6 @@
         "toggleOption": "Alternar {{value0}}",
         "pillAccessibleName": "{{value0}} {{value1}}",
         "valueUnknown": "Valor actual desconocido — elige Activado o Desactivado",
-        "sentNotConfirmed": "Enviado al agente — sin confirmar",
         "setWhenSessionStarts": "Configúralo al iniciar la sesión.",
         "availableAfterSessionStarts": "Disponible después de iniciar la sesión.",
         "optionUpdateFailed": "No se pudo actualizar la opción",
