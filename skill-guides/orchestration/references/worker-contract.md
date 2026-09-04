@@ -45,6 +45,10 @@ run — and once more immediately before `worker_done`, so a redirect or a
 cancellation lands before the Task settles. `check` names its caller with
 `--terminal`, never `--from`. Stop checking after `worker_done`.
 
+If `check` returns `consumer_fenced`, the Dispatch was re-attached to another
+worker process and this one no longer owns its mailbox: stop, do not send
+`worker_done`, and do not retry the check.
+
 ## Escalation
 
 Escalate only before completion and only when the coordinator must intervene:
