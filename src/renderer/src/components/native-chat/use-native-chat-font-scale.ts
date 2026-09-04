@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type RefObject } from 'react'
 import {
   chatFontScaleActionForEvent,
   decreaseChatFontScale,
@@ -6,6 +6,8 @@ import {
   increaseChatFontScale
 } from './native-chat-font-scale'
 import { isMacPlatform } from './native-chat-shortcut'
+import { registerNativeChatZoomOwner } from './native-chat-zoom-owner'
+import type { UIZoomDirection } from '../../../../shared/ui-zoom-level'
 
 export type ChatFontScaleControls = {
   /** Current chat text scale (1 = default). Apply as a font-size multiplier. */
@@ -16,17 +18,17 @@ export type ChatFontScaleControls = {
 }
 
 /**
- * In-session chat font scale plus the Cmd/Ctrl +/-/0 keyboard bindings — the
- * desktop analog of mobile pinch-zoom. Conversation readiness and visibility
- * both gate the listener so a parked chat cannot intercept another tab's zoom
- * shortcut. The scale lives in component state (in-session is fine per the plan).
+ * In-session chat font scale plus desktop routed zoom and web Cmd/Ctrl +/-/0
+ * bindings. The scale lives in component state (in-session is fine per the plan).
  */
 export function useNativeChatFontScale({
   enabled,
-  isVisible
+  isVisible,
+  rootRef
 }: {
   enabled: boolean
   isVisible: boolean
+  rootRef: RefObject<HTMLDivElement | null>
 }): ChatFontScaleControls {
   const [scale, setScale] = useState(DEFAULT_CHAT_FONT_SCALE)
 
@@ -34,8 +36,32 @@ export function useNativeChatFontScale({
   const decrease = useCallback(() => setScale((s) => decreaseChatFontScale(s)), [])
   const reset = useCallback(() => setScale(DEFAULT_CHAT_FONT_SCALE), [])
 
+  const applyZoom = useCallback(
+    (direction: UIZoomDirection) => {
+      if (direction === 'in') {
+        increase()
+      } else if (direction === 'out') {
+        decrease()
+      } else {
+        reset()
+      }
+    },
+    [decrease, increase, reset]
+  )
+
   useEffect(() => {
-    if (!enabled || !isVisible) {
+    const root = rootRef.current
+    if (!enabled || !isVisible || !root) {
+      return
+    }
+    return registerNativeChatZoomOwner(root, applyZoom)
+  }, [applyZoom, enabled, isVisible, rootRef])
+
+  useEffect(() => {
+    const root = rootRef.current
+    const isWebClient =
+      (globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ === true
+    if (!enabled || !isVisible || !isWebClient || !root) {
       return
     }
     const isMac = isMacPlatform()
@@ -44,21 +70,18 @@ export function useNativeChatFontScale({
       if (!action) {
         return
       }
+      if (!root.contains(document.activeElement)) {
+        return
+      }
       // Why: capture-phase + preventDefault so the chord drives chat zoom instead
       // of the host (Electron) page zoom, and only while chat is active.
       e.preventDefault()
       e.stopPropagation()
-      if (action === 'increase') {
-        increase()
-      } else if (action === 'decrease') {
-        decrease()
-      } else {
-        reset()
-      }
+      applyZoom(action === 'increase' ? 'in' : action === 'decrease' ? 'out' : 'reset')
     }
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [enabled, isVisible, increase, decrease, reset])
+  }, [applyZoom, enabled, isVisible, rootRef])
 
   return { scale, increase, decrease, reset }
 }

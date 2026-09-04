@@ -2,16 +2,23 @@ import type * as ReactModule from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveZoomTarget } from './resolve-zoom-target'
 
-function makeTarget(args: { hasXtermClass?: boolean; editorClosest?: boolean }): {
+function makeTarget(args: {
+  hasXtermClass?: boolean
+  editorClosest?: boolean
+  nativeChatClosest?: boolean
+}): {
   classList: { contains: (token: string) => boolean }
   closest: (selector: string) => Element | null
 } {
-  const { hasXtermClass = false, editorClosest = false } = args
+  const { hasXtermClass = false, editorClosest = false, nativeChatClosest = false } = args
   return {
     classList: {
       contains: (token: string) => hasXtermClass && token === 'xterm-helper-textarea'
     },
-    closest: () => (editorClosest ? ({} as Element) : null)
+    closest: (selector) =>
+      editorClosest || (nativeChatClosest && selector === '[data-native-chat-root="true"]')
+        ? ({} as Element)
+        : null
   }
 }
 
@@ -54,6 +61,16 @@ describe('resolveZoomTarget', () => {
         activeElement: makeTarget({ editorClosest: true })
       })
     ).toBe('editor')
+  })
+
+  it('routes to chat zoom when native chat owns focus', () => {
+    expect(
+      resolveZoomTarget({
+        activeView: 'terminal',
+        activeTabType: 'terminal',
+        activeElement: makeTarget({ nativeChatClosest: true })
+      })
+    ).toBe('chat')
   })
 
   it('routes to ui zoom outside terminal view', () => {

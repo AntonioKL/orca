@@ -2,6 +2,7 @@ import { applyUIZoom } from '@/lib/ui-zoom'
 import { computeEditorFontSize, nextEditorFontZoomLevel } from '@/lib/editor-font-zoom'
 import { zoomLevelToPercent } from '@/components/settings/SettingsConstants'
 import { dispatchZoomLevelChanged } from '@/lib/zoom-events'
+import { dispatchNativeChatZoom } from '@/components/native-chat/native-chat-zoom-owner'
 import { stepUIZoomLevel } from '../../../../shared/ui-zoom-level'
 import { useAppStore } from '../../store'
 import { resolveZoomTarget } from '../resolve-zoom-target'
@@ -19,6 +20,9 @@ export function registerZoomIpcBridge(unsubs: (() => void)[]): void {
         activeElement: document.activeElement
       })
       if (target === 'terminal') {
+        return
+      }
+      if (target === 'chat' && dispatchNativeChatZoom(document.activeElement, direction)) {
         return
       }
       if (target === 'editor') {

@@ -316,7 +316,7 @@ export function NativeChatResolvedView({
   const nativeChatFileLinkClick = useNativeChatFileLinkClick(fileLinkContext)
 
   // Chat-only font zoom via Cmd/Ctrl +/-/0 stays inert for parked and non-live views.
-  const fontScale = useNativeChatFontScale({ enabled: isConversation, isVisible })
+  const fontScale = useNativeChatFontScale({ enabled: isConversation, isVisible, rootRef })
 
   return (
     <div

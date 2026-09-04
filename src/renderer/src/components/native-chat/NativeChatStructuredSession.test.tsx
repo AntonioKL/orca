@@ -174,7 +174,9 @@ describe('NativeChatStructuredSession', () => {
       />
     )
 
-    expect(mocks.fontScale).toHaveBeenCalledWith({ enabled: true, isVisible: false })
+    expect(mocks.fontScale).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true, isVisible: false })
+    )
   })
 
   it('wires local structured file links through the native chat opener', () => {

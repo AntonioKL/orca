@@ -1,12 +1,14 @@
+import { isNativeChatZoomFocused } from '@/components/native-chat/native-chat-zoom-owner'
+
 /**
- * Determine which zoom domain (terminal, editor, simulator, or UI) should be adjusted
+ * Determine which zoom domain (terminal, chat, editor, simulator, or UI) should be adjusted
  * based on current view, tab type, and focused element.
  */
 export function resolveZoomTarget(args: {
   activeView: TopLevelView
   activeTabType: WorkspaceVisibleTabType
   activeElement: unknown
-}): 'terminal' | 'editor' | 'simulator' | 'ui' {
+}): 'terminal' | 'chat' | 'editor' | 'simulator' | 'ui' {
   const { activeView, activeTabType, activeElement } = args
   const terminalInputFocused =
     typeof activeElement === 'object' &&
@@ -45,6 +47,9 @@ export function resolveZoomTarget(args: {
   }
   if (activeTabType === 'editor' || editorFocused) {
     return 'editor'
+  }
+  if (isNativeChatZoomFocused(activeElement)) {
+    return 'chat'
   }
   // Why: terminal zoom is focus-owned. After the user clicks app chrome or
   // whitespace, the active terminal tab remains visible but app zoom should own
