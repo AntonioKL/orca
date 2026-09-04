@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { clearActiveChecksStatusCacheForTests, getActiveChecksStatus } from './active-checks-status'
+import {
+  ACTIVE_CHECKS_STATUS_INPUT_KEYS,
+  clearActiveChecksStatusCacheForTests,
+  getActiveChecksStatus
+} from './active-checks-status'
 import type { AppState } from '../../store/types'
 import type { PRInfo } from '../../../../shared/github/pull-request-types'
 
@@ -166,5 +170,30 @@ describe('getActiveChecksStatus caching', () => {
         makeState({ 'repo-1::feature/test': { data: makePR('failure'), fetchedAt: 3 } })
       )
     ).toBe('failure')
+  })
+
+  it('reads no store field the cache is not keyed on', () => {
+    // Guards against a cast or widened type bypassing the derived key list: every property the
+    // computation touches on the state object must invalidate the cache.
+    const reads = new Set<PropertyKey>()
+    const keyed = new Set<PropertyKey>(ACTIVE_CHECKS_STATUS_INPUT_KEYS)
+    const state = new Proxy(
+      makeState({ 'repo-1::feature/test': { data: makePR('success'), fetchedAt: 2 } }),
+      {
+        get(target, prop, receiver) {
+          reads.add(prop)
+          return Reflect.get(target, prop, receiver)
+        },
+        has(target, prop) {
+          reads.add(prop)
+          return Reflect.has(target, prop)
+        }
+      }
+    )
+
+    expect(getActiveChecksStatus(state)).toBe('success')
+    expect([...reads].filter((prop) => !keyed.has(prop))).toEqual([])
+    // The read set must also be non-trivial, or the guard proves nothing.
+    expect(reads.has('prCache')).toBe(true)
   })
 })
