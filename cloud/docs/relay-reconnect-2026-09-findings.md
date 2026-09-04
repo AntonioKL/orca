@@ -421,6 +421,16 @@ inventory at that moment. On the new director that can only be placement or a sw
 is still every rebind. What stalls *connections* (not locks) for 2 s fleet-wide remains unexplained;
 Cloud SQL is `db-custom-4-15360` REGIONAL PD_SSD 49 GB at 0.5–0.75 CPU when it happens.
 
+**Stall census (10:01Z):** 33 pg-connect-timeout stall events today (clusters of timeouts < 20 s apart).
+Before 08:35 they were 1–9 timeouts each and 10–60 min apart; from 08:35 the big ones are 16, 22, 21,
+17 timeouts and 5–30 min apart. No second-of-minute phase (start seconds spread across all buckets), so
+not a fixed timer. Cloud SQL backends by state at 09:55: active peaked 42 at 09:52, idle-in-transaction
+≤ 10, nothing near the 400 ceiling; memory 0.47; disk normal. Each stall is a few seconds where *new*
+connections to Cloud SQL (via the auth proxy socket) time out at the 2 s `connectionTimeoutMillis`,
+hitting every process that happens to need a fresh pool connection in that window. Old-image cells die
+on it (unhandled), new-image director logs a 2 s 500 and continues. Root cause of the stall itself is
+outside the relay code (Cloud SQL proxy or instance); not chased further here.
+
 ## Roll inputs (verified by the read-only `verify` run)
 
 - target-image-digest `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` (lock fix; supersedes 85bf6799 as target)
