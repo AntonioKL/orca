@@ -83,7 +83,10 @@ export class OrcaRuntimeWithSubscribeToTerminalResize extends OrcaRuntimeWithApp
     }
     // A process that dies while we are stopping it is that stop succeeding, not a failure:
     // settling it as `failed` here made the in-flight worker-stop report its own success as an error.
-    if (this._orchestrationDb.getWorkerDispatch?.(dispatch.id)?.state === 'stopping') {
+    // Only a stop begun in THIS runtime can claim the exit; a `stopping` row left durable by a
+    // killed process would otherwise absorb a much later crash as a clean stop.
+    const stopping = this._orchestrationDb.getWorkerDispatch?.(dispatch.id)
+    if (stopping?.state === 'stopping' && stopping.runtime_epoch === this.getRuntimeId()) {
       this._orchestrationDb.settleWorkerStop(dispatch.id)
       this.sweepSettledWorkerResumeFencesAfterExit()
       return
