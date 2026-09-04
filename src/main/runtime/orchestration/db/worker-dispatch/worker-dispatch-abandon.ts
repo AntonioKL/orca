@@ -61,8 +61,7 @@ export function abandonWorkerDispatch(
       id: dispatchId,
       from: worker.state,
       to: 'abandoned',
-      projection: { stage: 'abandoned', updated_at: new Date().toISOString() },
-      receipt: { kind: 'worker_abandoned' }
+      projection: { stage: 'abandoned', updated_at: new Date().toISOString() }
     })
     if (['pending', 'dispatched'].includes(dispatch.status)) {
       transitionLifecycleWithDb(this.db, {
@@ -73,8 +72,7 @@ export function abandonWorkerDispatch(
         projection: {
           capability_revoked_at: dispatch.capability_revoked_at ?? new Date().toISOString(),
           completed_at: dispatch.completed_at ?? new Date().toISOString()
-        },
-        receipt: { kind: 'dispatch_abandoned' }
+        }
       })
     }
     reconcileTaskAfterDispatchInterruption(this, dispatch.task_id, dispatchId)

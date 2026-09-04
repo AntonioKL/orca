@@ -81,8 +81,7 @@ export function updateTaskStatus(
         projection: {
           result: result ?? task.result,
           completed_at: terminalStatus ? new Date().toISOString() : task.completed_at
-        },
-        receipt: { kind: 'task_status', details: { result: result ?? null } }
+        }
       })
     } catch (error) {
       if (!(error instanceof OrchestrationError) || error.code !== 'lifecycle_conflict') {

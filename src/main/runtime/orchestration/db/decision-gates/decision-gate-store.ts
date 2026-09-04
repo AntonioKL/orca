@@ -85,8 +85,7 @@ export function createGate(
       entity: 'task',
       id: gate.taskId,
       from: task.status,
-      to: 'blocked',
-      receipt: { kind: 'task_gate_created', details: { gateId: id } }
+      to: 'blocked'
     })
     const created = this.db.prepare('SELECT * FROM decision_gates WHERE id = ?').get(id) as
       | DecisionGateRow

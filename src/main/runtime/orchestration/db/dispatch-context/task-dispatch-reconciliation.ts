@@ -36,7 +36,6 @@ export function reconcileTaskAfterDispatchInterruption(
     entity: 'task',
     id: taskId,
     from: task.status,
-    to: next,
-    receipt: { kind: 'task_dispatch_interrupted', details: { dispatchId } }
+    to: next
   })
 }

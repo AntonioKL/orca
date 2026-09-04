@@ -194,33 +194,6 @@ describe('Task/Dispatch lifecycle guards', () => {
       last_error: 'process exited'
     })
     expectCapability(database, worker, false)
-    expect(database.getLifecycleTransitionReceipts('worker', worker.dispatchId)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from_state: 'stop_unknown',
-          to_state: 'failed',
-          kind: 'worker_process_exited'
-        })
-      ])
-    )
-    expect(database.getLifecycleTransitionReceipts('dispatch', worker.dispatchId)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from_state: 'dispatched',
-          to_state: 'failed',
-          kind: 'dispatch_failed'
-        })
-      ])
-    )
-    expect(database.getLifecycleTransitionReceipts('task', task.id)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from_state: 'dispatched',
-          to_state: 'blocked',
-          kind: 'task_dispatch_interrupted'
-        })
-      ])
-    )
   })
 
   it('keeps a Task dispatched when missing-terminal recovery leaves another worker active', () => {
@@ -340,10 +313,10 @@ describe('Task/Dispatch lifecycle guards', () => {
     expect(database.getDispatchContextById(started.dispatch.id)?.status).toBe('pending')
     expect(database.getTask(task.id)?.status).toBe('blocked')
     expect(database.getQuestion(question.message.id)?.status).toBe('pending')
-    const receiptCounts = {
-      worker: database.getLifecycleTransitionReceipts('worker', started.dispatch.id).length,
-      dispatch: database.getLifecycleTransitionReceipts('dispatch', started.dispatch.id).length,
-      task: database.getLifecycleTransitionReceipts('task', task.id).length
+    const settled = {
+      worker: database.getWorkerDispatch(started.dispatch.id),
+      dispatch: database.getDispatchContextById(started.dispatch.id),
+      task: database.getTask(task.id)
     }
 
     database.reconcileFederatedWorkerStart({
@@ -353,15 +326,10 @@ describe('Task/Dispatch lifecycle guards', () => {
       lastError: 'worker server restarted'
     })
 
-    expect(database.getLifecycleTransitionReceipts('worker', started.dispatch.id)).toHaveLength(
-      receiptCounts.worker
-    )
-    expect(database.getLifecycleTransitionReceipts('dispatch', started.dispatch.id)).toHaveLength(
-      receiptCounts.dispatch
-    )
-    expect(database.getLifecycleTransitionReceipts('task', task.id)).toHaveLength(
-      receiptCounts.task
-    )
+    // A repeated report of the same uncertainty must not re-project any of the three entities.
+    expect(database.getWorkerDispatch(started.dispatch.id)).toEqual(settled.worker)
+    expect(database.getDispatchContextById(started.dispatch.id)).toEqual(settled.dispatch)
+    expect(database.getTask(task.id)).toEqual(settled.task)
     const answered = database.answerQuestion({
       messageId: question.message.id,
       runId: run.id,
@@ -372,7 +340,7 @@ describe('Task/Dispatch lifecycle guards', () => {
     expect(answered.message.body).toBe('yes')
   })
 
-  it('rolls back federated start uncertainty when the Task receipt cannot commit', () => {
+  it('rolls back federated start uncertainty when the Task transition cannot commit', () => {
     const database = createDatabase()
     const task = database.createTask({ spec: 'atomic federated uncertainty' })
     const started = database.createStartingWorkerDispatch({
@@ -388,10 +356,10 @@ describe('Task/Dispatch lifecycle guards', () => {
       }
     })
     sqliteFor(database).exec(`
-      CREATE TRIGGER reject_federated_unknown_task_receipt
-      BEFORE INSERT ON lifecycle_transition_receipts
-      WHEN NEW.kind = 'federated_task_start_unknown'
-      BEGIN SELECT RAISE(ABORT, 'forced federated uncertainty receipt failure'); END;
+      CREATE TRIGGER reject_federated_unknown_task_block
+      BEFORE UPDATE ON tasks
+      WHEN NEW.status = 'blocked'
+      BEGIN SELECT RAISE(ABORT, 'forced federated uncertainty task block failure'); END;
     `)
 
     expect(() =>
@@ -401,7 +369,7 @@ describe('Task/Dispatch lifecycle guards', () => {
         stage: 'remote_attach',
         lastError: 'worker server restarted'
       })
-    ).toThrow('forced federated uncertainty receipt failure')
+    ).toThrow('forced federated uncertainty task block failure')
     expect(database.getWorkerDispatch(started.dispatch.id)).toMatchObject({
       state: 'starting',
       stage: 'accepted',
@@ -409,11 +377,6 @@ describe('Task/Dispatch lifecycle guards', () => {
     })
     expect(database.getDispatchContextById(started.dispatch.id)?.status).toBe('pending')
     expect(database.getTask(task.id)?.status).toBe('dispatched')
-    expect(
-      database
-        .getLifecycleTransitionReceipts('worker', started.dispatch.id)
-        .some((receipt) => receipt.kind === 'federated_worker_start_unknown')
-    ).toBe(false)
   })
 
   it.each(['stop', 'abandon'] as const)(
@@ -472,40 +435,27 @@ describe('Task/Dispatch lifecycle guards', () => {
         alreadySettled: false,
         releasedCurrentTask: true
       })
-      expect(database.getLifecycleTransitionReceipts('dispatch', contextOnly.id)).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            from_state: 'dispatched',
-            to_state: 'failed',
-            kind: `dispatch_context_only_${operation === 'stop' ? 'stopped' : 'abandoned'}`
-          })
-        ])
-      )
-      expect(database.getLifecycleTransitionReceipts('task', task.id)).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            from_state: 'dispatched',
-            to_state: 'blocked',
-            kind: 'task_context_only_dispatch_released'
-          })
-        ])
-      )
+      expect(database.getDispatchContextById(contextOnly.id)).toMatchObject({
+        status: 'failed',
+        last_failure: operation === 'stop' ? 'stopped' : 'abandoned'
+      })
+      expect(database.getTask(task.id)?.status).toBe('blocked')
     }
   )
 
-  it('rolls back both context-only projections when receipt append fails', () => {
+  it('rolls back both context-only projections when the Task transition fails', () => {
     const database = createDatabase()
     const task = database.createTask({ spec: 'context-only atomic receipt' })
     const contextOnly = createRootDispatch(database, task.id, 'term_context')
     sqliteFor(database).exec(`
-      CREATE TRIGGER reject_context_release_receipt
-      BEFORE INSERT ON lifecycle_transition_receipts
-      WHEN NEW.entity = 'task'
-      BEGIN SELECT RAISE(ABORT, 'forced context release receipt failure'); END;
+      CREATE TRIGGER reject_context_release_task_block
+      BEFORE UPDATE ON tasks
+      WHEN NEW.status = 'blocked'
+      BEGIN SELECT RAISE(ABORT, 'forced context release task block failure'); END;
     `)
 
     expect(() => database.beginWorkerStop(contextOnly.id, 'runtime_test')).toThrow(
-      'forced context release receipt failure'
+      'forced context release task block failure'
     )
     expect(database.getTask(task.id)?.status).toBe('dispatched')
     expect(database.getDispatchContextById(contextOnly.id)).toMatchObject({
@@ -514,21 +464,6 @@ describe('Task/Dispatch lifecycle guards', () => {
       completed_at: null,
       capability_revoked_at: null
     })
-    expect(database.getLifecycleTransitionReceipts('dispatch', contextOnly.id)).toEqual([])
-    expect(database.getLifecycleTransitionReceipts('task', task.id)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from_state: 'ready',
-          to_state: 'dispatched',
-          kind: 'task_dispatched'
-        })
-      ])
-    )
-    expect(
-      database
-        .getLifecycleTransitionReceipts('task', task.id)
-        .some((receipt) => receipt.kind === 'task_context_only_dispatch_released')
-    ).toBe(false)
   })
 
   it.each(['stop', 'abandon'] as const)(

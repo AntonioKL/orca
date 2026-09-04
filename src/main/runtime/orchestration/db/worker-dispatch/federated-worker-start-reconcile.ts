@@ -55,16 +55,14 @@ export function reconcileFederatedWorkerStart(
             : worker.residual_resources,
           last_error: null,
           updated_at: new Date().toISOString()
-        },
-        receipt: { kind: 'federated_worker_ready' }
+        }
       })
       if (dispatch.status === 'pending') {
         transitionLifecycleWithDb(this.db, {
           entity: 'dispatch',
           id: params.dispatchId,
           from: 'pending',
-          to: 'dispatched',
-          receipt: { kind: 'federated_dispatch_ready' }
+          to: 'dispatched'
         })
       }
       const task = this.getTask(dispatch.task_id)
@@ -74,8 +72,7 @@ export function reconcileFederatedWorkerStart(
           id: dispatch.task_id,
           from: 'blocked',
           to: 'dispatched',
-          projection: { completed_at: null },
-          receipt: { kind: 'federated_task_ready' }
+          projection: { completed_at: null }
         })
       }
     } else if (params.state === 'start_unknown') {
@@ -90,15 +87,13 @@ export function reconcileFederatedWorkerStart(
             stage: params.stage,
             last_error: reason,
             updated_at: new Date().toISOString()
-          },
-          receipt: { kind: 'federated_worker_start_unknown', details: { reason } }
+          }
         })
         transitionLifecycleWithDb(this.db, {
           entity: 'dispatch',
           id: params.dispatchId,
           from: dispatch.status,
-          to: dispatch.status,
-          receipt: { kind: 'federated_dispatch_start_unknown' }
+          to: dispatch.status
         })
       }
       const task = this.getTask(dispatch.task_id)
@@ -107,8 +102,7 @@ export function reconcileFederatedWorkerStart(
           entity: 'task',
           id: dispatch.task_id,
           from: 'dispatched',
-          to: 'blocked',
-          receipt: { kind: 'federated_task_start_unknown', details: { reason } }
+          to: 'blocked'
         })
       }
     } else {
@@ -122,8 +116,7 @@ export function reconcileFederatedWorkerStart(
           stage: params.stage,
           last_error: reason,
           updated_at: new Date().toISOString()
-        },
-        receipt: { kind: `federated_worker_${params.state}`, details: { reason } }
+        }
       })
       if (['pending', 'dispatched'].includes(dispatch.status)) {
         transitionLifecycleWithDb(this.db, {
@@ -135,8 +128,7 @@ export function reconcileFederatedWorkerStart(
             last_failure: reason,
             completed_at: new Date().toISOString(),
             capability_revoked_at: dispatch.capability_revoked_at ?? new Date().toISOString()
-          },
-          receipt: { kind: 'federated_dispatch_failed', details: { reason } }
+          }
         })
       }
       reconcileTaskAfterDispatchInterruption(this, dispatch.task_id, params.dispatchId)
@@ -155,8 +147,7 @@ export function reconcileFederatedWorkerStart(
           id: dispatch.task_id,
           from: task.status,
           to: 'failed',
-          projection: { completed_at: new Date().toISOString() },
-          receipt: { kind: 'federated_task_failed' }
+          projection: { completed_at: new Date().toISOString() }
         })
       }
       this.closeQuestionsForDispatch(params.dispatchId)

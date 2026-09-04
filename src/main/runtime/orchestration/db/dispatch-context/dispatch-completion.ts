@@ -27,8 +27,7 @@ export function completeDispatch(this: OrchestrationDb, ctxId: string): void {
       projection: {
         completed_at: new Date().toISOString(),
         capability_revoked_at: dispatch.capability_revoked_at ?? new Date().toISOString()
-      },
-      receipt: { kind: 'dispatch_completed' }
+      }
     })
     this.db.exec('RELEASE complete_dispatch_transition')
   } catch (error) {
@@ -62,8 +61,7 @@ export function settleActiveDispatchesForTask(
             ? (failure ?? row.last_failure ?? 'Task marked failed')
             : row.last_failure,
         capability_revoked_at: row.capability_revoked_at ?? new Date().toISOString()
-      },
-      receipt: { kind: `dispatch_${status}`, details: { taskId } }
+      }
     })
   }
 }
@@ -160,8 +158,7 @@ export function failDispatch(
         termination_reason: options.terminationReason ?? before.termination_reason,
         completed_at: before.completed_at ?? new Date().toISOString(),
         capability_revoked_at: before.capability_revoked_at ?? new Date().toISOString()
-      },
-      receipt: { kind: 'dispatch_failed', details: { error } }
+      }
     })
     const ctx = this.db.prepare('SELECT * FROM dispatch_contexts WHERE id = ?').get(ctxId) as
       | DispatchContextRow
@@ -181,8 +178,7 @@ export function failDispatch(
           stage: 'process_exited',
           last_error: error,
           updated_at: new Date().toISOString()
-        },
-        receipt: { kind: 'worker_process_exited' }
+        }
       })
     }
 
@@ -203,8 +199,7 @@ export function failDispatch(
         id: ctx.task_id,
         from: 'dispatched',
         to: taskStatus,
-        projection: { completed_at: taskStatus === 'failed' ? new Date().toISOString() : null },
-        receipt: { kind: 'task_dispatch_failed', details: { dispatchId: ctxId } }
+        projection: { completed_at: taskStatus === 'failed' ? new Date().toISOString() : null }
       })
     }
     const updated = this.db.prepare('SELECT * FROM dispatch_contexts WHERE id = ?').get(ctxId) as

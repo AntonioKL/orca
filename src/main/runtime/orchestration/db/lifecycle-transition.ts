@@ -1,15 +1,14 @@
 import type Database from '../../../sqlite/sync-database'
 import { OrchestrationError } from '../orchestration-error'
 import type { OrchestrationDb } from './orchestration-db'
-import { generateId } from './generated-id'
 
 /**
  * The single write boundary for Task, Dispatch, and supervised worker state.
  *
  * This function deliberately does not open or commit a transaction. Callers
  * often compose several projections (and a mailbox effect) in one transaction;
- * keeping the boundary neutral makes the receipt and projection atomic with
- * that caller-owned transaction.
+ * keeping the boundary neutral makes every projection atomic with that
+ * caller-owned transaction.
  */
 export type LifecycleEntity = 'task' | 'dispatch' | 'worker'
 
@@ -55,8 +54,6 @@ export type LifecycleTransitionParams = {
   to: string
   /** Additional legacy projection columns written with the state change. */
   projection?: Record<string, string | number | null>
-  /** Stable event name and optional details retained for replay/audit. */
-  receipt?: { kind?: string; details?: unknown }
   /** Narrow exception for a worker report correcting an unobserved prompt start. */
   correction?: 'unobserved_prompt_report'
 }
@@ -121,21 +118,10 @@ const PROJECTION_COLUMNS = new Set([
   'runtime_epoch'
 ])
 
-export type LifecycleTransitionReceipt = {
-  id: string
-  entity: LifecycleEntity
-  entity_id: string
-  from_state: string
-  to_state: string
-  kind: string
-  details: string | null
-  created_at: string
-}
-
 export function transitionLifecycle(
   this: OrchestrationDb,
   params: LifecycleTransitionParams
-): { changed: boolean; receipt?: LifecycleTransitionReceipt } {
+): { changed: boolean } {
   return transitionLifecycleWithDb(this.db, params)
 }
 
@@ -143,7 +129,7 @@ export function transitionLifecycle(
 export function transitionLifecycleWithDb(
   db: Database.Database,
   params: LifecycleTransitionParams
-): { changed: boolean; receipt?: LifecycleTransitionReceipt } {
+): { changed: boolean } {
   const entity = ENTITY_TABLE[params.entity]
   const allowed = Array.isArray(params.from) ? params.from : [params.from]
   const current = db
@@ -207,82 +193,13 @@ export function transitionLifecycleWithDb(
     )
   }
 
-  const receipt = appendLifecycleTransitionReceipt(db, {
-    entity: params.entity,
-    entityId: params.id,
-    fromState: current.state,
-    toState: params.to,
-    kind: params.receipt?.kind,
-    details: params.receipt?.details
-  })
-  return { changed: true, receipt }
-}
-
-function appendLifecycleTransitionReceipt(
-  db: Database.Database,
-  params: {
-    entity: LifecycleEntity
-    entityId: string
-    fromState: string
-    toState: string
-    kind?: string
-    details?: unknown
-  }
-): LifecycleTransitionReceipt {
-  const receiptId = generateId('lcr')
-  db.prepare(
-    `INSERT INTO lifecycle_transition_receipts
-       (id, entity, entity_id, from_state, to_state, kind, details)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    receiptId,
-    params.entity,
-    params.entityId,
-    params.fromState,
-    params.toState,
-    params.kind ?? 'lifecycle_transition',
-    params.details === undefined ? null : JSON.stringify(params.details)
-  )
-  return db
-    .prepare('SELECT * FROM lifecycle_transition_receipts WHERE id = ?')
-    .get(receiptId) as LifecycleTransitionReceipt
-}
-
-export function getLifecycleTransitionReceipts(
-  this: OrchestrationDb,
-  entity: LifecycleEntity,
-  entityId: string
-): LifecycleTransitionReceipt[] {
-  const receipts = this.db
-    .prepare(
-      `SELECT * FROM lifecycle_transition_receipts
-       WHERE entity = ? AND entity_id = ? ORDER BY rowid`
-    )
-    .all(entity, entityId) as LifecycleTransitionReceipt[]
-  if (receipts.length > 0 || entity !== 'worker') {
-    return receipts
-  }
-  // Recovery receipts are keyed by owning Dispatch. Accept the historical Resource-ID query
-  // shape so callers inspecting older releases continue to see the same ledger entries.
-  const owner = this.db
-    .prepare('SELECT owner_dispatch_id FROM worker_terminal_resources WHERE id = ?')
-    .get(entityId) as { owner_dispatch_id: string } | undefined
-  if (!owner) {
-    return receipts
-  }
-  return this.db
-    .prepare(
-      `SELECT * FROM lifecycle_transition_receipts
-       WHERE entity = ? AND entity_id = ? AND kind = 'worker_terminal_recovery' ORDER BY rowid`
-    )
-    .all(entity, owner.owner_dispatch_id) as LifecycleTransitionReceipt[]
+  return { changed: true }
 }
 
 export type LifecycleTransitionMethods = {
   transitionLifecycle: typeof transitionLifecycle
-  getLifecycleTransitionReceipts: typeof getLifecycleTransitionReceipts
 }
 
 export function attachLifecycleTransition(ctor: { prototype: object }): void {
-  Object.assign(ctor.prototype, { transitionLifecycle, getLifecycleTransitionReceipts })
+  Object.assign(ctor.prototype, { transitionLifecycle })
 }

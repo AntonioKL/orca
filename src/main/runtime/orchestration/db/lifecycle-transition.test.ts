@@ -6,7 +6,7 @@ describe('guarded lifecycle transitions', () => {
 
   afterEach(() => db?.close())
 
-  it('rejects a stale prior state without writing a receipt', () => {
+  it('rejects a stale prior state without changing the projection', () => {
     db = new OrchestrationDb(':memory:')
     const task = db.createTask({ spec: 'guarded transition' })
 
@@ -18,32 +18,27 @@ describe('guarded lifecycle transitions', () => {
         to: 'completed'
       })
     ).toThrow(/expected pending/)
-    expect(db.getLifecycleTransitionReceipts('task', task.id)).toEqual([])
+    expect(db.getTask(task.id)?.status).toBe('ready')
   })
 
-  it('rolls back the legacy projection when receipt append fails', () => {
+  it('composes its projection into the caller-owned transaction', () => {
     db = new OrchestrationDb(':memory:')
-    const task = db.createTask({ spec: 'atomic receipt' })
-    db.db.exec(`
-      CREATE TRIGGER reject_lifecycle_receipt
-      BEFORE INSERT ON lifecycle_transition_receipts
-      BEGIN SELECT RAISE(ABORT, 'forced receipt failure'); END;
-    `)
+    const task = db.createTask({ spec: 'caller-owned rollback' })
 
     db.db.exec('SAVEPOINT lifecycle_test')
-    expect(() =>
-      db!.transitionLifecycle({
+    expect(
+      db.transitionLifecycle({
         entity: 'task',
         id: task.id,
         from: 'ready',
         to: 'completed',
-        receipt: { kind: 'test' }
+        projection: { result: 'uncommitted' }
       })
-    ).toThrow('forced receipt failure')
+    ).toEqual({ changed: true })
+    expect(db.getTask(task.id)?.status).toBe('completed')
     db.db.exec('ROLLBACK TO lifecycle_test')
     db.db.exec('RELEASE lifecycle_test')
 
-    expect(db.getTask(task.id)?.status).toBe('ready')
-    expect(db.getLifecycleTransitionReceipts('task', task.id)).toEqual([])
+    expect(db.getTask(task.id)).toMatchObject({ status: 'ready', result: null })
   })
 })

@@ -58,7 +58,6 @@ describe('orchestration worker release', () => {
       recovery_attempt_count: 0,
       last_recovery_at: null
     })
-    expect(h.db.getLifecycleTransitionReceipts('worker', resourceId!)).toEqual([])
   })
 
   it('releases a failed worker the same way', async () => {

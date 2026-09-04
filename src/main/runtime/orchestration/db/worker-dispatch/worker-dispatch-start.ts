@@ -164,8 +164,7 @@ export function createStartingWorkerDispatch(
       id: task.id,
       from: params.retryOf ? ['failed', 'blocked'] : 'ready',
       to: 'dispatched',
-      projection: { result: null, completed_at: null },
-      receipt: { kind: 'task_dispatched', details: { dispatchId: id } }
+      projection: { result: null, completed_at: null }
     })
     this.db.exec('COMMIT')
     this.hasAnyDispatchContextsCache = true

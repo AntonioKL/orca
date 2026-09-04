@@ -126,8 +126,7 @@ export function getWorkerTerminalResourceFormerlyOwnedBy(
 /** Records bounded recovery bookkeeping without changing ownership or release intent. */
 export function recordWorkerTerminalRecoveryAttempt(
   this: OrchestrationDb,
-  resourceId: string,
-  outcome: 'released' | 'pending' | 'unknown' | 'retained'
+  resourceId: string
 ): WorkerTerminalResourceRow | undefined {
   this.db
     .prepare(
@@ -137,36 +136,7 @@ export function recordWorkerTerminalRecoveryAttempt(
         WHERE id = ?`
     )
     .run(resourceId)
-  const resource = this.getWorkerTerminalResource(resourceId)
-  if (resource) {
-    // Keep the receipt in the worker lifecycle ledger keyed by its owning Dispatch, not the
-    // terminal Resource ID. Resource-ID lookups remain compatible in getLifecycleTransitionReceipts.
-    this.db
-      .prepare(
-        `INSERT INTO lifecycle_transition_receipts
-           (id, entity, entity_id, from_state, to_state, kind, details)
-         VALUES (?, 'worker', ?, ?, ?, 'worker_terminal_recovery', ?)`
-      )
-      .run(
-        generateId('wrr'),
-        resource.owner_dispatch_id,
-        resource.release_state,
-        outcome,
-        JSON.stringify({ attempt: resource.recovery_attempt_count })
-      )
-    this.db
-      .prepare(
-        `DELETE FROM lifecycle_transition_receipts
-          WHERE kind = 'worker_terminal_recovery' AND entity_id = ?
-            AND id NOT IN (
-              SELECT id FROM lifecycle_transition_receipts
-               WHERE kind = 'worker_terminal_recovery' AND entity_id = ?
-               ORDER BY created_at DESC LIMIT 32
-            )`
-      )
-      .run(resource.owner_dispatch_id, resource.owner_dispatch_id)
-  }
-  return resource
+  return this.getWorkerTerminalResource(resourceId)
 }
 
 // Reusable exact settled terminal: transfers cleanup ownership to the new Dispatch and fences

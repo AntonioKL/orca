@@ -74,8 +74,7 @@ export function beginWorkerStop(
         stage: 'stop_requested',
         runtime_epoch: runtimeEpoch,
         updated_at: new Date().toISOString()
-      },
-      receipt: { kind: 'worker_stop_requested' }
+      }
     })
     transitionLifecycleWithDb(this.db, {
       entity: 'dispatch',
@@ -84,8 +83,7 @@ export function beginWorkerStop(
       to: dispatch.status,
       projection: {
         capability_revoked_at: dispatch.capability_revoked_at ?? new Date().toISOString()
-      },
-      receipt: { kind: 'dispatch_capability_revoked' }
+      }
     })
     reconcileTaskAfterDispatchInterruption(this, dispatch.task_id, dispatchId)
     this.closeQuestionsForDispatch(dispatchId)
@@ -114,8 +112,7 @@ export function settleWorkerStop(this: OrchestrationDb, dispatchId: string): Wor
       id: dispatchId,
       from: 'stopping',
       to: 'stopped',
-      projection: { stage: 'process_stopped', updated_at: new Date().toISOString() },
-      receipt: { kind: 'worker_stopped' }
+      projection: { stage: 'process_stopped', updated_at: new Date().toISOString() }
     })
     if (['pending', 'dispatched'].includes(dispatch.status)) {
       transitionLifecycleWithDb(this.db, {
@@ -123,8 +120,7 @@ export function settleWorkerStop(this: OrchestrationDb, dispatchId: string): Wor
         id: dispatchId,
         from: dispatch.status,
         to: 'failed',
-        projection: { completed_at: new Date().toISOString(), last_failure: 'stopped' },
-        receipt: { kind: 'dispatch_stopped' }
+        projection: { completed_at: new Date().toISOString(), last_failure: 'stopped' }
       })
     }
     reconcileTaskAfterDispatchInterruption(this, dispatch.task_id, dispatchId)
@@ -169,8 +165,7 @@ export function reconcileFederatedWorkerStop(
         stage: 'process_stopped',
         last_error: null,
         updated_at: new Date().toISOString()
-      },
-      receipt: { kind: 'federated_worker_stopped' }
+      }
     })
     if (['pending', 'dispatched'].includes(dispatch.status)) {
       transitionLifecycleWithDb(this.db, {
@@ -181,8 +176,7 @@ export function reconcileFederatedWorkerStop(
         projection: {
           completed_at: dispatch.completed_at ?? new Date().toISOString(),
           last_failure: 'stopped'
-        },
-        receipt: { kind: 'federated_dispatch_stopped' }
+        }
       })
     }
     reconcileTaskAfterDispatchInterruption(this, dispatch.task_id, dispatchId)
@@ -210,8 +204,7 @@ export function resumeFederatedWorkerForTerminalRelay(
       id: dispatchId,
       from: 'stopping',
       to: 'ready',
-      projection: { stage: 'remote_report_pending', updated_at: new Date().toISOString() },
-      receipt: { kind: 'worker_stop_relay_resumed' }
+      projection: { stage: 'remote_report_pending', updated_at: new Date().toISOString() }
     })
     const task = this.getTask(dispatch.task_id)
     if (task?.status === 'blocked') {
@@ -219,8 +212,7 @@ export function resumeFederatedWorkerForTerminalRelay(
         entity: 'task',
         id: dispatch.task_id,
         from: 'blocked',
-        to: 'dispatched',
-        receipt: { kind: 'task_stop_relay_resumed' }
+        to: 'dispatched'
       })
     }
     this.db.exec('COMMIT')
@@ -251,8 +243,7 @@ export function markWorkerStopUnknown(
         stage: 'stop_outcome_unknown',
         last_error: reason,
         updated_at: new Date().toISOString()
-      },
-      receipt: { kind: 'worker_stop_unknown', details: { reason } }
+      }
     })
     this.db.exec('RELEASE mark_worker_stop_unknown')
     return this.getWorkerDispatch(dispatchId) as WorkerDispatchRow

@@ -70,8 +70,7 @@ export function reconcileMissingWorkerTerminal(
           last_failure: reason,
           completed_at: new Date().toISOString(),
           capability_revoked_at: dispatch.capability_revoked_at ?? new Date().toISOString()
-        },
-        receipt: { kind: 'dispatch_terminal_missing', details: { reason } }
+        }
       })
       if (!stopWasPending) {
         const taskStatus: TaskStatus = dispatchStatus === 'circuit_broken' ? 'failed' : 'ready'
@@ -91,8 +90,7 @@ export function reconcileMissingWorkerTerminal(
             id: dispatch.task_id,
             from: task.status,
             to: taskStatus,
-            projection: { completed_at: taskStatus === 'failed' ? new Date().toISOString() : null },
-            receipt: { kind: 'task_terminal_missing' }
+            projection: { completed_at: taskStatus === 'failed' ? new Date().toISOString() : null }
           })
         }
       }
@@ -107,11 +105,6 @@ export function reconcileMissingWorkerTerminal(
         stage: 'terminal_missing',
         last_error: reason,
         updated_at: new Date().toISOString()
-      },
-      receipt: {
-        kind: stopWasPending
-          ? 'worker_terminal_missing_stopped'
-          : 'worker_terminal_missing_abandoned'
       }
     })
     this.db.exec('COMMIT')

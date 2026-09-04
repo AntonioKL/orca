@@ -7,42 +7,33 @@ describe('decision-gate lifecycle transitions', () => {
 
   afterEach(() => db?.close())
 
-  it('records the guarded Task transition when creating a gate', () => {
+  it('blocks the dispatched Task when creating a gate', () => {
     db = new OrchestrationDb(':memory:')
-    const task = db.createTask({ spec: 'gate receipt' })
+    const task = db.createTask({ spec: 'gate blocks task' })
     createRootDispatch(db, task.id, 'term_gate')
+    expect(db.getTask(task.id)?.status).toBe('dispatched')
 
     db.createGate({ taskId: task.id, question: 'Proceed?' })
 
-    expect(db.getLifecycleTransitionReceipts('task', task.id)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from_state: 'dispatched',
-          to_state: 'blocked',
-          kind: 'task_gate_created'
-        })
-      ])
-    )
+    expect(db.getTask(task.id)?.status).toBe('blocked')
   })
 
-  it('rolls back gate and dispatch projections when receipt append fails', () => {
+  it('rolls back the gate row when the Task transition cannot commit', () => {
     db = new OrchestrationDb(':memory:')
     const task = db.createTask({ spec: 'atomic gate creation' })
     const dispatch = createRootDispatch(db, task.id, 'term_gate')
-    const taskReceiptsBefore = db.getLifecycleTransitionReceipts('task', task.id)
     db.db.exec(`
-      CREATE TRIGGER reject_gate_lifecycle_receipt
-      BEFORE INSERT ON lifecycle_transition_receipts
-      WHEN NEW.kind = 'task_gate_created'
-      BEGIN SELECT RAISE(ABORT, 'forced gate receipt failure'); END;
+      CREATE TRIGGER reject_gate_task_block
+      BEFORE UPDATE ON tasks
+      WHEN NEW.status = 'blocked'
+      BEGIN SELECT RAISE(ABORT, 'forced gate task block failure'); END;
     `)
 
     expect(() => db!.createGate({ taskId: task.id, question: 'Proceed?' })).toThrow(
-      'forced gate receipt failure'
+      'forced gate task block failure'
     )
     expect(db.listGates({ taskId: task.id })).toHaveLength(0)
     expect(db.getTask(task.id)?.status).toBe('dispatched')
     expect(db.getDispatchContextById(dispatch.id)?.status).toBe('dispatched')
-    expect(db.getLifecycleTransitionReceipts('task', task.id)).toEqual(taskReceiptsBefore)
   })
 })

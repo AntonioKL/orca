@@ -1,4 +1,5 @@
 import type { OrchestrationDb } from '../orchestration-db'
+import { ADDITIVE_LIFECYCLE_DELETE_TRIGGERS_SQL } from './create-graph-tables-sql'
 
 const ONE_OUTSTANDING_INDEX_SQL = `
   CREATE UNIQUE INDEX idx_deliveries_one_outstanding
@@ -19,6 +20,16 @@ export function migrateMailboxDeliveryRepairV35(this: OrchestrationDb, current: 
   if (current >= 35) {
     return
   }
+  // The write-only lifecycle ledger is gone. Old delete triggers still reference it, and
+  // CREATE TRIGGER IF NOT EXISTS cannot replace a body, so drop all three and rebuild the two
+  // that survive.
+  this.db.exec(`
+    DROP TRIGGER IF EXISTS trg_tasks_delete_additive_lifecycle;
+    DROP TRIGGER IF EXISTS trg_dispatches_delete_additive_lifecycle;
+    DROP TRIGGER IF EXISTS trg_workers_delete_additive_lifecycle;
+    DROP TABLE IF EXISTS lifecycle_transition_receipts;
+    ${ADDITIVE_LIFECYCLE_DELETE_TRIGGERS_SQL}
+  `)
   rebuildDeliveriesWithMailboxDefault.call(this)
   recreateIndexMissingPredicate.call(
     this,

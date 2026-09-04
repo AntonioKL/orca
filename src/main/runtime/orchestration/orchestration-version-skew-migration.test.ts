@@ -402,7 +402,6 @@ describe('OrchestrationDb version-skew migration', () => {
     raw.close()
 
     db = new OrchestrationDb(dbPath)
-    expect(db.db.prepare('SELECT * FROM lifecycle_transition_receipts').all()).toEqual([])
     expect(db.db.prepare('SELECT * FROM attempt_observation_facts').all()).toEqual([])
   })
   it('repairs a v33 schema missing the pointer-enter column', () => {

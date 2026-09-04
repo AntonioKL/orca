@@ -59,33 +59,6 @@ describe('worker start settled by an unobserved prompt', () => {
     expect(db.getTask(taskId)).toMatchObject({ status: 'completed', result: 'done the work' })
     expect(db.getDispatchContextById(dispatchId)?.status).toBe('completed')
     expect(db.getWorkerDispatch(dispatchId)).toMatchObject({ state: 'succeeded', stage: 'settled' })
-    expect(db.getLifecycleTransitionReceipts('task', taskId)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from_state: 'failed',
-          to_state: 'completed',
-          kind: 'task_prompt_stall_corrected'
-        })
-      ])
-    )
-    expect(db.getLifecycleTransitionReceipts('dispatch', dispatchId)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from_state: 'failed',
-          to_state: 'completed',
-          kind: 'dispatch_prompt_stall_corrected'
-        })
-      ])
-    )
-    expect(db.getLifecycleTransitionReceipts('worker', dispatchId)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from_state: 'failed',
-          to_state: 'succeeded',
-          kind: 'worker_prompt_stall_corrected'
-        })
-      ])
-    )
   })
 
   it('revokes and stays settled when the start failed for any other cause', () => {
@@ -119,33 +92,6 @@ describe('worker start settled by an unobserved prompt', () => {
       last_failure: 'build broke on X'
     })
     expect(db.getWorkerDispatch(dispatchId)).toMatchObject({ state: 'failed', stage: 'settled' })
-    expect(db.getLifecycleTransitionReceipts('task', taskId)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from_state: 'failed',
-          to_state: 'failed',
-          kind: 'task_prompt_stall_corrected'
-        })
-      ])
-    )
-    expect(db.getLifecycleTransitionReceipts('dispatch', dispatchId)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from_state: 'failed',
-          to_state: 'failed',
-          kind: 'dispatch_prompt_stall_corrected'
-        })
-      ])
-    )
-    expect(db.getLifecycleTransitionReceipts('worker', dispatchId)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from_state: 'failed',
-          to_state: 'failed',
-          kind: 'worker_prompt_stall_corrected'
-        })
-      ])
-    )
 
     // The stalled cause is gone, so a repeat report has nothing left to correct.
     expect(
@@ -154,17 +100,18 @@ describe('worker start settled by an unobserved prompt', () => {
     expect(db.getTask(taskId)?.result).toBe('build broke on X')
   })
 
-  it('rolls back every prompt-stall correction when a receipt cannot be inserted', () => {
+  it('rolls back every prompt-stall correction when the worker transition fails', () => {
     db = new OrchestrationDb(':memory:')
     const { taskId, dispatchId } = startWorker('atomic correction')
     db.failWorkerStart(dispatchId, 'dispatch_input', 'agent_prompt_stalled', {
       retainCapability: true
     })
+    // The worker correction is the last of the three, so aborting it must undo the other two.
     db.db.exec(`
       CREATE TRIGGER reject_worker_prompt_stall_correction
-      BEFORE INSERT ON lifecycle_transition_receipts
-      WHEN NEW.kind = 'worker_prompt_stall_corrected'
-      BEGIN SELECT RAISE(ABORT, 'forced prompt-stall receipt failure'); END;
+      BEFORE UPDATE ON worker_dispatches
+      WHEN NEW.state = 'succeeded'
+      BEGIN SELECT RAISE(ABORT, 'forced prompt-stall correction failure'); END;
     `)
 
     expect(() =>
@@ -174,7 +121,7 @@ describe('worker start settled by an unobserved prompt', () => {
         outcome: 'succeeded',
         result: 'uncommitted result'
       })
-    ).toThrow('forced prompt-stall receipt failure')
+    ).toThrow('forced prompt-stall correction failure')
     expect(db.getTask(taskId)).toMatchObject({ status: 'failed', result: null })
     expect(db.getDispatchContextById(dispatchId)).toMatchObject({
       status: 'failed',
@@ -185,15 +132,5 @@ describe('worker start settled by an unobserved prompt', () => {
       state: 'failed',
       stage: 'dispatch_input'
     })
-    expect(
-      db
-        .getLifecycleTransitionReceipts('task', taskId)
-        .some((receipt) => receipt.kind === 'task_prompt_stall_corrected')
-    ).toBe(false)
-    expect(
-      db
-        .getLifecycleTransitionReceipts('dispatch', dispatchId)
-        .some((receipt) => receipt.kind === 'dispatch_prompt_stall_corrected')
-    ).toBe(false)
   })
 })

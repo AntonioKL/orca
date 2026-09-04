@@ -308,25 +308,11 @@ describe('orchestration worker release recovery', () => {
       recovery_attempt_count: 1,
       last_recovery_at: expect.any(String)
     })
-    expect(db.getLifecycleTransitionReceipts('worker', resourceId!)).toEqual([
-      expect.objectContaining({ kind: 'worker_terminal_recovery' })
-    ])
-    expect(
-      db
-        .getLifecycleTransitionReceipts('worker', dispatchId)
-        .filter((receipt) => receipt.kind === 'worker_terminal_recovery')
-    ).toEqual([
-      expect.objectContaining({
-        kind: 'worker_terminal_recovery',
-        entity_id: dispatchId
-      })
-    ])
 
     await expect(reconcileRequestedWorkerTerminalReleases(runtime)).resolves.toMatchObject({
       attempted: 0
     })
     expect(db.getWorkerTerminalResource(resourceId!)?.recovery_attempt_count).toBe(1)
-    expect(db.getLifecycleTransitionReceipts('worker', resourceId!)).toHaveLength(1)
   })
 
   it('keeps live terminals bounded across 50 settled workers while controls survive', async () => {

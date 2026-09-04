@@ -347,39 +347,6 @@ describe('OrchestrationDb worker Dispatch state', () => {
     expect(d.getTask(task.id)?.status).toBe('blocked')
   })
 
-  it('rolls back stop-unknown projection when its receipt cannot be inserted', () => {
-    const d = createDb()
-    const task = d.createTask({ spec: 'atomic uncertain stop' })
-    const started = d.createStartingWorkerDispatch({
-      creator: { kind: 'system' },
-      maxDepth: Number.MAX_SAFE_INTEGER,
-      taskId: task.id,
-      startOptions: {}
-    })
-    d.markWorkerDispatchReady(started.dispatch.id)
-    expect(d.beginWorkerStop(started.dispatch.id, 'runtime_test').disposition).toBe('stopping')
-    d.db.exec(`
-      CREATE TRIGGER reject_worker_stop_unknown_receipt
-      BEFORE INSERT ON lifecycle_transition_receipts
-      WHEN NEW.kind = 'worker_stop_unknown'
-      BEGIN SELECT RAISE(ABORT, 'forced stop-unknown receipt failure'); END;
-    `)
-
-    expect(() => d.markWorkerStopUnknown(started.dispatch.id, 'stop response lost')).toThrow(
-      'forced stop-unknown receipt failure'
-    )
-    expect(d.getWorkerDispatch(started.dispatch.id)).toMatchObject({
-      state: 'stopping',
-      stage: 'stop_requested',
-      last_error: null
-    })
-    expect(
-      d
-        .getLifecycleTransitionReceipts('worker', started.dispatch.id)
-        .some((receipt) => receipt.kind === 'worker_stop_unknown')
-    ).toBe(false)
-  })
-
   it('allows explicit stop recovery from uncertain local and remote starts', () => {
     const d = createDb()
     const task = d.createTask({ spec: 'uncertain local start' })
