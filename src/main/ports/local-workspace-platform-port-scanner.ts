@@ -3,6 +3,7 @@ import { getProcessOutputFields } from '../../shared/process-output-field-scanne
 import { readWindowsProcessTable } from '../windows/windows-process-table'
 import { runPortScanCommand } from './port-scan-command-client'
 import {
+  partitionListenersNeedingMetadata,
   recallListenerMetadata,
   rememberListenerMetadata,
   shouldSkipMetadataCommands,
@@ -124,11 +125,15 @@ async function scanDarwinLsofPorts(
   if (shouldSkipMetadataCommands(spawnMs, options)) {
     return { ports, metadataAvailable: false }
   }
-  const metadata = await loadDarwinProcessMetadata(
-    new Set(ports.flatMap((p) => (p.pid ? [p.pid] : [])))
-  )
+  // Why: on a quiet machine the same servers keep listening, so the two metadata commands — the
+  // expensive half of the scan — would re-derive answers the last scan already has.
+  const { hydrated, pidsNeedingMetadata } = partitionListenersNeedingMetadata(ports)
+  if (pidsNeedingMetadata.size === 0) {
+    return { ports: hydrated, metadataAvailable: true }
+  }
+  const metadata = await loadDarwinProcessMetadata(pidsNeedingMetadata)
   return {
-    ports: ports.map((port) => ({ ...metadata.get(port.pid ?? -1), ...port })),
+    ports: hydrated.map((port) => ({ ...metadata.get(port.pid ?? -1), ...port })),
     metadataAvailable: true
   }
 }

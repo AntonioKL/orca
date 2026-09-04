@@ -387,7 +387,19 @@ describe('scanWorkspacePorts with delayed process creation', () => {
 
   it('does not let a required-metadata scan reset the background skip parity', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
-    mockStalledDarwinScan()
+    // Why a fresh pid each cycle: a listener the previous scan already resolved is served from the
+    // remembered metadata, so a stable pid would hide whether this scan skipped the probe or not.
+    let listenerPid = 123
+    runPortScanCommandMock.mockImplementation(async (command: string, args: string[]) => {
+      if (command === 'lsof' && args.includes('-iTCP')) {
+        listenerPid += 1
+        return { stdout: `p${listenerPid}\ncnode\nn127.0.0.1:5173`, spawnMs: 4_200 }
+      }
+      if (command === 'lsof') {
+        return { stdout: [`p${listenerPid}`, 'n/repo'].join('\n'), spawnMs: 4_200 }
+      }
+      return { stdout: `${listenerPid} node /repo/server.js`, spawnMs: 4_200 }
+    })
 
     await scanWorkspacePorts(worktrees, urlWatcherStub())
     await scanWorkspacePorts(worktrees, urlWatcherStub(), { requireMetadata: true })
@@ -395,6 +407,51 @@ describe('scanWorkspacePorts with delayed process creation', () => {
 
     // 1 skipped + 3 required + 3 recovered; a reset parity would skip twice.
     expect(runPortScanCommandMock).toHaveBeenCalledTimes(7)
+  })
+
+  it('serves an unchanged listener from remembered metadata instead of re-probing', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    runPortScanCommandMock.mockImplementation(async (command: string, args: string[]) => {
+      if (command === 'lsof' && args.includes('-iTCP')) {
+        return { stdout: LSOF_LISTEN_OUTPUT, spawnMs: 5 }
+      }
+      if (command === 'lsof') {
+        return { stdout: ['p123', 'n/repo'].join('\n'), spawnMs: 5 }
+      }
+      return { stdout: '123 node /repo/server.js', spawnMs: 5 }
+    })
+
+    const first = await scanWorkspacePorts(worktrees, urlWatcherStub())
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(3)
+
+    const second = await scanWorkspacePorts(worktrees, urlWatcherStub())
+
+    // Only the listening scan itself runs; the two metadata commands are served from the cache.
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(4)
+    expect(second.ports).toEqual(first.ports)
+  })
+
+  it('re-probes when a recycled pid is running a different process', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    let processName = 'node'
+    runPortScanCommandMock.mockImplementation(async (command: string, args: string[]) => {
+      if (command === 'lsof' && args.includes('-iTCP')) {
+        return { stdout: `p123\nc${processName}\nn127.0.0.1:5173`, spawnMs: 5 }
+      }
+      if (command === 'lsof') {
+        return { stdout: ['p123', 'n/repo'].join('\n'), spawnMs: 5 }
+      }
+      return { stdout: `123 ${processName} /repo/server.js`, spawnMs: 5 }
+    })
+
+    await scanWorkspacePorts(worktrees, urlWatcherStub())
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(3)
+
+    // Same pid and address, different process: the remembered metadata must not be reused.
+    processName = 'python3'
+    await scanWorkspacePorts(worktrees, urlWatcherStub())
+
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(6)
   })
 
   // Regression for #11161 review: without carry-forward the panel moves every

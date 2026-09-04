@@ -85,6 +85,43 @@ export function rememberListenerMetadata(ports: readonly RawListeningPort[]): vo
   )
 }
 
+/**
+ * Split listeners into those a previous scan already resolved and the pids still needing a probe.
+ *
+ * Why: the metadata commands are the expensive half of a macOS scan, and a listener that is still
+ * the same process on the same address has the same command line and cwd it had 30s ago. The
+ * remembered entry is only trusted when the process name from this scan's free `lsof -F c` field
+ * still matches, so a recycled pid re-probes instead of inheriting the dead process's metadata.
+ */
+export function partitionListenersNeedingMetadata(ports: readonly RawListeningPort[]): {
+  hydrated: RawListeningPort[]
+  pidsNeedingMetadata: Set<number>
+} {
+  const hydrated: RawListeningPort[] = []
+  const pidsNeedingMetadata = new Set<number>()
+  for (const port of ports) {
+    const remembered = lastListenerMetadata.get(listenerMetadataKey(port))
+    // Why require commandLine: a probe that returned nothing must not be cached as an answer.
+    if (
+      remembered?.commandLine !== undefined &&
+      remembered.processName === port.processName &&
+      port.pid !== undefined
+    ) {
+      hydrated.push({
+        ...port,
+        commandLine: port.commandLine ?? remembered.commandLine,
+        cwd: port.cwd ?? remembered.cwd
+      })
+      continue
+    }
+    hydrated.push(port)
+    if (port.pid !== undefined) {
+      pidsNeedingMetadata.add(port.pid)
+    }
+  }
+  return { hydrated, pidsNeedingMetadata }
+}
+
 export function recallListenerMetadata(port: RawListeningPort): RawListeningPort {
   const remembered = lastListenerMetadata.get(listenerMetadataKey(port))
   if (!remembered) {
