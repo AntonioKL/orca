@@ -232,6 +232,43 @@ describe('client accept abandoned mid-DB-phase', () => {
     }
   })
 
+  it('stops after a slow resume lookup before starting the invite and assignment lookups', async () => {
+    const h = harness()
+    await activeHost(h)
+    const store = h.store as typeof h.store & { resolveInviteForMove: ReturnType<typeof vi.fn> }
+    store.resolveInviteForMove = vi.fn().mockResolvedValue(null)
+    const slowResume = deferred<null>()
+    h.store.resolveResume.mockReturnValueOnce(slowResume.promise)
+    const resolveAssignment = (h.assignments as unknown as { resolve: ReturnType<typeof vi.fn> })
+      .resolve
+    resolveAssignment.mockClear()
+    const client = new FakeSocket()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const accepting = h.registry.acceptClient(
+        client as unknown as WebSocket,
+        identity.relayHostId,
+        'credential'
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      client.close(1000, 'client bound')
+      slowResume.resolve(null)
+      await accepting
+
+      expect(store.resolveInviteForMove).not.toHaveBeenCalled()
+      expect(resolveAssignment).not.toHaveBeenCalled()
+      expect(h.store.reserveCredential).not.toHaveBeenCalled()
+      expect(h.observer.recordClientAcceptAbandoned).toHaveBeenCalledWith(
+        'assignment',
+        expect.any(Number)
+      )
+    } finally {
+      warn.mockRestore()
+      h.registry.drain(0)
+      vi.advanceTimersByTime(0)
+    }
+  })
+
   it('still opens the connection when the phone is holding on', async () => {
     const h = harness()
     const control = await activeHost(h)

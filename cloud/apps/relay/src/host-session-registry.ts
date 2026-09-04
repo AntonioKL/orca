@@ -182,9 +182,14 @@ export class HostSessionRegistry {
       return true
     }
     if (this.config.role === 'cell') {
-      const outerIdentity =
-        (await this.store.resolveResume(hostId, credential)) ??
-        (await this.store.resolveInviteForMove(hostId, credential))
+      // Each lookup is its own pooled round trip; stop between them once the phone
+      // has left instead of running the rest of the chain for nobody.
+      let outerIdentity = await this.store.resolveResume(hostId, credential)
+      if (abandonedByClient('assignment')) return
+      if (!outerIdentity) {
+        outerIdentity = await this.store.resolveInviteForMove(hostId, credential)
+        if (abandonedByClient('assignment')) return
+      }
       const assignment = outerIdentity
         ? await this.assignments.resolve({ userId: outerIdentity.userId, relayHostId: hostId })
         : null
