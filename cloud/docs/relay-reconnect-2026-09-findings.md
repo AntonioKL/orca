@@ -26,7 +26,8 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | Same-cap `verify` c7 target=519f4914 rollback=85bf6799, gen 112 | **Passed** (read-only) | run 33856355648 |
 | Monitor dry-run #7 (gen 112) | Froze at sample 1 (09:05:31Z): `director.errors` 4 > 0, the four 2.0 s pg-connect 500s from the 09:00 cascade still inside the 5-min delta window. Dispatched 4 min too early. | run 33856521278 |
 | Monitor dry-run #8 (gen 112) | Green for 15 of 16 samples (09:09:38–09:24), froze on the final sample 09:25:22Z: `director.errors` 1 > 0. The one 500 was `/v1/admin/evacuation-status` at 09:23:50Z, 2.01 s latency = director pg-connect timeout, called by **the monitor's own collector** (`incident-monitor-sources.ts:492`). First evacuation-status 500 since Sep 1. The gate froze on a request it made itself. | run 33856905229 |
-| Monitor dry-run #9 (gen 112) | Dispatched 09:30:27Z; c13 and c23 crashed at 09:31:13/21Z (old-image class, 4,141 assign 503s that minute). Expected to freeze. | run 33858650691 |
+| Monitor dry-run #9 (gen 112) | Froze: c13/c23 crashed 50 s after dispatch, then c14/c20/c9 at 09:34. | run 33858650691 |
+| Monitor dry-run #10 | Waiter armed (6 quiet min -> dispatch -> canary c7 on green). Owner asked at 09:36Z to choose: A keep looping / B recalibrate `directorErrors` 0 -> small n / C human bypass. Recommendation B+A. | |
 | Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
 | PR #18606 lock removal (root cause) | **Merged** 09:2xZ as 7b108abf71 after review, fix, re-verify; CI green | https://github.com/stablyai/orca/pull/18606 |
 | Image publish for 7b108abf71 | **Done** 08:36:49Z run 33854111305: `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` | |
