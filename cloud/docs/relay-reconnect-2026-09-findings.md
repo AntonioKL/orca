@@ -362,6 +362,15 @@ since 06:25Z, did not crash. What triggered the pool timeouts fleet-wide at 08:4
 SQL CPU was 0.78–0.88 in the minutes before, the highest of the day, so the cells' 2 s connect timeout is
 the plausible tipping point under a busy database. Every cell still on 5aedbca5 remains exposed to this.
 
+## Finding 9 (2026-09-04 08:56Z): #18606 on the director cut lock retries ~10x
+
+`orca_relay_postgres_retries` per 5 min, director only: 08:21–08:41 windows 419–689 (old image, incl. the
+crash storm); 08:46/08:51/08:56 (new image 519f4914, refilling ~7k hosts): **61 / 69 / 54**. Exhausted:
+104–178 -> **11 / 14 / 12**. Inventory hold p95 ~200 ms, max 255 ms, ~366 holds/min. Cells (still old
+image) 17–44 -> 0–3, because the director no longer holds the 23-row lock on their behalf. This is the
+first direct measurement of the root-cause fix under real load. Cloud SQL CPU peaked 0.99 during the
+cascade and is decaying (0.86 at 08:55); the monitor freezes above 0.80, so no dry-run until it clears.
+
 ## Roll inputs (verified by the read-only `verify` run)
 
 - target-image-digest `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` (lock fix; supersedes 85bf6799 as target)
