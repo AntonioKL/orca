@@ -52,10 +52,26 @@ export function listWorkerTerminalReleaseBacklog(
 export const WORKER_LIST_CURSOR_EXPIRED_MESSAGE =
   'The worker inventory changed destructively while paging. Restart without --cursor.'
 
-function resolveDispatchRowId(this: OrchestrationDb, after: WorkerTerminalOrderingKey): number {
+/** The anchor must still belong to the filtered set. An anchor from another Run resolved to a
+ *  rowid past this Run's rows, so the page read as a finished, empty inventory. */
+function resolveAnchorRowId(
+  this: OrchestrationDb,
+  after: WorkerTerminalOrderingKey,
+  runId: string | undefined
+): number {
+  const conditions = ['id = ?']
+  const values: (string | number)[] = [after.dispatchId]
+  if (runId) {
+    conditions.push('run_id = ?')
+    values.push(runId)
+  }
+  if (after.databaseId !== undefined) {
+    conditions.push('rowid = ?')
+    values.push(after.databaseId)
+  }
   const anchor = this.db
-    .prepare('SELECT rowid AS rowid FROM dispatch_contexts WHERE id = ?')
-    .get(after.dispatchId) as { rowid: number } | undefined
+    .prepare(`SELECT rowid AS rowid FROM dispatch_contexts WHERE ${conditions.join(' AND ')}`)
+    .get(...values) as { rowid: number } | undefined
   if (!anchor) {
     throw new OrchestrationError('worker_list_cursor_expired', WORKER_LIST_CURSOR_EXPIRED_MESSAGE)
   }
@@ -116,12 +132,10 @@ export function listWorkerTerminalResources(
   }
   if (params.after) {
     // Order and fence must share one key, or a row created between pages moves across the cut.
-    // A pre-v3 cursor carries no rowid, so it has to be resolved from its anchor row; when a
-    // reset deleted that row `rowid > NULL` matched nothing and the page read as a finished,
-    // empty inventory instead of an expired cursor.
-    const anchorRowId = params.after.databaseId ?? resolveDispatchRowId.call(this, params.after)
+    // A pre-v3 cursor is resolved from its anchor row; when a reset deleted that row
+    // `rowid > NULL` matched nothing and the page read as a finished, empty inventory.
     where.push('d.rowid > ?')
-    values.push(anchorRowId)
+    values.push(resolveAnchorRowId.call(this, params.after, params.runId))
   }
   let detailWhere = where
   let detailValues = values

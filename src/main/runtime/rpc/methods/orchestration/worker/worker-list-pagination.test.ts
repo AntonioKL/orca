@@ -499,6 +499,73 @@ describe('orchestration worker-list pagination', () => {
     expect(active.workers.map((worker) => worker.dispatchId)).toEqual(['dispatch-unsupervised'])
     expect(active.page.total).toBe(1)
   })
+
+  describe('a legacy cursor anchored outside the requested Run', () => {
+    function twoRuns(): { runA: string; runB: string } {
+      db = new OrchestrationDb(':memory:')
+      const runA = db.createRun({
+        objective: 'A',
+        coordinatorHandle: 'term-a',
+        coordinatorPaneKey: 'tab-a:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+      })
+      const runB = db.createRun({
+        objective: 'B',
+        coordinatorHandle: 'term-b',
+        coordinatorPaneKey: 'tab-b:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+      })
+      insertDispatch(db, runA.id, 'a-1')
+      insertDispatch(db, runA.id, 'a-2')
+      insertDispatch(db, runB.id, 'b-1')
+      insertDispatch(db, runB.id, 'b-2')
+      return { runA: runA.id, runB: runB.id }
+    }
+
+    // Both shapes used to resolve to a rowid past Run A's rows and report a finished, empty page.
+    it('expires a v2 cursor that must be resolved from a foreign anchor', async () => {
+      const { runA } = twoRuns()
+      const runtime = new OrcaRuntimeService()
+      runtime.setOrchestrationDb(db!)
+      const foreign = encodeWorkerListCursor({
+        version: 2,
+        snapshot: { databaseId: 4 },
+        after: { createdAt: '2026-08-27 00:00:00', dispatchId: 'b-1' }
+      })
+
+      await expect(
+        callWorkerList(runtime, { run: runA, limit: 10, cursor: foreign })
+      ).rejects.toThrow(/changed destructively/u)
+    })
+
+    it('expires a v2 cursor that carries a foreign rowid', async () => {
+      const { runA } = twoRuns()
+      const runtime = new OrcaRuntimeService()
+      runtime.setOrchestrationDb(db!)
+      const foreign = encodeWorkerListCursor({
+        version: 2,
+        snapshot: { databaseId: 4 },
+        after: { createdAt: '2026-08-27 00:00:00', dispatchId: 'b-1', databaseId: 3 }
+      })
+
+      await expect(
+        callWorkerList(runtime, { run: runA, limit: 10, cursor: foreign })
+      ).rejects.toThrow(/changed destructively/u)
+    })
+
+    it('still pages the requested Run from its own anchor', async () => {
+      const { runA } = twoRuns()
+      const runtime = new OrcaRuntimeService()
+      runtime.setOrchestrationDb(db!)
+      const own = encodeWorkerListCursor({
+        version: 2,
+        snapshot: { databaseId: 4 },
+        after: { createdAt: '2026-08-27 00:00:00', dispatchId: 'a-1', databaseId: 1 }
+      })
+
+      const page = await callWorkerList(runtime, { run: runA, limit: 10, cursor: own })
+
+      expect(page.workers.map((worker) => worker.dispatchId)).toEqual(['a-2'])
+    })
+  })
 })
 
 async function callWorkerList(
