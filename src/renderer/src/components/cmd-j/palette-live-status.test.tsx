@@ -451,7 +451,7 @@ describe('palette live status', () => {
     expect(dotLabels()).toEqual(['Needs permission'])
   })
 
-  it('positions the attention glyph over the row icon', async () => {
+  it('keeps the attention glyph knockout white when its row is selected', async () => {
     setAgentState('working')
     await act(async () => {
       testRoot.render(
@@ -471,6 +471,9 @@ describe('palette live status', () => {
     })
     const pip = testContainer.querySelector<HTMLElement>('[aria-hidden="true"]')
     expect(pip).not.toBeNull()
-    expect(pip?.className).toBe('pointer-events-none absolute -right-0.5 -bottom-0.5')
+    expect(pip?.className).toContain('bg-popover')
+    expect(pip?.className).toContain('ring-popover')
+    expect(pip?.className).toContain('rounded-full')
+    expect(pip?.className).not.toContain('group-data-[selected=true]')
   })
 })
