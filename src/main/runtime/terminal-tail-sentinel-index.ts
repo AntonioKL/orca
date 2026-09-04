@@ -25,12 +25,26 @@ function collectSentinelMatches(
   }
 }
 
+/**
+ * How many arrays have been full-scanned because they arrived without an index entry.
+ * Every array `appendNormalizedToTailBuffer` produces is registered by `buildCarriedTailLines`,
+ * so this only advances for tails the index has genuinely never seen (a restore seed, a persisted
+ * record, a hand-built array). Tests assert it stays flat across the real append paths, which is
+ * what proves no producer path silently bypasses the constructor.
+ */
+let sentinelFullScanCount = 0
+
+export function getTerminalTailSentinelFullScanCount(): number {
+  return sentinelFullScanCount
+}
+
 /** Ascending indices of sentinel-matching lines; full-scans an unseen array. */
 export function getTerminalTailSentinelMatches(lines: readonly string[]): readonly number[] {
   const cached = sentinelMatchesByTailLines.get(lines)
   if (cached) {
     return cached
   }
+  sentinelFullScanCount += 1
   const matches: number[] = []
   collectSentinelMatches(lines, 0, matches)
   sentinelMatchesByTailLines.set(lines, matches)
@@ -45,11 +59,14 @@ export function tailMayContainBlockedSignal(lines: readonly string[]): boolean {
  * Derive `nextLines`' match index from `previousLines`', testing only the lines
  * the append actually produced.
  *
- * The caller guarantees `nextLines[0 … carriedCount)` are the very same strings
- * as `previousLines[carriedSourceStart … carriedSourceStart + carriedCount)`,
- * and that every later line is newly produced. Matches outside that carried
- * window are dropped because their lines were evicted or rewritten, which is
- * exactly what the full scan would conclude.
+ * `nextLines[0 … carriedCount)` are the very same strings as
+ * `previousLines[carriedSourceStart … carriedSourceStart + carriedCount)`, and
+ * every later line is newly produced. That is not an assumption a caller has to
+ * uphold by hand: `buildCarriedTailLines` in `terminal-tail-buffer.ts` is the
+ * sole caller, and it derives this window from the same keep bounds it slices
+ * `nextLines` out of, so the window and the array cannot disagree. Matches
+ * outside the carried window are dropped because their lines were evicted or
+ * rewritten, which is exactly what a full scan would conclude.
  */
 export function carryTerminalTailSentinelMatches(
   previousLines: readonly string[],

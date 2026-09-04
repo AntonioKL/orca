@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { appendNormalizedToTailBuffer } from './terminal-tail-buffer'
 import { MAX_TAIL_CHARS, MAX_TAIL_LINES } from './terminal-tail-limits'
 import { buildPreview } from './terminal-tail-state'
-import { tailMayContainBlockedSignal } from './terminal-tail-sentinel-index'
+import {
+  getTerminalTailSentinelFullScanCount,
+  getTerminalTailSentinelMatches,
+  tailMayContainBlockedSignal
+} from './terminal-tail-sentinel-index'
 import { computeTerminalTailWaitState } from './terminal-wait-tail-state'
 import { TERMINAL_WAIT_BLOCKED_SENTINEL_RE } from './terminal-wait-detection'
 import type { RetainedTailRedrawCursor } from './terminal-tail-redraw-buffer'
@@ -56,6 +60,32 @@ function assertMatchesFullScan(sim: TailSim): void {
 }
 
 const BLOCKED_LINE = 'Update available! Press Enter to continue.'
+const ESC = String.fromCharCode(27)
+
+/** The exact positions a from-scratch scan would record, written out independently. */
+function referenceSentinelMatches(lines: readonly string[]): number[] {
+  const matches: number[] = []
+  for (let index = 0; index < lines.length; index += 1) {
+    if (TERMINAL_WAIT_BLOCKED_SENTINEL_RE.test(lines[index]!)) {
+      matches.push(index)
+    }
+  }
+  return matches
+}
+
+/**
+ * The whole contract of the carried window, at position resolution: the index the constructor
+ * registered for this exact array must equal a from-scratch scan of it. A boolean-only assertion
+ * would pass on an index whose positions are shifted, doubled, or out of bounds.
+ */
+function assertIndexedPositionsAreExact(lines: readonly string[]): void {
+  const indexed = [...getTerminalTailSentinelMatches(lines)]
+  expect(indexed).toEqual(referenceSentinelMatches(lines))
+  for (const position of indexed) {
+    expect(position).toBeGreaterThanOrEqual(0)
+    expect(position).toBeLessThan(lines.length)
+  }
+}
 
 function countSentinelTests(run: () => void): number {
   const spy = vi.spyOn(TERMINAL_WAIT_BLOCKED_SENTINEL_RE, 'test')
@@ -179,6 +209,129 @@ describe('terminal tail sentinel index', () => {
   })
 })
 
+/**
+ * `buildCarriedTailLines` is the only producer of a tail array, and it derives the carried-match
+ * window from the same keep bounds it slices the array out of. These guards pin the four ways
+ * that derivation could still be written wrong, plus the one way a path could escape it. Each was
+ * confirmed to fail against a deliberately broken constructor (see the PR body).
+ */
+describe('terminal tail sentinel index carried window', () => {
+  it('drops a carried match the moment the constructor evicts its row (no stale match)', () => {
+    const sim = saturatedSim()
+    feed(sim, `${BLOCKED_LINE}\n`)
+    // Walk it to the very first retained slot, checking the position every step: each append
+    // evicts one row at a saturated tail, so the carried match must shift down by exactly one.
+    for (let index = 0; index < MAX_TAIL_LINES - 1; index += 1) {
+      feed(sim, `after prompt ${index}\n`)
+      expect(getTerminalTailSentinelMatches(sim.lines)).toEqual([MAX_TAIL_LINES - 2 - index])
+    }
+    expect(sim.lines[0]).toBe(BLOCKED_LINE)
+
+    feed(sim, 'evicting line\n')
+    expect(sim.lines.includes(BLOCKED_LINE)).toBe(false)
+    assertIndexedPositionsAreExact(sim.lines)
+    expect(indexedMayContainBlockedSignal(sim.lines, sim.partialLine)).toBe(false)
+  })
+
+  it('finds a match a redraw writes into rows the carried prefix does not cover', () => {
+    const sim = saturatedSim()
+    expect(indexedMayContainBlockedSignal(sim.lines, sim.partialLine)).toBe(false)
+
+    // A windowed redraw: the prefix carries, the rewritten suffix must still be scanned.
+    feed(sim, `${ESC}[3A${ESC}[2K${BLOCKED_LINE}\n`)
+    assertIndexedPositionsAreExact(sim.lines)
+    expect(indexedMayContainBlockedSignal(sim.lines, sim.partialLine)).toBe(true)
+
+    // And a redraw that overwrites that same row again must drop it.
+    feed(sim, `${ESC}[1A${ESC}[2Kplain replacement\n`)
+    assertIndexedPositionsAreExact(sim.lines)
+
+    // A redraw deep enough to outrun the window carries nothing and rescans in full.
+    feed(sim, `${ESC}[2500A${ESC}[2K${BLOCKED_LINE}\n`)
+    assertIndexedPositionsAreExact(sim.lines)
+    expect(indexedMayContainBlockedSignal(sim.lines, sim.partialLine)).toBe(true)
+  })
+
+  it('shifts every carried position by exactly the number of rows evicted', () => {
+    const sim = newSim()
+    feed(sim, `first\n${BLOCKED_LINE}\nsecond\n${BLOCKED_LINE}\nthird\n`)
+    expect(getTerminalTailSentinelMatches(sim.lines)).toEqual([1, 3])
+
+    // Saturate so the line cap evicts exactly one row per single-line append.
+    for (let index = 0; index < MAX_TAIL_LINES - 5; index += 1) {
+      feed(sim, `pad ${index}\n`)
+    }
+    expect(sim.lines.length).toBe(MAX_TAIL_LINES)
+    expect(getTerminalTailSentinelMatches(sim.lines)).toEqual([1, 3])
+
+    feed(sim, 'evict one\n')
+    expect(getTerminalTailSentinelMatches(sim.lines)).toEqual([0, 2])
+    feed(sim, 'evict two\n')
+    expect(getTerminalTailSentinelMatches(sim.lines)).toEqual([1])
+    assertIndexedPositionsAreExact(sim.lines)
+  })
+
+  it('stays in bounds when a single chunk evicts the whole carried window and part of itself', () => {
+    const sim = saturatedSim()
+    feed(sim, `${BLOCKED_LINE}\n`)
+    expect(indexedMayContainBlockedSignal(sim.lines, sim.partialLine)).toBe(true)
+
+    // One chunk with more complete lines than the tail retains: every carried row goes, and so
+    // does the front of the chunk itself, so nothing may survive from before the cut.
+    const early: string[] = [BLOCKED_LINE]
+    for (let index = 0; index < MAX_TAIL_LINES + 500; index += 1) {
+      early.push(`flood ${index}`)
+    }
+    feed(sim, `${early.join('\n')}\n`)
+    expect(sim.lines.length).toBe(MAX_TAIL_LINES)
+    assertIndexedPositionsAreExact(sim.lines)
+    expect(indexedMayContainBlockedSignal(sim.lines, sim.partialLine)).toBe(false)
+
+    // Same shape, but the prompt lands inside the surviving suffix of the chunk.
+    const late: string[] = []
+    for (let index = 0; index < MAX_TAIL_LINES + 500; index += 1) {
+      late.push(`flood ${index}`)
+    }
+    late.push(BLOCKED_LINE)
+    feed(sim, `${late.join('\n')}\n`)
+    expect(getTerminalTailSentinelMatches(sim.lines)).toEqual([MAX_TAIL_LINES - 1])
+    assertIndexedPositionsAreExact(sim.lines)
+
+    // The character cap drops from the same front, past the carried window and into the chunk.
+    const bulk = `${'x'.repeat(4000)}\n`
+    for (let index = 0; index * 4001 < MAX_TAIL_CHARS + 20000; index += 1) {
+      feed(sim, bulk)
+    }
+    assertIndexedPositionsAreExact(sim.lines)
+    expect(indexedMayContainBlockedSignal(sim.lines, sim.partialLine)).toBe(false)
+  })
+
+  it('never leaves a produced tail unindexed, on any append path', () => {
+    const sim = saturatedSim()
+    computeTerminalTailWaitState(sim.lines, sim.partialLine, sim.preview)
+    const fullScansBefore = getTerminalTailSentinelFullScanCount()
+
+    feed(sim, `${BLOCKED_LINE}\n`)
+    for (let index = 0; index < 200; index += 1) {
+      feed(sim, `after prompt ${index}\n`)
+    }
+    feed(sim, 'partial with no newline')
+    feed(sim, ' and its completion\n')
+    feed(sim, '\rspinner 40%')
+    feed(sim, `${ESC}[3A${ESC}[2Kredrawn\n`)
+    feed(sim, `${ESC}[2500A${ESC}[2Kdeep redraw\n`)
+    feed(sim, 'trailing spaces here   \n')
+    feed(sim, `${'z'.repeat(5000)}\n`)
+    feed(sim, `multi\nline\nchunk\n`)
+    feed(sim, '')
+    // Reading the verdict must never trigger a scan of an array the constructor produced.
+    computeTerminalTailWaitState(sim.lines, sim.partialLine, sim.preview)
+
+    expect(getTerminalTailSentinelFullScanCount()).toBe(fullScansBefore)
+    assertIndexedPositionsAreExact(sim.lines)
+  })
+})
+
 // Deterministic PRNG so a divergence is reproducible from the seed alone.
 function mulberry32(seed: number): () => number {
   let state = seed >>> 0
@@ -189,8 +342,6 @@ function mulberry32(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
 }
-
-const ESC = String.fromCharCode(27)
 
 /**
  * `streaming` saturates and evicts the retained tail; `tui` trades saturation for redraw
