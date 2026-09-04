@@ -29,8 +29,12 @@ export function hostScopeCensusIsComplete(scope: RuntimeListingHostScope | undef
   if (scope === undefined) {
     return false
   }
-  // A listing that covered no host at all proves nothing, whatever it omitted.
-  if (scope.hostIds.length === 0) {
+  // A listing that covered no host proves nothing, and an unreadable coverage claim is not a
+  // claim: `isTerminalListResult` checks only that `hostIds` is an array, so at least one covered
+  // id has to be legible before the claim can be believed. Deliberately "at least one" rather than
+  // "all": a host that later gains a kind this client cannot parse would otherwise report an
+  // incomplete census forever, which is the bug this predicate exists to stop.
+  if (!scope.hostIds.some((hostId) => parseExecutionHostId(hostId))) {
     return false
   }
   return scope.omittedHostIds.every((hostId) => parseExecutionHostId(hostId)?.kind === 'runtime')

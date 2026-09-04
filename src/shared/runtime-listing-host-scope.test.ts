@@ -50,6 +50,26 @@ describe('hostScopeCensusIsComplete', () => {
     expect(hostScopeCensusIsComplete(undefined)).toBe(false)
   })
 
+  // Why: without this the runtime-only rule trusts a coverage claim it cannot read — the shape
+  // `{hostIds: ['runtime:'], omittedHostIds: ['runtime:env-7']}` was `unverifiable` before the
+  // gate changed and must not become `complete` on the strength of an unparseable id.
+  it('refuses a coverage claim with no legible host in it', () => {
+    expect(
+      hostScopeCensusIsComplete({
+        hostIds: ['runtime:' as never],
+        omittedHostIds: ['runtime:env-7']
+      })
+    ).toBe(false)
+  })
+
+  // Why "at least one legible" and not "all legible": a host that later gains a kind this client
+  // cannot parse must not report an incomplete census forever — that is this bug in a new coat.
+  it('accepts a coverage claim carrying one legible host beside an unreadable one', () => {
+    expect(
+      hostScopeCensusIsComplete({ hostIds: ['local', 'newkind:x' as never], omittedHostIds: [] })
+    ).toBe(true)
+  })
+
   it('refuses an unparseable host id rather than discounting it', () => {
     expect(
       hostScopeCensusIsComplete({

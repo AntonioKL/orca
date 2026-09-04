@@ -57,7 +57,7 @@ describe('orphan recovery reads the host scope as coverage owed, not as disclosu
 
   it('prunes a twice-absent binding when the only omission is a peer runtime', async () => {
     const settled = await recoverTwice('repo::peer-disclosed', {
-      hostIds: [ENVIRONMENT_ID],
+      hostIds: ['local'],
       omittedHostIds: ['runtime:env-peer']
     })
 
@@ -66,7 +66,7 @@ describe('orphan recovery reads the host scope as coverage owed, not as disclosu
 
   it('retains the binding when an SSH host this runtime does query went unanswered', async () => {
     const settled = await recoverTwice('repo::ssh-gap', {
-      hostIds: [ENVIRONMENT_ID],
+      hostIds: ['local'],
       omittedHostIds: ['ssh:box-1']
     })
 
