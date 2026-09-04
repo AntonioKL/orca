@@ -1,4 +1,4 @@
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -47,13 +47,5 @@ export function writeHttp1CompatibilityMarker(userDataPath: string, enabled: boo
     writeFileSync(markerPath(userDataPath), JSON.stringify(marker))
   } catch {
     // Best effort: a missing marker just costs the next launch the settings-file fallback.
-  }
-}
-
-export function clearHttp1CompatibilityMarker(userDataPath: string): void {
-  try {
-    rmSync(markerPath(userDataPath), { force: true })
-  } catch {
-    // Best effort; a stale marker is revalidated on the next settings change.
   }
 }
