@@ -136,9 +136,18 @@ EXPO_PUBLIC_ORCA_MOBILE_ARCHITECTURE=hybrid pnpm exec expo run:ios
 EXPO_PUBLIC_ORCA_MOBILE_ARCHITECTURE=hybrid pnpm exec expo run:android
 ```
 
-Unset or `native` keeps the current native workspace experience. The
-development-only `EXPO_PUBLIC_ORCA_E2E_MOBILE_NATIVE_BASELINE=1` override still
-selects native routes for parity captures.
+`EXPO_PUBLIC_ORCA_MOBILE_ARCHITECTURE=native` always selects the native routes.
+Leaving it unset is **not** the same everywhere: a release build defaults to
+native, but a development build defaults to hybrid so the hosted journeys and
+the native baselines share one Metro bundle. Set it to `native` explicitly to
+exercise the native app from a dev build:
+
+```bash
+EXPO_PUBLIC_ORCA_MOBILE_ARCHITECTURE=native pnpm exec expo run:ios
+```
+
+The development-only `EXPO_PUBLIC_ORCA_E2E_MOBILE_NATIVE_BASELINE=1` override
+also selects native routes, for parity captures.
 
 ## Package Build
 

@@ -2,7 +2,11 @@ import type { TabActivationIntent } from '../../../src/shared/tab-activation-int
 import type { RpcClient } from '../transport/rpc-client'
 import { LogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import type { RpcResponse } from '../transport/types'
-import { logMobileTerminalDiagnostic } from './mobile-terminal-diagnostics'
+import {
+  getMobileTerminalDiagnosticErrorName,
+  logMobileTerminalDiagnostic,
+  shortenMobileTerminalDiagnosticId
+} from './mobile-terminal-diagnostics'
 
 type ActivationClient = Pick<RpcClient, 'sendRequest'>
 
@@ -18,41 +22,48 @@ type MobileSessionTabActivationParams = {
 
 async function retryIdempotentActivationAfterCutover(
   request: () => Promise<RpcResponse>,
-  operation: 'terminal.focus' | 'session.tabs.activate'
+  operation: 'terminal.focus' | 'session.tabs.activate',
+  target: string
 ): Promise<RpcResponse> {
   const terminal = operation === 'terminal.focus'
-  logMobileTerminalDiagnostic('activation-request', { terminal })
-  try {
-    const response = await request()
+  const diagnosticTarget = shortenMobileTerminalDiagnosticId(target)
+  logMobileTerminalDiagnostic('activation-request', { terminal, target: diagnosticTarget })
+  const logResult = (response: RpcResponse) =>
     logMobileTerminalDiagnostic('activation-result', {
       terminal,
-      ok: response.ok
+      target: diagnosticTarget,
+      ok: response.ok,
+      // Why: without the code a failed activation is indistinguishable from a rejected one.
+      rpcCode: response.ok ? null : response.error.code
     })
+  try {
+    const response = await request()
+    logResult(response)
     return response
   } catch (error) {
     if (!(error instanceof LogicalClientCutoverError)) {
       logMobileTerminalDiagnostic('activation-error', {
         terminal,
-        isErrorObject: error instanceof Error
+        target: diagnosticTarget,
+        errorName: getMobileTerminalDiagnosticErrorName(error)
       })
       throw error
     }
     logMobileTerminalDiagnostic('activation-cutover-retry', {
-      terminal
+      terminal,
+      target: diagnosticTarget
     })
     // Why: cutover rejects ambiguous in-flight work after the replacement is
     // active; these state-setting requests are idempotent and safe to repeat once.
     try {
       const response = await request()
-      logMobileTerminalDiagnostic('activation-result', {
-        terminal,
-        ok: response.ok
-      })
+      logResult(response)
       return response
     } catch (retryError) {
       logMobileTerminalDiagnostic('activation-error', {
         terminal,
-        isErrorObject: retryError instanceof Error
+        target: diagnosticTarget,
+        errorName: getMobileTerminalDiagnosticErrorName(retryError)
       })
       throw retryError
     }
@@ -65,7 +76,8 @@ export function focusMobileTerminal(
 ): Promise<RpcResponse> {
   return retryIdempotentActivationAfterCutover(
     () => client.sendRequest('terminal.focus', { terminal, navigation: 'host' }),
-    'terminal.focus'
+    'terminal.focus',
+    terminal
   )
 }
 
@@ -75,6 +87,7 @@ export function activateMobileSessionTab(
 ): Promise<RpcResponse> {
   return retryIdempotentActivationAfterCutover(
     () => client.sendRequest('session.tabs.activate', params),
-    'session.tabs.activate'
+    'session.tabs.activate',
+    params.tabId
   )
 }

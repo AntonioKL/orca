@@ -12,9 +12,10 @@ export async function removeHostAndCloseClient(
   hostPublicKey: string,
   forgetHostClient: (hostId: string) => void
 ): Promise<void> {
-  // Why: cache deletion is recoverable by redownload, while a completed unpair must not leave host code behind.
-  await removeMobileWebHostCache(hostPublicKey)
-  await clearMobileWebColdResumeRouteForHost(hostId)
+  // Why: cache deletion is recoverable by redownload, so a hybrid-only failure here must
+  // never block the unpair itself — on a native build the cache may not even exist.
+  await removeMobileWebHostCache(hostPublicKey).catch(() => null)
+  await clearMobileWebColdResumeRouteForHost(hostId).catch(() => null)
   // Why: closing before the metadata commit can strand a still-paired host on
   // storage failure; closing immediately after success prevents socket leaks.
   await removeHost(hostId)

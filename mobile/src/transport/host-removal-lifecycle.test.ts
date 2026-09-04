@@ -115,31 +115,35 @@ describe('host removal lifecycle', () => {
     expect(asyncStorage.removeItem).toHaveBeenCalledWith('orca:mobileNotificationsWatermark:host-1')
   })
 
-  it('keeps pairing metadata and the live client when native cache deletion fails', async () => {
+  it('unpairs even when the hybrid native cache deletion fails', async () => {
+    // The Kotlin/Swift store throws on an empty identity or a failed tree delete, and that
+    // cache does not exist at all on a native build — neither may strand a paired host.
     removeMobileWebHostCacheMock.mockRejectedValue(new Error('native cache unavailable'))
+    removeHostMock.mockResolvedValue(undefined)
     const closeHostClient = vi.fn()
 
     await expect(
       removeHostAndCloseClient('host-1', 'public-key-1', closeHostClient)
-    ).rejects.toThrow('native cache unavailable')
+    ).resolves.toBeUndefined()
 
-    expect(removeHostMock).not.toHaveBeenCalled()
-    expect(closeHostClient).not.toHaveBeenCalled()
-    expect(deleteConnectionLogMock).not.toHaveBeenCalled()
+    expect(removeHostMock).toHaveBeenCalledWith('host-1')
+    expect(closeHostClient).toHaveBeenCalledWith('host-1')
+    expect(deleteConnectionLogMock).toHaveBeenCalledWith('host-1')
   })
 
-  it('keeps pairing metadata when cold-route cleanup cannot commit', async () => {
+  it('unpairs even when cold-route cleanup cannot commit', async () => {
     clearMobileWebColdResumeRouteForHostMock.mockRejectedValue(
       new Error('route storage unavailable')
     )
+    removeHostMock.mockResolvedValue(undefined)
     const closeHostClient = vi.fn()
 
     await expect(
       removeHostAndCloseClient('host-1', 'public-key-1', closeHostClient)
-    ).rejects.toThrow('route storage unavailable')
+    ).resolves.toBeUndefined()
 
-    expect(removeHostMock).not.toHaveBeenCalled()
-    expect(closeHostClient).not.toHaveBeenCalled()
+    expect(removeHostMock).toHaveBeenCalledWith('host-1')
+    expect(closeHostClient).toHaveBeenCalledWith('host-1')
   })
 
   it('forgets removed-host logs even when client teardown throws', async () => {

@@ -24,11 +24,21 @@ type MobileTerminalDiagnosticEvent =
   | 'webview-ready'
   | 'webview-ref'
 
-type MobileTerminalDiagnosticValue = number | boolean | null | undefined
+type MobileTerminalDiagnosticValue = string | number | boolean | null | undefined
 
 export type MobileTerminalDiagnosticDetails = Readonly<
   Record<string, MobileTerminalDiagnosticValue>
 >
+
+// Why: full runtime identifiers make shared logs unnecessarily sensitive; the
+// suffix is enough to correlate lifecycle events within one reproduction.
+export function shortenMobileTerminalDiagnosticId(value: string | null | undefined): string | null {
+  return value ? value.slice(-8) : null
+}
+
+export function getMobileTerminalDiagnosticErrorName(error: unknown): string {
+  return error instanceof Error && error.name ? error.name : typeof error
+}
 
 type MobileTerminalDiagnosticRecord = {
   event: MobileTerminalDiagnosticEvent

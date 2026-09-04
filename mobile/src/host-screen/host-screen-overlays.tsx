@@ -183,11 +183,14 @@ export function HostScreenOverlays({ controller }: { controller: HostScreenContr
                           state.setSleptIds((prev) =>
                             new Set(prev).add(getWorktreeRowIdentity(actionTarget))
                           )
-                          void actions.sleepWorktree(actionTarget.worktreeId)
+                          // Why: an unhandled rejection here would surface as a redbox on a fire-and-forget sleep.
+                          void actions.sleepWorktree(actionTarget.worktreeId).catch(() => null)
                         } else if (client) {
-                          void client.sendRequest('worktree.sleep', {
-                            worktree: `id:${actionTarget.worktreeId}`
-                          })
+                          void client
+                            .sendRequest('worktree.sleep', {
+                              worktree: `id:${actionTarget.worktreeId}`
+                            })
+                            .catch(() => null)
                         }
                         state.setActionTarget(null)
                       }
