@@ -91,7 +91,13 @@ export const ORCHESTRATION_DISPATCH_METHODS: RpcMethod[] = [
           `Terminal ${to} has no stable pane/process incarnation for lifecycle authority.`
         )
       }
-      const callerPane = params.from ? runtime.getTerminalPaneKey(params.from) : null
+      // Why: the assignee side prefers dispatch authority, so the caller side must too — getTerminalPaneKey
+      // alone returns null for a handle reachable only through the window-graph leaf, going inert here.
+      const callerPane = params.from
+        ? (runtime.getOrchestrationDispatchAuthority(params.from)?.paneKey ??
+          runtime.getTerminalPaneKey(params.from) ??
+          null)
+        : null
       if (
         params.inject &&
         params.from &&
