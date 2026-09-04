@@ -254,7 +254,7 @@ export function PaletteRecentTabStatusDot({
       <span className="relative inline-flex size-3.5 shrink-0 items-center justify-center">
         {fallback}
         <span
-          // The white knockout separates the glyph from its icon without inheriting row selection.
+          // The popover-colored knockout separates the glyph from its icon without inheriting row selection.
           className="pointer-events-none absolute -right-0.5 -bottom-0.5 flex items-center justify-center rounded-full bg-popover ring-2 ring-popover"
           aria-hidden="true"
         >

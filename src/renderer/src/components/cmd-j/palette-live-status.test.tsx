@@ -451,7 +451,7 @@ describe('palette live status', () => {
     expect(dotLabels()).toEqual(['Needs permission'])
   })
 
-  it('keeps the attention glyph knockout white when its row is selected', async () => {
+  it('keeps the attention glyph knockout popover-colored when its row is selected', async () => {
     setAgentState('working')
     await act(async () => {
       testRoot.render(
