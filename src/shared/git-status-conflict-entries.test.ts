@@ -13,7 +13,7 @@ vi.mock('node:fs/promises', async (importOriginal) => ({
   access: accessMock
 }))
 
-const { parseUnmergedEntry } = await import('./git-status-conflict-entries')
+import { parseUnmergedEntry } from './git-status-conflict-entries'
 
 const WORKTREE = '/repo'
 
