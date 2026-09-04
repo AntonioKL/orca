@@ -460,6 +460,30 @@ describe('scanWorkspacePorts with delayed process creation', () => {
     expect(second.ports).toEqual(first.ports)
   })
 
+  it('always probes metadata for a requireMetadata scan, even when the cache is warm', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    runPortScanCommandMock.mockImplementation(async (command: string, args: string[]) => {
+      if (command === 'lsof' && args.includes('-iTCP')) {
+        return { stdout: LSOF_LISTEN_OUTPUT, spawnMs: 5 }
+      }
+      if (command === 'lsof') {
+        return { stdout: ['p123', 'n/repo'].join('\n'), spawnMs: 5 }
+      }
+      return { stdout: '123 node /repo/server.js', spawnMs: 5 }
+    })
+
+    await scanWorkspacePorts(worktrees, urlWatcherStub())
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(3)
+    await scanWorkspacePorts(worktrees, urlWatcherStub())
+    // Warm cache: the background poll is served without the metadata commands.
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(4)
+
+    // Why: this is the SIGTERM authorization re-scan; a remembered cwd must never authorize a kill.
+    await scanWorkspacePorts(worktrees, urlWatcherStub(), { requireMetadata: true })
+
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(7)
+  })
+
   it('re-probes when a recycled pid is running a different process', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     let processName = 'node'

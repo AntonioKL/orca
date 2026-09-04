@@ -130,8 +130,15 @@ async function scanDarwinLsofPorts(
     return { ports, metadataAvailable: false }
   }
   // Why: on a quiet machine the same servers keep listening, so the two metadata commands — the
-  // expensive half of the scan — would re-derive answers the last scan already has.
-  const { hydrated, pidsNeedingMetadata } = partitionListenersNeedingMetadata(ports)
+  // expensive half of the scan — would re-derive answers the last scan already has. A caller that
+  // requires metadata (the SIGTERM authorization re-scan) opts out: it must attribute the owner
+  // from this cycle's probe, never from a remembered cwd.
+  const { hydrated, pidsNeedingMetadata } = options.requireMetadata
+    ? {
+        hydrated: ports,
+        pidsNeedingMetadata: new Set(ports.flatMap((p) => (p.pid ? [p.pid] : [])))
+      }
+    : partitionListenersNeedingMetadata(ports)
   if (pidsNeedingMetadata.size === 0) {
     return { ports: hydrated, metadataAvailable: true }
   }
