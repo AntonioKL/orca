@@ -1,25 +1,9 @@
-import { AGENT_STATUS_STALE_AFTER_MS } from '../../../shared/agent-status-types'
 import type { AgentStatusIpcPayload } from '../../../shared/agent-status-ipc-payload'
 import { projectOrchestrationFleetAttention } from '../../../shared/orchestration-fleet-attention'
+import { projectLiveness } from '../../../shared/orchestration-fleet-worker-projection'
 import type { OrchestrationDb } from './db'
 import type { WorkerAttentionFacts } from './db/worker-terminal/worker-terminal-attention-query'
 import type { DispatchContextRow, TaskRow } from './types'
-
-function statusLiveness(
-  status: AgentStatusIpcPayload | undefined,
-  now: number
-): { verdict: 'live' | 'unverifiable'; reason?: string } {
-  if (!status || status.restoredUnconfirmed || status.providerSessionOnly) {
-    return { verdict: 'unverifiable', reason: 'missing_status' }
-  }
-  if (status.receivedAt > now + 5_000) {
-    return { verdict: 'unverifiable', reason: 'future_status' }
-  }
-  if (now - status.receivedAt > AGENT_STATUS_STALE_AFTER_MS) {
-    return { verdict: 'unverifiable', reason: 'stale_status' }
-  }
-  return { verdict: 'live' }
-}
 
 function resolvedOutcome(facts: WorkerAttentionFacts): WorkerAttentionFacts['outcome'] {
   if (facts.outcome !== 'outcome_unknown') {
@@ -65,6 +49,13 @@ export function projectWorkerAttentionContext(args: {
     interrupted:
       args.facts.terminationReason === 'operator_close' ||
       args.facts.terminationReason === 'signaled',
-    liveness: statusLiveness(args.status, args.now)
+    liveness: projectLiveness(
+      {
+        workerState: args.facts.workerState,
+        resource: args.facts.hostScope === undefined ? null : { hostScope: args.facts.hostScope }
+      },
+      args.status,
+      args.now
+    )
   })
 }

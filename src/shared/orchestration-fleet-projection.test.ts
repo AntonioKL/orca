@@ -3,8 +3,10 @@ import type { AgentStatusIpcPayload } from './agent-status-ipc-payload'
 import {
   ORCHESTRATION_FLEET_PAGE_MAX,
   projectOrchestrationFleet,
+  refreshOrchestrationFleetLivenessAttention,
   type FleetDurableWorker
 } from './orchestration-fleet-projection'
+import { AGENT_STATUS_STALE_AFTER_MS } from './agent-status-types'
 
 function worker(id: string, overrides: Partial<FleetDurableWorker> = {}): FleetDurableWorker {
   return {
@@ -315,5 +317,60 @@ describe('orchestration fleet projection', () => {
 
     expect(result.workers[0]?.host).toEqual({ kind: 'remote', id: 'host-unknown' })
     expect(result.workers[0]?.liveness.verdict).toBe('unverifiable')
+  })
+})
+
+describe('fleet liveness and attention after a host verdict', () => {
+  it('measures staleness on the evidence clock, not the replay delivery clock', () => {
+    const now = 10 * AGENT_STATUS_STALE_AFTER_MS
+    const replayed = projectOrchestrationFleet({
+      workers: [worker('1')],
+      // A relay reconnect restamps receivedAt to stay monotonic; the evidence is an hour old.
+      statuses: [
+        status('1', now - 1, { evidenceObservedAt: now - AGENT_STATUS_STALE_AFTER_MS - 60_000 })
+      ],
+      now
+    })
+
+    expect(replayed.workers[0]?.liveness).toMatchObject({
+      verdict: 'unverifiable',
+      reason: 'stale_status'
+    })
+    expect(replayed.workers[0]?.evidence.liveStatus).toBe('stale')
+    expect(replayed.workers[0]?.attention.categories).toContain('stale')
+  })
+
+  it('keeps an unproven outcome unverifiable after the host reports live', () => {
+    const now = 10_000
+    const projected = projectOrchestrationFleet({
+      workers: [worker('1', { outcome: 'finished_unverified' })],
+      statuses: [status('1', now - 1)],
+      now
+    })
+    const subject = projected.workers[0]!
+    expect(subject.attention).toMatchObject({ requiresAction: true })
+    expect(subject.attention.categories).toContain('unverifiable')
+
+    subject.liveness = { verdict: 'live', observedAt: now, source: 'execution_host' }
+    refreshOrchestrationFleetLivenessAttention(subject)
+
+    expect(subject.attention.categories).toContain('unverifiable')
+    expect(subject.attention.requiresAction).toBe(true)
+  })
+
+  it('drops a stale category the host verdict disproves', () => {
+    const now = 10 * AGENT_STATUS_STALE_AFTER_MS
+    const projected = projectOrchestrationFleet({
+      workers: [worker('1', { outcome: 'in_progress' })],
+      statuses: [status('1', now - AGENT_STATUS_STALE_AFTER_MS - 60_000)],
+      now
+    })
+    const subject = projected.workers[0]!
+    expect(subject.attention.categories).toContain('stale')
+
+    subject.liveness = { verdict: 'live', observedAt: now, source: 'execution_host' }
+    refreshOrchestrationFleetLivenessAttention(subject)
+
+    expect(subject.attention).toEqual({ categories: [], requiresAction: false })
   })
 })

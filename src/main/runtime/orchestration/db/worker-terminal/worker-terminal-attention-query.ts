@@ -1,5 +1,6 @@
 import { projectAttemptOutcome } from '../attempt-outcome-projection'
 import {
+  activeSiblingAttemptSql,
   exposeAttemptObservationFact,
   type AttemptObservationStorageRow
 } from '../attempt-observation-store'
@@ -18,6 +19,9 @@ export type WorkerAttentionFacts = {
   isRoot: boolean
   workerState: WorkerDispatchState | null
   dispatchStatus: DispatchStatus
+  /** Execution host of the worker's terminal resource; a remote row with no connection id is
+   *  unverifiable. `undefined` when no resource was ever materialized. */
+  hostScope?: string | null
 }
 
 export function getWorkerAttentionFactsForDispatches(
@@ -34,6 +38,7 @@ export function getWorkerAttentionFactsForDispatches(
     .prepare(
       `SELECT d.id AS dispatch_id, d.task_id, d.status AS dispatch_status,
               d.termination_reason, w.state AS worker_state, t.parent_id AS parent_task_id,
+              r.id AS resource_id, r.host_scope,
               EXISTS (
                 SELECT 1 FROM question_threads q
                  WHERE q.dispatch_id = d.id AND q.status = 'pending'
@@ -47,16 +52,11 @@ export function getWorkerAttentionFactsForDispatches(
                  WHERE m.run_id = d.run_id AND m.to_handle = 'dispatch:' || d.id
                    AND m.read = 0 AND m.delivery_contract = 'current_delivery'
               ) AS pending_guidance,
-              EXISTS (
-                SELECT 1 FROM dispatch_contexts active
-                JOIN worker_dispatches sibling_worker ON sibling_worker.dispatch_id = active.id
-                WHERE active.task_id = d.task_id AND active.id != d.id
-                  AND active.status IN ('pending', 'dispatched')
-                  AND sibling_worker.state NOT IN ('failed', 'succeeded', 'stopped', 'abandoned')
-              ) AS active_sibling
+              EXISTS (${activeSiblingAttemptSql('d.task_id', 'd.id')}) AS active_sibling
          FROM dispatch_contexts d
          LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
          LEFT JOIN tasks t ON t.id = d.task_id AND t.run_id = d.run_id
+         LEFT JOIN worker_terminal_resources r ON r.owner_dispatch_id = d.id
         WHERE d.id IN (SELECT value FROM json_each(?))`
     )
     .all(serializedIds) as {
@@ -66,6 +66,8 @@ export function getWorkerAttentionFactsForDispatches(
     termination_reason: TerminalExitCause['kind'] | null
     worker_state: WorkerDispatchState | null
     parent_task_id: string | null
+    resource_id: string | null
+    host_scope: string | null
     pending_input: number
     pending_approval: number
     pending_guidance: number
@@ -103,7 +105,8 @@ export function getWorkerAttentionFactsForDispatches(
           terminationReason: row.termination_reason,
           isRoot: row.parent_task_id === null,
           workerState: row.worker_state,
-          dispatchStatus: row.dispatch_status
+          dispatchStatus: row.dispatch_status,
+          ...(row.resource_id === null ? {} : { hostScope: row.host_scope })
         }
       ]
     })

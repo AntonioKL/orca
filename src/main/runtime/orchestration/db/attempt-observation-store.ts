@@ -163,6 +163,18 @@ export function getAttemptObservationFacts(
   ).map(exposeAttemptObservationFact)
 }
 
+/** A sibling attempt still running for the same Task. Both the outcome projection and the
+ *  attention query must read the identical predicate or one reports an outcome the other calls
+ *  unknown. `taskId`/`dispatchId` are SQL expressions the caller writes ('?' or a joined column),
+ *  never user input. */
+export function activeSiblingAttemptSql(taskId: string, dispatchId: string): string {
+  return `SELECT 1 FROM dispatch_contexts active
+     JOIN worker_dispatches sibling ON sibling.dispatch_id = active.id
+     WHERE active.task_id = ${taskId} AND active.id != ${dispatchId}
+       AND active.status IN ('pending', 'dispatched')
+       AND sibling.state NOT IN ('failed', 'succeeded', 'stopped', 'abandoned')`
+}
+
 export function getAttemptOutcomeProjection(
   this: OrchestrationDb,
   dispatchId: string,
@@ -175,14 +187,7 @@ export function getAttemptOutcomeProjection(
   }
   const activeSibling = Boolean(
     this.db
-      .prepare(
-        `SELECT active.id FROM dispatch_contexts active
-         JOIN worker_dispatches worker ON worker.dispatch_id = active.id
-         WHERE active.task_id = ? AND active.id != ?
-           AND active.status IN ('pending', 'dispatched')
-           AND worker.state NOT IN ('failed', 'succeeded', 'stopped', 'abandoned')
-         LIMIT 1`
-      )
+      .prepare(`${activeSiblingAttemptSql('?', '?')} LIMIT 1`)
       .get(dispatch.task_id, dispatchId)
   )
   return projectAttemptOutcome({

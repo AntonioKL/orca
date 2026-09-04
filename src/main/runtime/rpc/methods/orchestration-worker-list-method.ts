@@ -106,7 +106,7 @@ export const ORCHESTRATION_WORKER_LIST_METHOD: RpcMethod = defineMethod({
           ? ORCHESTRATION_WORKER_LIST_SNAPSHOT_MAX_ROWS + 1
           : limit + 1
     })
-    if (!cursor && params.terminalState) {
+    if (!cursor && params.terminalState && 'databaseId' in snapshot) {
       if (rows.length > ORCHESTRATION_WORKER_LIST_SNAPSHOT_MAX_ROWS) {
         throw new OrchestrationError(
           'worker_list_snapshot_too_large',

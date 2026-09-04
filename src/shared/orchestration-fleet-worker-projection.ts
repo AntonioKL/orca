@@ -11,8 +11,21 @@ import type {
 
 const FLEET_STATUS_FUTURE_TOLERANCE_MS = 5_000
 
-function projectLiveness(
-  worker: FleetDurableWorker,
+/** Everything the liveness verdict reads, so every surface can share one projection. */
+export type FleetLivenessSubject = {
+  workerStage?: string | null
+  workerState?: string | null
+  resource: { releaseState?: string | null; hostScope: string | null } | null
+}
+
+/** `receivedAt` is the DELIVERY clock: a relay reconnect replays a cached row and restamps it,
+ *  so measuring staleness against it makes an hour-old agent read live. */
+export function agentStatusFleetObservedAt(status: AgentStatusIpcPayload): number {
+  return status.evidenceObservedAt ?? status.receivedAt
+}
+
+export function projectLiveness(
+  worker: FleetLivenessSubject,
   status: AgentStatusIpcPayload | undefined,
   now: number
 ): FleetLiveness {
@@ -30,27 +43,24 @@ function projectLiveness(
   if (!status) {
     return { verdict: 'unverifiable', reason: 'missing_status' }
   }
+  const observedAt = agentStatusFleetObservedAt(status)
   if (status.restoredUnconfirmed) {
-    return {
-      verdict: 'unverifiable',
-      reason: 'restored_unconfirmed',
-      observedAt: status.receivedAt
-    }
+    return { verdict: 'unverifiable', reason: 'restored_unconfirmed', observedAt }
   }
   if (status.providerSessionOnly) {
-    return { verdict: 'unverifiable', reason: 'missing_status', observedAt: status.receivedAt }
+    return { verdict: 'unverifiable', reason: 'missing_status', observedAt }
   }
-  if (status.receivedAt - now > FLEET_STATUS_FUTURE_TOLERANCE_MS) {
-    return { verdict: 'unverifiable', reason: 'future_status', observedAt: status.receivedAt }
+  if (observedAt - now > FLEET_STATUS_FUTURE_TOLERANCE_MS) {
+    return { verdict: 'unverifiable', reason: 'future_status', observedAt }
   }
   const remoteHost = projectHost(status, worker.resource?.hostScope).kind === 'remote'
   if (remoteHost && !status.connectionId) {
-    return { verdict: 'unverifiable', reason: 'missing_status', observedAt: status.receivedAt }
+    return { verdict: 'unverifiable', reason: 'missing_status', observedAt }
   }
-  if (now - status.receivedAt > AGENT_STATUS_STALE_AFTER_MS) {
-    return { verdict: 'unverifiable', reason: 'stale_status', observedAt: status.receivedAt }
+  if (now - observedAt > AGENT_STATUS_STALE_AFTER_MS) {
+    return { verdict: 'unverifiable', reason: 'stale_status', observedAt }
   }
-  return { verdict: 'live', observedAt: status.receivedAt, source: 'agent_status' }
+  return { verdict: 'live', observedAt, source: 'agent_status' }
 }
 
 function projectResource(worker: FleetDurableWorker): FleetResourceProjection {
@@ -167,6 +177,7 @@ export function projectOrchestrationFleetWorker(
       detail: worker.workerStage,
       activity: fresh && status ? status.state : 'unknown'
     },
+    outcome,
     liveness,
     evidence: {
       durable: true,
@@ -177,7 +188,7 @@ export function projectOrchestrationFleetWorker(
           : fresh
             ? 'fresh'
             : 'stale',
-      lastObservedAt: status?.receivedAt ?? null
+      lastObservedAt: status ? agentStatusFleetObservedAt(status) : null
     },
     resource: projectResource(worker),
     nextAction: nextAction(worker),
