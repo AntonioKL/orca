@@ -8,7 +8,7 @@ import {
   type MobileWebSourceControlHistoryResult
 } from '../../../src/shared/mobile-web/source-control-history-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import {
   sanitizeMobileWebBranches,
   sanitizeMobileWebCommitCompare,
@@ -50,7 +50,7 @@ export async function executeMobileWebSourceControlHistoryOperation(args: {
       worktree: `id:${hostWorkspaceId}`
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return sanitizeMobileWebBranches(response.result, payload.workspaceId)
   }
@@ -63,7 +63,7 @@ export async function executeMobileWebSourceControlHistoryOperation(args: {
       ...(payload.baseRef ? { baseRef: payload.baseRef } : {})
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return sanitizeMobileWebHistory(response.result, payload.workspaceId, payload.limit)
   }
@@ -86,7 +86,7 @@ export async function executeMobileWebSourceControlHistoryOperation(args: {
     commitId: payload.commitId
   })
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   return sanitizeMobileWebCommitCompare(response.result, payload.workspaceId, payload.commitId)
 }

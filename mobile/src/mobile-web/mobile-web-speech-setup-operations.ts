@@ -8,7 +8,7 @@ import {
   type MobileWebSpeechSetup
 } from '../../../src/shared/mobile-web/speech-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 
 export async function loadMobileWebSpeechSetup(
   client: RpcClient,
@@ -54,7 +54,7 @@ async function sendSpeechRequest(
 ): Promise<unknown> {
   const response = await client.sendRequest(method, payload)
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   return response.result
 }

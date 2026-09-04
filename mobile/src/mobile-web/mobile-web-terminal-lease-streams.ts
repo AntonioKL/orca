@@ -137,6 +137,8 @@ export class MobileWebTerminalLeaseStreams {
         viewport: record.viewport,
         startSequence: 0,
         maxOutstandingBytes: MOBILE_WEB_TERMINAL_MAX_OUTSTANDING_BYTES,
+        // Constants for the same reason as the multiplex path: the host publishes no floor state and
+        // no reply-authority verdict over the terminal stream, so neither can be derived here.
         inputFloor: 'held',
         queryReplyAuthority: true
       })

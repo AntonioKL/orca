@@ -1,6 +1,6 @@
 import { fileUriToFilesystemPath, filesystemPathToFileUri } from '../../../src/shared/file-uri-path'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 
 const RESOLVE_TIMEOUT_MS = 10_000
 
@@ -37,7 +37,7 @@ export async function confineMobileWebBrowserFileUrl(args: {
     { timeoutMs: RESOLVE_TIMEOUT_MS }
   )
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   const resolved = response.result
   if (

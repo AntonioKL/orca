@@ -14,7 +14,7 @@ import {
 import { MobileWebRelativePathSchema } from '../../../src/shared/mobile-web/bridge-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import { encodeMobileWebBase64UrlToken } from './mobile-web-base64url-token'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { terminalArtifactFailureCode } from './mobile-web-terminal-artifact-host-error'
 import {
   displayNameFromTerminalArtifactPath,
@@ -68,7 +68,7 @@ export class MobileWebTerminalArtifactAuthority {
     )
     this.assertGeneration(generation)
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     const resolved = response.result
     if (

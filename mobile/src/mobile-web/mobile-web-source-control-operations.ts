@@ -33,7 +33,7 @@ import type {
   MobileWebSourceControlReviewTerminalSendResult
 } from '../../../src/shared/mobile-web/source-control-review-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { executeMobileWebSourceControlCommit } from './mobile-web-source-control-commit-operation'
 import {
   executeMobileWebSourceControlHistoryOperation,
@@ -109,7 +109,7 @@ export async function executeMobileWebSourceControlOperation(args: {
       reuseLineStats: true
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return sanitizeMobileWebSourceControlStatus(response.result, payload.workspaceId, payload.limit)
   }
@@ -122,7 +122,7 @@ export async function executeMobileWebSourceControlOperation(args: {
       staged: payload.area === 'staged'
     })
     if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+      throw mobileWebBrokerHostRpcError(response.error)
     }
     return sanitizeMobileWebSourceControlDiff(response.result, payload)
   }
@@ -148,7 +148,7 @@ async function executeMutation(
     reuseLineStats: true
   })
   if (!preflight.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(preflight.error)
   }
   assertMobileWebSourceControlMutationPreflight({
     result: preflight.result,
@@ -165,7 +165,7 @@ async function executeMutation(
     ...(bulk ? { filePaths: relativePaths } : { filePath: relativePaths[0] })
   })
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   return MobileWebSourceControlMutationResultSchema.parse({
     workspaceId: payload.workspaceId,

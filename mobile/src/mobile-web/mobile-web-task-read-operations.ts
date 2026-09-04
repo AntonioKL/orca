@@ -41,7 +41,7 @@ import { nativeHostTaskDetailOperations } from '../tasks/native-host-task-detail
 import { nativeHostTaskListOperations } from '../tasks/native-host-task-list-operations'
 import { nativeHostTaskReadOperations } from '../tasks/native-host-task-read-operations'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { mobileWebTaskSettings } from './mobile-web-task-bootstrap-projection'
 import type { MobileWebTaskTargetAuthority } from './mobile-web-task-target-authority'
 import type { MobileWebTaskProjectTablePager } from './mobile-web-task-project-table-pager'
@@ -285,8 +285,8 @@ function pageRepoId(hostRepoId: string, authority: MobileWebWorkspaceAuthority):
   }
 }
 
-function requireSuccess(response: { ok: boolean }): void {
+function requireSuccess(response: { ok: boolean; error?: { code?: unknown } }): void {
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error ?? {})
   }
 }

@@ -11,7 +11,7 @@ import {
   type MobileWebSourceControlReviewState
 } from '../../../src/shared/mobile-web/source-control-review-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 
 export async function readMobileWebSourceControlReviewMetadata(args: {
   client: RpcClient
@@ -89,7 +89,7 @@ export async function updateMobileWebSourceControlReviewMetadata(args: {
     }
   })
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   return readMobileWebSourceControlReviewMetadata(args)
 }

@@ -10,7 +10,7 @@ import {
 import { mobileWebPageBrowserUrl } from '../../../src/shared/mobile-web/browser-url-privacy'
 import type { RpcClient } from '../transport/rpc-client'
 import type { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 
 export async function executeMobileWebBrowserOperation(args: {
@@ -154,7 +154,7 @@ async function requireRequest(
 
 function requireResult(response: Awaited<ReturnType<RpcClient['sendRequest']>>): unknown {
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   return response.result
 }

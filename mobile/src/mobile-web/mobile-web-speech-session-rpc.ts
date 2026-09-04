@@ -4,7 +4,7 @@ import type {
 } from '../../../src/shared/mobile-web/speech-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import { DICTATION_FINISH_TIMEOUT_MS } from '../hooks/mobile-dictation-session-state'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 
 export type MobileWebSpeechSession = {
   id: string
@@ -45,7 +45,7 @@ export async function finishMobileWebRemoteSpeechSession(
       throw new MobileWebBrokerError('host_error')
     })
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error)
   }
   const value = response.result as { text?: unknown }
   const text = typeof value.text === 'string' ? value.text.trim().slice(0, 32 * 1024) : ''

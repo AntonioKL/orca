@@ -207,6 +207,32 @@ Bridge version 2 is the first production policy. Additive operations stay on
 the same version and use capability negotiation. A breaking envelope or
 security semantic requires a new native bridge version.
 
+The shell and the page ship from different releases, so what a change costs
+depends on its direction and on whether it adds a field or an operation:
+
+- **Additive field, shell to page** (any result or event payload) is always
+  safe and needs no negotiation. The page parses shell-authored payloads
+  through `tolerantMobileWebShellPayload`, which strips unknown keys, drops an
+  array member it cannot classify, and reads an unknown value for an
+  optional/nullable closed set as absent. Adding an enum value, a session tab
+  kind, or an optional field is therefore a degrade, not a break. Do not
+  reintroduce `.strict()` on that path: a page parse failure is
+  `invalid_message` with `retryable: false`, nothing re-subscribes, and the
+  one-shot fallback shares the schema, so both legs die on the same byte.
+  `shell-payload-tolerance-census.test.ts` fails if a strict node survives.
+- **Additive field, page to shell** (any request payload) requires a grant.
+  Request schemas stay `.strict()` because the shell is the security authority
+  and must reject what it cannot account for; a newer page that sends a field
+  an older shell does not know gets `invalid_request`. Gate the field's use on
+  the operation grant that introduces it, the same way an operation is gated.
+- **Additive operation, either direction** negotiates through `init.grants`.
+  The page fails an ungranted operation immediately with
+  `unsupported_capability`, so a newer page against an older shell degrades at
+  the call site instead of hanging.
+- **Additive frame type, either direction** is safe at the same version: both
+  receivers drop a frame they cannot parse. Frame *fields* do not share that
+  property — the envelope schemas are strict in both directions.
+
 Desktop must retain support for the existing bridge floor until a replacement
 has shipped in at least two stable mobile releases and the supported shell
 minimum has advanced. A Desktop package must declare the exact range it was

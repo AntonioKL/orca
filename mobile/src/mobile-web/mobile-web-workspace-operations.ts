@@ -9,7 +9,7 @@ import {
   MobileWebWorkspaceUpdateResultSchema
 } from '../../../src/shared/mobile-web/workspace-presentation-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { MobileWebBrokerError, mobileWebBrokerHostRpcError } from './mobile-web-broker-error'
 import { mobileWebWorkspaceActivation } from './mobile-web-workspace-activation'
 import { executeMobileWebWorkspaceCreationReadOperation } from './mobile-web-workspace-creation-read-operations'
 import { executeMobileWebWorkspaceCreationSourceOperation } from './mobile-web-workspace-creation-source-operations'
@@ -132,11 +132,14 @@ async function readRepositories(
   return mobileWebWorkspaceRepositories(response.result, authority)
 }
 
-function requireSuccess(response: { ok: boolean }): asserts response is {
+function requireSuccess(response: {
+  ok: boolean
+  error?: { code?: unknown }
+}): asserts response is {
   ok: true
   result: unknown
 } {
   if (!response.ok) {
-    throw new MobileWebBrokerError('host_error')
+    throw mobileWebBrokerHostRpcError(response.error ?? {})
   }
 }
