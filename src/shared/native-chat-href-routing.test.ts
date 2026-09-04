@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { routeNativeChatHref } from './native-chat-href-routing'
+import { createNativeChatFileHref, routeNativeChatHref } from './native-chat-href-routing'
 
 describe('routeNativeChatHref', () => {
   it('classifies web and mail links', () => {
@@ -43,6 +43,21 @@ describe('routeNativeChatHref', () => {
     expect(routeNativeChatHref(String.raw`C:\repo\src\index.ts`)).toEqual({
       kind: 'file',
       pathText: String.raw`C:\repo\src\index.ts`,
+      line: null
+    })
+  })
+
+  it('routes encoded renderer file targets without treating Windows drives as schemes', () => {
+    expect(
+      routeNativeChatHref(createNativeChatFileHref(String.raw`C:\repo\report.docx:12`))
+    ).toEqual({
+      kind: 'file',
+      pathText: String.raw`C:\repo\report.docx:12`,
+      line: null
+    })
+    expect(routeNativeChatHref(createNativeChatFileHref('/tmp/report.html'))).toEqual({
+      kind: 'file',
+      pathText: '/tmp/report.html',
       line: null
     })
   })

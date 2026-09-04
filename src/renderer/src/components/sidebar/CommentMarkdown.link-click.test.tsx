@@ -3,6 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { routeNativeChatHref } from '../../../../shared/native-chat-href-routing'
 import CommentMarkdown from './CommentMarkdown'
 
 describe('CommentMarkdown link click handler', () => {
@@ -145,5 +146,96 @@ describe('CommentMarkdown link click handler', () => {
 
     expect(onLinkClick).toHaveBeenCalledWith(expect.any(Object), 'assets/diagram.png')
     expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('linkifies bare POSIX and Windows document paths without an extension allowlist', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content={String.raw`Open /tmp/sta-6481-explainer.html, docs/review.docx, C:\Reports\final.pages, and ./scripts/release.`}
+          onLinkClick={vi.fn()}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    const routes = Array.from(container.querySelectorAll<HTMLAnchorElement>('a')).map((anchor) =>
+      routeNativeChatHref(anchor.getAttribute('href'))
+    )
+    expect(routes).toEqual([
+      { kind: 'file', pathText: '/tmp/sta-6481-explainer.html', line: null },
+      { kind: 'file', pathText: 'docs/review.docx', line: null },
+      { kind: 'file', pathText: String.raw`C:\Reports\final.pages`, line: null },
+      { kind: 'file', pathText: './scripts/release', line: null }
+    ])
+  })
+
+  it('makes an inline-code file path clickable while preserving code styling', () => {
+    const onLinkClick = vi.fn((event: React.MouseEvent<HTMLElement>) => event.preventDefault())
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content={'Open `C:\\Reports\\release.docx`.'}
+          onLinkClick={onLinkClick}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    const code = container.querySelector('code')
+    const anchor = code?.closest('a')
+    expect(anchor).not.toBeNull()
+    expect(routeNativeChatHref(anchor?.getAttribute('href'))).toEqual({
+      kind: 'file',
+      pathText: String.raw`C:\Reports\release.docx`,
+      line: null
+    })
+
+    act(() => {
+      anchor?.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }))
+    })
+    expect(onLinkClick).toHaveBeenCalledOnce()
+  })
+
+  it('normalizes Windows markdown hrefs but leaves fenced paths as source text', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content={[
+            String.raw`[report](C:\Reports\summary.pdf)`,
+            '',
+            '```text',
+            '/tmp/not-a-link.html',
+            '```'
+          ].join('\n')}
+          onLinkClick={vi.fn()}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    const anchors = container.querySelectorAll<HTMLAnchorElement>('a')
+    expect(anchors).toHaveLength(1)
+    expect(routeNativeChatHref(anchors[0]?.getAttribute('href'))).toEqual({
+      kind: 'file',
+      pathText: String.raw`C:\Reports\summary.pdf`,
+      line: null
+    })
+    expect(container.querySelector('pre')?.textContent).toContain('/tmp/not-a-link.html')
   })
 })

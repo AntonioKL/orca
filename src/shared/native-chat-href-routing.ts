@@ -8,6 +8,23 @@ export type NativeChatHrefRoute =
 
 const WEB_SCHEME_PATTERN = /^(?:https?|mailto):/i
 const SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/
+export const NATIVE_CHAT_FILE_HREF_PREFIX = '#orca-native-chat-file='
+
+export function createNativeChatFileHref(pathText: string): string {
+  return `${NATIVE_CHAT_FILE_HREF_PREFIX}${encodeURIComponent(pathText)}`
+}
+
+function decodeNativeChatFileHref(href: string): string | null {
+  if (!href.startsWith(NATIVE_CHAT_FILE_HREF_PREFIX)) {
+    return null
+  }
+  try {
+    const decoded = decodeURIComponent(href.slice(NATIVE_CHAT_FILE_HREF_PREFIX.length))
+    return decoded && !decoded.startsWith(NATIVE_CHAT_FILE_HREF_PREFIX) ? decoded : null
+  } catch {
+    return null
+  }
+}
 
 function parseLineFragment(hash: string): number | null {
   if (!hash) {
@@ -46,7 +63,14 @@ function maybeDecodeHrefPath(value: string): string {
 
 export function routeNativeChatHref(href: string | null | undefined): NativeChatHrefRoute {
   const trimmed = href?.trim()
-  if (!trimmed || trimmed.startsWith('#')) {
+  if (!trimmed) {
+    return { kind: 'none' }
+  }
+  const encodedFileHref = decodeNativeChatFileHref(trimmed)
+  if (encodedFileHref) {
+    return routeNativeChatHref(encodedFileHref)
+  }
+  if (trimmed.startsWith('#')) {
     return { kind: 'none' }
   }
   if (WEB_SCHEME_PATTERN.test(trimmed)) {

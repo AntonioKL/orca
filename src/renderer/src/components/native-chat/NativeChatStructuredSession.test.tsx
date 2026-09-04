@@ -165,7 +165,6 @@ describe('NativeChatStructuredSession', () => {
         sessionId="session-paste"
         target={{ kind: 'local' }}
         agent="codex"
-        allowFileUriLinks
       />
     )
 
@@ -176,15 +175,14 @@ describe('NativeChatStructuredSession', () => {
     expect(mocks.pasteFromClipboard).toHaveBeenCalledOnce()
   })
 
-  it('wires local structured file links through the native chat opener', () => {
+  it('wires remote structured file links through the host-aware native chat opener', () => {
     render(
       <NativeChatStructuredSession
         isVisible
         tabId="structured-tab-1"
         sessionId="session-1"
-        target={{ kind: 'local' }}
+        target={{ kind: 'environment', environmentId: 'env-1' }}
         agent="codex"
-        allowFileUriLinks
       />
     )
 
@@ -221,7 +219,6 @@ describe('NativeChatStructuredSession', () => {
         sessionId="session-1"
         target={{ kind: 'local' }}
         agent="codex"
-        allowFileUriLinks
       />
     )
     const dispatchCommand = mocks.composerProps?.structuredTransport?.dispatchCommand as
@@ -257,7 +254,6 @@ describe('NativeChatStructuredSession', () => {
         sessionId="session-1"
         target={{ kind: 'local' }}
         agent="codex"
-        allowFileUriLinks
       />
     )
 
@@ -289,7 +285,6 @@ describe('NativeChatStructuredSession', () => {
         sessionId="session-wedge"
         target={{ kind: 'local' }}
         agent="codex"
-        allowFileUriLinks
       />
     )
 
@@ -321,7 +316,6 @@ describe('NativeChatStructuredSession', () => {
         sessionId="session-probe-flag"
         target={{ kind: 'local' }}
         agent="codex"
-        allowFileUriLinks
       />
     )
 
@@ -354,7 +348,6 @@ describe('NativeChatStructuredSession', () => {
         sessionId="session-parked"
         target={{ kind: 'local' }}
         agent="codex"
-        allowFileUriLinks
       />
     )
 
@@ -404,7 +397,6 @@ describe('NativeChatStructuredSession', () => {
         sessionId="session-churn"
         target={{ kind: 'local' }}
         agent="codex"
-        allowFileUriLinks
       />
     )
     const { rerender } = render(makeView())
@@ -458,7 +450,6 @@ describe('NativeChatStructuredSession', () => {
         sessionId="session-target-switch"
         target={target}
         agent="codex"
-        allowFileUriLinks
       />
     )
     const { rerender } = render(makeView({ kind: 'local' }))
@@ -493,7 +484,6 @@ describe('NativeChatStructuredSession', () => {
         sessionId="session-forced"
         target={{ kind: 'local' }}
         agent="codex"
-        allowFileUriLinks
       />
     )
 
@@ -532,7 +522,6 @@ describe('NativeChatStructuredSession', () => {
         sessionId="session-pending"
         target={{ kind: 'local' }}
         agent="codex"
-        allowFileUriLinks
       />
     )
 
@@ -562,7 +551,6 @@ describe('NativeChatStructuredSession', () => {
           sessionId="session-budget"
           target={{ kind: 'local' }}
           agent="codex"
-          allowFileUriLinks
         />
       )
 
