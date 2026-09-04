@@ -237,6 +237,16 @@ describe('MobileNativeChatMessage', () => {
       expect(textIn(disclosed.root)).toContain('1×')
     })
 
+    it('lets the global Tools toggle reveal a hidden settled run', () => {
+      // Otherwise the composer's Tools control is a no-op on every settled turn.
+      const tree = render(toolMessage([settledCall]), {
+        structuredActivityUi: true,
+        activeTurnIsWorking: false,
+        toolsExpanded: true
+      })
+      expect(textIn(tree.root)).toContain('1\u00d7')
+    })
+
     it('keeps the bridge lane on its always-visible tool run', () => {
       const tree = render(toolMessage([settledCall]), { activeTurnIsWorking: false })
       expect(textIn(tree.root)).toContain('1×')

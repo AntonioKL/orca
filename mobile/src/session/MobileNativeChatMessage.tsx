@@ -151,8 +151,14 @@ function MobileNativeChatMessageImpl({
     : null
   // A completed turn's activity belongs behind the turn-status caret. Leaving the
   // grouped row visible made a failed child command read as a failed response.
+  // The composer's global Tools toggle still overrides this, or it would silently
+  // do nothing on every settled turn.
   const settledToolsHidden =
-    structuredActivityUi && activeCall == null && activeTurnIsWorking === false && !turnExpanded
+    structuredActivityUi &&
+    activeCall == null &&
+    activeTurnIsWorking === false &&
+    !turnExpanded &&
+    !toolsExpanded
   const showToolRun = tools.length > 0 && !settledToolsHidden
 
   const handleCopy = (): void => {
