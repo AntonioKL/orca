@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { setAppEnvironment, type AppEnvironment } from '../shared/app-environment'
 import { setProcessTreeKillGate } from '../shared/child-process/process-tree-kill-gate'
 import { signalProcessTree } from '../shared/child-process/process-tree-termination'
+import { removeTreeSync } from '../shared/windows-transient-lock-removal'
 import {
   findSelfInitiatedTreeKills,
   resetSelfInitiatedTreeKillLogForTest
@@ -115,7 +116,7 @@ describeOnWindows('own-Chromium gate against real Windows process trees', () => 
 
   afterAll(() => {
     if (markerDirectory) {
-      rmSync(markerDirectory, { recursive: true, force: true })
+      removeTreeSync(markerDirectory)
     }
   })
 
