@@ -202,6 +202,9 @@ export function startWindowsInstallDirAclRepairIfPoisoned(
   data: CrashReportBreadcrumbData,
   options: WindowsInstallDirAclRecoveryOptions
 ): void {
+  // Cleared for every verdict, including an unreadable one that proves nothing: that
+  // releases a provisional 'repaired' claim early, but holding it would only move the
+  // same release to the grace-window expiry — an unreadable probe can never corroborate.
   probePendingSince = null
   try {
     applyInstallDirAclProbeVerdict(data, options)

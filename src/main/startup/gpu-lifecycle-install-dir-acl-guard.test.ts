@@ -428,4 +428,15 @@ describe('presentGpuFallbackRecoveredLaunchPrompt vs a marker retired since it w
     await presentGpuFallbackRecoveredLaunchPrompt(window)
     expect(showMessageBox).not.toHaveBeenCalled()
   })
+
+  // The symmetric case to the one above: a FAILED repair leaves the marker on disk and the
+  // tree a live suspect, the window the prompt lands on is blank, and Keep is both defaultId
+  // and cancelId — so asking invites a userConfirmed pin no later repair may clear.
+  it('stays silent while the install DACL is still the suspect', async () => {
+    await reportProbePoisonedWithSettledRepair(1, userData.path)
+    expect(readGpuFallbackMarker(userData.path)).not.toBeNull()
+
+    await presentGpuFallbackRecoveredLaunchPrompt(window)
+    expect(showMessageBox).not.toHaveBeenCalled()
+  })
 })

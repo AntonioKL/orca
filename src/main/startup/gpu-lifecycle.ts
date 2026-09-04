@@ -96,6 +96,13 @@ export async function presentGpuFallbackRecoveredLaunchPrompt(
   if (!readActiveGpuFallbackMarker(userDataPath, gpuFallbackEnvironment())) {
     return
   }
+  // The symmetric case: while the tree, not the driver, is on trial (a failed gate leaves it
+  // a live suspect), a "keep it" answer would pin a userConfirmed marker no later repair may
+  // clear — on the window the poison keeps blank. Staying silent leaves the marker
+  // unconfirmed, which a successful repair still retires.
+  if (isInstallDirAclSuspect()) {
+    return
+  }
   await handleGpuFallbackRecoveredLaunch({
     isQuitting: () => state.isQuitting,
     prompt: () => promptForGpuFallbackRecoveredLaunch(window),
