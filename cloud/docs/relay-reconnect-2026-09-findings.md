@@ -322,6 +322,16 @@ one; measured directly via the timeSeries API). A Google-side publish gap, not a
 the monitor's freeze-on-missing rule is correct. The 12–13Z monitor failures were a different cause (active
 probes reading 0 during the crash cascade). Re-dispatched at 21:50Z.
 
+stablyai/orca PR #18719 (3.2 + 4.3, desktop): the replay engine was not the refresh function but
+`RelayAuthCoordinator.scheduleRetry`, since `shouldRetryRelayConnectionError` treats any non-HTTP error
+(including a refresh `TimeoutError`) as retryable and re-reads the same stored token on backoff. Fix: refresh
+gets one 60 s attempt; an ambiguous failure (no status line) records the token and blocks re-sending it for
+30 s (bounded, not permanent); definitive 5xx gets exactly one retry after re-reading the store; a 401 on an
+ambiguously-attempted token logs `orca_cloud_refresh_possible_replay`. Lease renewal gets ±10 % full jitter
+(base shrunk so the latest sample stays ≥ 90 s before expiry); server resets the full 55-min TTL on any rebind
+(`host-session-registry.ts:736-743`) so early renewal is free. Verified the retry-path claim and both server
+cites against main.
+
 **Landing (2026-09-04 20:50Z–21:02Z, owner: "if you are confident the cloud changes are valid, you can land them"):**
 
 - Merged: orca-cloud #474, #475, #476; stablyai/orca #18693, #18694, #18698. Neither repo has branch
