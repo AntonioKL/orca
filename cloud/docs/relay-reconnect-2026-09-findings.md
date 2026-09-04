@@ -223,6 +223,9 @@ immediately so the bar can be re-tightened after the fleet is on the 500 ms lock
 - 06:20Z: 849 assign 503s. Closes 06:19:30–06:21: 162x1006 age<5min (hosts bouncing off the recreating
   c27/c29), 73x4408 + 53x1006 in the 50-min age bin (Finding 3 rotation cohort). Not roll-caused.
   c7 MIG `recreating=1` on the new template since 06:16:18Z; c27 and c29 MIGs also RECREATING (autoheal).
+- 06:23:16Z c7 instance restarted in place (MIG RECREATE keeps name/id relay-c7-bwjc / 4545742188814054238),
+  pulled `relay@sha256:85bf6799…` 06:23:37Z, listening + readiness true 06:23:42Z. Apply step passed 06:24Z;
+  verify step running. Isolate -> ready on new image took ~14 min end to end.
 - Implication for the batch phase: every drain will push director concurrency past the monitor's 64 bar
   for ~1-2 min. The batch job rechecks safety *before* it drains (read-only step), so that is fine per wave,
   but never run a monitor dry-run concurrently with a wave, and prefer batches of 2 over 4 until the fleet
