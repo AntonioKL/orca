@@ -40,8 +40,8 @@ detecting provider CLIs and their login state, scaffolding and editing files und
 explicit OK before anything that provisions a paid resource. The paid steps are the base snapshot,
 the auth snapshot, and `--provision`. One OK covers the whole `--provision` fix-and-rerun loop, so
 do not re-ask per iteration. Stop for the interactive agent login, which you cannot drive: the user runs
-it and tells you when it finished. Never create an Orca workspace, commit, choose a plan or region,
-invent a scope, project, or billing id, or write a credential into a script, `userData`, the state
+it and tells you when it finished. Never create an Orca workspace except for the step-10 test the user asked for. Never commit,
+choose a plan or region, invent a scope, project, or billing id, or write a credential into a script, `userData`, the state
 file, or a commit.
 
 ## The branch that shapes everything

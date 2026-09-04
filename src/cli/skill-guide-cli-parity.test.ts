@@ -139,10 +139,13 @@ function parityFailures(invocation: Invocation): string[] {
     }
   }
   if (command === null) {
-    // An incomplete reference like `ORCA emulator ...` names a real prefix and pins no flags.
+    // A prefix reference such as `ORCA emulator ...` or `ORCA linear --help` names no exact
+    // path, but its flags still have to belong to some command under that prefix.
     if (pathPrefixes.has(tokens.join(' '))) {
-      return failures
+      command = tokens.join(' ')
     }
+  }
+  if (command === null) {
     failures.push(
       describeFailure(invocation, `no COMMAND_SPECS path or alias for "${tokens.join(' ')}"`)
     )
@@ -173,5 +176,14 @@ describe('skill guides only name commands and flags the CLI defines', () => {
 
   it('resolves every ORCA invocation against COMMAND_SPECS', () => {
     expect(invocations.flatMap(parityFailures)).toEqual([])
+  })
+
+  it('checks flags on a prefix reference against every command under it', () => {
+    const at = (text: string) => parityFailures({ file: 'x.md', line: 1, text })
+    expect(at('ORCA emulator ...')).toEqual([])
+    expect(at('ORCA linear --help')).toEqual([])
+    expect(at('ORCA emulator --webcam')).toEqual([
+      expect.stringContaining('--webcam is not a flag of "emulator"')
+    ])
   })
 })

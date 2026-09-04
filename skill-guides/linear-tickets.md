@@ -115,7 +115,7 @@ ORCA linear list --filter assigned --limit 10 --workspace all --json
 ORCA linear list --filter open --team <key-or-id> --workspace <workspaceId> --json
 ```
 
-Use `list-issues` when MCP-compatible filters or cursor pagination are needed.
+Use `ORCA linear list-issues` when MCP-compatible filters or cursor pagination are needed.
 
 - Omitting `--limit` returns every match and reports `result.meta.limit` as `null`, so filter before listing a large workspace. `--limit <n>` caps the read.
 - When a cap held results back, `--json` sets `result.truncated` and `result.meta.hasMore`; human output prints `truncated: showing N`. Check `truncated` before reporting a count, then page with `--cursor` until it is false.

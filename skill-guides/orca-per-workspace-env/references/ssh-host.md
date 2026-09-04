@@ -69,18 +69,26 @@ set -euo pipefail
 : "${identity_file:=}"; : "${jump_host:=}"; : "${proxy_command:=}"   # avoid set -u aborts on optionals
 gh_token="${GH_TOKEN:-${GITHUB_TOKEN:-$(command -v gh >/dev/null 2>&1 && gh auth token 2>/dev/null || true)}}"
 ssh_target="${ssh_username}@${host}"
-ssh_opts=(-p "$ssh_port"); [ -n "$identity_file" ] && ssh_opts+=(-i "$identity_file")
+if [ -n "$jump_host" ] && [ -n "$proxy_command" ]; then
+  echo "set jump_host or proxy_command, not both" >&2; exit 1
+fi
 # A fresh host's key isn't in known_hosts, and a StrictHostKeyChecking prompt HANGS a
-# non-interactive create. Pre-add the key (or set the option) so it can't block.
-ssh-keyscan -p "$ssh_port" "$host" >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+# non-interactive create. accept-new records the first key seen and never prompts; if the
+# provider publishes the host fingerprint, compare it after the first connection.
+ssh_opts=(-p "$ssh_port" -o StrictHostKeyChecking=accept-new)
+[ -n "$identity_file" ] && ssh_opts+=(-i "$identity_file")
+[ -n "$jump_host" ] && ssh_opts+=(-J "$jump_host")
+[ -n "$proxy_command" ] && ssh_opts+=(-o "ProxyCommand=$proxy_command")
 
-# 1. ensure the repo is present and at the right commit on the host (NO orca serve here)
-ssh "${ssh_opts[@]}" "$ssh_target" \
-  "GH_TOKEN='$gh_token' GIT_TERMINAL_PROMPT=0 bash -lc '
-     set -euo pipefail
-     [ -d \"$project_root/.git\" ] || git clone \"$repo_url\" \"$project_root\"
-     cd \"$project_root\" && git fetch origin \"$repo_ref\" && git checkout -B \"$repo_ref\" FETCH_HEAD
-   '" >&2
+# 1. ensure the repo is present and at the right commit on the host (NO orca serve here).
+#    printf %q quotes every value for the remote shell, so a space or quote in a path or
+#    ref cannot break out of the command.
+remote_sync='set -euo pipefail
+  [ -d "$project_root/.git" ] || git clone "$repo_url" "$project_root"
+  cd "$project_root" && git fetch origin "$repo_ref" && git checkout -B "$repo_ref" FETCH_HEAD'
+ssh "${ssh_opts[@]}" "$ssh_target" "$(printf \
+  'GH_TOKEN=%q GIT_TERMINAL_PROMPT=0 project_root=%q repo_url=%q repo_ref=%q bash -lc %q' \
+  "$gh_token" "$project_root" "$repo_url" "$repo_ref" "$remote_sync")" >&2
 
 # 2. print the SSH connection block (NO pairingCode, NO orca serve). host/port/username tell Orca's
 #    relay how to dial in; identityFile/jumpHost/proxyCommand/portForwards are emitted when set.
