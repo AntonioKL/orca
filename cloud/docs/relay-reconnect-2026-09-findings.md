@@ -371,6 +371,13 @@ image) 17–44 -> 0–3, because the director no longer holds the 23-row lock on
 first direct measurement of the root-cause fix under real load. Cloud SQL CPU peaked 0.99 during the
 cascade and is decaying (0.86 at 08:55); the monitor freezes above 0.80, so no dry-run until it clears.
 
+Fourth cascade 09:00:12–09:00:18Z: c23, c8, c16, c26, c22 (five cells, 11 container-die events in 6 s,
+all `5aedbca5`, exitCode 1, Node banner, pg-pool `client closed the connection` burst right before). Cloud
+SQL CPU 0.84 -> 0.78 in the preceding minutes, director concurrency 18–22 (idle), so this one fired
+*without* a database or director spike. Fleet had just recovered to 13,015. Cadence today: 01:31 (4),
+04:47 (5), 08:40 (10), 09:00 (5). The old image is now cascading roughly hourly regardless of load; the
+only cell on a fixed image (c7) has 0 crashes in 2.5 h across all four.
+
 ## Roll inputs (verified by the read-only `verify` run)
 
 - target-image-digest `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` (lock fix; supersedes 85bf6799 as target)
