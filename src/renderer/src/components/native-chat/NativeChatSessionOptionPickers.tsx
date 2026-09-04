@@ -15,10 +15,11 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
 import { sortNativeChatSessionOptions } from '../../../../shared/native-chat-session-option-snapshot'
-import type {
-  SessionOptionDescriptor,
-  SessionOptionsSurface,
-  SessionOptionValue
+import {
+  sessionOptionDispatchUnconfirmed,
+  type SessionOptionDescriptor,
+  type SessionOptionsSurface,
+  type SessionOptionValue
 } from '../../../../shared/native-chat-session-options'
 import {
   nativeChatModelPillLabel,
@@ -37,11 +38,32 @@ export type NativeChatSessionOptionPickersProps = {
   pickerRequest?: NativeChatOptionPickerRequest | null
 }
 
+function PickerTooltipContent(props: {
+  label: string
+  disabledReason?: string | null
+  dispatched: boolean
+}): React.JSX.Element {
+  return (
+    <div className="space-y-0.5">
+      <div>{props.disabledReason ?? props.label}</div>
+      {props.dispatched ? (
+        <div>
+          {translate(
+            'components.native-chat.composer.sentNotConfirmed',
+            'Sent to the agent — not confirmed'
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function PickerTrigger(props: {
   label: string
   tooltipLabel: string
   disabled: boolean
   disabledReason?: string | null
+  dispatched: boolean
 }): React.JSX.Element {
   // Why: value-only visible text must still include the category in the
   // accessible name (WCAG 2.5.3 Label in Name / voice control).
@@ -69,7 +91,11 @@ function PickerTrigger(props: {
         </DropdownMenuTrigger>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={4}>
-        {props.disabledReason ?? props.tooltipLabel}
+        <PickerTooltipContent
+          label={props.tooltipLabel}
+          disabledReason={props.disabledReason}
+          dispatched={props.dispatched}
+        />
       </TooltipContent>
     </Tooltip>
   )
@@ -225,6 +251,7 @@ function NativeChatSessionOptionPickersInner({
             tooltipLabel={optionsTooltip}
             disabled={isWorking || pendingId !== null}
             disabledReason={optionsReason}
+            dispatched={options.some(sessionOptionDispatchUnconfirmed)}
           />
           <DropdownMenuContent align="start" side="top" collisionPadding={8} className="w-60">
             {options.map((descriptor, index) => {
@@ -257,6 +284,7 @@ function NativeChatSessionOptionPickersInner({
           tooltipLabel={modelTooltip}
           disabled={isWorking || pendingId !== null}
           disabledReason={modelReason}
+          dispatched={sessionOptionDispatchUnconfirmed(model)}
         />
         <DropdownMenuContent align="start" side="top" collisionPadding={8} className="w-64">
           {modelReason && !model.settable ? (
