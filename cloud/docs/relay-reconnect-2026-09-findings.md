@@ -40,6 +40,7 @@ ordinary (49/29/13 per min). Best reading: a ~5 s Postgres-side wait event share
 (lock on a hot row held across a long transaction, or an instance-level pause), not CPU/IO. Cell
 `sqlLatencyMsMax` was already 1.5–2.2 s fleet-wide in the four minutes before, i.e. the old cells' 1 s
 `lock_timeout` plus queueing. | run 33872946111 |
+| Monitor dry-run #16 | Dispatched 12:38:57Z by the waiter (now also requires no cell SQL max > 3 s in the prior 3 min). Checkpoint sync still 2.6–4.9 s every 45 s at dispatch, so a freeze is likely. 15 dry-runs: 1 pass, 14 freezes. |
 | Gate decision | Owner asked at 09:36Z to choose: A keep looping / B recalibrate `directorErrors` 0 -> small n / C human bypass. Ten dry-runs, four froze on this bar. Recommendation B+A. Note: B alone would not have passed #9 or #10 (cell health probes and a 12-error burst); it fixes the single-500 false freezes (#7, #8) only. | |
 | Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
 | PR #18606 lock removal (root cause) | **Merged** 09:2xZ as 7b108abf71 after review, fix, re-verify; CI green | https://github.com/stablyai/orca/pull/18606 |
@@ -198,6 +199,16 @@ The same-cap roll is blocked only by the monitor gate, and the gate is blocked b
 
 My recommendation: B, with the number chosen from the table in Finding 5 and the roll following
 immediately so the bar can be re-tightened after the fleet is on the 500 ms lock wait.
+
+## What actually blocks the roll now (12:40Z summary for the owner)
+
+1. **Cloud SQL disk** (Finding 10): 49 GB PD-SSD saturated since 11:58Z, checkpoint loop, fleet-wide
+   4–6 s stalls every ~45 s. Fix: bigger disk and/or `max_wal_size`, in the Terraform root that owns the
+   instance (orca-cloud). Online change. **This is now the first thing to do**; nothing else can pass a
+   15-min gate while it persists, and it is also what is killing the old-image cells several times an hour.
+2. **Old cell image** (Finding 6): dies on every stall. Fixed by rolling 519f4914 (canary inputs ready).
+3. **Gate policy**: `directorErrors: 0` and per-cell health probes freeze on any single stall. Recalibrate
+   after 1 and 2, or bypass by hand for the canary.
 
 ## Plan agreed with the owner (2026-09-04 ~06:45Z), in execution order
 
