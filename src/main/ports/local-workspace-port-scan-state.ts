@@ -123,12 +123,20 @@ export function rememberListenerMetadata(ports: readonly RawListeningPort[]): vo
  * metadata; and every entry is re-probed after METADATA_REPROBE_INTERVAL_SCANS so a process that
  * chdir'd while listening cannot keep a stale cwd forever.
  */
-export function partitionListenersNeedingMetadata(ports: readonly RawListeningPort[]): {
-  hydrated: RawListeningPort[]
-  pidsNeedingMetadata: Set<number>
-} {
+export function partitionListenersNeedingMetadata(
+  ports: readonly RawListeningPort[],
+  options: WorkspacePortScanOptions = {}
+): { hydrated: RawListeningPort[]; pidsNeedingMetadata: Set<number> } {
   metadataScanSequence += 1
   reusedListenerKeys = new Set()
+  // Why requireMetadata opts out: that caller is the SIGTERM authorization re-scan, so it must
+  // attribute the owner from this cycle's probe and never from a remembered cwd.
+  if (options.requireMetadata) {
+    return {
+      hydrated: [...ports],
+      pidsNeedingMetadata: new Set(ports.flatMap((port) => (port.pid ? [port.pid] : [])))
+    }
+  }
   const hydrated: RawListeningPort[] = []
   const pidsNeedingMetadata = new Set<number>()
   const reusableByPort = new Map<RawListeningPort, ProcessMetadata>()
