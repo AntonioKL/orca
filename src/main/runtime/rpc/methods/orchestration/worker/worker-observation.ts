@@ -123,6 +123,9 @@ export function exposeDispatchContext(dispatch: DispatchContextRow) {
     id: dispatch.id,
     runId: dispatch.run_id,
     taskId: dispatch.task_id,
+    // Every shipped CLI prints `dispatch.task_id`, and mixed client/host versions are the
+    // normal state, so the rename ships beside the spelling old clients still read.
+    task_id: dispatch.task_id,
     contractVersion: dispatch.contract_version,
     assigneeHandle: dispatch.assignee_handle,
     assigneePaneKey: dispatch.assignee_pane_key,

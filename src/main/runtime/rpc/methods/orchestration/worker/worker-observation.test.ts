@@ -119,7 +119,31 @@ describe('worker-show receipt shape', () => {
     expect(exposed).not.toHaveProperty('host_scope')
     expect(exposed).not.toHaveProperty('launch_token_hash')
     expect(exposed).not.toHaveProperty('capability_hash')
-    // The row shipped raw beside a camelCase `worker`; no snake_case key may survive.
-    expect(Object.keys(exposed).filter((key) => key.includes('_'))).toEqual([])
+    // The row shipped raw beside a camelCase `worker`; only the one spelling an older
+    // paired CLI still prints may survive.
+    expect(Object.keys(exposed).filter((key) => key.includes('_'))).toEqual(['task_id'])
+  })
+
+  // A paired CLI and host update independently, so an older CLI reads this receipt.
+  // These are the fields it prints: src/cli/handlers/orchestration/
+  // worker-observation-handlers.ts:18-19,25.
+  it('keeps every field an older paired CLI prints', () => {
+    const dispatch = exposeDispatchContext({
+      id: DISPATCH_ID,
+      run_id: 'run-1',
+      task_id: 'task-1',
+      status: 'dispatched'
+    } as DispatchContextRow)
+
+    expect(dispatch).toMatchObject({ id: DISPATCH_ID, task_id: 'task-1', status: 'dispatched' })
+    expect(
+      exposeWorker({
+        state: 'ready',
+        stage: 'input_accepted',
+        effects: '[]',
+        residual_resources: '[]',
+        start_options: '{}'
+      } as WorkerDispatchRow)
+    ).toMatchObject({ state: 'ready', stage: 'input_accepted' })
   })
 })
