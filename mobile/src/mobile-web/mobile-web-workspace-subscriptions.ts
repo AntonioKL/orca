@@ -4,6 +4,7 @@ import {
   type MobileWebWorkspaceChange
 } from '../../../src/shared/mobile-web/workspace-presentation-contract'
 import type { RpcClient } from '../transport/rpc-client'
+import { MobileWebBrokerError } from './mobile-web-broker-error'
 
 type SubscriptionRecord = {
   requestId: string
@@ -29,10 +30,10 @@ export class MobileWebWorkspaceSubscriptions {
 
   start(args: { requestId: string; subscriptionId: string; client: RpcClient }): void {
     if (this.records.has(args.subscriptionId)) {
-      throw new MobileWebWorkspaceSubscriptionError('invalid_request')
+      throw new MobileWebBrokerError('invalid_request')
     }
     if (this.records.size >= MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS) {
-      throw new MobileWebWorkspaceSubscriptionError('rate_limited')
+      throw new MobileWebBrokerError('rate_limited')
     }
     const record: SubscriptionRecord = {
       requestId: args.requestId,
@@ -53,7 +54,7 @@ export class MobileWebWorkspaceSubscriptions {
       }
     } catch {
       this.cancel(args.subscriptionId)
-      throw new MobileWebWorkspaceSubscriptionError('host_error')
+      throw new MobileWebBrokerError('host_error')
     }
   }
 
@@ -118,12 +119,6 @@ export class MobileWebWorkspaceSubscriptions {
       .catch(() => {
         this.cancel(subscriptionId)
       })
-  }
-}
-
-export class MobileWebWorkspaceSubscriptionError extends Error {
-  constructor(readonly code: 'invalid_request' | 'rate_limited' | 'host_error') {
-    super(code)
   }
 }
 

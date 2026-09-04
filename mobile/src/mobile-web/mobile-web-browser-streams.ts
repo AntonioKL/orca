@@ -15,6 +15,7 @@ import type { RpcClient } from '../transport/rpc-client'
 import type { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
 import { sanitizeMobileWebBrowserEvent } from './mobile-web-browser-event-sanitizer'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
+import { MobileWebBrokerError } from './mobile-web-broker-error'
 
 type SubscriptionRecord = {
   requestId: string
@@ -50,10 +51,10 @@ export class MobileWebBrowserStreams {
     client: RpcClient
   }): void {
     if (this.records.has(args.subscriptionId)) {
-      throw new MobileWebBrowserStreamError('invalid_request')
+      throw new MobileWebBrokerError('invalid_request')
     }
     if (this.records.size >= MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS) {
-      throw new MobileWebBrowserStreamError('rate_limited')
+      throw new MobileWebBrokerError('rate_limited')
     }
     const payload = MobileWebBrowserStreamPayloadSchema.parse(args.payload)
     const hostWorkspaceId = this.options.workspaceAuthority.hostWorkspaceId(payload.workspaceId)
@@ -102,7 +103,7 @@ export class MobileWebBrowserStreams {
       }
     } catch {
       this.cancel(args.subscriptionId)
-      throw new MobileWebBrowserStreamError('host_error')
+      throw new MobileWebBrokerError('host_error')
     }
   }
 
@@ -250,12 +251,6 @@ export class MobileWebBrowserStreams {
   }
 }
 
-export class MobileWebBrowserStreamError extends Error {
-  constructor(readonly code: 'invalid_request' | 'rate_limited' | 'host_error') {
-    super(code)
-  }
-}
-
 function boundedMetadata(metadata: BrowserScreencastFrameMetadata): BrowserScreencastFrameMetadata {
   const parsed = MobileWebBrowserEventSchema.parse({
     type: 'frameChunk',
@@ -268,7 +263,7 @@ function boundedMetadata(metadata: BrowserScreencastFrameMetadata): BrowserScree
     data: 'AA=='
   })
   if (parsed.type !== 'frameChunk') {
-    throw new MobileWebBrowserStreamError('host_error')
+    throw new MobileWebBrokerError('host_error')
   }
   return parsed.metadata
 }
