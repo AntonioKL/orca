@@ -26,6 +26,17 @@ describe('orchestration RPC methods', () => {
     return h.call(name, params, ctx)
   }
 
+  // A consuming check now requires a live pane, so direct-mailbox handles must resolve to one.
+  function resolveDirectPanes(...handles: string[]): void {
+    vi.mocked(runtime.getTerminalPaneKey).mockImplementation((handle) =>
+      handle === 'term_coord'
+        ? coordinatorPaneKey
+        : handles.includes(handle)
+          ? `tab_${handle}:leaf_${handle}`
+          : null
+    )
+  }
+
   describe('orchestration.check', () => {
     function createDispatchedTask(assigneeHandle = 'term_worker', assigneePaneKey?: string) {
       const task = db.createTask({ spec: 'manual check work' })
@@ -67,6 +78,7 @@ describe('orchestration RPC methods', () => {
 
     it('returns unread messages for a terminal', async () => {
       setup()
+      resolveDirectPanes('b')
       db.insertMessage({ from: 'a', to: 'b', subject: 'one' })
       db.insertMessage({ from: 'a', to: 'b', subject: 'two' })
       db.insertMessage({ from: 'a', to: 'c', subject: 'other' })
@@ -170,6 +182,7 @@ describe('orchestration RPC methods', () => {
 
     it('returns formatted output with --format', async () => {
       setup()
+      resolveDirectPanes('b')
       db.insertMessage({ from: 'a', to: 'b', subject: 'test' })
 
       const result = (await call('orchestration.check', {
@@ -183,6 +196,7 @@ describe('orchestration RPC methods', () => {
 
     it('filters by type', async () => {
       setup()
+      resolveDirectPanes('b')
       db.insertMessage({ from: 'a', to: 'b', subject: 'status', type: 'status' })
       db.insertMessage({ from: 'a', to: 'b', subject: 'done', type: 'worker_done' })
 
@@ -520,6 +534,7 @@ describe('orchestration RPC methods', () => {
 
     it('default (unread only) marks returned rows as read', async () => {
       setup()
+      resolveDirectPanes('b')
       db.insertMessage({ from: 'a', to: 'b', subject: 'one' })
       db.insertMessage({ from: 'a', to: 'b', subject: 'two' })
 
@@ -532,6 +547,35 @@ describe('orchestration RPC methods', () => {
         count: number
       }
       expect(second.count).toBe(0)
+    })
+
+    it('rejects a consuming check whose --terminal no longer resolves to a pane', async () => {
+      setup()
+      db.insertMessage({ from: 'a', to: 'term_gone', subject: 'stranded' })
+
+      await expect(call('orchestration.check', { terminal: 'term_gone' })).rejects.toMatchObject({
+        code: 'stable_pane_required',
+        data: { effectsApplied: false }
+      })
+      // The stranded row must survive the refusal so a rebound consumer can still read it.
+      expect(db.getUnreadMessages('term_gone')).toHaveLength(1)
+    })
+
+    it('still inspects a stale handle with --peek and --all', async () => {
+      setup()
+      db.insertMessage({ from: 'a', to: 'term_gone', subject: 'stranded' })
+
+      const peeked = (await call('orchestration.check', {
+        terminal: 'term_gone',
+        peek: true
+      })) as { count: number }
+      const history = (await call('orchestration.check', {
+        terminal: 'term_gone',
+        all: true
+      })) as { count: number }
+
+      expect(peeked.count).toBe(1)
+      expect(history.count).toBe(1)
     })
 
     it('--peek returns unread messages without marking them read', async () => {
@@ -640,6 +684,7 @@ describe('orchestration RPC methods', () => {
 
     it('does not mark messages read when a waiting check is aborted', async () => {
       setup()
+      resolveDirectPanes('b')
       const abortController = new AbortController()
       ctx = { runtime, signal: abortController.signal }
       vi.spyOn(runtime, 'waitForMessage').mockImplementation(async () => {
@@ -701,6 +746,7 @@ describe('orchestration RPC methods', () => {
 
     it('does not mark existing messages read when the check starts aborted', async () => {
       setup()
+      resolveDirectPanes('b')
       const abortController = new AbortController()
       abortController.abort()
       ctx = { runtime, signal: abortController.signal }

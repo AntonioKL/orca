@@ -5,6 +5,7 @@ import { parseMessageTypes } from '../routing'
 import { checkRunMailbox } from './check-run'
 import { checkWorkerMailbox } from './check-worker'
 import { checkDirectMailbox } from './check-direct'
+import { orchestrationSkillRecoveryData } from '../../../../../../shared/orchestration-rpc-contract'
 
 export const ORCHESTRATION_CHECK_METHODS: RpcMethod[] = [
   defineMethod({
@@ -72,6 +73,15 @@ export const ORCHESTRATION_CHECK_METHODS: RpcMethod[] = [
           activeDispatch,
           remoteAttachment
         })
+      }
+      // Why: a consuming check on a handle with no live pane and no Dispatch can never see
+      // Run mail, so an empty inbox would read as "nothing yet" instead of a stale caller.
+      if (!paneKey && params.peek !== true && params.all !== true && params.unread !== false) {
+        throw new OrchestrationError(
+          'stable_pane_required',
+          `Terminal ${handle} has no live pane bound to a Run, so this inbox can never receive Run mail. Rebind this terminal with orchestration run-use, or read the Run mailbox with --run <run_id>.`,
+          orchestrationSkillRecoveryData()
+        )
       }
       return checkDirectMailbox({ params, runtime, db, handle, typeFilter, signal })
     }

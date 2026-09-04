@@ -76,6 +76,8 @@ describe('orchestration migration behavior', () => {
 
   it('rejects acknowledgment of legacy mail without effects', async () => {
     const { db, runtime } = createRuntime()
+    // A consuming check refuses a handle with no live pane before it reads any mail.
+    vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue('tab_legacy:leaf_legacy')
     const message = db.insertMessage({
       from: 'term_worker',
       to: 'term_coord',
