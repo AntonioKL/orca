@@ -42,6 +42,7 @@ export type NativeChatStructuredViewProps = NativeChatOrchestrationProps & {
   agent: AgentType
   isVisible: boolean
   allowFileUriLinks: boolean
+  contextMenuActions?: Omit<NativeChatContextMenuActions, 'onPaste'>
 }
 
 export type NativeChatResolvedViewProps = NativeChatOrchestrationProps & {

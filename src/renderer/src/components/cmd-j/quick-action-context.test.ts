@@ -335,4 +335,33 @@ describe('Cmd+J quick action context', () => {
     await expect(action?.run(context)).resolves.toEqual({ status: 'ok' })
     expect(calls).toEqual(['delete'])
   })
+
+  it('offers and runs split actions only for an active movable chat', async () => {
+    const calls: string[] = []
+    const action = getCmdJQuickActions().find((entry) => entry.id === 'split-chat-right')
+    const context = {
+      ...ctx({}),
+      activeWorktree: null,
+      runtimeMode: 'local-desktop' as const,
+      openNewBrowserTab: async () => {},
+      openNewMarkdownFile: async () => {},
+      openNewTerminalTab: async () => {},
+      openCreateWorkspace: () => {},
+      deleteActiveWorkspace: () => {},
+      openAddQuickCommand: () => {},
+      canSplitActiveChat: true,
+      splitActiveChat: (direction: string) => {
+        calls.push(direction)
+        return true
+      }
+    } satisfies CmdJQuickActionContext
+
+    expect(action?.isAvailable(context)).toEqual({ available: true })
+    await expect(action?.run(context)).resolves.toEqual({ status: 'ok' })
+    expect(calls).toEqual(['right'])
+    expect(action?.isAvailable({ ...context, canSplitActiveChat: false })).toEqual({
+      available: false,
+      reason: 'no-active-chat'
+    })
+  })
 })

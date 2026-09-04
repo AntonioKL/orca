@@ -52,6 +52,10 @@ vi.mock('@/i18n/i18n', () => ({
   translate: (_key: string, fallback: string) => fallback
 }))
 
+vi.mock('@/components/tab-bar/TabWorkspaceLayoutMenuSection', () => ({
+  TabWorkspaceLayoutMenuSection: () => 'Move Tab to Split'
+}))
+
 function childrenText(children: ReactNode): string {
   return React.Children.toArray(children)
     .map((child) => {
@@ -65,11 +69,19 @@ function childrenText(children: ReactNode): string {
     .join('')
 }
 
-function Harness({ onSwitchToTerminal }: { onSwitchToTerminal?: () => void }) {
+function Harness({
+  onSwitchToTerminal,
+  structured = false
+}: {
+  onSwitchToTerminal?: () => void
+  structured?: boolean
+}) {
   const rootRef = createRef<HTMLDivElement>()
   const { menu } = useNativeChatContextMenu({
     rootRef,
     onSwitchToTerminal,
+    showTerminalPaneActions: !structured,
+    workspaceLayout: structured ? { unifiedTabId: 'chat-tab', groupId: 'group-1' } : undefined,
     actions: {
       ...emptyNativeChatContextMenuActions,
       onPaste: vi.fn()
@@ -106,5 +118,13 @@ describe('useNativeChatContextMenu', () => {
     expect(
       items.list.some((candidate) => childrenText(candidate.children) === 'Switch to terminal view')
     ).toBe(false)
+  })
+
+  it('reuses workspace layout actions without terminal-only pane commands', () => {
+    const markup = renderToStaticMarkup(<Harness structured />)
+
+    expect(markup).toContain('Move Tab to Split')
+    expect(markup).not.toContain('Split Terminal Right')
+    expect(markup).not.toContain('Fork Agent Session')
   })
 })
