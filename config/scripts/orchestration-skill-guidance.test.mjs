@@ -23,6 +23,19 @@ function squash(text) {
   return text.replace(/\s+/gu, ' ').trim()
 }
 
+describe('orchestration skill routing', () => {
+  it('keeps external browser routing at the OS/page boundary', () => {
+    const description = squash(readKernel())
+
+    expect(description).toContain(
+      "Use Computer Use for external browser windows, webviews, Orca app UI, or desktop UI outside Orca's embedded browser only when the task requires OS/window-level control such as focus, menus, dialogs, coordinates, or screenshots."
+    )
+    expect(description).toContain(
+      "`orca-cli` for Orca's embedded pages and a page-automation tool such as Playwright or CDP for external pages."
+    )
+  })
+})
+
 describe('orchestration kernel', () => {
   it('keeps the always-loaded guide compact and ordered around the normal protocol', () => {
     const kernel = readKernel()

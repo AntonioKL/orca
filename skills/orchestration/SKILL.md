@@ -5,7 +5,12 @@ description: >-
   messages, questions, gates, and completion tracking. Use when the user asks
   to supervise, monitor, wait for results, coordinate a DAG, or manage blocking
   agent-to-agent questions. For full ownership handoffs or ordinary terminal,
-  worktree, and built-in-browser control, use `orca-cli`.
+  worktree, and built-in-browser control, use `orca-cli`. Use Computer Use for
+  external browser windows, webviews, Orca app UI, or desktop UI outside Orca's
+  embedded browser only when the task requires OS/window-level control such as
+  focus, menus, dialogs, coordinates, or screenshots. Use `orca-cli` for Orca's
+  embedded pages and a page-automation tool such as Playwright or CDP for
+  external pages.
 ---
 
 # Orca Orchestration
