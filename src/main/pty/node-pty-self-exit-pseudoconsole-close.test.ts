@@ -66,13 +66,50 @@ describe('node-pty patch: pseudoconsole close on the self-exit path', () => {
   it('closes the pseudoconsole from PtyKill even after the shell has exited', () => {
     // hpc is copied out under the lock, so the close survives the baton's removal.
     expect(PATCH).toContain('+      hpc = handle->hpc;')
-    expect(PATCH).toContain('+        pfnClosePseudoConsole(hpc);')
+    expect(PATCH).toContain('+      pfnClosePseudoConsole(hpc);')
   })
 
-  it('never terminates through a shell handle the watcher may have closed', () => {
-    // The watcher nulls hShell on exit; upstream dereferenced it unconditionally.
-    expect(PATCH).toContain('+      if (useConptyDll && handle->hShell != nullptr) {')
-    expect(PATCH).not.toMatch(/^\+\s*TerminateProcess\(handle->hShell, 1\);/m)
+  it('resolves the ConPTY DLL before it claims the close', () => {
+    // LoadConptyDll throws when conpty.dll is missing. Throwing after
+    // consoleClosed was set would strand the pseudoconsole for good: the retry
+    // finds the work claimed and does nothing.
+    const dllResolve = PATCH.indexOf('+  HANDLE hLibrary = LoadConptyDll(info, useConptyDll);')
+    const claim = PATCH.indexOf('+      handle->consoleClosed = true;')
+    expect(dllResolve).toBeGreaterThan(-1)
+    expect(claim).toBeGreaterThan(-1)
+    expect(dllResolve).toBeLessThan(claim)
+  })
+
+  it('reaches hShell only under the null check the watcher can trip', () => {
+    // Pinned as one block. The watcher nulls hShell on exit, and upstream
+    // dereferenced it unconditionally; every remaining use — the duplication and
+    // the failure fallback below it — must stay inside this guard.
+    const guarded = PATCH.slice(
+      PATCH.indexOf('+      if (useConptyDll && handle->hShell != nullptr) {'),
+      PATCH.indexOf('+      if (handle->shellExited) {')
+    )
+    expect(guarded).not.toBe('')
+    expect(guarded).toContain('DuplicateHandle(GetCurrentProcess(), handle->hShell')
+    expect(guarded).toContain('TerminateProcess(handle->hShell, 1);')
+    // No ADDED line outside that guard may terminate through hShell. Removed
+    // (`-`) lines still carry upstream's unguarded call, which is the point.
+    const strayAdds = PATCH.replace(guarded, '')
+      .split('\n')
+      .filter((line) => line.startsWith('+') && line.includes('TerminateProcess(handle->hShell'))
+    expect(strayAdds).toEqual([])
+  })
+
+  it('still kills the shell when DuplicateHandle fails', () => {
+    // A null hShellDup is indistinguishable from the self-exit case, so a
+    // swallowed failure would leave the shell running after its pane closed —
+    // a worse outcome than the leak this patch exists to fix.
+    expect(PATCH).toContain(
+      [
+        '+          hShellDup = nullptr;',
+        '+          TerminateProcess(handle->hShell, 1);',
+        '+        }'
+      ].join('\n')
+    )
   })
 
   it('keeps the close idempotent so a second kill cannot double-close', () => {

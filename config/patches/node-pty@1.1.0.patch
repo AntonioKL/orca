@@ -603,7 +603,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
  }
  #endif
 diff --git a/src/win/conpty.cc b/src/win/conpty.cc
-index 7b286d3d644c26141df516929703aa6e129df4b2..ab7706780a2dfa9b355b2d398749d40d3f275fb7 100644
+index 7b286d3d644c26141df516929703aa6e129df4b2..4aed260dd68e6a171dcfd349e9a7c5c97209248e 100644
 --- a/src/win/conpty.cc
 +++ b/src/win/conpty.cc
 @@ -18,6 +18,7 @@
@@ -614,7 +614,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ab7706780a2dfa9b355b2d398749d40d
  #include <vector>
  #include <Windows.h>
  #include <strsafe.h>
-@@ -44,12 +45,38 @@ struct pty_baton {
+@@ -44,12 +45,39 @@ struct pty_baton {
    HANDLE hOut;
    HPCON hpc;
  
@@ -644,17 +644,18 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ab7706780a2dfa9b355b2d398749d40d
  };
  
  static std::vector<std::unique_ptr<pty_baton>> ptyHandles;
-+// Orca: guards the job accessors below against the exit watcher thread. It does
-+// NOT make the whole table safe -- PtyResize/PtyClear/PtyKill read it unlocked,
-+// as they always have -- but it closes the window this patch opened, where the
-+// watcher can close hShell/hJob and free the baton between a lookup and its use.
++// Orca: guards the job accessors below, and PtyKill, against the exit watcher
++// thread. It does NOT make the whole table safe -- PtyResize and PtyClear still
++// read it unlocked, as they always have -- but it closes the window this patch
++// opened, where the watcher can close hShell/hJob and free the baton between a
++// lookup and its use.
 +// Handle VALUES are recycled aggressively, so an unguarded read could pass the
 +// shell-pid check against an unrelated process and terminate the wrong job.
 +static std::mutex ptyJobMutex;
  static volatile LONG ptyCounter;
  
  static pty_baton* get_pty_baton(int id) {
-@@ -102,8 +129,31 @@ void SetupExitCallback(Napi::Env env, Napi::Function cb, pty_baton* baton) {
+@@ -102,8 +130,31 @@ void SetupExitCallback(Napi::Env env, Napi::Function cb, pty_baton* baton) {
      // Get process exit code.
      GetExitCodeProcess(baton->hShell, (LPDWORD)(&exit_event->exit_code));
      // Clean up handles
@@ -688,7 +689,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ab7706780a2dfa9b355b2d398749d40d
  
      auto status = tsfn.BlockingCall(exit_event, callback); // In main thread
      switch (status) {
-@@ -409,6 +459,15 @@ static Napi::Value PtyConnect(const Napi::CallbackInfo& info) {
+@@ -409,6 +460,15 @@ static Napi::Value PtyConnect(const Napi::CallbackInfo& info) {
      throw errorWithCode(info, "UpdateProcThreadAttribute failed");
    }
  
@@ -704,7 +705,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ab7706780a2dfa9b355b2d398749d40d
    PROCESS_INFORMATION piClient{};
    fSuccess = !!CreateProcessW(
        nullptr,
-@@ -416,7 +475,10 @@ static Napi::Value PtyConnect(const Napi::CallbackInfo& info) {
+@@ -416,7 +476,10 @@ static Napi::Value PtyConnect(const Napi::CallbackInfo& info) {
        nullptr,                      // lpProcessAttributes
        nullptr,                      // lpThreadAttributes
        false,                        // bInheritHandles VERY IMPORTANT that this is false
@@ -716,7 +717,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ab7706780a2dfa9b355b2d398749d40d
        envArg,                       // lpEnvironment
        mutableCwd.get(),             // lpCurrentDirectory
        &siEx.StartupInfo,            // lpStartupInfo
-@@ -426,8 +488,47 @@ static Napi::Value PtyConnect(const Napi::CallbackInfo& info) {
+@@ -426,8 +489,47 @@ static Napi::Value PtyConnect(const Napi::CallbackInfo& info) {
      throw errorWithCode(info, "Cannot create process");
    }
  
@@ -766,7 +767,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ab7706780a2dfa9b355b2d398749d40d
    if (useConptyDll && fLoadedDll)
    {
      PFNRELEASEPSEUDOCONSOLE const pfnReleasePseudoConsole = (PFNRELEASEPSEUDOCONSOLE)GetProcAddress(
-@@ -440,6 +541,8 @@ static Napi::Value PtyConnect(const Napi::CallbackInfo& info) {
+@@ -440,6 +542,8 @@ static Napi::Value PtyConnect(const Napi::CallbackInfo& info) {
  
    // Update handle
    handle->hShell = piClient.hProcess;
@@ -775,11 +776,36 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ab7706780a2dfa9b355b2d398749d40d
  
    // Close the thread handle to avoid resource leak
    CloseHandle(piClient.hThread);
-@@ -544,9 +647,40 @@ static Napi::Value PtyKill(const Napi::CallbackInfo& info) {
+@@ -544,29 +648,215 @@ static Napi::Value PtyKill(const Napi::CallbackInfo& info) {
    int id = info[0].As<Napi::Number>().Int32Value();
    const bool useConptyDll = info[1].As<Napi::Boolean>().Value();
  
 -  const pty_baton* handle = get_pty_baton(id);
++  // Orca: resolve the DLL BEFORE touching any baton state, for the same reason
++  // PtyConnect does it before creating anything. LoadConptyDll throws when
++  // conpty.dll is missing, and a throw after consoleClosed was set would strand
++  // the pseudoconsole permanently: the retry would find the work already
++  // claimed and do nothing. Only the useConptyDll path can throw here; the
++  // other returns kernel32.
++  HANDLE hLibrary = LoadConptyDll(info, useConptyDll);
++  PFNCLOSEPSEUDOCONSOLE pfnClosePseudoConsole = nullptr;
++  if (hLibrary != nullptr) {
++    pfnClosePseudoConsole = (PFNCLOSEPSEUDOCONSOLE)GetProcAddress(
++      (HMODULE)hLibrary,
++      useConptyDll ? "ConptyClosePseudoConsole" : "ClosePseudoConsole");
++  }
+ 
+-  if (handle != nullptr) {
+-    HANDLE hLibrary = LoadConptyDll(info, useConptyDll);
+-    bool fLoadedDll = hLibrary != nullptr;
+-    if (fLoadedDll)
+-    {
+-      PFNCLOSEPSEUDOCONSOLE const pfnClosePseudoConsole = (PFNCLOSEPSEUDOCONSOLE)GetProcAddress(
+-        (HMODULE)hLibrary,
+-        useConptyDll ? "ConptyClosePseudoConsole" : "ClosePseudoConsole");
+-      if (pfnClosePseudoConsole)
+-      {
+-        pfnClosePseudoConsole(handle->hpc);
 +  // Orca: the baton now outlives the shell, so this runs on a self-exited pty
 +  // too -- that is the whole point. Take what we need under the lock: the
 +  // watcher thread nulls hShell the moment the shell dies, and TerminateProcess
@@ -797,37 +823,38 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ab7706780a2dfa9b355b2d398749d40d
 +      hpc = handle->hpc;
 +      owed = true;
 +      handle->consoleClosed = true;
-+      // Null on a self-exited pty, where there is nothing left to terminate.
++      // Null hShell means a self-exited pty, where there is nothing to kill.
 +      if (useConptyDll && handle->hShell != nullptr) {
-+        DuplicateHandle(GetCurrentProcess(), handle->hShell, GetCurrentProcess(),
-+                        &hShellDup, 0, FALSE, DUPLICATE_SAME_ACCESS);
++        if (!DuplicateHandle(GetCurrentProcess(), handle->hShell, GetCurrentProcess(),
++                             &hShellDup, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
++          // Why terminate here instead of skipping: a failed duplication leaves
++          // hShellDup null, which is indistinguishable from the self-exit case,
++          // and skipping would leave the shell RUNNING after its pane closed --
++          // a worse outcome than the leak this all exists to fix. hShell is
++          // valid under this lock and TerminateProcess does not block, so the
++          // only cost is that this rare path kills before the console closes.
++          hShellDup = nullptr;
++          TerminateProcess(handle->hShell, 1);
++        }
 +      }
 +      if (handle->shellExited) {
 +        const bool removed = remove_pty_baton(id);
 +        assert(removed);
 +        (void)removed;
-+      }
-+      // Else the shell is still running and the watcher frees the baton.
-+    }
-+  }
- 
--  if (handle != nullptr) {
-+  // Why outside the lock: ClosePseudoConsole blocks until the conout side has
-+  // drained, and the watcher must be able to take the lock while it does.
-+  if (owed) {
-     HANDLE hLibrary = LoadConptyDll(info, useConptyDll);
-     bool fLoadedDll = hLibrary != nullptr;
-     if (fLoadedDll)
-@@ -556,17 +690,155 @@ static Napi::Value PtyKill(const Napi::CallbackInfo& info) {
-         useConptyDll ? "ConptyClosePseudoConsole" : "ClosePseudoConsole");
-       if (pfnClosePseudoConsole)
-       {
--        pfnClosePseudoConsole(handle->hpc);
-+        pfnClosePseudoConsole(hpc);
        }
++      // Else the shell is still running and the watcher frees the baton.
      }
 -    if (useConptyDll) {
 -      TerminateProcess(handle->hShell, 1);
++  }
++
++  // Why outside the lock: ClosePseudoConsole blocks until the conout side has
++  // drained, and the watcher must be able to take the lock while it does.
++  if (owed) {
++    if (pfnClosePseudoConsole)
++    {
++      pfnClosePseudoConsole(hpc);
++    }
 +    if (hShellDup != nullptr) {
 +      TerminateProcess(hShellDup, 1);
 +      CloseHandle(hShellDup);
@@ -879,9 +906,11 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ab7706780a2dfa9b355b2d398749d40d
 + * Orca: the pids still alive in this pty's tree, straight from the kernel.
 + *
 + * Descendant liveness for a tree that is still tracked, including children that
-+ * detached from the console. Once the shell exits the baton is gone, so this
-+ * returns null rather than an empty list -- null means "no answer", never
-+ * "they died". Also returns null when no job was assigned.
++ * detached from the console. Once the shell exits the watcher nulls hJob, which
++ * ownsShell rejects, so this returns null rather than an empty list -- null
++ * means "no answer", never "they died". (The baton itself now outlives the
++ * shell, until kill() runs; hJob is what makes the answer null.) Also returns
++ * null when no job was assigned.
 + *
 + * Does not include the ConPTY console host: CreatePseudoConsole spawns it
 + * before this job exists, so it is not a member and ClosePseudoConsole is what
@@ -977,7 +1006,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ab7706780a2dfa9b355b2d398749d40d
  /**
  * Init
  */
-@@ -577,6 +849,9 @@ Napi::Object init(Napi::Env env, Napi::Object exports) {
+@@ -577,6 +867,9 @@ Napi::Object init(Napi::Env env, Napi::Object exports) {
    exports.Set("resize", Napi::Function::New(env, PtyResize));
    exports.Set("clear", Napi::Function::New(env, PtyClear));
    exports.Set("kill", Napi::Function::New(env, PtyKill));
