@@ -344,6 +344,19 @@ export function NativeChatMessageList({
         onScroll={handleScroll}
         className="scrollbar-sleek h-full overflow-y-auto px-3 pt-10 pb-4 sm:px-4"
       >
+        {showTurnStatus && isWorking && turnStatuses.active ? (
+          <div
+            data-native-chat-running-status="true"
+            className="sticky top-0 z-10 mx-auto w-full max-w-4xl bg-background"
+            style={{ zoom: fontScale }}
+          >
+            <NativeChatWorkingStatus
+              startedAt={turnStatuses.active.startedAt}
+              thinking={turnStatuses.active.thinking}
+              workedSeconds={turnStatuses.active.workedSeconds}
+            />
+          </div>
+        ) : null}
         <div
           ref={contentRef}
           // Why: same max width as the composer column; horizontal inset comes
@@ -400,9 +413,7 @@ export function NativeChatMessageList({
                   activityExpandOverride={turnKey ? expandedTurnIds.has(turnKey) : undefined}
                   runtimeContext={runtimeContext}
                 />
-                {showTurnStatus &&
-                status &&
-                (index !== latestUserIndex || showTypingIndicator || !isWorking) ? (
+                {showTurnStatus && status && (index !== latestUserIndex || !isWorking) ? (
                   <NativeChatWorkingStatus
                     startedAt={status.startedAt}
                     thinking={status.thinking}
@@ -418,16 +429,6 @@ export function NativeChatMessageList({
               </Fragment>
             )
           })}
-          {showTurnStatus &&
-          latestUserIndex === -1 &&
-          turnStatuses.active &&
-          showTypingIndicator ? (
-            <NativeChatWorkingStatus
-              startedAt={turnStatuses.active.startedAt}
-              thinking={turnStatuses.active.thinking}
-              workedSeconds={turnStatuses.active.workedSeconds}
-            />
-          ) : null}
           {!showTurnStatus && showTypingIndicator ? <NativeChatTypingIndicatorRow /> : null}
         </div>
       </div>

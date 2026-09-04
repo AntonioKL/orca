@@ -153,7 +153,7 @@ describe('NativeChatMessageList assistant messages', () => {
     expect(screen.getByText('Running sleep 5')).toBeInTheDocument()
   })
 
-  it('shows a stable thinking status directly below the user message', () => {
+  it('pins a stable thinking status above the transcript', () => {
     const { container } = render(
       <NativeChatMessageList
         session={{
@@ -177,15 +177,16 @@ describe('NativeChatMessageList assistant messages', () => {
 
     const user = screen.getByText('Start the task')
     const thinking = screen.getByText('Thinking')
-    expect(user.compareDocumentPosition(thinking)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(thinking.compareDocumentPosition(user)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
     expect(thinking.parentElement).not.toHaveClass('border-b')
     expect(thinking.parentElement).toHaveClass('text-sm')
+    expect(thinking.parentElement?.parentElement).toHaveClass('sticky', 'top-0', 'bg-background')
     expect(container.querySelector('.animate-bounce')).toBeNull()
     expect(thinking).toHaveClass('animate-pulse')
     expect(container.querySelectorAll('.size-1.5.animate-pulse')).toHaveLength(0)
   })
 
-  it('places the thinking status directly after the latest user message', () => {
+  it('pins the working status above the current turn output', () => {
     render(
       <NativeChatMessageList
         session={{
@@ -217,9 +218,10 @@ describe('NativeChatMessageList assistant messages', () => {
     const user = screen.getByText('Run the checks')
     const status = screen.getByText('Working for 0 seconds')
     const assistant = screen.getByText('I am checking now.')
-    expect(user.compareDocumentPosition(status)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(status.compareDocumentPosition(user)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
     expect(status.compareDocumentPosition(assistant)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
     expect(status.parentElement).toHaveClass('border-b')
+    expect(status.closest('[data-native-chat-running-status]')).toHaveClass('sticky', 'top-0')
   })
 
   it('shows elapsed working time once tool activity starts', () => {
