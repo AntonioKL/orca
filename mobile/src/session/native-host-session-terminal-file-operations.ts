@@ -1,4 +1,7 @@
-import type { RuntimeTerminalPathResolution } from '../../../src/shared/runtime-types'
+import type {
+  RuntimeFileOpenResult,
+  RuntimeTerminalPathResolution
+} from '../../../src/shared/runtime-types'
 import type { RpcClient } from '../transport/rpc-client'
 import type { RpcSuccess } from '../transport/types'
 import type {
@@ -36,7 +39,7 @@ export function nativeHostSessionTerminalFileOperations(
         { worktree: `id:${workspaceId}`, relativePath },
         { timeoutMs: 15_000 }
       )
-      if (!response.ok) {
+      if (!response.ok || !(response.result as RuntimeFileOpenResult).opened) {
         throw new Error('file_open_failed')
       }
     }
