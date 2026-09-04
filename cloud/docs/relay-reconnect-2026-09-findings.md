@@ -282,6 +282,22 @@ Durable fixes (orca-cloud PR in preparation on branch `auth-revoke-only-live-tok
 open after that: prune `refresh_tokens` (expired or revoked rows older than N days), a server-side statement
 timeout shorter than the desktop's 30 s so the client and server agree on failure, and an alert on auth 429s.
 
+**19:11Z RESOLVED at the database layer.** `refresh_tokens_family_unrevoked` went valid at 19:11:17Z (build
+18:07–19:11, two full table scans of 2.1 M blocks under load). Within 60 s: refresh latency 100 s → 0.1 s, auth 429
+→ 0, active orca_auth backends 200 → 2, checkpoints back on the 5-min timer (`checkpoint starting: time` at 18:35,
+18:41, 19:00, 19:11). Director `/v1/assign` returning 200. Fleet controls 0 → 17 by 19:14Z.
+
+**Residual: mass sign-out.** 19:11–19:14Z: 3,857 refresh 401s from 3,829 distinct IPs, then near zero. Every one is
+a desktop whose family was revoked by reuse-detection during the outage; the desktop clears its cloud session on
+401 (`clearCloudSessionIfUnchanged`) and stops retrying. Those users must sign in again before the relay sees
+them. Fresh `/session` sign-ins: 1, 5, 3 per minute at 19:10–19:12. Recovery of controls is now paced by users
+signing in, not by infrastructure. Total `session-refresh-reuse-detected` events 13:00–19:00Z ≈ 100k, against a
+~100/hour baseline.
+
+orca-cloud PR #474 (branch `auth-revoke-only-live-tokens`): caps → 20, disk 250 / max_wal_size 16384 in
+Terraform, partial index in the schema, `already-revoked` short-circuit. Do not deploy auth to any environment
+with a large `refresh_tokens` before building the index concurrently there.
+
 ## What actually blocks the roll now (12:58Z summary for the owner)
 
 0. **Cloud NAT ports** (Finding 11, found 12:55Z): every us-central1 cell reaches Cloud SQL's public IP
