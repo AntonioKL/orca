@@ -79,7 +79,10 @@ export function NativeChatStructuredSession(props: {
     [controller, props.agent, props.sessionId]
   )
   const viewState = selectNativeChatViewState(session)
-  const fontScale = useNativeChatFontScale(viewState.kind === 'ready')
+  const fontScale = useNativeChatFontScale({
+    enabled: viewState.kind === 'ready',
+    isVisible: props.isVisible
+  })
   const fileLinkContext = useNativeChatFileLinkContext(props.tabId)
   const imageRuntimeContext = useNativeChatImageRuntimeContext(props.tabId)
   const fileLinkClick = useNativeChatFileLinkClick(props.allowFileUriLinks ? fileLinkContext : null)

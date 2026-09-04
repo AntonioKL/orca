@@ -17,12 +17,17 @@ export type ChatFontScaleControls = {
 
 /**
  * In-session chat font scale plus the Cmd/Ctrl +/-/0 keyboard bindings — the
- * desktop analog of mobile pinch-zoom. `enabled` gates the listener to the
- * focused/active chat view so the chord can't act when chat isn't on screen,
- * keeping the scale scoped to the chat surface rather than the whole app. The
- * scale lives in component state (in-session is fine per the plan).
+ * desktop analog of mobile pinch-zoom. Conversation readiness and visibility
+ * both gate the listener so a parked chat cannot intercept another tab's zoom
+ * shortcut. The scale lives in component state (in-session is fine per the plan).
  */
-export function useNativeChatFontScale(enabled: boolean): ChatFontScaleControls {
+export function useNativeChatFontScale({
+  enabled,
+  isVisible
+}: {
+  enabled: boolean
+  isVisible: boolean
+}): ChatFontScaleControls {
   const [scale, setScale] = useState(DEFAULT_CHAT_FONT_SCALE)
 
   const increase = useCallback(() => setScale((s) => increaseChatFontScale(s)), [])
@@ -30,7 +35,7 @@ export function useNativeChatFontScale(enabled: boolean): ChatFontScaleControls 
   const reset = useCallback(() => setScale(DEFAULT_CHAT_FONT_SCALE), [])
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || !isVisible) {
       return
     }
     const isMac = isMacPlatform()
@@ -53,7 +58,7 @@ export function useNativeChatFontScale(enabled: boolean): ChatFontScaleControls 
     }
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [enabled, increase, decrease, reset])
+  }, [enabled, isVisible, increase, decrease, reset])
 
   return { scale, increase, decrease, reset }
 }

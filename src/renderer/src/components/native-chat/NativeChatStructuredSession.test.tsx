@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     onLinkClick?: (...args: unknown[]) => void
   },
   composerProps: null as null | { structuredTransport?: Record<string, unknown> },
+  fontScale: vi.fn(() => ({ scale: 1 })),
   handlePasteEvent: vi.fn(),
   pasteFromClipboard: vi.fn(),
   submissions: [] as unknown[]
@@ -89,7 +90,7 @@ vi.mock('./use-structured-agent-session', async () => {
 })
 
 vi.mock('./use-native-chat-font-scale', () => ({
-  useNativeChatFontScale: () => ({ scale: 1 })
+  useNativeChatFontScale: mocks.fontScale
 }))
 
 vi.mock('./use-native-chat-file-link-context', () => ({
@@ -136,6 +137,7 @@ describe('NativeChatStructuredSession', () => {
     mocks.mode = 'static'
     mocks.messageListProps = null
     mocks.composerProps = null
+    mocks.fontScale.mockClear()
     mocks.handlePasteEvent.mockReset()
     mocks.pasteFromClipboard.mockReset()
     mocks.submissions = []
@@ -158,6 +160,21 @@ describe('NativeChatStructuredSession', () => {
     window.dispatchEvent(new Event('orca-app-menu-paste', { cancelable: true }))
 
     expect(mocks.pasteFromClipboard).toHaveBeenCalledOnce()
+  })
+
+  it('disables font zoom while the structured session is parked', () => {
+    render(
+      <NativeChatStructuredSession
+        isVisible={false}
+        tabId="structured-tab-hidden"
+        sessionId="session-hidden"
+        target={{ kind: 'local' }}
+        agent="codex"
+        allowFileUriLinks
+      />
+    )
+
+    expect(mocks.fontScale).toHaveBeenCalledWith({ enabled: true, isVisible: false })
   })
 
   it('wires local structured file links through the native chat opener', () => {
