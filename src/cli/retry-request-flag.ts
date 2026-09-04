@@ -1,7 +1,9 @@
 import { rejectValuelessFlag } from './flags'
 import { RuntimeClientError } from './runtime/types'
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+import {
+  isOrchestrationRetryRequestId,
+  RETRY_REQUEST_ID_GUIDANCE
+} from '../shared/orchestration-retry-request-id'
 
 /**
  * `--retry-request` carries the mutation identity that makes a replay idempotent. A damaged value
@@ -14,11 +16,8 @@ export function readRetryRequestFlag(flags: Map<string, string | boolean>): stri
   if (value === undefined) {
     return undefined
   }
-  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
-    throw new RuntimeClientError(
-      'invalid_argument',
-      '--retry-request must be the UUID Orca reported for the original request; pass it exactly as printed, or omit the flag to start a new request.'
-    )
+  if (!isOrchestrationRetryRequestId(value)) {
+    throw new RuntimeClientError('invalid_argument', RETRY_REQUEST_ID_GUIDANCE)
   }
   return value
 }
