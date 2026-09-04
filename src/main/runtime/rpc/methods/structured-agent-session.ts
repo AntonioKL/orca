@@ -15,6 +15,7 @@ import { defineMethod, defineStreamingMethod, type RpcAnyMethod, type RpcContext
 import {
   ensureStructuredHostInstalled as ensureHostInstalled,
   requireStructuredCapability,
+  requireStructuredCleanupHost,
   requireStructuredHost as requireHost,
   structuredCallerFor as callerFor,
   supportsStructuredSessions
@@ -277,7 +278,7 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
     name: 'agentSession.unsubscribe',
     params: UnsubscribeParams,
     handler: async (params, ctx) => {
-      requireHost(ctx)
+      requireStructuredCleanupHost(ctx)
       const connection = ctx.connectionId ?? 'local'
       const base = `${SUBSCRIPTION_PREFIX}:${connection}:${params.sessionId}`
       if (params.subscriptionId) {

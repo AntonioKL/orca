@@ -20,16 +20,22 @@ export function isStructuredNativeChatEnabled(
   }
 }
 
+export function supportsStructuredAgentSessionCapability(
+  context: Pick<StructuredPolicyContext, 'clientCapabilities' | 'clientKind'>
+): boolean {
+  return (
+    context.clientKind === undefined ||
+    context.clientCapabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY) === true
+  )
+}
+
 /**
  * One rule for every caller. The host setting is policy and applies to desktop, mobile and
  * in-process callers alike; the negotiated capability is a wire term, so it is asked of remote
  * clients only — in-process callers are the same build as the host and never negotiate one.
  */
 export function supportsStructuredAgentSessions(context: StructuredPolicyContext): boolean {
-  if (
-    context.clientKind !== undefined &&
-    context.clientCapabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY) !== true
-  ) {
+  if (!supportsStructuredAgentSessionCapability(context)) {
     return false
   }
   return (

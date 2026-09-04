@@ -122,7 +122,8 @@ function hostStub(): StructuredAgentSessionHost {
     })),
     history: vi.fn(() => ({ ok: true, page: { items: [] } })),
     subscribe: vi.fn(() => () => undefined),
-    unsubscribe: vi.fn()
+    unsubscribe: vi.fn(),
+    release: vi.fn()
   }
   return hostCalls as unknown as StructuredAgentSessionHost
 }
@@ -305,6 +306,41 @@ describe('capability gating', () => {
     })
     expect(response).toMatchObject({ ok: true })
     expect(hostCalls.send).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['agentSession.release', { sessionId: SESSION, holderId: 'surface-1' }],
+    ['agentSession.unsubscribe', { sessionId: SESSION }]
+  ])('keeps %s hidden from remote clients without the capability', async (method, params) => {
+    const response = await call(method, params, {
+      clientKind: 'runtime',
+      clientCapabilities: []
+    })
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining('structured_agent_session_unsupported') }
+    })
+    expect(hostCalls.release).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['agentSession.release', { sessionId: SESSION, holderId: 'surface-1' }],
+    ['agentSession.unsubscribe', { sessionId: SESSION }]
+  ])('does not install a host for cleanup-only method %s', async (method, params) => {
+    const ensureHost = vi.fn()
+    setStructuredAgentSessionHost(null)
+
+    const response = await call(method, params, STRUCTURED_CLIENT, {
+      getClientSettings: () => ({ experimentalStructuredNativeChat: false }),
+      ensureStructuredAgentSessionHost: ensureHost
+    })
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining('structured_agent_session_unsupported') }
+    })
+    expect(ensureHost).not.toHaveBeenCalled()
   })
 
   it('serves an in-process caller, which negotiates no capabilities at all', async () => {

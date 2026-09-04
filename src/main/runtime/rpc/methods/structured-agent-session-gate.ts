@@ -9,7 +9,10 @@ import { getStructuredAgentSessionHost } from '../../../native-chat/agent-sessio
 import type { StructuredAgentSessionHost } from '../../../native-chat/agent-session-wire/structured-agent-session-host'
 import type { StructuredAgentSessionCaller } from '../../../native-chat/agent-session-wire/structured-agent-session-host-types'
 import type { RpcContext } from '../core'
-import { supportsStructuredAgentSessions } from './structured-agent-session-policy'
+import {
+  supportsStructuredAgentSessionCapability,
+  supportsStructuredAgentSessions
+} from './structured-agent-session-policy'
 
 /**
  * In-process callers are the same build as the host, so they carry no negotiated
@@ -27,6 +30,19 @@ export function requireStructuredCapability(ctx: RpcContext): void {
 
 export function requireStructuredHost(ctx: RpcContext): StructuredAgentSessionHost {
   requireStructuredCapability(ctx)
+  const host = getStructuredAgentSessionHost()
+  if (!host) {
+    throw new Error('structured_agent_session_unsupported')
+  }
+  return host
+}
+
+/** Cleanup remains available after the setting is disabled, but never bypasses wire negotiation
+ *  or creates a host. This lets admitted callers retire only resources they already own. */
+export function requireStructuredCleanupHost(ctx: RpcContext): StructuredAgentSessionHost {
+  if (!supportsStructuredAgentSessionCapability(ctx)) {
+    throw new Error('structured_agent_session_unsupported')
+  }
   const host = getStructuredAgentSessionHost()
   if (!host) {
     throw new Error('structured_agent_session_unsupported')
