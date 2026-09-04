@@ -36,8 +36,12 @@ import {
 const SESSION = 'claude-integration-1'
 const PROVIDER_SESSION = claudeSessionIdForOrcaSession(SESSION)
 const WORKSPACE = 'workspace-claude'
+// Why 'runtime': this file exercises the Claude structured integration over agentSession.*, not the
+// mobile surface — nothing here asserts anything mobile-specific, and its sibling integration
+// suites use 'runtime' too. Mobile additionally requires the experimental structured-chat setting,
+// which structured-agent-session.test.ts pins in both its satisfied and refused states.
 const CLIENT = {
-  clientKind: 'mobile' as const,
+  clientKind: 'runtime' as const,
   clientCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY]
 }
 
