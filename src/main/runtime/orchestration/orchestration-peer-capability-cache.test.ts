@@ -345,6 +345,19 @@ describe('OrchestrationPeerCapabilityCache', () => {
       cached: true
     })
   })
+
+  it('accepts a response that advances the epoch it was sent against', () => {
+    const cache = new OrchestrationPeerCapabilityCache()
+    cache.remember('peer-a', 'epoch-a', capability, true)
+
+    cache.remember('peer-a', 'epoch-b', capability, false, 'epoch-a')
+
+    expect(cache.knownSupport('peer-a', null, capability)).toEqual({
+      runtimeEpoch: 'epoch-b',
+      supported: false,
+      cached: true
+    })
+  })
 })
 
 function runtimeStatus(runtimeId: string, supported: boolean) {

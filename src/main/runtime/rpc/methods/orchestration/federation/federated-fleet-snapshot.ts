@@ -1,7 +1,7 @@
+import { groupFederatedDispatches } from './federated-fleet-host-groups'
 import { mapWithConcurrency } from '../../../../../../shared/map-with-concurrency'
 import { ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY } from '../../../../../../shared/protocol-version'
 import {
-  ORCHESTRATION_FLEET_PAGE_MAX,
   refreshOrchestrationFleetLivenessAttention,
   type FleetDurableWorker,
   type OrchestrationFleetPage
@@ -10,7 +10,6 @@ import { projectFleetNextAction } from '../../../../../../shared/orchestration-f
 import { getOrchestrationPeerCapabilityCache } from '../../../../orchestration/orchestration-peer-capability-cache'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import { OrchestrationError } from '../../../../orchestration/orchestration-error'
-import type { FederatedDispatchRow } from '../../../../orchestration/types'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import { resolvePinnedFederatedServer } from '../worker/worker-observation'
 
@@ -29,12 +28,6 @@ export type FederatedFleetHostError = {
   name: string
   code: 'capability_unsupported' | 'host_unavailable' | 'home_budget_exhausted' | 'peer_changed'
   dispatchIds: string[]
-}
-
-type HostGroup = {
-  environmentId: string
-  name: string
-  dispatches: FederatedDispatchRow[]
 }
 
 export async function readFederatedFleetSnapshots(args: {
@@ -59,7 +52,6 @@ export async function readFederatedFleetSnapshots(args: {
     })
     const remaining = deadline - Date.now()
     if (remaining <= 0) {
-      // Orca never contacted this host; that is a home-side budget fact, not host silence.
       return { observations: [], error: error('home_budget_exhausted') }
     }
     const timeoutMs = Math.min(FLEET_HOST_TIMEOUT_MS, remaining)
@@ -68,8 +60,7 @@ export async function readFederatedFleetSnapshots(args: {
     let observedCapabilityEpoch: string | null = null
     try {
       const server = resolvePinnedFederatedServer(args.runtime, first)
-      // `method_not_found` is the single downgrade signal; a status probe would spend the
-      // fleet budget on a round trip that still misses hosts serving the unadvertised method.
+      // Shipped hosts serve this method without advertising it.
       const known = cache.knownSupport(
         first.peer_fingerprint,
         first.remote_runtime_epoch,
@@ -101,7 +92,8 @@ export async function readFederatedFleetSnapshots(args: {
         first.peer_fingerprint,
         snapshot.runtimeEpoch,
         ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY,
-        true
+        true,
+        observedCapabilityEpoch
       )
       const projectedDispatches = projectFleetRuntimeEpochs(
         args.db,
@@ -119,7 +111,6 @@ export async function readFederatedFleetSnapshots(args: {
               ? item
               : {
                   ...item,
-                  // A non-exact identity can never prove either liveness or exit.
                   observation: { ...item.observation, status: 'unverifiable' as const }
                 }
           ),
@@ -138,7 +129,6 @@ export async function readFederatedFleetSnapshots(args: {
         }
         return { observations: [], error: error('capability_unsupported') }
       }
-      // The environment was repointed at another Orca server; that is an identity fact, not silence.
       return {
         observations: [],
         error: error(
@@ -231,14 +221,12 @@ export function applyFederatedFleetObservations(
           ? { verdict: 'exited', source: 'execution_host' }
           : { verdict: 'unverifiable', reason: hostReportedReason(observation.reason) }
     worker.evidence.liveStatus = observation.status === 'live' ? 'fresh' : 'unavailable'
-    // The host answered for both `live` and `exited`, so both carry a real observation time.
     worker.evidence.lastObservedAt = observation.status === 'unverifiable' ? null : observedAt
     refreshFleetWorkerVerdict(worker, durable)
   }
 }
 
-/** The host verdict replaces the local one, so everything derived from liveness has to
- *  follow it: a stale `inspect` outranked the `recover` a proven remote exit owes. */
+// Recompute every projection derived from the host's verdict.
 function refreshFleetWorkerVerdict(
   worker: OrchestrationFleetPage['workers'][number],
   durable: ReadonlyMap<string, FleetDurableWorker>
@@ -275,41 +263,4 @@ function hostReportedReason(
   return reason && HOST_REPORTED_REASONS.has(reason)
     ? (reason as 'missing_status' | 'stale_status' | 'future_status' | 'restored_unconfirmed')
     : 'host_indeterminate'
-}
-
-function groupFederatedDispatches(args: {
-  runtime: OrcaRuntimeService
-  db: OrchestrationDb
-  dispatchIds: readonly string[]
-}): HostGroup[] {
-  const groups = new Map<string, HostGroup>()
-  const federatedByDispatchId = new Map(
-    args.db
-      .listFederatedDispatchesByIds(args.dispatchIds)
-      .map((dispatch) => [dispatch.dispatch_id, dispatch])
-  )
-  for (const dispatchId of args.dispatchIds) {
-    const dispatch = federatedByDispatchId.get(dispatchId)
-    if (!dispatch) {
-      continue
-    }
-    const groupKey = `${dispatch.environment_id}\u0000${dispatch.peer_fingerprint}`
-    const group = groups.get(groupKey) ?? {
-      environmentId: dispatch.environment_id,
-      name: dispatch.environment_name,
-      dispatches: []
-    }
-    group.dispatches.push(dispatch)
-    groups.set(groupKey, group)
-  }
-  return [...groups.values()].flatMap((group) => {
-    const batches: HostGroup[] = []
-    for (let offset = 0; offset < group.dispatches.length; offset += ORCHESTRATION_FLEET_PAGE_MAX) {
-      batches.push({
-        ...group,
-        dispatches: group.dispatches.slice(offset, offset + ORCHESTRATION_FLEET_PAGE_MAX)
-      })
-    }
-    return batches
-  })
 }

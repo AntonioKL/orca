@@ -63,7 +63,8 @@ export async function readFederatedWorkerOutput(args: {
       args.federated.peer_fingerprint,
       remote.runtimeEpoch,
       ORCHESTRATION_FEDERATION_STRUCTURED_READ_RUNTIME_CAPABILITY,
-      true
+      true,
+      expectedRuntimeEpoch
     )
     projectRemoteRuntimeEpoch(args.db, observationFence, remote.runtimeEpoch)
     return {
@@ -80,7 +81,8 @@ export async function readFederatedWorkerOutput(args: {
       args.federated.peer_fingerprint,
       legacy.remoteRuntimeEpoch,
       ORCHESTRATION_FEDERATION_STRUCTURED_READ_RUNTIME_CAPABILITY,
-      false
+      false,
+      expectedRuntimeEpoch
     )
     projectRemoteRuntimeEpoch(args.db, observationFence, legacy.remoteRuntimeEpoch)
     return legacy
