@@ -134,12 +134,11 @@ async function terminatePosixTree(
       signalGroup(snapshot.rootPgid, 'SIGKILL')
       groupSignalled = true
     } catch {
-      // Group already exited: still the desired outcome, but nothing here
-      // killed it, and a breadcrumb for a kill we never landed is a false
-      // suspect in the render-process-gone window.
+      // Already-gone is still the desired outcome, but nothing here killed it,
+      // and a crumb for a kill we never landed is a false render-process-gone suspect.
     }
     if (groupSignalled) {
-      // Outside the try, like terminateDedicatedPosixGroup: that catch is the
+      // Outside the try, as in terminateDedicatedPosixGroup: that catch is the
       // already-gone contract, not a breadcrumb handler.
       recordSelfInitiatedTreeKill({
         pid: snapshot.rootPgid,
