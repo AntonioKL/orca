@@ -18,6 +18,7 @@ const value: RpcClientContextValue = {
   disconnectHostClient: noop,
   getState: () => 'disconnected',
   getKnownState: () => null,
+  getClientId: () => null,
   getReconnectAttempt: () => 0,
   getLastConnectedAt: () => null,
   getActivePath: () => 'lan',
@@ -29,7 +30,7 @@ const value: RpcClientContextValue = {
   primeHosts: noop
 }
 const Ctx = createContext<RpcClientContextValue | null>(null)
-const disconnectedClient = { client: null, state: 'disconnected' } as const
+const disconnectedClient = { client: null, clientId: null, state: 'disconnected' } as const
 
 export function RpcClientProvider({ children }: { children: ReactNode }) {
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
@@ -45,6 +46,7 @@ export function useRpcClientContext(): RpcClientContextValue {
 
 export function useHostClient(_hostId: string | undefined): {
   client: RpcClient | null
+  clientId: string | null
   state: ConnectionState
 } {
   useRpcClientContext()

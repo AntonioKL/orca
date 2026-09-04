@@ -101,6 +101,10 @@ export function useMobileSessionFoundation({
   // Why: shared client per host owned by RpcClientProvider (docs/mobile-shared-client-per-host.md).
   const nativeHost = useHostClient(nativeHostBinding ? hostId : undefined)
   const client = nativeHost.client
+  // Why: the shared client owns authenticated identity (#16239); the hosted page has no native
+  // client, the shell signs its bridge traffic, so identity is ready there by construction.
+  const clientId = nativeHostBinding ? nativeHost.clientId : null
+  const hostClientIdentityReady = !nativeHostBinding || clientId !== null
   const connState = connectionStateProp ?? nativeHost.state
   const sessionTabOperations = useMemo(
     () => sessionTabOperationsProp ?? (client ? defaultHostSessionTabOperations(client) : null),
@@ -248,6 +252,8 @@ export function useMobileSessionFoundation({
     router,
     insets,
     client,
+    clientId,
+    hostClientIdentityReady,
     connState,
     reconnectAttempts,
     lastConnectedAt,

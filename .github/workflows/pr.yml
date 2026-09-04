@@ -382,7 +382,7 @@ jobs:
       - uses: ./.github/actions/install-node-dependencies
 
       # Why: the check rebuilds every package in the manifest from a pinned upstream
-      # commit — @xterm/xterm and the two addons, each built twice (once unmodified to
+      # commit — @xterm/xterm and its three addons, each built twice (once unmodified to
       # prove the toolchain still reproduces the published bundles, once patched). Caching
       # the npm metadata and the shallow clone keeps the repeated cost to the builds
       # themselves; the key is the manifest, so a commit, package or toolchain bump
@@ -818,6 +818,7 @@ jobs:
           src/main/cli/wsl-cli-powershell-boundary.test.ts
           src/main/cursor/hook-service.test.ts
           src/main/orca-profiles/profile-index-store.test.ts
+          src/main/startup/windows-install-dir-acl-repair.win32.test.ts
           src/main/runtime/repo-worktree-admin-fingerprint.test.ts
           src/main/runtime/worktree-scan-admin-fingerprint-gate.test.ts
           src/shared/secure-file-fsync-flags.test.ts

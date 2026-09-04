@@ -7,9 +7,10 @@ export function useMobileSessionTerminalSubscription(
   scope: MobileSessionTerminalSubscriptionFoundationModel
 ) {
   const {
+    clientId,
+    hostClientIdentityReady,
     setTerminalModes,
     terminalCwdRef,
-    deviceTokenRef,
     viewportRef,
     viewportMeasuredRef,
     terminalUnsubsRef,
@@ -39,6 +40,10 @@ export function useMobileSessionTerminalSubscription(
         diagnostics.streamSkipped(handle, reason, handle === activeHandleRef.current)
       if (!sessionTerminalOperations) {
         logSkippedGate('no-terminal-operations')
+        return
+      }
+      if (!hostClientIdentityReady) {
+        logSkippedGate('no-client-identity')
         return
       }
       if (terminalUnsubsRef.current.has(handle)) {
@@ -81,7 +86,7 @@ export function useMobileSessionTerminalSubscription(
         {
           workspaceId: worktreeId,
           terminalId: handle,
-          clientId: deviceTokenRef.current,
+          clientId,
           viewport: nativeChatTerminalStream.mobileNativeChatSubscribeViewport(
             covered,
             viewportRef.current
@@ -135,6 +140,8 @@ export function useMobileSessionTerminalSubscription(
       subscribingHandlesRef.current.delete(handle)
     },
     [
+      clientId,
+      hostClientIdentityReady,
       getTerminalRef,
       deliverPendingQuickCommandInput,
       markNativeChatInputLeaseReady,

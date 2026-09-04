@@ -17,6 +17,14 @@ const terminalStreamPresentationSource = readMobileSessionRouteSource(
 const autoCreateHookSource = readMobileSessionRouteSource(
   './use-initial-session-terminal-autocreate.ts'
 )
+const foundationSource = readMobileSessionRouteSource('./use-mobile-session-foundation.ts')
+const terminalRuntimeSource = readMobileSessionRouteSource(
+  './use-mobile-session-terminal-runtime.ts'
+)
+const terminalSubscriptionSourceForIdentity = readMobileSessionRouteSource(
+  './use-mobile-session-terminal-subscription.ts'
+)
+const lifecycleSource = readMobileSessionRouteSource('./use-mobile-session-lifecycle.ts')
 
 function sliceBetween(startPattern: string, endPattern: string): string {
   const start = source.indexOf(startPattern)
@@ -71,6 +79,27 @@ describe('mobile session startup', () => {
     expect(reconciliationHookSource).toContain('appStateSubscription.remove()')
   })
 
+  it('binds terminal identity to the shared client before subscription effects run', () => {
+    // Why: the hosted page has no native client, so identity readiness is a flag rather than a non-null id.
+    expect(foundationSource).toContain(
+      'const clientId = nativeHostBinding ? nativeHost.clientId : null'
+    )
+    expect(foundationSource).toContain(
+      'const hostClientIdentityReady = !nativeHostBinding || clientId !== null'
+    )
+    expect(foundationSource).toContain('    clientId,')
+    expect(terminalRuntimeSource).toContain('useRef<string | null>(clientId)')
+    expect(terminalRuntimeSource).toContain('deviceTokenRef.current = clientId')
+    expect(terminalRuntimeSource).toContain(
+      'inputGate.canSend && sessionTerminalOperations != null && hostClientIdentityReady'
+    )
+    expect(terminalSubscriptionSourceForIdentity).toContain('if (!hostClientIdentityReady)')
+    expect(terminalSubscriptionSourceForIdentity).toContain(
+      'terminalId: handle,\n          clientId,'
+    )
+    expect(lifecycleSource).not.toContain('deviceTokenRef.current = host.deviceToken')
+  })
+
   it('confirms terminal stream teardown with a committed inventory-recovery bridge', () => {
     expect(terminalStreamPresentationSource).toContain(
       "if (data.type === 'end' || data.type === 'error')"
@@ -113,7 +142,7 @@ describe('mobile session startup', () => {
   it('fails runtime capability gates closed while probing a replacement client', () => {
     const capabilityEffect = sliceBetween(
       'const [runtimeCapabilitySnapshot, setRuntimeCapabilitySnapshot]',
-      '// Why: read deviceToken from host record'
+      '// Why: the shared client owns authenticated identity'
     )
     const probeStart = capabilityEffect.indexOf('startRuntimeCapabilityRead(')
 
