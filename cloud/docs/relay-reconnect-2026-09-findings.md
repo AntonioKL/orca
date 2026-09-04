@@ -333,13 +333,15 @@ with a large `refresh_tokens` before building the index concurrently there.
   `deletedRows`, not the exit code (a run that only ever times out exits 0); ~48 M rows drain in ~10 days at
   200k/hour; deleting them leaves dead tuples, so the 16 GB is not reclaimed without a separate VACUUM FULL or
   pg_repack pass, which is its own change.
-- Phone-side copy when the desktop is signed out: today the relay answers the phone with `HOST_OFFLINE` (4404)
-  and the phone shows "Can't reach desktop" after enough attempts; the relay cannot tell "desktop asleep" from
-  "desktop signed out" because the desktop closes its control with no reason. Design note: have the desktop
-  close its control with a `signed-out` reason on auth loss, have the relay remember the last close reason per
-  host for the credential's lifetime and return it in `relay-hello`, and have the phone render "Sign in to Orca
-  on your desktop to reconnect". Needs a wire change on all three sides (new optional field, safe for old
-  clients). Not started.
+- Phone-side copy when the desktop is signed out: stablyai/orca PR #18698 (`phone-desktop-signed-out-reason`).
+  Real path traced: the director resolves the phone to the host's last cell (durable assignment row), and the
+  cell's `acceptClient` rejects with 4404. The only additive slot every shipped peer tolerates is the WebSocket
+  close *reason* (relay-hello and resolve schemas are zod strict; a new close code drops old phones off the
+  host-offline cadence). Desktop closes its control with reason `signed-out` only when the cloud session is gone
+  (null context after a 401, or explicit sign-out); quit and relaunch stay reasonless. Cell remembers it per
+  host for the dormant-assignment TTL, forgets on re-auth, and echoes it as the 4404 close reason; phone
+  renders "Desktop signed out — sign in to Orca on your desktop to reconnect" with the same retry cadence.
+  Old×new matrix in the PR body; nothing changes for any old peer. Merges cleanly with #18694.
 
 ## What actually blocks the roll now (12:58Z summary for the owner)
 
