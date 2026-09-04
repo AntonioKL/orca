@@ -126,22 +126,3 @@ export function classifyTerminalProcessInspectionFailure(
   }
   return null
 }
-
-/**
- * Whether a close has to stop and ask.
- *
- * Prefers `childProcessEvidence` because it is the only member that can say "I did not look";
- * `hasChildProcesses` spells that the same way it spells "nothing is running". A host without the
- * member keeps the boolean's meaning exactly, so old hosts decide as they always did.
- *
- * A client-only unverifiable stays not-busy on purpose: that verdict is about the transport, not
- * the pane, and the close paths deliberately fail open on it rather than leave a dead button.
- */
-export function inspectionReportsRunningWork(inspection: TerminalProcessInspection): boolean {
-  if (isClientOnlyUnverifiableInspection(inspection)) {
-    return false
-  }
-  return inspection.childProcessEvidence === undefined
-    ? inspection.hasChildProcesses
-    : inspection.childProcessEvidence !== 'no-children'
-}
