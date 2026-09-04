@@ -26,7 +26,7 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | Same-cap `verify` c7 target=519f4914 rollback=85bf6799, gen 112 | **Passed** (read-only) | run 33856355648 |
 | Monitor dry-run #7 (gen 112) | Froze at sample 1 (09:05:31Z): `director.errors` 4 > 0, the four 2.0 s pg-connect 500s from the 09:00 cascade still inside the 5-min delta window. Dispatched 4 min too early. | run 33856521278 |
 | Monitor dry-run #8 (gen 112) | Green for 15 of 16 samples (09:09:38–09:24), froze on the final sample 09:25:22Z: `director.errors` 1 > 0. The one 500 was `/v1/admin/evacuation-status` at 09:23:50Z, 2.01 s latency = director pg-connect timeout, called by **the monitor's own collector** (`incident-monitor-sources.ts:492`). First evacuation-status 500 since Sep 1. The gate froze on a request it made itself. | run 33856905229 |
-| Monitor dry-run #9 (gen 112) | Armed: waiter dispatches after 6 quiet min, then auto-canary c7 on green | |
+| Monitor dry-run #9 (gen 112) | Dispatched 09:30:27Z; c13 and c23 crashed at 09:31:13/21Z (old-image class, 4,141 assign 503s that minute). Expected to freeze. | run 33858650691 |
 | Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
 | PR #18606 lock removal (root cause) | **Merged** 09:2xZ as 7b108abf71 after review, fix, re-verify; CI green | https://github.com/stablyai/orca/pull/18606 |
 | Image publish for 7b108abf71 | **Done** 08:36:49Z run 33854111305: `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` | |
@@ -379,7 +379,7 @@ Fourth cascade 09:00:12–09:00:18Z: c23, c8, c16, c26, c22 (five cells, 11 cont
 all `5aedbca5`, exitCode 1, Node banner, pg-pool `client closed the connection` burst right before). Cloud
 SQL CPU 0.84 -> 0.78 in the preceding minutes, director concurrency 18–22 (idle), so this one fired
 *without* a database or director spike. Fleet had just recovered to 13,015. Cadence today: 01:31 (4),
-04:47 (5), 08:40 (10), 09:00 (5). The old image is now cascading roughly hourly regardless of load; the
+04:47 (5), 08:40 (10), 09:00 (5), 09:31 (2: c13, c23). The old image is now cascading roughly hourly regardless of load; the
 only cell on a fixed image (c7) has 0 crashes in 2.5 h across all four.
 
 Director 500s: 4 in the 09:00 window, all 2.0 s latency on `/v1/assign` or `/v1/resolve` = pg-pool connect
