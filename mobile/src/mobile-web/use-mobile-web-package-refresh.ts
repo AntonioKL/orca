@@ -1,4 +1,4 @@
-import { useEffect, type MutableRefObject } from 'react'
+import { useEffect, useRef, type MutableRefObject } from 'react'
 import ExpoMobileWebShell, { type MobileWebShellSession } from '@orca/expo-mobile-web-shell'
 import { MOBILE_WEB_BRIDGE_PROTOCOL_VERSION } from '../../../src/shared/mobile-web/bridge-contract'
 import { MOBILE_WEB_PACKAGE_MAX_RANGE_BYTES } from '../../../src/shared/mobile-web/package-rpc-contract'
@@ -11,6 +11,10 @@ import {
   type MobileWebPackageDownloadProgress
 } from './mobile-web-package-downloader'
 import { mobileWebDiagnosticsStore } from './mobile-web-diagnostics-store'
+import {
+  mobileWebPackageRefreshDelayMs,
+  waitBeforeMobileWebPackageRefresh
+} from './mobile-web-package-refresh-backoff'
 import type { MobileWebCachedBuildProbe } from './mobile-web-cached-build-probe'
 import { mobileWebPackageRefreshWarning } from './mobile-web-package-refresh-warning'
 import type { MobileWebShellNotice } from './mobile-web-shell-notice'
@@ -56,6 +60,7 @@ export function useMobileWebPackageRefresh(args: {
     setPackageWarning,
     setPackageProgress
   } = args
+  const retryRef = useRef({ hostId: '', refreshEpoch, attempts: 0 })
 
   useEffect(() => {
     if (!host || !client || state !== 'connected' || packageCapability.status !== 'supported') {
@@ -64,11 +69,20 @@ export function useMobileWebPackageRefresh(args: {
     const hostEpoch = hostEpochRef.current
     const cachedBuildProbe = cachedBuildProbeRef.current
     const controller = new AbortController()
+    // A user-driven retry and a host change both start the backoff ladder over.
+    if (retryRef.current.hostId !== host.id || retryRef.current.refreshEpoch !== refreshEpoch) {
+      retryRef.current = { hostId: host.id, refreshEpoch, attempts: 0 }
+    }
+    const retryDelayMs = mobileWebPackageRefreshDelayMs(retryRef.current.attempts)
+    retryRef.current.attempts += 1
     refreshingHostEpochRef.current = hostEpoch
     setPackageLoading(true)
     setPackageWarning(undefined)
     setPackageProgress(undefined)
     void (async () => {
+      if (!(await waitBeforeMobileWebPackageRefresh(retryDelayMs, controller.signal))) {
+        return
+      }
       const refreshStartedAt = Date.now()
       try {
         const downloaded = await downloadMobileWebPackage(
@@ -98,6 +112,8 @@ export function useMobileWebPackageRefresh(args: {
             }
           }
         )
+        // The bundle is staged: whatever happens next costs no more download, so the ladder resets.
+        retryRef.current.attempts = 0
         if (controller.signal.aborted || hostEpochRef.current !== hostEpoch) {
           return
         }

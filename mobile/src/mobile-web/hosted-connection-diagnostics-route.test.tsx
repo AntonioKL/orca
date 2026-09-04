@@ -7,6 +7,8 @@ import { handleMobileWebBrokerMessage } from './mobile-web-broker-message-handof
 import { MobileWebNativeRouteHandoff } from './mobile-web-native-route-handoff'
 import { MOBILE_WEB_PRODUCTION_NAVIGATION_GRANTS } from './mobile-web-production-navigation-grants'
 import { useMobileWebNavigationAuthority } from './use-mobile-web-navigation-authority'
+import { leaveHostRoute } from '../host-route-exit'
+import { removeHostAndCloseClient } from '../transport/host-removal-lifecycle'
 import type { MobileWebShellViewRef } from '@orca/expo-mobile-web-shell'
 import type { MobileWebNavigationAuthority } from './mobile-web-navigation-operations'
 
@@ -71,6 +73,21 @@ describe('hosted network diagnostics route', () => {
 
     await vi.waitFor(() => expect(pushed).toEqual(['connectionLog']))
     expect(deactivateSessionView).toHaveBeenCalledWith()
+  })
+
+  it('leaves the hosted route before the unpair deletes the package cache it serves', async () => {
+    const order: string[] = []
+    vi.mocked(leaveHostRoute).mockImplementation(() => {
+      order.push('leave-route')
+    })
+    vi.mocked(removeHostAndCloseClient).mockImplementation(async () => {
+      order.push('remove-host')
+    })
+    const authority = renderNavigationAuthority(new MobileWebNativeRouteHandoff())
+
+    await authority.current?.removeHost()
+
+    expect(order).toEqual(['leave-route', 'remove-host'])
   })
 
   it('leaves the host picker exit on the page-local route path', () => {

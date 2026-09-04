@@ -12,10 +12,6 @@ export async function removeHostAndCloseClient(
   hostPublicKey: string,
   forgetHostClient: (hostId: string) => void
 ): Promise<void> {
-  // Why: cache deletion is recoverable by redownload, so a hybrid-only failure here must
-  // never block the unpair itself — on a native build the cache may not even exist.
-  await removeMobileWebHostCache(hostPublicKey).catch(() => null)
-  await clearMobileWebColdResumeRouteForHost(hostId).catch(() => null)
   // Why: closing before the metadata commit can strand a still-paired host on
   // storage failure; closing immediately after success prevents socket leaks.
   await removeHost(hostId)
@@ -26,5 +22,11 @@ export async function removeHostAndCloseClient(
     forgetHostNotificationSession(hostId)
     void clearWatermark(hostId)
     connectionLogStore.delete(hostId)
+    // Why last: the hybrid WebView serves its document out of this cache, so deleting it while one
+    // is still mounted 403s every asset the page asks for next. Cache deletion is recoverable by
+    // redownload, so a hybrid-only failure here must never block the unpair either — on a native
+    // build the cache may not even exist.
+    await removeMobileWebHostCache(hostPublicKey).catch(() => null)
+    await clearMobileWebColdResumeRouteForHost(hostId).catch(() => null)
   }
 }

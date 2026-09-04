@@ -51,6 +51,10 @@ export function useMobileWebNavigationAuthority({
         return forceReconnectHost(hostId)
       },
       removeHost() {
+        // The hosted document is served out of the host's package cache that the unpair deletes,
+        // so leave the route first instead of letting the hosts-list change unmount the view later.
+        clearColdResumeRoute()
+        leaveHostRoute(router)
         return removeHostAndCloseClient(hostId, hostPublicKeyB64, closeHostClient)
       }
     }

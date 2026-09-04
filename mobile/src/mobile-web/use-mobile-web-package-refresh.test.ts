@@ -99,4 +99,57 @@ describe('useMobileWebPackageRefresh', () => {
     expect(await reuse?.(BUILD_ID)).toBe(true)
     expect(native.openSession).not.toHaveBeenCalled()
   })
+
+  // A flapping link aborts the download and drops every staged byte, so an unpaced restart
+  // re-downloads the whole bundle over cellular data as fast as the link comes back.
+  it('paces a restart that follows an attempt which never finished downloading', async () => {
+    vi.useFakeTimers()
+    try {
+      downloadPackage.mockImplementation(() => new Promise(() => {}))
+      const props = {
+        client: { sendRequest: vi.fn() } as unknown as RpcClient,
+        host: HOST,
+        state: 'connected',
+        packageCapability: { status: 'supported', gzip: false },
+        cachedBuildProbeRef: ref({
+          hostEpoch: 1,
+          promise: Promise.resolve(null),
+          resolve: vi.fn()
+        }),
+        hostEpochRef: ref(1),
+        ownedSessionRef: ref<OwnedSession | null>(null),
+        rejectedBuildIdsRef: ref(new Set<string>()),
+        refreshingHostEpochRef: ref<number | null>(null),
+        publishSession: vi.fn(async () => true),
+        refreshEpoch: 0,
+        setPackageLoading: vi.fn(),
+        setPackageWarning: vi.fn(),
+        setPackageProgress: vi.fn()
+      } as const
+      function Harness({ swap }: { swap: number }): null {
+        useMobileWebPackageRefresh({
+          ...props,
+          client: { sendRequest: vi.fn(), swap } as unknown as RpcClient
+        })
+        return null
+      }
+
+      await act(async () => {
+        renderer = create(createElement(Harness, { swap: 0 }))
+      })
+      expect(downloadPackage).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        renderer?.update(createElement(Harness, { swap: 1 }))
+      })
+      expect(downloadPackage).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_200)
+      })
+      expect(downloadPackage).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

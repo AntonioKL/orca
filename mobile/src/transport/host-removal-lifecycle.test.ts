@@ -146,6 +146,35 @@ describe('host removal lifecycle', () => {
     expect(closeHostClient).toHaveBeenCalledWith('host-1')
   })
 
+  it('deletes the package cache only after the client that served it is closed', async () => {
+    // The hosted WebView reads its document out of that cache: deleting it first turned every
+    // later asset request into a 403 under a still-mounted document.
+    const order: string[] = []
+    removeHostMock.mockImplementation(async () => {
+      order.push('remove-metadata')
+    })
+    removeMobileWebHostCacheMock.mockImplementation(async () => {
+      order.push('delete-cache')
+    })
+    clearMobileWebColdResumeRouteForHostMock.mockImplementation(async () => {
+      order.push('clear-cold-route')
+    })
+
+    await removeHostAndCloseClient('host-1', 'public-key-1', () => order.push('close-client'))
+
+    expect(order).toEqual(['remove-metadata', 'close-client', 'delete-cache', 'clear-cold-route'])
+  })
+
+  it('keeps the package cache when the unpair itself never commits', async () => {
+    removeHostMock.mockRejectedValue(new Error('storage unavailable'))
+
+    await expect(removeHostAndCloseClient('host-1', 'public-key-1', vi.fn())).rejects.toThrow(
+      'storage unavailable'
+    )
+
+    expect(removeMobileWebHostCacheMock).not.toHaveBeenCalled()
+  })
+
   it('forgets removed-host logs even when client teardown throws', async () => {
     removeHostMock.mockResolvedValue(undefined)
     const closeHostClient = vi.fn(() => {
