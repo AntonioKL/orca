@@ -22,8 +22,10 @@ export function nativeHostSessionNativeChatOperations(
   client: RpcClient
 ): HostSessionNativeChatOperations {
   let searchSupported: boolean | null = null
-  let legacyPaths: string[] | null = null
-  let legacyLoad: Promise<string[] | null> | null = null
+  // Why: the legacy full-inventory fallback is per workspace — one shared list makes
+  // `@` autocomplete in a second workspace suggest the first workspace's files.
+  const legacyPathsByWorkspace = new Map<string, string[]>()
+  const legacyLoadByWorkspace = new Map<string, Promise<string[] | null>>()
   return {
     async readability(workspaceId) {
       if (isFloatingWorkspaceWorktreeId(workspaceId)) {
@@ -92,7 +94,9 @@ export function nativeHostSessionNativeChatOperations(
       return sendNative(target, text, enter, client, deadline)
     },
     stop(target, deadline) {
-      return sendNative(target, escape(), true, client, deadline)
+      // Escape must not carry Return: the extra newline submits whatever the agent
+      // had parked on its input line.
+      return sendNative(target, escape(), false, client, deadline)
     },
     async searchFiles(target, query) {
       if (searchSupported !== false) {
@@ -110,22 +114,28 @@ export function nativeHostSessionNativeChatOperations(
         }
         searchSupported = false
       }
+      let legacyPaths = legacyPathsByWorkspace.get(target.workspaceId)
       if (!legacyPaths) {
+        let legacyLoad = legacyLoadByWorkspace.get(target.workspaceId)
         if (!legacyLoad) {
+          // Older hosts expose only the full inventory RPC; overlapping queries must
+          // share one slow local/SSH read.
           legacyLoad = client
             .sendRequest('files.list', {
               worktree: `id:${target.workspaceId}`
             })
             .then((response) => (response.ok ? extractPaths(response.result) : null))
             .finally(() => {
-              legacyLoad = null
+              legacyLoadByWorkspace.delete(target.workspaceId)
             })
+          legacyLoadByWorkspace.set(target.workspaceId, legacyLoad)
         }
         const paths = await legacyLoad
         if (!paths) {
           return []
         }
         legacyPaths = paths
+        legacyPathsByWorkspace.set(target.workspaceId, paths)
       }
       return rankSuggestions(legacyPaths, query, FILE_RESULT_LIMIT)
     },

@@ -113,7 +113,8 @@ export async function executeMobileWebNativeChatTerminalOperation(args: {
       args.client,
       binding.hostTerminalId!,
       String.fromCharCode(27),
-      true,
+      // Escape must not carry Return: the extra newline submits the agent's input line.
+      false,
       args.terminalClientId,
       payload.deadline,
       false,

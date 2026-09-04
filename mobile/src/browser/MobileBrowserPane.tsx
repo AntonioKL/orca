@@ -177,6 +177,12 @@ export function MobileBrowserPane({
     focused: addressFocused,
     url: tab.url
   })
+  // The screencast `navigation` event is a newer-host refinement; the tab props stay
+  // the baseline so an older host that never emits it does not freeze Back/Forward.
+  useEffect(() => {
+    setNavigationState({ canGoBack: tab.canGoBack, canGoForward: tab.canGoForward })
+  }, [tab.canGoBack, tab.canGoForward])
+
   useEffect(() => {
     if (addressSync.nextState === addressSyncState) {
       return

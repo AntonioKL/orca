@@ -132,7 +132,13 @@ async function openMobileFileTapAsync<T extends FileTapSessionTab>(
 
   const openedPath = resolved.relativePath
   triggerMobileTerminalOpenFeedback(options.triggerOpenFeedback)
-  if (options.line !== null || options.column !== null) {
+  // A sibling-workspace hit has no tab in this session to open into, so it must go
+  // to the preview route addressed at the workspace that actually holds the file.
+  if (
+    resolvedWorktreeId !== options.worktreeId ||
+    options.line !== null ||
+    options.column !== null
+  ) {
     options.pushPreviewRoute(
       createMobileFilePreviewHref({
         hostId: options.hostId,
@@ -151,7 +157,7 @@ async function openMobileFileTapAsync<T extends FileTapSessionTab>(
     options.openBrowser(filesystemPathToFileUri(resolved.localAbsolutePath))
     return
   }
-  await options.operations.openWorktreeFile(options.worktreeId, openedPath)
+  await options.operations.openWorktreeFile(resolvedWorktreeId, openedPath)
   scheduleOpenedWorktreeTabActivation(options, openedPath)
 }
 

@@ -52,10 +52,14 @@ function extractMutationError(error: unknown, method: string): string {
 async function sendGithubPrMutation(
   client: Pick<RpcClient, 'sendRequest'>,
   method: string,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
+  options?: { timeoutMs?: number }
 ): Promise<GitHubPrMutationOutcome> {
   try {
-    const response = await client.sendRequest(method, params)
+    // Keep the two-argument call shape when no timeout is requested.
+    const response = options
+      ? await client.sendRequest(method, params, options)
+      : await client.sendRequest(method, params)
     if (!response.ok) {
       return { ok: false, error: response.error?.message || `Request failed: ${method}` }
     }
@@ -79,7 +83,8 @@ async function sendGithubPrMutation(
 export async function fetchMergePR(
   client: Pick<RpcClient, 'sendRequest'>,
   worktreeId: string,
-  args: { prNumber: number; method?: GitHubPRMergeMethod; prRepo?: GitHubPrRepoSlug | null }
+  args: { prNumber: number; method?: GitHubPRMergeMethod; prRepo?: GitHubPrRepoSlug | null },
+  options?: { timeoutMs?: number }
 ): Promise<GitHubPrMutationOutcome> {
   const params: Record<string, unknown> = { prNumber: args.prNumber }
   if (args.method) {
@@ -88,7 +93,8 @@ export async function fetchMergePR(
   return sendGithubPrMutation(
     client,
     'github.mergePR',
-    buildGithubPrParams('github.mergePR', worktreeId, params, { prRepo: args.prRepo })
+    buildGithubPrParams('github.mergePR', worktreeId, params, { prRepo: args.prRepo }),
+    options
   )
 }
 
@@ -312,7 +318,8 @@ export async function fetchRerunPRChecks(
     headSha?: string | null
     failedOnly?: boolean
     prRepo?: GitHubPrRepoSlug | null
-  }
+  },
+  options?: { timeoutMs?: number }
 ): Promise<GitHubPrMutationOutcome> {
   const params: Record<string, unknown> = { prNumber: args.prNumber }
   if (args.failedOnly !== undefined) {
@@ -324,6 +331,7 @@ export async function fetchRerunPRChecks(
   return sendGithubPrMutation(
     client,
     'github.rerunPRChecks',
-    buildGithubPrParams('github.rerunPRChecks', worktreeId, params, { prRepo: args.prRepo })
+    buildGithubPrParams('github.rerunPRChecks', worktreeId, params, { prRepo: args.prRepo }),
+    options
   )
 }

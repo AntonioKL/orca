@@ -254,8 +254,9 @@ function parseInlineSafely(text: string): InlineToken[] {
 
 function keyedInlineTokens(tokens: InlineToken[]): { key: string; token: InlineToken }[] {
   let sourceOffset = 0
-  return tokens.map((token) => {
-    const key = `${sourceOffset}:${token.kind}`
+  // The index keeps two adjacent zero-length tokens of the same kind distinct.
+  return tokens.map((token, index) => {
+    const key = `${index}:${sourceOffset}:${token.kind}`
     sourceOffset += token.text.length
     return { key, token }
   })

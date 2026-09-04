@@ -167,12 +167,17 @@ it('revalidates opaque GitHub Project mutation targets before every write', asyn
   expect(
     sendRequest.mock.calls.filter(([method]) => method === 'github.project.viewTable')
   ).toHaveLength(18)
-  expect(sendRequest).toHaveBeenCalledWith('github.mergePR', {
-    repo: `id:host-repo-private`,
-    prNumber: 8,
-    method: 'squash',
-    prRepo: { owner: 'stablyai', repo: 'orca', host: 'github.com' }
-  })
+  expect(sendRequest).toHaveBeenCalledWith(
+    'github.mergePR',
+    {
+      repo: `id:host-repo-private`,
+      prNumber: 8,
+      method: 'squash',
+      prRepo: { owner: 'stablyai', repo: 'orca', host: 'github.com' }
+    },
+    // A merge routinely outruns the 30s default.
+    { timeoutMs: 60_000 }
+  )
   expect(sendRequest).toHaveBeenCalledWith(
     'github.prChecks',
     {

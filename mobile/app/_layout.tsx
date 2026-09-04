@@ -30,7 +30,7 @@ import {
   MOBILE_NATIVE_BASELINE_MODE
 } from '../src/mobile-web/mobile-native-baseline-mode'
 import { mobileHostWorkspaceEntry } from '../src/mobile-web/mobile-web-home-navigation'
-import { loadHosts } from '../src/transport/host-store'
+import { loadHostCatalog, loadHosts } from '../src/transport/host-store'
 import { extractPairingCodeFromUrl } from '../src/transport/pairing'
 import { recoverMobileRelayPairing } from '../src/transport/mobile-relay-pairing-recovery'
 
@@ -171,7 +171,7 @@ export default function RootLayout() {
     }
 
     async function getNavigation(data: unknown) {
-      return notificationNavigationResolverRef.current!.resolve(data, loadHosts)
+      return notificationNavigationResolverRef.current!.resolve(data, loadHostCatalog)
     }
 
     async function handleNotificationResponse(response: Notifications.NotificationResponse) {

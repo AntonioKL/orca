@@ -113,6 +113,87 @@ describe('openMobileFileTap', () => {
     expect(switchSessionTab).toHaveBeenCalledWith(openedTab)
   })
 
+  it('opens a sibling-workspace path through the resolved owning workspace', async () => {
+    const operations = createOperations([
+      {
+        kind: 'worktree-file' as const,
+        relativePath: 'docs/readme.md',
+        localAbsolutePath: '/repo-b/docs/readme.md',
+        workspaceId: 'wt-2'
+      }
+    ])
+    const pushPreviewRoute = vi.fn()
+
+    openMobileTerminalFileTap({
+      operations,
+      hostId: 'host-1',
+      worktreeId: 'wt-1',
+      worktreeName: 'workspace one',
+      pathText: '/repo-b/docs/readme.md',
+      terminalHandle: 'terminal-1',
+      line: null,
+      column: null,
+      pushPreviewRoute,
+      openBrowser: vi.fn(),
+      triggerOpenFeedback: vi.fn(),
+      fetchSessionTabs: vi.fn(),
+      getSessionTabs: () => [],
+      getActiveSessionTabId: () => null,
+      getActivationState: activeTerminalState,
+      switchSessionTab: vi.fn(),
+      scheduleDelayedAction: vi.fn()
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    // Opening it in this session's workspace would hit a same-named file or nothing.
+    expect(pushPreviewRoute).toHaveBeenCalledWith({
+      pathname: '/h/[hostId]/files/preview/[worktreeId]',
+      params: expect.objectContaining({
+        hostId: 'host-1',
+        worktreeId: 'wt-2',
+        source: 'worktree',
+        relativePath: 'docs/readme.md'
+      })
+    })
+    expect(pushPreviewRoute.mock.calls[0]?.[0].params).not.toHaveProperty('worktreeName')
+    expect(operations.openWorktreeFile).not.toHaveBeenCalled()
+  })
+
+  it('addresses files.open at the workspace the host resolved', async () => {
+    const operations = createOperations([
+      {
+        kind: 'worktree-file' as const,
+        relativePath: 'src/index.ts',
+        localAbsolutePath: '/repo/src/index.ts',
+        workspaceId: 'wt-1'
+      }
+    ])
+
+    openMobileTerminalFileTap({
+      operations,
+      hostId: 'host-1',
+      worktreeId: 'wt-1',
+      pathText: 'src/index.ts',
+      terminalHandle: 'terminal-1',
+      line: null,
+      column: null,
+      pushPreviewRoute: vi.fn(),
+      openBrowser: vi.fn(),
+      triggerOpenFeedback: vi.fn(),
+      fetchSessionTabs: vi.fn(),
+      getSessionTabs: () => [],
+      getActiveSessionTabId: () => 'terminal-tab',
+      getActivationState: activeTerminalState,
+      switchSessionTab: vi.fn(),
+      scheduleDelayedAction: vi.fn()
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(operations.openWorktreeFile).toHaveBeenCalledWith('wt-1', 'src/index.ts')
+  })
+
   it('opens the file when optional haptic feedback is unavailable', async () => {
     const operations = createOperations([worktreeTarget('README.md', '/repo/README.md')])
 

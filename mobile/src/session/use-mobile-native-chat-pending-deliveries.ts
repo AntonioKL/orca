@@ -6,7 +6,8 @@ import {
   countUserTextOccurrences,
   findLandedImagePreviewEchoes,
   mergeLandedImagePreviewEchoes,
-  migrateImagePreviewMessageIds
+  migrateImagePreviewMessageIds,
+  normalizeReconcileText
 } from './mobile-native-chat-draft-reconcile'
 import { rebaseMobileNativeChatPendingBaselines } from './mobile-native-chat-pending-baseline'
 import { retireLandedMobileNativeChatPending } from './mobile-native-chat-pending-retirement'
@@ -192,7 +193,7 @@ export function useMobileNativeChatPendingDeliveries(args: {
       const current = pendingBySessionRef.current[storageKey] ?? NO_PENDING_MESSAGES
       const earlierOutstanding = current.filter(
         (pending) =>
-          pending.text.trim() === origin.normalizedText &&
+          normalizeReconcileText(pending.text) === origin.normalizedText &&
           pending.expectedOccurrence > origin.baselineOccurrences
       ).length
       const expectedImageEchoOrdinal =

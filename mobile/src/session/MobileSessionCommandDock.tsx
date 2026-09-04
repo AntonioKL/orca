@@ -196,9 +196,9 @@ export function MobileSessionCommandDock({ controller }: { controller: MobileSes
                   if (!key.repeatable) {
                     return
                   }
-                  const input = createTerminalLiveAccessoryInput(key)
-                  void handleAccessoryKey(input)
-                  startAccessoryRepeat(input)
+                  // startAccessoryRepeat owns the press-time send; sending here too
+                  // emits the key twice per tap.
+                  startAccessoryRepeat(createTerminalLiveAccessoryInput(key))
                 }}
                 onPressOut={() => {
                   if (key.repeatable) {

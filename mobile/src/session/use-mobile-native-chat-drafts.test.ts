@@ -340,6 +340,39 @@ describe('useMobileNativeChatDrafts', () => {
     ])
   })
 
+  it('normalizes a multi-line prompt so its transcript echo can retire it', async () => {
+    const prompt = 'first line\nsecond  line'
+    // The transcript records the prompt with whitespace runs collapsed.
+    const echo = userTextMessage('m1', 'first line second line')
+    await mount('a')
+    // An identical earlier turn must be counted, or the pending retires against it.
+    await act(async () =>
+      renderer?.update(createElement(Harness, { tabId: 'a', messages: [echo] }))
+    )
+    expect(state?.captureSendOrigin(prompt)).toMatchObject({
+      normalizedText: 'first line second line',
+      baselineOccurrences: 1
+    })
+
+    const origin = state?.captureSendOrigin(prompt)
+    act(() => {
+      if (origin) {
+        state?.acceptSend(origin, prompt)
+      }
+    })
+    expect(state?.pending.map((pending) => pending.text)).toEqual([prompt])
+
+    await act(async () =>
+      renderer?.update(
+        createElement(Harness, {
+          tabId: 'a',
+          messages: [echo, userTextMessage('m2', 'first line second line')]
+        })
+      )
+    )
+    expect(state?.pending).toEqual([])
+  })
+
   it('clears one pending per landed message so duplicate sends are not all dropped', async () => {
     await mount('a')
     const origin = state?.captureSendOrigin('ping')

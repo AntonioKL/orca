@@ -71,11 +71,16 @@ export function getNotificationNavigationPath(
   return getNotificationNavigationTargetPath(target)
 }
 
+// Why: the credential status must be required, not optional — a loader that only knows
+// device-token-backed hosts (loadHosts) silently drops unreadable ones from knownHostIds
+// and kills the tap instead of routing it to credential recovery.
+export type NotificationKnownHost = { id: string; credentialStatus: HostCredentialStatus }
+
 export async function resolveNotificationNavigation(
   data: unknown,
-  loadKnownHosts: () => Promise<readonly { id: string; credentialStatus?: HostCredentialStatus }[]>
+  loadKnownHosts: () => Promise<readonly NotificationKnownHost[]>
 ): Promise<NotificationNavigation | null> {
-  let hosts: readonly { id: string; credentialStatus?: HostCredentialStatus }[]
+  let hosts: readonly NotificationKnownHost[]
   try {
     hosts = await loadKnownHosts()
   } catch {
@@ -98,7 +103,7 @@ export class LatestNotificationNavigationResolver {
 
   async resolve(
     data: unknown,
-    loadKnownHosts: () => Promise<readonly { id: string }[]>
+    loadKnownHosts: () => Promise<readonly NotificationKnownHost[]>
   ): Promise<NotificationNavigation | null> {
     const sequence = ++this.latestSequence
     const navigation = await resolveNotificationNavigation(data, loadKnownHosts)

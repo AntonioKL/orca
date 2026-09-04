@@ -240,10 +240,16 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
           return
         }
         const event = payload as ScreencastEvent
-        if ((event.type === 'ready' || event.type === 'navigation') && event.tab) {
+        // Only a payload that actually carries the flags may override the tab props;
+        // an older host's `ready` omits them and would pin both arrows off.
+        if (
+          (event.type === 'ready' || event.type === 'navigation') &&
+          typeof event.tab?.canGoBack === 'boolean' &&
+          typeof event.tab.canGoForward === 'boolean'
+        ) {
           setNavigationState?.({
-            canGoBack: event.tab.canGoBack === true,
-            canGoForward: event.tab.canGoForward === true
+            canGoBack: event.tab.canGoBack,
+            canGoForward: event.tab.canGoForward
           })
         }
         handleBrowserScreencastEvent({

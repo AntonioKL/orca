@@ -4,7 +4,8 @@ import {
   getNotificationNavigationPath,
   getNotificationNavigationTarget,
   LatestNotificationNavigationResolver,
-  resolveNotificationNavigation
+  resolveNotificationNavigation,
+  type NotificationKnownHost
 } from './notification-routing'
 
 describe('notification routing', () => {
@@ -113,7 +114,7 @@ describe('notification routing', () => {
     await expect(
       resolveNotificationNavigation(
         { hostId: 'host-1', worktreeId: 'repo::/tmp/worktree' },
-        async () => [{ id: 'host-1' }]
+        async () => [{ id: 'host-1', credentialStatus: 'ready' as const }]
       )
     ).resolves.toEqual({
       target: {
@@ -125,9 +126,22 @@ describe('notification routing', () => {
     })
   })
 
+  it('routes a host with unreadable credentials to recovery instead of dropping the tap', async () => {
+    await expect(
+      resolveNotificationNavigation({ hostId: 'host-1', worktreeId: 'workspace-one' }, async () => [
+        { id: 'host-1', credentialStatus: 'temporarily-unavailable' as const }
+      ])
+    ).resolves.toMatchObject({ target: { credentialRecovery: 'retry' } })
+    await expect(
+      resolveNotificationNavigation({ hostId: 'host-1' }, async () => [
+        { id: 'host-1', credentialStatus: 'missing' as const }
+      ])
+    ).resolves.toMatchObject({ target: { credentialRecovery: 're-pair' } })
+  })
+
   it('suppresses an older tap whose paired-host read finishes after a newer tap', async () => {
-    const firstHosts = deferred<readonly { id: string }[]>()
-    const secondHosts = deferred<readonly { id: string }[]>()
+    const firstHosts = deferred<readonly NotificationKnownHost[]>()
+    const secondHosts = deferred<readonly NotificationKnownHost[]>()
     const resolver = new LatestNotificationNavigationResolver()
     const first = resolver.resolve(
       { hostId: 'host-1', worktreeId: 'workspace-one' },
@@ -138,11 +152,11 @@ describe('notification routing', () => {
       () => secondHosts.promise
     )
 
-    secondHosts.resolve([{ id: 'host-1' }])
+    secondHosts.resolve([{ id: 'host-1', credentialStatus: 'ready' }])
     await expect(second).resolves.toMatchObject({
       target: { kind: 'session', hostWorkspaceId: 'workspace-two' }
     })
-    firstHosts.resolve([{ id: 'host-1' }])
+    firstHosts.resolve([{ id: 'host-1', credentialStatus: 'ready' }])
     await expect(first).resolves.toBeNull()
   })
 })
