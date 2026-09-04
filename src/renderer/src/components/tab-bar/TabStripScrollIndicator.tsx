@@ -198,9 +198,7 @@ export function TabStripScrollIndicator({
       ref={trackRef}
       data-testid="tab-strip-scroll-indicator"
       className={`absolute inset-x-0 bottom-0 z-[12] select-none transition-[height,background-color,opacity] duration-150 ease-out ${
-        isExpanded
-          ? 'h-[5px] bg-muted-foreground/15 cursor-pointer'
-          : 'h-[3px] bg-foreground/[0.04]'
+        isExpanded ? 'h-[3px] bg-muted-foreground/10 cursor-pointer' : 'h-[2px] bg-transparent'
       } ${
         disabled
           ? 'opacity-0 pointer-events-none'
@@ -219,10 +217,10 @@ export function TabStripScrollIndicator({
         data-testid="tab-strip-scroll-thumb"
         className={`absolute bottom-0 h-full rounded-full transition-colors duration-150 ease-out ${
           isDragging
-            ? 'bg-[color-mix(in_srgb,var(--foreground)_85%,transparent)] cursor-grabbing'
+            ? 'bg-foreground/40 cursor-grabbing'
             : isHovered
-              ? 'bg-[color-mix(in_srgb,var(--foreground)_65%,transparent)] cursor-grab'
-              : 'bg-[color-mix(in_srgb,var(--foreground)_45%,transparent)] cursor-default'
+              ? 'bg-muted-foreground/50 cursor-grab'
+              : 'bg-muted-foreground/25 cursor-default'
         }`}
         style={{
           width: `${thumbLayout.widthPx}px`,
