@@ -4,7 +4,7 @@ import { getMixedHostContextLabels } from './host-context-labels'
 
 type Item = { id: string; hostId: ExecutionHostId }
 
-function argsFor(items: Item[], counters: { hostIdReads: number; identityReads: number }) {
+function argsFor(counters: { hostIdReads: number; identityReads: number }) {
   return {
     getHostId: (item: Item): ExecutionHostId => {
       counters.hostIdReads += 1
@@ -25,7 +25,7 @@ describe('getMixedHostContextLabels', () => {
     }))
     const counters = { hostIdReads: 0, identityReads: 0 }
 
-    expect(getMixedHostContextLabels(items, argsFor(items, counters))).toBeUndefined()
+    expect(getMixedHostContextLabels(items, argsFor(counters))).toBeUndefined()
     // The label map was built for all 50 and thrown away before; now nothing is built.
     expect(counters.identityReads).toBe(0)
   })
@@ -38,7 +38,7 @@ describe('getMixedHostContextLabels', () => {
       }))
       const counters = { hostIdReads: 0, identityReads: 0 }
 
-      const labels = getMixedHostContextLabels(items, argsFor(items, counters))
+      const labels = getMixedHostContextLabels(items, argsFor(counters))
 
       expect(labels, `second host at index ${lateIndex}`).toBeDefined()
       expect(labels?.size).toBe(50)
@@ -48,6 +48,6 @@ describe('getMixedHostContextLabels', () => {
 
   it('returns undefined for an empty list', () => {
     const counters = { hostIdReads: 0, identityReads: 0 }
-    expect(getMixedHostContextLabels([], argsFor([], counters))).toBeUndefined()
+    expect(getMixedHostContextLabels([], argsFor(counters))).toBeUndefined()
   })
 })

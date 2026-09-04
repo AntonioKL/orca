@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ExecutionHostId } from '../../../../../../shared/execution-host'
 import type { Repo } from '../../../../../../shared/repo-types'
-import type { Worktree } from '../../../../../../shared/worktree-types'
+import type { Worktree } from '../../../../../../shared/worktree/types'
 import { getHostWorktreeCounts, getHostWorktreeIds } from './host-labels'
 
 const LOCAL = 'local' as ExecutionHostId
