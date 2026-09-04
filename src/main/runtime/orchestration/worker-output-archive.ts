@@ -35,8 +35,6 @@ export type WorkerTerminalTailArchive = {
   warnings: string[]
   /** Transcript-first attempt provenance preserved across release handoff. */
   fallbackReason?: OrchestrationWorkerReadFallbackReason
-  sourceExact?: boolean
-  contentComplete?: boolean
   clipping?: string[]
 }
 
@@ -150,8 +148,6 @@ export async function captureWorkerOutputArchive(args: {
           ]
         : redacted.warnings,
       fallbackReason: transcriptFallbackReason,
-      sourceExact: false,
-      contentComplete: false,
       clipping: [
         'terminal_fallback',
         ...(bounded.truncated || terminal.truncated ? ['terminal_buffer'] : [])
