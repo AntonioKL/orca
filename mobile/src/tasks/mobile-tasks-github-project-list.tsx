@@ -17,7 +17,7 @@ import {
   getRepoBadgeColor,
   projectFieldDisplayLabel,
   projectRowStatusLabel
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function renderMobileTasksGitHubProjectList(model: ConnectionPresentationModel) {
   const {

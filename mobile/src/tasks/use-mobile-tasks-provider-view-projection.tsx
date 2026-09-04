@@ -17,7 +17,7 @@ import {
   type TaskItem,
   compareLinearIssues,
   groupLinearIssues
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksProviderViewProjection(model: PickerProjectionModel) {
   const {

@@ -22,7 +22,7 @@ import {
   githubProjectOptionColor,
   canCreateWorkspaceFromProjectRow,
   projectRowType
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 import { renderMobileTasksProjectFieldEditors } from './mobile-tasks-project-field-editors'
 import {
   renderMobileTasksProjectLabelsEditor,

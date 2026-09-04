@@ -6,7 +6,7 @@ import {
   getGitHubReviewerRows,
   splitReviewerList,
   GitHubPrFileDiff
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 import {
   TextInput,
   colors,

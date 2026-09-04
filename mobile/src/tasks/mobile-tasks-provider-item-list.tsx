@@ -25,7 +25,7 @@ import {
   taskKindLabel,
   getGitHubReviewSummary,
   getGitHubMergeLabel
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function renderMobileTasksProviderItemList(model: ConnectionPresentationModel) {
   const {

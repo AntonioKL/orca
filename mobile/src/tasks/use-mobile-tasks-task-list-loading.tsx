@@ -14,7 +14,7 @@ import {
   createLinearTask,
   mapWithConcurrency,
   taskTime
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksTaskListLoading(model: ProviderLoadActionsModel) {
   const {

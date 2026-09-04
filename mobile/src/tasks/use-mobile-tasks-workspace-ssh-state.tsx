@@ -7,11 +7,7 @@ import {
   useEffect,
   useMemo
 } from './mobile-tasks-dependencies'
-import type {
-  RepoHooksResponse,
-  RepoSummary,
-  SetupDecision
-} from './mobile-tasks-legacy-foundation'
+import type { RepoHooksResponse, RepoSummary, SetupDecision } from './mobile-tasks-model'
 
 export function useMobileTasksWorkspaceSshState(model: WorkspaceSparseActionsModel) {
   const {

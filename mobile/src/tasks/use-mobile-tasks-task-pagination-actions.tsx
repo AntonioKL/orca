@@ -5,7 +5,7 @@ import {
   useCallback,
   useMemo
 } from './mobile-tasks-dependencies'
-import { type TaskItem, buildPartialRepositoryNotice } from './mobile-tasks-legacy-foundation'
+import { type TaskItem, buildPartialRepositoryNotice } from './mobile-tasks-model'
 
 export function useMobileTasksTaskPaginationActions(model: TaskListLoadingModel) {
   const {

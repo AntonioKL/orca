@@ -10,11 +10,7 @@ import {
   useCallback,
   wasSetupHookPreviouslyApproved
 } from './mobile-tasks-dependencies'
-import type {
-  ActionableTaskItem,
-  RuntimeTaskSettings,
-  SetupDecision
-} from './mobile-tasks-legacy-foundation'
+import type { ActionableTaskItem, RuntimeTaskSettings, SetupDecision } from './mobile-tasks-model'
 
 export function useMobileTasksWorkspaceCreateActions(model: WorkspaceSshStateModel) {
   const {

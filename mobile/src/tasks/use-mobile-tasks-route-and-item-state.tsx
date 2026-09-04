@@ -35,7 +35,7 @@ import {
   type TaskSort,
   type TasksSupportState,
   getTaskPresetQuery
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 import { useMobileTasksItemState } from './use-mobile-tasks-item-state'
 
 export function useMobileTasksRouteAndItemState(hostOperations: MobileTasksHostOperations) {

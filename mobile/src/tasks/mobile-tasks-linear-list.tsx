@@ -17,7 +17,7 @@ import {
   type TaskItem,
   linearIssueSecondaryParts,
   formatUpdatedAt
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function renderMobileTasksLinearList(model: ConnectionPresentationModel) {
   const {

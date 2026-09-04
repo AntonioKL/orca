@@ -7,7 +7,7 @@ import {
   type GitHubProjectRow,
   optimisticProjectFieldValue,
   projectRowMutationTarget
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksProjectMetadataActions(model: ProjectThreadReplyActionsModel) {
   const {

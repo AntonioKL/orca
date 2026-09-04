@@ -1,6 +1,6 @@
 import type { GitlabGithubStatusActionsModel } from './use-mobile-tasks-gitlab-github-status-actions'
 import { useCallback } from './mobile-tasks-dependencies'
-import { type TaskItem, taskItemMutationTarget } from './mobile-tasks-legacy-foundation'
+import { type TaskItem, taskItemMutationTarget } from './mobile-tasks-model'
 
 export function useMobileTasksHostedMetadataActions(model: GitlabGithubStatusActionsModel) {
   const {

@@ -1,8 +1,5 @@
 import type { ConnectionPresentationModel } from './use-mobile-tasks-connection-presentation'
-import {
-  SHOW_MOBILE_PROJECT_METADATA_EDITORS,
-  projectRowType
-} from './mobile-tasks-legacy-foundation'
+import { SHOW_MOBILE_PROJECT_METADATA_EDITORS, projectRowType } from './mobile-tasks-model'
 import {
   View,
   Text,

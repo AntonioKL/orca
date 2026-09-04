@@ -15,7 +15,7 @@ import {
   GITLAB_FILTER_OPTIONS,
   LINEAR_FILTER_OPTIONS,
   TASK_SECONDARY_DRAWER_Z_INDEX
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function renderMobileTasksGitHubProjectFieldsPicker(model: ConnectionPresentationModel) {
   const {

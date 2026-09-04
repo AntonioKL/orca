@@ -7,7 +7,7 @@ import {
   projectRowType,
   isFailedGitHubCheck,
   GitHubPrFileDiff
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 import {
   View,
   Text,

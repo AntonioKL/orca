@@ -28,7 +28,7 @@ import {
   type TaskItem,
   type WorkspaceCreateDraft,
   type WorkspaceSparseDraft
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksWorkspaceAndProjectState(model: RouteAndItemStateModel) {
   const [workspaceRepoPickerItem, setWorkspaceRepoPickerItem] = useState<Extract<

@@ -8,7 +8,7 @@ import {
   type TaskItem,
   projectRowMutationTarget,
   taskItemMutationTarget
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksProjectFileMergeActions(model: ProjectReviewCheckActionsModel) {
   const {

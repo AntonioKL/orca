@@ -6,7 +6,7 @@ import {
   mapWithConcurrency,
   mergeGitHubAssignableUsers,
   projectRowType
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksProjectRepositoryResolution(model: ProjectProjectionModel) {
   const {

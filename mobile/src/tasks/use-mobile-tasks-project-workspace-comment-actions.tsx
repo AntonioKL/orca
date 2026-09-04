@@ -8,7 +8,7 @@ import {
   projectRowStatusLabel,
   projectRowType,
   splitRepositorySlug
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function useMobileTasksProjectWorkspaceCommentActions(model: WorkspaceCreateActionsModel) {
   const {

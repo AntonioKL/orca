@@ -17,7 +17,7 @@ import {
   type TaskItem,
   taskStatusActionLabel,
   isGitHubPrMergeBlocked
-} from './mobile-tasks-legacy-foundation'
+} from './mobile-tasks-model'
 
 export function renderMobileTasksItemActions(model: ConnectionPresentationModel) {
   const {

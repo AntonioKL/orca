@@ -6,7 +6,7 @@ import {
   useLayoutEffect,
   useState
 } from './mobile-tasks-dependencies'
-import type { GitHubPreset, RepoSummary, TaskResumeState } from './mobile-tasks-legacy-foundation'
+import type { GitHubPreset, RepoSummary, TaskResumeState } from './mobile-tasks-model'
 
 export function useMobileTasksClientSettingsActions(model: ProjectRepositoryResolutionModel) {
   const {
