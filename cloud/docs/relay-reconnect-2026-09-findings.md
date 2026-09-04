@@ -350,6 +350,21 @@ disable private IP or remove the network link). The director uses the Cloud Run 
 relay VPC NAT, so it never consumed the exhausted ports and is out of scope. Disabling public IP later breaks
 the local proxy workflow and the director. #18720 merges (inert); #477 held for owner decision.
 
+4.1 + 2.3 relay: stablyai/orca PR #18722. Premise correction: #18521 and #18606 had already bounded and
+narrowed most of the fleet-wide lock before today; what remained were the sticky-refresh retry (all 23 rows →
+the one pinned row), reservation reconciliation (23 → the 2 involved rows), a dead pool-default fallback, and
+an absolute counter write (→ delta with capacity guard). Placement (`assignOnce`) deliberately keeps the
+ordered inventory lock: least-loaded selection is fleet-wide and dynamic target-only locking previously caused
+cross-cell cycles; converting it to optimistic snapshot + conditional delta is the remaining 55P03 floor and a
+follow-up. Pool `statement_timeout` was already 5 s but hardcoded; now env-configurable, `57014` added to the
+retryable set (it was terminal before), schema DDL on an untimed max:1 pool. Independently re-ran the new and
+adjacent suites here against 55440: 66/66. Harness note: 55440 is not idempotent across full runs (2
+pre-existing failures on a second run); reset the schema between runs. Rollout: director first, watch
+`orca_relay_postgres_transaction_exhausted` and `cellInventoryHoldMsP95` before cells.
+
+#18719 first CI run failed only on `windows-host-job.win32.test.ts` (EPERM on temp-dir cleanup), a Windows
+PTY test the PR does not touch and which no other recent run failed on; rerun dispatched rather than waved.
+
 **Landing (2026-09-04 20:50Z–21:02Z, owner: "if you are confident the cloud changes are valid, you can land them"):**
 
 - Merged: orca-cloud #474, #475, #476; stablyai/orca #18693, #18694, #18698. Neither repo has branch
