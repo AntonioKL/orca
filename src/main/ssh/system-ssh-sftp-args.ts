@@ -52,6 +52,17 @@ export function translateSshArgsToSftpArgs(sshArgs: readonly string[]): string[]
       index += 2
       continue
     }
+    if (flag === '-l') {
+      // sftp has no `-l`; the login name is an option there. `buildSshArgs` emits this for an
+      // unclaimed config alias, so throwing would route those hosts down the defective path and
+      // then cache the refusal against them for half an hour.
+      if (value === undefined) {
+        throw new SftpArgTranslationError(flag)
+      }
+      sftpArgs.push('-o', `User=${value}`)
+      index += 2
+      continue
+    }
     if (flag === '-S') {
       // ssh's `-S none` is ControlPath=none; sftp's `-S` would run a binary called `none`.
       if (value !== 'none') {

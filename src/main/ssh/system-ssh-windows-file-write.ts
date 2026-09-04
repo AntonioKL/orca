@@ -24,9 +24,18 @@ export type WindowsPublishMode = 'create' | 'exclusive' | 'append'
  * Publishes a staged upload onto its real name.
  *
  * Every branch reads the staged *file*, never a redirected stdin, which is what makes this safe on
- * a host whose Windows PowerShell 5.1 cannot drain a piped stdin. `File::Move` throws when the
- * destination exists, which is exactly the exclusive contract; the replacing caller deletes first
- * (a no-op on an absent path).
+ * a host whose Windows PowerShell 5.1 cannot drain a piped stdin.
+ *
+ * The replacing branch must never delete the destination first. Deleting and then moving loses the
+ * user's existing file outright if the move fails, and exposes a window where a reader sees no file
+ * at all — a worse outcome than the truncated-partial this staging discipline exists to prevent.
+ * `File.Replace` is the atomic swap (Win32 `ReplaceFile`), and it requires the destination to
+ * exist, so an absent one falls back to a plain `Move`. That fallback is raced deliberately: if the
+ * destination appears in between, `Move` throws, the staged file survives, and the destination is
+ * left exactly as whoever created it left it.
+ *
+ * `File::Move` throwing on an existing destination is also precisely the exclusive contract, which
+ * is why that branch needs nothing else.
  */
 export function makeWindowsPublishStagedFileCommand(
   stagingPath: string,
@@ -44,6 +53,9 @@ export function makeWindowsPublishStagedFileCommand(
     return powerShellCommand(
       [
         ...preamble,
+        // Not atomic, and cannot cheaply be: appending is defined as extending the destination, so
+        // a failure part-way leaves it longer than it was rather than destroyed. The caller's
+        // chunked-append protocol already restarts from its own offset.
         '$in = [System.IO.File]::OpenRead($staging)',
         '$out = [System.IO.File]::Open($path, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)',
         'try { $in.CopyTo($out) } finally { $out.Dispose(); $in.Dispose() }',
@@ -51,11 +63,13 @@ export function makeWindowsPublishStagedFileCommand(
       ].join('; ')
     )
   }
+  if (mode === 'exclusive') {
+    return powerShellCommand([...preamble, '[System.IO.File]::Move($staging, $path)'].join('; '))
+  }
   return powerShellCommand(
     [
       ...preamble,
-      ...(mode === 'exclusive' ? [] : ['[System.IO.File]::Delete($path)']),
-      '[System.IO.File]::Move($staging, $path)'
+      'try { [System.IO.File]::Replace($staging, $path, $null) } catch [System.IO.FileNotFoundException] { [System.IO.File]::Move($staging, $path) }'
     ].join('; ')
   )
 }

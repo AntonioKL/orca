@@ -14,7 +14,7 @@
  */
 import { EventEmitter } from 'node:events'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { readFile, rm } from 'node:fs/promises'
+import { readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough, Writable } from 'node:stream'
@@ -257,12 +257,34 @@ describe('Windows upload over sftp', () => {
 
     await uploadFileViaSystemSsh(target, join(localDir, 'relay.js'), remotePath, { hostPlatform })
 
-    expect(putDestination(putLines()[0]!)).not.toBe(`/C:${remotePath.slice(2)}`)
+    const destination = putDestination(putLines()[0]!)
+    // Assert the positive first: an unmatched regex yields '', which would satisfy the `not.toBe`
+    // below without this test ever having seen a destination.
+    expect(destination).toContain(WINDOWS_STAGED_WRITE_SUFFIX)
+    expect(destination).not.toBe(`/C:${remotePath.slice(2)}`)
     const publish = commands.at(-1)!
-    expect(publish.script).toContain('[System.IO.File]::Move($staging, $path)')
-    expect(publish.script).toContain('[System.IO.File]::Delete($path)')
+    expect(publish.script).toContain('[System.IO.File]::Replace($staging, $path, $null)')
     // The publish reads the staged file, never a pipe, so it is safe on PowerShell 5.1.
     expect(publish.script).not.toContain('OpenStandardInput')
+  })
+
+  it('never deletes the destination it is replacing', async () => {
+    writeFileSync(join(localDir, 'relay.js'), 'x')
+
+    await uploadFileViaSystemSsh(target, join(localDir, 'relay.js'), `${remoteRoot}/relay.js`, {
+      hostPlatform
+    })
+
+    const publish = commands.at(-1)!
+    // Delete-then-move destroys the user's existing file outright if the move then fails, and
+    // exposes a window where a reader sees no file at all — worse than the truncated partial the
+    // staging discipline exists to prevent. `File.Replace` is the atomic swap.
+    expect(publish.script).not.toContain('[System.IO.File]::Delete($path)')
+    expect(publish.script).toContain('[System.IO.File]::Replace($staging, $path, $null)')
+    // An absent destination cannot be Replaced, so that case falls back to a plain Move.
+    expect(publish.script).toContain(
+      'catch [System.IO.FileNotFoundException] { [System.IO.File]::Move($staging, $path) }'
+    )
   })
 
   it('gives every attempt its own staging name, so a retry cannot meet a predecessor lock', async () => {
@@ -317,12 +339,16 @@ describe('Windows upload over sftp', () => {
   })
 
   it('writes a buffer through a 0600 temp file that does not outlive the transfer', async () => {
-    const seen: { path: string; contents: Buffer }[] = []
+    const seen: { path: string; contents: Buffer; mode: number }[] = []
     runProcessMock.mockImplementation(async (spec: { args: string[]; input: string }) => {
       sftpBatches.push({ args: spec.args, script: spec.input })
       for (const line of spec.input.split('\n').filter((entry) => entry.startsWith('put '))) {
         const path = putSource(line)
-        seen.push({ path, contents: await readFile(path) })
+        seen.push({
+          path,
+          contents: await readFile(path),
+          mode: (await stat(path)).mode & 0o777
+        })
       }
       return { code: 0, signal: null, stdout: '', stderr: '', timedOut: false }
     })
@@ -333,6 +359,9 @@ describe('Windows upload over sftp', () => {
 
     expect(seen).toHaveLength(1)
     expect(seen[0]!.contents.toString()).toBe('1.2.3')
+    // The payload can be repository content and tmpdir is world-readable on every platform, so the
+    // window between write and upload must not be group- or world-readable.
+    expect(seen[0]!.mode).toBe(0o600)
     await expect(readFile(seen[0]!.path)).rejects.toThrow()
   })
 
@@ -342,6 +371,9 @@ describe('Windows upload over sftp', () => {
 
     await uploadDirectoryViaSystemSsh(target, localDir, remoteRoot, { hostPlatform })
 
+    // Anchor on a non-empty observation: `some` is false of an empty list, so this would pass even
+    // if no command had been recorded at all.
+    expect(commands.length).toBeGreaterThan(0)
     expect(commands.some((command) => command.script.includes('StreamReader([Console]::'))).toBe(
       false
     )
@@ -458,6 +490,7 @@ describe('Windows upload on a host with no sftp subsystem', () => {
 
     // A refused subsystem staged nothing, so there is nothing to delete — and on a host without
     // sftp that sweep would otherwise be paid on every single write.
+    expect(commands.length).toBeGreaterThan(0)
     expect(commands.some((command) => command.script.includes('Delete($staging)'))).toBe(false)
   })
 
@@ -490,6 +523,9 @@ describe('Windows upload on a host with no sftp subsystem', () => {
     expect(Buffer.concat(writes.map((write) => write.stdin)).equals(contents)).toBe(true)
     expect(writes.map(fileMode)).toEqual(['Create', 'Append', 'Append', 'Append'])
     // A wedged PowerShell never closes on its own, so no wait on this path may be unbounded.
+    // Count first: `every` is true of zero calls, so a wait that moved to a different helper would
+    // pass this silently.
+    expect(waitForChannelCloseSpy.mock.calls.length).toBeGreaterThan(0)
     expect(
       waitForChannelCloseSpy.mock.calls.every((call) => call[2] === WINDOWS_STDIN_WRITE_TIMEOUT_MS)
     ).toBe(true)
@@ -517,6 +553,7 @@ describe('Windows upload on a host with no sftp subsystem', () => {
       })
     ).rejects.toThrow()
 
+    expect(fileWrites().length).toBeGreaterThan(0)
     expect(fileWrites().map(writtenPath)).not.toContain(`${remoteRoot}/relay.js`)
     expect(commands.some((command) => command.script.includes('::Move('))).toBe(false)
   })

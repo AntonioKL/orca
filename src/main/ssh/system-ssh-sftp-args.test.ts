@@ -17,6 +17,47 @@ describe('translateSshArgsToSftpArgs', () => {
     expect(args).toEqual(['-o', 'Port=2222', '--', 'dev@win.example'])
   })
 
+  it('sends the login name as an option, since sftp has no -l', () => {
+    // `buildSshArgs` emits `-l` for a config alias no Host block claims. Throwing here would send
+    // exactly those hosts to the transport this PR exists to stop using, silently.
+    const args = translateSshArgsToSftpArgs(['-l', 'neil', '--', 'awin'])
+
+    expect(args).toEqual(['-o', 'User=neil', '--', 'awin'])
+  })
+
+  it('translates the whole unclaimed-alias shape buildSshArgs emits', () => {
+    const args = translateSshArgsToSftpArgs([
+      '-o',
+      'BatchMode=no',
+      '-T',
+      '-S',
+      'none',
+      '-o',
+      'Hostname=192.168.0.186',
+      '-p',
+      '2222',
+      '-l',
+      'neil',
+      '--',
+      'awin'
+    ])
+
+    expect(args).toEqual([
+      '-o',
+      'BatchMode=no',
+      '-o',
+      'ControlPath=none',
+      '-o',
+      'Hostname=192.168.0.186',
+      '-o',
+      'Port=2222',
+      '-o',
+      'User=neil',
+      '--',
+      'awin'
+    ])
+  })
+
   it('spells ControlPath=none out, since sftp -S names a program to run', () => {
     // `sftp -S none` would try to exec a binary called `none`.
     const args = translateSshArgsToSftpArgs(['-S', 'none', '--', 'dev@win.example'])

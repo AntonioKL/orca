@@ -736,7 +736,9 @@ describe('spawnSystemSsh', () => {
     // The rename that publishes it reads the staged file, never a pipe.
     const publish = (spawnMock.mock.calls[1][1] as string[]).at(-1) ?? ''
     expect(publish).toContain('powershell.exe')
-    expect(decodePowerShellCommand(publish)).toContain('[System.IO.File]::Move($staging, $path)')
+    expect(decodePowerShellCommand(publish)).toContain(
+      '[System.IO.File]::Replace($staging, $path, $null)'
+    )
     expect(publish).not.toContain('/bin/sh')
   })
 
