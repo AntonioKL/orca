@@ -1,4 +1,5 @@
 import type { OrcaRuntimeService } from '../../orca-runtime'
+import type { RpcMethod } from '../core'
 
 /**
  * One pass both stamps the automatic-resume fence on every settled worker pane and lifts it from
@@ -12,5 +13,30 @@ export function sweepSettledWorkerResumeFences(runtime: OrcaRuntimeService): voi
     runtime.prepareLegacyWorkerTerminalRecovery()
   } catch (error) {
     console.warn('[orchestration] settled worker resume fence sweep failed', error)
+  }
+}
+
+/** Settling a worker is what makes its pane fenceable, and release/retain/takeover are what make it
+ *  unfenceable again — so every one of those has to sweep in the same call. Without the settlement
+ *  half the fence only appeared at the next app start, and reopening the pane in the same session
+ *  respawned the agent. */
+const FENCE_SWEEPING_METHOD_NAMES = new Set([
+  'orchestration.workerRelease',
+  'orchestration.workerRetain',
+  'orchestration.workerStop',
+  'orchestration.workerAbandon'
+])
+
+export function sweepingSettledWorkerResumeFences(method: RpcMethod): RpcMethod {
+  if (!FENCE_SWEEPING_METHOD_NAMES.has(method.name)) {
+    return method
+  }
+  return {
+    ...method,
+    handler: async (params, ctx) => {
+      const result = await method.handler(params, ctx)
+      sweepSettledWorkerResumeFences(ctx.runtime)
+      return result
+    }
   }
 }

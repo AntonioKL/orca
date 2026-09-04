@@ -131,7 +131,8 @@ export class OrcaRuntimeWithPreservedBranchCleanup extends OrcaRuntimeWithTermin
     new RuntimeLegacyWorkerTerminalRecoveryPersistence(
       () => this.store,
       () => this.getOrchestrationDb(),
-      (worktreeId) => this.tryGetWorkspaceSessionHostIdForWorktree(worktreeId)
+      (worktreeId) => this.tryGetWorkspaceSessionHostIdForWorktree(worktreeId),
+      (paneKey, blocked) => this.notifier?.setLegacyWorkerTerminalResumeFence?.(paneKey, blocked)
     )
 
   protected readonly legacyWorkerRecovery = new RuntimeLegacyWorkerTerminalRecoveryController({
