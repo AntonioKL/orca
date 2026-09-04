@@ -284,26 +284,14 @@ describe('bundled skill guide generator', () => {
     }
   })
 
-  // Why: a guide that restates the resolver must restate all of it — a partial copy is what
-  // sends an agent to bare `orca` and the GNOME screen reader on Linux.
-  it('keeps the executable-resolution ladder whole in the guides that restate it', async () => {
-    for (const name of ['orca-cli', 'computer-use']) {
+  // Why: `skills get` already ran on a resolved executable, so guide bodies name that
+  // executable instead of carrying another copy of the ladder the stubs own.
+  it('points every guide at the executable that ran skills get', async () => {
+    for (const name of CANONICAL_GUIDE_NAMES) {
       const source = await readFile(path.join(projectDir, 'skill-guides', `${name}.md`), 'utf8')
 
-      expect(source, name).toContain('ORCA_CLI_COMMAND')
-      expect(source, name).toContain('orca-dev')
-      expect(source, name).toContain('orca-ide')
-    }
-  })
-
-  // Why: `skills get` already ran on a resolved executable, so the emulator guides name that
-  // executable instead of carrying a fourth copy of the ladder the stubs own.
-  it('points the emulator guides at the stub-resolved executable', async () => {
-    for (const name of ['orca-emulator', 'orca-emulator-android']) {
-      const source = await readFile(path.join(projectDir, 'skill-guides', `${name}.md`), 'utf8')
-
-      expect(source, name).toContain(
-        '`ORCA` is a placeholder for the executable you used to run `skills get`'
+      expect(source.replace(/\s+/gu, ' '), name).toContain(
+        'the executable you used to run `skills get`'
       )
       expect(source, name).not.toContain('ORCA_CLI_COMMAND')
     }

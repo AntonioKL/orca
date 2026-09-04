@@ -18,10 +18,7 @@ const MAX_GUIDE_LINES = 300
  * ratchet ceiling, not a target: shrink them freely and delete the entry once the guide fits.
  * A name may leave this set. A name may never join it — split the guide into `references/` instead.
  */
-const OVER_BUDGET = new Map([
-  ['orca-cli', 424],
-  ['orca-per-workspace-env', 794]
-])
+const OVER_BUDGET = new Map([['orca-per-workspace-env', 390]])
 
 /** Matches `wc -l`: a trailing newline ends the last line rather than starting a new one. */
 function lineCount(contents) {

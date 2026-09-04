@@ -77,7 +77,8 @@ device.
 
 `attach` makes one device active per worktree, and opening the emulator pane does the same,
 so unqualified commands target it. Pass a selector only to override that or to reach a
-second device.
+second device. An unqualified command with no active session fails with
+`emulator_no_active`; run `attach` or open the pane, then retry.
 
 - `--device "iPhone 16 Pro"` or `--device <udid>`, from `list` or `devices`.
 - `--emulator <id>` is an alternative spelling of `--device`: the bridge resolves both
