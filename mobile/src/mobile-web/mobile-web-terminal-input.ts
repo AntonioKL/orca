@@ -2,6 +2,7 @@ import type {
   MobileWebTerminalDeviceInputResult,
   MobileWebTerminalRequest
 } from '../../../src/shared/mobile-web/terminal-stream-contract'
+import { isTerminalQueryReply } from '../../../src/shared/terminal-query-reply'
 import type { RpcClient } from '../transport/rpc-client'
 import { TerminalStreamOpcode } from '../transport/terminal-stream-protocol'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
@@ -27,15 +28,18 @@ export function handleMobileWebTerminalInput(args: {
   return enqueueInput(args.record, async () => {
     requireLive(args.isLive)
     if (args.request.operation === 'input' || args.request.operation === 'queryReply') {
+      const bytes = atob(args.request.data)
+      // Why: the page's own label is not evidence; the host drops opcode 18 that fails this same grammar check.
+      if (args.request.operation === 'queryReply' && !isTerminalQueryReply(bytes)) {
+        return null
+      }
       sendMobileWebTerminalFrame(
         args.client,
         args.record,
-        args.request.operation === 'queryReply'
-          ? args.record.supportsQueryReply
-            ? TerminalStreamOpcode.QueryReply
-            : TerminalStreamOpcode.Input
+        args.request.operation === 'queryReply' && args.record.supportsQueryReply
+          ? TerminalStreamOpcode.QueryReply
           : TerminalStreamOpcode.Input,
-        Uint8Array.from(atob(args.request.data), (character) => character.charCodeAt(0))
+        Uint8Array.from(bytes, (character) => character.charCodeAt(0))
       )
       return null
     }

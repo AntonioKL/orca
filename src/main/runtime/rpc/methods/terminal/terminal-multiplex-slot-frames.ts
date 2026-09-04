@@ -10,6 +10,7 @@ import {
   TerminalMultiplexSourceRangeAckFrame
 } from './stream-schemas'
 import { isTerminalInputLockedForClient, sendTerminalStreamInput } from './terminal-input-delivery'
+import { isAcceptableTerminalQueryReplyFrame } from './terminal-query-reply-guard'
 import {
   getOutputAfterSnapshotSeq,
   normalizeMultiplexSnapshotScrollbackRows
@@ -73,8 +74,21 @@ export function installMultiplexSlotFrames(
       }
       // Mobile already has the higher-priority floor, so a rejected desktop claim must not suppress later phone input.
       const inputClaimTail = stream.isMobile ? Promise.resolve(true) : stream.desktopClaimTail
+      const isQueryReply = frame.opcode === TerminalStreamOpcode.QueryReply
       void inputClaimTail.then(async (claimed) => {
         if (!claimed || isTerminalInputLockedForClient(runtime, stream.ptyId, stream.client)) {
+          return
+        }
+        // Why: opcode 18 skips the mobile input floor, so it needs every guard terminal.send applies; drop otherwise.
+        if (
+          isQueryReply &&
+          !isAcceptableTerminalQueryReplyFrame({
+            runtime,
+            ptyId: stream.ptyId,
+            text,
+            client: stream.client
+          })
+        ) {
           return
         }
         const outcome = await sendTerminalStreamInput(runtime, {
@@ -82,7 +96,7 @@ export function installMultiplexSlotFrames(
           text,
           client: stream.client,
           isMobile: stream.isMobile,
-          inputKind: frame.opcode === TerminalStreamOpcode.QueryReply ? 'query-reply' : 'input'
+          inputKind: isQueryReply ? 'query-reply' : 'input'
         })
         state.notifyStreamWriteUnavailable(stream, outcome)
       })

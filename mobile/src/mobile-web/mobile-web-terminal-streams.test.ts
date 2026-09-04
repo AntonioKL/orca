@@ -268,6 +268,39 @@ describe('MobileWebTerminalStreams', () => {
     expect(decodeTerminalStreamText(harness.sentFrames.at(-1)!.payload)).toBe('\x1b[0n')
   })
 
+  it('drops a page query-reply that is not a reply grammar', async () => {
+    const harness = createHarness()
+    await harness.streams.start({
+      requestId: 'request-bad-query',
+      subscriptionId: SUBSCRIPTION_ID,
+      payload: subscribePayload(),
+      client: harness.client,
+      isRequestActive: () => true
+    })
+    harness.emitMultiplex({ type: 'ready' })
+    const subscribe = harness.sentFrames.at(-1)!
+    const hostStreamId = decodeTerminalStreamJson<Record<string, unknown>>(subscribe.payload)!
+      .streamId as number
+    harness.emitMultiplex({
+      type: 'subscribed',
+      streamId: hostStreamId,
+      capabilities: { queryReply: 1 }
+    })
+    const framesBefore = harness.sentFrames.length
+
+    await harness.streams.handle(
+      {
+        operation: 'queryReply',
+        streamId: SUBSCRIPTION_ID,
+        sequence: 0,
+        data: Buffer.from(':q!\r').toString('base64')
+      },
+      harness.client
+    )
+
+    expect(harness.sentFrames.length).toBe(framesBefore)
+  })
+
   it('falls back to legacy input when an older host omits query-reply support', async () => {
     const harness = createHarness()
     await harness.streams.start({
