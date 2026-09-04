@@ -25,10 +25,11 @@ const CENSUS: CensusEntry[] = [
   { method: 'assignOnce', mode: 'nowait', reach: 'both' },
   { method: 'assignOnce', mode: 'nowait', reach: 'both' },
   { method: 'refreshDrainMigrationLeasesOnce', mode: 'request', reach: 'request' },
-  // Reachable from neither: changeActivity has no production callers, only tests.
-  { method: 'changeActivity', mode: 'request', reach: 'orphan' },
-  { method: 'acquireActivity', mode: 'request', reach: 'request' },
-  { method: 'activateControl', mode: 'request', reach: 'request' },
+  // changeActivity, acquireActivity, activateControl and
+  // removeSupersededSameCellControls adjust exactly one cell's reservation and
+  // no longer take the inventory: a single-row atomic update cannot deadlock
+  // with placement, and the 23-row lock there serialised every reconnect in
+  // the fleet behind every other one.
   { method: 'startEvacuation', mode: 'request', reach: 'request' },
   { method: 'completeEvacuationFromDeadSourceOnce', mode: 'request', reach: 'request' },
   { method: 'completeEvacuationFromDeadSourceOnce', mode: 'nowait', reach: 'request' },
@@ -48,8 +49,7 @@ const CENSUS: CensusEntry[] = [
   { method: 'releaseExpiredActivityLeases', mode: 'nowait', reach: 'sweep' },
   { method: 'releaseExpiredActivity', mode: 'nowait', reach: 'sweep' },
   { method: 'reconcileReservationAccounting', mode: 'pool-default', reach: 'both' },
-  { method: 'leastLoadedCell', mode: 'pool-default', reach: 'both' },
-  { method: 'removeSupersededSameCellControls', mode: 'request', reach: 'request' }
+  { method: 'leastLoadedCell', mode: 'pool-default', reach: 'both' }
 ]
 
 // The background sweeps, and nothing else. A method reachable from one of these

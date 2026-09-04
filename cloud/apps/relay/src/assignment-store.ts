@@ -3202,8 +3202,7 @@ export class RelayAssignmentStore {
         )
         const requestDelta = ACTIVITY_REQUEST_UNITS[kind] * (after - before)
         if (requestDelta !== 0) {
-          await this.lockCellInventory(transaction, 'request')
-          await this.adjustCellReservation(transaction, text(row, 'cell_id'), requestDelta)
+          await this.adjustCellReservationAtomically(transaction, text(row, 'cell_id'), requestDelta)
         }
       })
     })
@@ -3263,9 +3262,8 @@ export class RelayAssignmentStore {
         }
         const units = ACTIVITY_REQUEST_UNITS[input.kind]
         if (existing) {
-          await this.lockCellInventory(transaction, 'request')
           await this.removeActivityLease(transaction, identity, existing, now)
-          await this.adjustCellReservation(transaction, input.cellId, units)
+          await this.adjustCellReservationAtomically(transaction, input.cellId, units)
         }
         await this.adjustActivityCount(transaction, identity, input.kind, 1, expiresAt, now)
         await transaction.query(
@@ -3580,8 +3578,7 @@ export class RelayAssignmentStore {
             )
             await this.touchAssignment(transaction, identity, expiresAt, now)
           } else {
-            await this.lockCellInventory(transaction, 'request')
-            await this.adjustCellReservation(transaction, input.cellId, 1)
+            await this.adjustCellReservationAtomically(transaction, input.cellId, 1)
             await this.adjustActivityCount(transaction, identity, 'control', 1, expiresAt, now)
             await transaction.query(
               `INSERT INTO relay_assignment_activity_leases
@@ -7590,7 +7587,12 @@ export class RelayAssignmentStore {
     ) {
       throw new Error('activity_lease_shape_mismatch')
     }
-    const cells = await this.lockCellInventory(database, 'request')
+    // Why: this recomputes one cell's reservation from its leases, so only that
+    // row needs to be held; the 23-row inventory lock here serialised every
+    // desktop control rebind in the fleet behind every other one.
+    const cellRow = (
+      await database.queryLocked(`SELECT * FROM relay_cells WHERE cell_id = ?`, [cellId])
+    )[0]
     await database.query(
       `DELETE FROM relay_assignment_activity_leases
        WHERE user_id = ? AND relay_host_id = ? AND activity_kind = 'control'
@@ -7611,7 +7613,6 @@ export class RelayAssignmentStore {
         [cellId]
       )
     )[0]!
-    const cellRow = cells.find((cell) => text(cell, 'cell_id') === cellId)
     const cellUnits = integer(cellUnitsRow, 'request_units')
     if (!cellRow) throw new Error('assigned_cell_missing')
     if (cellUnits > integer(cellRow, 'capacity_requests')) {
