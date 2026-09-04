@@ -1,3 +1,6 @@
+import type { BrowserLoadError } from '../../../../shared/browser-workspace-types'
+import type { BrowserPageFailLoadEvent } from './describe-page/browser-page-types'
+import { resolveBrowserWebviewLoadFailure } from './navigate/browser-webview-load-failure'
 import { recordRendererCrashBreadcrumb } from '@/lib/crash-breadcrumb-recorder'
 import { redactKagiSessionToken } from '../../../../shared/browser-url'
 import type { BrowserClientPageMetadataSnapshot } from './browser-client-page-metadata-publisher'
@@ -37,5 +40,28 @@ export function readBrowserClientPageGuestMetadataIfLive(
       errorMessage: error instanceof Error ? error.message : String(error)
     })
     return null
+  }
+}
+
+export function createBrowserClientPageLoadFailureHandler(
+  webview: Electron.WebviewTag,
+  onUnavailable: () => void,
+  onFailure: (error: BrowserLoadError) => void
+): (event: Event) => void {
+  return (event) => {
+    let guestUnavailable = false
+    const loadError = resolveBrowserWebviewLoadFailure(event as BrowserPageFailLoadEvent, {
+      // Discarded ERR_ABORTED/subframe events must not read the guest.
+      fallbackUrl: () => {
+        const metadata = readBrowserClientPageGuestMetadataIfLive(webview)
+        guestUnavailable = metadata === null
+        return metadata?.url ?? null
+      }
+    })
+    if (guestUnavailable) {
+      onUnavailable()
+    } else if (loadError) {
+      onFailure(loadError)
+    }
   }
 }

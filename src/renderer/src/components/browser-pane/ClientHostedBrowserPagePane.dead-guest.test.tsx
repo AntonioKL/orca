@@ -231,6 +231,56 @@ describe('client-hosted browser pane over a dead guest', () => {
     expect(onUpdatePageState.mock.calls.at(-1)).toEqual(['page-a', { loading: false }])
   })
 
+  it('ignores queued load events after guest loss', () => {
+    const onUpdatePageState = vi.fn()
+    render(paneElement(true, { onUpdatePageState }))
+    act(() => webview.dispatchEvent(new Event('destroyed')))
+    onUpdatePageState.mockClear()
+
+    act(() => webview.dispatchEvent(new Event('did-start-loading')))
+
+    expect(onUpdatePageState).not.toHaveBeenCalled()
+    expect(screen.getByText('Client-hosted browser unavailable')).toBeTruthy()
+  })
+
+  it('uses the guarded title snapshot if the guest dies immediately afterward', () => {
+    render(paneElement(true))
+    webview.getTitle = vi.fn(() => {
+      webview.getTitle = vi.fn(() => {
+        throw invalidGuestInstanceId()
+      })
+      return 'Last live title'
+    })
+
+    expect(() => act(() => webview.dispatchEvent(new Event('did-navigate')))).not.toThrow()
+    expect(webview.getTitle).not.toHaveBeenCalled()
+  })
+
+  it('shows unavailability when a load-failure fallback finds the guest gone', () => {
+    const onUpdatePageState = vi.fn()
+    render(paneElement(true, { onUpdatePageState }))
+    webview.getURL.mockImplementation(() => {
+      throw invalidGuestInstanceId()
+    })
+
+    act(() => webview.dispatchEvent(new Event('did-fail-load')))
+
+    expect(screen.getByText('Client-hosted browser unavailable')).toBeTruthy()
+    expect(onUpdatePageState.mock.calls.at(-1)).toEqual(['page-a', { loading: false }])
+  })
+
+  it('removes loss listeners when the initial guest read fails', () => {
+    const removeListener = vi.spyOn(webview, 'removeEventListener')
+    webview.getURL.mockImplementation(() => {
+      throw invalidGuestInstanceId()
+    })
+
+    render(paneElement(true))
+
+    expect(removeListener).toHaveBeenCalledWith('destroyed', expect.any(Function))
+    expect(removeListener).toHaveBeenCalledWith('render-process-gone', expect.any(Function))
+  })
+
   it('stops listening for guest loss once the pane lets go of the tag', () => {
     const onUpdatePageState = vi.fn()
     const view = render(paneElement(true, { onUpdatePageState }))

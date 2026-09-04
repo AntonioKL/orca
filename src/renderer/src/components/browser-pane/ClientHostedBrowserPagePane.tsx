@@ -7,7 +7,10 @@ import type {
 } from '../../../../shared/browser-workspace-types'
 import { toHttpsRecoveryUrl } from '../../../../shared/browser-url'
 import type { RuntimeBrowserClientPlacement } from '../../../../shared/runtime-browser-placement'
-import { readBrowserClientPageGuestMetadataIfLive } from './browser-client-page-guest-metadata'
+import {
+  readBrowserClientPageGuestMetadataIfLive,
+  createBrowserClientPageLoadFailureHandler
+} from './browser-client-page-guest-metadata'
 import {
   forgetBrowserClientPageMetadataReports,
   startBrowserClientPageMetadataPublisher
@@ -37,7 +40,6 @@ import { BrowserLoadFailureOverlay } from './navigate/browser-load-failure-overl
 import { useClientHostedPageUrlSubmission } from './navigate/use-client-hosted-page-url-submission'
 import { convertBrowserPageToWorkspaceDoc } from '@/lib/file-preview'
 import { useBrowserPageReloadActions } from './navigate/use-browser-page-reload-actions'
-import { resolveBrowserWebviewLoadFailure } from './navigate/browser-webview-load-failure'
 import { resolveActiveBrowserLoadFailure } from './navigate/browser-load-failure-for-url'
 import { consumeBrowserPageDeferredNavigation } from './navigate/browser-page-deferred-navigation'
 import {
@@ -47,7 +49,6 @@ import {
 } from './describe-page/browser-page-url-display'
 import type {
   BrowserChromeShortcutScope,
-  BrowserPageFailLoadEvent,
   BrowserPageUrlSetter,
   BrowserTabPageState
 } from './describe-page/browser-page-types'
@@ -175,9 +176,7 @@ export function ClientHostedBrowserPagePane({
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current
-    // Why: no placement means the host has not minted this page yet. Attaching would throw for an
-    // id the retained registry has never seen and strand the pane on the unavailable notice, whose
-    // only exit is reopening on the server — so mount quiet and wait for adoption to supply it.
+    // Wait for host adoption before attaching an optimistic page the registry has not seen.
     if (
       !viewport ||
       pageHostGeneration === null ||
@@ -201,24 +200,23 @@ export function ClientHostedBrowserPagePane({
       return
     }
     const webview = attachment.webview
-    // Why one route: a dead guest must always land on the unavailable notice — the pane's existing
-    // recovery state, with its reopen-on-server escape — never on a mute pane or an endless spinner.
+    // Guest loss uses the existing recovery notice and clears pending loading state.
+    let releaseGuest = (): void => attachment.detach()
     const guestLoss = watchBrowserClientPageGuestLoss({
       webview,
       webviewRef,
       browserPageId: browserTab.id,
       pageHostGeneration,
       onLost: () => {
-        attachment.detach()
+        releaseGuest()
         retryGuestRecoveryRef.current()
       }
     })
-    // Why: main can destroy the guest while the tag stays in the DOM holding its id, and every
-    // read below then throws — that is page unavailability, not a crash.
+    // Main can destroy the guest while its tag still holds the stale id.
     const attachedMetadata = readBrowserClientPageGuestMetadataIfLive(webview)
     if (!attachedMetadata) {
       guestLoss.lose('unreadable')
-      return
+      return guestLoss.dispose()
     }
     const publisher = startBrowserClientPageMetadataPublisher({
       browserPageId: browserTab.id,
@@ -233,10 +231,7 @@ export function ClientHostedBrowserPagePane({
     })
     webviewRef.current = webview
     setAttachmentError(null)
-    // Why: the failure carried in from the store is hearsay — this pane may be remounting over a
-    // guest that navigated on while nothing was listening — so it is checked once against where
-    // the guest actually is. Failures this session observes are trusted as they arrive, because a
-    // navigation that fails outright often never commits and leaves the guest on the old URL.
+    // Reconcile restored failures once; failed navigations this session may never commit a URL.
     activeLoadFailureRef.current = resolveActiveBrowserLoadFailure(
       activeLoadFailureRef.current,
       attachedMetadata.url
@@ -248,12 +243,9 @@ export function ClientHostedBrowserPagePane({
         guestLoss.lose('unreadable')
         return
       }
-      // Why: did-stop-loading fires after did-fail-load, so an unconditional null here would
-      // wipe the failure the overlay is about to show.
+      // did-stop-loading must preserve the preceding did-fail-load overlay.
       const activeLoadFailure = activeLoadFailureRef.current
-      // Why: a URL write drops the page's certificate challenge by design (challenges are
-      // transient across navigation), so a standing failure must not run through one — the
-      // local pane returns before its own setUrl for the same reason.
+      // URL writes clear certificate challenges, so preserve them while a failure stands.
       if (!activeLoadFailure) {
         setUrlFromGuest(browserTab.id, metadata.url, {
           preserveLoadError: true
@@ -267,9 +259,8 @@ export function ClientHostedBrowserPagePane({
         loadError: activeLoadFailure
       })
       publisher.publish(metadata)
-      // Why: the address bar's suggestions read the client's shared URL history, so a page
-      // hosted here has to file its navigations there like a local guest does.
-      recordHistoryFromGuest(metadata.url, getBrowserDisplayTitle(webview.getTitle(), metadata.url))
+      // Address-bar suggestions use the client's URL history, including client-hosted pages.
+      recordHistoryFromGuest(metadata.url, getBrowserDisplayTitle(metadata.title, metadata.url))
       setAddressBarValueFromPage(toDisplayUrl(metadata.url))
     }
     const onStart = (): void => {
@@ -282,32 +273,15 @@ export function ClientHostedBrowserPagePane({
       }
       publisher.publish(startMetadata)
     }
-    const onFailLoad = (event: Event): void => {
-      const loadError = resolveBrowserWebviewLoadFailure(event as BrowserPageFailLoadEvent, {
-        // Lazy: the guest read is five sync IPCs, and ERR_ABORTED/subframe events are discarded
-        // before any fallback is needed.
-        fallbackUrl: () => readBrowserClientPageGuestMetadataIfLive(webview)?.url ?? null
-      })
-      if (!loadError) {
-        return
+    const onFailLoad = createBrowserClientPageLoadFailureHandler(
+      webview,
+      () => guestLoss.lose('unreadable'),
+      (loadError) => {
+        activeLoadFailureRef.current = loadError
+        updatePageStateFromGuest(browserTab.id, { loading: false, loadError })
       }
-      activeLoadFailureRef.current = loadError
-      updatePageStateFromGuest(browserTab.id, { loading: false, loadError })
-    }
-    webview.addEventListener('did-start-loading', onStart)
-    webview.addEventListener('did-stop-loading', syncNavigation)
-    webview.addEventListener('did-navigate', syncNavigation)
-    webview.addEventListener('did-navigate-in-page', syncNavigation)
-    webview.addEventListener('page-title-updated', syncNavigation)
-    webview.addEventListener('did-fail-load', onFailLoad)
-    syncNavigation()
-    // Why: the user pressed Enter while this page was still an optimistic stage, so the navigation
-    // was parked rather than sent to a host page that did not exist yet. The guest exists now.
-    const deferredUrl = consumeBrowserPageDeferredNavigation(browserTab.id)
-    if (deferredUrl) {
-      runDeferredNavigation(deferredUrl)
-    }
-    return () => {
+    )
+    const cleanupGuest = (): void => {
       webview.removeEventListener('did-start-loading', onStart)
       webview.removeEventListener('did-stop-loading', syncNavigation)
       webview.removeEventListener('did-navigate', syncNavigation)
@@ -319,6 +293,20 @@ export function ClientHostedBrowserPagePane({
       forgetBrowserClientPageMetadataReports(browserTab.id)
       attachment.detach()
     }
+    releaseGuest = cleanupGuest
+    webview.addEventListener('did-start-loading', onStart)
+    webview.addEventListener('did-stop-loading', syncNavigation)
+    webview.addEventListener('did-navigate', syncNavigation)
+    webview.addEventListener('did-navigate-in-page', syncNavigation)
+    webview.addEventListener('page-title-updated', syncNavigation)
+    webview.addEventListener('did-fail-load', onFailLoad)
+    syncNavigation()
+    // Resume navigation submitted before host adoption.
+    const deferredUrl = consumeBrowserPageDeferredNavigation(browserTab.id)
+    if (deferredUrl) {
+      runDeferredNavigation(deferredUrl)
+    }
+    return cleanupGuest
   }, [
     browserTab.id,
     browserHostClientId,
