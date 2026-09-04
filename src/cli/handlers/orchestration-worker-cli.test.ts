@@ -75,7 +75,7 @@ describe('orchestration worker-start CLI contract', () => {
         ['timeout-ms', '90000'],
         ['run', 'run_1'],
         ['from', 'term_coord'],
-        ['retry-request', 'request_1']
+        ['retry-request', '44444444-4444-4444-8444-444444444444']
       ])
     )
 
@@ -99,7 +99,7 @@ describe('orchestration worker-start CLI contract', () => {
         from: 'term_coord',
         devMode: false
       },
-      { orchestrationRequestId: 'request_1' }
+      { orchestrationRequestId: '44444444-4444-4444-8444-444444444444' }
     )
     expect(process.exitCode).toBeUndefined()
   })

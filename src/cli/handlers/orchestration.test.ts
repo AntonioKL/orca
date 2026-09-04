@@ -122,14 +122,17 @@ describe('orchestration send structured payload flags', () => {
         ['type', 'heartbeat'],
         ['dispatch-id', 'ctx_1'],
         ['dispatch-capability', 'dcap_secret'],
-        ['retry-request', 'mutation_1']
+        ['retry-request', '33333333-3333-4333-8333-333333333333']
       ])
     )
 
     expect(callMock).toHaveBeenCalledWith(
       'orchestration.send',
       expect.not.objectContaining({ dispatchCapability: expect.anything() }),
-      { orchestrationCapability: 'dcap_secret', orchestrationRequestId: 'mutation_1' }
+      {
+        orchestrationCapability: 'dcap_secret',
+        orchestrationRequestId: '33333333-3333-4333-8333-333333333333'
+      }
     )
   })
 

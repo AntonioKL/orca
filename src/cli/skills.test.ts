@@ -303,7 +303,7 @@ describe('orca skills CLI', () => {
     await main(['skills', 'install', '--skill'], '/tmp/repo')
 
     expect(process.exitCode).toBe(1)
-    expect(errorSpy).toHaveBeenCalledWith('Missing required --skill')
+    expect(errorSpy).toHaveBeenCalledWith('--skill requires a value; it was passed with none.')
     expect(spawnMock).not.toHaveBeenCalled()
   })
 

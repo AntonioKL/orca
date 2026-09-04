@@ -278,7 +278,7 @@ describe('terminal send CLI', () => {
           accepted: true,
           bytesWritten: 7,
           prompt: {
-            requestId: 'prompt-1',
+            requestId: '11111111-1111-4111-8111-111111111111',
             stages: ['input_accepted'],
             provider: 'codex',
             observation: 'supported',
@@ -405,7 +405,7 @@ describe('terminal send CLI', () => {
           accepted: true,
           bytesWritten: 8,
           prompt: {
-            requestId: 'prompt-1',
+            requestId: '11111111-1111-4111-8111-111111111111',
             stages: ['input_accepted'],
             provider: 'codex',
             observation: 'supported',
@@ -423,7 +423,7 @@ describe('terminal send CLI', () => {
         ['terminal', 'term-1'],
         ['text', 'continue'],
         ['enter', true],
-        ['retry-request', 'prompt-1'],
+        ['retry-request', '11111111-1111-4111-8111-111111111111'],
         ['wait-submit', '3']
       ]),
       client: promptClient(call, true),
@@ -436,7 +436,7 @@ describe('terminal send CLI', () => {
       expect.objectContaining({ agentPrompt: true, waitSubmitMs: 3_000 }),
       {
         terminalPromptPreflight: { runtimeId: 'runtime-current' },
-        orchestrationRequestId: 'prompt-1',
+        orchestrationRequestId: '11111111-1111-4111-8111-111111111111',
         timeoutMs: 13_000
       }
     )
@@ -467,7 +467,7 @@ describe('terminal send CLI', () => {
         ['terminal', 'term-1'],
         ['text', 'continue'],
         ['enter', true],
-        ['retry-request', 'prompt-1'],
+        ['retry-request', '11111111-1111-4111-8111-111111111111'],
         ['wait-submit', '3']
       ]),
       client,
@@ -482,7 +482,7 @@ describe('terminal send CLI', () => {
       expect.objectContaining({ agentPrompt: true, waitSubmitMs: 3_000 }),
       {
         terminalPromptPreflight: { runtimeId: 'new-runtime-before-restart' },
-        orchestrationRequestId: 'prompt-1',
+        orchestrationRequestId: '11111111-1111-4111-8111-111111111111',
         timeoutMs: 13_000
       }
     )
@@ -572,7 +572,7 @@ describe('terminal send CLI', () => {
         ['terminal', 'term-1'],
         ['text', 'review'],
         ['enter', true],
-        ['retry-request', 'prompt-1']
+        ['retry-request', '11111111-1111-4111-8111-111111111111']
       ]),
       client: {
         call,
@@ -605,7 +605,7 @@ describe('terminal send CLI', () => {
             accepted: true,
             bytesWritten: 13,
             prompt: {
-              requestId: 'prompt-retry',
+              requestId: '22222222-2222-4222-8222-222222222222',
               stages: ['input_accepted'],
               provider: 'codex',
               observation: 'supported',
@@ -621,7 +621,7 @@ describe('terminal send CLI', () => {
       ['terminal', 'term-1'],
       ['text', 'retry safely'],
       ['enter', true],
-      ['retry-request', 'prompt-retry']
+      ['retry-request', '22222222-2222-4222-8222-222222222222']
     ])
     vi.spyOn(console, 'log').mockImplementation(() => {})
 
@@ -639,11 +639,11 @@ describe('terminal send CLI', () => {
     expect(call.mock.calls.map((args) => args[2])).toEqual([
       {
         terminalPromptPreflight: { runtimeId: 'runtime-current' },
-        orchestrationRequestId: 'prompt-retry'
+        orchestrationRequestId: '22222222-2222-4222-8222-222222222222'
       },
       {
         terminalPromptPreflight: { runtimeId: 'runtime-current' },
-        orchestrationRequestId: 'prompt-retry'
+        orchestrationRequestId: '22222222-2222-4222-8222-222222222222'
       }
     ])
   })

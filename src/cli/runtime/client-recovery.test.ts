@@ -199,6 +199,50 @@ describe('RuntimeClient orchestration recovery identity', () => {
     expect((error as Error).message).toContain('--retry-request prompt-current')
   })
 
+  it('keeps the prompt retry ID when the attested runtime times out in transport', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-rt-timeout-'))
+    const endpoint = join(userDataPath, 'runtime.sock')
+    let receivedRequest: Record<string, unknown> | undefined
+    const server = createServer((socket) => {
+      socket.once('data', (data) => {
+        receivedRequest = JSON.parse(String(data).trim()) as Record<string, unknown>
+      })
+    })
+    servers.add(server)
+    await new Promise<void>((resolve) => server.listen(endpoint, resolve))
+    writeRuntimeConnection(userDataPath, endpoint, 'runtime-current')
+
+    const client = new RuntimeClient(userDataPath, 200, null, null, 'orca')
+    const error = await client
+      .call(
+        'terminal.send',
+        {
+          terminal: 'term-current',
+          text: 'review',
+          enter: true,
+          interrupt: false,
+          agentPrompt: true,
+          client: { id: 'orca-cli', type: 'desktop' }
+        },
+        {
+          terminalPromptPreflight: { runtimeId: 'runtime-current' },
+          orchestrationRequestId: 'prompt-transport-timeout'
+        }
+      )
+      .then(() => undefined)
+      .catch((caught: unknown) => caught)
+
+    expect(receivedRequest?.orchestrationRequestId).toBe('prompt-transport-timeout')
+    expect(error).toBeInstanceOf(RuntimeClientError)
+    expect(error).not.toBeInstanceOf(RuntimeRpcFailureError)
+    expect((error as RuntimeClientError).code).toBe('runtime_timeout')
+    expect(error).toMatchObject({ data: { orchestrationRequestId: 'prompt-transport-timeout' } })
+    expect((error as Error).message).toContain(
+      '--retry-request prompt-transport-timeout --wait-submit <seconds>'
+    )
+    expect((error as RuntimeClientError).data).not.toHaveProperty('retrySafe')
+  })
+
   it('blocks retry when a downgraded runtime rejects after capability preflight', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-downgraded-prompt-'))
     const endpoint = join(userDataPath, 'runtime.sock')
@@ -285,6 +329,7 @@ describe('RuntimeClient orchestration recovery identity', () => {
     expect(error).toBeInstanceOf(RuntimeClientError)
     expect(error).not.toBeInstanceOf(RuntimeRpcFailureError)
     expectPromptRetryBlockedJson(error, 'prompt-downgraded-lost-reply')
+    expect(JSON.stringify((error as RuntimeClientError).data)).not.toContain('Update Orca')
   })
 
   it('reports an unknown legacy prompt outcome without advertising an unsafe retry', async () => {
