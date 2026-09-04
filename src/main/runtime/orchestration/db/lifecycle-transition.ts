@@ -64,19 +64,18 @@ const ENTITY_TABLE: Record<LifecycleEntity, { table: string; id: string; state: 
   worker: { table: 'worker_dispatches', id: 'dispatch_id', state: 'state' }
 }
 
-/** Explicit lifecycle graph; terminal states intentionally have no outgoing edges. */
+const TASK_STATUSES = ['pending', 'ready', 'dispatched', 'completed', 'failed', 'blocked'] as const
+
+/** Explicit lifecycle graph; Dispatch and worker terminal states have no outgoing edges. */
 const LEGAL_TRANSITIONS: Record<LifecycleEntity, Record<string, readonly string[]>> = {
   task: {
-    // Pending tasks can be manually resolved even when dependencies remain
-    // blocked; this was part of the public Task-status contract.
-    pending: ['pending', 'ready', 'completed', 'failed', 'blocked'],
-    ready: ['ready', 'dispatched', 'completed', 'failed', 'blocked'],
-    dispatched: ['dispatched', 'completed', 'failed', 'blocked', 'ready'],
-    blocked: ['blocked', 'ready', 'dispatched', 'failed'],
-    // A settled Task stays reopenable/overturnable: orchestration.taskUpdate still accepts
-    // every status, and coordinators overturn a review result through it.
-    completed: ['completed', 'ready', 'failed'],
-    failed: ['failed', 'ready', 'dispatched']
+    // Public taskUpdate accepts every status; its caller enforces active-Dispatch invariants.
+    pending: TASK_STATUSES,
+    ready: TASK_STATUSES,
+    dispatched: TASK_STATUSES,
+    blocked: TASK_STATUSES,
+    completed: TASK_STATUSES,
+    failed: TASK_STATUSES
   },
   dispatch: {
     pending: ['pending', 'dispatched', 'completed', 'failed', 'circuit_broken'],

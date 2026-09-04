@@ -48,10 +48,16 @@ describe('Task/Dispatch invariant transactions', () => {
     const task = db.createTask({ spec: 'invalid lifecycle edge' })
     db.updateTaskStatus(task.id, 'blocked')
 
-    expect(() => db.updateTaskStatus(task.id, 'completed', 'must reject')).toThrowError(
+    expect(() =>
+      db.updateTaskStatus(
+        task.id,
+        'invalid' as Parameters<OrchestrationDb['updateTaskStatus']>[1],
+        'must reject'
+      )
+    ).toThrowError(
       expect.objectContaining({
         code: 'lifecycle_conflict',
-        data: expect.objectContaining({ state: 'blocked', to: 'completed' })
+        data: expect.objectContaining({ state: 'blocked', to: 'invalid' })
       })
     )
     expect(db.getTask(task.id)).toMatchObject({ status: 'blocked', result: null })

@@ -26,7 +26,7 @@ afterEach(() => {
 })
 
 describe('Task/Dispatch concurrency', () => {
-  it('preserves the concurrent Task status winner before writer reservation', () => {
+  it('reads a concurrent Task result before applying an explicit status correction', () => {
     const first = createDatabase()
     const concurrent = createDatabase(first.path)
     const task = first.db.createTask({ spec: 'concurrent status winner' })
@@ -43,12 +43,13 @@ describe('Task/Dispatch concurrency', () => {
       return exec(sql)
     })
 
-    expect(() => first.db.updateTaskStatus(task.id, 'completed', 'stale loser')).toThrow(
-      `task ${task.id} cannot transition from failed to completed`
-    )
+    expect(first.db.updateTaskStatus(task.id, 'completed')).toMatchObject({
+      status: 'completed',
+      result: 'concurrent winner'
+    })
     expect(concurrentWon).toBe(true)
     expect(first.db.getTask(task.id)).toMatchObject({
-      status: 'failed',
+      status: 'completed',
       result: 'concurrent winner'
     })
   })
