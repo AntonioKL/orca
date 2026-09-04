@@ -20,25 +20,26 @@ registered checkout, offers the recipe as a "Run on" target, and runs
 `create`/`suspend`/`resume`/`destroy` against it.
 
 **Done:** `ORCA vm recipe doctor <recipe-id> --repo-path <repo> --provision --json` returns
-`ok: true`, and the recipe is on the project's primary branch. The user may explicitly choose to
-defer that placement; nothing else defers it.
+`ok: true` with no check at status `warn` (a `warn` leaves `ok` true, so read the checks), and
+the recipe is on the project's primary branch. Only the user can defer that placement, and only
+by saying so.
 
 **Safe failure:** stop and report the provider's own error text and the command that produced it.
 Never replace a provider error with a generic message, and never leave a paid resource running.
 
 `ORCA` is a placeholder for the executable you used to run `skills get`. Substitute it before
-running anything; do not create a shell variable or run `ORCA` literally. A command written
-*inside* a script that executes on the remote machine runs that machine's own binary (`orca serve`,
-`pnpm exec orca-dev serve`) and is not this placeholder.
+running anything; do not create a shell variable or run `ORCA` literally. The placeholder does
+not apply inside the lifecycle scripts: a command such as `orca serve` written there executes on
+the remote machine with that machine's own binary.
 
 ## Autonomy envelope
 
 Invoking this workflow authorizes, without asking again: reading the repo and its `orca.yaml`,
 detecting provider CLIs and their login state, scaffolding and editing files under
 `scripts/orca-vm/`, and running `ORCA vm recipe doctor` without `--provision`. Stop and get an
-explicit OK before anything that provisions a paid resource, which is the base snapshot, the auth
-snapshot, and `--provision`; one OK covers the whole `--provision` fix-and-rerun loop, so do not
-re-ask per iteration. Stop for the interactive agent login, which you cannot drive: the user runs
+explicit OK before anything that provisions a paid resource. The paid steps are the base snapshot,
+the auth snapshot, and `--provision`. One OK covers the whole `--provision` fix-and-rerun loop, so
+do not re-ask per iteration. Stop for the interactive agent login, which you cannot drive: the user runs
 it and tells you when it finished. Never create an Orca workspace, commit, choose a plan or region,
 invent a scope, project, or billing id, or write a credential into a script, `userData`, the state
 file, or a commit.
@@ -59,8 +60,9 @@ version 2.
 
 Drive these with the user. Three setup phases run before the per-workspace recipe can run and their
 order is invariant: the base snapshot (step 5) is what the auth snapshot (step 6) boots from, and
-`create` boots from the authenticated snapshot the two of them produce. A **[CHECKPOINT]** step is
-one the autonomy envelope above stops for; the envelope decides what it stops for, not the step.
+`create` boots from the authenticated snapshot the two of them produce. A **[CHECKPOINT]** label
+marks a step the autonomy envelope above stops for. The envelope is the rule; the label only
+points at it.
 
 1. **Inspect the repo** for an existing `environmentRecipes` entry, `scripts/orca-vm/`, a state
    file, or setup notes. If a working recipe already exists, go straight to the doctor loop below
@@ -153,6 +155,11 @@ ephemeral. Authenticate once and bake it into a second snapshot layer.
    and would commit an unauthenticated image.
 4. Re-snapshot, parse the new id, overwrite `snapshotId` in state with the authenticated image, and
    record `authSourceSnapshotId`. Remove the auth environment.
+
+Authenticate inside the disposable runtime and snapshot that layer. Do not bind-mount or copy a host
+agent home such as `~/.codex` as the auth snapshot: it carries sqlite state, hook approvals, caches,
+and host-specific config that break in the runtime. If the agent's credentials are short-lived, tell
+the user the snapshot needs periodic re-auth.
 
 You cannot drive step 2: you run commands non-interactively, so there is no TTY for `docker exec -it`
 or `ssh -t` to prompt against. The user runs the login in their own terminal, and you cannot observe
@@ -355,14 +362,14 @@ nothing. It checks local-host execution, the repo path, that the recipe id exist
 destroy, suspend, and resume command paths resolve, that suspend and resume are paired, and that
 each script is executable (the POSIX exec bit, skipped on Windows).
 
-**This free gate is clear only when no check has status `fail` and no check has status `warn`.** A
-`warn` still leaves `ok: true`, so `ok: true` alone does not clear it: resolve each `warn`, or state
-the reason you are accepting it, before spending money on `--provision`.
+**This free gate is clear only when no check has status `fail` and no check has status `warn`.**
+A `warn` still leaves `ok: true`, so `ok: true` alone does not clear the gate. Before spending money
+on `--provision`, resolve each `warn` or state the reason you are accepting it.
 
 Adding `--provision` runs the recipe end to end: it executes `create`, validates the returned recipe
 JSON, then runs `destroy` to tear the environment back down, so the test leaves nothing running as
-long as `destroy` works. `--connect` is an accepted synonym for `--provision` and costs the same; the
-envelope's money boundary covers both.
+long as `destroy` works. `--connect` is an accepted synonym for `--provision`, so the envelope's money
+boundary covers both.
 
 Run it as a loop: read the `provisionTranscript` the failed result carries, fix the script, and
 re-run `--provision` until `ok` is `true`, rather than waiting for the user to paste errors. Reading

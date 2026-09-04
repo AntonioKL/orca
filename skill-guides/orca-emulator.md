@@ -80,9 +80,10 @@ so unqualified commands target it. Pass a selector only to override that or to r
 second device. An unqualified command with no active session fails with
 `emulator_no_active`; run `attach` or open the pane, then retry.
 
-- `--device "iPhone 16 Pro"` or `--device <udid>`, from `list` or `devices`.
-- `--emulator <id>` is an alternative spelling of `--device`: the bridge resolves both
-  through the same device lookup.
+- `--device "iPhone 16 Pro"` or `--device <udid>`, from `list` or `devices`. `--emulator
+  <id>` is an alternative spelling: the bridge resolves both through the same lookup. These
+  selectors apply to the action verbs; `list` and `devices` take only `--worktree`, and
+  `attach` names its device as a positional argument.
 - `--worktree id:<fullWorktreeId>` or `--worktree active`. The full id is the exact
   `<repo-id>::<path>` value returned by `ORCA worktree list --json`; a bare repo id is not
   valid here.

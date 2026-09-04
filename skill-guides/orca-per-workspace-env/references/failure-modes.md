@@ -1,8 +1,8 @@
 # Failure modes
 
 Load this when a doctor, provision, clone, login, or snapshot step failed. Each entry maps an
-observed signal to its cause; the rule that prevents it is in the guide next to the action it
-protects.
+observed signal to its cause. The rule that prevents it sits in the guide beside the action it
+protects, or in the provider reference for that route.
 
 ## Reading a failed `--provision` result
 

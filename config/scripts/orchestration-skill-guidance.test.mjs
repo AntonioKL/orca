@@ -181,7 +181,7 @@ describe('orchestration kernel', () => {
     expect(kernel).toContain("the worker's own observation of process exit")
     expect(kernel).toContain('transcript whose final agent turn sent no `worker_done`')
     expect(kernel).toContain(
-      '`unverifiable` is absence \u2014 including when `worker-show` reports `agentWait` null \u2014 and never authorizes stop, abandon, retry, or release'
+      '`unverifiable` is absence, including when `worker-show` reports `agentWait` null. Absence never authorizes stop, abandon, retry, or release'
     )
   })
 

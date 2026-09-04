@@ -142,8 +142,8 @@ keep waiting with `check --wait`. Leave the wait only on positive proof the
 agent stopped: `exited` liveness, the worker's own observation of process exit,
 or a transcript whose final agent turn sent no `worker_done`. Then load
 `references/recovery-and-cleanup.md` and choose `worker-stop` or
-`worker-abandon` explicitly. `unverifiable` is absence — including when
-`worker-show` reports `agentWait` null — and never authorizes stop, abandon,
+`worker-abandon` explicitly. `unverifiable` is absence, including when
+`worker-show` reports `agentWait` null. Absence never authorizes stop, abandon,
 retry, or release; keep waiting or inspect.
 
 `worker-start` is the normal path, composing placement, terminal readiness,

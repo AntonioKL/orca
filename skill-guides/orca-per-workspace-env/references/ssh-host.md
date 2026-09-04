@@ -38,8 +38,8 @@ These describe how the user's desktop reaches the box; there is no `orca serve` 
 - A public IP or DNS name, or a Tailscale or VPN address, is the `host`; the SSH port is `port`,
   usually 22.
 - Key auth sets `identityFile`. Add `"identitiesOnly": true` when the agent holds many keys.
-- Reaching the box through a bastion is either `jumpHost`, a `user@host` ProxyJump, or
-  `proxyCommand`, a full command such as an access proxy. **Set one, never both.** The schema
+- A bastion is reached through one of two fields: `jumpHost` takes a `user@host` ProxyJump
+  target, and `proxyCommand` takes a full command such as an access proxy. **Set one, never both.** The schema
   accepts both, and the two consumers then disagree: one pushes `-J` and `-o ProxyCommand=` into the
   same argv, the other resolves `proxyCommand` and ignores `jumpHost` entirely.
 - A service port the workspace needs is an entry in `portForwards`. Each entry requires
@@ -48,7 +48,8 @@ These describe how the user's desktop reaches the box; there is no `orca serve` 
 - `relayGracePeriodSeconds` bounds how long Orca keeps the SSH relay alive after the workspace
   detaches. **`0` means unbounded**: the relay stays up until something explicitly terminates it, so
   it is the wrong value for a disposable runtime. Any other value must be between 60 and 604800
-  seconds; a number in between, such as `30`, is rejected and takes the whole recipe result with it.
+  seconds. A value between 1 and 59, such as `30`, is rejected and takes the whole recipe result
+  with it.
   Omit the field unless the user asked for a specific reconnect grace window.
 
 ## Toolchain and agent auth on a persistent host

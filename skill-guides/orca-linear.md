@@ -112,7 +112,13 @@ ORCA linear list --filter assigned --limit 10 --workspace all --json
 ORCA linear list --filter open --team <key-or-id> --workspace <workspaceId> --json
 ```
 
-Use `list-issues` when MCP-compatible filters or cursor pagination are needed. Omitting `--limit` returns every match (`result.meta.limit` is `null`), so filter before listing a large workspace; `--limit <n>` caps the read. `--json` sets `result.truncated` (and `result.meta.hasMore`) when a cap held results back; human output prints `truncated: showing N`. Check `truncated` before reporting a count, then page with `--cursor` until `truncated` is false. Issued `--cursor` values bind the workspace; `--workspace all` cannot page; a raw Linear cursor still needs a concrete `--workspace`. Replay `--cursor` against the same Orca runtime that issued it. `--priority` is `0=none`, `1=urgent`, `2=high`, `3=medium`, `4=low`; JSON includes `priorityLabel` on each issue (CLI setter vocabulary). `ORCA linear search`, `ORCA linear list`, and `ORCA linear project list` still cap at their own `--limit` and set `result.truncated` when the cap is hit. Project JSON `priorityLabel` stays Linear's title-case provider string.
+Use `list-issues` when MCP-compatible filters or cursor pagination are needed.
+
+- Omitting `--limit` returns every match and reports `result.meta.limit` as `null`, so filter before listing a large workspace. `--limit <n>` caps the read.
+- When a cap held results back, `--json` sets `result.truncated` and `result.meta.hasMore`; human output prints `truncated: showing N`. Check `truncated` before reporting a count, then page with `--cursor` until it is false.
+- A `--cursor` is bound to the workspace and the Orca runtime that issued it. `--workspace all` cannot page, and a raw Linear cursor still needs a concrete `--workspace`.
+- `--priority` is `0=none`, `1=urgent`, `2=high`, `3=medium`, `4=low`. Issue JSON carries `priorityLabel` in the CLI setter vocabulary; project JSON keeps Linear's title-case label.
+- `ORCA linear search`, `ORCA linear list`, and `ORCA linear project list` cap at their own `--limit` and set `result.truncated` the same way.
 
 Prefer `label add` and `label remove` for incremental edits. `label set` replaces the full label set and should be used only when deliberate cleanup is intended.
 
