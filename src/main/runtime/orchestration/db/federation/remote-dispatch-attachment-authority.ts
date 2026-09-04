@@ -41,7 +41,8 @@ export function prepareRemoteAttachmentAuthority(
         `UPDATE remote_dispatch_attachments
          SET stage = 'authority_attached', capability_hash = ?, pane_key = ?,
              process_incarnation = ?, worktree_id = ?, terminal_handle = ?, setup_state = ?,
-             effects = ?, residual_resources = ?, updated_at = datetime('now')
+             effects = ?, residual_resources = ?, updated_at = datetime('now'),
+             consumer_generation = consumer_generation + 1
          WHERE dispatch_id = ? AND state = 'starting'`
       )
       .run(
@@ -70,6 +71,7 @@ export function prepareRemoteAttachmentAuthority(
         `Remote Dispatch ${params.dispatchId} is not starting.`
       )
     }
+    this.fenceOutstandingMailboxDelivery(`dispatch:${params.dispatchId}`)
     if (params.terminalOwnership && !this.getWorkerTerminalResourceByOwner(params.dispatchId)) {
       const resource =
         params.terminalOwnership === 'external'
