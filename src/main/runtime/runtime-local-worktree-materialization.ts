@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { getRepoExecutionHostId } from '../../shared/execution-host'
+import { requireRepoExecutionHostId } from '../providers/execution-host-provider-dispatch'
 import { getProjectHostSetupWorktreeMeta } from '../../shared/project-host-setup-lookup'
 import type { GitWorktreeInfo, GitPushTarget, Worktree } from '../../shared/worktree/types'
 import type { Repo } from '../../shared/repo-types'
@@ -61,6 +61,9 @@ export async function materializeRuntimeLocalWorktree<T>(args: {
     effectiveCreatedWithAgent,
     localWorktreeGitOptions
   } = args
+  // This path already created the checkout on THIS machine. Stamping it with a host we had to guess
+  // would publish a workspace nothing can route back to.
+  const executionHostId = requireRepoExecutionHostId(repo)
   const worktreeId = `${repo.id}::${created.path}`
   const now = Date.now()
   const metadataBaseRef = request.compareBaseRef ?? remoteTrackingBase?.ref ?? baseBranch
@@ -128,7 +131,7 @@ export async function materializeRuntimeLocalWorktree<T>(args: {
   })
   const worktree = {
     ...mergeWorktree(repo.id, created, meta),
-    hostId: meta.hostId ?? getRepoExecutionHostId(repo)
+    hostId: meta.hostId ?? executionHostId
   }
   const metadataResult = args.onMetadataPersisted(worktree)
 

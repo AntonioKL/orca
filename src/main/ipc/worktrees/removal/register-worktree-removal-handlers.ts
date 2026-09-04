@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import type { RemoveWorktreeResult } from '../../../../shared/worktree/create-types'
-import { getRepoExecutionHostId } from '../../../../shared/execution-host'
+import { requireRepoExecutionHostId } from '../../../providers/execution-host-provider-dispatch'
 import { withWorktreeSpan } from '../../../observability/instrumentation'
 import { parseWorktreeId } from '../../worktree-logic'
 import type { RemoveWorktreeArgs } from '../ipc-context-schemas'
@@ -23,8 +23,9 @@ export function registerWorktreeRemovalHandlers(context: WorktreeIpcContext): vo
       if (!repo) {
         throw new Error(`Repo not found: ${repoId}`)
       }
-      // The resolved repo supplies host ownership when legacy callers omit args.hostId.
-      const removalHostId = getRepoExecutionHostId(repo)
+      // The resolved repo supplies host ownership when legacy callers omit args.hostId. Deleting a
+      // checkout is the one thing that must never run on a host we had to guess.
+      const removalHostId = requireRepoExecutionHostId(repo)
       const inFlightKey = getWorktreeRemovalInFlightKey(args.worktreeId, removalHostId)
       const optionsKey = getWorktreeRemovalOptionsKey(args)
       const inFlightRemoval = worktreeRemovalsInFlight.get(inFlightKey)

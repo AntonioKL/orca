@@ -9,7 +9,7 @@ import {
   repoMatchesHostIdentity
 } from '../slices/repo-host-identity'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '../../runtime/runtime-rpc-client'
-import { getRepoExecutionHostId } from '../../../../shared/execution-host'
+import { resolveRepoExecutionHostId } from '../../../../shared/execution-host'
 import {
   normalizeCustomWorktreeVisibilitySources,
   normalizeWorktreeVisibilitySourcePreferences
@@ -103,13 +103,20 @@ export function createRepoUpdateActions(
       const ownerHasExplicitHost = Boolean(
         options?.hostId || ownerRepo.executionHostId?.trim() || ownerRepo.connectionId?.trim()
       )
-      const explicitOwnerHostId = getRepoExecutionHostId(ownerRepo)
-      const ownerTarget = ownerHasExplicitHost
+      const explicitOwnerHostId = ownerHasExplicitHost
+        ? resolveRepoExecutionHostId(ownerRepo)
+        : null
+      if (ownerHasExplicitHost && !explicitOwnerHostId) {
+        // The row names a host that cannot be parsed. Every branch below routes the write by it; the
+        // alternative is the focused-runtime fallback, which for a same-id pair writes the other
+        // host's row.
+        console.error('[repos] refusing update for unresolvable execution host', projectId)
+        return false
+      }
+      const ownerTarget = explicitOwnerHostId
         ? getProjectSetupRuntimeTarget(explicitOwnerHostId)
         : getActiveRuntimeTarget(settingsForRepoOwner(get(), projectId))
-      const ownerHostId = ownerHasExplicitHost
-        ? explicitOwnerHostId
-        : getRuntimeTargetHostId(ownerTarget)
+      const ownerHostId = explicitOwnerHostId ?? getRuntimeTargetHostId(ownerTarget)
       const updateChainKey = getRepoHostIdentityForParts(projectId, ownerHostId)
       const applyRepoUpdate = async () => {
         try {

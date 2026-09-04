@@ -166,6 +166,35 @@ export function getRepoExecutionHostId(
   return connectionId ? toSshExecutionHostId(connectionId) : LOCAL_EXECUTION_HOST_ID
 }
 
+/**
+ * The same answer for a caller that is about to *route* by it: `null` when the row's
+ * `executionHostId` is present but names no parseable host (`ssh:`, `ssh:a|b`, a scheme from a
+ * future build).
+ *
+ * Why a second function rather than making the one above nullable. `getRepoExecutionHostId` is total
+ * because ~340 callers — sidebar grouping, host labels, index and cache keys, set membership — only
+ * need *a* bucket, and for them the fall-through below is harmless. Routing is the one job where it
+ * is not: `local` there means "execute on this machine", so a row that declared a host and then
+ * failed to say where must not take the `local` branch. That is the #11163 defect class, and until
+ * this existed the host-keyed dispatch in `execution-host-provider-dispatch` could never see it —
+ * the collapse happened one layer above, before dispatch was ever asked.
+ *
+ * A malformed id does not fall back to `connectionId` either: the row's own declaration is the more
+ * specific claim, and recovering a host from the field it overrode is the same guess in a new place.
+ * `host-repo-catalog-snapshot` already treats that pair as a contradiction.
+ *
+ * Feed the `null` straight to `resolveGitRouteForHost` / `resolveFilesystemRouteForHost` and they
+ * throw `UnresolvableExecutionHostError`; main callers that need the id itself have
+ * `requireRepoExecutionHostId`.
+ */
+export function resolveRepoExecutionHostId(
+  repo: Pick<Repo, 'connectionId' | 'executionHostId'>
+): ExecutionHostId | null {
+  return normalizeHostPart(repo.executionHostId)
+    ? normalizeExecutionHostId(repo.executionHostId)
+    : getRepoExecutionHostId(repo)
+}
+
 export function getSshTargetIdForExecutionHost(
   executionHostId: string | null | undefined
 ): string | null {
@@ -226,13 +255,17 @@ export function getSettingsFocusedExecutionHostId(
     : LOCAL_EXECUTION_HOST_ID
 }
 
-export function getExecutionHostLabel(id: ExecutionHostScope): string {
+export function getExecutionHostLabel(id: ExecutionHostScope | null | undefined): string {
   if (id === ALL_EXECUTION_HOSTS_SCOPE) {
     return 'All hosts'
   }
   const parsed = parseExecutionHostId(id)
   if (!parsed) {
-    return 'All hosts'
+    // Not "All hosts": an id that names no host is one *unknown* host, and answering with the
+    // everything-scope label shows an unroutable row as though it were on every host.
+    // Plain English like every other label in this module — none of them resolve through the
+    // renderer's i18n catalog, and a lone translated string here would read inconsistently.
+    return 'Unknown host'
   }
   switch (parsed.kind) {
     case 'local':

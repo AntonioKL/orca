@@ -2,7 +2,7 @@ import type { OrcaRuntimeService } from '../../../runtime/orca-runtime'
 import { getSshPtyProvider, getLocalPtyProvider, clearProviderPtyState } from '../../pty'
 import { killAllProcessesForWorktree } from '../../../runtime/worktree-teardown'
 import type { Store } from '../../../persistence/loading-store/store'
-import { getRepoExecutionHostId } from '../../../../shared/execution-host'
+import { resolveRepoExecutionHostId } from '../../../../shared/execution-host'
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type { Repo } from '../../../../shared/repo-types'
 import { hasWorktreeRemovalRepoOwnerOnOtherHost } from '../../../worktree-removal-repo-owner'
@@ -57,10 +57,15 @@ export function resolveWorktreeRemovalOwnerHostId(
   repo: Repo | undefined,
   fallbackHostId?: ExecutionHostId
 ): ExecutionHostId | undefined {
-  return (
-    fallbackHostId ??
-    (repo ? getRepoExecutionHostId(repo) : store.getWorktreeMeta(worktreeId)?.hostId)
-  )
+  if (fallbackHostId) {
+    return fallbackHostId
+  }
+  // A resolved repo answers, even when its answer is "no host I can name". The unqualified meta row
+  // below is a pre-host-id stand-in, and reading it for a row that declared a host would recover the
+  // owner from evidence that row already overrode.
+  return repo
+    ? (resolveRepoExecutionHostId(repo) ?? undefined)
+    : store.getWorktreeMeta(worktreeId)?.hostId
 }
 
 export function removeWorktreeMetadataAndTransientState(

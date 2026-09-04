@@ -17,6 +17,7 @@
 
 import {
   getRepoExecutionHostId,
+  resolveRepoExecutionHostId,
   getWorktreeExecutionHostId,
   LOCAL_EXECUTION_HOST_ID,
   type ExecutionHostId
@@ -44,11 +45,15 @@ export type WorkspaceCleanupWorktreeGitRoute =
   | WorkspaceCleanupGitRoute
   | { kind: 'host-mismatch'; hostId: ExecutionHostId; listedHostId: ExecutionHostId }
 
-/** Throws on a `runtime:` row; callers scan per repo and report the throw as a repo scan error. */
+/**
+ * Throws on a `runtime:` row, and on a row naming an unparseable host — callers scan per repo and
+ * report either throw as a repo scan error. Reading this machine's disk for a path the row says is
+ * elsewhere is the one answer that cannot be right.
+ */
 export function resolveWorkspaceCleanupRepoGitRoute(
   repo: Pick<Repo, 'connectionId' | 'executionHostId'>
 ): WorkspaceCleanupGitRoute {
-  const route = resolveGitRouteForHost(getRepoExecutionHostId(repo))
+  const route = resolveGitRouteForHost(resolveRepoExecutionHostId(repo))
   switch (route.kind) {
     case 'local':
       return { kind: 'local', hostId: route.hostId }

@@ -40,10 +40,12 @@
 
 import {
   parseExecutionHostId,
+  resolveRepoExecutionHostId,
   type ExecutionHostId,
   type LOCAL_EXECUTION_HOST_ID,
   type ParsedExecutionHost
 } from '../../shared/execution-host'
+import type { Repo } from '../../shared/repo-types'
 import { getSshGitProvider, SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE } from './ssh-git-dispatch'
 import type { SshGitProvider } from './ssh-git-provider'
 import {
@@ -94,6 +96,21 @@ function parseRoutableHost(hostId: string | null | undefined): ParsedExecutionHo
     throw new UnresolvableExecutionHostError(hostId)
   }
   return parsed
+}
+
+/**
+ * The host a repo row routes to, for a caller that needs the id itself rather than a route.
+ * Throws instead of answering `local`, which is what `getRepoExecutionHostId` would do — see the
+ * note on `resolveRepoExecutionHostId` for why routing is the one job that cannot take that answer.
+ */
+export function requireRepoExecutionHostId(
+  repo: Pick<Repo, 'connectionId' | 'executionHostId'>
+): ExecutionHostId {
+  const hostId = resolveRepoExecutionHostId(repo)
+  if (!hostId) {
+    throw new UnresolvableExecutionHostError(repo.executionHostId)
+  }
+  return hostId
 }
 
 export function resolveGitRouteForHost(hostId: string | null | undefined): ExecutionHostGitRoute {

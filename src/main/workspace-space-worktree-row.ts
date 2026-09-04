@@ -2,13 +2,18 @@ import { posix, win32 } from 'node:path'
 import type { Repo } from '../shared/repo-types'
 import type { Worktree } from '../shared/worktree/types'
 import type {
+  WorkspaceSpaceRepoSummary,
   WorkspaceSpaceDirectoryScanResult,
   WorkspaceSpaceItem,
   WorkspaceSpaceScanStatus,
   WorkspaceSpaceWorktree
 } from '../shared/workspace-space-types'
 import type { WorkspaceSpaceEntryScan } from '../shared/workspace-space-entry-traversal'
-import { getWorktreeExecutionHostId } from '../shared/execution-host'
+import {
+  getWorktreeExecutionHostId,
+  LOCAL_EXECUTION_HOST_ID,
+  type ExecutionHostId
+} from '../shared/execution-host'
 
 export function basenameWorkspaceFilesystemPath(pathValue: string): string {
   return looksLikeWindowsPath(pathValue) ? win32.basename(pathValue) : posix.basename(pathValue)
@@ -20,6 +25,38 @@ export function joinWorkspaceFilesystemPath(parent: string, child: string): stri
 
 function looksLikeWindowsPath(pathValue: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(pathValue) || pathValue.startsWith('\\\\')
+}
+
+export type WorkspaceSpaceRepoScanResult = {
+  summary: WorkspaceSpaceRepoSummary
+  worktrees: WorkspaceSpaceWorktree[]
+}
+
+/**
+ * A repo that produced nothing measurable, with the reason. `executionHostId` is omitted when the
+ * row names one that cannot be resolved — a summary must not claim a host the row never named.
+ */
+export function unmeasuredWorkspaceSpaceRepoResult(
+  repo: Pick<Repo, 'id' | 'displayName' | 'path'>,
+  executionHostId: ExecutionHostId | null,
+  error: string
+): WorkspaceSpaceRepoScanResult {
+  return {
+    worktrees: [],
+    summary: {
+      repoId: repo.id,
+      ...(executionHostId ? { executionHostId } : {}),
+      displayName: repo.displayName,
+      path: repo.path,
+      isRemote: executionHostId !== LOCAL_EXECUTION_HOST_ID,
+      worktreeCount: 0,
+      scannedWorktreeCount: 0,
+      unavailableWorktreeCount: 1,
+      totalSizeBytes: 0,
+      reclaimableBytes: 0,
+      error
+    }
+  }
 }
 
 export function toWorkspaceSpaceItem(stats: WorkspaceSpaceEntryScan): WorkspaceSpaceItem {

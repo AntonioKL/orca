@@ -14,6 +14,7 @@ import { toRuntimeWorktreeSelector } from '../../runtime/runtime-worktree-select
 import { translate } from '@/i18n/i18n'
 import {
   getRepoExecutionHostId,
+  resolveRepoExecutionHostId,
   isRuntimeOwnedSshTargetId,
   LOCAL_EXECUTION_HOST_ID
 } from '../../../../shared/execution-host'
@@ -61,7 +62,14 @@ export function createRepoRemovalActions(
         if (!ownerRepo) {
           return
         }
-        const ownerHostId = getRepoExecutionHostId(ownerRepo)
+        const ownerHostId = resolveRepoExecutionHostId(ownerRepo)
+        if (!ownerHostId) {
+          // Every step below fences on this host — the worktree purge, the PTY teardown, the
+          // host-scoped `repos:removeForHost`. Without one they widen to every row sharing the id,
+          // so a corrupt row would take its healthy same-id twin on another host with it.
+          console.error('[repos] refusing removal for unresolvable execution host', projectId)
+          return
+        }
         const runtimeSshTargetId = ownerRepo.connectionId
         // Why: an SSH per-workspace-env's workspace is the repo's main worktree, so removal routes here; tear down its ephemeral runtime first so it doesn't leak.
         if (runtimeSshTargetId && isRuntimeOwnedSshTargetId(runtimeSshTargetId)) {

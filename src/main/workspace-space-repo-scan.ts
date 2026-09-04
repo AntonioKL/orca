@@ -9,7 +9,11 @@ import type {
   WorkspaceSpaceWorktree
 } from '../shared/workspace-space-types'
 import { mapWithConcurrency } from '../shared/map-with-concurrency'
-import { getRepoExecutionHostId, LOCAL_EXECUTION_HOST_ID } from '../shared/execution-host'
+import {
+  getRepoExecutionHostId,
+  LOCAL_EXECUTION_HOST_ID,
+  resolveRepoExecutionHostId
+} from '../shared/execution-host'
 import { readWorktreeMetaForHost } from './persistence/host-qualified-worktree-meta'
 import { getRepoOwnedWorktreeMeta } from './worktree-metadata-ownership'
 import {
@@ -25,7 +29,13 @@ import {
   throwIfWorkspaceSpaceScanAborted,
   type AsyncLimiter
 } from './workspace-space-scan-control'
-import { createUnavailableWorkspaceSpaceRow } from './workspace-space-worktree-row'
+import {
+  createUnavailableWorkspaceSpaceRow,
+  unmeasuredWorkspaceSpaceRepoResult,
+  type WorkspaceSpaceRepoScanResult
+} from './workspace-space-worktree-row'
+
+export type { WorkspaceSpaceRepoScanResult }
 import { scanRemoteWorkspaceSpaceWorktree } from './workspace-space-remote-scan'
 import {
   scanLocalWorkspaceSpaceWorktree,
@@ -47,11 +57,6 @@ export type WorkspaceSpaceAnalyzeOptions = {
 export type WorkspaceSpaceScanLimiters = {
   localWorktree: AsyncLimiter
   remoteFallbackTraversal: AsyncLimiter
-}
-
-export type WorkspaceSpaceRepoScanResult = {
-  summary: WorkspaceSpaceRepoSummary
-  worktrees: WorkspaceSpaceWorktree[]
 }
 
 export function summarizeWorkspaceSpaceRows(
@@ -167,6 +172,20 @@ export async function scanWorkspaceSpaceRepo(args: {
 }): Promise<WorkspaceSpaceRepoScanResult> {
   const { repo, scannedAt, store, limiters, progress, options } = args
   throwIfWorkspaceSpaceScanAborted(options.signal)
+  // Nothing here can name where this project's files are, so neither `du` nor a remote stat has a
+  // host to run on. Report a scan error rather than measuring this machine's disk for a remote path.
+  if (!resolveRepoExecutionHostId(repo)) {
+    reportProgress(
+      progress,
+      { scannedRepoCount: progress.scannedRepoCount + 1 },
+      options.onProgress
+    )
+    return unmeasuredWorkspaceSpaceRepoResult(
+      repo,
+      null,
+      'This project names an execution host that cannot be resolved.'
+    )
+  }
   reportProgress(
     progress,
     { currentRepoDisplayName: repo.displayName, currentWorktreeDisplayName: null },
@@ -179,22 +198,7 @@ export async function scanWorkspaceSpaceRepo(args: {
       { scannedRepoCount: progress.scannedRepoCount + 1 },
       options.onProgress
     )
-    return {
-      worktrees: [],
-      summary: {
-        repoId: repo.id,
-        executionHostId: getRepoExecutionHostId(repo),
-        displayName: repo.displayName,
-        path: repo.path,
-        isRemote: getRepoExecutionHostId(repo) !== LOCAL_EXECUTION_HOST_ID,
-        worktreeCount: 0,
-        scannedWorktreeCount: 0,
-        unavailableWorktreeCount: 1,
-        totalSizeBytes: 0,
-        reclaimableBytes: 0,
-        error: listed.error
-      }
-    }
+    return unmeasuredWorkspaceSpaceRepoResult(repo, getRepoExecutionHostId(repo), listed.error)
   }
   const worktrees = listed.worktrees
     .filter((gitWorktree) => !gitWorktree.prunable)

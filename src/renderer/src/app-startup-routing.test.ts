@@ -17,6 +17,7 @@ const ROOT_SURFACES_PATH = 'src/renderer/src/app-shell/AppRootSurfaces.tsx'
 const LAZY_MODAL_MOUNTS_PATH = 'src/renderer/src/app-shell/use-lazy-modal-mounts.ts'
 const SESSION_PERSISTENCE_PATH = 'src/renderer/src/app-shell/use-app-session-persistence.ts'
 const PERSISTED_UI_WRITER_PATH = 'src/renderer/src/app-shell/use-persisted-ui-writer.ts'
+const HYDRATION_KEYS_PATH = 'src/renderer/src/lib/workspace-session-hydration-keys.ts'
 
 describe('renderer startup runtime routing', () => {
   it('routes packaged terminal restore through the daemon adoption gate', () => {
@@ -104,16 +105,25 @@ describe('renderer startup runtime routing', () => {
     expect(hydrationWorktreeBlock).toContain(
       'mapWithConcurrency(hydrationRepos, WORKTREE_REFRESH_CONCURRENCY'
     )
-    expect(hydrationWorktreeBlock).toContain('executionHostId: getRepoExecutionHostId(repo)')
+    // Why: the fetch carries the target's own host — an unscoped `worktrees:list` is answered by
+    // the handler's default host, which is how a remote row's workspaces arrive as this machine's.
+    expect(hydrationWorktreeBlock).toContain(
+      'fetchWorktrees(target.repoId, { executionHostId: target.executionHostId })'
+    )
     // Why: the pre-hydration fetch must include SSH repos (only runtime-owned repos are
     // excluded); gating on local-only drops SSH tab/editor/browser chrome at hydration.
-    const hydrationFilterBlock = source.slice(
-      source.indexOf('const hydrationRepos'),
-      hydrationWorktreesIndex
+    const hydrationTargetSource = readSource(HYDRATION_KEYS_PATH)
+    const hydrationFilterBlock = hydrationTargetSource.slice(
+      hydrationTargetSource.indexOf('export function selectWorktreeHydrationTargets')
     )
     expect(hydrationFilterBlock).toContain(
-      "parseExecutionHostId(getRepoExecutionHostId(repo))?.kind !== 'runtime'"
+      "parseExecutionHostId(executionHostId)?.kind !== 'runtime'"
     )
+    // A row naming a host that cannot be parsed is dropped, not fetched unscoped.
+    expect(hydrationFilterBlock).toContain(
+      'const executionHostId = resolveRepoExecutionHostId(repo)'
+    )
+    expect(hydrationFilterBlock).toContain('executionHostId &&')
     expect(hydrationFilterBlock).not.toContain('=== LOCAL_EXECUTION_HOST_ID')
     expect(fullWorktreesIndex).toBeGreaterThan(
       source.indexOf("logRendererStartupDiagnostic('startup-hydration-done'")

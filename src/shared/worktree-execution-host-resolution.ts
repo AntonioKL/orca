@@ -14,10 +14,10 @@
 
 import type { Repo } from './repo-types'
 import {
-  getRepoExecutionHostId,
   getRepoSshConnectionId,
   getSshTargetIdForExecutionHost,
   normalizeExecutionHostId,
+  resolveRepoExecutionHostId,
   type ExecutionHostId
 } from './execution-host'
 
@@ -54,7 +54,14 @@ export type WorktreeExecutionHostResolution<T extends ExecutionHostOwnerRow> =
       /** Display metadata only. The decisions are `hostId` / `connectionId`. */
       owner: T | null
     }
-  | { kind: 'unresolved'; reason: 'ambiguous' | 'unknown' }
+  /**
+   * Three reasons, not two, and deliberately not collapsed into one word. `unknown` (no row carries
+   * the id) is a verdict callers may legitimately dispose of as "a plain local folder"; `malformed`
+   * (the row named a host that cannot be parsed) must fail closed. A vocabulary that cannot express
+   * the difference guarantees it gets lost at the first caller that switches on it — the same shape
+   * as #18006, where one word had to stand for two liveness situations.
+   */
+  | { kind: 'unresolved'; reason: 'ambiguous' | 'unknown' | 'malformed' }
 
 export function resolveWorktreeExecutionHost<T extends ExecutionHostOwnerRow>(
   lookup: ExecutionHostOwnerLookup<T>,
@@ -80,9 +87,15 @@ export function resolveWorktreeExecutionHost<T extends ExecutionHostOwnerRow>(
   if (match.kind !== 'resolved') {
     return { kind: 'unresolved', reason: match.kind === 'ambiguous' ? 'ambiguous' : 'unknown' }
   }
+  // The strict read: this resolution feeds the launch scope's PTY route and the renderer's
+  // file-read route, so it is routing, and `local` here would mean "read it on this client".
+  const hostId = resolveRepoExecutionHostId(match.owner)
+  if (!hostId) {
+    return { kind: 'unresolved', reason: 'malformed' }
+  }
   return {
     kind: 'resolved',
-    hostId: getRepoExecutionHostId(match.owner),
+    hostId,
     connectionId: getRepoSshConnectionId(match.owner),
     owner: match.owner
   }
@@ -115,12 +128,14 @@ export function createRepoRowExecutionHostLookup<T extends ExecutionHostOwnerRow
       if (!owner) {
         return { kind: 'missing' }
       }
-      const ownerHostId = getRepoExecutionHostId(owner)
-      return rows.some((repo) => getRepoExecutionHostId(repo) !== ownerHostId)
+      const ownerHostId = resolveRepoExecutionHostId(owner)
+      return rows.some((repo) => resolveRepoExecutionHostId(repo) !== ownerHostId)
         ? { kind: 'ambiguous' }
         : { kind: 'resolved', owner }
     },
+    // A row naming an unparseable host matches no host, which is the answer that keeps a worktree
+    // on a real host from adopting it.
     byHost: (repoId, hostId) =>
-      rowsFor(repoId).find((repo) => getRepoExecutionHostId(repo) === hostId) ?? null
+      rowsFor(repoId).find((repo) => resolveRepoExecutionHostId(repo) === hostId) ?? null
   }
 }

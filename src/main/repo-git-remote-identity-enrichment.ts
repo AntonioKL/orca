@@ -1,5 +1,6 @@
 import {
   getRepoExecutionHostId,
+  resolveRepoExecutionHostId,
   getSshTargetIdForExecutionHost,
   LOCAL_EXECUTION_HOST_ID,
   type ExecutionHostId
@@ -56,8 +57,11 @@ function getRepoLocationKey(repo: Pick<Repo, 'path' | 'connectionId' | 'executio
  * file-holding target: a `runtime:` row's nested SSH target lives in that server's namespace, so
  * dialing it here would reach a same-named box of ours — a wrong-host answer, not a local one.
  */
-function getRepoProbeHostId(repo: Repo): ExecutionHostId {
-  const hostId = getRepoExecutionHostId(repo)
+function getRepoProbeHostId(repo: Repo): ExecutionHostId | null {
+  const hostId = resolveRepoExecutionHostId(repo)
+  if (!hostId) {
+    return null
+  }
   return getSshTargetIdForExecutionHost(hostId) ? hostId : LOCAL_EXECUTION_HOST_ID
 }
 
@@ -103,6 +107,12 @@ function writeIdentity(
 }
 
 async function enrichRepoGitRemoteIdentity(store: RepoIdentityStore, repo: Repo): Promise<boolean> {
+  const probeHostId = getRepoProbeHostId(repo)
+  if (!probeHostId) {
+    // No host to run `git remote` on. Probing here would read this machine's checkout at a path the
+    // row says belongs elsewhere, and stamp its remote identity onto the row.
+    return false
+  }
   const locationKey = getRepoLocationKey(repo)
   const retryAfter = probeRetryAfterByLocation.get(locationKey) ?? 0
   if (retryAfter > Date.now()) {
@@ -119,7 +129,7 @@ async function enrichRepoGitRemoteIdentity(store: RepoIdentityStore, repo: Repo)
     : NO_IDENTITY_RETRY_TTL_MS
   const controller = new AbortController()
   const promise = (async () => {
-    const result = await probeGitRemoteIdentity(repo.path, getRepoProbeHostId(repo), {
+    const result = await probeGitRemoteIdentity(repo.path, probeHostId, {
       signal: controller.signal
     })
     // Why the signal and not a catch: probeGitRemoteIdentity swallows the AbortError and RESOLVES

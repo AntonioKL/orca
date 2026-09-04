@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { getRepoExecutionHostId, type ExecutionHostId } from '../../shared/execution-host'
+import type { ExecutionHostId } from '../../shared/execution-host'
+import { requireRepoExecutionHostId } from '../providers/execution-host-provider-dispatch'
 import { projectHostSetupProjectionFromRepos } from '../../shared/project-host-setup-projection'
 import type { SshTarget } from '../../shared/ssh-types'
 import type { WorkspaceKey } from '../../shared/folder-workspace-types'
@@ -132,6 +133,9 @@ export function createTransferPayload(args: {
   const { sourceState, sourceRepo, targetRepo, includeSessions } = args
   const oldRepoId = sourceRepo.id
   const newRepoId = targetRepo.id
+  // Every transferred row is stamped with the target's host; without one the migration hands the
+  // profile a set of workspaces nothing can route.
+  const targetHostId = requireRepoExecutionHostId(targetRepo)
   const worktreeIds = collectTransferWorktreeIds(sourceState, oldRepoId)
   const targetProjection = projectHostSetupProjectionFromRepos([targetRepo])
   const targetProjectId =
@@ -155,7 +159,7 @@ export function createTransferPayload(args: {
       (meta) => ({
         ...structuredClone(meta),
         ...(targetProjectId ? { projectId: targetProjectId } : {}),
-        hostId: getRepoExecutionHostId(targetRepo),
+        hostId: targetHostId,
         projectHostSetupId: targetRepo.id
       })
     ),

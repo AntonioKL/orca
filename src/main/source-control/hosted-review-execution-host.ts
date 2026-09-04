@@ -1,5 +1,4 @@
 import {
-  getRepoExecutionHostId,
   getSshTargetIdForExecutionHost,
   LOCAL_EXECUTION_HOST_ID,
   type ExecutionHostId
@@ -7,6 +6,7 @@ import {
 import type { Repo } from '../../shared/repo-types'
 import {
   ExecutionHostNotDispatchableError,
+  requireRepoExecutionHostId,
   resolveGitRouteForHost
 } from '../providers/execution-host-provider-dispatch'
 
@@ -40,10 +40,14 @@ export function hostedReviewSshConnectionId(executionHostId: ExecutionHostId): s
  * (`runtimeRepoMatchesExecutionHost` refuses to match an SSH row), so the checkout really is here
  * and this keeps the review that has always been created for it. A row whose files sit on an SSH
  * host keeps its own target — including one that carries only `executionHostId: ssh:…`.
+ *
+ * `requireRepoExecutionHostId`, not `getRepoExecutionHostId`: every caller is about to run `git`,
+ * `gh` or `glab` somewhere, and the local fallback below is meant for rows that resolve to a host.
+ * A row naming an unparseable one would otherwise take it and run the review on this machine.
  */
 export function getRepoHostedReviewExecutionHostId(
   repo: Pick<Repo, 'connectionId' | 'executionHostId'>
 ): ExecutionHostId {
-  const hostId = getRepoExecutionHostId(repo)
+  const hostId = requireRepoExecutionHostId(repo)
   return getSshTargetIdForExecutionHost(hostId) ? hostId : LOCAL_EXECUTION_HOST_ID
 }

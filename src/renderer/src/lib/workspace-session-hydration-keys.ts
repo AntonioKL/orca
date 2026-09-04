@@ -1,5 +1,6 @@
 import type { ExecutionHostId } from '../../../shared/execution-host'
-import { parseExecutionHostId } from '../../../shared/execution-host'
+import { parseExecutionHostId, resolveRepoExecutionHostId } from '../../../shared/execution-host'
+import type { Repo } from '../../../shared/repo-types'
 import type { WorkspaceKey } from '../../../shared/folder-workspace-types'
 import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
@@ -159,6 +160,30 @@ export function collectWorktreeHydrationRepoIdsFromSession(
   addWorktreeRepoId(session.activeRepoId)
 
   return [...repoIds].filter(Boolean).sort()
+}
+
+export type WorktreeHydrationTarget = { repoId: string; executionHostId: ExecutionHostId }
+
+/**
+ * The repos the pre-hydration worktree fetch runs against, each paired with the host to scope it to.
+ * A row naming a host that cannot be parsed is dropped: an unscoped `worktrees:list` is answered by
+ * the handler's default host, which is how a remote row's workspaces arrive as this machine's.
+ */
+export function selectWorktreeHydrationTargets(
+  repos: readonly Repo[],
+  hydrationRepoIds: readonly string[]
+): WorktreeHydrationTarget[] {
+  const hydrationRepoIdSet = new Set(hydrationRepoIds)
+  return repos.flatMap((repo) => {
+    const executionHostId = resolveRepoExecutionHostId(repo)
+    // Why: disconnected SSH repos hydrate from local metadata; only runtime-owned repos use
+    // placeholders.
+    const eligible =
+      hydrationRepoIdSet.has(repo.id) &&
+      executionHostId &&
+      parseExecutionHostId(executionHostId)?.kind !== 'runtime'
+    return eligible ? [{ repoId: repo.id, executionHostId }] : []
+  })
 }
 
 export function addAdditionalValidWorkspaceKeys(

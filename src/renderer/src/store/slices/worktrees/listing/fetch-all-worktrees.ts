@@ -3,6 +3,7 @@ import type { WorktreeSliceGet, WorktreeSliceSet } from './worktree-slice-types'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../../../shared/constants'
 import {
   getRepoExecutionHostId,
+  resolveRepoExecutionHostId,
   parseExecutionHostId
 } from '../../../../../../shared/execution-host'
 import { folderWorkspaceKey, parseWorkspaceKey } from '../../../../../../shared/workspace-scope'
@@ -40,7 +41,12 @@ export function createFetchAllWorktrees(
         try {
           const requestStartedState = get()
           const requestStartedWorktrees = requestStartedState.worktreesByRepo[r.id]
-          const hostId = getRepoExecutionHostId(r)
+          const hostId = resolveRepoExecutionHostId(r)
+          if (!hostId) {
+            // An unscoped `worktrees:list` is answered by the handler's default host, which is how a
+            // remote row's workspaces arrive as this machine's.
+            return
+          }
           const setup = getProjectHostSetupForRepoHost(requestStartedState, r.id, hostId)
           const settings = settingsForKnownRepoOwner(requestStartedState.settings, r)
           const parsedHost = parseExecutionHostId(hostId)
@@ -93,7 +99,10 @@ export function createFetchAllWorktrees(
         try {
           const requestStartedState = get()
           const requestStartedWorktrees = requestStartedState.worktreesByRepo[r.id]
-          const hostId = getRepoExecutionHostId(r)
+          const hostId = resolveRepoExecutionHostId(r)
+          if (!hostId) {
+            return { repoId: r.id, ok: false as const }
+          }
           const setup = getProjectHostSetupForRepoHost(requestStartedState, r.id, hostId)
           const parsedHost = parseExecutionHostId(hostId)
           const directSshAuthority =

@@ -9,7 +9,8 @@ import { sweepRestoredCodexPanesForStaleAccounts } from '../lib/codex-stale-pane
 import { fetchWorkspaceSessionWithRuntimeHostOwners } from '../lib/workspace-session-host-hydration'
 import {
   collectFolderWorkspaceKeysFromSession,
-  collectWorktreeHydrationRepoIdsFromSession
+  collectWorktreeHydrationRepoIdsFromSession,
+  selectWorktreeHydrationTargets
 } from '../lib/workspace-session-hydration-keys'
 import { hydratePersistedUIAfterStartupRead } from '../lib/startup-ui-hydration'
 import {
@@ -27,9 +28,7 @@ import {
   refreshTerminalProviderSnapshotCapabilities
 } from '../components/terminal/terminal-provider-snapshot-capability'
 import {
-  getRepoExecutionHostId,
   isRuntimeOwnedSshTargetId,
-  parseExecutionHostId,
   toRuntimeExecutionHostId,
   type ExecutionHostId
 } from '../../../shared/execution-host'
@@ -149,12 +148,9 @@ export function useAppStartupHydration(onOnboardingLoaded: (state: OnboardingSta
             sessionRead.session,
             sessionRead.runtimeHostIdByWorkspaceSessionKey
           )
-          const hydrationRepoIdSet = new Set(hydrationRepoIds)
-          const hydrationRepos = useAppStore.getState().repos.filter(
-            (repo) =>
-              hydrationRepoIdSet.has(repo.id) &&
-              // Why: disconnected SSH repos hydrate from local metadata; only runtime-owned repos use placeholders.
-              parseExecutionHostId(getRepoExecutionHostId(repo))?.kind !== 'runtime'
+          const hydrationRepos = selectWorktreeHydrationTargets(
+            useAppStore.getState().repos,
+            hydrationRepoIds
           )
           // Why this barrier and not the first-window one: worktree refresh can spawn host Git,
           // which needs the shell-PATH generation and the managed WSL CLI registration. It never
@@ -164,8 +160,8 @@ export function useAppStartupHydration(onOnboardingLoaded: (state: OnboardingSta
             window.api.app.awaitGitEnvironmentStartupBarrier()
           )
           await timeRendererStartupStep('fetch-hydration-worktrees', () =>
-            mapWithConcurrency(hydrationRepos, WORKTREE_REFRESH_CONCURRENCY, (repo) =>
-              actions.fetchWorktrees(repo.id, { executionHostId: getRepoExecutionHostId(repo) })
+            mapWithConcurrency(hydrationRepos, WORKTREE_REFRESH_CONCURRENCY, (target) =>
+              actions.fetchWorktrees(target.repoId, { executionHostId: target.executionHostId })
             )
           )
           return sessionRead

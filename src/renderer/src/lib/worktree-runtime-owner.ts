@@ -1,4 +1,8 @@
-import { getRepoExecutionHostId, parseExecutionHostId } from '../../../shared/execution-host'
+import {
+  getRepoExecutionHostId,
+  parseExecutionHostId,
+  resolveRepoExecutionHostId
+} from '../../../shared/execution-host'
 import type { ExecutionHostId } from '../../../shared/execution-host'
 import type { GlobalSettings } from '../../../shared/global-settings-types'
 import type { Worktree } from '../../../shared/worktree/types'
@@ -197,8 +201,15 @@ export function getExecutionHostIdForWorktree(
   const repoId = worktree?.repoId ?? getRepoIdFromWorktreeId(worktreeId)
   const repo = findRepoRecord(state.repos, repoId)
   const hasExplicitOwner = Boolean(repo?.executionHostId?.trim() || repo?.connectionId?.trim())
+  const repoHostId = repo && hasExplicitOwner ? resolveRepoExecutionHostId(repo) : null
+  if (repoHostId) {
+    return repoHostId
+  }
   if (repo && hasExplicitOwner) {
-    return getRepoExecutionHostId(repo)
+    // The row named a host and it does not parse. Same disposition as the conflicting publication
+    // above: the focused-runtime fallback below would hand this workspace to whichever host the user
+    // happens to be on, and this value decides paired-client-local PTY behaviour.
+    return 'runtime:unresolved-owner'
   }
   const environmentId = getSingleFocusedRuntimeEnvironmentId(state)
   return environmentId ? `runtime:${encodeURIComponent(environmentId)}` : 'local'

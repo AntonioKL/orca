@@ -1,4 +1,5 @@
 import { getRepoExecutionHostId } from '../../shared/execution-host'
+import { requireRepoExecutionHostId } from '../providers/execution-host-provider-dispatch'
 import { isFolderRepo } from '../../shared/repo-kind'
 import type { Repo } from '../../shared/repo-types'
 import { invalidateAuthorizedRootsCache } from '../ipc/filesystem-auth'
@@ -114,7 +115,9 @@ export class RuntimeRepositorySettingsController {
       if (!store.removeProjectForHost) {
         throw new Error('runtime_unavailable')
       }
-      store.removeProjectForHost(repo.id, hostId)
+      // Per-host removal needs a host to name, and the id is shared — an unnamed one would take a
+      // sibling row's project with it. The sole-owner branch below is safe without one.
+      store.removeProjectForHost(repo.id, requireRepoExecutionHostId(repo))
     } else {
       store.removeProject(repo.id)
     }
