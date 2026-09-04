@@ -324,8 +324,12 @@ with a large `refresh_tokens` before building the index concurrently there.
   artifacts bucket lifecycle rule) and fails on the 1Password Cloudflare data source locally. The foundation
   root plans clean (disk 250 / max_wal_size already match). Those drifts belong to whoever runs the next full
   apps apply in CI.
-- Dispatched `deploy-auth-production` on main 8034955 (run 33919143723): candidate → smoke → promote →
-  rollback tag on the previous revision. The deploy script strips env vars it does not own, so the Terraform
+- `deploy-auth-production` on main 8034955 (run 33919143723) **succeeded 21:04Z**: serving revision
+  `orca-cloud-auth-00031-tox` at 100%, previous `00018-4jc`, cap 20, smoke passed on both URLs. First 15 min on
+  the new revision: 31×200 / 1×401 on `/refresh`, max latency 56 ms, no 5xx. The new
+  `refresh_token_prune_cursor` table exists, so the new schema applied.
+- US NAT soak (21:01–21:06Z): 0 drops, 0 proxy dial errors, 0 cell exits, port_usage 11, sqlMax ~1.07 s.
+  Asia NAT then applied 21:05:28Z from the pre-verified saved plan (same three attributes). The deploy script strips env vars it does not own, so the Terraform
   TTL var will not be on the new revision until the full apps apply lands; the auth code defaults to 30 d.
 - Terraform locally needs `GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token)"`; ADC is stale.
 
