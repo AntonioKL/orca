@@ -332,6 +332,15 @@ ambiguously-attempted token logs `orca_cloud_refresh_possible_replay`. Lease ren
 (`host-session-registry.ts:736-743`) so early renewal is free. Verified the retry-path claim and both server
 cites against main.
 
+2.1 private IP: orca-cloud PR #477 (foundation: servicenetworking API, /24 peering range 10.42.128.0, private
+network on the instance, `prevent_destroy`; real production plan 3 add / 1 in-place change, staging unchanged)
+and stablyai/orca PR #18720 (relay: `relay_cloud_sql_private_ip` variable, conditional `--private-ip` in the
+cell startup template; default false renders byte-identical to main). Findings that change the plan: Google
+states the private-IP change **restarts the instance** with no in-place path, and it is a one-way door (cannot
+disable private IP or remove the network link). The director uses the Cloud Run built-in connector, not the
+relay VPC NAT, so it never consumed the exhausted ports and is out of scope. Disabling public IP later breaks
+the local proxy workflow and the director. #18720 merges (inert); #477 held for owner decision.
+
 **Landing (2026-09-04 20:50Z–21:02Z, owner: "if you are confident the cloud changes are valid, you can land them"):**
 
 - Merged: orca-cloud #474, #475, #476; stablyai/orca #18693, #18694, #18698. Neither repo has branch

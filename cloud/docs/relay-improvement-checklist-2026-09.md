@@ -55,7 +55,7 @@ independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is p
 | 1.3 reclaim | **Depends on tool** | `VACUUM FULL` takes an exclusive lock on `refresh_tokens`: sign-in and refresh block for its duration (minutes to tens of minutes on 16 GB). `pg_repack` holds only brief locks. | Use `pg_repack`. If VACUUM FULL, announce a maintenance window. |
 | 1.4 full apps apply | Should be none, **verify** | Terraform will create a new auth revision (env added). Traffic is pinned to `00031-tox` by name, so the new revision should receive 0 %. | Confirm in the plan that no `traffic` change appears. If it does, stop: the Terraform image variable is not the serving image. |
 | 1.5, 5.x alerts | No | | |
-| 2.1 private IP | **Possibly, verify** | Adding a private IP to an existing Cloud SQL instance may restart it (1–2 min DB unavailability: sign-in fails, relay renewals retry). Google's docs are inconsistent across versions; treat it as a restart. The proxy flag change rides Roll 2. | Off-peak; the relay's bounded retry survives a 2 min DB blip on the new image (not the old one: do Roll 1 first). |
+| 2.1 private IP | **Yes, certain** | Google: "Configuring an existing Cloud SQL instance to use private IP causes the instance to restart, resulting in downtime." No in-place path, HA does not avoid it. Expect 1–2 min DB unavailability: sign-in fails, relay renewals retry. **One-way door**: private IP cannot be disabled and the VPC link cannot be removed once set. The proxy flag change rides Roll 2. | Off-peak; only after Roll 1 (old image dies on a 2 min DB blip). Owner decision required before the foundation apply. |
 | 2.2 DB split (deferred) | **Yes, scheduled** | Relay unavailable for the cutover (drain all cells → copy relay tables → flip `DATABASE_URL` → restart). Minutes if rehearsed. Desktops and phones reconnect automatically after. | Rehearse on staging; do it in the US night; announce. |
 | 2.3 statement timeout | No beyond Roll 2 | | |
 | 3.1 grace window | No | Auth deploys are no-traffic candidate → smoke → promote. | Security trade-off: a stolen token replayed inside the window is served once instead of revoking. 60 s is the usual choice. |
@@ -91,7 +91,10 @@ independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is p
 - [ ] Plan shows exactly the four known drifts and **no traffic change** on `google_cloud_run_v2_service.auth`.
 - [ ] Apply; confirm `status.traffic` still pins `00031-tox` at 100 %.
 
-### 2.1 Private IP
+### 2.1 Private IP (PRs open: orca-cloud #477 foundation, stablyai/orca #18720 relay flag)
+- [ ] **Owner decision**: the foundation apply restarts the instance and is irreversible on Google's side. Merging #477 arms the next foundation apply; hold the merge until the window is chosen.
+- [ ] Director is out of scope: it uses the Cloud Run built-in connector (managed Google path, not the relay VPC NAT), so it consumed none of the exhausted ports; moving it needs Direct VPC egress + a separate DSN secret. Own PR if ever wanted.
+- [ ] Step 7 (`ipv4_enabled=false`) is blocked until humans have IAP/bastion access and the director is moved; it breaks both today.
 - [ ] Allocate a `/24` private services range on the relay VPC; `google_service_networking_connection`.
 - [ ] Add `ip_configuration.private_network` to `google_sql_database_instance.auth` (foundation root). Plan must show update, not replace.
 - [ ] Apply off-peak; expect a possible restart. Watch auth 5xx alert and relay `sqlFailures`.
