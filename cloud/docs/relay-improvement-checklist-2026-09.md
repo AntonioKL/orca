@@ -4,6 +4,46 @@ Companion to [`relay-improvement-roadmap-2026-09.md`](./relay-improvement-roadma
 match). This file answers three questions per item: what are the concrete steps, what can run in parallel,
 and will a user notice.
 
+## Status as of 2026-09-04 22:30Z
+
+Three buckets. "Merged" means the code is on `main` and nothing in production has changed yet. "Deployed" means users are already getting it. "Awaiting owner" means I will not touch production without a go.
+
+**Deployed to production**
+- Auth instance cap 20 + dead-family audit fix (orca-cloud #474) as revision `orca-cloud-auth-00031-tox`.
+- Dynamic NAT ports in both regions (stablyai/orca #18693). Zero drops and zero proxy dial errors since.
+- Nine alert policies with log metrics: 4 auth (#475), 3 relay Cloud SQL/NAT (#18693), 1 cell process-exit (#18717), all on the relay Slack channel.
+
+**Merged, ships with the next relay cell image roll (Roll 1 carries `519f4914`; Roll 2 needs a fresh image build)**
+- Per-cell inventory locks, delta counters, pool `statement_timeout` (#18722). Roll 2.
+- Cells dial Cloud SQL with `--private-ip` when configured (#18720). Inert until 2.1 applies.
+- Phone shows a clear "sign in on the desktop again" state when the desktop is signed out (#18698).
+
+**Merged, ships with the next auth deploy**
+- Refresh rotation grace window (orca-cloud #478). Startup adds one nullable column (brief exclusive lock on `refresh_tokens`).
+- Pruning job code (orca-cloud #476) is in the image; the job itself is Terraform-disabled until 1.2.
+
+**Merged, ships with the next desktop release**
+- Never replay a refresh token after a timeout; ±10 % jitter on relay lease renewal (#18719).
+- Renderer learns when a cloud session is revoked (#18694).
+
+**Merged, not applied**
+- Incident dashboard (#18717) blocked behind the runtime-metric label drift (5.x first item).
+- Monitor probe fix (#18723) is live in the workflow; the same-cap roll gate has not yet produced a green dry-run since.
+
+**Awaiting owner go (production mutations)**
+1. Roll 1 cell image roll (1.1): dry-run gate, then c8 canary, then batches.
+2. Auth deploy carrying #478 (3.1): quiet minute for the column add.
+3. orca-cloud #477 private IP (2.1): merge arms an instance restart and a one-way door. Recommendation: hold.
+4. Runtime-metric `region` label drift (5.x): intentional replacement of 21 metrics, or drop the label.
+5. Enable pruning (1.2): first budget 20k rows; needs a Terraform apply.
+6. Paging channel for auth alerts (5.2): needs the destination from you.
+
+**Open code follow-ups (no gate, nobody assigned)**
+- Deploy script strips `ORCA_CLOUD_REFRESH_TOKEN_TTL_DAYS` on every release (3.1 first item).
+- `assignOnce` placement lock still global (4.1 remainder).
+- Region preference (4.2), retries-bar recalibration after a week of Roll 2 data (4.4), pruner `stopReason` alert (1.5).
+- Full apps-root apply for 4 unrelated drifts (1.4), from a host with the 1Password account.
+
 ## Uplift ranking (reliability gained per unit of effort)
 
 | Rank | Item | Why it ranks here |
@@ -68,7 +108,7 @@ independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is p
 
 ### 1.1 Cell image roll (Roll 1)
 - [ ] Confirm fleet is quiet: 15-min monitor dry-run passes (no cell health 0, no crash in window).
-- [ ] Confirm director is on 519f4914 and c7 on 85bf6799 (`verify` mode of the same-cap workflow).
+- [x] Confirm director is on 519f4914 and c7 on 85bf6799 (confirmed 2026-09-04 via instance-template census; 20 serving cells still on `5aedbca5`) (`verify` mode of the same-cap workflow).
 - [ ] Dispatch `cloud-deploy-relay-production-same-cap` waves per the plan in the findings doc; one wave, verify, next.
 - [ ] After each wave: controls recover on the recreated cells within 5 min; no `container die`; 4408/1006 burst subsides.
 - [ ] Record image census (all 23 on the same digest) in the findings doc.
@@ -98,7 +138,7 @@ independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is p
 - [ ] Allocate a `/24` private services range on the relay VPC; `google_service_networking_connection`.
 - [ ] Add `ip_configuration.private_network` to `google_sql_database_instance.auth` (foundation root). Plan must show update, not replace.
 - [ ] Apply off-peak; expect a possible restart. Watch auth 5xx alert and relay `sqlFailures`.
-- [ ] Cell template: proxy args add `--private-ip`. Director: Direct VPC egress or connector, then the same flag. Both ride Roll 2.
+- [ ] Cell template: proxy args add `--private-ip` (code merged #18720; flag not set). Director: Direct VPC egress or connector, then the same flag. Both ride Roll 2.
 - [ ] After Roll 2: NAT `port_usage` for relay gateways drops to ~0; then consider `ipv4_enabled = false` (removes the public IP; breaks the local `cloud-sql-proxy --token` workflow unless it also goes private).
 
 ### 2.2 Database split (deferred to ~2026-11-01; checklist kept for when it is revived)
@@ -108,24 +148,24 @@ independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is p
 - [ ] Production: announce a window; same steps; verify `orca_relay_runtime_metrics` controls recover to pre-cutover count.
 - [ ] Update `production-cloud-sql-app-consumers` budget test and both alert policies' `database_id`.
 
-### 2.3 Relay pool statement timeout
-- [ ] `statement_timeout` on the relay `pg.Pool`, below the control-renewal deadline; DDL on an untimed connection (same pattern as auth #476).
-- [ ] Postgres test on 55440: a held lock fails the query fast and the bounded retry takes over.
+### 2.3 Relay pool statement timeout (merged stablyai/orca #18722; ships Roll 2)
+- [x] `statement_timeout` on the relay `pg.Pool` (5 s, env-configurable; schema pool untimed; `57014` retryable), below the control-renewal deadline; DDL on an untimed connection (same pattern as auth #476).
+- [x] Postgres test on 55440: a held lock fails the query fast and the bounded retry takes over.
 
 ### 3.1 Refresh rotation grace window (orca-cloud #478 merged 2026-09-04; deploy pending owner go)
 - [ ] Fix the deploy-script env strip for `ORCA_CLOUD_REFRESH_TOKEN_TTL_DAYS` (pre-existing; found by #478).
-- [ ] `rotateRefreshToken`: if `rotated_at` within 60 s and not revoked, return the existing successor (idempotent), no revoke, no audit.
-- [ ] Outside the window or a third presentation: unchanged (revoke + audit).
-- [ ] Tests: replay inside window returns same successor; outside revokes; concurrent double-present yields one successor.
-- [ ] Deploy via `deploy-auth-production` (candidate → smoke → promote).
+- [x] `rotateRefreshToken`: if `rotated_at` within 60 s and not revoked, return the existing successor (idempotent), no revoke, no audit.
+- [x] Outside the window or a third presentation: unchanged (revoke + audit).
+- [x] Tests: replay inside window returns same successor; outside revokes; concurrent double-present yields one successor.
+- [ ] Deploy via `deploy-auth-production` (candidate → smoke → promote). **Awaiting owner go.** (candidate → smoke → promote).
 
-### 3.2 / 4.3 Desktop
-- [ ] 3.2: on refresh timeout, re-read stored session before retrying; do not re-send a token already rotated locally.
-- [ ] 4.3: ±10 % jitter on control lease renewal; unit test on the distribution; wire-compatible (server accepts early renewals already).
+### 3.2 / 4.3 Desktop (merged stablyai/orca #18719; ships next desktop release)
+- [x] 3.2: on refresh timeout, re-read stored session before retrying; do not re-send a token already rotated locally.
+- [x] 4.3: ±10 % jitter on control lease renewal; unit test on the distribution; wire-compatible (server accepts early renewals already).
 
-### 4.1 Lock contention
-- [ ] Replace the global `FOR UPDATE` over `relay_cells` with per-cell row locks or `pg_advisory_xact_lock(cell)`; counters delta-only.
-- [ ] Postgres tests on 55440 with concurrent probes; `postgres_retries` per hour drops in staging load run.
+### 4.1 Lock contention (partial: stablyai/orca #18722 merged; ships Roll 2)
+- [x] Replace the global `FOR UPDATE` over `relay_cells` with per-cell row locks; counters delta-only. Remaining: `assignOnce` placement lock is still global (optimistic snapshot follow-up). with per-cell row locks or `pg_advisory_xact_lock(cell)`; counters delta-only.
+- [x] Postgres tests on 55440 with concurrent probes (in #18722). Staging load run still owed; `postgres_retries` per hour drops in staging load run.
 - [ ] Ships in Roll 2; then 4.4 recalibrates the retries bar from a week of data.
 
 ### 4.2 Region preference
@@ -134,6 +174,6 @@ independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is p
 
 ### 5.x Observability
 - [ ] **Relay-root runtime-metric drift**: `relay_snapshot[*]` in Terraform carries a `region` label the 21 live metrics lack; applying replaces all 21 (history reset, alert policies blank during swap). Decide: apply in a quiet window as an intentional replacement, or drop the label from Terraform. The incident dashboard (#18717) is blocked behind this.
-- [ ] 5.1 `container die` log metric per cell, > 3 / 15 min, relay channel.
-- [ ] 5.2 Add a paging channel to `auth_alert_notification_channels` for refresh rejections + latency.
-- [ ] 5.4 One dashboard: `orca_relay_cloud_sql_wal_checkpoint`, NAT drops, `orca_auth_refresh_401`, summed `controls`.
+- [x] 5.1 `container die` log metric per cell (`relay_cell_process_exit`, applied 2026-09-04 via #18717), > 3 / 15 min, relay channel.
+- [ ] 5.2 Add a paging channel (**needs owner input**: destination) to `auth_alert_notification_channels` for refresh rejections + latency.
+- [ ] 5.4 One dashboard (merged #18717; apply blocked behind the label drift above): `orca_relay_cloud_sql_wal_checkpoint`, NAT drops, `orca_auth_refresh_401`, summed `controls`.
