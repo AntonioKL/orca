@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
@@ -82,6 +82,38 @@ describe('mobile web package ranged gzip reads', () => {
     const second = await assets.getAssetGzipChunk(params)
 
     expect(second).toEqual(first)
+  })
+
+  it('evicts the least recently used range once the gzip cache is full', async () => {
+    const fixture = await createRangeFixture()
+    const script = fixture.manifest.assets.find((asset) => asset.role === 'script')!
+    const length = 4 * MOBILE_WEB_PACKAGE_CHUNK_BYTES
+    const first = { buildId: fixture.manifest.buildId, path: script.path, offset: 0, length }
+    const second = { ...first, offset: MOBILE_WEB_PACKAGE_CHUNK_BYTES }
+    // Both ranges are the same run of identical bytes, so one cached entry is the cap.
+    const sized = await new MobileWebPackageAssets({
+      resolveRoot: () => fixture.root
+    }).getAssetGzipChunk(first)
+    let reads = 0
+    const assets = new MobileWebPackageAssets({
+      resolveRoot: () => fixture.root,
+      gzipCacheMaxBytes: sized.byteLength,
+      readAssetRange: async (path, offset, byteLength) => {
+        reads += 1
+        return readFile(path).then((bytes) => bytes.subarray(offset, offset + byteLength))
+      }
+    })
+
+    await assets.getAssetGzipChunk(first)
+    await assets.getAssetGzipChunk(first)
+    expect(reads).toBe(1)
+    await assets.getAssetGzipChunk(second)
+    // Caching the second range evicted the first, so it must be read again.
+    await assets.getAssetGzipChunk(first)
+    expect(reads).toBe(3)
+    // The re-read made the first range the most recent, so it stays cached.
+    await assets.getAssetGzipChunk(first)
+    expect(reads).toBe(3)
   })
 
   it('keeps a chunk read and a range read at the same offset apart', async () => {
