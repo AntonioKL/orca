@@ -23,7 +23,8 @@ describe('federated fleet snapshots', () => {
       ])
     )
     const db = {
-      getFederatedDispatch: (dispatchId: string) => dispatches.get(dispatchId),
+      listFederatedDispatchesByIds: (ids: readonly string[]) =>
+        ids.flatMap((id) => (dispatches.get(id) ? [dispatches.get(id)!] : [])),
       updateFederatedDispatchRuntimeEpoch: vi.fn(),
       ...observationFenceMethods()
     } as unknown as OrchestrationDb
@@ -63,7 +64,7 @@ describe('federated fleet snapshots', () => {
   it('asks the snapshot method directly instead of probing status.get', async () => {
     const dispatch = federatedDispatch('dispatch-optimistic', 'peer-optimistic', 'epoch-a')
     const db = {
-      getFederatedDispatch: () => dispatch,
+      listFederatedDispatchesByIds: (ids: readonly string[]) => ids.map(() => dispatch),
       updateFederatedDispatchRuntimeEpoch: vi.fn(),
       ...observationFenceMethods()
     } as unknown as OrchestrationDb
@@ -116,7 +117,8 @@ describe('federated fleet snapshots', () => {
       ])
     )
     const db = {
-      getFederatedDispatch: (dispatchId: string) => dispatches.get(dispatchId),
+      listFederatedDispatchesByIds: (ids: readonly string[]) =>
+        ids.flatMap((id) => (dispatches.get(id) ? [dispatches.get(id)!] : [])),
       updateFederatedDispatchRuntimeEpoch: vi.fn(),
       ...observationFenceMethods()
     } as unknown as OrchestrationDb
@@ -164,7 +166,8 @@ describe('federated fleet snapshots', () => {
     ])
     const updateFederatedDispatchRuntimeEpoch = vi.fn()
     const db = {
-      getFederatedDispatch: (dispatchId: string) => dispatches.get(dispatchId),
+      listFederatedDispatchesByIds: (ids: readonly string[]) =>
+        ids.flatMap((id) => (dispatches.get(id) ? [dispatches.get(id)!] : [])),
       updateFederatedDispatchRuntimeEpoch,
       ...observationFenceMethods()
     } as unknown as OrchestrationDb
@@ -274,9 +277,10 @@ describe('federated fleet snapshots', () => {
     const updateFederatedDispatchRuntimeEpoch = vi.fn()
     const projectFederatedDispatchObservation = vi.fn().mockReturnValue(false)
     const db = {
-      getFederatedDispatch: () => dispatch,
+      listFederatedDispatchesByIds: (ids: readonly string[]) => ids.map(() => dispatch),
       updateFederatedDispatchRuntimeEpoch,
-      captureFederatedDispatchObservationFence: () => ({ dispatch_id: dispatch.dispatch_id }),
+      captureFederatedDispatchObservationFences: (ids: readonly string[]) =>
+        new Map(ids.map((id) => [id, { dispatch_id: id }])),
       projectFederatedDispatchObservation
     } as unknown as OrchestrationDb
     const runtime = {
@@ -316,7 +320,7 @@ describe('federated fleet snapshots', () => {
     const dispatch = federatedDispatch('dispatch-unsupported', 'peer-a', 'epoch-old')
     const updateFederatedDispatchRuntimeEpoch = vi.fn()
     const db = {
-      getFederatedDispatch: () => dispatch,
+      listFederatedDispatchesByIds: (ids: readonly string[]) => ids.map(() => dispatch),
       updateFederatedDispatchRuntimeEpoch,
       ...observationFenceMethods()
     } as unknown as OrchestrationDb
@@ -381,9 +385,8 @@ function runtimeStatus(runtimeId: string) {
 
 function observationFenceMethods() {
   return {
-    captureFederatedDispatchObservationFence: (dispatchId: string) => ({
-      dispatch_id: dispatchId
-    }),
+    captureFederatedDispatchObservationFences: (dispatchIds: readonly string[]) =>
+      new Map(dispatchIds.map((dispatchId) => [dispatchId, { dispatch_id: dispatchId }])),
     projectFederatedDispatchObservation: (_fence: unknown, projection: () => void) => {
       projection()
       return true

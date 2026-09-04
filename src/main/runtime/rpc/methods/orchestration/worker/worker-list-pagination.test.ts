@@ -203,8 +203,8 @@ describe('orchestration worker-list pagination', () => {
     })
     insertDispatch(db, run.id, 'dispatch-a')
     insertDispatch(db, run.id, 'dispatch-z')
-    vi.spyOn(db, 'getFederatedDispatch').mockImplementation((dispatchId) =>
-      dispatchId === 'dispatch-a' ? federatedDispatch(dispatchId) : undefined
+    vi.spyOn(db, 'listFederatedDispatchesByIds').mockImplementation((dispatchIds) =>
+      dispatchIds.includes('dispatch-a') ? [federatedDispatch('dispatch-a')] : []
     )
     vi.spyOn(runtime, 'resolveOrchestrationWorkerServer').mockReturnValue({
       environmentId: 'environment-remote',
@@ -447,6 +447,30 @@ describe('orchestration worker-list pagination', () => {
     expect(second.page.total).toBe(2)
     expect(second.counts).toEqual({ retained: 2 })
   })
+
+  it.each([10, 20, 40])(
+    'reads %i unreachable federated rows without a per-row query',
+    async (workerCount) => {
+      db = new OrchestrationDb(':memory:')
+      const runtime = new OrcaRuntimeService()
+      runtime.setOrchestrationDb(db)
+      const run = db.createRun({
+        objective: 'Federated read cost',
+        coordinatorHandle: 'term-coordinator',
+        coordinatorPaneKey: 'tab-coordinator:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+      })
+      for (let index = 0; index < workerCount; index += 1) {
+        insertDispatch(db, run.id, `dispatch-${String(index).padStart(3, '0')}`)
+      }
+      const prepare = vi.spyOn(sqliteFor(db), 'prepare')
+      prepare.mockClear()
+
+      await callWorkerList(runtime, { run: run.id, limit: 100, includeRemote: true })
+
+      // The page cost must not grow with the number of federated rows on it.
+      expect(prepare.mock.calls.length).toBeLessThan(8)
+    }
+  )
 
   it('filters and labels terminal state through one projection', async () => {
     db = new OrchestrationDb(':memory:')

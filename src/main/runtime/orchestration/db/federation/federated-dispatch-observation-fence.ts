@@ -23,13 +23,7 @@ export type FederatedDispatchObservationFence = {
   worker_last_error: string | null
 }
 
-export function captureFederatedDispatchObservationFence(
-  this: OrchestrationDb,
-  dispatchId: string
-): FederatedDispatchObservationFence | undefined {
-  return this.db
-    .prepare(
-      `SELECT fd.dispatch_id, fd.remote_runtime_epoch, fd.remote_worktree_id,
+const OBSERVATION_FENCE_SQL = `SELECT fd.dispatch_id, fd.remote_runtime_epoch, fd.remote_worktree_id,
               fd.remote_terminal_handle, dc.status AS dispatch_status,
               t.status AS task_status, wd.runtime_epoch AS worker_runtime_epoch,
               wd.state AS worker_state, wd.stage AS worker_stage,
@@ -42,9 +36,29 @@ export function captureFederatedDispatchObservationFence(
        INNER JOIN dispatch_contexts dc ON dc.id = fd.dispatch_id
        INNER JOIN tasks t ON t.id = dc.task_id
        INNER JOIN worker_dispatches wd ON wd.dispatch_id = fd.dispatch_id
-       WHERE fd.dispatch_id = ?`
-    )
-    .get(dispatchId) as FederatedDispatchObservationFence | undefined
+       WHERE fd.dispatch_id`
+
+export function captureFederatedDispatchObservationFence(
+  this: OrchestrationDb,
+  dispatchId: string
+): FederatedDispatchObservationFence | undefined {
+  return this.db.prepare(`${OBSERVATION_FENCE_SQL} = ?`).get(dispatchId) as
+    | FederatedDispatchObservationFence
+    | undefined
+}
+
+/** One statement per host group; capturing a page's fences one row at a time was an N+1. */
+export function captureFederatedDispatchObservationFences(
+  this: OrchestrationDb,
+  dispatchIds: readonly string[]
+): Map<string, FederatedDispatchObservationFence> {
+  if (dispatchIds.length === 0) {
+    return new Map()
+  }
+  const rows = this.db
+    .prepare(`${OBSERVATION_FENCE_SQL} IN (SELECT value FROM json_each(?))`)
+    .all(JSON.stringify([...dispatchIds])) as FederatedDispatchObservationFence[]
+  return new Map(rows.map((row) => [row.dispatch_id, row]))
 }
 
 export function projectFederatedDispatchObservation(
@@ -81,12 +95,14 @@ function observationFenceMatches(
 
 export type FederatedDispatchObservationFenceMethods = {
   captureFederatedDispatchObservationFence: typeof captureFederatedDispatchObservationFence
+  captureFederatedDispatchObservationFences: typeof captureFederatedDispatchObservationFences
   projectFederatedDispatchObservation: typeof projectFederatedDispatchObservation
 }
 
 export function attachFederatedDispatchObservationFence(ctor: { prototype: object }): void {
   Object.assign(ctor.prototype, {
     captureFederatedDispatchObservationFence,
+    captureFederatedDispatchObservationFences,
     projectFederatedDispatchObservation
   })
 }
