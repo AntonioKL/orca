@@ -23,6 +23,8 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | Monitor dry-run #6 | **Passed** 06:06:31Z: 16 samples, no freeze (started 05:47:42Z) | run 33841783747 attempt 1 |
 | c7 `canary-apply` | **Succeeded.** Dispatched 06:07:15Z; drain 06:10Z; MIG recreate 06:16–06:23Z; new image listening 06:23:42Z; verify + trust proof passed; restored to `admission=general` 06:25:21Z; canary authority sealed. c7 is on `85bf6799…`. | run 33843071283 |
 | PR #18581 doc reconcile (Aug 23 figure: 2,200–3,000 raw log lines vs 1,510 on the gate metric) | **Merged** | https://github.com/stablyai/orca/pull/18581 |
+| Same-cap `verify` c7 target=519f4914 rollback=85bf6799, gen 112 | Dispatched 09:02:26Z (read-only) | run 33856355648 |
+| Monitor dry-run #7 (gen 112) | Dispatched ~09:05Z after fleet refill to 14,248 and Cloud SQL CPU < 0.75 | see status board update |
 | Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
 | PR #18606 lock removal (root cause) | **Merged** 09:2xZ as 7b108abf71 after review, fix, re-verify; CI green | https://github.com/stablyai/orca/pull/18606 |
 | Image publish for 7b108abf71 | **Done** 08:36:49Z run 33854111305: `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` | |
@@ -377,6 +379,11 @@ SQL CPU 0.84 -> 0.78 in the preceding minutes, director concurrency 18–22 (idl
 *without* a database or director spike. Fleet had just recovered to 13,015. Cadence today: 01:31 (4),
 04:47 (5), 08:40 (10), 09:00 (5). The old image is now cascading roughly hourly regardless of load; the
 only cell on a fixed image (c7) has 0 crashes in 2.5 h across all four.
+
+Director 500s: 4 in the 09:00 window, all 2.0 s latency on `/v1/assign` or `/v1/resolve` = pg-pool connect
+timeout surfacing as a 500. Pre-existing (Sep 3: 03h/08h/16h one each, same 2.0 s shape; 06:09Z today on
+the old image during the c7 drain). The monitor's `directorErrors: 0` bar freezes on any of these, so a
+dry-run needs a 15-min window with none; at ~1 per cascade that is a real but modest constraint.
 
 ## Roll inputs (verified by the read-only `verify` run)
 
