@@ -30,11 +30,16 @@ describe('native chat Stop layering', () => {
   // Why both bounds: raising the working pane over the panel hides a summoned
   // floating workspace behind the chat column while an agent streams.
   it('stays under the floating workspace panel while working', () => {
+    // Comments stripped first: the surrounding layering comment cites bare z-40/z-50
+    // tiers, and a reworded one could otherwise be read as the panel's own class.
     const panel = source(
       'src/renderer/src/components/floating-terminal/FloatingTerminalPanelSurface.tsx'
+    ).replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')
+    const panelZIndex = Number(
+      /data-floating-terminal-panel[\s\S]*?className=[\s\S]*?z-\[(\d+)\]/.exec(panel)?.[1]
     )
-    const panelZIndex = Number(/data-floating-terminal-panel[\s\S]*?z-\[(\d+)\]/.exec(panel)?.[1])
 
+    // FloatingTerminalPanel.bounds.test.tsx pins this same 45 through a real render.
     expect(panelZIndex).toBe(45)
     expect(workingChatZIndex(source('src/renderer/src/assets/main.css'))).toBeLessThan(panelZIndex)
   })
