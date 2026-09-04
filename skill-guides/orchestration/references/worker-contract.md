@@ -47,7 +47,8 @@ cancellation lands before the Task settles. `check` names its caller with
 
 If `check` returns `consumer_fenced`, the Dispatch was re-attached to another
 worker process and this one no longer owns its mailbox: stop, do not send
-`worker_done`, and do not retry the check.
+`worker_done`, and do not retry the check. An empty `check` never means you were
+replaced; `consumer_fenced` is the only way you learn that.
 
 ## Escalation
 

@@ -289,6 +289,7 @@ describe('owned orchestration references', () => {
       '`check` names its caller with `--terminal`, never `--from`'
     )
     expect(squash(reference)).toContain('If `check` returns `consumer_fenced`')
+    expect(squash(reference)).toContain('An empty `check` never means you were replaced')
   })
 
   it('keeps heartbeat and worker_done recipes bound to the injected capability', () => {
