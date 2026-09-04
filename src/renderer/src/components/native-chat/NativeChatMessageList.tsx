@@ -342,26 +342,13 @@ export function NativeChatMessageList({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="scrollbar-sleek h-full overflow-y-auto px-3 pt-10 pb-4 sm:px-4"
+        className="scrollbar-sleek h-full overflow-y-auto px-3 pb-4 sm:px-4"
       >
-        {showTurnStatus && isWorking && turnStatuses.active ? (
-          <div
-            data-native-chat-running-status="true"
-            className="sticky top-0 z-10 mx-auto w-full max-w-4xl bg-background"
-            style={{ zoom: fontScale }}
-          >
-            <NativeChatWorkingStatus
-              startedAt={turnStatuses.active.startedAt}
-              thinking={turnStatuses.active.thinking}
-              workedSeconds={turnStatuses.active.workedSeconds}
-            />
-          </div>
-        ) : null}
         <div
           ref={contentRef}
           // Why: same max width as the composer column; horizontal inset comes
           // from the scroll container so content aligns with the composer field.
-          className="mx-auto flex w-full max-w-4xl flex-col gap-5"
+          className="mx-auto flex w-full max-w-4xl flex-col gap-5 pt-10"
           // Why: `zoom` scales the chat transcript's text and layout together,
           // scoped to this container so the rest of the app is untouched. It's
           // the desktop analog of the mobile pinch-zoom (Chromium/Electron only).
@@ -413,7 +400,7 @@ export function NativeChatMessageList({
                   activityExpandOverride={turnKey ? expandedTurnIds.has(turnKey) : undefined}
                   runtimeContext={runtimeContext}
                 />
-                {showTurnStatus && status && (index !== latestUserIndex || !isWorking) ? (
+                {showTurnStatus && status ? (
                   <NativeChatWorkingStatus
                     startedAt={status.startedAt}
                     thinking={status.thinking}
@@ -424,11 +411,23 @@ export function NativeChatMessageList({
                         ? () => toggleExpandedTurn(turnKey)
                         : undefined
                     }
+                    sticky={index === latestUserIndex && isWorking}
                   />
                 ) : null}
               </Fragment>
             )
           })}
+          {showTurnStatus &&
+          latestUserIndex === -1 &&
+          turnStatuses.active &&
+          showTypingIndicator ? (
+            <NativeChatWorkingStatus
+              startedAt={turnStatuses.active.startedAt}
+              thinking={turnStatuses.active.thinking}
+              workedSeconds={turnStatuses.active.workedSeconds}
+              sticky
+            />
+          ) : null}
           {!showTurnStatus && showTypingIndicator ? <NativeChatTypingIndicatorRow /> : null}
         </div>
       </div>

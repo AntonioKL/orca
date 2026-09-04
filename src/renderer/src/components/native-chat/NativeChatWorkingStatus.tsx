@@ -8,13 +8,15 @@ export function NativeChatWorkingStatus({
   thinking,
   workedSeconds,
   expanded = false,
-  onToggleExpanded
+  onToggleExpanded,
+  sticky = false
 }: {
   startedAt: number | null
   thinking: boolean
   workedSeconds?: number | null
   expanded?: boolean
   onToggleExpanded?: () => void
+  sticky?: boolean
 }): React.JSX.Element {
   // Why: elapsed seconds is ordinary render dataflow, not an external system.
   // The shared 1s clock is visibility-gated and collapses every in-flight turn
@@ -47,8 +49,8 @@ export function NativeChatWorkingStatus({
         aria-hidden="true"
       />
     ) : null
-  if (workedSeconds != null && onToggleExpanded) {
-    return (
+  const status =
+    workedSeconds != null && onToggleExpanded ? (
       <button
         type="button"
         className={`${className} w-full text-left hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70`}
@@ -59,17 +61,22 @@ export function NativeChatWorkingStatus({
         <span>{label}</span>
         {caret}
       </button>
+    ) : (
+      <div
+        className={className}
+        aria-label={translate('components.native-chat.status.responding', 'Agent is responding')}
+        aria-live="polite"
+      >
+        <span className={thinking ? 'animate-pulse' : undefined}>{label}</span>
+        {caret}
+      </div>
     )
-  }
 
-  return (
-    <div
-      className={className}
-      aria-label={translate('components.native-chat.status.responding', 'Agent is responding')}
-      aria-live="polite"
-    >
-      <span className={thinking ? 'animate-pulse' : undefined}>{label}</span>
-      {caret}
+  return sticky ? (
+    <div data-native-chat-running-status="true" className="sticky top-0 z-10 bg-background">
+      {status}
     </div>
+  ) : (
+    status
   )
 }
