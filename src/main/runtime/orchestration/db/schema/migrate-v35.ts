@@ -11,7 +11,8 @@ const PENDING_POINTER_ENTER_INDEX_SQL = `
     WHERE read = 0 AND pointer_enter_pending > 0;
 `
 
-/** v31 identity columns that were never read back; only creator_dispatch_id and host_scope stay. */
+/** v31 identity columns that were never read back; creator_dispatch_id, host_scope, depth, and
+ *  retry_of_dispatch_id (published as `retryOfDispatchId`) stay. */
 const DROPPED_DISPATCH_IDENTITY_COLUMNS = [
   'creator_role',
   'endpoint_id',
