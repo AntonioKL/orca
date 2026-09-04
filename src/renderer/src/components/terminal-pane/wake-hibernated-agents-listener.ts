@@ -5,6 +5,7 @@ import {
 } from '@/constants/terminal'
 
 type PaneBindingWithWake = IDisposable & {
+  paneKey?: string
   wakeHibernatedAgentIfArmed?: (claimedProviderSessions?: Set<string>) => string | null
 }
 
@@ -36,9 +37,11 @@ export function installWakeHibernatedAgentsListener(
       return
     }
     for (const panePtyBinding of deps.getPanePtyBindings()) {
-      const claimKey = (panePtyBinding as PaneBindingWithWake).wakeHibernatedAgentIfArmed?.(
-        detail.wokenClaimKeys
-      )
+      const binding = panePtyBinding as PaneBindingWithWake
+      if (detail.paneKey && binding.paneKey !== detail.paneKey) {
+        continue
+      }
+      const claimKey = binding.wakeHibernatedAgentIfArmed?.(detail.wokenClaimKeys)
       if (claimKey) {
         detail.wokenClaimKeys?.add(claimKey)
       }

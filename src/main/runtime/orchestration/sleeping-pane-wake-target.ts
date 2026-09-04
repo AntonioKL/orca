@@ -2,6 +2,7 @@ import {
   mayBackgroundWakeSleepingAgentSession,
   type SleepingAgentSessionRecord
 } from '../../../shared/agent-session-resume'
+import { parsePaneKey } from '../../../shared/stable-pane-id'
 import type { SleepingPaneWakeRequest } from './sleeping-pane-wake-scheduler'
 
 export type SleepingPaneWakeLookups = {
@@ -14,7 +15,11 @@ export type SleepingPaneWakeLookups = {
   getSleepingRecord: (paneKey: string) => SleepingAgentSessionRecord | undefined
 }
 
-export type SleepingPaneWakeRefusal = 'no-pane-identity' | 'not-slept' | 'user-slept'
+export type SleepingPaneWakeRefusal =
+  | 'no-pane-identity'
+  | 'no-tab-identity'
+  | 'not-slept'
+  | 'user-slept'
 
 export type SleepingPaneWakeResolution =
   | { ok: true; request: SleepingPaneWakeRequest }
@@ -51,12 +56,18 @@ export function resolveSleepingPaneWakeTarget(
   if (!mayBackgroundWakeSleepingAgentSession(record)) {
     return { ok: false, reason: 'user-slept' }
   }
+  // The resolved pane key is the routing authority and may carry a reminted tab
+  // newer than persistence. It also recovers legacy records with no tabId.
+  const tabId = parsePaneKey(paneKey)?.tabId
+  if (!tabId) {
+    return { ok: false, reason: 'no-tab-identity' }
+  }
   return {
     ok: true,
     request: {
       paneKey,
       worktreeId: record.worktreeId,
-      ...(record.tabId ? { tabId: record.tabId } : {})
+      tabId
     }
   }
 }

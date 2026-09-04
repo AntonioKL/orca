@@ -446,6 +446,24 @@ describe('wakeMountedSleptPaneInPlace', () => {
     expect(rec.wakeDetails[0]?.wokenClaimKeys).toBeInstanceOf(Set)
   })
 
+  it('matches a reminted tab by stable leaf identity and preserves the pane target', () => {
+    const leafId = '11111111-1111-4111-8111-111111111111'
+    sleepingRecords = {
+      k1: {
+        ...autoSleptRecord,
+        paneKey: `tab-obsolete:${leafId}`,
+        tabId: 'tab-obsolete'
+      }
+    }
+    const rec = recordEvents()
+    const paneKey = `tab-reminted:${leafId}`
+
+    expect(wakeMountedSleptPaneInPlace('wt-1', 'tab-reminted', paneKey)).toBe(true)
+
+    rec.stop()
+    expect(rec.wakeDetails[0]).toMatchObject({ tabId: 'tab-reminted', paneKey })
+  })
+
   it('never wakes a pane the user slept deliberately', () => {
     sleepingRecords = { k1: { ...autoSleptRecord, restoreOnTabOpenOnly: true } }
     const rec = recordEvents()

@@ -79,11 +79,16 @@ export const uiTerminalAndSessionTabsApi = {
     return () => ipcRenderer.removeListener('terminal:requestTabCreate', listener)
   },
   onRequestTerminalTabMount: (
-    callback: (data: { worktreeId: string; tabId?: string; ptyId?: string }) => void
+    callback: (data: {
+      worktreeId: string
+      tabId?: string
+      ptyId?: string
+      paneKey?: string
+    }) => void
   ): (() => void) => {
     const listener = (
       _event: Electron.IpcRendererEvent,
-      data: { worktreeId: string; tabId?: string; ptyId?: string }
+      data: { worktreeId: string; tabId?: string; ptyId?: string; paneKey?: string }
     ) => callback(data)
     ipcRenderer.on('terminal:requestTabMount', listener)
     return () => ipcRenderer.removeListener('terminal:requestTabMount', listener)

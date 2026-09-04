@@ -88,6 +88,8 @@ export type WakeHibernatedAgentsWorktreeDetail = {
   /** Present on a mail-driven wake: only the named tab's panes may consume it,
    *  so one inbound message cannot respawn every slept agent in the worktree. */
   tabId?: string
+  /** Present on a split-pane mail wake: only this stable pane may consume it. */
+  paneKey?: string
   /** Mutable collector: mounted panes that consume (or latch) the in-place
    *  hibernation wake add their provider-session claim keys here so the
    *  dispatcher's follow-up generic resume skips those sessions instead of

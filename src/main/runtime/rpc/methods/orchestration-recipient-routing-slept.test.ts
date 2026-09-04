@@ -1,6 +1,6 @@
 /**
- * Addressing a slept agent must be accepted and queued, not refused with the
- * same `terminal_not_found` a handle that never existed gets.
+ * A slept agent stays addressable through its durable Run/Dispatch mailbox;
+ * a terminal-only address must fail because no resumed reader can consume it.
  */
 import { describe, expect, it } from 'vitest'
 import type { OrchestrationDb } from '../../orchestration/db'
@@ -53,14 +53,21 @@ describe('sending to a slept recipient', () => {
     expect(resolution.ok).toBe(true)
   })
 
-  it('accepts a slept pane with no run as a queued terminal mailbox', () => {
+  it('refuses a slept terminal-only mailbox that no resumed agent can read', () => {
     const resolution = resolveBareOrchestrationRecipient({
       runtime: runtimeWith({ paneKey: PANE_KEY, autoWakes: true }),
       db: dbWith(),
       handle: HANDLE
     })
-    expect(resolution).toMatchObject({ ok: true, to: HANDLE })
-    expect(resolution.warning?.code).toBe('recipient_asleep')
+    expect(resolution).toMatchObject({
+      ok: false,
+      code: 'terminal_not_found',
+      warning: { code: 'recipient_unreachable' }
+    })
+    if (resolution.ok) {
+      throw new Error('expected slept terminal-only recipient to be rejected')
+    }
+    expect(resolution.message).toContain('no durable Run/Dispatch mailbox')
   })
 
   it('still refuses a handle that resolves to no pane at all', () => {

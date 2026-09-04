@@ -143,9 +143,10 @@ export class OrcaRuntimeWithWriteOrchestrationPointerPty extends OrcaRuntimeWith
    *  new fact, so nothing reading liveness changes (ssh-execution-boundary.md). */
   protected buildSleptPaneTerminalSummary(
     pane: ResumableSleptPane,
-    worktreesById: Map<string, ResolvedWorktree>
+    worktreesById: Map<string, ResolvedWorktree>,
+    resolvedWorktree?: ResolvedWorktree
   ): RuntimeTerminalSummary {
-    const worktree = worktreesById.get(pane.worktreeId)
+    const worktree = resolvedWorktree ?? worktreesById.get(pane.worktreeId)
     return {
       handle: this.issueResumableSleptPaneHandle(pane),
       ptyId: null,

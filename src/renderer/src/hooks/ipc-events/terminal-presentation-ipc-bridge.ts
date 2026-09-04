@@ -248,7 +248,7 @@ export function registerTerminalPresentationIpcBridge(unsubs: (() => void)[]): v
 
   // Why: background-mount a mobile-subscribed tab's PTY without navigating the desktop (STA-1840).
   unsubs.push(
-    window.api.ui.onRequestTerminalTabMount(({ worktreeId, tabId, ptyId }) => {
+    window.api.ui.onRequestTerminalTabMount(({ worktreeId, tabId, ptyId, paneKey }) => {
       if (!worktreeId) {
         return
       }
@@ -270,7 +270,7 @@ export function registerTerminalPresentationIpcBridge(unsubs: (() => void)[]): v
       } else if (resolution?.kind === 'already-mounted') {
         // Why: a slept pane whose tab is still mounted cannot be woken by a
         // mount — its pane holds an armed in-place cold-restore instead.
-        wakeMountedSleptPaneInPlace(worktreeId, resolution.tabId)
+        wakeMountedSleptPaneInPlace(worktreeId, resolution.tabId, paneKey)
       }
     })
   )

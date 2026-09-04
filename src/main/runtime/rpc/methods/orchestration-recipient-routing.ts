@@ -104,7 +104,7 @@ export function resolveBareOrchestrationRecipient(params: {
     )
   }
 
-  if (paneKey) {
+  if (livePaneKey) {
     return {
       ok: true,
       to: handle,
@@ -114,6 +114,16 @@ export function resolveBareOrchestrationRecipient(params: {
         recipient: handle,
         message: `${handle} is a live terminal-only mailbox. Delivery is not durable after that terminal closes; prefer run:<id> or dispatch:<id>.`
       }
+    }
+  }
+
+  if (sleptPane) {
+    const message = `${handle} is asleep but has no durable Run/Dispatch mailbox. Use a canonical run:<id> or dispatch:<id> address.`
+    return {
+      ok: false,
+      code: 'terminal_not_found',
+      message,
+      warning: { code: 'recipient_unreachable', recipient: handle, message }
     }
   }
 

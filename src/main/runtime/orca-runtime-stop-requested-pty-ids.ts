@@ -125,7 +125,8 @@ export class OrcaRuntimeWithStopRequestedPtyIds extends OrcaRuntimeWithRuntimeId
       this.buildTerminalSummary(leaf, worktrees, livePtyIds),
     buildPtySummary: (pty, worktrees) => this.buildPtyTerminalSummary(pty, worktrees),
     listResumableSleptPanes: (targetWorktreeId) => this.listResumableSleptPanes(targetWorktreeId),
-    buildSleptPaneSummary: (pane, worktrees) => this.buildSleptPaneTerminalSummary(pane, worktrees),
+    buildSleptPaneSummary: (pane, worktrees, resolvedWorktree) =>
+      this.buildSleptPaneTerminalSummary(pane, worktrees, resolvedWorktree),
     getSnapshots: () => this.mobileSessionTabsByWorktree,
     getTabTitle: (tabId) => this.tabs.get(tabId)?.title ?? null,
     getTopologyRevision: (worktreeId) => this.getTerminalTopologyRevision(worktreeId),

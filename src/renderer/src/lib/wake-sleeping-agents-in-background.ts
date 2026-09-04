@@ -95,20 +95,31 @@ function dispatchBackgroundMount(worktreeId: string, tabIds: readonly string[] |
  * cannot respawn the whole worktree. Gated on the same fail-closed predicate
  * main's wake request uses, so a pane the user slept is never woken by mail.
  */
-export function wakeMountedSleptPaneInPlace(worktreeId: string, tabId: string): boolean {
+export function wakeMountedSleptPaneInPlace(
+  worktreeId: string,
+  tabId: string,
+  paneKey?: string
+): boolean {
   const state = useAppStore.getState()
-  const eligible = Object.values(state.sleepingAgentSessionsByPaneKey).some(
-    (record) =>
-      record.worktreeId === worktreeId &&
-      getSleepingRecordTabId(record) === tabId &&
-      mayBackgroundWakeSleepingAgentSession(record)
-  )
+  const targetLeafId = paneKey ? parsePaneKey(paneKey)?.leafId : undefined
+  const eligible = Object.values(state.sleepingAgentSessionsByPaneKey).some((record) => {
+    if (record.worktreeId !== worktreeId || !mayBackgroundWakeSleepingAgentSession(record)) {
+      return false
+    }
+    if (!paneKey) {
+      return getSleepingRecordTabId(record) === tabId
+    }
+    return (
+      record.paneKey === paneKey ||
+      (targetLeafId !== undefined && parsePaneKey(record.paneKey)?.leafId === targetLeafId)
+    )
+  })
   if (!eligible) {
     return false
   }
   window.dispatchEvent(
     new CustomEvent<WakeHibernatedAgentsWorktreeDetail>(WAKE_HIBERNATED_AGENTS_WORKTREE_EVENT, {
-      detail: { worktreeId, tabId, wokenClaimKeys: new Set() }
+      detail: { worktreeId, tabId, ...(paneKey ? { paneKey } : {}), wokenClaimKeys: new Set() }
     })
   )
   return true

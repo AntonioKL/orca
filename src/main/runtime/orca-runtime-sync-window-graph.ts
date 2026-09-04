@@ -88,6 +88,23 @@ export class OrcaRuntimeWithSyncWindowGraph extends OrcaRuntimeWithAttachWindow 
     // Why: renderer reloads can briefly republish the same leaf with no ptyId;
     // keep live CLI handles usable while the UI graph rebuilds.
     const preserveLivePtysDuringReload = this.graphStatus === 'reloading'
+    const incomingPtyOwnerByPtyId = new Map<string, string | null>()
+    for (const leaf of lifecycleLeaves) {
+      const leafKey = this.getLeafKey(leaf.tabId, leaf.leafId)
+      const existing = this.leaves.get(leafKey)
+      const ptyId =
+        preserveLivePtysDuringReload && leaf.ptyId === null && existing?.ptyId
+          ? existing.ptyId
+          : leaf.ptyId
+      if (!ptyId) {
+        continue
+      }
+      const priorOwner = incomingPtyOwnerByPtyId.get(ptyId)
+      incomingPtyOwnerByPtyId.set(
+        ptyId,
+        priorOwner === undefined || priorOwner === leafKey ? leafKey : null
+      )
+    }
     for (const leaf of lifecycleLeaves) {
       const leafKey = this.getLeafKey(leaf.tabId, leaf.leafId)
       const existing = this.leaves.get(leafKey)
@@ -145,7 +162,13 @@ export class OrcaRuntimeWithSyncWindowGraph extends OrcaRuntimeWithAttachWindow 
         // Why: mobile can subscribe while the pane is waiting for its first PTY.
         // Keep that handle usable after the recovery mount binds it.
         const adoptedFirstPty =
-          existing.ptyId === null && this.adoptFirstPtyForLeafHandle(leafKey, ptyId, ptyGeneration)
+          existing.ptyId === null &&
+          this.adoptFirstPtyForLeafHandle(
+            leafKey,
+            ptyId,
+            ptyGeneration,
+            ptyId ? (incomingPtyOwnerByPtyId.get(ptyId) ?? null) : null
+          )
         if (!adoptedFirstPty) {
           this.invalidateLeafHandle(leafKey)
         }
@@ -153,7 +176,16 @@ export class OrcaRuntimeWithSyncWindowGraph extends OrcaRuntimeWithAttachWindow 
         // Why: a slept pane's handle is minted from its resume record with no leaf
         // behind it. Adopt the PTY the wake produced so the handle a sender
         // addressed keeps resolving instead of being orphaned by a remint.
-        this.adoptFirstPtyForLeafHandle(leafKey, ptyId, ptyGeneration)
+        if (
+          !this.adoptFirstPtyForLeafHandle(
+            leafKey,
+            ptyId,
+            ptyGeneration,
+            incomingPtyOwnerByPtyId.get(ptyId) ?? null
+          )
+        ) {
+          this.invalidateLeafHandle(leafKey)
+        }
       }
     }
 

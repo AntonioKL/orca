@@ -61,6 +61,7 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
   tabMountSends: unknown[][]
   write: ReturnType<typeof vi.fn>
   remountWithPty: (ptyId: string) => void
+  setRendererAvailable: (available: boolean) => void
 }> {
   const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(sleptSession(record))
   const runtime = new OrcaRuntimeService(runtimeStore as never)
@@ -99,14 +100,20 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
   syncGraph(null)
 
   const tabMountSends: unknown[][] = []
+  let rendererAvailable = true
   vi.spyOn(
     runtime as unknown as { getAuthoritativeWindow: () => unknown },
     'getAuthoritativeWindow'
-  ).mockReturnValue({
-    webContents: {
-      send: (...args: unknown[]) => {
-        if (args[0] === 'terminal:requestTabMount') {
-          tabMountSends.push(args)
+  ).mockImplementation(() => {
+    if (!rendererAvailable) {
+      throw new Error('renderer unavailable')
+    }
+    return {
+      webContents: {
+        send: (...args: unknown[]) => {
+          if (args[0] === 'terminal:requestTabMount') {
+            tabMountSends.push(args)
+          }
         }
       }
     }
@@ -125,6 +132,9 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
     connected: row!.connected,
     tabMountSends,
     write,
+    setRendererAvailable: (available) => {
+      rendererAvailable = available
+    },
     // What the renderer does with `terminal:requestTabMount`: the tab remounts and
     // its agent cold-restores into a fresh PTY that then reports a finished turn.
     remountWithPty: (ptyId: string) => {
@@ -136,6 +146,29 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
 }
 
 describe('mail addressed to a listed slept pane', () => {
+  it('retries a parked wake when the renderer graph becomes ready', async () => {
+    vi.useFakeTimers()
+    try {
+      const { runtime, db, handle, tabMountSends, setRendererAvailable } =
+        await sleptPaneRuntime(sleepingRecord())
+      setRendererAvailable(false)
+      db.insertMessage({ from: 'term_sender', to: handle, subject: 'wake up', type: 'status' })
+      runtime.notifyMessageArrived(handle, 'status')
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(1_500)
+      expect(tabMountSends).toEqual([])
+
+      setRendererAvailable(true)
+      runtime.markGraphReady(1)
+      await vi.advanceTimersByTimeAsync(1_500)
+
+      expect(tabMountSends).toHaveLength(1)
+      db.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('wakes the pane the listing just made addressable', async () => {
     const { runtime, db, handle, resumable, connected, tabMountSends } =
       await sleptPaneRuntime(sleepingRecord())
@@ -151,7 +184,8 @@ describe('mail addressed to a listed slept pane', () => {
     expect(tabMountSends).toHaveLength(1)
     expect(tabMountSends[0]?.[1]).toMatchObject({
       worktreeId: TEST_WORKTREE_ID,
-      tabId: TAB_ID
+      tabId: TAB_ID,
+      paneKey: PANE_KEY
     })
     db.close()
   })

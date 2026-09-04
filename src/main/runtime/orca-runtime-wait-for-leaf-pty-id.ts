@@ -123,7 +123,8 @@ export class OrcaRuntimeWithWaitForLeafPtyId extends OrcaRuntimeWithRestoreLiveP
       this.getAuthoritativeWindow().webContents.send('terminal:requestTabMount', {
         worktreeId: args.worktreeId,
         ...(args.tabId ? { tabId: args.tabId } : {}),
-        ...(args.ptyId ? { ptyId: args.ptyId } : {})
+        ...(args.ptyId ? { ptyId: args.ptyId } : {}),
+        ...(args.paneKey ? { paneKey: args.paneKey } : {})
       })
       return true
     } catch {
@@ -155,13 +156,21 @@ export class OrcaRuntimeWithWaitForLeafPtyId extends OrcaRuntimeWithRestoreLiveP
 
   protected mayBackgroundWakeSleepingPane(paneKey: string): boolean {
     const record = this.findSleepingAgentRecordForPane(paneKey)
-    return !record || mayBackgroundWakeSleepingAgentSession(record)
+    return Boolean(record && mayBackgroundWakeSleepingAgentSession(record))
   }
 
   protected readonly sleepingPaneWakes = new SleepingPaneWakeScheduler({
     wake: (request) =>
+      !this.mayBackgroundWakeSleepingPane(request.paneKey) ||
       this.requestRendererTerminalTabMountForPane({ ...request, intent: 'inbound-message' })
   })
+
+  markGraphReady(windowId: number): void {
+    super.markGraphReady(windowId)
+    if (windowId === this.authoritativeWindowId && this.graphStatus === 'ready') {
+      this.sleepingPaneWakes.retryPending()
+    }
+  }
 
   /**
    * Mail landed for a mailbox whose pane has no process. The message arriving IS

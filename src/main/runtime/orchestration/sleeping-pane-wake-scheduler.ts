@@ -3,8 +3,8 @@
  *
  * Two independent bounds, both caller-side — the mount door keeps no bookkeeping
  * of its own, mirroring the close-intent guard (`web-session-close-intent.ts`):
- *  - per-pane suppression, so a wake that fails (no window, record already gone)
- *    is not retried in a loop by the next message;
+ *  - per-pane suppression after a successful request, so repeat mail cannot
+ *    restart a wake already in progress;
  *  - a minimum spacing between wakes, so one `@all` broadcast spreads its wakes
  *    instead of respawning a workspace at once. Queued wakes still happen.
  */
@@ -21,9 +21,6 @@ export const SLEEPING_PANE_WAKE_SUPPRESSION_TTL_MS =
 
 export const SLEEPING_PANE_WAKE_SPACING_MS = 1_500
 
-/** Bounds a broadcast's queue; overflow stays durable mail, woken by the next arrival. */
-export const SLEEPING_PANE_WAKE_QUEUE_LIMIT = 64
-
 export type SleepingPaneWakeRequest = {
   paneKey: string
   worktreeId: string
@@ -31,13 +28,13 @@ export type SleepingPaneWakeRequest = {
   ptyId?: string
 }
 
-export type SleepingPaneWakeOutcome = 'requested' | 'queued' | 'suppressed' | 'dropped'
+export type SleepingPaneWakeOutcome = 'requested' | 'queued' | 'suppressed'
 
 /** Node returns a Timeout, jsdom/browser a number; neither is unref-able for sure. */
 type SleepingPaneWakeTimer = { unref?: () => void } | number
 
 type SleepingPaneWakeSchedulerDependencies = {
-  wake: (request: SleepingPaneWakeRequest) => void
+  wake: (request: SleepingPaneWakeRequest) => boolean
   now?: () => number
   schedule?: (run: () => void, delayMs: number) => SleepingPaneWakeTimer
   cancel?: (timer: SleepingPaneWakeTimer) => void
@@ -45,9 +42,12 @@ type SleepingPaneWakeSchedulerDependencies = {
 
 export class SleepingPaneWakeScheduler {
   private readonly requestedAtByPaneKey = new Map<string, number>()
-  private readonly queue = new Map<string, SleepingPaneWakeRequest>()
-  private lastWakeAt = Number.NEGATIVE_INFINITY
+  // One row per slept pane, independent of message volume.
+  private readonly queue = new Map<string, { request: SleepingPaneWakeRequest; failures: number }>()
+  private readonly failed = new Map<string, SleepingPaneWakeRequest>()
+  private lastAttemptAt = Number.NEGATIVE_INFINITY
   private drainTimer: SleepingPaneWakeTimer | null = null
+  private pruneTimer: SleepingPaneWakeTimer | null = null
 
   constructor(private readonly deps: SleepingPaneWakeSchedulerDependencies) {}
 
@@ -57,16 +57,33 @@ export class SleepingPaneWakeScheduler {
     if (this.requestedAtByPaneKey.has(request.paneKey) || this.queue.has(request.paneKey)) {
       return 'suppressed'
     }
-    if (now - this.lastWakeAt >= SLEEPING_PANE_WAKE_SPACING_MS && this.queue.size === 0) {
-      this.fire(request, now)
-      return 'requested'
+    // A new arrival is an event-driven retry for a request parked after its one
+    // automatic retry. Keep the newest coordinates in case the tab reminted.
+    this.failed.delete(request.paneKey)
+    if (now - this.lastAttemptAt >= SLEEPING_PANE_WAKE_SPACING_MS && this.queue.size === 0) {
+      if (this.fire(request, now)) {
+        return 'requested'
+      }
+      this.queue.set(request.paneKey, { request, failures: 1 })
+      this.scheduleDrain(now)
+      return 'queued'
     }
-    if (this.queue.size >= SLEEPING_PANE_WAKE_QUEUE_LIMIT) {
-      return 'dropped'
-    }
-    this.queue.set(request.paneKey, request)
+    this.queue.set(request.paneKey, { request, failures: 0 })
     this.scheduleDrain(now)
     return 'queued'
+  }
+
+  /** Retry parked failures when renderer readiness provides new wake capacity. */
+  retryPending(): void {
+    for (const [paneKey, request] of this.failed) {
+      if (!this.requestedAtByPaneKey.has(paneKey) && !this.queue.has(paneKey)) {
+        this.queue.set(paneKey, { request, failures: 0 })
+      }
+    }
+    this.failed.clear()
+    if (this.queue.size > 0) {
+      this.scheduleDrain(this.now())
+    }
   }
 
   dispose(): void {
@@ -74,27 +91,34 @@ export class SleepingPaneWakeScheduler {
       ;(this.deps.cancel ?? clearTimeout)(this.drainTimer as ReturnType<typeof setTimeout>)
       this.drainTimer = null
     }
+    if (this.pruneTimer !== null) {
+      ;(this.deps.cancel ?? clearTimeout)(this.pruneTimer as ReturnType<typeof setTimeout>)
+      this.pruneTimer = null
+    }
     this.queue.clear()
+    this.failed.clear()
     this.requestedAtByPaneKey.clear()
   }
 
-  private fire(request: SleepingPaneWakeRequest, now: number): void {
-    // Stamp before the call: a wake that throws must still be suppressed, or a
-    // chatty run retries it on every message.
-    this.requestedAtByPaneKey.set(request.paneKey, now)
-    this.lastWakeAt = now
+  private fire(request: SleepingPaneWakeRequest, now: number): boolean {
+    this.lastAttemptAt = now
     try {
-      this.deps.wake(request)
+      if (!this.deps.wake(request)) {
+        return false
+      }
     } catch {
-      // The message stays durable; the tab-open path still delivers it.
+      return false
     }
+    this.requestedAtByPaneKey.set(request.paneKey, now)
+    this.scheduleSuppressionPrune(now)
+    return true
   }
 
   private scheduleDrain(now: number): void {
     if (this.drainTimer !== null) {
       return
     }
-    const delay = Math.max(0, this.lastWakeAt + SLEEPING_PANE_WAKE_SPACING_MS - now)
+    const delay = Math.max(0, this.lastAttemptAt + SLEEPING_PANE_WAKE_SPACING_MS - now)
     const timer = (this.deps.schedule ?? setTimeout)(() => {
       this.drainTimer = null
       this.drain()
@@ -112,9 +136,17 @@ export class SleepingPaneWakeScheduler {
     if (next.done) {
       return
     }
-    const [paneKey, request] = next.value
+    const [paneKey, queued] = next.value
     this.queue.delete(paneKey)
-    this.fire(request, now)
+    if (!this.fire(queued.request, now)) {
+      if (queued.failures === 0) {
+        this.queue.set(paneKey, { request: queued.request, failures: 1 })
+      } else {
+        // Do not poll forever while no renderer exists. A later graph-ready
+        // edge or message arrival calls retryPending/request respectively.
+        this.failed.set(paneKey, queued.request)
+      }
+    }
     if (this.queue.size > 0) {
       this.scheduleDrain(now)
     }
@@ -125,6 +157,29 @@ export class SleepingPaneWakeScheduler {
       if (now - requestedAt >= SLEEPING_PANE_WAKE_SUPPRESSION_TTL_MS) {
         this.requestedAtByPaneKey.delete(paneKey)
       }
+    }
+  }
+
+  private scheduleSuppressionPrune(now: number): void {
+    if (this.pruneTimer !== null) {
+      return
+    }
+    const firstRequestedAt = this.requestedAtByPaneKey.values().next().value
+    if (firstRequestedAt === undefined) {
+      return
+    }
+    const delay = Math.max(0, firstRequestedAt + SLEEPING_PANE_WAKE_SUPPRESSION_TTL_MS - now)
+    const timer = (this.deps.schedule ?? setTimeout)(() => {
+      this.pruneTimer = null
+      const currentNow = this.now()
+      this.pruneSuppressions(currentNow)
+      if (this.requestedAtByPaneKey.size > 0) {
+        this.scheduleSuppressionPrune(currentNow)
+      }
+    }, delay)
+    this.pruneTimer = timer
+    if (typeof timer !== 'number') {
+      timer.unref?.()
     }
   }
 

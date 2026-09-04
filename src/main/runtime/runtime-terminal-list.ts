@@ -10,9 +10,16 @@ import type { ResumableSleptPane } from './resumable-slept-pane-listing'
 import type { RuntimeLeafRecord, RuntimePtyWorktreeRecord } from './runtime-terminal-state-records'
 import { buildRuntimeTerminalVisualLayouts } from './runtime-terminal-visual-layout'
 import {
+  createIncrementalResolvedWorktreeLookup,
   includeTargetResolvedWorktree,
+  runtimeWorktreeLookupKey,
   type ResolvedWorktree
 } from './runtime-worktree-path-identity'
+import { parsePaneKey } from '../../shared/stable-pane-id'
+
+function stablePaneLeafKey(worktreeId: string, leafId: string): string {
+  return `${runtimeWorktreeLookupKey(worktreeId)}\0${leafId}`
+}
 
 type RuntimeTerminalListDependencies = {
   getGraphEpoch(): number | null
@@ -41,7 +48,8 @@ type RuntimeTerminalListDependencies = {
   listResumableSleptPanes(targetWorktreeId: string | null): readonly ResumableSleptPane[]
   buildSleptPaneSummary(
     pane: ResumableSleptPane,
-    worktrees: Map<string, ResolvedWorktree>
+    worktrees: Map<string, ResolvedWorktree>,
+    resolvedWorktree: ResolvedWorktree | undefined
   ): RuntimeTerminalSummary
   getSnapshots(): ReadonlyMap<string, RuntimeMobileSessionTabsSnapshot>
   getTabTitle(tabId: string): string | null
@@ -126,8 +134,10 @@ export class RuntimeTerminalList {
     const sleptPanes = opts.requireFreshPtyLiveness
       ? []
       : this.deps.listResumableSleptPanes(targetId)
-    const sleptPanesByPaneKey = new Map(sleptPanes.map((pane) => [pane.paneKey, pane]))
-    const listedPaneKeys = new Set<string>()
+    const sleptPanesByLeaf = new Map(
+      sleptPanes.map((pane) => [stablePaneLeafKey(pane.worktreeId, pane.leafId), pane])
+    )
+    const listedLeaves = new Set<string>()
     if (graphEpoch !== null) {
       for (const leaf of this.deps.getLeaves()) {
         if (targetId && leaf.worktreeId !== targetId) {
@@ -136,9 +146,8 @@ export class RuntimeTerminalList {
         if (opts.requireFreshPtyLiveness && (!leaf.ptyId || !refreshedPtyIds?.has(leaf.ptyId))) {
           continue
         }
-        const sleptPane = leaf.ptyId
-          ? undefined
-          : sleptPanesByPaneKey.get(`${leaf.tabId}:${leaf.leafId}`)
+        const leafIdentity = stablePaneLeafKey(leaf.worktreeId, leaf.leafId)
+        const sleptPane = leaf.ptyId ? undefined : sleptPanesByLeaf.get(leafIdentity)
         // Why: a PTY-less leaf in a worktree that still has live PTYs is normally
         // a surface waiting to bind. A resume record makes it a slept pane, which
         // must stay visible instead of reading as never having existed.
@@ -148,7 +157,7 @@ export class RuntimeTerminalList {
         if (leaf.ptyId) {
           leafPtyIds.add(leaf.ptyId)
         }
-        listedPaneKeys.add(`${leaf.tabId}:${leaf.leafId}`)
+        listedLeaves.add(leafIdentity)
         const summary = this.deps.buildLeafSummary(leaf, worktreesById, provenLivePtyIds)
         terminals.push(sleptPane ? { ...summary, resumable: true } : summary)
       }
@@ -164,15 +173,27 @@ export class RuntimeTerminalList {
         continue
       }
       if (pty.paneKey) {
-        listedPaneKeys.add(pty.paneKey)
+        const leafId = parsePaneKey(pty.paneKey)?.leafId
+        if (leafId) {
+          listedLeaves.add(stablePaneLeafKey(pty.worktreeId, leafId))
+        }
       }
       terminals.push(this.deps.buildPtySummary(pty, worktreesById))
     }
-    for (const pane of sleptPanes) {
+    const findResolvedWorktree = createIncrementalResolvedWorktreeLookup([
+      ...worktreesById.values()
+    ])
+    for (const pane of sleptPanesByLeaf.values()) {
       // Why: a slept pane's tab is unmounted, so its leaf left the renderer graph
       // entirely. Synthesize the row from the resume record persistence still holds.
-      if (!listedPaneKeys.has(pane.paneKey)) {
-        terminals.push(this.deps.buildSleptPaneSummary(pane, worktreesById))
+      if (!listedLeaves.has(stablePaneLeafKey(pane.worktreeId, pane.leafId))) {
+        terminals.push(
+          this.deps.buildSleptPaneSummary(
+            pane,
+            worktreesById,
+            findResolvedWorktree(pane.worktreeId)
+          )
+        )
       }
     }
     const requestedHandles = opts.handles ? new Set(opts.handles) : null

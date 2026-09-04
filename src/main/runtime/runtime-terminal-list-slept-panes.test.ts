@@ -17,11 +17,14 @@ const WORKTREE: ResolvedWorktree = {
   branch: 'main'
 } as unknown as ResolvedWorktree
 
+const SLEPT_LEAF_ID = '11111111-1111-4111-8111-111111111111'
+const LIVE_LEAF_ID = '22222222-2222-4222-8222-222222222222'
+
 const SLEPT_PANE: ResumableSleptPane = {
-  paneKey: 'tab-slept:leaf-slept',
+  paneKey: `tab-slept:${SLEPT_LEAF_ID}`,
   worktreeId: 'wt-1',
   tabId: 'tab-slept',
-  leafId: 'leaf-slept',
+  leafId: SLEPT_LEAF_ID,
   title: 'coordinator',
   agent: 'claude',
   lastOutputAt: 42
@@ -30,7 +33,7 @@ const SLEPT_PANE: ResumableSleptPane = {
 function leaf(overrides: Partial<RuntimeLeafRecord> = {}): RuntimeLeafRecord {
   return {
     tabId: 'tab-live',
-    leafId: 'leaf-live',
+    leafId: LIVE_LEAF_ID,
     worktreeId: 'wt-1',
     ptyId: 'pty-live',
     connected: true,
@@ -43,7 +46,7 @@ function pty(overrides: Partial<RuntimePtyWorktreeRecord> = {}): RuntimePtyWorkt
     ptyId: 'pty-live',
     worktreeId: 'wt-1',
     connected: true,
-    paneKey: 'tab-live:leaf-live',
+    paneKey: `tab-live:${LIVE_LEAF_ID}`,
     ...overrides
   } as unknown as RuntimePtyWorktreeRecord
 }
@@ -69,6 +72,7 @@ function makeList(args: {
   leaves?: RuntimeLeafRecord[]
   ptys?: RuntimePtyWorktreeRecord[]
   sleptPanes?: ResumableSleptPane[]
+  worktree?: ResolvedWorktree
 }) {
   const sleptPaneCalls: (string | null)[] = []
   const list = new RuntimeTerminalList({
@@ -79,7 +83,10 @@ function makeList(args: {
     buildWorktreeFromId: () => WORKTREE,
     resolveWorktree: () => Promise.resolve(WORKTREE),
     listKnownWorktrees: () => [WORKTREE],
-    getWorktreeMap: () => Promise.resolve(new Map([[WORKTREE.id, WORKTREE]])),
+    getWorktreeMap: () => {
+      const worktree = args.worktree ?? WORKTREE
+      return Promise.resolve(new Map([[worktree.id, worktree]]))
+    },
     refreshPtys: () =>
       Promise.resolve({ livePtyIds: ['pty-live'], allLivePtyIds: new Set(['pty-live']) } as never),
     getPtys: () => args.ptys ?? [],
@@ -94,9 +101,11 @@ function makeList(args: {
       sleptPaneCalls.push(targetWorktreeId)
       return args.sleptPanes ?? []
     },
-    buildSleptPaneSummary: (pane) => ({
+    buildSleptPaneSummary: (pane, _worktrees, resolvedWorktree) => ({
       ...summaryFor(pane),
       handle: `term_${pane.paneKey}`,
+      worktreePath: resolvedWorktree?.path ?? '',
+      branch: resolvedWorktree?.branch ?? '',
       title: pane.title,
       resumable: true,
       agentIdentity: pane.agent
@@ -124,7 +133,7 @@ describe('terminal list with slept panes', () => {
   })
 
   it('keeps a PTY-less leaf visible when a resume record claims it', async () => {
-    const sleptLeaf = leaf({ tabId: 'tab-slept', leafId: 'leaf-slept', ptyId: null })
+    const sleptLeaf = leaf({ tabId: 'tab-slept', leafId: SLEPT_LEAF_ID, ptyId: null })
     const { list } = makeList({
       leaves: [leaf(), sleptLeaf],
       ptys: [pty()],
@@ -160,10 +169,40 @@ describe('terminal list with slept panes', () => {
   })
 
   it('does not duplicate a pane that a live PTY row already covers', async () => {
-    const stalePane = { ...SLEPT_PANE, paneKey: 'tab-live:leaf-live' }
+    const stalePane = {
+      ...SLEPT_PANE,
+      paneKey: `tab-live:${LIVE_LEAF_ID}`,
+      leafId: LIVE_LEAF_ID
+    }
     const { list } = makeList({ ptys: [pty()], sleptPanes: [stalePane] })
     const result = await list.list('wt-1', 10, { includeVisualLayouts: false })
     expect(result.terminals).toHaveLength(1)
     expect(result.terminals[0].resumable).toBeUndefined()
+  })
+
+  it('does not duplicate a slept leaf after its tab id is reminted', async () => {
+    const remintedLeaf = leaf({ tabId: 'tab-reminted', leafId: SLEPT_LEAF_ID, ptyId: null })
+    const { list } = makeList({
+      leaves: [leaf(), remintedLeaf],
+      ptys: [pty()],
+      sleptPanes: [SLEPT_PANE]
+    })
+    const result = await list.list('wt-1', 10, { includeVisualLayouts: false })
+    expect(result.terminals.filter((terminal) => terminal.leafId === SLEPT_LEAF_ID)).toHaveLength(1)
+  })
+
+  it('resolves slept-pane metadata through equivalent worktree identity', async () => {
+    const resolved = {
+      ...WORKTREE,
+      id: 'repo-1::/tmp/wt-1',
+      path: '/tmp/wt-1',
+      branch: 'feature'
+    } as ResolvedWorktree
+    const pane = { ...SLEPT_PANE, worktreeId: 'repo-1::/tmp//wt-1/' }
+    const { list } = makeList({ sleptPanes: [pane], worktree: resolved })
+
+    const result = await list.list(undefined, 10, { includeVisualLayouts: false })
+
+    expect(result.terminals[0]).toMatchObject({ worktreePath: '/tmp/wt-1', branch: 'feature' })
   })
 })

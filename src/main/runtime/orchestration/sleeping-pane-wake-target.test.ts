@@ -107,7 +107,7 @@ describe('resolveSleepingPaneWakeTarget', () => {
     ).toEqual({ ok: false, reason: 'user-slept' })
   })
 
-  it('omits an absent tab id rather than sending an empty one', () => {
+  it('recovers the current tab from the pane key when persistence has no tab id', () => {
     const record = autoSleptRecord()
     delete record.tabId
     const resolution = resolveSleepingPaneWakeTarget(
@@ -116,7 +116,34 @@ describe('resolveSleepingPaneWakeTarget', () => {
     )
     expect(resolution).toEqual({
       ok: true,
-      request: { paneKey: PANE_KEY, worktreeId: 'wt-1' }
+      request: { paneKey: PANE_KEY, worktreeId: 'wt-1', tabId: 'tab-1' }
     })
+  })
+
+  it('uses the resolved reminted tab instead of a stale persisted tab id', () => {
+    const remintedPaneKey = PANE_KEY.replace('tab-1', 'tab-reminted')
+    const resolution = resolveSleepingPaneWakeTarget(
+      'term_abc',
+      lookups({
+        getPaneKeyForHandle: () => remintedPaneKey,
+        getSleepingRecord: () => autoSleptRecord({ tabId: 'tab-obsolete' })
+      })
+    )
+    expect(resolution).toEqual({
+      ok: true,
+      request: { paneKey: remintedPaneKey, worktreeId: 'wt-1', tabId: 'tab-reminted' }
+    })
+  })
+
+  it('refuses a sleeping record with no routable tab identity', () => {
+    expect(
+      resolveSleepingPaneWakeTarget(
+        'term_abc',
+        lookups({
+          getPaneKeyForHandle: () => 'legacy-unparseable',
+          getSleepingRecord: () => autoSleptRecord()
+        })
+      )
+    ).toEqual({ ok: false, reason: 'no-tab-identity' })
   })
 })

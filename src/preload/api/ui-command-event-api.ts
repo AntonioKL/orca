@@ -168,7 +168,12 @@ export type UiCommandEventApi = {
     callback: (data: RuntimeTerminalCreateRequestPayload) => void
   ) => () => void
   onRequestTerminalTabMount: (
-    callback: (data: { worktreeId: string; tabId?: string; ptyId?: string }) => void
+    callback: (data: {
+      worktreeId: string
+      tabId?: string
+      ptyId?: string
+      paneKey?: string
+    }) => void
   ) => () => void
   replyTerminalCreate: (reply: TerminalTabCreateReply) => void
   onSplitTerminal: (

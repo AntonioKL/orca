@@ -23,6 +23,7 @@ describe('installWakeHibernatedAgentsListener', () => {
   })
 
   function install(binding: {
+    paneKey?: string
     dispose?: () => void
     wakeHibernatedAgentIfArmed?: (claimed?: Set<string>) => string | null
   }): void {
@@ -71,6 +72,38 @@ describe('installWakeHibernatedAgentsListener', () => {
     install({ wakeHibernatedAgentIfArmed: wake })
     dispatchWake({ worktreeId: 'wt-1', tabId: 'tab-a' })
     expect(wake).toHaveBeenCalledOnce()
+  })
+
+  it('wakes only the addressed pane in a split tab', () => {
+    const firstWake = vi.fn(() => null)
+    const siblingWake = vi.fn(() => null)
+    cleanups.push(
+      installWakeHibernatedAgentsListener({
+        worktreeId: 'wt-1',
+        tabId: 'tab-a',
+        getPanePtyBindings: () => [
+          {
+            dispose: () => {},
+            paneKey: 'tab-a:11111111-1111-4111-8111-111111111111',
+            wakeHibernatedAgentIfArmed: firstWake
+          },
+          {
+            dispose: () => {},
+            paneKey: 'tab-a:22222222-2222-4222-8222-222222222222',
+            wakeHibernatedAgentIfArmed: siblingWake
+          }
+        ]
+      })
+    )
+
+    dispatchWake({
+      worktreeId: 'wt-1',
+      tabId: 'tab-a',
+      paneKey: 'tab-a:11111111-1111-4111-8111-111111111111'
+    })
+
+    expect(firstWake).toHaveBeenCalledOnce()
+    expect(siblingWake).not.toHaveBeenCalled()
   })
 
   it('stops listening after cleanup', () => {

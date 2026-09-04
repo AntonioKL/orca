@@ -1,26 +1,25 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  SLEEPING_PANE_WAKE_QUEUE_LIMIT,
   SLEEPING_PANE_WAKE_SPACING_MS,
   SLEEPING_PANE_WAKE_SUPPRESSION_TTL_MS,
   SleepingPaneWakeScheduler,
   type SleepingPaneWakeRequest
 } from './sleeping-pane-wake-scheduler'
 
-type Timer = { run: () => void; delayMs: number }
+type Timer = { run: () => void; delayMs: number; runAt: number }
 
-function harness(options: { wake?: (request: SleepingPaneWakeRequest) => void } = {}) {
+function harness(options: { wake?: (request: SleepingPaneWakeRequest) => boolean } = {}) {
   let now = 1_000_000
   const woken: SleepingPaneWakeRequest[] = []
   const timers: Timer[] = []
   const scheduler = new SleepingPaneWakeScheduler({
     wake: (request) => {
       woken.push(request)
-      options.wake?.(request)
+      return options.wake?.(request) ?? true
     },
     now: () => now,
     schedule: (run, delayMs) => {
-      timers.push({ run, delayMs })
+      timers.push({ run, delayMs, runAt: now + delayMs })
       return timers.length as unknown as ReturnType<typeof setTimeout>
     },
     cancel: () => undefined
@@ -33,7 +32,9 @@ function harness(options: { wake?: (request: SleepingPaneWakeRequest) => void } 
       now += ms
     },
     fireTimers: () => {
-      const pending = timers.splice(0)
+      const pending = timers.filter((timer) => timer.runAt <= now)
+      const future = timers.filter((timer) => timer.runAt > now)
+      timers.splice(0, timers.length, ...future)
       for (const timer of pending) {
         timer.run()
       }
@@ -68,13 +69,42 @@ describe('SleepingPaneWakeScheduler', () => {
     expect(h.woken).toHaveLength(2)
   })
 
-  it('does not retry a wake that threw', () => {
+  it('self-prunes successful suppression state after the TTL', () => {
+    const h = harness()
+    h.scheduler.request(paneRequest('a'))
+    h.advance(SLEEPING_PANE_WAKE_SUPPRESSION_TTL_MS)
+    h.fireTimers()
+    expect(h.timers).toEqual([])
+  })
+
+  it('automatically retries one failed wake without suppressing it as successful', () => {
+    let attempts = 0
     const h = harness({
       wake: () => {
-        throw new Error('no authoritative window')
+        attempts += 1
+        return attempts > 1
       }
     })
-    expect(() => h.scheduler.request(paneRequest('a'))).not.toThrow()
+    expect(h.scheduler.request(paneRequest('a'))).toBe('queued')
+    h.advance(SLEEPING_PANE_WAKE_SPACING_MS)
+    h.fireTimers()
+    expect(attempts).toBe(2)
+    expect(h.scheduler.request(paneRequest('a'))).toBe('suppressed')
+  })
+
+  it('parks a repeated failure until renderer readiness retries it', () => {
+    let available = false
+    const h = harness({ wake: () => available })
+    expect(h.scheduler.request(paneRequest('a'))).toBe('queued')
+    h.advance(SLEEPING_PANE_WAKE_SPACING_MS)
+    h.fireTimers()
+    expect(h.woken).toHaveLength(2)
+
+    available = true
+    h.scheduler.retryPending()
+    h.advance(SLEEPING_PANE_WAKE_SPACING_MS)
+    h.fireTimers()
+    expect(h.woken).toHaveLength(3)
     expect(h.scheduler.request(paneRequest('a'))).toBe('suppressed')
   })
 
@@ -92,7 +122,6 @@ describe('SleepingPaneWakeScheduler', () => {
     h.advance(SLEEPING_PANE_WAKE_SPACING_MS)
     h.fireTimers()
     expect(h.woken.map((request) => request.paneKey)).toEqual(['a', 'b', 'c'])
-    expect(h.timers).toHaveLength(0)
   })
 
   it('queues each pane once', () => {
@@ -105,13 +134,13 @@ describe('SleepingPaneWakeScheduler', () => {
     expect(h.woken.map((request) => request.paneKey)).toEqual(['a', 'b'])
   })
 
-  it('drops overflow past the queue limit rather than growing without bound', () => {
+  it('retains one queued wake per distinct slept pane instead of dropping accepted mail', () => {
     const h = harness()
     h.scheduler.request(paneRequest('head'))
-    for (let i = 0; i < SLEEPING_PANE_WAKE_QUEUE_LIMIT; i += 1) {
+    for (let i = 0; i < 65; i += 1) {
       expect(h.scheduler.request(paneRequest(`pane-${i}`))).toBe('queued')
     }
-    expect(h.scheduler.request(paneRequest('overflow'))).toBe('dropped')
+    expect(h.scheduler.request(paneRequest('pane-64'))).toBe('suppressed')
   })
 
   it('stops scheduling after dispose', () => {
@@ -129,7 +158,10 @@ describe('SleepingPaneWakeScheduler', () => {
     try {
       const woken: string[] = []
       const scheduler = new SleepingPaneWakeScheduler({
-        wake: (request) => woken.push(request.paneKey)
+        wake: (request) => {
+          woken.push(request.paneKey)
+          return true
+        }
       })
       scheduler.request(paneRequest('a'))
       scheduler.request(paneRequest('b'))
