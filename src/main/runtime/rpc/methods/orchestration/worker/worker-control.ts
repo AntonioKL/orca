@@ -210,7 +210,7 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
                 ? 'exited'
                 : 'unverifiable'
         }
-        return readArchivedWorkerOutput({
+        const archived = await readArchivedWorkerOutput({
           db,
           dispatchId: params.dispatch,
           workerState: worker?.state ?? 'unsupervised',
@@ -220,6 +220,7 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
           limit: params.limit,
           liveness
         })
+        return { ...archived, projection: projectFleetWorker(runtime, db, params.dispatch) }
       }
       const observation = await inspectWorkerTerminal(runtime, db, params.dispatch)
       if (!observation.exact) {
@@ -257,7 +258,8 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
           `Worker Dispatch ${params.dispatch} changed process while output was read.`
         )
       }
-      return output
+      // Two verdicts: status.liveness is the PTY's, the projection is the agent's.
+      return { ...output, projection: projectFleetWorker(runtime, db, params.dispatch) }
     }
   }),
   defineMethod({

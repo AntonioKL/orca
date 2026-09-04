@@ -1,6 +1,39 @@
 import { describe, expect, it } from 'vitest'
+import type { OrchestrationFleetWorker } from '../../../shared/orchestration-fleet-projection'
 import type { OrchestrationWorkerReadResult } from '../../../shared/orchestration-worker-output'
 import { formatWorkerRead, formatWorkerStart } from './worker-output'
+
+function fleetProjection(verdict: 'live' | 'unverifiable' | 'exited'): OrchestrationFleetWorker {
+  return {
+    id: 'dispatch_1',
+    dispatchId: 'dispatch_1',
+    taskId: 'task_1',
+    runId: 'run_1',
+    role: 'worker',
+    parent: null,
+    provider: { id: 'codex', model: null },
+    host: { kind: 'local', id: 'local' },
+    workspace: { id: 'ws_1', kind: 'folder_or_worktree' },
+    stage: { worker: 'ready', dispatch: 'dispatched', detail: null, activity: 'working' },
+    outcome: 'in_progress',
+    liveness:
+      verdict === 'live'
+        ? { verdict, observedAt: 1, source: 'agent_status' }
+        : verdict === 'exited'
+          ? { verdict, source: 'execution_host' }
+          : { verdict, reason: 'missing_status' },
+    evidence: { durable: true, liveStatus: 'fresh', lastObservedAt: 1 },
+    resource: {
+      state: 'owned',
+      id: 'wtr_1',
+      ownerDispatchId: 'dispatch_1',
+      releaseState: 'active',
+      terminalState: null
+    },
+    nextAction: { kind: 'inspect', argv: [] },
+    attention: { categories: [], requiresAction: false }
+  }
+}
 
 describe('worker-start plain formatting', () => {
   it('renders partial effects, residual resources, and exact recovery commands for unknown starts', () => {
@@ -175,7 +208,7 @@ describe('worker-read plain formatting', () => {
     const output = formatWorkerRead({
       dispatchId: 'dispatch_1',
       status: { worker: 'ready', terminal: 'running', liveness: 'live' },
-      projection: { liveness: 'unverifiable' },
+      projection: fleetProjection('unverifiable'),
       source: 'terminal',
       sourceIdentity: 'private-source-identity',
       terminal: {
@@ -188,11 +221,33 @@ describe('worker-read plain formatting', () => {
       cursor: null,
       fallbackReason: null,
       warnings: []
-    } as unknown as OrchestrationWorkerReadResult)
+    })
 
     expect(output).toContain('Terminal liveness: live')
     expect(output).toContain('Agent liveness: unverifiable')
     expect(output).not.toMatch(/^Liveness:/mu)
+  })
+
+  it('omits the agent verdict when the host published no projection', () => {
+    const output = formatWorkerRead({
+      dispatchId: 'dispatch_1',
+      status: { worker: 'ready', terminal: 'running', liveness: 'live' },
+      source: 'terminal',
+      sourceIdentity: 'private-source-identity',
+      terminal: {
+        handle: 'term_worker',
+        status: 'running',
+        tail: ['tail'],
+        truncated: false,
+        nextCursor: null
+      },
+      cursor: null,
+      fallbackReason: null,
+      warnings: []
+    })
+
+    expect(output).toContain('Terminal liveness: live')
+    expect(output).not.toContain('Agent liveness:')
   })
 
   it('distinguishes a released archive read from a live one', () => {

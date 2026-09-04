@@ -77,10 +77,8 @@ function formatWorkerReadDetails(value: OrchestrationWorkerReadResult): string {
   if (value.status?.liveness) {
     lines.push(`Terminal liveness: ${value.status.liveness}`)
   }
-  const agentLiveness = (value as { projection?: { liveness?: string } | null }).projection
-    ?.liveness
-  if (agentLiveness) {
-    lines.push(`Agent liveness: ${agentLiveness}`)
+  if (value.projection) {
+    lines.push(`Agent liveness: ${value.projection.liveness.verdict}`)
   }
   if (value.sourceExact !== undefined) {
     lines.push(`Source exact: ${value.sourceExact}`)
