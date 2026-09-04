@@ -27,7 +27,10 @@ export function useDebouncedSettingsTextDraft(args: {
   const commitRef = useRef(commit)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  commitRef.current = commit
+  // Why an effect, not a render-time write: render must stay pure, and React can replay it.
+  useEffect(() => {
+    commitRef.current = commit
+  }, [commit])
 
   // Why gated on dirty: an external write (another window, a reset) should land in the field, but
   // must not yank characters out from under someone mid-edit.
@@ -65,13 +68,12 @@ export function useDebouncedSettingsTextDraft(args: {
   )
 
   // Why on unmount too: closing the pane mid-word must persist the same value typing it would have.
-  const flushRef = useRef(flush)
-  flushRef.current = flush
+  // `flush` has no dependencies, so this cleanup only ever runs on unmount.
   useEffect(() => {
     return () => {
-      flushRef.current()
+      flush()
     }
-  }, [])
+  }, [flush])
 
   return { value: draft, onChange, onBlur: flush }
 }
