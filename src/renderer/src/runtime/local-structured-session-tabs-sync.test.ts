@@ -34,7 +34,6 @@ const PRIMARY_GROUP = 'primary-group'
 const SECONDARY_GROUP = 'secondary-group'
 
 afterEach(() => {
-  delete (window as unknown as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__
   resetLocalStructuredSessionVersionForTests()
   resetWebSessionFocusIntentForTests()
   resetWebSessionTabsSnapshotFreshnessForTests()
@@ -229,58 +228,6 @@ describe('local structured session tab projection', () => {
       callbacks[0]?.({ ok: false, error: { code: 'runtime_unavailable', message: 'late' } })
       await vi.advanceTimersByTimeAsync(5000)
       expect(subscribe).toHaveBeenCalledTimes(2)
-    } finally {
-      Object.defineProperty(window, 'api', { configurable: true, value: priorApi })
-    }
-  })
-
-  it('refreshes host capabilities and reconnects when the paired client closes a subscription', async () => {
-    vi.useFakeTimers()
-    const priorApi = window.api
-    ;(window as unknown as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ = true
-    const onCloseCallbacks: (() => void)[] = []
-    const subscribe = vi.fn(
-      async (
-        _args: unknown,
-        callbackOrCallbacks: ((response: unknown) => void) | { onClose?: () => void },
-        lifecycle?: { onClose?: () => void }
-      ) => {
-        const callbacks =
-          typeof callbackOrCallbacks === 'function' ? lifecycle : callbackOrCallbacks
-        onCloseCallbacks.push(callbacks?.onClose ?? (() => undefined))
-        return { unsubscribe: vi.fn(), sendBinary: vi.fn() }
-      }
-    )
-    const getStatus = vi
-      .fn()
-      .mockResolvedValue({ capabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY] })
-    Object.defineProperty(window, 'api', {
-      configurable: true,
-      value: {
-        runtime: {
-          getStatus,
-          call: vi.fn().mockResolvedValue({ ok: true, result: { snapshots: [] } })
-        },
-        runtimeEnvironments: {
-          subscribe
-        }
-      }
-    })
-    try {
-      await startLocalStructuredSessionTabsSync({
-        isDisposed: () => false,
-        setUnsubscribe: () => undefined
-      })
-      expect(subscribe).toHaveBeenCalledOnce()
-
-      // Replacing the active paired host closes the child subscription without an RPC end frame.
-      onCloseCallbacks[0]?.()
-      await vi.advanceTimersByTimeAsync(249)
-      expect(subscribe).toHaveBeenCalledOnce()
-      await vi.advanceTimersByTimeAsync(1)
-      await vi.waitFor(() => expect(subscribe).toHaveBeenCalledTimes(2))
-
-      expect(getStatus.mock.calls.length).toBeGreaterThanOrEqual(2)
     } finally {
       Object.defineProperty(window, 'api', { configurable: true, value: priorApi })
     }

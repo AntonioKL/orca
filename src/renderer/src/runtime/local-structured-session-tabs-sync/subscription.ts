@@ -1,8 +1,6 @@
 import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import type { RuntimeMobileSessionTabsResult } from '../../../../shared/runtime-types'
-import type { RuntimeRpcResponse } from '../../../../shared/runtime-rpc-envelope'
 import { refreshLocalRuntimeCapabilities } from '../local-runtime-capabilities'
-import { isWebClientLocation } from '../../lib/web-client-location'
 import {
   isCurrentLocalStructuredSessionGeneration,
   localStructuredSessionGeneration
@@ -41,17 +39,6 @@ export async function startLocalStructuredSessionTabsSync(args: {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let reconnectAttempt = 0
   let activeHandle: { unsubscribe: () => void } | null = null
-  const handleSubscriptionTermination = (): void => {
-    if (!isCurrent()) {
-      return
-    }
-    subscriptionGeneration += 1
-    if (activeHandle !== null) {
-      activeHandle.unsubscribe()
-      activeHandle = null
-    }
-    scheduleSubscribeRetry()
-  }
   const scheduleSubscribeRetry = (): void => {
     if (!isCurrent() || reconnectTimer !== null) {
       return
@@ -60,8 +47,7 @@ export async function startLocalStructuredSessionTabsSync(args: {
     reconnectAttempt += 1
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null
-      void refreshLocalRuntimeCapabilities()
-        .then(() => refreshLocalStructuredSessionTabs(syncGeneration))
+      void refreshLocalStructuredSessionTabs(syncGeneration)
         .catch((error) => console.warn('[structured-session-tabs] resync failed', error))
         .finally(() => {
           if (isCurrent()) {
@@ -79,35 +65,42 @@ export async function startLocalStructuredSessionTabsSync(args: {
     }
     const generation = ++subscriptionGeneration
     let handle: { unsubscribe: () => void } | null = null
-    const onResponse = (response: RuntimeRpcResponse<unknown>): void => {
-      if (!isCurrent() || generation !== subscriptionGeneration) {
-        return
+    handle = await window.api.runtime.subscribe(
+      { method: 'session.tabs.subscribeAll', params: {} },
+      (response) => {
+        if (!isCurrent() || generation !== subscriptionGeneration) {
+          return
+        }
+        if (!response.ok) {
+          // A streaming RPC can terminate with an error response before its
+          // handle resolves; fence that generation and retry the subscription.
+          subscriptionGeneration += 1
+          handle?.unsubscribe()
+          if (activeHandle === handle) {
+            activeHandle = null
+          }
+          scheduleSubscribeRetry()
+          return
+        }
+        const event = response.result as SessionTabsEvent
+        if (event.type === 'snapshots') {
+          applyStructuredSessionTabSnapshots(event.snapshots)
+        } else if (event.type === 'snapshot' || event.type === 'updated') {
+          applyStructuredSessionTabSnapshots([event])
+        } else if (event.type === 'end' && generation === subscriptionGeneration) {
+          // Reattach with one refresh so a runtime-restart boundary cannot strand stale tabs.
+          subscriptionGeneration += 1
+          handle?.unsubscribe()
+          if (activeHandle === handle) {
+            activeHandle = null
+          }
+          if (reconnectTimer !== null) {
+            clearTimeout(reconnectTimer)
+          }
+          scheduleSubscribeRetry()
+        }
       }
-      if (!response.ok) {
-        // A streaming RPC can terminate with an error response before its
-        // handle resolves; fence that generation and retry the subscription.
-        handleSubscriptionTermination()
-        return
-      }
-      const event = response.result as SessionTabsEvent
-      if (event.type === 'snapshots') {
-        applyStructuredSessionTabSnapshots(event.snapshots)
-      } else if (event.type === 'snapshot' || event.type === 'updated') {
-        applyStructuredSessionTabSnapshots([event])
-      } else if (event.type === 'end' && generation === subscriptionGeneration) {
-        // Reattach with one refresh so a runtime-restart boundary cannot strand stale tabs.
-        handleSubscriptionTermination()
-      }
-    }
-    handle = isWebClientLocation()
-      ? await window.api.runtimeEnvironments.subscribe(
-          { selector: 'active', method: 'session.tabs.subscribeAll', params: {} },
-          { onResponse, onClose: handleSubscriptionTermination }
-        )
-      : await window.api.runtime.subscribe(
-          { method: 'session.tabs.subscribeAll', params: {} },
-          onResponse
-        )
+    )
     if (!isCurrent() || generation !== subscriptionGeneration) {
       handle.unsubscribe()
     } else {
