@@ -22,6 +22,10 @@ import { parseRuntimeStatusCapabilities } from '../transport/runtime-capability-
 import { projectHostSessionRuntimeCapabilities } from '../session/host-session-runtime-capabilities'
 import { loadMobileNewTabAgentOptions } from '../session/mobile-new-tab-agent-loader'
 import type { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
+import {
+  confineMobileWebBrowserFileUrl,
+  isMobileWebBrowserFileUrl
+} from './mobile-web-browser-file-url-confinement'
 import type { MobileWebNativeChatAuthority } from './mobile-web-native-chat-authority'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 import { mobileWebSessionSnapshot } from './mobile-web-session-snapshot'
@@ -176,9 +180,16 @@ export async function executeMobileWebSessionOperation(args: {
   if (args.operation === 'createBrowser') {
     const payload = MobileWebSessionBrowserCreatePayloadSchema.parse(args.payload)
     const hostWorkspaceId = args.workspaceAuthority.hostWorkspaceId(payload.workspaceId)
+    const url = isMobileWebBrowserFileUrl(payload.url)
+      ? await confineMobileWebBrowserFileUrl({
+          url: payload.url,
+          hostWorkspaceId,
+          client: args.client
+        })
+      : payload.url
     const response = await args.client.sendRequest('browser.tabCreate', {
       worktree: `id:${hostWorkspaceId}`,
-      url: payload.url,
+      url,
       activate: true
     })
     if (!response.ok) {
