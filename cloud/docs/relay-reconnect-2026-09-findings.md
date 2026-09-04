@@ -24,7 +24,7 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | c7 `canary-apply` | **Succeeded.** Dispatched 06:07:15Z; drain 06:10Z; MIG recreate 06:16–06:23Z; new image listening 06:23:42Z; verify + trust proof passed; restored to `admission=general` 06:25:21Z; canary authority sealed. c7 is on `85bf6799…`. | run 33843071283 |
 | PR #18581 doc reconcile (Aug 23 figure: 2,200–3,000 raw log lines vs 1,510 on the gate metric) | **Merged** | https://github.com/stablyai/orca/pull/18581 |
 | Same-cap `verify` c7 target=519f4914 rollback=85bf6799, gen 112 | **Passed** (read-only) | run 33856355648 |
-| Monitor dry-run #7 (gen 112) | Dispatched 09:04:25Z at main 766b5b153c after fleet refill to 14,248 and Cloud SQL CPU < 0.75; verdict ~09:22Z | run 33856521278 |
+| Monitor dry-run #7 (gen 112) | Froze at sample 1 (09:05:31Z): `director.errors` 4 > 0, the four 2.0 s pg-connect 500s from the 09:00 cascade still inside the 5-min delta window. Dispatched 4 min too early. | run 33856521278 |
 | Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
 | PR #18606 lock removal (root cause) | **Merged** 09:2xZ as 7b108abf71 after review, fix, re-verify; CI green | https://github.com/stablyai/orca/pull/18606 |
 | Image publish for 7b108abf71 | **Done** 08:36:49Z run 33854111305: `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` | |
