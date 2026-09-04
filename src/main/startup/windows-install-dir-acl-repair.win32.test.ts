@@ -112,6 +112,13 @@ describeOnWindows('install-dir package ACL repair against the real icacls', () =
 
     // A directory grant is not enough: the file carries its own DACL.
     expect((await icacls(moduleFile)).out).toMatch(RESTRICTED_PACKAGES_NAME)
+    // The /T pass must also reach a NESTED protected file — the shape app.asar.unpacked
+    // and node_modules actually have.
+    expect((await icacls(trapFile)).out).toMatch(RESTRICTED_PACKAGES_NAME)
+    // And the (OI)(CI) root grant exists so files a later update writes inherit it.
+    const updateFile = join(installDir, 'resources', 'added-by-update.dll')
+    writeFileSync(updateFile, 'binary')
+    expect((await icacls(updateFile)).out).toMatch(RESTRICTED_PACKAGES_NAME)
     expect((await probeVerdict()).matchesPoisonSignature).toBe(false)
   })
 })
