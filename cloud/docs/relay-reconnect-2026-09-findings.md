@@ -180,7 +180,11 @@ Owner: "feel free to improve operations to make things more effective ... contin
 until this process is complete." Owner has had multi-day experiences with cell rolls and does not want a
 9-hour sequential roll.
 
-1. **Lock-removal PR** (root cause). Make `activateControl` superseded-control cleanup, `acquireActivity`
+1. **Lock-removal PR** (root cause). *Status 07:20Z: committed 5a6e4754d7 on branch
+   `relay-single-row-reservation` (worktree /tmp/wt-retries-bar). 4 call sites converted; census updated;
+   new `control-rebind-inventory-lock-postgres.test.ts` passes on pg17:55440 and fails with the lock
+   re-added; 479 SQLite unit tests green; tsc clean. Opus adversarial review + full Postgres smoke running.
+   Not yet pushed.* Make `activateControl` superseded-control cleanup, `acquireActivity`
    existing-lease branch, and `changeActivity` use the existing single-row
    `adjustCellReservationAtomically` instead of the 23-row `lockCellInventory`. Keep the global lock only
    for placement (`resolve`/assignment) and sweeps. Real-Postgres contention test on port 55440.
