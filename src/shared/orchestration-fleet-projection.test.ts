@@ -420,6 +420,43 @@ describe('fleet liveness and attention after a host verdict', () => {
     })
   })
 
+  it('refuses to certify a process_exited stage whose cause was never observed', () => {
+    const projected = projectOrchestrationFleet({
+      workers: [
+        worker('1', {
+          workerStage: 'process_exited',
+          workerState: 'failed',
+          terminationReason: 'unknown'
+        })
+      ],
+      statuses: [],
+      now: 10_000
+    })
+    expect(projected.workers[0]!.liveness).toEqual({
+      verdict: 'unverifiable',
+      reason: 'missing_status'
+    })
+    expect(projected.workers[0]!.nextAction.kind).toBe('inspect')
+  })
+
+  it('certifies a process_exited stage whose exit was observed', () => {
+    const projected = projectOrchestrationFleet({
+      workers: [
+        worker('1', {
+          workerStage: 'process_exited',
+          workerState: 'failed',
+          terminationReason: 'exited'
+        })
+      ],
+      statuses: [],
+      now: 10_000
+    })
+    expect(projected.workers[0]!.liveness).toEqual({
+      verdict: 'exited',
+      source: 'execution_host'
+    })
+  })
+
   it('keeps an unverifiable worker on inspect: absence is never authority to stop', () => {
     const now = 10 * AGENT_STATUS_STALE_AFTER_MS
     const projected = projectOrchestrationFleet({

@@ -26,7 +26,10 @@ const SETTLED_WORKER_STATES = new Set(['succeeded', 'failed', 'stopped', 'abando
  *  `unknown` is a death certificate — regardless of which state the worker settled into. */
 function hasCertifiedExit(worker: FleetLivenessSubject): boolean {
   return (
-    worker.workerStage === 'process_exited' ||
+    // `process_exited` is written from the same cause as the reason beside it, and
+    // `unknown` there means a stop was issued and no exit was ever observed. A null
+    // reason is a pre-v29 row whose stage write was the only exit record.
+    (worker.workerStage === 'process_exited' && worker.terminationReason !== 'unknown') ||
     worker.terminationReason === 'operator_close' ||
     worker.terminationReason === 'signaled' ||
     worker.terminationReason === 'exited'
