@@ -77,7 +77,7 @@ describe('orchestration.check on a re-attached Dispatch', () => {
 
     await expect(check(PANE_A, { ack: staleDelivery })).rejects.toMatchObject({
       code: 'consumer_fenced',
-      message: expect.stringContaining('re-attached to another worker')
+      message: expect.stringContaining('no longer owns its Dispatch')
     })
     expect(db.getUnreadMessages(`dispatch:${dispatchId}`)).toHaveLength(1)
   })
@@ -115,7 +115,7 @@ describe('orchestration.check on a re-attached Dispatch', () => {
 
     await expect(check(PANE_A)).rejects.toMatchObject({
       code: 'consumer_fenced',
-      message: expect.stringContaining('re-attached to another worker')
+      message: expect.stringContaining('no longer owns its Dispatch')
     })
     expect(db.getUnreadMessages(`dispatch:${dispatchId}`)).toHaveLength(1)
 

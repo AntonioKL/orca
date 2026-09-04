@@ -3,7 +3,7 @@ import { OrchestrationError } from '../../../../orchestration/orchestration-erro
 import { isEquivalentPaneKey } from '../../../../orchestration/db/pane-key-match'
 
 export const DISPATCH_FENCED_MESSAGE =
-  'This Dispatch was re-attached to another worker; this process no longer owns its mailbox.'
+  'This process no longer owns its Dispatch: the Attempt was re-attached to another worker or settled. Stop; do not send worker_done and do not retry the check.'
 
 export function dispatchFenced(): OrchestrationError {
   return new OrchestrationError('consumer_fenced', DISPATCH_FENCED_MESSAGE)

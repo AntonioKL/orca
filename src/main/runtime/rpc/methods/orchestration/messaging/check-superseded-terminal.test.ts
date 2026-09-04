@@ -65,7 +65,7 @@ describe('orchestration.check from a terminal whose Attempt was superseded', () 
 
     await expect(check('term_old', PANE_OLD)).rejects.toMatchObject({
       code: 'consumer_fenced',
-      message: expect.stringContaining('no longer owns its mailbox')
+      message: expect.stringContaining('no longer owns its Dispatch')
     })
   })
 
@@ -90,6 +90,18 @@ describe('orchestration.check from a terminal whose Attempt was superseded', () 
     db.failDispatch(dispatch.id, 'worker terminal closed')
 
     await expect(check('term_old', PANE_OLD)).rejects.toMatchObject({ code: 'consumer_fenced' })
+  })
+
+  // A terminal that lost its pane binding needs the rebind recovery, not the stop instruction.
+  it('reports a paneless caller as stable_pane_required before the settled-Attempt fence', async () => {
+    ;({ db, ctx } = h.setup())
+    const task = db.createTask({ spec: 'work that failed on a pane that is gone' })
+    const dispatch = createRootDispatch(db, task.id, 'term_old', PANE_OLD)
+    db.failDispatch(dispatch.id, 'worker terminal closed')
+
+    await expect(
+      h.call('orchestration.check', { terminal: 'term_old' }, ctx)
+    ).rejects.toMatchObject({ code: 'stable_pane_required' })
   })
 
   it('keeps serving direct mail to a terminal whose Attempt completed normally', async () => {
