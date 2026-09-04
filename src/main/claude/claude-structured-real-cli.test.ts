@@ -127,6 +127,45 @@ describe.skipIf(!realClaudeAvailable)('Claude structured real CLI handshake', ()
     10_000
   )
 
+  // Unit tests can only pin the shape we read, which is exactly how the blank
+  // Effort pill survived every gate: the fixture invented an `effortLevel` on a
+  // frame the CLI does not send. This asserts both halves against the live
+  // binary — that get_settings reports the effort, and that init does not.
+  it.skipIf(!realClaudeAuthenticated)(
+    'reports the current effort through get_settings and never on the init frame',
+    async () => {
+      const providerSessionId = randomUUID()
+      const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
+      const events: ClaudeStructuredSessionEvent[] = []
+      const adapter = realAdapter(providerSessionId, claudeConfigDir, events)
+
+      try {
+        await adapter.acquire({
+          identity: identity(providerSessionId),
+          fence: 1,
+          spawnToken: 'real-cli-effort'
+        })
+        const published = events.flatMap((event) =>
+          event.type === 'message' ? [event.message] : []
+        )
+        const options = await adapter.readOptions({ sessionId: 'real-cli-handshake', fence: 1 })
+
+        expect(published.length).toBeGreaterThan(0)
+        // Not just the init frame: no frame the CLI publishes carries an effort
+        // at all. Goes red the day one does, which is when the simpler fix
+        // becomes available. Which frame proves the session varies by host, so
+        // this asserts over all of them rather than picking one.
+        expect(published.filter((frame) => 'effortLevel' in frame)).toEqual([])
+        // Goes red if `effective.effortLevel` is renamed or dropped, which no
+        // fixture-backed test can see.
+        expect(options.current.effort).toEqual(expect.any(String))
+      } finally {
+        await adapter.closeAll()
+      }
+    },
+    15_000
+  )
+
   // Mobile native chat never reads the structured journal — it reads the CLI's own
   // transcript through native-chat/session-file-resolver.ts. So this resolves the way
   // transcript-read-cache.ts:104 does, with NO root override, and checks the answer
