@@ -211,6 +211,8 @@ immediately so the bar can be re-tightened after the fleet is on the 500 ms lock
 - Confounder: c10 (us-central1, instance 2803000337345335589) crashed 06:09:56Z on the old-image class
   (Node.js banner + container die), so ~1,600 hosts re-dialed in the same minute, not ~800. Coincidental;
   the fleet has one of these every ~15 min.
+- Recovery: 06:13 903 / 06:14 1471 assign 200s from 640 distinct desktop IPs; 503s 78 -> 183 -> 29/min.
+  No cell crash 06:12–06:16Z. Drain step passed ~06:16Z; template/MIG apply started.
 - Implication for the batch phase: every drain will push director concurrency past the monitor's 64 bar
   for ~1-2 min. The batch job rechecks safety *before* it drains (read-only step), so that is fine per wave,
   but never run a monitor dry-run concurrently with a wave, and prefer batches of 2 over 4 until the fleet
