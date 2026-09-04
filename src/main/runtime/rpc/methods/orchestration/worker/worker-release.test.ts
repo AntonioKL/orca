@@ -181,8 +181,10 @@ describe('orchestration worker release', () => {
     })
   })
 
+  // A stopped/abandoned worker never reaches `release_state = 'requested'`, so no archive can
+  // ever exist for it; refusing the release left the owned pane retained forever.
   it.each(['stopped', 'abandoned'] as const)(
-    'refuses to settle a dead %s worker whose output was never archived',
+    'releases a dead %s worker whose output could never be archived',
     async (state) => {
       h.setup()
       const { dispatchId } = await h.startWorker()
@@ -197,11 +199,39 @@ describe('orchestration worker release', () => {
       await expect(
         h.call('orchestration.workerRelease', { dispatch: dispatchId })
       ).resolves.toMatchObject({
+        state: 'released',
+        processAction: 'none',
+        archive: { status: 'unavailable' }
+      })
+      expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
+      expect(h.db.getWorkerTerminalResourceByOwner(dispatchId)).toMatchObject({
+        ownership_state: 'released',
+        release_state: 'released',
+        archive_status: 'unavailable'
+      })
+    }
+  )
+
+  it.each(['stopped', 'abandoned'] as const)(
+    'keeps a dead %s worker retained while its process is still unproven',
+    async (state) => {
+      h.setup()
+      const { dispatchId } = await h.startWorker()
+      if (state === 'stopped') {
+        h.db.beginWorkerStop(dispatchId, h.runtime.getRuntimeId())
+        h.db.settleWorkerStop(dispatchId)
+      } else {
+        h.db.abandonWorkerDispatch(dispatchId)
+      }
+      h.inspectProcessLiveness.mockResolvedValue('unverifiable')
+
+      await expect(
+        h.call('orchestration.workerRelease', { dispatch: dispatchId })
+      ).resolves.toMatchObject({
         state: 'retained',
         reason: 'identity_unproven',
         processAction: 'none'
       })
-      expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
       expect(h.db.getWorkerTerminalResourceByOwner(dispatchId)?.release_state).not.toBe('released')
     }
   )

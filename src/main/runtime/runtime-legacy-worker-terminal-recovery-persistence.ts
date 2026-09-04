@@ -18,7 +18,9 @@ export class RuntimeLegacyWorkerTerminalRecoveryPersistence {
   constructor(
     private readonly getStore: () => RuntimeStore | null,
     private readonly getDb: () => OrchestrationDb,
-    private readonly getHostId: (worktreeId: string) => ExecutionHostId | null
+    private readonly getHostId: (worktreeId: string) => ExecutionHostId | null,
+    /** The store write only reaches the next app start; a live renderer holds its own copy. */
+    private readonly notifyFenceChanged?: (paneKey: string, blocked: boolean) => void
   ) {}
 
   prepare(): LegacyWorkerTerminalRecoveryPlan {
@@ -41,6 +43,7 @@ export class RuntimeLegacyWorkerTerminalRecoveryPersistence {
       { current: WorkspaceSessionState; next: WorkspaceSessionState }
     >()
     const changedHostIds = new Set<ExecutionHostId>()
+    const fenceChanges: [string, boolean][] = []
     for (const blocked of plan.blockedPanes) {
       let hostIds: ExecutionHostId[]
       try {
@@ -79,9 +82,10 @@ export class RuntimeLegacyWorkerTerminalRecoveryPersistence {
           [blocked.paneKey]: { ...record, automaticResumeBlockedBy: 'legacy-orchestration-worker' }
         }
         changedHostIds.add(hostId)
+        fenceChanges.push([blocked.paneKey, true])
       }
     }
-    this.liftRetiredFences(store, plan, sessions, changedHostIds)
+    this.liftRetiredFences(store, plan, sessions, changedHostIds, fenceChanges)
     const changed = [...sessions].filter(([hostId]) => changedHostIds.has(hostId))
     if (changed.length === 0) {
       return plan
@@ -92,6 +96,10 @@ export class RuntimeLegacyWorkerTerminalRecoveryPersistence {
       }
     } catch (error) {
       console.warn('[orchestration] failed to stage legacy worker resume fence', error)
+      return plan
+    }
+    for (const [paneKey, blocked] of fenceChanges) {
+      this.notifyFenceChanged?.(paneKey, blocked)
     }
     return plan
   }
@@ -103,7 +111,8 @@ export class RuntimeLegacyWorkerTerminalRecoveryPersistence {
     store: RuntimeStore,
     plan: LegacyWorkerTerminalRecoveryPlan,
     sessions: Map<ExecutionHostId, { current: WorkspaceSessionState; next: WorkspaceSessionState }>,
-    changedHostIds: Set<ExecutionHostId>
+    changedHostIds: Set<ExecutionHostId>,
+    fenceChanges: [string, boolean][]
   ): void {
     const blockedPaneKeys = new Set(plan.blockedPanes.map((blocked) => blocked.paneKey))
     for (const hostId of store.getWorkspaceSessionHostIds?.() ?? [LOCAL_EXECUTION_HOST_ID]) {
@@ -130,6 +139,7 @@ export class RuntimeLegacyWorkerTerminalRecoveryPersistence {
       for (const [paneKey, record] of retired) {
         const { automaticResumeBlockedBy: _retired, ...unfenced } = record
         next[paneKey] = unfenced
+        fenceChanges.push([paneKey, false])
       }
       state.next.sleepingAgentSessionsByPaneKey = next
       changedHostIds.add(hostId)

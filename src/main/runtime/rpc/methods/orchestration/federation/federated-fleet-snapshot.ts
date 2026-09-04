@@ -48,12 +48,7 @@ export async function readFederatedFleetSnapshots(args: {
   const deadline = Date.now() + FLEET_TOTAL_TIMEOUT_MS
   const results = await mapWithConcurrency(groups, FLEET_HOST_CONCURRENCY, async (group) => {
     const dispatchIds = group.dispatches.map((dispatch) => dispatch.dispatch_id)
-    const observationFences = new Map(
-      group.dispatches.flatMap((dispatch) => {
-        const fence = args.db.captureFederatedDispatchObservationFence(dispatch.dispatch_id)
-        return fence ? [[dispatch.dispatch_id, fence] as const] : []
-      })
-    )
+    const observationFences = args.db.captureFederatedDispatchObservationFences(dispatchIds)
     const error = (code: FederatedFleetHostError['code']): FederatedFleetHostError => ({
       environmentId: group.environmentId,
       name: group.name,
@@ -272,8 +267,13 @@ function groupFederatedDispatches(args: {
   dispatchIds: readonly string[]
 }): HostGroup[] {
   const groups = new Map<string, HostGroup>()
+  const federatedByDispatchId = new Map(
+    args.db
+      .listFederatedDispatchesByIds(args.dispatchIds)
+      .map((dispatch) => [dispatch.dispatch_id, dispatch])
+  )
   for (const dispatchId of args.dispatchIds) {
-    const dispatch = args.db.getFederatedDispatch(dispatchId)
+    const dispatch = federatedByDispatchId.get(dispatchId)
     if (!dispatch) {
       continue
     }

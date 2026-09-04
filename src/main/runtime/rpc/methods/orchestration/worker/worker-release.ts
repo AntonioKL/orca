@@ -13,29 +13,7 @@ import {
 import { WorkerDispatchParams, WorkerRetainParams } from './worker-release-schemas'
 import { sweepSettledWorkerResumeFences } from '../../settled-worker-resume-fence-sweep'
 
-// Release and retain both drop the worker's row from the legacy recovery plan, and a fenced pane
-// refuses a fresh spawn — so the sweep runs after every early return of both methods. workerList
-// is a pure read and is deliberately absent.
-const FENCE_SWEEPING_METHOD_NAMES = new Set([
-  'orchestration.workerRelease',
-  'orchestration.workerRetain'
-])
-
-function sweepingRetiredWorkerResumeFences(method: RpcMethod): RpcMethod {
-  if (!FENCE_SWEEPING_METHOD_NAMES.has(method.name)) {
-    return method
-  }
-  return {
-    ...method,
-    handler: async (params, ctx) => {
-      const result = await method.handler(params, ctx)
-      sweepSettledWorkerResumeFences(ctx.runtime)
-      return result
-    }
-  }
-}
-
-const WORKER_RELEASE_METHODS: RpcMethod[] = [
+export const ORCHESTRATION_WORKER_RELEASE_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'orchestration.workerRelease',
     params: WorkerDispatchParams,
@@ -170,7 +148,3 @@ const WORKER_RELEASE_METHODS: RpcMethod[] = [
     }
   })
 ]
-
-export const ORCHESTRATION_WORKER_RELEASE_METHODS: RpcMethod[] = WORKER_RELEASE_METHODS.map(
-  sweepingRetiredWorkerResumeFences
-)

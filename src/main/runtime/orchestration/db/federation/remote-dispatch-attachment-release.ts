@@ -1,5 +1,7 @@
 import {
+  decideWorkerTerminalRelease,
   WORKER_SETTLED_STATES,
+  WORKER_TERMINAL_RELEASABLE_ROW_SQL,
   type WorkerTerminalResourceRow,
   type WorkerTerminalRetainedReason
 } from '../../worker-terminal-ownership'
@@ -40,7 +42,8 @@ export function requestRemoteAttachmentTerminalRelease(
         ? { disposition: 'retained', resource: transferred, reason: 'ownership_transferred' }
         : { disposition: 'retained', resource: null, reason: 'no_owned_resource' }
     }
-    if (resource.release_state === 'released' || resource.ownership_state === 'released') {
+    const decision = decideWorkerTerminalRelease(resource)
+    if (decision.action === 'already_released') {
       this.db.exec('COMMIT')
       return { disposition: 'already_released', resource }
     }
@@ -48,21 +51,9 @@ export function requestRemoteAttachmentTerminalRelease(
       this.db.exec('COMMIT')
       return { disposition: 'retained', resource, reason: 'identity_unproven' }
     }
-    if (resource.ownership_state === 'external') {
+    if (decision.action === 'retained') {
       this.db.exec('COMMIT')
-      return {
-        disposition: 'retained',
-        resource,
-        reason: (resource.retained_reason as WorkerTerminalRetainedReason) ?? 'external_terminal'
-      }
-    }
-    if (resource.ownership_state === 'user_owned') {
-      this.db.exec('COMMIT')
-      return { disposition: 'retained', resource, reason: 'user_takeover' }
-    }
-    if (resource.ownership_state === 'transferred') {
-      this.db.exec('COMMIT')
-      return { disposition: 'retained', resource, reason: 'ownership_transferred' }
+      return { disposition: 'retained', resource, reason: decision.reason }
     }
     this.db
       .prepare(
@@ -74,7 +65,7 @@ export function requestRemoteAttachmentTerminalRelease(
              retained_reason = NULL,
              release_requested_at = COALESCE(release_requested_at, datetime('now')),
              release_error = NULL, updated_at = datetime('now')
-         WHERE id = ? AND release_state IN ('not_requested', 'retained', 'requested', 'releasing', 'unknown')`
+         WHERE id = ? AND ${WORKER_TERMINAL_RELEASABLE_ROW_SQL}`
       )
       .run(resource.id)
     this.db.exec('COMMIT')

@@ -50,11 +50,46 @@ describe('workerRelease on a retained resource whose process exited', () => {
     }
   )
 
-  it('does not mark released without a durable output archive', async () => {
+  it('records the archive as unavailable rather than retaining the pane forever', async () => {
     const { dispatchId } = await harness.startWorker()
-    // Abandon so release reports `identity_unproven` and keeps the still-owned pane.
+    // Abandoned workers never reach `requested`, the only state that writes an archive.
     expect(harness.db.abandonWorkerDispatch(dispatchId).disposition).toBe('abandoned')
     expect(harness.db.getWorkerTerminalArchive(dispatchId)).toBeFalsy()
+
+    harness.inspectProcessLiveness.mockResolvedValue('exited')
+    const receipt = (await harness.call('orchestration.workerRelease', {
+      dispatch: dispatchId
+    })) as { state: string; archive: { status: string | null } | null }
+
+    expect(receipt.state).toBe('released')
+    expect(receipt.archive?.status).toBe('unavailable')
+  })
+
+  it('exits retention after a recovery abandon even once the user retained it', async () => {
+    const { dispatchId } = await harness.startWorker()
+    harness.db.reconcileMissingWorkerTerminal(dispatchId, 'terminal gone')
+    expect(harness.db.getWorkerDispatch(dispatchId)?.state).toBe('abandoned')
+    harness.inspectProcessLiveness.mockResolvedValue('exited')
+
+    // retain deletes the archive and parks the row in `retained`: still no route back to `requested`.
+    await harness.call('orchestration.workerRetain', { dispatch: dispatchId })
+    const receipt = (await harness.call('orchestration.workerRelease', {
+      dispatch: dispatchId
+    })) as { state: string }
+
+    expect(receipt.state).toBe('released')
+  })
+
+  it('still refuses when an archive names a different resource', async () => {
+    const { dispatchId } = await harness.startWorker()
+    const resource = harness.db.getWorkerTerminalResourceByOwner(dispatchId)!
+    expect(harness.db.abandonWorkerDispatch(dispatchId).disposition).toBe('abandoned')
+    harness.db.storeWorkerTerminalArchive({
+      dispatchId,
+      resourceId: `${resource.id}-other`,
+      kind: 'terminal_tail',
+      content: 'tail'
+    })
 
     harness.inspectProcessLiveness.mockResolvedValue('exited')
     const receipt = (await harness.call('orchestration.workerRelease', {

@@ -91,6 +91,18 @@ export const ORCHESTRATION_DISPATCH_METHODS: RpcMethod[] = [
           `Terminal ${to} has no stable pane/process incarnation for lifecycle authority.`
         )
       }
+      const callerPane = params.from ? runtime.getTerminalPaneKey(params.from) : null
+      if (
+        params.from &&
+        (to === params.from || (assigneePaneKey != null && assigneePaneKey === callerPane))
+      ) {
+        // A coordinator dispatched to itself answers its own preamble forever (worker-start
+        // --terminal is the other door into the same self-adoption).
+        throw new OrchestrationError(
+          'terminal_is_coordinator',
+          `Terminal ${to} is this coordinator's own terminal. Dispatch to a different agent pane, or use worker-start to create one.`
+        )
+      }
 
       revalidateLegacyCoordinator?.()
       const ctx = db.createDispatchContext({

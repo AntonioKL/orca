@@ -386,4 +386,57 @@ describe('fleet liveness and attention after a host verdict', () => {
 
     expect(subject.attention).toEqual({ categories: [], requiresAction: false })
   })
+  it('reports an operator-closed worker as exited, not as absence', () => {
+    const now = 10_000
+    const projected = projectOrchestrationFleet({
+      workers: [
+        worker('1', {
+          workerState: 'failed',
+          workerStage: 'process_exited',
+          dispatchStatus: 'failed',
+          terminationReason: 'operator_close'
+        })
+      ],
+      statuses: [],
+      now
+    })
+    // The same receipt used to carry `observation.status: exited` next to this verdict.
+    expect(projected.workers[0]!.liveness).toEqual({
+      verdict: 'exited',
+      source: 'execution_host'
+    })
+  })
+
+  it('sends a proven-dead worker that never settled to worker-read, not the worker-show loop', () => {
+    const now = 10_000
+    const projected = projectOrchestrationFleet({
+      workers: [worker('1', { workerStage: 'process_exited' })],
+      statuses: [],
+      now
+    })
+    expect(projected.workers[0]!.nextAction).toEqual({
+      kind: 'recover',
+      argv: ['orchestration', 'worker-read', '--dispatch', '1']
+    })
+  })
+
+  it('keeps an unverifiable worker on inspect: absence is never authority to stop', () => {
+    const now = 10 * AGENT_STATUS_STALE_AFTER_MS
+    const projected = projectOrchestrationFleet({
+      workers: [worker('1')],
+      statuses: [status('1', now - AGENT_STATUS_STALE_AFTER_MS - 60_000)],
+      now
+    })
+    expect(projected.workers[0]!.liveness.verdict).toBe('unverifiable')
+    expect(projected.workers[0]!.nextAction.kind).toBe('inspect')
+  })
+
+  it('leaves a worker blocked on a question inspectable rather than recoverable', () => {
+    const projected = projectOrchestrationFleet({
+      workers: [worker('1', { workerStage: 'process_exited', pendingInput: true })],
+      statuses: [],
+      now: 10_000
+    })
+    expect(projected.workers[0]!.nextAction.kind).toBe('inspect')
+  })
 })

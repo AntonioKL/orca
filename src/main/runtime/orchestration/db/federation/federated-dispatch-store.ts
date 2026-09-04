@@ -11,6 +11,22 @@ export function getFederatedDispatch(
     .get(dispatchId) as FederatedDispatchRow | undefined
 }
 
+/** One statement for a whole worker-list page; the per-id lookup was an N+1 over the page. */
+export function listFederatedDispatchesByIds(
+  this: OrchestrationDb,
+  dispatchIds: readonly string[]
+): FederatedDispatchRow[] {
+  if (dispatchIds.length === 0) {
+    return []
+  }
+  return this.db
+    .prepare(
+      `SELECT * FROM federated_dispatches
+        WHERE dispatch_id IN (SELECT value FROM json_each(?))`
+    )
+    .all(JSON.stringify([...dispatchIds])) as FederatedDispatchRow[]
+}
+
 export function listActiveFederatedDispatches(
   this: OrchestrationDb,
   runId?: string
@@ -111,6 +127,7 @@ export function updateFederatedDispatchRuntimeEpoch(
 
 export type FederatedDispatchStoreMethods = {
   getFederatedDispatch: typeof getFederatedDispatch
+  listFederatedDispatchesByIds: typeof listFederatedDispatchesByIds
   listActiveFederatedDispatches: typeof listActiveFederatedDispatches
   findNextTerminalFederatedDispatchPendingAcknowledgment: typeof findNextTerminalFederatedDispatchPendingAcknowledgment
   isFederatedDispatchRelayEligible: typeof isFederatedDispatchRelayEligible
@@ -121,6 +138,7 @@ export type FederatedDispatchStoreMethods = {
 export function attachFederatedDispatchStore(ctor: { prototype: object }): void {
   Object.assign(ctor.prototype, {
     getFederatedDispatch,
+    listFederatedDispatchesByIds,
     listActiveFederatedDispatches,
     findNextTerminalFederatedDispatchPendingAcknowledgment,
     isFederatedDispatchRelayEligible,

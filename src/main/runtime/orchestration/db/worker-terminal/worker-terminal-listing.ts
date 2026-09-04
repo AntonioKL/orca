@@ -6,6 +6,7 @@ import type {
   WorkerTerminalResourceRow,
   WorkerTerminalListState
 } from '../../worker-terminal-ownership'
+import { OrchestrationError } from '../../orchestration-error'
 import type { OrchestrationDb } from '../orchestration-db'
 import {
   getWorkerAttentionFacts,
@@ -46,6 +47,19 @@ export function listWorkerTerminalReleaseBacklog(
         ORDER BY release_requested_at ASC`
     )
     .all() as WorkerTerminalResourceRow[]
+}
+
+export const WORKER_LIST_CURSOR_EXPIRED_MESSAGE =
+  'The worker inventory changed destructively while paging. Restart without --cursor.'
+
+function resolveDispatchRowId(this: OrchestrationDb, after: WorkerTerminalOrderingKey): number {
+  const anchor = this.db
+    .prepare('SELECT rowid AS rowid FROM dispatch_contexts WHERE id = ?')
+    .get(after.dispatchId) as { rowid: number } | undefined
+  if (!anchor) {
+    throw new OrchestrationError('worker_list_cursor_expired', WORKER_LIST_CURSOR_EXPIRED_MESSAGE)
+  }
+  return anchor.rowid
 }
 
 export function listWorkerTerminalResources(
@@ -102,12 +116,12 @@ export function listWorkerTerminalResources(
   }
   if (params.after) {
     // Order and fence must share one key, or a row created between pages moves across the cut.
-    where.push(
-      params.after.databaseId === undefined
-        ? 'd.rowid > (SELECT rowid FROM dispatch_contexts WHERE id = ?)'
-        : 'd.rowid > ?'
-    )
-    values.push(params.after.databaseId ?? params.after.dispatchId)
+    // A pre-v3 cursor carries no rowid, so it has to be resolved from its anchor row; when a
+    // reset deleted that row `rowid > NULL` matched nothing and the page read as a finished,
+    // empty inventory instead of an expired cursor.
+    const anchorRowId = params.after.databaseId ?? resolveDispatchRowId.call(this, params.after)
+    where.push('d.rowid > ?')
+    values.push(anchorRowId)
   }
   let detailWhere = where
   let detailValues = values

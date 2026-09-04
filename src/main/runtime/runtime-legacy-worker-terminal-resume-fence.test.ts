@@ -3,6 +3,8 @@ import { getDefaultWorkspaceSession } from '../../shared/constants'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { OrchestrationDb } from './orchestration/db'
+import { OrcaRuntimeService } from './orca-runtime'
+import { ORCHESTRATION_METHODS } from './rpc/methods/orchestration'
 import { RuntimeLegacyWorkerTerminalRecoveryPersistence } from './runtime-legacy-worker-terminal-recovery-persistence'
 import type { RuntimeStore } from './runtime-store-contract'
 
@@ -34,7 +36,7 @@ describe('settled worker automatic-resume fence persistence', () => {
 
   afterEach(() => db?.close())
 
-  function harness(): {
+  function harness(onFenceChanged?: (paneKey: string, blocked: boolean) => void): {
     db: OrchestrationDb
     taskId: string
     dispatchId: string
@@ -77,7 +79,8 @@ describe('settled worker automatic-resume fence persistence', () => {
       persistence: new RuntimeLegacyWorkerTerminalRecoveryPersistence(
         () => store,
         () => orchestrationDb,
-        () => LOCAL_EXECUTION_HOST_ID
+        () => LOCAL_EXECUTION_HOST_ID,
+        onFenceChanged
       ),
       fence: () => session.sleepingAgentSessionsByPaneKey?.[PANE_KEY]?.automaticResumeBlockedBy
     }
@@ -88,6 +91,16 @@ describe('settled worker automatic-resume fence persistence', () => {
       d.settleWorkerReport({ taskId, dispatchId, outcome: 'succeeded', result: 'done' }).action
     ).toBe('settled')
   }
+
+  it('pushes the fence to the live renderer instead of waiting for the next app start', () => {
+    const fenceChanges: [string, boolean][] = []
+    const h = harness((paneKey, blocked) => fenceChanges.push([paneKey, blocked]))
+    settle(h.db, h.taskId, h.dispatchId)
+
+    h.persistence.prepare()
+
+    expect(fenceChanges).toEqual([[PANE_KEY, true]])
+  })
 
   // The STA-4577 repro: worker_done, no release, restart, open the worktree — the pane still
   // holds a resumable provider session and must not respawn `codex resume`.
@@ -162,5 +175,87 @@ describe('settled worker automatic-resume fence persistence', () => {
       expect.objectContaining({ paneKey: PANE_KEY, settled: false })
     ])
     expect(plan.candidates).toEqual([expect.objectContaining({ dispatchId: h.dispatchId })])
+  })
+})
+
+// STA-4577's other half: settlement with no release and no restart. The stamp only ran at startup
+// and after release/retain/takeover, so reopening the pane in the same session respawned the agent.
+describe('worker_done without a release', () => {
+  let db: OrchestrationDb | undefined
+
+  afterEach(() => db?.close())
+
+  it('fences the pane in the same session', async () => {
+    const orchestrationDb = new OrchestrationDb(':memory:')
+    db = orchestrationDb
+    let session = sessionWithSleepingWorker()
+    const store = {
+      getWorkspaceSession: () => session,
+      setWorkspaceSession: (next: WorkspaceSessionState) => {
+        session = next
+      },
+      getWorkspaceSessionHostIds: () => [LOCAL_EXECUTION_HOST_ID],
+      flushOrThrow: vi.fn()
+    } as unknown as RuntimeStore
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setOrchestrationDb(orchestrationDb)
+    vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) =>
+      handle === 'term_worker' ? PANE_KEY : 'tab_coord:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    )
+    vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockReturnValue('runtime:pty:1')
+    vi.spyOn(runtime, 'notifyMessageArrived').mockImplementation(() => {})
+
+    const run = orchestrationDb.createRun({
+      objective: 'settle without release',
+      coordinatorHandle: 'term_coord',
+      coordinatorPaneKey: 'tab_coord:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    })
+    const task = orchestrationDb.createTask({ spec: 'settle without release', runId: run.id })
+    const started = orchestrationDb.createStartingWorkerDispatch({
+      creator: { kind: 'system' },
+      maxDepth: Number.MAX_SAFE_INTEGER,
+      taskId: task.id,
+      startOptions: {}
+    })
+    orchestrationDb.prepareStartingWorkerAuthority({
+      dispatchId: started.dispatch.id,
+      handle: 'term_worker',
+      paneKey: PANE_KEY,
+      processIncarnation: 'runtime:pty:1',
+      worktreeId: WORKTREE_ID,
+      setupState: 'not_applicable',
+      effects: [],
+      terminalOwnership: 'created'
+    })
+    orchestrationDb.markWorkerDispatchReady(started.dispatch.id)
+    const capability = orchestrationDb.mintDispatchCapability({
+      dispatchId: started.dispatch.id,
+      paneKey: PANE_KEY,
+      processIncarnation: 'runtime:pty:1'
+    })
+    expect(session.sleepingAgentSessionsByPaneKey?.[PANE_KEY]?.automaticResumeBlockedBy).toBe(
+      undefined
+    )
+
+    const send = ORCHESTRATION_METHODS.find((method) => method.name === 'orchestration.send')!
+    await send.handler(
+      send.params!.parse({
+        from: 'term_worker',
+        to: 'term_coord',
+        subject: 'Done',
+        type: 'worker_done',
+        payload: JSON.stringify({
+          taskId: task.id,
+          dispatchId: started.dispatch.id,
+          outcome: 'succeeded'
+        })
+      }),
+      { runtime, orchestrationCapability: capability }
+    )
+
+    expect(orchestrationDb.getWorkerDispatch(started.dispatch.id)?.state).toBe('succeeded')
+    expect(session.sleepingAgentSessionsByPaneKey?.[PANE_KEY]?.automaticResumeBlockedBy).toBe(
+      'legacy-orchestration-worker'
+    )
   })
 })

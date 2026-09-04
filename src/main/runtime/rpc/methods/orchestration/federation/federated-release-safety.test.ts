@@ -81,22 +81,17 @@ describe('federated worker release ownership', () => {
     expect(runtime.closeTerminal).not.toHaveBeenCalled()
   })
 
-  it('closes an exited remote terminal before reporting closed_exited_terminal', async () => {
+  // Host-owned evidence: the execution host certifies this PTY exited.
+  function mockExitedRemoteTerminal(): void {
     vi.mocked(runtime.showTerminal).mockResolvedValue({
       handle: TERMINAL_HANDLE,
       worktreeId: 'repo::remote',
       connected: false,
       status: 'exited'
     } as never)
-    // Host-owned evidence: the execution host certifies this PTY exited.
     vi.mocked(runtime.getTerminalLivenessVerdict).mockReturnValue({
       status: 'exited',
       ptyIds: [TERMINAL_HANDLE]
-    } as never)
-    vi.mocked(runtime.closeTerminal).mockResolvedValue({
-      handle: TERMINAL_HANDLE,
-      tabId: 'tab-remote',
-      ptyKilled: true
     } as never)
     vi.spyOn(runtime, 'readTerminal').mockResolvedValue({
       handle: TERMINAL_HANDLE,
@@ -107,6 +102,15 @@ describe('federated worker release ownership', () => {
       nextCursor: '1',
       limited: false
     } as never)
+  }
+
+  it('closes an exited remote terminal before reporting closed_exited_terminal', async () => {
+    mockExitedRemoteTerminal()
+    vi.mocked(runtime.closeTerminal).mockResolvedValue({
+      handle: TERMINAL_HANDLE,
+      tabId: 'tab-remote',
+      ptyKilled: true
+    } as never)
     createAttachment('ctx_exited', 'created')
     settleAttachment('ctx_exited')
 
@@ -116,6 +120,23 @@ describe('federated worker release ownership', () => {
     })
     expect(runtime.closeTerminal).toHaveBeenCalledWith(TERMINAL_HANDLE)
   })
+
+  it.each([
+    ['terminal_handle_stale', 'released'],
+    ['endpoint is not connected', 'release_pending']
+  ] as const)(
+    'settles a host-certified exit whose close throws %s as %s',
+    async (message, expected) => {
+      mockExitedRemoteTerminal()
+      vi.mocked(runtime.closeTerminal).mockRejectedValue(new Error(message))
+      createAttachment(`ctx_throw_${expected}`, 'created')
+      settleAttachment(`ctx_throw_${expected}`)
+
+      await expect(
+        call('orchestration.federationRelease', `ctx_throw_${expected}`)
+      ).resolves.toMatchObject({ state: expected })
+    }
+  )
 
   it('fails closed for a settled legacy attachment without an ownership lease', async () => {
     createAttachment('ctx_legacy')
