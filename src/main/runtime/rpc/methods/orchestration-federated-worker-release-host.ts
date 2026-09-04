@@ -207,41 +207,43 @@ export async function releaseRemoteAttachment(args: {
       output
     }
   }
-  if (observation.status !== 'exited') {
-    try {
-      const close = await runtime.closeTerminal(observation.terminal.handle)
-      if (!close.ptyKilled) {
-        const reason = describeUnconfirmedAgentStop(close)
-        return {
-          dispatchId: attachment.dispatch_id,
-          state: 'release_unknown',
-          processAction: 'closed_agent_terminal',
-          lastError: reason,
-          recovery: releaseUnknownRecovery(attachment.dispatch_id),
-          archive: archiveSummary(db.markWorkerTerminalReleaseUnknown(resource.id, reason)),
-          output: projectArchivedOutputLiveness(
-            output,
-            close.ptyStopVerdict === 'live' ? 'live' : 'unverifiable'
-          )
-        }
-      }
-    } catch (error) {
-      const closeError = classifyWorkerTerminalCloseError(error)
+  // An exited worker still owns a terminal record and tab on the host; close it before
+  // reporting `closed_exited_terminal`, exactly as the local release path does.
+  try {
+    const close = await runtime.closeTerminal(observation.terminal.handle)
+    // A host-certified exit already proved the process is gone, so a kill that stops nothing
+    // is not new doubt; anything else that survives the close still is.
+    if (!close.ptyKilled && observation.status !== 'exited') {
+      const reason = describeUnconfirmedAgentStop(close)
       return {
         dispatchId: attachment.dispatch_id,
-        state: closeError.transient ? 'release_pending' : 'release_unknown',
-        processAction: 'none',
-        lastError: closeError.reason,
-        recovery: closeError.transient
-          ? TRANSIENT_WORKER_RELEASE_RECOVERY
-          : releaseUnknownRecovery(attachment.dispatch_id),
-        archive: archiveSummary(
-          closeError.transient
-            ? releasing
-            : db.markWorkerTerminalReleaseUnknown(resource.id, closeError.reason)
-        ),
-        output: projectArchivedOutputLiveness(output, 'unverifiable')
+        state: 'release_unknown',
+        processAction: 'closed_agent_terminal',
+        lastError: reason,
+        recovery: releaseUnknownRecovery(attachment.dispatch_id),
+        archive: archiveSummary(db.markWorkerTerminalReleaseUnknown(resource.id, reason)),
+        output: projectArchivedOutputLiveness(
+          output,
+          close.ptyStopVerdict === 'live' ? 'live' : 'unverifiable'
+        )
       }
+    }
+  } catch (error) {
+    const closeError = classifyWorkerTerminalCloseError(error)
+    return {
+      dispatchId: attachment.dispatch_id,
+      state: closeError.transient ? 'release_pending' : 'release_unknown',
+      processAction: 'none',
+      lastError: closeError.reason,
+      recovery: closeError.transient
+        ? TRANSIENT_WORKER_RELEASE_RECOVERY
+        : releaseUnknownRecovery(attachment.dispatch_id),
+      archive: archiveSummary(
+        closeError.transient
+          ? releasing
+          : db.markWorkerTerminalReleaseUnknown(resource.id, closeError.reason)
+      ),
+      output: projectArchivedOutputLiveness(output, 'unverifiable')
     }
   }
   const released = db.settleWorkerTerminalRelease(resource.id)

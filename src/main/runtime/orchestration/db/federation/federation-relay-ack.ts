@@ -53,8 +53,6 @@ export function acknowledgeFederationRelay(
     direction: FederationRelayDirection
     throughSequence: number
     settleRemoteReports?: { sequence: number; outcome?: WorkerReportOutcome }[]
-    /** Current runtime capability; omitted callers retain persisted-protocol behavior. */
-    supportsLifecycleSettlement?: boolean
   }
 ): void {
   this.db.exec('BEGIN IMMEDIATE')
@@ -83,9 +81,7 @@ export function acknowledgeFederationRelay(
     if (
       params.direction === 'to_home' &&
       attachment !== undefined &&
-      (params.supportsLifecycleSettlement ??
-        attachment.protocol_version >=
-          ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION)
+      attachment.protocol_version >= ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION
     ) {
       const acknowledgedReports = this.db
         .prepare(

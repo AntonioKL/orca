@@ -81,6 +81,42 @@ describe('federated worker release ownership', () => {
     expect(runtime.closeTerminal).not.toHaveBeenCalled()
   })
 
+  it('closes an exited remote terminal before reporting closed_exited_terminal', async () => {
+    vi.mocked(runtime.showTerminal).mockResolvedValue({
+      handle: TERMINAL_HANDLE,
+      worktreeId: 'repo::remote',
+      connected: false,
+      status: 'exited'
+    } as never)
+    // Host-owned evidence: the execution host certifies this PTY exited.
+    vi.mocked(runtime.getTerminalLivenessVerdict).mockReturnValue({
+      status: 'exited',
+      ptyIds: [TERMINAL_HANDLE]
+    } as never)
+    vi.mocked(runtime.closeTerminal).mockResolvedValue({
+      handle: TERMINAL_HANDLE,
+      tabId: 'tab-remote',
+      ptyKilled: true
+    } as never)
+    vi.spyOn(runtime, 'readTerminal').mockResolvedValue({
+      handle: TERMINAL_HANDLE,
+      status: 'exited',
+      tail: ['worker output'],
+      truncated: false,
+      entries: [{ cursor: 1, text: 'worker output' }],
+      nextCursor: '1',
+      limited: false
+    } as never)
+    createAttachment('ctx_exited', 'created')
+    settleAttachment('ctx_exited')
+
+    await expect(call('orchestration.federationRelease', 'ctx_exited')).resolves.toMatchObject({
+      state: 'released',
+      processAction: 'closed_exited_terminal'
+    })
+    expect(runtime.closeTerminal).toHaveBeenCalledWith(TERMINAL_HANDLE)
+  })
+
   it('fails closed for a settled legacy attachment without an ownership lease', async () => {
     createAttachment('ctx_legacy')
     settleAttachment('ctx_legacy')

@@ -4,7 +4,6 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { OrchestrationDb } from '../../orchestration/db'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import type { FederatedDispatchRow } from '../../orchestration/types'
-import { getOrchestrationPeerCapabilityCache } from '../../orchestration/orchestration-peer-capability-cache'
 import { projectOrchestrationFleet } from '../../../../shared/orchestration-fleet-projection'
 import {
   applyFederatedFleetObservations,
@@ -61,96 +60,23 @@ describe('federated fleet snapshots', () => {
     expect(result.observations).toHaveLength(101)
   })
 
-  it('keeps a capability retry inside the fleet total deadline', async () => {
-    const dispatch = federatedDispatch('dispatch-deadline', 'peer-deadline', 'epoch-a')
+  it('asks the snapshot method directly instead of probing status.get', async () => {
+    const dispatch = federatedDispatch('dispatch-optimistic', 'peer-optimistic', 'epoch-a')
     const db = {
       getFederatedDispatch: () => dispatch,
       updateFederatedDispatchRuntimeEpoch: vi.fn(),
       ...observationFenceMethods()
     } as unknown as OrchestrationDb
-    const runtime = {
-      resolveOrchestrationWorkerServer: () => ({
-        environmentId: dispatch.environment_id,
-        name: dispatch.environment_name,
-        peerFingerprint: dispatch.peer_fingerprint,
-        pairingRevision: 1
-      }),
-      callOrchestrationWorkerServer: vi.fn()
-    } as unknown as OrcaRuntimeService
-    const cache = getOrchestrationPeerCapabilityCache(runtime)
-    let now = 1_000
-    const dateNow = vi.spyOn(Date, 'now').mockImplementation(() => now)
-    const timeouts: number[] = []
-    let statusCalls = 0
-    ;(runtime.callOrchestrationWorkerServer as ReturnType<typeof vi.fn>).mockImplementation(
-      async (_environmentId: string, method: string, _params: unknown, timeoutMs: number) => {
-        timeouts.push(timeoutMs)
-        if (method === 'status.get') {
-          statusCalls += 1
-          if (statusCalls === 1) {
-            // A concurrent observer notices a restart while this probe is in flight.
-            cache.observeEpoch(dispatch.peer_fingerprint, 'epoch-b')
-            now += 4_900
-            return runtimeStatus('epoch-a')
-          }
-          return runtimeStatus('epoch-b')
-        }
-        return {
-          runtimeEpoch: 'epoch-b',
-          items: [
-            {
-              dispatchId: dispatch.dispatch_id,
-              observation: { status: 'live' as const, exactWorker: true }
-            }
-          ]
-        }
-      }
-    )
-
-    try {
-      const result = await readFederatedFleetSnapshots({
-        runtime,
-        db,
-        dispatchIds: [dispatch.dispatch_id]
-      })
-
-      expect(result.observations.get(dispatch.dispatch_id)).toEqual({
-        status: 'live',
-        exactWorker: true
-      })
-      expect(statusCalls).toBe(2)
-      expect(timeouts).toEqual([3_000, 100, 100])
-    } finally {
-      dateNow.mockRestore()
-    }
-  })
-
-  it('does not grant a snapshot call budget after the fleet deadline expires', async () => {
-    const dispatch = federatedDispatch('dispatch-expired', 'peer-expired', 'epoch-a')
-    const db = {
-      getFederatedDispatch: () => dispatch,
-      updateFederatedDispatchRuntimeEpoch: vi.fn(),
-      ...observationFenceMethods()
-    } as unknown as OrchestrationDb
-    const runtime = {
-      resolveOrchestrationWorkerServer: () => ({
-        environmentId: dispatch.environment_id,
-        name: dispatch.environment_name,
-        peerFingerprint: dispatch.peer_fingerprint,
-        pairingRevision: 1
-      }),
-      callOrchestrationWorkerServer: vi.fn()
-    } as unknown as OrcaRuntimeService
-    let now = 1_000
-    const dateNow = vi.spyOn(Date, 'now').mockImplementation(() => now)
     const methods: string[] = []
-    ;(runtime.callOrchestrationWorkerServer as ReturnType<typeof vi.fn>).mockImplementation(
-      async (_environmentId: string, method: string) => {
+    const runtime = {
+      resolveOrchestrationWorkerServer: () => ({
+        environmentId: dispatch.environment_id,
+        name: dispatch.environment_name,
+        peerFingerprint: dispatch.peer_fingerprint,
+        pairingRevision: 1
+      }),
+      callOrchestrationWorkerServer: vi.fn(async (_environmentId: string, method: string) => {
         methods.push(method)
-        if (method === 'status.get') {
-          now += 5_001
-          return runtimeStatus('epoch-a')
-        }
         return {
           runtimeEpoch: 'epoch-a',
           items: [
@@ -160,21 +86,72 @@ describe('federated fleet snapshots', () => {
             }
           ]
         }
-      }
+      })
+    } as unknown as OrcaRuntimeService
+
+    const result = await readFederatedFleetSnapshots({
+      runtime,
+      db,
+      dispatchIds: [dispatch.dispatch_id]
+    })
+
+    expect(methods).toEqual(['orchestration.federationFleetSnapshot'])
+    expect(result.observations.get(dispatch.dispatch_id)).toEqual({
+      status: 'live',
+      exactWorker: true
+    })
+  })
+
+  it('does not grant a snapshot call budget after the fleet deadline expires', async () => {
+    // Five distinct peers exceed the host concurrency, so the last one only starts after the
+    // first wave has already spent the whole fleet budget.
+    const dispatchIds = Array.from({ length: 5 }, (_, index) => `dispatch-expired-${index}`)
+    const dispatches = new Map(
+      dispatchIds.map((dispatchId) => [
+        dispatchId,
+        {
+          ...federatedDispatch(dispatchId, `peer-${dispatchId}`, 'epoch-a'),
+          environment_id: dispatchId
+        }
+      ])
     )
+    const db = {
+      getFederatedDispatch: (dispatchId: string) => dispatches.get(dispatchId),
+      updateFederatedDispatchRuntimeEpoch: vi.fn(),
+      ...observationFenceMethods()
+    } as unknown as OrchestrationDb
+    let now = 1_000
+    const dateNow = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const runtime = {
+      resolveOrchestrationWorkerServer: (environmentId: string) => ({
+        environmentId,
+        name: 'repointed',
+        peerFingerprint: `peer-${environmentId}`,
+        pairingRevision: 1
+      }),
+      callOrchestrationWorkerServer: vi.fn(
+        async (_environmentId: string, _method: string, params: unknown) => {
+          now += 5_001
+          return {
+            runtimeEpoch: 'epoch-a',
+            items: (params as { dispatchIds: string[] }).dispatchIds.map((dispatchId) => ({
+              dispatchId,
+              observation: { status: 'live' as const, exactWorker: true }
+            }))
+          }
+        }
+      )
+    } as unknown as OrcaRuntimeService
 
     try {
-      const result = await readFederatedFleetSnapshots({
-        runtime,
-        db,
-        dispatchIds: [dispatch.dispatch_id]
-      })
+      const result = await readFederatedFleetSnapshots({ runtime, db, dispatchIds })
 
-      expect(result.observations).toEqual(new Map())
-      expect(result.errors).toEqual([
-        expect.objectContaining({ code: 'host_unavailable', dispatchIds: [dispatch.dispatch_id] })
-      ])
-      expect(methods).toEqual(['status.get'])
+      // Orca never contacted these hosts, so calling them unavailable would fabricate a verdict.
+      expect(result.errors.length).toBeGreaterThan(0)
+      expect(result.errors.map((error) => error.code)).toEqual(
+        result.errors.map(() => 'home_budget_exhausted')
+      )
+      expect(result.errors.flatMap((error) => error.dispatchIds)).toContain('dispatch-expired-4')
     } finally {
       dateNow.mockRestore()
     }
@@ -226,7 +203,7 @@ describe('federated fleet snapshots', () => {
     expect(result.errors).toEqual([
       expect.objectContaining({
         environmentId: 'environment-repointed',
-        code: 'host_unavailable',
+        code: 'peer_changed',
         dispatchIds: ['dispatch-a']
       })
     ])
@@ -335,7 +312,7 @@ describe('federated fleet snapshots', () => {
     expect(updateFederatedDispatchRuntimeEpoch).not.toHaveBeenCalled()
   })
 
-  it('records a method-not-found result at the probed runtime epoch', async () => {
+  it('records a method-not-found result at the pinned runtime epoch', async () => {
     const dispatch = federatedDispatch('dispatch-unsupported', 'peer-a', 'epoch-old')
     const updateFederatedDispatchRuntimeEpoch = vi.fn()
     const db = {
@@ -350,10 +327,7 @@ describe('federated fleet snapshots', () => {
         peerFingerprint: dispatch.peer_fingerprint,
         pairingRevision: 1
       }),
-      callOrchestrationWorkerServer: vi.fn(async (_environmentId: string, method: string) => {
-        if (method === 'status.get') {
-          return runtimeStatus('epoch-new')
-        }
+      callOrchestrationWorkerServer: vi.fn(async () => {
         throw new OrchestrationError('method_not_found', 'fleet snapshot unavailable')
       })
     } as unknown as OrcaRuntimeService
@@ -367,7 +341,7 @@ describe('federated fleet snapshots', () => {
     expect(result.errors).toEqual([expect.objectContaining({ code: 'capability_unsupported' })])
     expect(updateFederatedDispatchRuntimeEpoch).toHaveBeenCalledWith(
       dispatch.dispatch_id,
-      'epoch-new'
+      'epoch-old'
     )
   })
 })

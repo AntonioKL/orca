@@ -19,7 +19,6 @@ export async function resolveFederatedLifecycleSettlementCapability(
     peerFingerprint: federated.peer_fingerprint,
     expectedRuntimeEpoch: federated.remote_runtime_epoch,
     capability: ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY,
-    forceProbe: true,
     probe: () =>
       runtime.callOrchestrationWorkerServer(
         federated.environment_id,

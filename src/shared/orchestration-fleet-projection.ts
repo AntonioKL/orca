@@ -57,6 +57,12 @@ export type FleetLiveness =
         | 'future_status'
         | 'restored_unconfirmed'
         | 'host_unavailable'
+        /** Orca's own fleet budget ran out before it asked the host anything. */
+        | 'home_budget_exhausted'
+        /** The host answered and could not tell; contact was never lost. */
+        | 'host_indeterminate'
+        /** The saved environment now identifies a different Orca server. */
+        | 'peer_changed'
       observedAt?: number
     }
   | { verdict: 'exited'; source: 'resource_release' | 'worker_stop' | 'execution_host' }

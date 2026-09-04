@@ -1,6 +1,5 @@
 import { mapWithConcurrency } from '../../../../shared/map-with-concurrency'
 import { ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
-import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import {
   ORCHESTRATION_FLEET_PAGE_MAX,
   refreshOrchestrationFleetLivenessAttention,
@@ -26,7 +25,7 @@ export type FederatedFleetObservation = {
 export type FederatedFleetHostError = {
   environmentId: string
   name: string
-  code: 'capability_unsupported' | 'host_unavailable'
+  code: 'capability_unsupported' | 'host_unavailable' | 'home_budget_exhausted' | 'peer_changed'
   dispatchIds: string[]
 }
 
@@ -63,7 +62,8 @@ export async function readFederatedFleetSnapshots(args: {
     })
     const remaining = deadline - Date.now()
     if (remaining <= 0) {
-      return { observations: [], error: error('host_unavailable') }
+      // Orca never contacted this host; that is a home-side budget fact, not host silence.
+      return { observations: [], error: error('home_budget_exhausted') }
     }
     const timeoutMs = Math.min(FLEET_HOST_TIMEOUT_MS, remaining)
     const first = group.dispatches[0]
@@ -71,29 +71,15 @@ export async function readFederatedFleetSnapshots(args: {
     let observedCapabilityEpoch: string | null = null
     try {
       const server = resolvePinnedFederatedServer(args.runtime, first)
-      const capability = await cache.resolve({
-        peerFingerprint: first.peer_fingerprint,
-        expectedRuntimeEpoch: first.remote_runtime_epoch,
-        capability: ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY,
-        // Capability negotiation may retry after a peer restart; each probe
-        // must consume the same fleet deadline instead of restarting its budget.
-        probe: async () => {
-          const probeTimeoutMs = Math.min(FLEET_HOST_TIMEOUT_MS, deadline - Date.now())
-          if (probeTimeoutMs <= 0) {
-            throw new Error('Federated fleet deadline exceeded during capability negotiation')
-          }
-          return args.runtime.callOrchestrationWorkerServer(
-            server.environmentId,
-            'status.get',
-            undefined,
-            probeTimeoutMs,
-            undefined,
-            { expectedEnvironmentPairingRevision: server.pairingRevision }
-          ) as Promise<RuntimeStatus>
-        }
-      })
-      observedCapabilityEpoch = capability.runtimeEpoch
-      if (!capability.supported) {
+      // `method_not_found` is the single downgrade signal; a status probe would spend the
+      // fleet budget on a round trip that still misses hosts serving the unadvertised method.
+      const known = cache.knownSupport(
+        first.peer_fingerprint,
+        first.remote_runtime_epoch,
+        ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY
+      )
+      observedCapabilityEpoch = known?.runtimeEpoch ?? first.remote_runtime_epoch
+      if (known?.supported === false) {
         if (observedCapabilityEpoch) {
           projectFleetRuntimeEpochs(args.db, observationFences, observedCapabilityEpoch)
         }
@@ -101,7 +87,7 @@ export async function readFederatedFleetSnapshots(args: {
       }
       const snapshotRemainingMs = deadline - Date.now()
       if (snapshotRemainingMs <= 0) {
-        return { observations: [], error: error('host_unavailable') }
+        return { observations: [], error: error('home_budget_exhausted') }
       }
       const snapshot = (await args.runtime.callOrchestrationWorkerServer(
         server.environmentId,
@@ -155,7 +141,15 @@ export async function readFederatedFleetSnapshots(args: {
         }
         return { observations: [], error: error('capability_unsupported') }
       }
-      return { observations: [], error: error('host_unavailable') }
+      // The environment was repointed at another Orca server; that is an identity fact, not silence.
+      return {
+        observations: [],
+        error: error(
+          caught instanceof OrchestrationError && caught.code === 'peer_changed'
+            ? 'peer_changed'
+            : 'host_unavailable'
+        )
+      }
     }
   })
   const observations = new Map<string, FederatedFleetObservation>()
@@ -203,7 +197,13 @@ export function applyFederatedFleetObservations(
   federated: Awaited<ReturnType<typeof readFederatedFleetSnapshots>>,
   observedAt = Date.now()
 ): void {
-  const unavailableDispatches = new Set(federated.errors.flatMap((error) => error.dispatchIds))
+  const unavailableDispatches = new Map(
+    federated.errors.flatMap((error) =>
+      error.dispatchIds.map(
+        (dispatchId) => [dispatchId, unavailableLivenessReason(error.code)] as const
+      )
+    )
+  )
   for (const worker of fleet.workers) {
     const hostId = federated.hosts.get(worker.dispatchId)
     if (hostId) {
@@ -211,11 +211,12 @@ export function applyFederatedFleetObservations(
     }
     const observation = federated.observations.get(worker.dispatchId)
     if (!observation) {
-      if (unavailableDispatches.has(worker.dispatchId)) {
+      const unavailableReason = unavailableDispatches.get(worker.dispatchId)
+      if (unavailableReason) {
         if (worker.liveness.verdict === 'exited') {
           continue
         }
-        worker.liveness = { verdict: 'unverifiable', reason: 'host_unavailable' }
+        worker.liveness = { verdict: 'unverifiable', reason: unavailableReason }
         worker.evidence.liveStatus = 'unavailable'
         worker.evidence.lastObservedAt = null
         refreshOrchestrationFleetLivenessAttention(worker)
@@ -230,11 +231,39 @@ export function applyFederatedFleetObservations(
         ? { verdict: 'live', observedAt, source: 'execution_host' }
         : observation.status === 'exited'
           ? { verdict: 'exited', source: 'execution_host' }
-          : { verdict: 'unverifiable', reason: 'host_unavailable' }
+          : { verdict: 'unverifiable', reason: hostReportedReason(observation.reason) }
     worker.evidence.liveStatus = observation.status === 'live' ? 'fresh' : 'unavailable'
-    worker.evidence.lastObservedAt = observation.status === 'live' ? observedAt : null
+    // The host answered for both `live` and `exited`, so both carry a real observation time.
+    worker.evidence.lastObservedAt = observation.status === 'unverifiable' ? null : observedAt
     refreshOrchestrationFleetLivenessAttention(worker)
   }
+}
+
+function unavailableLivenessReason(
+  code: FederatedFleetHostError['code']
+): 'home_budget_exhausted' | 'peer_changed' | 'host_unavailable' {
+  return code === 'home_budget_exhausted' || code === 'peer_changed' ? code : 'host_unavailable'
+}
+
+const HOST_REPORTED_REASONS = new Set([
+  'missing_status',
+  'stale_status',
+  'future_status',
+  'restored_unconfirmed'
+])
+
+/** The host answered; contact was never lost, so never relabel its verdict as host_unavailable. */
+function hostReportedReason(
+  reason: string | undefined
+):
+  | 'host_indeterminate'
+  | 'missing_status'
+  | 'stale_status'
+  | 'future_status'
+  | 'restored_unconfirmed' {
+  return reason && HOST_REPORTED_REASONS.has(reason)
+    ? (reason as 'missing_status' | 'stale_status' | 'future_status' | 'restored_unconfirmed')
+    : 'host_indeterminate'
 }
 
 function groupFederatedDispatches(args: {

@@ -46,6 +46,8 @@ export async function releaseFederatedWorker(args: {
   requestId: string
 }): Promise<WorkerReleaseReceipt & { remoteOutput?: unknown }> {
   const cache = getOrchestrationPeerCapabilityCache(args.runtime)
+  // This capability states that the host writes a durable archive before it closes anything;
+  // `method_not_found` cannot express that, so release still asks the advertisement.
   const capability = await cache.resolve({
     peerFingerprint: args.federated.peer_fingerprint,
     expectedRuntimeEpoch: args.federated.remote_runtime_epoch,

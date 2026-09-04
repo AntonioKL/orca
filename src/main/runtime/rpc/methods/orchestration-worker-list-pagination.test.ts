@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import type Database from '../../../sqlite/sync-database'
 import { OrchestrationDb } from '../../orchestration/db'
 import type { FederatedDispatchRow } from '../../orchestration/types'
@@ -180,17 +179,15 @@ describe('orchestration worker-list pagination', () => {
       peerFingerprint: 'peer-remote',
       pairingRevision: 1
     })
-    let resolveStatus!: (status: ReturnType<typeof fleetRuntimeStatus>) => void
-    const status = new Promise<ReturnType<typeof fleetRuntimeStatus>>((resolve) => {
-      resolveStatus = resolve
+    let resolveSnapshot!: () => void
+    const snapshotGate = new Promise<void>((resolve) => {
+      resolveSnapshot = resolve
     })
     const remoteCall = vi
       .spyOn(runtime, 'callOrchestrationWorkerServer')
-      .mockImplementation((_environmentId, method) => {
-        if (method === 'status.get') {
-          return status
-        }
-        return Promise.resolve({
+      .mockImplementation(async () => {
+        await snapshotGate
+        return {
           runtimeEpoch: 'epoch-remote',
           items: [
             {
@@ -198,7 +195,7 @@ describe('orchestration worker-list pagination', () => {
               observation: { status: 'live', exactWorker: true }
             }
           ]
-        })
+        }
       })
 
     const pending = callWorkerList(runtime, {
@@ -210,8 +207,8 @@ describe('orchestration worker-list pagination', () => {
     await vi.waitFor(() =>
       expect(remoteCall).toHaveBeenCalledWith(
         'environment-remote',
-        'status.get',
-        undefined,
+        'orchestration.federationFleetSnapshot',
+        { dispatchIds: ['dispatch-a'] },
         expect.any(Number),
         undefined,
         { expectedEnvironmentPairingRevision: 1 }
@@ -220,7 +217,7 @@ describe('orchestration worker-list pagination', () => {
     for (let call = 0; call < 32; call += 1) {
       await callWorkerList(runtime, { run: run.id, terminalState: 'retained', limit: 1 })
     }
-    resolveStatus(fleetRuntimeStatus())
+    resolveSnapshot()
 
     const first = await pending
     expect(first).toMatchObject({
@@ -418,17 +415,5 @@ function federatedDispatch(dispatchId: string): FederatedDispatchRow {
     to_home_acknowledged_sequence: 0,
     created_at: '2026-08-27 00:00:00',
     updated_at: '2026-08-27 00:00:00'
-  }
-}
-
-function fleetRuntimeStatus() {
-  return {
-    runtimeId: 'epoch-remote',
-    capabilities: [ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY],
-    rendererGraphEpoch: 0,
-    graphStatus: 'ready' as const,
-    authoritativeWindowId: null,
-    liveTabCount: 0,
-    liveLeafCount: 0
   }
 }

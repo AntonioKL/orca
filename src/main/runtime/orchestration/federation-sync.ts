@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import type { OrcaRuntimeService } from '../orca-runtime'
 import type { FederatedLifecycleSettlement } from './federation-lifecycle-settlement'
 import { ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION } from '../../../shared/protocol-version'
@@ -16,14 +17,25 @@ export { parseRelayedMessage } from './federation-sync-message'
 const FEDERATION_PULL_PAGE_SIZE = 50
 const MAX_FEDERATION_PULL_PAGES_PER_SYNC = 6
 
-type PulledRelayItem = {
-  dispatch_id: string
-  direction: 'to_home'
-  sequence: number
-  message_id: string
-  kind: string
-  payload: string
-}
+// Peer payloads are untrusted input: decode them so a malformed page fails as an
+// orchestration error instead of a TypeError deep inside the import loop.
+const PulledRelayPage = z
+  .object({
+    runtimeEpoch: z.string().min(1),
+    items: z.array(
+      z
+        .object({
+          dispatch_id: z.string(),
+          direction: z.literal('to_home'),
+          sequence: z.number(),
+          message_id: z.string(),
+          kind: z.string(),
+          payload: z.string()
+        })
+        .passthrough()
+    )
+  })
+  .passthrough()
 
 export async function syncFederatedDispatch(
   runtime: OrcaRuntimeService,
@@ -77,7 +89,7 @@ async function syncFederatedDispatchPages(
     (federated.protocol_version >= ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION &&
       (federated.to_home_acknowledged_sequence ?? 0) < federated.to_home_imported_sequence)
 
-  const pulled = (await runtime.callOrchestrationWorkerServer(
+  const pulledResponse = await runtime.callOrchestrationWorkerServer(
     federated.environment_id,
     'orchestration.federationPull',
     {
@@ -89,7 +101,15 @@ async function syncFederatedDispatchPages(
     15_000,
     undefined,
     { expectedEnvironmentPairingRevision: currentServer.pairingRevision }
-  )) as { runtimeEpoch: string; items: PulledRelayItem[] }
+  )
+  const parsedPull = PulledRelayPage.safeParse(pulledResponse)
+  if (!parsedPull.success) {
+    throw new OrchestrationError(
+      'invalid_runtime_response',
+      `The execution host returned an invalid federation relay page for ${dispatchId}.`
+    )
+  }
+  const pulled = parsedPull.data
   if (!isCurrent()) {
     return { imported: 0, acknowledgedThrough: federated.to_home_imported_sequence }
   }
