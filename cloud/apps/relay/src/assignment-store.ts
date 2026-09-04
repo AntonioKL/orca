@@ -3262,6 +3262,10 @@ export class RelayAssignmentStore {
         }
         const units = ACTIVITY_REQUEST_UNITS[input.kind]
         if (existing) {
+          // Why: a client-chosen activity id can move between cells, so lock the
+          // one or two rows this path touches in cell_id order, the same order
+          // placement takes the inventory in, and no cycle can form.
+          await this.lockCellRows(transaction, [text(existing, 'cell_id'), input.cellId])
           await this.removeActivityLease(transaction, identity, existing, now)
           await this.adjustCellReservationAtomically(transaction, input.cellId, units)
         }
@@ -6951,6 +6955,19 @@ export class RelayAssignmentStore {
     return rows
   }
 
+  // Per-connection paths touch one or two cells. Locking exactly those rows,
+  // in the same ascending order the inventory lock uses (ORDER BY fixes the
+  // row-lock order), keeps them off the fleet-wide lock without a cycle.
+  private async lockCellRows(database: RelayDatabase, cellIds: string[]): Promise<SqlRow[]> {
+    const distinct = [...new Set(cellIds)]
+    return await database.queryLocked(
+      `SELECT * FROM relay_cells WHERE cell_id IN (${distinct.map(() => '?').join(', ')})
+       ORDER BY cell_id ASC`,
+      distinct,
+      { lockTimeoutMs: CELL_INVENTORY_LOCK_TIMEOUT_MS }
+    )
+  }
+
   private async lockGeneralCellInventory(
     database: RelayDatabase,
     mode: CellInventoryLockMode
@@ -7590,9 +7607,7 @@ export class RelayAssignmentStore {
     // Why: this recomputes one cell's reservation from its leases, so only that
     // row needs to be held; the 23-row inventory lock here serialised every
     // desktop control rebind in the fleet behind every other one.
-    const cellRow = (
-      await database.queryLocked(`SELECT * FROM relay_cells WHERE cell_id = ?`, [cellId])
-    )[0]
+    const cellRow = (await this.lockCellRows(database, [cellId]))[0]
     await database.query(
       `DELETE FROM relay_assignment_activity_leases
        WHERE user_id = ? AND relay_host_id = ? AND activity_kind = 'control'

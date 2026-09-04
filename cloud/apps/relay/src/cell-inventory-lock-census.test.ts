@@ -26,10 +26,11 @@ const CENSUS: CensusEntry[] = [
   { method: 'assignOnce', mode: 'nowait', reach: 'both' },
   { method: 'refreshDrainMigrationLeasesOnce', mode: 'request', reach: 'request' },
   // changeActivity, acquireActivity, activateControl and
-  // removeSupersededSameCellControls adjust exactly one cell's reservation and
-  // no longer take the inventory: a single-row atomic update cannot deadlock
-  // with placement, and the 23-row lock there serialised every reconnect in
-  // the fleet behind every other one.
+  // removeSupersededSameCellControls no longer take the inventory: they lock
+  // only the one or two cell rows they touch, in cell_id order (lockCellRows),
+  // so they cannot cycle with placement's ordered inventory lock, and the
+  // 23-row lock there had serialised every reconnect in the fleet behind every
+  // other one.
   { method: 'startEvacuation', mode: 'request', reach: 'request' },
   { method: 'completeEvacuationFromDeadSourceOnce', mode: 'request', reach: 'request' },
   { method: 'completeEvacuationFromDeadSourceOnce', mode: 'nowait', reach: 'request' },
@@ -50,6 +51,28 @@ const CENSUS: CensusEntry[] = [
   { method: 'releaseExpiredActivity', mode: 'nowait', reach: 'sweep' },
   { method: 'reconcileReservationAccounting', mode: 'pool-default', reach: 'both' },
   { method: 'leastLoadedCell', mode: 'pool-default', reach: 'both' }
+]
+
+// Every inline `FROM relay_cells ... FOR UPDATE` outside the named lock helpers,
+// in source order: whole-table locks in reconciliation and sticky placement,
+// and single-row locks for a cell the method is already scoped to (heartbeat,
+// fence, drain generation, configuration, or a reservation adjust that runs
+// under a lock its caller already holds). A new inline lock fails the census
+// below until it is listed here; per-connection paths that touch more than one
+// cell go through lockCellRows so the order is fixed.
+const INLINE_CELL_LOCK_SITES = [
+  'reconcileCellsWithOptions',
+  'assignStickyOnce',
+  'recordCellHeartbeat',
+  'attestCellFence',
+  'adoptLegacyCellFence',
+  'commitLegacyCellFenceAdoption',
+  'prepareCellFenceAttempt',
+  'attestCellFenceAttempt',
+  'attestCellFenceAttempt',
+  'configureCell',
+  'assertDrainCellGeneration',
+  'adjustCellReservation'
 ]
 
 // The background sweeps, and nothing else. A method reachable from one of these
@@ -149,6 +172,24 @@ describe('cell inventory lock call-site census', () => {
     expect(readCallSites()).toEqual(
       CENSUS.map(({ method, mode }) => ({ method, mode }))
     )
+  })
+
+  // Why: the census only sees lockCellInventory calls, so a hand-written
+  // `relay_cells ... FOR UPDATE` would escape classification entirely.
+  it('routes every relay_cells row lock through a named lock helper', () => {
+    const lines = storeSource()
+    let method = '<module>'
+    const rawSites: string[] = []
+    lines.forEach((line, index) => {
+      const declaration = DECLARATION.exec(line)
+      if (declaration) method = declaration[1]!
+      if (!/queryLocked\(/.test(line)) return
+      const statement = lines.slice(index, index + 4).join(' ')
+      if (!/FROM relay_cells\b/.test(statement)) return
+      if (['lockCellInventory', 'lockGeneralCellInventory', 'lockCellRows'].includes(method)) return
+      rawSites.push(method)
+    })
+    expect(rawSites).toEqual(INLINE_CELL_LOCK_SITES)
   })
 
   it('leaves no call site taking the inventory without naming a mode', () => {
