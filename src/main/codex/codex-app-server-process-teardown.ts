@@ -128,19 +128,25 @@ async function terminatePosixTree(
   if (descendantsExited && snapshot.rootPgid === rootPid) {
     const signalGroup =
       deps.signalProcessGroup ??
-      ((pgid: number, signal: NodeJS.Signals) => {
-        try {
-          process.kill(-pgid, signal)
-        } catch {
-          // Group already exited.
-        }
+      ((pgid: number, signal: NodeJS.Signals) => process.kill(-pgid, signal))
+    let groupSignalled = false
+    try {
+      signalGroup(snapshot.rootPgid, 'SIGKILL')
+      groupSignalled = true
+    } catch {
+      // Group already exited: still the desired outcome, but nothing here
+      // killed it, and a breadcrumb for a kill we never landed is a false
+      // suspect in the render-process-gone window.
+    }
+    if (groupSignalled) {
+      // Outside the try, like terminateDedicatedPosixGroup: that catch is the
+      // already-gone contract, not a breadcrumb handler.
+      recordSelfInitiatedTreeKill({
+        pid: snapshot.rootPgid,
+        site: 'codex-app-server-teardown',
+        scope: 'posix-process-group'
       })
-    signalGroup(snapshot.rootPgid, 'SIGKILL')
-    recordSelfInitiatedTreeKill({
-      pid: snapshot.rootPgid,
-      site: 'codex-app-server-teardown',
-      scope: 'posix-process-group'
-    })
+    }
   }
   if (!descendantsExited) {
     child.kill('SIGCONT')
