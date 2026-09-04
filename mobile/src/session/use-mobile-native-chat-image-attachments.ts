@@ -34,14 +34,16 @@ import { useMobileNativeChatImageUpload } from './use-mobile-native-chat-image-u
 
 type CurrentRef<T> = { readonly current: T }
 type ShowToast = (message: string, durationMs?: number) => void
+
 type Args = {
   readonly client: RpcClient | null
   readonly activeHandleRef: CurrentRef<string | null>
   readonly deviceTokenRef: CurrentRef<string | null>
   readonly getActiveWorktreeConnectionId: () => Promise<string | null>
   readonly connState: ConnectionState
-  /** Active composer identity: chips cannot ride a tab switch into another
-   *  terminal. Null disables attaching. */
+  /** Identity of the active composer surface (same key shape as the drafts hook):
+   *  chips are scoped to the tab that picked them, so a tab switch cannot ride
+   *  one tab's image into another tab's terminal. Null disables attaching. */
   readonly scopeKey: string | null
   /** The native-chat input lease is ready — same gate `handleNativeChatSend` uses. */
   readonly enabled: boolean
@@ -259,6 +261,7 @@ export function useMobileNativeChatImageAttachments({
           await sleep(MOBILE_NATIVE_CHAT_IMAGE_SETTLE_MS)
           // The settle is deliberate pacing, not transport latency — credit it back
           // so a shared budget doesn't charge the text body for the TUI's beat.
+          const textDeadline = deadline + MOBILE_NATIVE_CHAT_IMAGE_SETTLE_MS
           // The paste above targeted `handle`; a tab switch during the settle would
           // route the text + Enter to a different terminal than the images. Abort —
           // the chips keep their scope and a retry's Ctrl+U clears the stale paste.
@@ -271,7 +274,7 @@ export function useMobileNativeChatImageAttachments({
           const outcome = await baseSend(
             text,
             pendingImages.map((attachment) => attachment.previewUri),
-            deadline + MOBILE_NATIVE_CHAT_IMAGE_SETTLE_MS
+            textDeadline
           )
           if (outcome !== 'accepted') {
             // 'rejected' leaves the pasted image path on this input line; 'unknown'
