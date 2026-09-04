@@ -1,8 +1,9 @@
 import { useCallback, useRef, useState } from 'react'
-import { useAppStore } from '../store'
-import { getConnectionId } from '../lib/connection-context'
-import { isRemoteRuntimePtyId } from '@/runtime/runtime-terminal-inspection'
 import { CLOSE_DIALOG_DEBOUNCE_MS } from './terminal-workspace-model'
+import {
+  assessWindowCloseRunningWork,
+  type WindowCloseRunningWork
+} from './terminal/window-close-running-work'
 import type { TerminalWorkspaceProjectionController } from './use-terminal-workspace-projection'
 import { runWithWindowCloseCheckpointScope } from './window-close-request-coordinator'
 import { showShutdownCheckpointFailureToast } from '@/lib/shutdown-checkpoint-failure-toast'
@@ -27,6 +28,14 @@ export function useTerminalEditorCloseFoundation(
     closeDialogDebounceTimersRef.current.add(timer)
   }, [])
   const [windowCloseDialogOpen, setWindowCloseDialogOpen] = useState(false)
+  // Why: "running" and "could not reach the host" are different claims, and telling the user
+  // processes are running when the truth is that a host went quiet is the fabricated certainty
+  // docs/reference/ssh-execution-boundary.md forbids.
+  const [windowCloseDialogKind, setWindowCloseDialogKind] =
+    useState<Exclude<WindowCloseRunningWork['kind'], 'none'>>('running')
+  const pendingWindowCloseDialogRef = useRef<{ requestId?: number } | null>(null)
+  // Ignore stale probe completions so they cannot resolve a newer close request.
+  const windowCloseAssessmentGenerationRef = useRef(0)
   const windowCloseAfterDirtyRef = useRef<{ isQuitting: boolean; requestId?: number } | null>(null)
 
   const confirmNativeWindowClose = useCallback((requestId?: number) => {
@@ -47,35 +56,55 @@ export function useTerminalEditorCloseFoundation(
     window.api.ui.confirmWindowClose()
   }, [])
 
+  const cancelWindowCloseDialog = useCallback(() => {
+    const pendingClose = pendingWindowCloseDialogRef.current
+    pendingWindowCloseDialogRef.current = null
+    setWindowCloseDialogOpen(false)
+    if (pendingClose) {
+      windowCloseAssessmentGenerationRef.current += 1
+      window.api.ui.cancelWindowClose(pendingClose.requestId)
+    }
+  }, [])
+
+  const confirmWindowCloseDialog = useCallback(() => {
+    const pendingClose = pendingWindowCloseDialogRef.current
+    pendingWindowCloseDialogRef.current = null
+    setWindowCloseDialogOpen(false)
+    if (pendingClose) {
+      windowCloseAssessmentGenerationRef.current += 1
+      confirmNativeWindowClose(pendingClose.requestId)
+    }
+  }, [confirmNativeWindowClose])
+
   const proceedToNativeWindowClose = useCallback(
     (isQuitting: boolean, requestId?: number) => {
-      if (!isQuitting) {
-        const state = useAppStore.getState()
-        const localPtyIds = Object.entries(state.tabsByWorktree).flatMap(
-          ([worktreeId, worktreeTabs]) => {
-            const connectionId = getConnectionId(worktreeId)
-            if (connectionId !== null) {
-              return []
-            }
-            return worktreeTabs
-              .flatMap((tab) => state.ptyIdsByTabId[tab.id] ?? [])
-              .filter((ptyId) => !isRemoteRuntimePtyId(ptyId))
+      const assessmentGeneration = ++windowCloseAssessmentGenerationRef.current
+      void assessWindowCloseRunningWork({ isQuitting })
+        .then((runningWork) => {
+          if (assessmentGeneration !== windowCloseAssessmentGenerationRef.current) {
+            return
           }
-        )
-        if (localPtyIds.length > 0) {
-          void Promise.all(localPtyIds.map((id) => window.api.pty.hasChildProcesses(id))).then(
-            (results) => {
-              if (results.some(Boolean)) {
-                setWindowCloseDialogOpen(true)
-              } else {
-                confirmNativeWindowClose(requestId)
-              }
-            }
-          )
-          return
-        }
-      }
-      confirmNativeWindowClose(requestId)
+          if (runningWork.kind === 'none') {
+            pendingWindowCloseDialogRef.current = null
+            setWindowCloseDialogOpen(false)
+            confirmNativeWindowClose(requestId)
+            return
+          }
+          pendingWindowCloseDialogRef.current = { requestId }
+          setWindowCloseDialogKind(runningWork.kind)
+          setWindowCloseDialogOpen(true)
+        })
+        // Why: the assessment must never be able to trap the window. A thrown store read is
+        // not evidence either way, and a close that silently does nothing is unrecoverable
+        // without SIGKILL, so fall through to the close the user actually asked for.
+        .catch(() => {
+          if (assessmentGeneration !== windowCloseAssessmentGenerationRef.current) {
+            return
+          }
+          pendingWindowCloseDialogRef.current = null
+          setWindowCloseDialogOpen(false)
+          confirmNativeWindowClose(requestId)
+        })
     },
     [confirmNativeWindowClose]
   )
@@ -90,7 +119,9 @@ export function useTerminalEditorCloseFoundation(
     closeDialogDebounceTimersRef,
     releaseCloseDialogGuardAfterDebounce,
     windowCloseDialogOpen,
-    setWindowCloseDialogOpen,
+    windowCloseDialogKind,
+    cancelWindowCloseDialog,
+    confirmWindowCloseDialog,
     windowCloseAfterDirtyRef,
     confirmNativeWindowClose,
     proceedToNativeWindowClose

@@ -17,13 +17,14 @@ export function TerminalWorkspaceDialogs({
   controller: TerminalController
 }): React.JSX.Element {
   const {
-    confirmNativeWindowClose,
+    cancelWindowCloseDialog,
+    confirmWindowCloseDialog,
     handleSaveDialogCancel,
     handleSaveDialogDiscard,
     handleSaveDialogSave,
     saveDialogFile,
     saveDialogFileId,
-    setWindowCloseDialogOpen,
+    windowCloseDialogKind,
     windowCloseDialogOpen
   } = controller
   return (
@@ -72,7 +73,7 @@ export function TerminalWorkspaceDialogs({
         open={windowCloseDialogOpen}
         onOpenChange={(open) => {
           if (!open) {
-            setWindowCloseDialogOpen(false)
+            cancelWindowCloseDialog()
           }
         }}
       >
@@ -82,19 +83,19 @@ export function TerminalWorkspaceDialogs({
               {translate('auto.components.Terminal.2fa9c69ff3', 'Close Window?')}
             </DialogTitle>
             <DialogDescription className="text-xs">
-              {translate(
-                'auto.components.Terminal.7958465754',
-                'There are local terminals with running processes. Close the window anyway?'
-              )}
+              {windowCloseDialogKind === 'unverifiable'
+                ? translate(
+                    'auto.components.Terminal.b7c1f0a934',
+                    'A remote host could not be reached, so Orca cannot tell whether work is still running there. Close the window anyway?'
+                  )
+                : translate(
+                    'auto.components.Terminal.7958465754',
+                    'There are terminals with running processes. Close the window anyway?'
+                  )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setWindowCloseDialogOpen(false)}
-            >
+            <Button type="button" variant="outline" size="sm" onClick={cancelWindowCloseDialog}>
               {translate('auto.components.Terminal.f82e9f02df', 'Cancel')}
             </Button>
             <Button
@@ -102,10 +103,7 @@ export function TerminalWorkspaceDialogs({
               variant="destructive"
               size="sm"
               autoFocus
-              onClick={() => {
-                setWindowCloseDialogOpen(false)
-                confirmNativeWindowClose()
-              }}
+              onClick={confirmWindowCloseDialog}
             >
               {translate('auto.components.Terminal.73768427cf', 'Close')}
             </Button>

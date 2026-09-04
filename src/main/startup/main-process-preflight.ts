@@ -49,6 +49,7 @@ import {
 } from './single-instance-lock'
 import { setAppEnvironment } from '../../shared/app-environment'
 import { ElectronAppEnvironment } from '../host/electron-app-environment'
+import { installProcessTreeKillBreadcrumbObserver } from '../crash-reporting/self-initiated-tree-kill-log'
 import { setSecretStore } from '../../shared/secret-store'
 import { ElectronSecretStore } from '../host/electron-secret-store'
 import { setPtyHostBindings } from '../ipc/pty-host-bindings'
@@ -162,6 +163,9 @@ export function runMainProcessPreflight(options: MainProcessPreflightOptions): b
       }
     })
   }
+  // Why before any spawn: `signalProcessTree` is shared with the CLI and relay, so
+  // it can only reach the main-process breadcrumb store through a registered observer.
+  installProcessTreeKillBreadcrumbObserver()
   const isDev = is.dev
   configureDevUserDataPath(isDev)
   configureOrcaUserDataPathEnv()
