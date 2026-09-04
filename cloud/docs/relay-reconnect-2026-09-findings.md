@@ -380,6 +380,13 @@ one value. **Pre-existing bug surfaced:** the deploy script strips every env var
 Terraform-set `ORCA_CLOUD_REFRESH_TOKEN_TTL_DAYS` (from #476) silently reverts to the compiled default on each
 release. Latent only because both defaults are 30. Follow-up: add it to `authEnvironment` + the workflow env.
 
+Monitor probe fix: stablyai/orca PR #18723. A thrown fetch (DNS/TCP/TLS/8 s abort) is now "no reading" and is
+re-asked once after 1 s; only a second throw is `false`. A non-ok HTTP answer is still `false` with no extra
+retry. `latencyMs` is the slowest answering round trip, never a sleep. `requiresReady` is per endpoint: auth
+(no `/ready` by design) is judged on `/health` + latency; director and cells unchanged. No threshold or rule
+touched; `auth.ready` had no consumer. 81/81 relay-ops tests and 9/9 evidence-script tests locally. The monitor
+runs at `main` head, so once merged the next dry-run uses it.
+
 **Landing (2026-09-04 20:50Z–21:02Z, owner: "if you are confident the cloud changes are valid, you can land them"):**
 
 - Merged: orca-cloud #474, #475, #476; stablyai/orca #18693, #18694, #18698. Neither repo has branch
