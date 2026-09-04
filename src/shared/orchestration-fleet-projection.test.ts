@@ -439,4 +439,68 @@ describe('fleet liveness and attention after a host verdict', () => {
     })
     expect(projected.workers[0]!.nextAction.kind).toBe('inspect')
   })
+
+  // The live worker-list row from a stopped worker: the same receipt proved the exit,
+  // called it absence, and pointed back at the command that reported the settlement.
+  it('never contradicts a proven exit on a stopped worker still owning its terminal', () => {
+    const projected = projectOrchestrationFleet({
+      workers: [
+        worker('1', {
+          workerState: 'stopped',
+          dispatchStatus: 'completed',
+          workerStage: 'process_stopped',
+          outcome: 'outcome_unknown',
+          terminalState: 'retained',
+          resource: {
+            id: 'resource-1',
+            ownerDispatchId: '1',
+            worktreeId: 'workspace-1',
+            paneKey: 'tab-1:leaf-1',
+            hostScope: null,
+            ownershipState: 'owned',
+            releaseState: 'active',
+            updatedAt: '2026-09-04T00:00:00.000Z'
+          }
+        })
+      ],
+      statuses: [],
+      now: 10_000
+    })
+    const row = projected.workers[0]!
+
+    expect(row.liveness.verdict).toBe('exited')
+    expect(row.attention.categories).not.toContain('unverifiable')
+    expect(row.attention.requiresAction).toBe(false)
+    expect(row.nextAction).toEqual({
+      kind: 'release',
+      argv: ['orchestration', 'worker-release', '--dispatch', '1']
+    })
+  })
+
+  it('asks nothing more of a settled worker whose terminal is already released', () => {
+    const projected = projectOrchestrationFleet({
+      workers: [
+        worker('1', {
+          workerState: 'stopped',
+          dispatchStatus: 'completed',
+          outcome: 'outcome_unknown',
+          terminalState: 'retained',
+          resource: {
+            id: 'resource-1',
+            ownerDispatchId: '1',
+            worktreeId: 'workspace-1',
+            paneKey: 'tab-1:leaf-1',
+            hostScope: null,
+            ownershipState: 'user_owned',
+            releaseState: 'active',
+            updatedAt: '2026-09-04T00:00:00.000Z'
+          }
+        })
+      ],
+      statuses: [],
+      now: 10_000
+    })
+
+    expect(projected.workers[0]!.nextAction).toEqual({ kind: 'none', argv: [] })
+  })
 })

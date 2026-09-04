@@ -61,7 +61,12 @@ export function projectOrchestrationFleetAttention(
   if (facts.liveness.verdict === 'unverifiable') {
     categories.push(facts.liveness.reason === 'stale_status' ? 'stale' : 'unverifiable')
   }
-  if (facts.outcome === 'outcome_unknown' || facts.outcome === 'finished_unverified') {
+  // A proven exit is evidence, not absence: `unverifiable` beside an `exited` verdict told a
+  // reader to keep waiting on a worker the execution host had already reported gone.
+  if (
+    facts.liveness.verdict !== 'exited' &&
+    (facts.outcome === 'outcome_unknown' || facts.outcome === 'finished_unverified')
+  ) {
     if (!categories.includes('unverifiable')) {
       categories.push('unverifiable')
     }
