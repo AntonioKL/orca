@@ -112,7 +112,8 @@ independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is p
 - [ ] `statement_timeout` on the relay `pg.Pool`, below the control-renewal deadline; DDL on an untimed connection (same pattern as auth #476).
 - [ ] Postgres test on 55440: a held lock fails the query fast and the bounded retry takes over.
 
-### 3.1 Refresh rotation grace window
+### 3.1 Refresh rotation grace window (orca-cloud #478 merged 2026-09-04; deploy pending owner go)
+- [ ] Fix the deploy-script env strip for `ORCA_CLOUD_REFRESH_TOKEN_TTL_DAYS` (pre-existing; found by #478).
 - [ ] `rotateRefreshToken`: if `rotated_at` within 60 s and not revoked, return the existing successor (idempotent), no revoke, no audit.
 - [ ] Outside the window or a third presentation: unchanged (revoke + audit).
 - [ ] Tests: replay inside window returns same successor; outside revokes; concurrent double-present yields one successor.

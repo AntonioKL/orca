@@ -365,6 +365,21 @@ pre-existing failures on a second run); reset the schema between runs. Rollout: 
 #18719 first CI run failed only on `windows-host-job.win32.test.ts` (EPERM on temp-dir cleanup), a Windows
 PTY test the PR does not touch and which no other recent run failed on; rerun dispatched rather than waved.
 
+3.1 grace window: orca-cloud PR #478 merged (not yet deployed; deploy is an owner gate because the startup
+schema apply adds a nullable column to `refresh_tokens` with a brief ACCESS EXCLUSIVE). Semantics: within
+`ORCA_CLOUD_REFRESH_ROTATION_GRACE_MS` (60 s default, 300 s cap, 0 = off) a re-presented rotated token gets the
+SAME successor refresh token + a fresh access token, no revoke, no audit, provided the successor is still the
+live head. Third presentation / outside window / revoked family: unchanged (revoke + audit). Successor plaintext
+is stored sealed (AES-256-GCM, key = HKDF of the predecessor token; the DB never holds the key). Cost stated
+plainly: a stolen token replayed inside 60 s is served once instead of tripping detection; DB-read + stolen
+predecessor recovers the successor offline until pruned. Rotation now runs in one transaction (proved by a
+forced-INSERT-failure rollback test; the 8-way race alone did not kill the non-transactional mutant). Verified
+locally 27/27 incl. the Postgres suite against 55440, and CI ran it on PG 16 and 17 (4/4 each, not skipped).
+Deploy wiring: env is set by BOTH Terraform and the deploy workflow, with a test pinning all three sources to
+one value. **Pre-existing bug surfaced:** the deploy script strips every env var it does not own, so the
+Terraform-set `ORCA_CLOUD_REFRESH_TOKEN_TTL_DAYS` (from #476) silently reverts to the compiled default on each
+release. Latent only because both defaults are 30. Follow-up: add it to `authEnvironment` + the workflow env.
+
 **Landing (2026-09-04 20:50Z–21:02Z, owner: "if you are confident the cloud changes are valid, you can land them"):**
 
 - Merged: orca-cloud #474, #475, #476; stablyai/orca #18693, #18694, #18698. Neither repo has branch
