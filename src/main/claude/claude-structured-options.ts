@@ -79,6 +79,13 @@ export async function setClaudeStructuredOption(
     )
   }
   session.options.set(input.key, input.value)
+  // Only a readback that agreed is adoption evidence; one that could not be taken
+  // records the value but must not also claim the provider vouched for it.
+  if (adopted !== null && adopted === input.value) {
+    session.confirmedOptions.add(input.key)
+  } else {
+    session.confirmedOptions.delete(input.key)
+  }
   return Object.fromEntries(session.options)
 }
 

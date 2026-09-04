@@ -59,6 +59,7 @@ export function createClaudeSessionPublication(input: {
         ...(effort ? { effort } : {})
       },
       reportedModelMutation: 0,
+      confirmedOptions: new Set(effort ? ['effort'] : []),
       restoreSkippedOptions: new Set(),
       translator: input.translator,
       events: input.events
