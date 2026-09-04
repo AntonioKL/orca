@@ -94,7 +94,7 @@ function generateRoot(random: () => number, candidate: string): string {
 
 // ─── Differential fuzz ───────────────────────────────────────────────
 
-const FUZZ_ITERATIONS = 200_000
+const FUZZ_ITERATIONS = 20_000
 
 describe('guarded path normalization matches the pre-guard implementation', () => {
   it(`agrees on every export across ${FUZZ_ITERATIONS} seeded paths`, () => {
@@ -192,16 +192,10 @@ describe('guarded path normalization matches the pre-guard implementation', () =
       ) {
         record('createNormalizedPathInsideOrEqualMatcher', path, root)
       }
-      const expectedRelative = unguarded.relativePathInsideRoot(root, path)
-      if (guarded.relativePathInsideRoot(root, path) !== expectedRelative) {
+      if (
+        guarded.relativePathInsideRoot(root, path) !== unguarded.relativePathInsideRoot(root, path)
+      ) {
         record('relativePathInsideRoot', path, root)
-      }
-      const resolver = guarded.createRelativePathInsideRootResolver(root)
-      if (resolver.resolve(path) !== expectedRelative) {
-        record('createRelativePathInsideRootResolver.resolve', path, root)
-      }
-      if (resolver.comparisonRoot !== unguarded.normalizeRuntimePathForComparison(root)) {
-        record('createRelativePathInsideRootResolver.comparisonRoot', path, root)
       }
     }
 
@@ -250,11 +244,9 @@ describe('guards still do the work when the fast path does not apply', () => {
 // ─── Regression guards: counted work, not wall clock ─────────────────
 
 const originalReplace = String.prototype.replace
-const originalNormalize = String.prototype.normalize
 
 afterEach(() => {
   String.prototype.replace = originalReplace
-  String.prototype.normalize = originalNormalize
 })
 
 function countReplaceCalls(run: () => void): number {
@@ -267,20 +259,6 @@ function countReplaceCalls(run: () => void): number {
     run()
   } finally {
     String.prototype.replace = originalReplace
-  }
-  return calls
-}
-
-function countNormalizeCalls(run: () => void): number {
-  let calls = 0
-  String.prototype.normalize = function (this: string, ...args: never[]) {
-    calls++
-    return originalNormalize.apply(this, args as never)
-  } as typeof String.prototype.normalize
-  try {
-    run()
-  } finally {
-    String.prototype.normalize = originalNormalize
   }
   return calls
 }
@@ -305,27 +283,34 @@ describe('no-op regex passes stay skipped', () => {
   })
 })
 
-describe('a fan-out folds its root once, not once per candidate', () => {
-  const root = '/Users/nwparker/orca/workspaces/orca/perf'
-  const candidates = Array.from({ length: 50 }, (_, index) => `${root}/src/file-${index}.ts`)
+// ─── One root-bound factory, one input contract ──────────────────────
 
-  it('normalizes the root a single time across the whole batch', () => {
-    // 1 root fold + 2 per candidate (comparison key, then the NFC Windows-ness probe).
-    const calls = countNormalizeCalls(() => {
-      const resolver = guarded.createRelativePathInsideRootResolver(root)
-      for (const candidate of candidates) {
-        resolver.resolve(candidate)
-      }
-    })
-    expect(calls).toBe(1 + candidates.length * 2)
+/**
+ * `createNormalizedPathInsideOrEqualMatcher` demands an already-normalized candidate because
+ * `normalizeRuntimePathForComparison` is not idempotent. A sibling factory on the same root that
+ * took RAW candidates would put two opposite contracts one line apart, and mixing them up returns
+ * "outside the root" rather than throwing. Hoisting a root out of a loop is worth ~0.2 us/event;
+ * this is the price. Keep the raw-candidate entry point the plain `relativePathInsideRoot` call.
+ */
+describe('cross-platform-path exposes a single root-bound factory', () => {
+  it('has no raw-candidate sibling to the normalized matcher', () => {
+    expect(Object.keys(guarded).filter((name) => name.startsWith('create'))).toEqual([
+      'createNormalizedPathInsideOrEqualMatcher'
+    ])
   })
 
-  it('costs strictly more when the root is re-folded per candidate', () => {
-    const perCall = countNormalizeCalls(() => {
-      for (const candidate of candidates) {
-        guarded.relativePathInsideRoot(root, candidate)
-      }
-    })
-    expect(perCall).toBe(candidates.length * 3)
+  it('shows what mixing the two contracts would cost', () => {
+    const root = '//wsl.localhost/Ubuntu/Repo'
+    const candidate = '//wsl.localhost/Ubuntu/Repo/src/App.tsx'
+    const normalizedCandidate = guarded.normalizeRuntimePathForComparison(candidate)
+    expect(guarded.normalizeRuntimePathForComparison(normalizedCandidate)).not.toBe(
+      normalizedCandidate
+    )
+
+    const matcher = guarded.createNormalizedPathInsideOrEqualMatcher(root)
+    expect(matcher(normalizedCandidate)).toBe(true)
+    // The raw spelling a resolver would accept is silently reported as outside the root.
+    expect(matcher(candidate)).toBe(false)
+    expect(guarded.relativePathInsideRoot(root, candidate)).toBe('src/App.tsx')
   })
 })

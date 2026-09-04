@@ -20,7 +20,6 @@ import { processFileExplorerFsPayload } from './file-explorer-watch-reconcile'
 
 export {
   canonicalizeFileExplorerWatchPath,
-  createFileExplorerWatchPathResolver,
   getExternalFileChangeRelativePath,
   resolveCachedDirPath
 } from './file-explorer-watch-path'

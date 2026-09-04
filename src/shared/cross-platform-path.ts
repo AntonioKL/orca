@@ -192,50 +192,28 @@ export function isPathInsideOrEqual(rootPath: string, candidatePath: string): bo
   )
 }
 
-export type RelativePathInsideRootResolver = {
-  /** The root's comparison key, so rankers can size it without a second normalize. */
-  readonly comparisonRoot: string
-  resolve: (candidatePath: string) => string | null
-}
-
-/**
- * Pre-normalizes the root so a fan-out normalizes it once, not once per candidate.
- *
- * Unlike `createNormalizedPathInsideOrEqualMatcher`, candidates are passed raw: the returned
- * suffix has to be sliced out of the caller's own spelling, so the resolver needs both forms.
- */
-export function createRelativePathInsideRootResolver(
-  rootPath: string
-): RelativePathInsideRootResolver {
+export function relativePathInsideRoot(rootPath: string, candidatePath: string): string | null {
+  // Why: decide Windows-ness on the same NFC form the comparison key uses, or the
+  // two disagree (U+212A folds to 'K', making only one side a drive path) and the
+  // segment counts desync. Only the branch test sees NFC — the sliced string stays
+  // raw so the returned suffix remains byte-exact.
+  const normalizedCandidate = trimRuntimePathTrailingSlash(
+    isWindowsAbsolutePathLike(candidatePath.normalize('NFC'))
+      ? normalizeRuntimePathSeparators(candidatePath)
+      : collapseRuntimePathSlashes(candidatePath)
+  )
   const comparisonRoot = normalizeRuntimePathForComparison(rootPath)
+  const comparisonCandidate = normalizeRuntimePathForComparison(candidatePath)
+
+  if (comparisonCandidate === comparisonRoot) {
+    return ''
+  }
   const isRoot = comparisonRoot === '/' || /^[a-z]:\/$/i.test(comparisonRoot)
   const comparisonPrefix = isRoot ? comparisonRoot : `${comparisonRoot}/`
-  return {
-    comparisonRoot,
-    resolve: (candidatePath) => {
-      const comparisonCandidate = normalizeRuntimePathForComparison(candidatePath)
-      if (comparisonCandidate === comparisonRoot) {
-        return ''
-      }
-      if (!comparisonCandidate.startsWith(comparisonPrefix)) {
-        return null
-      }
-      // Why: decide Windows-ness on the same NFC form the comparison key uses, or the
-      // two disagree (U+212A folds to 'K', making only one side a drive path) and the
-      // segment counts desync. Only the branch test sees NFC — the sliced string stays
-      // raw so the returned suffix remains byte-exact.
-      const normalizedCandidate = trimRuntimePathTrailingSlash(
-        isWindowsAbsolutePathLike(candidatePath.normalize('NFC'))
-          ? normalizeRuntimePathSeparators(candidatePath)
-          : collapseRuntimePathSlashes(candidatePath)
-      )
-      return sliceCandidatePastRootSegments(comparisonRoot, normalizedCandidate)
-    }
+  if (!comparisonCandidate.startsWith(comparisonPrefix)) {
+    return null
   }
-}
-
-export function relativePathInsideRoot(rootPath: string, candidatePath: string): string | null {
-  return createRelativePathInsideRootResolver(rootPath).resolve(candidatePath)
+  return sliceCandidatePastRootSegments(comparisonRoot, normalizedCandidate)
 }
 
 /**

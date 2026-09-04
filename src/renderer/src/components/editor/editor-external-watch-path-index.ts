@@ -1,5 +1,5 @@
 import { joinPath } from '@/lib/path'
-import { createFileExplorerWatchPathResolver } from '@/components/right-sidebar/useFileExplorerWatch'
+import { getExternalFileChangeRelativePath } from '@/components/right-sidebar/useFileExplorerWatch'
 import type { OpenFile } from '@/store/slices/editor'
 import type { FsChangedPayload } from '../../../../shared/filesystem-entry-types'
 import {
@@ -183,7 +183,6 @@ export function indexEditorExternalWatchBatchPaths(
   const deleteLookup = new IndexedPathLookup<IndexedPath>(allowAliases)
   const createOrUpdatePaths = new Map<string, string>()
   const changesByRelativePath = new Map<string, IndexedExternalWatchChange>()
-  const watchPathResolver = createFileExplorerWatchPathResolver(scope.worktreePath)
 
   for (const event of payload.events) {
     if (event.kind === 'overflow') {
@@ -201,7 +200,8 @@ export function indexEditorExternalWatchBatchPaths(
       createOrUpdatePaths.set(eventPath.identity.normalizedPath, event.absolutePath)
       createOrUpdateLookup.add(eventPath, eventPath)
     }
-    const relativePath = watchPathResolver.externalFileChangeRelativePath(
+    const relativePath = getExternalFileChangeRelativePath(
+      scope.worktreePath,
       event.absolutePath,
       event.isDirectory
     )

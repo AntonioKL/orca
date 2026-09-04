@@ -6,7 +6,7 @@
  * Centralized to stop local/relay listFiles from drifting on blocklist, ignores, exclusions,
  * timeouts, and buffering. See docs/design/share-quick-open-file-listing.md.
  */
-import { createRelativePathInsideRootResolver } from './cross-platform-path'
+import { relativePathInsideRoot } from './cross-platform-path'
 
 // ─── Hidden-dir blocklist ────────────────────────────────────────────
 
@@ -85,12 +85,11 @@ export function buildExcludePathPrefixes(rootPath: string, excludePaths?: unknow
     return []
   }
   const out: string[] = []
-  const insideRoot = createRelativePathInsideRootResolver(rootPath)
   for (const raw of excludePaths) {
     if (typeof raw !== 'string' || raw.length === 0) {
       continue
     }
-    const relativePath = insideRoot.resolve(raw)
+    const relativePath = relativePathInsideRoot(rootPath, raw)
     if (relativePath === null) {
       continue
     }

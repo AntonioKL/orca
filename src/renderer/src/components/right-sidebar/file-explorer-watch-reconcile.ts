@@ -11,8 +11,8 @@ import {
   clearStalePendingReveal
 } from './file-explorer-watcher-reconcile'
 import {
+  canonicalizeFileExplorerWatchPath,
   createCachedDirPathIndex,
-  createFileExplorerWatchPathResolver,
   normalizeExplorerAbsolutePath,
   parentDirForWatchPath,
   resolveCachedDirPath
@@ -71,7 +71,6 @@ export function processFileExplorerFsPayload(args: ProcessFileExplorerFsPayloadA
   let cachedDirPathIndex: ReadonlyMap<string, string> | undefined
   const cachePathIndex = (): ReadonlyMap<string, string> =>
     (cachedDirPathIndex ??= createCachedDirPathIndex(cache))
-  const watchPathResolver = createFileExplorerWatchPathResolver(currentWorktreePath)
   const cachedDirsToPurge = new Set<string>()
   const reconciledRenameSources = new Set<string>()
   let needsFullRefresh = false
@@ -88,7 +87,7 @@ export function processFileExplorerFsPayload(args: ProcessFileExplorerFsPayloadA
       break
     }
 
-    const normalizedPath = watchPathResolver.canonicalize(evt.absolutePath)
+    const normalizedPath = canonicalizeFileExplorerWatchPath(currentWorktreePath, evt.absolutePath)
     if (!normalizedPath) {
       continue
     }
@@ -140,7 +139,7 @@ export function processFileExplorerFsPayload(args: ProcessFileExplorerFsPayloadA
       }
       if (evt.kind === 'rename') {
         const oldPath = evt.oldAbsolutePath
-          ? watchPathResolver.canonicalize(evt.oldAbsolutePath)
+          ? canonicalizeFileExplorerWatchPath(currentWorktreePath, evt.oldAbsolutePath)
           : null
         const cachedOldDir = oldPath
           ? resolveCachedDirPath(cache, oldPath, currentWorktreePath, cachePathIndex)
