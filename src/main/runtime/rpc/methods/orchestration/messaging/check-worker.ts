@@ -5,6 +5,7 @@ import { formatMessageBanner } from '../../../../orchestration/formatter'
 import { exposeMessages } from './mailbox-message-receipt'
 import { ORCHESTRATION_LEGACY_RUN_ID } from '../../../../../../shared/orchestration-rpc-contract'
 import { routeAllMailboxPages } from '../schemas'
+import { asDispatchFence, callerHoldsDispatchPane, dispatchFenced } from './dispatch-mailbox-fence'
 import type { CheckParams } from '../schemas'
 import type { z } from 'zod'
 
@@ -13,16 +14,6 @@ type ActiveDispatch = NonNullable<ReturnType<OrchestrationDb['getActiveDispatchF
 type RemoteAttachment = NonNullable<
   ReturnType<OrchestrationDb['findActiveRemoteAttachmentForPane']>
 >
-
-const DISPATCH_FENCED_MESSAGE =
-  'This Dispatch was re-attached to another worker; this process no longer owns its mailbox.'
-
-/** Delivery fencing is generic; a worker needs to hear that it lost the Dispatch, not the Run. */
-function asDispatchFence(error: unknown): unknown {
-  return error instanceof OrchestrationError && error.code === 'consumer_fenced'
-    ? new OrchestrationError('consumer_fenced', DISPATCH_FENCED_MESSAGE)
-    : error
-}
 
 export async function checkWorkerMailbox(args: {
   params: CheckParamsInput
@@ -83,7 +74,11 @@ export async function checkWorkerMailbox(args: {
     if (activeDispatch) {
       const current = db.getActiveDispatchForIdentity(handle, paneKey)
       if (current?.id === activeDispatch.id) {
-        return
+        // Why: a re-attach landing on the awaits above keeps the id but re-points the pane.
+        if (callerHoldsDispatchPane(current, paneKey)) {
+          return
+        }
+        throw dispatchFenced()
       }
     } else if (remoteAttachment && paneKey) {
       const current = db.findActiveRemoteAttachmentForPane(paneKey)
@@ -186,6 +181,11 @@ export async function checkWorkerMailbox(args: {
   const showAll = params.all === true || (params.unread === false && params.peek !== true)
   const readPeek = () => db.getUnreadMessages(address, typeFilter)
   const readDelivery = (wakeTypes?: MessageType[]) => {
+    // Why: re-read live, or a re-attach landing on an await above mints a Delivery at a generation
+    // the row has already left, which then fences the legitimate worker on every later check.
+    if (readCurrentGeneration() !== workerMailbox.generation) {
+      throw dispatchFenced()
+    }
     try {
       return db.getOrCreateMailboxDelivery({
         runId: deliveryRunId,
@@ -251,7 +251,7 @@ export async function checkWorkerMailbox(args: {
   })
   await revalidateWorkerMailbox()
   if (readCurrentGeneration() !== workerMailbox.generation) {
-    throw new OrchestrationError('consumer_fenced', DISPATCH_FENCED_MESSAGE)
+    throw dispatchFenced()
   }
   if (waitResult === 'timed_out' || waitResult === 'cancelled') {
     return {

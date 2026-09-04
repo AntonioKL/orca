@@ -219,7 +219,7 @@ async function projectWorkerListPageWithFilteredSnapshot(
       })
     : null
   if (federated) {
-    applyFederatedFleetObservations(fleet, federated)
+    applyFederatedFleetObservations(fleet, federated, fleet.durable)
   }
   // Total and counts must come out of one row set. A pinned filtered cursor's row set is its
   // membership; deriving the total from that and the counts from a live scan of the extent

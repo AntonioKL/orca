@@ -17,6 +17,7 @@ decision, stop/abandon request, retention request, or uncertain release.
 
 ```text
 ORCA orchestration worker-list --json
+ORCA orchestration worker-list --include-remote --json
 ORCA orchestration worker-show --dispatch <dispatch_id> --json
 ORCA orchestration worker-read --dispatch <dispatch_id> --limit 50 --json
 ```
@@ -27,6 +28,11 @@ each row carries `projection.liveness`, `projection.attention.categories`,
 argv to run. `worker-show`'s `observation.status` is PTY liveness only, so a
 `live` terminal whose agent died at a trust prompt still reads `live` there.
 When the two disagree, the fleet verdict decides.
+
+A worker started with `--on <environment>` reads `unverifiable` until you
+enumerate with `--include-remote`, which asks its execution host for the
+verdict. Past 100 rows the response pages, so follow `page.nextCursor` with
+`--cursor <value>` until `page.hasMore` is false.
 
 ## Stall needs positive evidence
 

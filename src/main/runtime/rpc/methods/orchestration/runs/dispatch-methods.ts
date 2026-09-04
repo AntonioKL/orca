@@ -70,14 +70,6 @@ export const ORCHESTRATION_DISPATCH_METHODS: RpcMethod[] = [
         throw new Error(`Task ${params.task} is ${task.status}; only ready tasks can be dispatched`)
       }
 
-      // Why: injecting the preamble into a bare shell dumps it as shell commands (gibberish), so require a detected agent first.
-      if (params.inject) {
-        const hasAgent = await runtime.isTerminalRunningAgent(to)
-        if (!hasAgent) {
-          throw new Error(buildInjectRejectionMessage(to))
-        }
-      }
-
       const dispatchAuthority = runtime.getOrchestrationDispatchAuthority(to)
       const assigneePaneKey =
         dispatchAuthority?.paneKey ?? runtime.getTerminalPaneKey(to) ?? undefined
@@ -85,13 +77,13 @@ export const ORCHESTRATION_DISPATCH_METHODS: RpcMethod[] = [
         dispatchAuthority?.paneKey && dispatchAuthority.processIncarnation
           ? dispatchAuthority.processIncarnation
           : undefined
-      if (params.inject && (!assigneePaneKey || !processIncarnation)) {
-        throw new OrchestrationError(
-          'stable_pane_required',
-          `Terminal ${to} has no stable pane/process incarnation for lifecycle authority.`
-        )
-      }
-      const callerPane = params.from ? runtime.getTerminalPaneKey(params.from) : null
+      // Why: the assignee side prefers dispatch authority, so the caller side must too — getTerminalPaneKey
+      // alone returns null for a handle reachable only through the window-graph leaf, going inert here.
+      const callerPane = params.from
+        ? (runtime.getOrchestrationDispatchAuthority(params.from)?.paneKey ??
+          runtime.getTerminalPaneKey(params.from) ??
+          null)
+        : null
       if (
         params.inject &&
         params.from &&
@@ -103,6 +95,21 @@ export const ORCHESTRATION_DISPATCH_METHODS: RpcMethod[] = [
         throw new OrchestrationError(
           'terminal_is_coordinator',
           `Terminal ${to} is this coordinator's own terminal. Dispatch to a different agent pane, or use worker-start to create one.`
+        )
+      }
+
+      // Why: injecting the preamble into a bare shell dumps it as shell commands (gibberish), so require a detected agent first.
+      if (params.inject) {
+        const hasAgent = await runtime.isTerminalRunningAgent(to)
+        if (!hasAgent) {
+          throw new Error(buildInjectRejectionMessage(to))
+        }
+      }
+
+      if (params.inject && (!assigneePaneKey || !processIncarnation)) {
+        throw new OrchestrationError(
+          'stable_pane_required',
+          `Terminal ${to} has no stable pane/process incarnation for lifecycle authority.`
         )
       }
 

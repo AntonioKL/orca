@@ -114,6 +114,39 @@ describe('orchestration.dispatch --to the caller', () => {
     expect(harness.runtime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
   })
 
+  // The rejection for a missing agent tells the caller to dispatch without --inject, which the
+  // coordinator guard forbids; the self-target answer must not depend on agent presence.
+  it.each([
+    ['the coordinator handle', 'term_coord'],
+    ['an alias of the coordinator pane', 'term_coord_alias']
+  ])('refuses %s even when no agent is detected', async (_label, target) => {
+    vi.spyOn(harness.runtime, 'isTerminalRunningAgent').mockResolvedValue(false)
+    vi.spyOn(harness.runtime, 'getOrchestrationDispatchAuthority').mockImplementation(
+      (handle) =>
+        (handle === 'term_coord_alias'
+          ? {
+              terminalHandle: handle,
+              paneKey: harness.coordinatorPaneKey,
+              processIncarnation: 'runtime_test:term_coord:1'
+            }
+          : null) as never
+    )
+    const task = harness.db.createTask({
+      spec: `self inject ${target}`,
+      runId: harness.activeRunId
+    })
+
+    await expect(
+      harness.call('orchestration.dispatch', {
+        task: task.id,
+        from: 'term_coord',
+        to: target,
+        inject: true
+      })
+    ).rejects.toMatchObject({ code: 'terminal_is_coordinator' })
+    expect(harness.db.getDispatchContext(task.id)).toBeUndefined()
+  })
+
   it('still dispatches to a different pane', async () => {
     const task = harness.db.createTask({ spec: 'peer dispatch', runId: harness.activeRunId })
     const result = (await harness.call('orchestration.dispatch', {

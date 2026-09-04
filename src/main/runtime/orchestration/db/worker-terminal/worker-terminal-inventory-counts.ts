@@ -89,17 +89,6 @@ export function scanWorkerTerminalStates(
   }))
 }
 
-export function countWorkerTerminalResources(
-  this: OrchestrationDb,
-  params: WorkerTerminalInventoryParams = {}
-): number {
-  const { where, values } = buildInventoryScope(params)
-  const rows = scanWorkerTerminalStates.call(this, where, values)
-  return params.terminalState
-    ? rows.filter((row) => row.terminalState === params.terminalState).length
-    : rows.length
-}
-
 export function countWorkerTerminalInventory(
   this: OrchestrationDb,
   params: WorkerTerminalInventoryParams = {}

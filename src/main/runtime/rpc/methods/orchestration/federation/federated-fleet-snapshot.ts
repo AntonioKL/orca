@@ -3,8 +3,10 @@ import { ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY } from '../.
 import {
   ORCHESTRATION_FLEET_PAGE_MAX,
   refreshOrchestrationFleetLivenessAttention,
+  type FleetDurableWorker,
   type OrchestrationFleetPage
 } from '../../../../../../shared/orchestration-fleet-projection'
+import { projectFleetNextAction } from '../../../../../../shared/orchestration-fleet-worker-projection'
 import { getOrchestrationPeerCapabilityCache } from '../../../../orchestration/orchestration-peer-capability-cache'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import { OrchestrationError } from '../../../../orchestration/orchestration-error'
@@ -190,6 +192,7 @@ function projectFleetRuntimeEpochs(
 export function applyFederatedFleetObservations(
   fleet: OrchestrationFleetPage,
   federated: Awaited<ReturnType<typeof readFederatedFleetSnapshots>>,
+  durable: ReadonlyMap<string, FleetDurableWorker>,
   observedAt = Date.now()
 ): void {
   const unavailableDispatches = new Map(
@@ -214,7 +217,7 @@ export function applyFederatedFleetObservations(
         worker.liveness = { verdict: 'unverifiable', reason: unavailableReason }
         worker.evidence.liveStatus = 'unavailable'
         worker.evidence.lastObservedAt = null
-        refreshOrchestrationFleetLivenessAttention(worker)
+        refreshFleetWorkerVerdict(worker, durable)
       }
       continue
     }
@@ -230,7 +233,20 @@ export function applyFederatedFleetObservations(
     worker.evidence.liveStatus = observation.status === 'live' ? 'fresh' : 'unavailable'
     // The host answered for both `live` and `exited`, so both carry a real observation time.
     worker.evidence.lastObservedAt = observation.status === 'unverifiable' ? null : observedAt
-    refreshOrchestrationFleetLivenessAttention(worker)
+    refreshFleetWorkerVerdict(worker, durable)
+  }
+}
+
+/** The host verdict replaces the local one, so everything derived from liveness has to
+ *  follow it: a stale `inspect` outranked the `recover` a proven remote exit owes. */
+function refreshFleetWorkerVerdict(
+  worker: OrchestrationFleetPage['workers'][number],
+  durable: ReadonlyMap<string, FleetDurableWorker>
+): void {
+  refreshOrchestrationFleetLivenessAttention(worker)
+  const row = durable.get(worker.dispatchId)
+  if (row) {
+    worker.nextAction = projectFleetNextAction(row, worker.liveness)
   }
 }
 

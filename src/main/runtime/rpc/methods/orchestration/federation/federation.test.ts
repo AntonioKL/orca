@@ -627,7 +627,16 @@ describe('orchestration federation', () => {
     })
     expect(shown).toMatchObject({
       ok: true,
-      result: { observation: { status: 'live', exactWorker: true } }
+      result: {
+        observation: { status: 'live', exactWorker: true },
+        // The execution host answered; the push-fed status snapshot only covers local panes,
+        // so this projection used to contradict the observation printed beside it.
+        projection: {
+          host: { kind: 'remote', id: 'environment_windows' },
+          liveness: { verdict: 'live', source: 'execution_host' },
+          nextAction: { kind: 'none', argv: [] }
+        }
+      }
     })
     expect(homeDb.getFederatedDispatch(dispatch.id)?.remote_runtime_epoch).not.toBe(oldEpoch)
     expect(homeDb.getFederatedDispatch(dispatch.id)?.peer_fingerprint).toBe(

@@ -15,6 +15,7 @@ function facts(overrides: Partial<WorkerAttentionFacts> = {}): WorkerAttentionFa
     terminationReason: null,
     isRoot: false,
     workerState: 'ready',
+    workerStage: 'prompt_delivered',
     dispatchStatus: 'dispatched',
     ...overrides
   }
@@ -62,6 +63,37 @@ describe('worker attention liveness', () => {
       facts: facts({ hostScope: '{"kind":"local","hostId":"local"}' }),
       isRoot: false,
       status: status(),
+      now: NOW
+    })
+
+    expect(attention).toEqual({ categories: [], requiresAction: false })
+  })
+
+  it('reads a released resource as exited, not as a stale live pane', () => {
+    const attention = projectWorkerAttentionContext({
+      // worker-list called the same dispatch exited while this pane classified from a status.
+      facts: facts({
+        outcome: 'outcome_unknown',
+        hostScope: '{"kind":"local","hostId":"local"}',
+        releaseState: 'released'
+      }),
+      isRoot: false,
+      status: status({ evidenceObservedAt: NOW - AGENT_STATUS_STALE_AFTER_MS - 60_000 }),
+      now: NOW
+    })
+
+    expect(attention).toEqual({ categories: [], requiresAction: false })
+  })
+
+  it('reads a released worker stage as exited, not as a stale live pane', () => {
+    const attention = projectWorkerAttentionContext({
+      facts: facts({
+        outcome: 'outcome_unknown',
+        workerStage: 'released',
+        hostScope: '{"kind":"local","hostId":"local"}'
+      }),
+      isRoot: false,
+      status: status({ evidenceObservedAt: NOW - AGENT_STATUS_STALE_AFTER_MS - 60_000 }),
       now: NOW
     })
 

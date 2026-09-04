@@ -60,7 +60,11 @@ terminal handle.
 ORCA orchestration worker-show --dispatch <dispatch_id> --json
 ORCA orchestration worker-read --dispatch <dispatch_id> --limit 50 --json
 ORCA orchestration send --to dispatch:<dispatch_id> --subject "Follow-up" --body "<guidance>" --json
+ORCA orchestration worker-list --include-remote --json
 ```
+
+`worker-list` reads local fleet state only; enumerate remote workers with
+`--include-remote` or every one of them reads `unverifiable`.
 
 ## Execution-host and mixed-version floor
 

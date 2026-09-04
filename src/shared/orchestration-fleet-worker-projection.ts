@@ -12,7 +12,7 @@ import type {
 const FLEET_STATUS_FUTURE_TOLERANCE_MS = 5_000
 
 /** Everything the liveness verdict reads, so every surface can share one projection. */
-export type FleetLivenessSubject = {
+type FleetLivenessSubject = {
   workerStage?: string | null
   workerState?: string | null
   terminationReason?: FleetDurableWorker['terminationReason']
@@ -26,7 +26,10 @@ const SETTLED_WORKER_STATES = new Set(['succeeded', 'failed', 'stopped', 'abando
  *  `unknown` is a death certificate — regardless of which state the worker settled into. */
 function hasCertifiedExit(worker: FleetLivenessSubject): boolean {
   return (
-    worker.workerStage === 'process_exited' ||
+    // `process_exited` is written from the same cause as the reason beside it, and
+    // `unknown` there means a stop was issued and no exit was ever observed. A null
+    // reason is a pre-v29 row whose stage write was the only exit record.
+    (worker.workerStage === 'process_exited' && worker.terminationReason !== 'unknown') ||
     worker.terminationReason === 'operator_close' ||
     worker.terminationReason === 'signaled' ||
     worker.terminationReason === 'exited'
@@ -35,7 +38,7 @@ function hasCertifiedExit(worker: FleetLivenessSubject): boolean {
 
 /** `receivedAt` is the DELIVERY clock: a relay reconnect replays a cached row and restamps it,
  *  so measuring staleness against it makes an hour-old agent read live. */
-export function agentStatusFleetObservedAt(status: AgentStatusIpcPayload): number {
+function agentStatusFleetObservedAt(status: AgentStatusIpcPayload): number {
   return status.evidenceObservedAt ?? status.receivedAt
 }
 
@@ -105,7 +108,12 @@ function projectResource(worker: FleetDurableWorker): FleetResourceProjection {
   }
 }
 
-function nextAction(worker: FleetDurableWorker, liveness: FleetLiveness): FleetNextAction {
+/** Exported so a later host verdict can re-derive it; `inspect` under a stale local
+ *  verdict outranked the `recover` a proven remote exit owes. */
+export function projectFleetNextAction(
+  worker: FleetDurableWorker,
+  liveness: FleetLiveness
+): FleetNextAction {
   if (worker.workerStage === 'released') {
     return { kind: 'none', argv: [] }
   }
@@ -144,6 +152,17 @@ function nextAction(worker: FleetDurableWorker, liveness: FleetLiveness): FleetN
       kind: 'recover',
       argv: ['orchestration', 'worker-read', '--dispatch', worker.dispatchId]
     }
+  }
+  // A running worker with a live verdict and nothing pending owes the coordinator
+  // nothing; `inspect` is the unknown-state bucket, and worker-show publishes this
+  // same projection, so pointing there was a self-loop on its own receipt.
+  if (
+    liveness.verdict === 'live' &&
+    worker.workerState === 'ready' &&
+    !worker.pendingInput &&
+    !worker.pendingApproval
+  ) {
+    return { kind: 'none', argv: [] }
   }
   return {
     kind: 'inspect',
@@ -235,7 +254,7 @@ export function projectOrchestrationFleetWorker(
       lastObservedAt: status ? agentStatusFleetObservedAt(status) : null
     },
     resource: projectResource(worker),
-    nextAction: nextAction(worker, liveness),
+    nextAction: projectFleetNextAction(worker, liveness),
     attention: projectOrchestrationFleetAttention({
       isRoot: worker.parentTaskId === null,
       outcome,

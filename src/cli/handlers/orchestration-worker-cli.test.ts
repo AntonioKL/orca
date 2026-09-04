@@ -494,6 +494,76 @@ describe('orchestration worker-start CLI contract', () => {
     expect(printResult).not.toHaveBeenCalled()
   })
 
+  it('prints each projected row with its literal next-action argv', async () => {
+    const response = {
+      result: {
+        workers: [
+          {
+            dispatchId: 'ctx_live',
+            taskId: 'task_live',
+            runId: 'run_1',
+            workerState: 'running',
+            dispatchStatus: 'dispatched',
+            agentTerminalHandle: 'term_live',
+            terminalState: 'active',
+            resource: null,
+            projection: {
+              provider: { id: 'claude', model: 'opus' },
+              host: { id: 'local' },
+              workspace: { id: 'ws_1' },
+              stage: { activity: 'working' },
+              liveness: { verdict: 'live' },
+              nextAction: {
+                argv: ['orchestration', 'worker-release', '--dispatch', 'ctx_live']
+              },
+              attention: { categories: ['settled'] }
+            }
+          },
+          {
+            dispatchId: 'ctx_done',
+            taskId: 'task_done',
+            runId: 'run_1',
+            workerState: 'released',
+            dispatchStatus: 'completed',
+            agentTerminalHandle: null,
+            terminalState: null,
+            resource: null,
+            projection: {
+              provider: null,
+              host: { id: 'local' },
+              workspace: null,
+              stage: { activity: 'released' },
+              liveness: { verdict: 'exited' },
+              nextAction: { argv: [] },
+              attention: { categories: [] }
+            }
+          }
+        ],
+        counts: { active: 1 },
+        page: { total: 2, hasMore: false, nextCursor: null }
+      }
+    }
+    callMock.mockResolvedValue(response)
+
+    await ORCHESTRATION_HANDLERS['orchestration worker-list']({
+      flags: new Map<string, string | boolean>(),
+      client: { call: callMock },
+      cwd: '/tmp/repo',
+      json: false
+    } as never)
+
+    const formatter = vi.mocked(printResult).mock.calls[0]?.[2] as
+      | ((result: (typeof response)['result']) => string)
+      | undefined
+    const output = formatter?.(response.result)
+    expect(output).toContain(
+      'ctx_live task=task_live [running/working] attention=settled liveness=live provider=claude/opus host=local workspace=ws_1 terminal=active next=orchestration worker-release --dispatch ctx_live'
+    )
+    expect(output).toContain(
+      'ctx_done task=task_done [released/released] attention=none liveness=exited provider=unknown host=local workspace=unknown terminal=none next=none'
+    )
+  })
+
   it('prints partial host warnings alongside worker rows', async () => {
     const response = {
       result: {

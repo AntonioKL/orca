@@ -24,7 +24,9 @@ A consuming coordinator `check` returns the bound Run's oldest FIFO Delivery,
 up to 50 messages, and replays that exact batch until acknowledged. Process
 every row and required terminal ownership decision before `--ack`. Type filters
 decide when a waiter wakes; they do not authorize skipping older actionable
-mail. `--peek` and `--all` are read-only inspection, not progress through the
+mail. A Delivery therefore always carries the whole FIFO batch whatever its
+types, and a `check` without `--wait` hands that batch over unfiltered.
+`--peek` and `--all` are read-only inspection, not progress through the
 coordinator inbox.
 
 An empty wait or timeout is a checkpoint. Continue rolling waits until every

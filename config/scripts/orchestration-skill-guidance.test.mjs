@@ -77,7 +77,8 @@ describe('orchestration kernel', () => {
       '## Conditional references'
     ]
 
-    expect(kernel.split('\n').length).toBeLessThanOrEqual(200)
+    // Why: 202 is the budget after the anti-loop nextAction rule; the kernel is always in context.
+    expect(kernel.split('\n').length).toBeLessThanOrEqual(202)
     for (let index = 1; index < headings.length; index += 1) {
       expect(kernel.indexOf(headings[index])).toBeGreaterThan(kernel.indexOf(headings[index - 1]))
     }
@@ -157,9 +158,12 @@ describe('orchestration kernel', () => {
     expect(kernel).toContain("`worker-list`'s `projection.liveness` is the fleet verdict")
     expect(kernel).toContain("`worker-show`'s `observation.status` is PTY liveness only")
     expect(kernel).toContain('After three consecutive empty waits')
-    expect(kernel).toContain('`ORCA orchestration worker-list --json`')
+    expect(kernel).toContain('`ORCA orchestration worker-list --include-remote --json`')
     expect(kernel).toContain(
       '`projection.attention` categories, `projection.attention.requiresAction`, and literal `projection.nextAction` argv'
+    )
+    expect(kernel).toContain(
+      'An `inspect` `nextAction` on a `live` row with `attention.requiresAction` false is informational, not a command to re-run: keep waiting with `check --wait`'
     )
     expect(kernel).toContain('choose `worker-stop` or `worker-abandon`')
   })
@@ -289,6 +293,7 @@ describe('owned orchestration references', () => {
       '`check` names its caller with `--terminal`, never `--from`'
     )
     expect(squash(reference)).toContain('If `check` returns `consumer_fenced`')
+    expect(squash(reference)).toContain('An empty `check` never means you were replaced')
   })
 
   it('keeps heartbeat and worker_done recipes bound to the injected capability', () => {
@@ -327,6 +332,10 @@ describe('owned orchestration references', () => {
       'ORCA project setup-existing-folder --project <project_id> --host <host_id> --path <abs_path> --kind folder --json'
     )
     expect(squash(reference)).toContain('and rejects a plain directory')
+    expect(reference).toContain('ORCA orchestration worker-list --include-remote --json')
+    expect(squash(reference)).toContain(
+      'enumerate remote workers with `--include-remote` or every one of them reads `unverifiable`'
+    )
   })
 
   it('owns FIFO mail, Dispatch addresses, groups, questions, and gates', () => {
@@ -334,6 +343,9 @@ describe('owned orchestration references', () => {
 
     expect(reference).toContain('oldest FIFO Delivery')
     expect(squash(reference)).toContain('Process every row')
+    expect(squash(reference)).toContain(
+      'A Delivery therefore always carries the whole FIFO batch whatever its types, and a `check` without `--wait` hands that batch over unfiltered'
+    )
     expect(reference).toContain('send --to dispatch:<dispatch_id>')
     for (const group of ['@all', '@grok', '@cursor', '@worktree:<id>']) {
       expect(reference).toContain(group)
@@ -384,6 +396,9 @@ describe('owned orchestration references', () => {
     )
     expect(reference).toContain('`projection.nextAction` argv')
     expect(reference).toContain('the fleet verdict decides')
+    expect(reference).toContain('ORCA orchestration worker-list --include-remote --json')
+    expect(reference).toContain('reads `unverifiable` until you enumerate with `--include-remote`')
+    expect(reference).toContain('follow `page.nextCursor` with `--cursor <value>`')
   })
 
   it('requires positive evidence of exit before stop, abandon, retry, or release', () => {

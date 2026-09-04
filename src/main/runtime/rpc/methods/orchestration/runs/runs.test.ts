@@ -90,6 +90,22 @@ describe('orchestration RPC methods', () => {
       expect(current.run?.id).toBe(created.run.id)
     })
 
+    it('publishes a run receipt without internal routing columns', async () => {
+      setup(false)
+      vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(
+        'tab_coord:11111111-1111-4111-8111-111111111111'
+      )
+
+      const created = (await call('orchestration.runCreate', {
+        objective: 'Coordinate reviews',
+        from: 'term_coord'
+      })) as { run: Record<string, unknown> }
+
+      expect(created.run).not.toHaveProperty('coordinator_pane_key')
+      expect(created.run).not.toHaveProperty('home_database')
+      expect(created.run.consumer_generation).toBe(1)
+    })
+
     it('requires runtime-observed stable pane identity for binding', async () => {
       setup(false)
       vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(null)
