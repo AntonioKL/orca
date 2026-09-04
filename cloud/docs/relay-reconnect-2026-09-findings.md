@@ -14,7 +14,9 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | Monitor dry-run #1 | Froze min 5: `relay.postgres_retries` 380 > 300 | run 33836470590 |
 | Monitor dry-run #2 | Green to min 13, froze 04:49Z: `director.concurrency` 76.7 > 64 (six-cell crash storm, Finding 6) | run 33837160275 |
 | Monitor dry-run #3 | Froze min 3 at 05:01Z: `relay.postgres_retries` 339 > 300; no crash, concurrency 5–8 | run 33838698725 |
-| Dispatch loop | **Stopped by me** after 3 read-only runs: the retries bar (Finding 5) cannot pass at today's baseline and I will not raise it unasked | |
+| Owner decision 2026-09-04 ~05:10Z | **Option B approved**: "you can raise the bar. or remove it altogether ... whats the most logical move". Kept the bar (removal would leave contention unwatched during the roll) and recalibrated from measured data. | this thread |
+| PR #18580 monitor `relayPostgresRetries` 300 -> 2000 | Open, awaiting CI; mutation-checked (300 fails the new test) | https://github.com/stablyai/orca/pull/18580 |
+| PR #18565 CI | Was red on `root directory guard` because this findings file sat at repo root; moved to `cloud/docs/` in 8ebff89106 | |
 | Cell canary / batch roll | **Not dispatched.** No production mutation has happened. | |
 | Terraform alert `relay_postgres_retry_exhausted` at `> 0` | Firing continuously since #18521; recalibration not done (own change) | `cloud/infra/terraform/relay-observability.tf:447,469` |
 
@@ -118,7 +120,26 @@ Host 666077865f2e: stable throughout. 4408 rotation 00:27:45Z; 1006 quit 00:52:2
 sticky reassignment to c27 00:52:35Z on new build; rotation closes 01:44:55Z and 02:23:15Z with
 splices intact. No drain/4404/wrong-cell.
 
-## Decision needed from the owner
+## Finding 7 (2026-09-04 ~05:10Z): retries bar recalibration basis (PR #18580)
+
+Chose 2000 over removal. The metric is the gate's own source (`orca_relay_postgres_retries`
+log metric, director + cells summed per five minutes, ALIGN_DELTA 300 s):
+
+| window | p50 | p90 | p99 | max | > 300 |
+|---|---|---|---|---|---|
+| 2026-09-01 | 56 | 105 | 206 | 456 | 0% |
+| 2026-09-02 | 109 | 186 | 294 | 377 | 1% |
+| 2026-09-03 | 430 | 924 | 1320 | 1504 | 55% |
+| 2026-09-04 to 05Z | 285 | 1012 | 1211 | 1211 | 44% |
+
+15-minute pass rate, last 24 h: bar 300 -> 22%, 800 -> 66%, 1000 -> 86%, 1500 -> 99%, 2000 -> 100%.
+Aug 23 incident on this metric: 1510 then 646 (single windows), so retries no longer separate an
+incident from baseline; exhausted (467 vs bar 300; healthy 72 h max 184), director concurrency,
+and pool bars carry that role. Note: my earlier "p99 1398 / 65% over 300" in Finding 5 came from
+raw log line counts; the metric-based numbers above are what the gate actually evaluates.
+Baseline tripled between Sep 2 and Sep 3 with no deploy; still unexplained (Finding 2).
+
+## Decision needed from the owner (resolved: B)
 
 The same-cap roll is blocked only by the monitor gate, and the gate is blocked by `relayPostgresRetries: 300`
 (Finding 5: 65% of windows breach it; even the 04:55Z quiet window hit 339). Three options:
