@@ -60,6 +60,8 @@ const CENSUS: CensusEntry[] = [
 // under a lock its caller already holds). A new inline lock fails the census
 // below until it is listed here; per-connection paths that touch more than one
 // cell go through lockCellRows so the order is fixed.
+const NAMED_LOCK_HELPERS = ['lockCellInventory', 'lockGeneralCellInventory', 'lockCellRows']
+
 const INLINE_CELL_LOCK_SITES = [
   'reconcileCellsWithOptions',
   'assignStickyOnce',
@@ -178,17 +180,35 @@ describe('cell inventory lock call-site census', () => {
   // `relay_cells ... FOR UPDATE` would escape classification entirely.
   it('routes every relay_cells row lock through a named lock helper', () => {
     const lines = storeSource()
-    let method = '<module>'
     const rawSites: string[] = []
+    // Whole statements, not a fixed window: a wide column list or a raw
+    // FOR UPDATE inside query() must not slip past.
+    const source = lines.join('\n')
+    const bounds: { name: string; start: number }[] = []
     lines.forEach((line, index) => {
       const declaration = DECLARATION.exec(line)
-      if (declaration) method = declaration[1]!
-      if (!/queryLocked\(/.test(line)) return
-      const statement = lines.slice(index, index + 4).join(' ')
-      if (!/FROM relay_cells\b/.test(statement)) return
-      if (['lockCellInventory', 'lockGeneralCellInventory', 'lockCellRows'].includes(method)) return
-      rawSites.push(method)
+      if (declaration) bounds.push({ name: declaration[1]!, start: index })
     })
+    const methodAt = (offset: number): string => {
+      const lineIndex = source.slice(0, offset).split('\n').length - 1
+      let name = '<module>'
+      for (const bound of bounds) if (bound.start <= lineIndex) name = bound.name
+      return name
+    }
+    const tick = String.fromCharCode(96)
+    const statementCall = new RegExp(
+      '\\.(queryLocked|query)\\(\\s*' + tick + '([^' + tick + ']*)' + tick,
+      'g'
+    )
+    for (const call of source.matchAll(statementCall)) {
+      const statement = call[2]!
+      if (!/\bFROM\s+relay_cells\b/.test(statement)) continue
+      const locks = call[1] === 'queryLocked' || /\bFOR\s+UPDATE\b/.test(statement)
+      if (!locks) continue
+      const method = methodAt(call.index)
+      if (NAMED_LOCK_HELPERS.includes(method)) continue
+      rawSites.push(method)
+    }
     expect(rawSites).toEqual(INLINE_CELL_LOCK_SITES)
   })
 
