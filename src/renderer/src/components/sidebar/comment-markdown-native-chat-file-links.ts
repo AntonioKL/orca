@@ -12,8 +12,12 @@ type MarkdownNode = {
 }
 
 function isLinkifiableFile(link: ParsedTerminalFileLink, requireSeparator: boolean): boolean {
+  const hasRootedPrefix = /^(?:~[\\/]|\.{1,2}[\\/]|[\\/]|[A-Za-z]:[\\/])/.test(link.pathText)
+  const hasLineSuffix = link.line !== null || link.column !== null
+  const hasAlphabeticExtension = /\.[A-Za-z][A-Za-z0-9_+-]*$/.test(link.pathText)
   return (
     (!requireSeparator || /[\\/]/.test(link.pathText)) &&
+    (hasRootedPrefix || hasLineSuffix || hasAlphabeticExtension) &&
     routeNativeChatHref(link.displayText).kind === 'file'
   )
 }

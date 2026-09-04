@@ -1,5 +1,6 @@
 import React from 'react'
 import type { Components } from 'react-markdown'
+import { NATIVE_CHAT_FILE_HREF_PREFIX } from '../../../../shared/native-chat-href-routing'
 import { isMermaidFence, isMermaidPre, renderMermaidFence } from './comment-mermaid-fence'
 import {
   GitHubUserAttachmentImage,
@@ -32,7 +33,11 @@ function handleMarkdownAnchorClick(
   // Why: link clicks should not also trigger an outer row/card click handler;
   // images only claim the click when an image handler is wired below.
   event.stopPropagation()
-  if (href?.trim().toLowerCase().startsWith('file:')) {
+  const trimmedHref = href?.trim()
+  if (
+    trimmedHref?.toLowerCase().startsWith('file:') ||
+    trimmedHref?.startsWith(NATIVE_CHAT_FILE_HREF_PREFIX)
+  ) {
     event.preventDefault()
   }
   onLinkClick?.(event, href)
