@@ -9,7 +9,7 @@ import { OrchestrationError } from '../orchestration/orchestration-error'
 import type { RpcRequest } from './core'
 import { RpcDispatcher } from './dispatcher'
 import { ORCHESTRATION_METHODS } from './methods/orchestration'
-import { createOrchestrationRpcHarness } from './methods/orchestration-rpc-test-harness'
+import { createOrchestrationRpcHarness } from './methods/orchestration/rpc-test-harness'
 
 describe('orchestration commit-notify recovery', () => {
   const harness = createOrchestrationRpcHarness()

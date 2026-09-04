@@ -1,7 +1,7 @@
 import type { OrcaRuntimeService } from '../orca-runtime'
-import { inspectRemoteAttachment } from '../rpc/methods/orchestration-federation-attachment-observation'
-import { releaseRemoteAttachment } from '../rpc/methods/orchestration-federated-worker-release-host'
-import { completeWorkerTerminalRelease } from '../rpc/methods/orchestration-worker-release-completion'
+import { inspectRemoteAttachment } from '../rpc/methods/orchestration/federation/federation-attachment-observation'
+import { releaseRemoteAttachment } from '../rpc/methods/orchestration/federation/federated-worker-release-host'
+import { completeWorkerTerminalRelease } from '../rpc/methods/orchestration/worker/worker-release-completion'
 
 export type WorkerTerminalReleaseReconciliationResult = {
   attempted: number
