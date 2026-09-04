@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { AgentSessionOptionRejectedError } from '../native-chat/agent-session-wire/structured-agent-session-option-error'
+import { setClaudeStructuredOption } from './claude-structured-options'
 import { readClaudeSettingsEffort } from './claude-structured-session-options'
+import type { ClaudeSession } from './claude-structured-session-state'
 import type { ClaudeStructuredSessionEvent } from './claude-structured-session-adapter'
 import { acquired, fakeClaude } from './claude-structured-session-test-support'
 
@@ -58,5 +61,56 @@ describe('Claude effort reporting', () => {
     // The regression that hid this defect: a fixture inventing `effortLevel`
     // kept every gate green over a value that is always empty in production.
     expect(Object.keys(init[0])).not.toContain('effortLevel')
+  })
+})
+
+describe('Claude effort readback', () => {
+  function sessionWith(reported: string | null, calls: string[] = []) {
+    return {
+      session: {
+        options: new Map<string, string>(),
+        optionMutationSequence: 0,
+        connection: {
+          applyFlagSettings: async (settings: { effortLevel?: string }) => {
+            // The measured behaviour: an unknown effort is accepted and ignored.
+            calls.push(`apply:${settings.effortLevel}`)
+          },
+          getSettings: async () => {
+            calls.push('get_settings')
+            return reported === null
+              ? { applied: {}, effective: {}, sources: {} }
+              : { applied: { effort: reported }, effective: { effortLevel: reported }, sources: {} }
+          }
+        }
+      } as unknown as ClaudeSession,
+      calls
+    }
+  }
+
+  it('refuses to record an effort the child did not adopt', async () => {
+    const { session, calls } = sessionWith('high')
+
+    await expect(
+      setClaudeStructuredOption(session, { key: 'effort', value: 'bogus-effort-xyz' }, undefined)
+    ).rejects.toBeInstanceOf(AgentSessionOptionRejectedError)
+    expect(session.options.has('effort')).toBe(false)
+    expect(calls).toEqual(['apply:bogus-effort-xyz', 'get_settings'])
+  })
+
+  it('records an effort the child confirms', async () => {
+    const { session } = sessionWith('low')
+
+    await expect(
+      setClaudeStructuredOption(session, { key: 'effort', value: 'low' }, undefined)
+    ).resolves.toEqual({ effort: 'low' })
+  })
+
+  it('records the request when the readback is unavailable', async () => {
+    // No evidence of a refusal is not evidence of one; the apply itself succeeded.
+    const { session } = sessionWith(null)
+
+    await expect(
+      setClaudeStructuredOption(session, { key: 'effort', value: 'low' }, undefined)
+    ).resolves.toEqual({ effort: 'low' })
   })
 })

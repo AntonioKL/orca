@@ -82,9 +82,11 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
       options: { model: 'opus', effort: 'high' }
     })
 
-    expect(claude.connections[0].calls.slice(-2)).toEqual([
+    expect(claude.connections[0].calls.slice(-3)).toEqual([
       { subtype: 'set_model', params: { model: 'opus' } },
-      { subtype: 'apply_flag_settings', params: { settings: { effortLevel: 'high' } } }
+      { subtype: 'apply_flag_settings', params: { settings: { effortLevel: 'high' } } },
+      // The effort is only recorded once the child reports having adopted it.
+      { subtype: 'get_settings' }
     ])
     await expect(adapter.readOptions({ sessionId: 'session-1', fence: 7 })).resolves.toMatchObject({
       current: { model: 'opus', effort: 'high' }
