@@ -30,6 +30,7 @@ export function registerLegacyBinaryControlFrames(
     registerBinaryStreamHandler,
     ptyId,
     clientId,
+    connectionClientId,
     isMobile,
     supportsDesktopViewportClaims,
     supportsQueryReply,
@@ -61,7 +62,13 @@ export function registerLegacyBinaryControlFrames(
         // Why: opcode 18 skips the mobile input floor, so it needs every guard terminal.send applies; drop otherwise.
         if (
           isQueryReply &&
-          !isAcceptableTerminalQueryReplyFrame({ runtime, ptyId, text, client: params.client })
+          !isAcceptableTerminalQueryReplyFrame({
+            runtime,
+            ptyId,
+            text,
+            client: params.client,
+            connectionClientId
+          })
         ) {
           return
         }

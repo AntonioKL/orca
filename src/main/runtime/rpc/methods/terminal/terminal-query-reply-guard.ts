@@ -5,8 +5,11 @@ import type { TerminalViewportClient } from './terminal-stream-types'
 type TerminalQueryReplyIdentity = {
   text: string | undefined
   client: TerminalViewportClient | undefined
-  /** Authenticated device token when the transport carries one; the declared client id must match it. */
-  connectionClientId?: string | undefined
+  /**
+   * Authenticated device token when the transport carries one; the declared client id must match it.
+   * Required (not optional) so a new call site cannot silently fall back to the declared id.
+   */
+  connectionClientId: string | undefined
 }
 
 /**

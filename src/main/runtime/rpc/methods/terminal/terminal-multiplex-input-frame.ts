@@ -45,7 +45,8 @@ export function handleMultiplexInputFrame(
         runtime,
         ptyId: stream.ptyId,
         text,
-        client: stream.client
+        client: stream.client,
+        connectionClientId: state.connectionClientId
       })
     ) {
       return
