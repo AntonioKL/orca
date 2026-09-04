@@ -14,11 +14,15 @@ export { PS_ARGS, PS_MAX_BUFFER_BYTES }
 
 const execFile = promisify(execFileCb)
 
-/** Columns used by the evidence reader. Keep command last so its spaces survive parsing. */
-export const PS_TIMEOUT_MS = 3000
+// Why 15s: the `command=` column costs a per-pid argv read (measured 1.15s for 1,948
+// processes; 0.03s without it), and CPU contention multiplies that -- at load 27 the same
+// capture measured 1.3-6.0s, so a 3s budget timed out on 6 of 20 consecutive tries and the
+// whole subsystem answered "unverifiable" about a table it could read. This keeps a wedged
+// `ps` bounded while staying out of reach of a host that is merely busy.
+export const PS_TIMEOUT_MS = 15_000
 const DEFAULT_SNAPSHOT_TTL_MS = 500
 
-type Snapshot<T> = { value: T; capturedAtMs: number }
+type Snapshot<T> = { value: T; capturedAtMs: number; completedAtMs: number }
 
 type ProcessTableSnapshotReaderDeps<T> = {
   runPs: () => Promise<T>
@@ -42,11 +46,16 @@ export function createProcessTableSnapshotReader<T = string>(
   let freshQueued: { promise: Promise<T>; startSequence: number | null } | null = null
 
   async function runSnapshot(): Promise<T> {
+    // Two stamps because they answer different questions: `capturedAtMs` is when `ps` read the
+    // kernel table, which is what a destructive consumer bounds staleness against, while the TTL
+    // keys on completion so a capture slower than the TTL still coalesces instead of forking a
+    // whole-machine `ps` per caller on exactly the loaded host that can least afford it.
+    const capturedAtMs = deps.now()
     const promise = deps.runPs()
     inFlight = promise
     try {
       const value = await promise
-      cached = { value, capturedAtMs: deps.now() }
+      cached = { value, capturedAtMs, completedAtMs: deps.now() }
       return value
     } finally {
       if (inFlight === promise) {
@@ -56,7 +65,7 @@ export function createProcessTableSnapshotReader<T = string>(
   }
 
   async function getSnapshot(): Promise<T> {
-    if (cached && deps.now() - cached.capturedAtMs < ttlMs) {
+    if (cached && deps.now() - cached.completedAtMs < ttlMs) {
       return cached.value
     }
     if (inFlight) {
@@ -277,7 +286,8 @@ export async function getStrictProcessTableSnapshotWithAge(): Promise<{
   return { rows: snapshot.value.strict(), capturedAgeMs: snapshot.capturedAgeMs }
 }
 
-/** How much older than its own await a TTL-cached capture may be. */
+/** How much older than its own await a TTL-cached capture may be, on top of the capture's own
+ *  duration. Reported ages carry both, so this alone is not the staleness bound. */
 export const PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS = DEFAULT_SNAPSHOT_TTL_MS
 
 export function resetProcessTableSnapshotForTests(): void {

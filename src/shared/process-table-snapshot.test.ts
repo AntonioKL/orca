@@ -11,6 +11,7 @@ import {
   getProcessTableSnapshot,
   getStrictProcessTableSnapshot,
   PS_MAX_BUFFER_BYTES,
+  PS_TIMEOUT_MS,
   resetProcessTableSnapshotForTests
 } from './process-table-snapshot-reader'
 import {
@@ -122,6 +123,26 @@ describe('process-table-snapshot reader', () => {
     clock = 900
     expect(await reader.getSnapshot()).toBe('scan-1')
     expect(scans).toBe(1)
+  })
+
+  it('reports the age of the capture instant, not of the moment ps finished', async () => {
+    let clock = 0
+    const gate = deferred<string>()
+    const reader = createProcessTableSnapshotReader({
+      runPs: () => gate.promise,
+      now: () => clock,
+      ttlMs: 500
+    })
+
+    const first = reader.getSnapshot()
+    // A capture that took 4s of wall clock describes the machine as it was 4s ago.
+    clock = 4_000
+    gate.resolve('scan-1')
+    await first
+
+    // Age used to start at the callback, so a capture older than the destructive
+    // consumer's ceiling was admitted as if it had just been taken.
+    expect((await reader.getSnapshotWithAge()).capturedAgeMs).toBe(4_000)
   })
 
   it('does not cache failures and retries on the next call', async () => {
@@ -598,5 +619,44 @@ describe('process-table capture completeness', () => {
 
     await expect(getProcessTableSnapshot()).rejects.toThrow(ProcessTableCaptureError)
     await expect(getProcessTableSnapshot()).rejects.toThrow('empty_capture')
+  })
+
+  /**
+   * Emulate Node's own execFile deadline: past `timeout` it SIGTERMs the child and calls
+   * back with `Command failed: <argv>` and no stderr -- indistinguishable from a broken
+   * `ps` unless the budget itself is under test.
+   */
+  function mockPsTakingMs(durationMs: number, stdout: string): void {
+    execFileMock.mockImplementation(
+      (command: string, args: string[], options: unknown, callback: unknown) => {
+        const done = callback as (err: unknown, result: { stdout: string; stderr: string }) => void
+        const timeout = (options as { timeout?: number })?.timeout
+        if (timeout !== undefined && durationMs > timeout) {
+          const error = Object.assign(
+            new Error(`Command failed: ${[command, ...args].join(' ')}\n`),
+            { code: null, killed: true, signal: 'SIGTERM' }
+          )
+          done(error, { stdout: '', stderr: '' })
+          return
+        }
+        done(null, { stdout, stderr: '' })
+      }
+    )
+  }
+
+  it('reads a loaded host whose whole-machine ps runs for seconds', async () => {
+    // Measured on a 1,948-process host at load 27: the `command=` argv read alone costs
+    // 1.15s, and contention stretched the same capture to 6.0s. The old 3s budget killed
+    // 6 of 20 consecutive captures, so a readable table answered "unverifiable".
+    mockPsTakingMs(6_000, busyHostTable(200))
+
+    expect(PS_TIMEOUT_MS).toBeGreaterThan(6_000)
+    await expect(getProcessTableSnapshot()).resolves.toHaveLength(200)
+  })
+
+  it('still bounds a ps that never returns', async () => {
+    mockPsTakingMs(PS_TIMEOUT_MS + 1, busyHostTable(200))
+
+    await expect(getProcessTableSnapshot()).rejects.toThrow('Command failed: ps')
   })
 })
