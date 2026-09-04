@@ -91,9 +91,6 @@ export const MobileWebProviderReviewSubmissionResultSchema = z
   })
   .strict()
 
-export type MobileWebProviderReviewSubmissionAction = z.infer<
-  typeof MobileWebProviderReviewSubmissionActionSchema
->
 export type MobileWebProviderReviewQueuedComment = z.infer<
   typeof MobileWebProviderReviewQueuedCommentSchema
 >

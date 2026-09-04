@@ -196,7 +196,6 @@ export type MobileWebSessionTabActionPayload = z.infer<
 >
 export type MobileWebSessionTab = z.infer<typeof MobileWebSessionTabSchema>
 export type MobileWebSessionSnapshotResult = z.infer<typeof MobileWebSessionSnapshotResultSchema>
-export type MobileWebSessionEvent = z.infer<typeof MobileWebSessionEventSchema>
 export type MobileWebSessionCreateResult = z.infer<typeof MobileWebSessionCreateResultSchema>
 export type MobileWebSessionAgentOptionsResult = z.infer<
   typeof MobileWebSessionAgentOptionsResultSchema

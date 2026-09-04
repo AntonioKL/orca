@@ -133,5 +133,3 @@ export function useHybridHostScreenCatalog(args: {
   })
   return { fetchWorktrees, onRefresh, refreshing }
 }
-
-export type HybridHostScreenCatalog = ReturnType<typeof useHybridHostScreenCatalog>

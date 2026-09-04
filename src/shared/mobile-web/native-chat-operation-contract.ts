@@ -9,10 +9,7 @@ import {
 } from '../agent-status-limits'
 import { MobileWebRelativePathSchema } from './file-operation-contract'
 import { MobileWebWorkspaceIdSchema } from './workspace-operation-contract'
-import {
-  MobileWebNativeChatTargetShape,
-  type MobileWebNativeChatSessionIdSchema
-} from './native-chat-target-contract'
+import { MobileWebNativeChatTargetShape } from './native-chat-target-contract'
 
 export * from './native-chat-image-operation-contract'
 export { MobileWebNativeChatSessionIdSchema } from './native-chat-target-contract'
@@ -233,10 +230,7 @@ export const MobileWebNativeChatReadabilityResultSchema = z
   .object({ readable: z.boolean() })
   .strict()
 
-export type MobileWebNativeChatSessionId = z.infer<typeof MobileWebNativeChatSessionIdSchema>
 export type MobileWebNativeChatAgentStatus = z.infer<typeof MobileWebNativeChatAgentStatusSchema>
-export type MobileWebNativeChatLifecycle = z.infer<typeof MobileWebNativeChatLifecycleSchema>
-export type MobileWebNativeChatMessage = z.infer<typeof MobileWebNativeChatMessageSchema>
 export type MobileWebNativeChatReadPayload = z.infer<typeof MobileWebNativeChatReadPayloadSchema>
 export type MobileWebNativeChatSubscribePayload = z.infer<
   typeof MobileWebNativeChatSubscribePayloadSchema
@@ -253,9 +247,6 @@ export type MobileWebNativeChatStopPayload = z.infer<typeof MobileWebNativeChatS
 export type MobileWebNativeChatSendResult = z.infer<typeof MobileWebNativeChatSendResultSchema>
 export type MobileWebNativeChatPrepareCommitPayload = z.infer<
   typeof MobileWebNativeChatPrepareCommitPayloadSchema
->
-export type MobileWebNativeChatPendingDelivery = z.infer<
-  typeof MobileWebNativeChatPendingDeliverySchema
 >
 export type MobileWebNativeChatPendingReadPayload = z.infer<
   typeof MobileWebNativeChatPendingReadPayloadSchema

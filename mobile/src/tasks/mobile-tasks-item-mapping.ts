@@ -1,4 +1,4 @@
-import { type GitHubOwnerRepo, type TaskProvider, colors } from './mobile-tasks-dependencies'
+import { type TaskProvider, colors } from './mobile-tasks-dependencies'
 import type {
   GitHubPreset,
   GitHubProjectRow,
@@ -102,14 +102,6 @@ export function canCreateWorkspaceFromProjectRow(row: GitHubProjectRow): boolean
 export function splitRepositorySlug(slug: string | null): { owner: string; repo: string } | null {
   const [owner, repo] = slug?.split('/') ?? []
   return owner && repo ? { owner, repo } : null
-}
-
-export function projectRowGitHubRepository(
-  row: GitHubProjectRow,
-  host: string
-): GitHubOwnerRepo | null {
-  const slug = splitRepositorySlug(row.content.repository)
-  return slug ? { ...slug, host } : null
 }
 
 export const GITHUB_PROJECT_OPTION_COLORS: Record<string, string> = {

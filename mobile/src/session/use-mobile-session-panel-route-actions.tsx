@@ -173,6 +173,3 @@ export function useMobileSessionPanelRouteActions(scope: MobileSessionPresentati
     createTabBusy
   }
 }
-
-export type MobileSessionPanelRouteActionsModel = MobileSessionPresentationModel &
-  ReturnType<typeof useMobileSessionPanelRouteActions>
