@@ -456,4 +456,110 @@ describe('OrchestrationDb version-skew migration', () => {
     // A second outstanding legacy row must not collide on the empty mailbox handle either.
     expect(() => insertLegacyDelivery('delivery_old_binary_2')).not.toThrow()
   })
+
+  // Why: v34 early-returns at >= 34 and every index probe uses IF NOT EXISTS, so a DB the pre-fix
+  // build already stamped v34 kept the old shape until v35 repaired it against the stored SQL.
+  it('repairs deliveries a pre-fix build already stamped v34', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-db-v34-already-stamped-'))
+    const dbPath = join(tempDir, 'orchestration.db')
+    db = new OrchestrationDb(dbPath)
+    db.close()
+    db = undefined
+
+    const raw = new Database(dbPath)
+    raw.exec(`
+      DROP TABLE deliveries;
+      CREATE TABLE deliveries (
+        id TEXT PRIMARY KEY, run_id TEXT NOT NULL, mailbox_handle TEXT NOT NULL,
+        consumer_generation INTEGER NOT NULL, message_ids TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'outstanding'
+          CHECK(status IN ('outstanding', 'acknowledged', 'fenced')),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')), acknowledged_at TEXT);
+      CREATE UNIQUE INDEX idx_deliveries_one_outstanding
+        ON deliveries(mailbox_handle) WHERE status = 'outstanding';
+      CREATE INDEX idx_deliveries_run_created ON deliveries(run_id, created_at);
+    `)
+    raw.pragma('user_version = 34')
+    raw.close()
+
+    db = new OrchestrationDb(dbPath)
+    expect(db.db.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION)
+    expect(db.db.pragma('table_info(deliveries)')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'mailbox_handle', notnull: 1, dflt_value: "''" })
+      ])
+    )
+    expect(
+      (
+        db.db
+          .prepare("SELECT sql FROM sqlite_master WHERE name = 'idx_deliveries_one_outstanding'")
+          .get() as { sql: string }
+      ).sql
+    ).toContain("mailbox_handle != ''")
+
+    const run = db.createRun({
+      objective: 'already stamped',
+      coordinatorHandle: 'term_coord',
+      coordinatorPaneKey: 'tab_c:aaaaaaaa-aaaa-4aaa-8aaa-000000000010'
+    })
+    expect(() =>
+      db!.db
+        .prepare(
+          'INSERT INTO deliveries (id, run_id, consumer_generation, message_ids) VALUES (?, ?, ?, ?)'
+        )
+        .run('delivery_after_v35', run.id, 1, '[]')
+    ).not.toThrow()
+  })
+
+  it('rewrites a pointer-enter index a v34 database built on the = 1 predicate', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-db-v34-pointer-predicate-'))
+    const dbPath = join(tempDir, 'orchestration.db')
+    db = new OrchestrationDb(dbPath)
+    db.close()
+    db = undefined
+
+    const raw = new Database(dbPath)
+    raw.exec(`
+      DROP INDEX IF EXISTS idx_messages_pending_pointer_enter;
+      CREATE INDEX idx_messages_pending_pointer_enter
+        ON messages(to_handle, sequence)
+        WHERE read = 0 AND pointer_enter_pending = 1;
+    `)
+    raw.pragma('user_version = 34')
+    raw.close()
+
+    db = new OrchestrationDb(dbPath)
+    const sql = (
+      db.db
+        .prepare("SELECT sql FROM sqlite_master WHERE name = 'idx_messages_pending_pointer_enter'")
+        .get() as { sql: string }
+    ).sql
+    expect(sql).toContain('pointer_enter_pending > 0')
+  })
+
+  it('treats a v35 stamp over the wrong index predicate as skew', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-db-v35-predicate-skew-'))
+    const dbPath = join(tempDir, 'orchestration.db')
+    db = new OrchestrationDb(dbPath)
+    db.close()
+    db = undefined
+
+    const raw = new Database(dbPath)
+    raw.exec(`
+      DROP INDEX IF EXISTS idx_deliveries_one_outstanding;
+      CREATE UNIQUE INDEX idx_deliveries_one_outstanding
+        ON deliveries(mailbox_handle) WHERE status = 'outstanding';
+    `)
+    expect(resolveOrchestrationMigrationStartVersion(raw, 35, SCHEMA_VERSION)).toBe(6)
+    raw.close()
+
+    db = new OrchestrationDb(dbPath)
+    expect(
+      (
+        db.db
+          .prepare("SELECT sql FROM sqlite_master WHERE name = 'idx_deliveries_one_outstanding'")
+          .get() as { sql: string }
+      ).sql
+    ).toContain("mailbox_handle != ''")
+  })
 })
