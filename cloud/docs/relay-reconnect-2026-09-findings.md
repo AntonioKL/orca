@@ -478,11 +478,24 @@ forced by WAL volume, so a write amplifier inside Postgres is the leading candid
 rate and Cloud SQL network bytes were flat). This is the first cause found today that is *upstream* of
 the relay code and it explains the afternoon acceleration (11Z 68 dies, 12Z 47 by 12:34).
 
-**Owning workflow / mitigation (not applied):** the disk is Terraform-owned under `cloud/infra/terraform`
-(`google_sql_database_instance`); PD-SSD IOPS/throughput grow linearly with size, so raising
-`disk_size` (e.g. 49 -> 200 GB) roughly quadruples the ceiling and is online, no restart. That change
-belongs in a reviewed Terraform PR applied by the infra workflow, per the standing rule not to apply
-relay config/capacity changes from this session.
+Corrections after digging (12:45Z): relay query volume, renewals, reconnects, and assignments per 5 min
+were **flat** across 11:58 (sqlQ ~330k, renewals ~115k), so the relay did not start writing more. WAL
+recycling per checkpoint went 7 -> 10–11 files (16 MB each) at 45 s intervals, i.e. WAL output rose from
+~0.4 MB/s to ~4 MB/s while data-file writes rose to 30–50 MB/s; checkpoints switched from `time` to `wal`
+triggered at 11:58:24. No Postgres slow-statement or "checkpoints too frequently" lines. This is
+write amplification inside Postgres (full-page writes after each of the now-frequent checkpoints on
+hot pages, plus autovacuum on every relay table each minute) on a disk too small for its IOPS ceiling,
+not new relay load. Instance label `managed_by=terraform`, created 2026-07-09; the instance resource is
+**not** in `cloud/infra/terraform` (only the database, user, and secret are, via
+`local.relay_database_instance_name`), so it lives in the other Terraform root (orca-cloud, per
+[[orca-cloud-terraform-split-findings]]). `storageAutoResize=true` with limit 0, so Cloud SQL will grow
+the disk only when it fills, not when IOPS saturate; disk is 81% full.
+
+**Owning workflow / mitigation (not applied):** raise the Cloud SQL data disk (PD-SSD IOPS and MB/s scale
+linearly with GB; 49 -> 200 GB roughly quadruples the ceiling, online, no restart) in the Terraform root
+that owns `google_sql_database_instance` for `orca-cloud-auth-db`, applied through that root's workflow.
+Per the standing rule, not applied from this session. Until then the fleet-wide 4–6 s stalls recur on
+every slow checkpoint sync, the old-image cells die on each one, and no 15-min gate window will exist.
 
 ## Roll inputs (verified by the read-only `verify` run)
 
