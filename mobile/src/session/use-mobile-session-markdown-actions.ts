@@ -116,9 +116,8 @@ export function useMobileSessionMarkdownActions(scope: MobileSessionDiffComments
     const target = discardMarkdownTarget
     setDiscardMarkdownTarget(null)
     if (target) {
-      void clearMarkdownDraft(target)
-        .catch(() => {})
-        .then(() => readMarkdownTab(target))
+      void clearMarkdownDraft(target).catch(() => {})
+      void readMarkdownTab(target)
     }
   }, [clearMarkdownDraft, discardMarkdownTarget, readMarkdownTab])
 
@@ -155,7 +154,8 @@ export function useMobileSessionMarkdownActions(scope: MobileSessionDiffComments
         if (markdownSaveSeqRef.current.get(tab.id) !== saveSeq) {
           return
         }
-        await clearMarkdownDraft(tab).catch(() => {})
+        // Draft persistence must not delay an already acknowledged document transition.
+        void clearMarkdownDraft(tab).catch(() => {})
         setMarkdownDocs((prev) =>
           new Map(prev).set(tab.id, {
             status: 'ready',

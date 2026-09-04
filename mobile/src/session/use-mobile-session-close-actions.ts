@@ -123,7 +123,8 @@ export function useMobileSessionCloseActions(scope: MobileSessionContentCreateAc
           fileDocLifecycleRef.current.close(tab.id, setFileDocs)
         }
         if (tab.type === 'markdown') {
-          await clearMarkdownDraft(tab).catch(() => {})
+          // Draft persistence must not delay reconciliation of an acknowledged close.
+          void clearMarkdownDraft(tab).catch(() => {})
           const nextDocs = markdownDocLifecycleRef.current.close(tab.id, markdownDocsRef.current)
           markdownDocsRef.current = nextDocs
           setMarkdownDocs(nextDocs)
