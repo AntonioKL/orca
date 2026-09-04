@@ -6,6 +6,7 @@ import { closeWebRuntimeTerminal } from '@/runtime/web-runtime-session'
 import { resolveLeafCloseCopyKind } from '../terminal/terminal-close-copy-kind'
 import { RUNNING_CLOSE_PROBE_TIMEOUT_MS } from '../terminal/running-terminal-close-guard'
 import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
+import { inspectionReportsRunningWork } from '../../../../shared/terminal-process-inspection'
 import {
   detachTerminalPaneToTab,
   isTerminalTabStripDropTarget,
@@ -99,12 +100,14 @@ export function useTerminalPaneCloseActions(controller: TerminalPaneBindingContr
           copyKind: getCloseDialogCopyKind(paneId)
         })
       const probeTimeout = setTimeout(() => decide(confirmClose), RUNNING_CLOSE_PROBE_TIMEOUT_MS)
-      void inspectRuntimeTerminalProcess(settings, ptyId)
+      // Why the flag: same one-shot destructive decision as the tab guard, so it is worth the host
+      // process-table read that the polled inspections deliberately skip.
+      void inspectRuntimeTerminalProcess(settings, ptyId, { scanChildProcesses: true })
         .then((process) => {
           clearTimeout(probeTimeout)
           decide(() => {
             if (
-              !process.hasChildProcesses ||
+              !inspectionReportsRunningWork(process) ||
               settings?.skipCloseTerminalWithRunningProcessConfirm
             ) {
               executeClosePane(paneId)

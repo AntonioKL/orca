@@ -138,7 +138,7 @@ export function recordRuntimeTerminalInputForPtyId(ptyId: string, timestamp = Da
 export async function inspectRuntimeTerminalProcess(
   settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined,
   ptyId: string,
-  options?: { expectedIncarnationId?: string }
+  options?: { expectedIncarnationId?: string; scanChildProcesses?: boolean }
 ): Promise<RuntimeTerminalProcessInspection> {
   const ownerEnvironmentId = getRemoteRuntimePtyEnvironmentId(ptyId)
   const target = ownerEnvironmentId
@@ -148,7 +148,7 @@ export async function inspectRuntimeTerminalProcess(
   const remote = isRemoteInspectionPtyId(ptyId)
   if (target.kind !== 'environment' || !terminal) {
     try {
-      const result = await (options?.expectedIncarnationId
+      const result = await (options
         ? window.api.pty.inspectProcess(ptyId, options)
         : window.api.pty.inspectProcess(ptyId))
       return normalizeInspectionResult(result, remote)

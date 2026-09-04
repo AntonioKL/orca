@@ -1,5 +1,15 @@
 import type { RemoteForegroundEvidence } from './foreground-process-evidence'
 
+/**
+ * What the execution host observed about processes running under a PTY's shell.
+ *
+ * Separate from `hasChildProcesses` because a boolean cannot hold the third answer. The host that
+ * could not read its own process table and the host that read it and found nothing both had to
+ * spell themselves `false`, and every close guard reads `false` as "nothing is running here".
+ * Windows relays spelled it `false` unconditionally.
+ */
+export type PtyChildProcessVerdict = 'children' | 'no-children' | 'unverifiable'
+
 /** Reasons the renderer could not observe the execution host. */
 export type ClientOnlyUnverifiableReason =
   | 'transport_loss'
@@ -17,6 +27,7 @@ export type ClientOnlyUnverifiableInspection = {
   verdict: 'unverifiable'
   reason: string
   foregroundProcessEvidence?: never
+  childProcessEvidence?: never
   authorityGeneration?: never
   observationEpoch?: never
   capturedAgeMs?: never
@@ -30,6 +41,8 @@ export type HostProcessInspection = {
   hasChildProcesses: boolean
   /** Optional on old hosts; the renderer treats an omitted field as old-host unverifiable. */
   foregroundProcessEvidence?: RemoteForegroundEvidence
+  /** Absent on hosts that predate the member, and on answers the host did not pay to observe. */
+  childProcessEvidence?: PtyChildProcessVerdict
   verdict?: never
   reason?: never
 }
@@ -112,4 +125,23 @@ export function classifyTerminalProcessInspectionFailure(
     return 'transport_loss'
   }
   return null
+}
+
+/**
+ * Whether a close has to stop and ask.
+ *
+ * Prefers `childProcessEvidence` because it is the only member that can say "I did not look";
+ * `hasChildProcesses` spells that the same way it spells "nothing is running". A host without the
+ * member keeps the boolean's meaning exactly, so old hosts decide as they always did.
+ *
+ * A client-only unverifiable stays not-busy on purpose: that verdict is about the transport, not
+ * the pane, and the close paths deliberately fail open on it rather than leave a dead button.
+ */
+export function inspectionReportsRunningWork(inspection: TerminalProcessInspection): boolean {
+  if (isClientOnlyUnverifiableInspection(inspection)) {
+    return false
+  }
+  return inspection.childProcessEvidence === undefined
+    ? inspection.hasChildProcesses
+    : inspection.childProcessEvidence !== 'no-children'
 }
