@@ -244,26 +244,30 @@ async function completeWorkerTerminalReleaseOnce(
   } catch (error) {
     const closeError = classifyWorkerTerminalCloseError(error)
     const reason = closeError.reason
-    if (closeError.transient) {
-      // Durable intent exists; the owning endpoint is temporarily unreachable. Recovery retries.
+    // A close that finds nothing to close is this release's goal once the host certified the
+    // exit; anything else keeps the record open for recovery.
+    if (!(closeError.alreadyGone && observation.status === 'exited')) {
+      if (closeError.transient) {
+        // Durable intent exists; the owning endpoint is temporarily unreachable. Recovery retries.
+        return {
+          dispatchId,
+          state: 'release_pending',
+          processAction: 'none',
+          archive: { source: archiveSource, status: archiveStatus },
+          lastError: reason,
+          recovery:
+            'The owning endpoint is temporarily unavailable; recovery will retry this release after reconnect without another coordinator decision.'
+        }
+      }
+      const unknown = db.markWorkerTerminalReleaseUnknown(resource.id, reason)
       return {
         dispatchId,
-        state: 'release_pending',
+        state: 'release_unknown',
         processAction: 'none',
         archive: { source: archiveSource, status: archiveStatus },
-        lastError: reason,
-        recovery:
-          'The owning endpoint is temporarily unavailable; recovery will retry this release after reconnect without another coordinator decision.'
+        lastError: unknown.release_error ?? reason,
+        recovery: releaseUnknownRecovery(dispatchId)
       }
-    }
-    const unknown = db.markWorkerTerminalReleaseUnknown(resource.id, reason)
-    return {
-      dispatchId,
-      state: 'release_unknown',
-      processAction: 'none',
-      archive: { source: archiveSource, status: archiveStatus },
-      lastError: unknown.release_error ?? reason,
-      recovery: releaseUnknownRecovery(dispatchId)
     }
   }
   const released = db.settleWorkerTerminalRelease(resource.id)

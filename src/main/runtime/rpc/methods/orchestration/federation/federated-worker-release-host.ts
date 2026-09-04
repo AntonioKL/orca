@@ -230,20 +230,25 @@ export async function releaseRemoteAttachment(args: {
     }
   } catch (error) {
     const closeError = classifyWorkerTerminalCloseError(error)
-    return {
-      dispatchId: attachment.dispatch_id,
-      state: closeError.transient ? 'release_pending' : 'release_unknown',
-      processAction: 'none',
-      lastError: closeError.reason,
-      recovery: closeError.transient
-        ? TRANSIENT_WORKER_RELEASE_RECOVERY
-        : releaseUnknownRecovery(attachment.dispatch_id),
-      archive: archiveSummary(
-        closeError.transient
-          ? releasing
-          : db.markWorkerTerminalReleaseUnknown(resource.id, closeError.reason)
-      ),
-      output: projectArchivedOutputLiveness(output, 'unverifiable')
+    // A close that finds nothing to close is this release's goal once the host certified the
+    // exit; reporting release_unknown wedged the record and told the agent to retry the same
+    // stale handle.
+    if (!(closeError.alreadyGone && observation.status === 'exited')) {
+      return {
+        dispatchId: attachment.dispatch_id,
+        state: closeError.transient ? 'release_pending' : 'release_unknown',
+        processAction: 'none',
+        lastError: closeError.reason,
+        recovery: closeError.transient
+          ? TRANSIENT_WORKER_RELEASE_RECOVERY
+          : releaseUnknownRecovery(attachment.dispatch_id),
+        archive: archiveSummary(
+          closeError.transient
+            ? releasing
+            : db.markWorkerTerminalReleaseUnknown(resource.id, closeError.reason)
+        ),
+        output: projectArchivedOutputLiveness(output, 'unverifiable')
+      }
     }
   }
   const released = db.settleWorkerTerminalRelease(resource.id)
