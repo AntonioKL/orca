@@ -18,7 +18,7 @@ function route(overrides: Partial<Parameters<typeof resolveAgentLaunchRoute>[0]>
     agent: 'codex',
     settings,
     executionHostId: 'local',
-    platform: 'darwin',
+    executionHostPlatform: 'darwin',
     hostCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY],
     windowsProcessStartTime: 'unavailable' as const,
     worktreeUsesWslPath: false,
@@ -69,13 +69,16 @@ describe('resolveAgentLaunchRoute', () => {
   it.each(['git-worktree', 'folder'] as const)(
     'supports a local %s without widening floating-terminal scope',
     (workspaceKind) => {
-      expect(route({ workspaceKind, platform: 'linux' })).toBe('structured-native-chat')
+      expect(route({ workspaceKind, executionHostPlatform: 'linux' })).toBe(
+        'structured-native-chat'
+      )
     }
   )
 
   it('keeps floating, Windows, WSL, and repair-required launches terminal-backed', () => {
     expect(route({ workspaceKind: 'floating' })).toBe('legacy-native-chat')
-    expect(route({ platform: 'win32' })).toBe('legacy-native-chat')
+    expect(route({ executionHostPlatform: null })).toBe('legacy-native-chat')
+    expect(route({ executionHostPlatform: 'win32' })).toBe('legacy-native-chat')
     expect(
       route({
         projectRuntime: {
@@ -129,19 +132,22 @@ describe('resolveAgentLaunchRoute Windows structured gate', () => {
   // Ported from the structured-native-chat availability gate that #18248
   // removed; these pin the Windows enablement this lane exists to deliver.
   it('refuses Windows when the host never answered the start-time probe', () => {
-    expect(route({ platform: 'win32', windowsProcessStartTime: 'unknown' })).toBe(
+    expect(route({ executionHostPlatform: 'win32', windowsProcessStartTime: 'unknown' })).toBe(
       'legacy-native-chat'
     )
   })
 
   it('refuses Windows when the host proved it cannot read start times', () => {
-    expect(route({ platform: 'win32', windowsProcessStartTime: 'unavailable' })).toBe(
-      'legacy-native-chat'
-    )
+    expect(
+      route({
+        executionHostPlatform: 'win32',
+        windowsProcessStartTime: 'unavailable'
+      })
+    ).toBe('legacy-native-chat')
   })
 
   it('allows Windows once native start-time proof is available', () => {
-    expect(route({ platform: 'win32', windowsProcessStartTime: 'available' })).toBe(
+    expect(route({ executionHostPlatform: 'win32', windowsProcessStartTime: 'available' })).toBe(
       'structured-native-chat'
     )
   })
@@ -149,7 +155,7 @@ describe('resolveAgentLaunchRoute Windows structured gate', () => {
   it('keeps a WSL UNC workspace on the legacy terminal even with proof', () => {
     expect(
       route({
-        platform: 'win32',
+        executionHostPlatform: 'win32',
         windowsProcessStartTime: 'available',
         worktreeUsesWslPath: true
       })
@@ -159,7 +165,7 @@ describe('resolveAgentLaunchRoute Windows structured gate', () => {
   it('allows a Windows folder workspace once start-time proof is available', () => {
     expect(
       route({
-        platform: 'win32',
+        executionHostPlatform: 'win32',
         windowsProcessStartTime: 'available',
         workspaceKind: 'folder'
       })
@@ -169,7 +175,7 @@ describe('resolveAgentLaunchRoute Windows structured gate', () => {
   it('still refuses a non-local Windows host that has proof', () => {
     expect(
       route({
-        platform: 'win32',
+        executionHostPlatform: 'win32',
         windowsProcessStartTime: 'available',
         executionHostId: 'ssh-1'
       })

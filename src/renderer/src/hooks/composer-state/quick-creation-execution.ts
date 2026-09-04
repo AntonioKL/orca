@@ -36,7 +36,7 @@ import { useCallback } from 'react'
 import type { Repo } from '../../../../shared/repo-types'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { WorktreeCreationRequest } from '@/lib/pending-worktree-creation'
-import { readWindowsProcessStartTimeGate } from '@/lib/agent-launch-routing-windows-gate'
+import { readWindowsCreationGateInputs } from '@/lib/agent-launch-routing-windows-gate'
 import { useAppStore } from '@/store'
 import { settleComposerSubmit } from '@/lib/composer-submit-cancellation'
 import { ensureHooksConfirmed } from '@/lib/ensure-hooks-confirmed'
@@ -207,12 +207,8 @@ export function useQuickCreationExecution(input: QuickCreationExecutionInput) {
             executionHostId: ephemeralVmRecipe
               ? 'runtime:pending-ephemeral-vm'
               : (workspaceRunContext?.hostId ?? selectedRepoExecutionHostId ?? 'local'),
-            platform: CLIENT_PLATFORM,
             hostCapabilities: readLocalRuntimeCapabilities(),
-            windowsProcessStartTime: readWindowsProcessStartTimeGate(),
-            // The workspace has no store entry until after this decision, so the
-            // WSL-UNC check cannot run yet; it applies on the next launch.
-            worktreeUsesWslPath: false,
+            ...readWindowsCreationGateInputs(CLIENT_PLATFORM),
             workspaceKind: selectedRepoIsGit ? 'git-worktree' : 'folder',
             promptDelivery: quickDraftPrompt ? 'draft' : 'auto-submit',
             launchText: quickDraftPrompt ?? quickPrompt,

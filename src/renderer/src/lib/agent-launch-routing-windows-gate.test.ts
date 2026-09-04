@@ -1,5 +1,39 @@
-import { describe, expect, it } from 'vitest'
-import { pathUsesWslUnc, readWorktreeUsesWslPath } from './agent-launch-routing-windows-gate'
+// @vitest-environment happy-dom
+
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  pathUsesWslUnc,
+  readAgentLaunchHostPlatform,
+  readWorktreeUsesWslPath
+} from './agent-launch-routing-windows-gate'
+import { setLocalRuntimeCapabilitiesForTests } from '@/runtime/local-runtime-capabilities'
+
+afterEach(() => {
+  setLocalRuntimeCapabilitiesForTests([])
+  delete (window as unknown as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__
+})
+
+describe('readAgentLaunchHostPlatform', () => {
+  it('uses the execution host instead of the browser platform for paired web', () => {
+    ;(window as unknown as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ = true
+    setLocalRuntimeCapabilitiesForTests([], 'linux')
+
+    expect(readAgentLaunchHostPlatform('win32')).toBe('linux')
+
+    setLocalRuntimeCapabilitiesForTests([], 'win32')
+    expect(readAgentLaunchHostPlatform('darwin')).toBe('win32')
+  })
+
+  it('fails closed while a paired execution host platform is unknown', () => {
+    ;(window as unknown as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ = true
+
+    expect(readAgentLaunchHostPlatform('linux')).toBeNull()
+  })
+
+  it('uses the renderer platform for a local desktop runtime', () => {
+    expect(readAgentLaunchHostPlatform('darwin')).toBe('darwin')
+  })
+})
 
 describe('pathUsesWslUnc', () => {
   it('treats a wsl.localhost parent as WSL', () => {

@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   readLocalRuntimeCapabilities,
+  readLocalRuntimeHostPlatform,
   refreshLocalRuntimeCapabilities,
   setLocalRuntimeCapabilitiesForTests
 } from './local-runtime-capabilities'
@@ -13,7 +14,10 @@ describe('local runtime capabilities', () => {
   })
 
   it('fails closed until the live host advertises support', async () => {
-    const getStatus = vi.fn(async () => ({ capabilities: ['agent-session.structured.v1'] }))
+    const getStatus = vi.fn(async () => ({
+      capabilities: ['agent-session.structured.v1'],
+      hostPlatform: 'win32' as const
+    }))
     Object.assign(window, { api: { runtime: { getStatus } } })
 
     expect(readLocalRuntimeCapabilities()).toEqual([])
@@ -21,6 +25,7 @@ describe('local runtime capabilities', () => {
       'agent-session.structured.v1'
     ])
     expect(readLocalRuntimeCapabilities()).toEqual(['agent-session.structured.v1'])
+    expect(readLocalRuntimeHostPlatform()).toBe('win32')
   })
 
   it('coalesces concurrent live status reads', async () => {
@@ -55,5 +60,6 @@ describe('local runtime capabilities', () => {
 
     await expect(refreshLocalRuntimeCapabilities()).resolves.toEqual([])
     expect(readLocalRuntimeCapabilities()).toEqual([])
+    expect(readLocalRuntimeHostPlatform()).toBeNull()
   })
 })

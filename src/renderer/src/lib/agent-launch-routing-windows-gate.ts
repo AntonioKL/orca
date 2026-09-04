@@ -5,8 +5,17 @@ import {
   getCachedWindowsTerminalCapabilities,
   hasCachedWindowsTerminalCapabilities
 } from '@/lib/windows-terminal-capabilities'
+import { isWebClientLocation } from '@/lib/web-client-location'
+import { readLocalRuntimeHostPlatform } from '@/runtime/local-runtime-capabilities'
 
 export type WindowsProcessStartTimeGate = 'available' | 'unavailable' | 'unknown'
+
+/** The runtime owns the execution platform in paired web; an unknown host must fail closed. */
+export function readAgentLaunchHostPlatform(
+  clientPlatform: NodeJS.Platform
+): NodeJS.Platform | null {
+  return readLocalRuntimeHostPlatform() ?? (isWebClientLocation() ? null : clientPlatform)
+}
 
 /**
  * Derive the host half of the Windows structured gate once, so the routing call
@@ -43,12 +52,34 @@ export function pathUsesWslUnc(path: string | null | undefined): boolean {
   return path ? isWslUncPath(path) : false
 }
 
-/** Both halves at once, so a store-backed call site adds one line, not two. */
+/** All host-owned inputs for a workspace whose store entry does not exist yet. */
+export function readWindowsCreationGateInputs(
+  clientPlatform: NodeJS.Platform,
+  workspacePath?: string | null
+): {
+  executionHostPlatform: NodeJS.Platform | null
+  windowsProcessStartTime: WindowsProcessStartTimeGate
+  worktreeUsesWslPath: boolean
+} {
+  return {
+    executionHostPlatform: readAgentLaunchHostPlatform(clientPlatform),
+    windowsProcessStartTime: readWindowsProcessStartTimeGate(),
+    worktreeUsesWslPath: pathUsesWslUnc(workspacePath)
+  }
+}
+
+/** All host-owned inputs for a workspace already present in the store. */
 export function readWindowsStructuredGateInputs(
   state: Partial<Pick<AppState, 'folderWorkspaces' | 'worktreesByRepo'>>,
-  worktreeId: string
-): { windowsProcessStartTime: WindowsProcessStartTimeGate; worktreeUsesWslPath: boolean } {
+  worktreeId: string,
+  clientPlatform: NodeJS.Platform
+): {
+  executionHostPlatform: NodeJS.Platform | null
+  windowsProcessStartTime: WindowsProcessStartTimeGate
+  worktreeUsesWslPath: boolean
+} {
   return {
+    executionHostPlatform: readAgentLaunchHostPlatform(clientPlatform),
     windowsProcessStartTime: readWindowsProcessStartTimeGate(),
     worktreeUsesWslPath: readWorktreeUsesWslPath(state, worktreeId)
   }
