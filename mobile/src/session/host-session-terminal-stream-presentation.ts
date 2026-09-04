@@ -11,6 +11,12 @@ import {
 import { updateTerminalCwdFromStreamEvent } from './mobile-session-route-helpers'
 import type { MobileDisplayMode } from './mobile-session-route-types'
 import type { MobileTerminalDiagnostics } from './mobile-terminal-diagnostics'
+import {
+  readTerminalViewportDims,
+  runTerminalViewportFitPass,
+  type TerminalViewportDims,
+  type TerminalViewportResubscribeBudget
+} from './mobile-terminal-viewport-resubscribe'
 
 type MutableRef<T> = { current: T }
 
@@ -18,34 +24,40 @@ type HostSessionTerminalStreamPresentation = {
   event: HostSessionTerminalStreamEvent
   handle: string
   subscribeSequence: number
-  currentSubscribeSequence: () => number | undefined
   isCovered: () => boolean
   unsubscribe: (handle: string) => void
   markInputLeaseReady: (handle: string) => void
+  signalTerminalInventoryRecovery: () => void
   layoutSequences: Map<string, number>
-  initializedHandles: Set<string>
   terminalCwds: Map<string, string>
-  getTerminalRef: (handle: string) => TerminalWebViewHandle | undefined
+  getTerminalRef: (handle: string | null) => TerminalWebViewHandle | undefined
   operations: HostSessionTerminalOperations
   setDisplayMode: (handle: string, mode: MobileDisplayMode) => void
   diagnostics: MobileTerminalDiagnostics
   scheduleDelayedAction: (action: () => void, delayMs: number) => void
-  viewportRef: MutableRef<{ cols: number; rows: number } | null>
+  viewportRef: MutableRef<TerminalViewportDims | null>
   viewportMeasuredRef: MutableRef<boolean>
   terminalFrameHeightRef: MutableRef<number>
+  subscribeSeqRef: MutableRef<Map<string, number>>
+  initializedHandlesRef: MutableRef<Set<string>>
+  terminalUnsubsRef: MutableRef<Map<string, () => void>>
+  viewportResubscribeBudget: TerminalViewportResubscribeBudget
+  showToast: (message: string, durationMs?: number) => void
   subscribe: (handle: string) => void
 }
 
 export function presentHostSessionTerminalStreamEvent(
   context: HostSessionTerminalStreamPresentation
 ): void {
-  if (context.currentSubscribeSequence() !== context.subscribeSequence) {
+  if (context.subscribeSeqRef.current.get(context.handle) !== context.subscribeSequence) {
     return
   }
   const data = context.event as unknown as Record<string, unknown>
   context.diagnostics.firstStreamEvent(context.handle, context.subscribeSequence, data.type)
   if (data.type === 'end' || data.type === 'error') {
     context.unsubscribe(context.handle)
+    // Why: a dead PTY leaves a stale tab until the next 60s sweep unless the list is re-read now.
+    context.signalTerminalInventoryRecovery()
     return
   }
   if (data.type === 'subscribed') {
@@ -109,12 +121,15 @@ function presentScrollback(
     eventSequence,
     data
   )
-  if (context.initializedHandles.has(context.handle)) {
+  if (context.initializedHandlesRef.current.has(context.handle)) {
     return
   }
   updateTerminalCwdFromStreamEvent(context.handle, data, context.terminalCwds)
-  const cols = (data.cols as number) || 80
-  const rows = (data.rows as number) || 24
+  const { hostCols, hostRows } = readTerminalViewportDims(data)
+  // Why: absent host dims must not be coerced into a comparable size — 80x24
+  // never equals a phone viewport and armed a zero-delay resubscribe loop (STA-3337).
+  const cols = hostCols ?? context.viewportRef.current?.cols ?? 80
+  const rows = hostRows ?? context.viewportRef.current?.rows ?? 24
   const serialized = hostSessionTerminalData(data.serialized)
   const ref = context.getTerminalRef(context.handle)
   if (!ref) {
@@ -132,50 +147,34 @@ function presentScrollback(
     isTerminalOscLinkRanges(data.oscLinks) ? data.oscLinks : undefined,
     hostSessionTerminalAcknowledgement(context.operations, context.handle, data.throughSequence)
   )
-  context.initializedHandles.add(context.handle)
+  context.initializedHandlesRef.current.add(context.handle)
   setDisplayMode(context, data)
   context.scheduleDelayedAction(() => context.getTerminalRef(context.handle)?.resetZoom(), 200)
-  scheduleInitialViewportCorrection(context, cols, rows, data.displayMode)
-}
-
-function scheduleInitialViewportCorrection(
-  context: HostSessionTerminalStreamPresentation,
-  scrollbackCols: number,
-  scrollbackRows: number,
-  displayMode: unknown
-): void {
-  if (displayMode === 'desktop') {
+  if (data.displayMode === 'desktop') {
     return
   }
-  const viewport = context.viewportRef.current
-  if (
-    context.viewportMeasuredRef.current &&
-    (!viewport || (scrollbackCols === viewport.cols && scrollbackRows === viewport.rows))
-  ) {
-    return
-  }
-  void (async () => {
-    await context.getTerminalRef(context.handle)?.awaitReady()
-    if (context.currentSubscribeSequence() !== context.subscribeSequence) {
-      return
-    }
-    const dims = await context
-      .getTerminalRef(context.handle)
-      ?.measureFitDimensions(context.terminalFrameHeightRef.current || undefined)
-    if (
-      context.currentSubscribeSequence() !== context.subscribeSequence ||
-      !context.getTerminalRef(context.handle) ||
-      !dims
-    ) {
-      return
-    }
-    context.diagnostics.streamResubscribing(context.handle, context.subscribeSequence, dims)
-    context.viewportRef.current = dims
-    context.viewportMeasuredRef.current = true
-    context.unsubscribe(context.handle)
-    context.initializedHandles.delete(context.handle)
-    context.subscribe(context.handle)
-  })()
+  // Why: first subscribe has no viewport (xterm not loaded yet), so measure after init
+  // and resubscribe so the server can phone-fit — bounded per handle so a
+  // non-converging host degrades visibly instead of hot-looping (STA-3337).
+  runTerminalViewportFitPass({
+    handle: context.handle,
+    seq: context.subscribeSequence,
+    hostCols,
+    hostRows,
+    budget: context.viewportResubscribeBudget,
+    diagnostics: context.diagnostics,
+    viewportRef: context.viewportRef,
+    viewportMeasuredRef: context.viewportMeasuredRef,
+    subscribeSeqRef: context.subscribeSeqRef,
+    initializedHandlesRef: context.initializedHandlesRef,
+    terminalUnsubsRef: context.terminalUnsubsRef,
+    terminalFrameHeightRef: context.terminalFrameHeightRef,
+    getTerminalRef: context.getTerminalRef,
+    unsubscribeTerminal: context.unsubscribe,
+    subscribeToTerminal: context.subscribe,
+    scheduleDelayedAction: context.scheduleDelayedAction,
+    showToast: context.showToast
+  })
 }
 
 function presentOutput(
@@ -187,11 +186,11 @@ function presentOutput(
   if (!ref) {
     console.log('[fit][session] data DROPPED — no terminal ref', {
       chunkLen: hostSessionTerminalData(data.chunk).length,
-      initialized: context.initializedHandles.has(context.handle)
+      initialized: context.initializedHandlesRef.current.has(context.handle)
     })
     return
   }
-  if (!context.initializedHandles.has(context.handle)) {
+  if (!context.initializedHandlesRef.current.has(context.handle)) {
     console.log('[fit][session] data RECEIVED before scrollback', {
       chunkLen: hostSessionTerminalData(data.chunk).length
     })
@@ -208,8 +207,12 @@ function presentResize(
   eventSequence: number | null
 ): void {
   updateTerminalCwdFromStreamEvent(context.handle, data, context.terminalCwds)
-  const cols = (data.cols as number) || 80
-  const rows = (data.rows as number) || 24
+  // Why: a resize that already matches the measured viewport is convergence — it retires the fit budget.
+  const [cols, rows] = context.viewportResubscribeBudget.observeResize(
+    context.handle,
+    data,
+    context.viewportMeasuredRef.current ? context.viewportRef.current : null
+  )
   const serialized = hostSessionTerminalData(data.serialized)
   context.diagnostics.streamResized(
     context.handle,

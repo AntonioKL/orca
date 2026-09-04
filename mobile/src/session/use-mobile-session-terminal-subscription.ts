@@ -18,12 +18,14 @@ export function useMobileSessionTerminalSubscription(
     leaseOnlyHandlesRef,
     initializedHandlesRef,
     terminalDiagnosticsRef,
+    viewportResubscribeBudgetRef,
     webReadyHandlesRef,
     activeHandleRef,
     subscribeSeqRef,
     layoutSeqRef,
     terminalFrameHeightRef,
     scheduleDelayedAction,
+    showToast,
     markNativeChatInputLeaseReady,
     showNativeChatRef,
     getTerminalRef,
@@ -99,7 +101,6 @@ export function useMobileSessionTerminalSubscription(
             event: result,
             handle,
             subscribeSequence: seq,
-            currentSubscribeSequence: () => subscribeSeqRef.current.get(handle),
             isCovered: () =>
               nativeChatTerminalStream.isTerminalCoveredByNativeChat(
                 showNativeChatRef.current,
@@ -108,18 +109,28 @@ export function useMobileSessionTerminalSubscription(
               ),
             unsubscribe: unsubscribeTerminalRef.current,
             markInputLeaseReady: markNativeChatInputLeaseReady,
+            signalTerminalInventoryRecovery,
             layoutSequences: layoutSeqRef.current,
-            initializedHandles: initializedHandlesRef.current,
             terminalCwds: terminalCwdRef.current,
             getTerminalRef,
             operations: sessionTerminalOperations,
             setDisplayMode: (terminalId, mode) =>
-              setTerminalModes((previous) => new Map(previous).set(terminalId, mode)),
+              // Why: same-mode frames must keep the Map identity, or every stream pass re-renders the whole route.
+              setTerminalModes((previous) =>
+                previous.get(terminalId) === mode
+                  ? previous
+                  : new Map(previous).set(terminalId, mode)
+              ),
             diagnostics,
             scheduleDelayedAction,
             viewportRef,
             viewportMeasuredRef,
             terminalFrameHeightRef,
+            subscribeSeqRef,
+            initializedHandlesRef,
+            terminalUnsubsRef,
+            viewportResubscribeBudget: viewportResubscribeBudgetRef.current,
+            showToast,
             subscribe: subscribeToTerminal
           })
           if (result.type === 'subscribed') {
@@ -147,6 +158,8 @@ export function useMobileSessionTerminalSubscription(
       markNativeChatInputLeaseReady,
       scheduleDelayedAction,
       sessionTerminalOperations,
+      showToast,
+      signalTerminalInventoryRecovery,
       worktreeId
     ]
   )
