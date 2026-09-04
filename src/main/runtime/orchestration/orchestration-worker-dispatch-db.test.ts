@@ -99,11 +99,8 @@ describe('OrchestrationDb worker Dispatch state', () => {
       effects: [],
       terminalOwnership: 'created'
     })
-    expect(d.getDispatchContextById(started.dispatch.id)).toMatchObject({
-      attachment_kind: 'local',
-      resource_id: expect.any(String)
-    })
     expect(d.getWorkerTerminalResourceByOwner(started.dispatch.id)).toMatchObject({
+      owner_dispatch_id: started.dispatch.id,
       endpoint_incarnation: 'runtime:pty:1'
     })
     d.markWorkerDispatchReady(started.dispatch.id)
@@ -245,8 +242,6 @@ describe('OrchestrationDb worker Dispatch state', () => {
       retryOf: first.dispatch.id,
       startOptions: {}
     })
-    expect(second.dispatch.retry_of_dispatch_id).toBe(first.dispatch.id)
-    expect(second.dispatch.creator_role).toBe('system')
     d.failWorkerStart(second.dispatch.id, 'agent_readiness', 'second failed')
 
     expect(() =>

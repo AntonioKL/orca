@@ -11,12 +11,22 @@ const PENDING_POINTER_ENTER_INDEX_SQL = `
     WHERE read = 0 AND pointer_enter_pending > 0;
 `
 
+/** v31 identity columns that were never read back; only creator_dispatch_id and host_scope stay. */
+const DROPPED_DISPATCH_IDENTITY_COLUMNS = [
+  'retry_of_dispatch_id',
+  'creator_role',
+  'endpoint_id',
+  'endpoint_incarnation',
+  'attachment_kind',
+  'resource_id'
+] as const
+
 /**
  * Databases stamped v34 by the pre-fix build kept the old deliveries shape: v34 early-returns at
  * `>= 34`, and every index probe uses IF NOT EXISTS, so whichever predicate ran first survives.
  * Re-apply both halves against the stored SQL rather than the version stamp.
  */
-export function migrateMailboxDeliveryRepairV35(this: OrchestrationDb, current: number): void {
+export function migrateV35(this: OrchestrationDb, current: number): void {
   if (current >= 35) {
     return
   }
@@ -43,6 +53,7 @@ export function migrateMailboxDeliveryRepairV35(this: OrchestrationDb, current: 
     'pointer_enter_pending > 0',
     PENDING_POINTER_ENTER_INDEX_SQL
   )
+  dropUnreadDispatchIdentityColumns.call(this)
 }
 
 function rebuildDeliveriesWithMailboxDefault(this: OrchestrationDb): void {
@@ -94,4 +105,17 @@ function recreateIndexMissingPredicate(
     return
   }
   this.db.exec(`DROP INDEX IF EXISTS ${index};\n${createSql}`)
+}
+
+function dropUnreadDispatchIdentityColumns(this: OrchestrationDb): void {
+  // SQLite refuses DROP COLUMN while an index still references the column.
+  this.db.exec(`
+    DROP INDEX IF EXISTS idx_dispatch_retry_of;
+    DROP INDEX IF EXISTS idx_dispatch_resource;
+  `)
+  for (const column of DROPPED_DISPATCH_IDENTITY_COLUMNS) {
+    if (this.hasColumn('dispatch_contexts', column)) {
+      this.db.exec(`ALTER TABLE dispatch_contexts DROP COLUMN ${column}`)
+    }
+  }
 }

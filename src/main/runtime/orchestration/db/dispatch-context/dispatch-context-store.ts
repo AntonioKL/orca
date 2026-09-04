@@ -62,7 +62,6 @@ export function createDispatchContext(
       assigneePaneKey: assigneePaneKey ?? null,
       processIncarnation: processIncarnation ?? null,
       creatorDispatchId,
-      creatorRole: params.creator.kind,
       priorFailures,
       depth,
       taskId,

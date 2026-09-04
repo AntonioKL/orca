@@ -54,8 +54,7 @@ export function prepareStartingWorkerAuthority(
       .prepare(
         `UPDATE dispatch_contexts
          SET assignee_handle = ?, assignee_pane_key = ?, process_incarnation = ?,
-             endpoint_id = COALESCE(endpoint_id, ?), endpoint_incarnation = ?, host_scope = ?,
-             attachment_kind = 'local',
+             host_scope = ?,
              capability_hash = ?, launch_token_hash = COALESCE(launch_token_hash, ?),
              capability_revoked_at = NULL
          WHERE id = ? AND status = 'pending'`
@@ -63,8 +62,6 @@ export function prepareStartingWorkerAuthority(
       .run(
         params.handle,
         params.paneKey,
-        params.processIncarnation,
-        endpointId,
         params.processIncarnation,
         params.hostScope ?? null,
         hashDispatchCapability(capability),
@@ -152,16 +149,6 @@ export function prepareStartingWorkerAuthority(
           })
         }
       }
-    }
-    const resource = this.getWorkerTerminalResourceByOwner(params.dispatchId)
-    if (resource) {
-      this.db
-        .prepare(
-          `UPDATE dispatch_contexts
-              SET resource_id = ?, attachment_kind = 'local'
-            WHERE id = ?`
-        )
-        .run(resource.id, params.dispatchId)
     }
     this.db.exec('COMMIT')
     return capability

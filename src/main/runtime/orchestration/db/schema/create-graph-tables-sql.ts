@@ -145,14 +145,8 @@ CREATE TABLE IF NOT EXISTS dispatch_contexts (
   process_incarnation TEXT,
   capability_revoked_at TEXT,
   -- R1 identity facts; nullable when legacy provenance was never proven.
-  retry_of_dispatch_id TEXT,
   creator_dispatch_id TEXT,
-  creator_role        TEXT,
-  endpoint_id         TEXT,
-  endpoint_incarnation TEXT,
   host_scope          TEXT,
-  attachment_kind     TEXT,
-  resource_id         TEXT,
   status              TEXT NOT NULL DEFAULT 'pending'
     CHECK(status IN ('pending', 'dispatched', 'completed', 'failed', 'circuit_broken')),
   failure_count       INTEGER NOT NULL DEFAULT 0,

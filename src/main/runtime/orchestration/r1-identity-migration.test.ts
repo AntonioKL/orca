@@ -6,16 +6,7 @@ import Database from '../../sqlite/sync-database'
 import { OrchestrationDb } from './db'
 import { SCHEMA_VERSION } from './db/contract-constants'
 
-const DISPATCH_IDENTITY_COLUMNS = [
-  'retry_of_dispatch_id',
-  'creator_dispatch_id',
-  'creator_role',
-  'endpoint_id',
-  'endpoint_incarnation',
-  'host_scope',
-  'attachment_kind',
-  'resource_id'
-] as const
+const DISPATCH_IDENTITY_COLUMNS = ['creator_dispatch_id', 'host_scope'] as const
 
 describe('R1 identity migration', () => {
   let db: OrchestrationDb | undefined
@@ -70,14 +61,13 @@ describe('R1 identity migration', () => {
     db = new OrchestrationDb(dbPath)
     expect(db.db.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION)
     expect(db.getDispatchContextById(started.dispatch.id)).toMatchObject({
-      retry_of_dispatch_id: null,
       creator_dispatch_id: null,
-      creator_role: null,
-      endpoint_id: 'runtime-v30',
-      endpoint_incarnation: null,
-      host_scope: null,
-      attachment_kind: null,
-      resource_id: resourceId
+      host_scope: null
+    })
+    // Re-added by v31 without guessing: a v30 writer never recorded endpoint identity.
+    expect(db.getWorkerTerminalResource(resourceId!)).toMatchObject({
+      endpoint_id: null,
+      endpoint_incarnation: null
     })
     db.close()
     db = undefined
@@ -94,12 +84,42 @@ describe('R1 identity migration', () => {
     db = new OrchestrationDb(dbPath)
     expect(db.db.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION)
     expect(db.getDispatchContextById('ctx_old_writer')).toMatchObject({
-      retry_of_dispatch_id: null,
       creator_dispatch_id: null,
-      creator_role: null,
-      endpoint_id: null,
-      attachment_kind: null,
-      resource_id: null
+      host_scope: null
     })
+  })
+
+  it('drops the v31 identity columns no reader ever consumed', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-r1-identity-drop-'))
+    const dbPath = join(tempDir, 'orchestration.db')
+    db = new OrchestrationDb(dbPath)
+    db.close()
+    db = undefined
+
+    const v34 = new Database(dbPath)
+    for (const column of ['retry_of_dispatch_id', 'creator_role', 'endpoint_id'] as const) {
+      v34.exec(`ALTER TABLE dispatch_contexts ADD COLUMN ${column} TEXT`)
+    }
+    for (const column of ['endpoint_incarnation', 'attachment_kind', 'resource_id'] as const) {
+      v34.exec(`ALTER TABLE dispatch_contexts ADD COLUMN ${column} TEXT`)
+    }
+    v34.exec(`
+      CREATE INDEX idx_dispatch_retry_of ON dispatch_contexts(retry_of_dispatch_id);
+      CREATE INDEX idx_dispatch_resource ON dispatch_contexts(resource_id);
+    `)
+    v34.pragma('user_version = 34')
+    v34.close()
+
+    db = new OrchestrationDb(dbPath)
+    const columns = (db.db.pragma('table_info(dispatch_contexts)') as { name: string }[]).map(
+      ({ name }) => name
+    )
+    expect(columns).toEqual(expect.arrayContaining(['creator_dispatch_id', 'host_scope', 'depth']))
+    expect(columns).not.toContain('retry_of_dispatch_id')
+    expect(columns).not.toContain('resource_id')
+    expect(columns).not.toContain('attachment_kind')
+    expect(
+      db.db.prepare("SELECT name FROM sqlite_master WHERE name = 'idx_dispatch_retry_of'").get()
+    ).toBeUndefined()
   })
 })
