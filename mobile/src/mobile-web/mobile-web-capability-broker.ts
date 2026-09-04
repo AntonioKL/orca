@@ -14,6 +14,7 @@ import { MobileWebCommitMessageGeneration } from './mobile-web-commit-message-ge
 import { MobileWebCapabilitySubscriptions } from './mobile-web-capability-subscriptions'
 import { MOBILE_WEB_PRODUCTION_GRANT_INDEX } from './mobile-web-production-grants'
 import { MobileWebTerminalStreams } from './mobile-web-terminal-streams'
+import { MOBILE_WEB_TERMINAL_CLIENT_CLOSURE } from './mobile-web-terminal-stream-retirement'
 import { MobileWebSpeechAuthority } from './mobile-web-speech-authority'
 import { executeMobileWebCapabilityRequest } from './mobile-web-capability-execution'
 import { MobileWebCapabilityAuthorities } from './mobile-web-capability-authorities'
@@ -74,8 +75,8 @@ export class MobileWebCapabilityBroker {
       onFlowMetrics: options.onTerminalFlowMetrics,
       onResync: options.onTerminalResync,
       workspaceAuthority: this.authorities.workspace,
-      postEvent: (subscriptionId, sequence, event) =>
-        this.messages.event(subscriptionId, sequence, event)
+      postEvent: this.messages.event.bind(this.messages),
+      postClosed: mobileWebSubscriptionClosedPoster(this.messages)
     })
   }
 
@@ -106,7 +107,8 @@ export class MobileWebCapabilityBroker {
     this.authorities.clear()
     this.commitMessageGeneration.replaceClient(client)
     this.subscriptions.dispose()
-    this.terminalStreams.dispose(null)
+    // The page and its grants survive a client swap, so its terminals can re-subscribe once told.
+    this.terminalStreams.dispose(null, MOBILE_WEB_TERMINAL_CLIENT_CLOSURE)
     this.speechAuthority.replaceClient()
     for (const [requestId, pending] of this.pending) {
       if (survivesCancellation(pending)) {
@@ -242,8 +244,7 @@ export class MobileWebCapabilityBroker {
       sourceControlSubscriptions: this.subscriptions.sourceControl,
       sourceControlBranchCompare: this.authorities.sourceControlBranchCompare,
       speechAuthority: this.speechAuthority,
-      postSpeechEvent: (subscriptionId, sequence, event) =>
-        this.messages.event(subscriptionId, sequence, event),
+      postSpeechEvent: this.messages.event.bind(this.messages),
       postSpeechClosed: mobileWebSubscriptionClosedPoster(this.messages),
       workspaceSubscriptions: this.subscriptions.workspace,
       terminalStreams: this.terminalStreams,

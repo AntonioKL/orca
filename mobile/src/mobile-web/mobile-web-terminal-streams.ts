@@ -9,6 +9,10 @@ import {
   type TerminalStreamFrame
 } from '../transport/terminal-stream-protocol'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import type {
+  MobileWebPostSubscriptionClosed,
+  MobileWebSubscriptionClosure
+} from './mobile-web-subscription-closure'
 import { runMobileWebTerminalAction } from './mobile-web-terminal-actions'
 import {
   acknowledgeMobileWebTerminalOutput,
@@ -16,13 +20,17 @@ import {
   type MobileWebTerminalStreamRecord
 } from './mobile-web-terminal-flow-control'
 import {
-  safeUnsubscribeMobileWebTerminal,
   sendMobileWebTerminalFrame,
   sendMobileWebTerminalSubscribe
 } from './mobile-web-terminal-host-transport'
 import { handleMobileWebTerminalMultiplexEvent } from './mobile-web-terminal-multiplex-events'
 import { resolveMobileWebTerminal } from './mobile-web-terminal-resolution'
 import { MobileWebTerminalStreamRegistry } from './mobile-web-terminal-stream-registry'
+import {
+  MOBILE_WEB_TERMINAL_AUTHORITY_CLOSURE,
+  MOBILE_WEB_TERMINAL_DELIVERY_CLOSURE,
+  MobileWebTerminalStreamRetirement
+} from './mobile-web-terminal-stream-retirement'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 import { MobileWebTerminalLeaseStreams } from './mobile-web-terminal-lease-streams'
 import { sendMobileWebTerminalAckBytes } from './mobile-web-terminal-stream-control'
@@ -35,6 +43,7 @@ import type {
 
 export class MobileWebTerminalStreams {
   private readonly registry: MobileWebTerminalStreamRegistry
+  private readonly retirement: MobileWebTerminalStreamRetirement
   private readonly leaseStreams: MobileWebTerminalLeaseStreams
   private disposeMultiplex: (() => void) | null = null
   private multiplexReady = false
@@ -53,9 +62,14 @@ export class MobileWebTerminalStreams {
         sequence: number,
         event: MobileWebTerminalEvent
       ) => Promise<void>
+      postClosed: MobileWebPostSubscriptionClosed
     }
   ) {
     this.registry = new MobileWebTerminalStreamRegistry(options.workspaceAuthority)
+    this.retirement = new MobileWebTerminalStreamRetirement({
+      registry: this.registry,
+      postClosed: options.postClosed
+    })
     this.leaseStreams = new MobileWebTerminalLeaseStreams(options)
   }
 
@@ -124,8 +138,7 @@ export class MobileWebTerminalStreams {
       throw new MobileWebBrokerError('not_found')
     }
     if (!this.isAuthorized(record)) {
-      safeUnsubscribeMobileWebTerminal(client, record)
-      this.registry.retire(record)
+      this.retirement.retire(record, client, MOBILE_WEB_TERMINAL_AUTHORITY_CLOSURE)
       throw new MobileWebBrokerError('not_found')
     }
     if (
@@ -165,10 +178,7 @@ export class MobileWebTerminalStreams {
     if (!record) {
       return null
     }
-    if (client) {
-      safeUnsubscribeMobileWebTerminal(client, record)
-    }
-    this.registry.retire(record)
+    this.retirement.retire(record, client)
     return record.requestId
   }
 
@@ -185,12 +195,10 @@ export class MobileWebTerminalStreams {
     return operationKey === 'terminal.subscribe' ? this.registry.size + this.leaseStreams.size : 0
   }
 
-  dispose(client: RpcClient | null): void {
-    this.leaseStreams.dispose()
+  dispose(client: RpcClient | null, closure?: MobileWebSubscriptionClosure): void {
+    this.leaseStreams.dispose(closure)
     for (const record of this.registry.records()) {
-      if (client) {
-        safeUnsubscribeMobileWebTerminal(client, record)
-      }
+      this.retirement.retire(record, client, closure)
     }
     this.registry.clear()
     this.disposeMultiplex?.()
@@ -229,8 +237,7 @@ export class MobileWebTerminalStreams {
       return false
     }
     if (!this.isAuthorized(record)) {
-      safeUnsubscribeMobileWebTerminal(client, record)
-      this.registry.retire(record)
+      this.retirement.retire(record, client, MOBILE_WEB_TERMINAL_AUTHORITY_CLOSURE)
       return true
     }
     handleMobileWebHostTerminalFrame(record, frame, this.flowContext(client))
@@ -266,26 +273,26 @@ export class MobileWebTerminalStreams {
 
   private post(record: MobileWebTerminalStreamRecord, event: MobileWebTerminalEvent): void {
     if (!this.options.isActive()) {
-      this.registry.retire(record)
+      // No closure: the shell drops every frame for an inactive page, so the host stream is all
+      // there is left to release.
+      this.retirement.retire(record, record.client)
       return
     }
     if (!this.isAuthorized(record)) {
-      safeUnsubscribeMobileWebTerminal(record.client, record)
-      this.registry.retire(record)
+      this.retirement.retire(record, record.client, MOBILE_WEB_TERMINAL_AUTHORITY_CLOSURE)
       return
     }
     const sequence = record.bridgeSequence++
     record.delivery = record.delivery
       .then(() => this.options.postEvent(record.subscriptionId, sequence, event))
       .catch(() => {
-        safeUnsubscribeMobileWebTerminal(record.client, record)
-        this.registry.retire(record)
+        this.retirement.retire(record, record.client, MOBILE_WEB_TERMINAL_DELIVERY_CLOSURE)
       })
   }
 
   private retireUnauthorizedRecords(client: RpcClient): void {
     for (const record of this.registry.retireUnauthorized()) {
-      safeUnsubscribeMobileWebTerminal(client, record)
+      this.retirement.retire(record, client, MOBILE_WEB_TERMINAL_AUTHORITY_CLOSURE)
     }
   }
 

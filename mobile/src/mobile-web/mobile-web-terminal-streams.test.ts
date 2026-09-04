@@ -10,7 +10,9 @@ import {
   TerminalStreamOpcode,
   type TerminalStreamFrame
 } from '../transport/terminal-stream-protocol'
+import type { MobileWebSubscriptionClosure } from './mobile-web-subscription-closure'
 import { MobileWebTerminalStreams } from './mobile-web-terminal-streams'
+import { MOBILE_WEB_TERMINAL_CLIENT_CLOSURE } from './mobile-web-terminal-stream-retirement'
 import {
   prepareMobileWebClipboardPaste,
   prepareMobileWebImageAttachment
@@ -536,10 +538,159 @@ describe('MobileWebTerminalStreams', () => {
     expect(harness.streams.cancel(SUBSCRIPTION_ID, harness.client)).toBeNull()
     expect(harness.leaseUnsubscribe).toHaveBeenCalledOnce()
   })
+
+  // Every shell-side retirement below used to be silent: the page kept a live terminal entry with
+  // no error and no resubscribe, and some of them left the host PTY publishing into nothing.
+  it('releases the host stream when the page session stops being active', async () => {
+    let active = true
+    const harness = createHarness({ isActive: () => active })
+    const hostStreamId = await subscribeHostStream(harness, 'request-inactive')
+
+    active = false
+    harness.emitMultiplex({ type: 'subscribed', streamId: hostStreamId })
+
+    expect(harness.sentFrames.at(-1)).toMatchObject({
+      opcode: TerminalStreamOpcode.Unsubscribe,
+      streamId: hostStreamId
+    })
+    // The shell drops every frame for an inactive page, so a closure would go nowhere.
+    expect(harness.closures).toEqual([])
+    expect(harness.streams.countForOperation('terminal.subscribe')).toBe(0)
+  })
+
+  it('closes the page terminal when the workspace binding disappears under a host frame', async () => {
+    const harness = createHarness()
+    const hostStreamId = await subscribeHostStream(harness, 'request-frame-revoked')
+    harness.emitMultiplex({ type: 'subscribed', streamId: hostStreamId })
+    harness.workspaceAuthority.synchronize([])
+
+    expect(
+      harness.emitFrame({
+        opcode: TerminalStreamOpcode.Output,
+        streamId: hostStreamId,
+        seq: 0,
+        payload: encodeTerminalStreamText('hi')
+      })
+    ).toBe(true)
+
+    expect(harness.sentFrames.at(-1)).toMatchObject({
+      opcode: TerminalStreamOpcode.Unsubscribe,
+      streamId: hostStreamId
+    })
+    expect(harness.closures).toEqual([
+      { subscriptionId: SUBSCRIPTION_ID, closure: { code: 'not_found', retryable: false } }
+    ])
+  })
+
+  it('closes the page terminal when a multiplex event sweeps an unauthorized record', async () => {
+    const harness = createHarness()
+    const hostStreamId = await subscribeHostStream(harness, 'request-sweep-revoked')
+    harness.workspaceAuthority.synchronize([])
+
+    harness.emitMultiplex({ type: 'ready' })
+
+    expect(harness.sentFrames.at(-1)).toMatchObject({
+      opcode: TerminalStreamOpcode.Unsubscribe,
+      streamId: hostStreamId
+    })
+    expect(harness.closures).toEqual([
+      { subscriptionId: SUBSCRIPTION_ID, closure: { code: 'not_found', retryable: false } }
+    ])
+  })
+
+  it('closes the page terminal when its own request finds the binding revoked', async () => {
+    const harness = createHarness()
+    const hostStreamId = await subscribeHostStream(harness, 'request-revoked-closure')
+    harness.workspaceAuthority.synchronize([])
+
+    expect(() =>
+      harness.streams.handle(
+        { operation: 'resize', streamId: SUBSCRIPTION_ID, viewport: { cols: 100, rows: 30 } },
+        harness.client
+      )
+    ).toThrow('not_found')
+
+    expect(harness.sentFrames.at(-1)).toMatchObject({
+      opcode: TerminalStreamOpcode.Unsubscribe,
+      streamId: hostStreamId
+    })
+    expect(harness.closures).toEqual([
+      { subscriptionId: SUBSCRIPTION_ID, closure: { code: 'not_found', retryable: false } }
+    ])
+  })
+
+  it('closes the page terminal when bridge delivery fails', async () => {
+    const harness = createHarness({ postEvent: () => Promise.reject(new Error('bridge gone')) })
+    const hostStreamId = await subscribeHostStream(harness, 'request-delivery-failure')
+
+    harness.emitMultiplex({ type: 'subscribed', streamId: hostStreamId })
+    await settle()
+
+    expect(harness.sentFrames.at(-1)).toMatchObject({
+      opcode: TerminalStreamOpcode.Unsubscribe,
+      streamId: hostStreamId
+    })
+    expect(harness.closures).toEqual([
+      { subscriptionId: SUBSCRIPTION_ID, closure: { code: 'unavailable', retryable: true } }
+    ])
+  })
+
+  it('tells the page to re-subscribe when the transport is swapped underneath it', async () => {
+    const harness = createHarness()
+    await subscribeHostStream(harness, 'request-client-swap')
+
+    // What MobileWebCapabilityBroker.replaceClient passes: the old transport can no longer carry an
+    // unsubscribe, so the page has to hear that its terminal is gone and ask again.
+    harness.streams.dispose(null, MOBILE_WEB_TERMINAL_CLIENT_CLOSURE)
+
+    expect(harness.closures).toEqual([
+      { subscriptionId: SUBSCRIPTION_ID, closure: MOBILE_WEB_TERMINAL_CLIENT_CLOSURE }
+    ])
+    expect(harness.multiplexUnsubscribe).toHaveBeenCalledOnce()
+    expect(harness.streams.countForOperation('terminal.subscribe')).toBe(0)
+  })
+
+  it('closes a lease stream whose workspace binding disappears', async () => {
+    const harness = createHarness()
+    await harness.streams.start({
+      requestId: 'request-lease-revoked',
+      subscriptionId: SUBSCRIPTION_ID,
+      payload: { ...subscribePayload(), visible: false, leaseOnly: true },
+      client: harness.client,
+      isRequestActive: () => true
+    })
+    harness.workspaceAuthority.synchronize([])
+
+    harness.emitLease({ type: 'subscribed' })
+
+    expect(harness.leaseUnsubscribe).toHaveBeenCalledOnce()
+    expect(harness.closures).toEqual([
+      { subscriptionId: SUBSCRIPTION_ID, closure: { code: 'not_found', retryable: false } }
+    ])
+  })
 })
 
-function createHarness() {
+async function subscribeHostStream(
+  harness: ReturnType<typeof createHarness>,
+  requestId: string
+): Promise<number> {
+  await harness.streams.start({
+    requestId,
+    subscriptionId: SUBSCRIPTION_ID,
+    payload: subscribePayload(),
+    client: harness.client,
+    isRequestActive: () => true
+  })
+  harness.emitMultiplex({ type: 'ready' })
+  return decodeTerminalStreamJson<Record<string, unknown>>(harness.sentFrames.at(-1)!.payload)!
+    .streamId as number
+}
+
+function createHarness(
+  overrides: { isActive?: () => boolean; postEvent?: () => Promise<void> } = {}
+) {
   const sentFrames: TerminalStreamFrame[] = []
+  const closures: { subscriptionId: string; closure: MobileWebSubscriptionClosure }[] = []
   const events: { sequence: number; event: MobileWebTerminalEvent }[] = []
   const resyncReasons: string[] = []
   const flowMetrics: { ackLagMs: number | undefined; outstandingBytes: number }[] = []
@@ -548,6 +699,7 @@ function createHarness() {
   let emitFrame = (_frame: TerminalStreamFrame): boolean => false
   let emitLease = (_result: unknown): void => {}
   const leaseUnsubscribe = vi.fn()
+  const multiplexUnsubscribe = vi.fn()
   const workspaceAuthority = new MobileWebWorkspaceAuthority(() => new Uint8Array(16).fill(9))
   workspaceAuthority.synchronize([{ workspaceId: HOST_WORKSPACE_ID, repoId: '/secret/repo' }])
   const client = {
@@ -572,7 +724,7 @@ function createHarness() {
       }
       emitMultiplex = listener
       emitFrame = options?.onTerminalBinaryFrame ?? emitFrame
-      return vi.fn()
+      return multiplexUnsubscribe
     }),
     sendTerminalBinaryFrame: vi.fn((frame) => {
       sentFrames.push(frame)
@@ -580,7 +732,7 @@ function createHarness() {
     })
   } as unknown as RpcClient
   const streams = new MobileWebTerminalStreams({
-    isActive: () => true,
+    isActive: overrides.isActive ?? (() => true),
     clientId: 'device-secret',
     now: () => nowMs,
     onFlowMetrics: (metrics) => flowMetrics.push(metrics),
@@ -588,7 +740,9 @@ function createHarness() {
     workspaceAuthority,
     postEvent: async (_subscriptionId, sequence, event) => {
       events.push({ sequence, event })
-    }
+      await overrides.postEvent?.()
+    },
+    postClosed: (subscriptionId, closure) => closures.push({ subscriptionId, closure })
   })
   return {
     streams,
@@ -605,7 +759,9 @@ function createHarness() {
     emitMultiplex: (result: unknown) => emitMultiplex(result),
     emitFrame: (frame: TerminalStreamFrame) => emitFrame(frame),
     emitLease: (result: unknown) => emitLease(result),
-    leaseUnsubscribe
+    leaseUnsubscribe,
+    multiplexUnsubscribe,
+    closures
   }
 }
 

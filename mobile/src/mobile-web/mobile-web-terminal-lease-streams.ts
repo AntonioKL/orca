@@ -5,6 +5,14 @@ import {
 } from '../../../src/shared/mobile-web/terminal-stream-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import type {
+  MobileWebPostSubscriptionClosed,
+  MobileWebSubscriptionClosure
+} from './mobile-web-subscription-closure'
+import {
+  MOBILE_WEB_TERMINAL_AUTHORITY_CLOSURE,
+  MOBILE_WEB_TERMINAL_DELIVERY_CLOSURE
+} from './mobile-web-terminal-stream-retirement'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 
 type LeaseSubscribeRequest = Extract<MobileWebTerminalRequest, { operation: 'subscribe' }>
@@ -34,6 +42,7 @@ export class MobileWebTerminalLeaseStreams {
         sequence: number,
         event: MobileWebTerminalEvent
       ) => Promise<void>
+      postClosed: MobileWebPostSubscriptionClosed
     }
   ) {}
 
@@ -85,12 +94,12 @@ export class MobileWebTerminalLeaseStreams {
     return this.records.has(streamId)
   }
 
-  cancel(subscriptionId: string): string | null {
+  cancel(subscriptionId: string, closure?: MobileWebSubscriptionClosure): string | null {
     const record = this.records.get(subscriptionId)
     if (!record) {
       return null
     }
-    this.retire(record)
+    this.retire(record, closure)
     return record.requestId
   }
 
@@ -102,9 +111,9 @@ export class MobileWebTerminalLeaseStreams {
     }
   }
 
-  dispose(): void {
+  dispose(closure?: MobileWebSubscriptionClosure): void {
     for (const subscriptionId of this.records.keys()) {
-      this.cancel(subscriptionId)
+      this.cancel(subscriptionId, closure)
     }
   }
 
@@ -113,8 +122,12 @@ export class MobileWebTerminalLeaseStreams {
   }
 
   private receive(subscriptionId: string, record: LeaseRecord, value: unknown): void {
-    if (!this.isLive(subscriptionId, record) || !this.isAuthorized(record)) {
+    if (!this.isLive(subscriptionId, record)) {
       this.retire(record)
+      return
+    }
+    if (!this.isAuthorized(record)) {
+      this.retire(record, MOBILE_WEB_TERMINAL_AUTHORITY_CLOSURE)
       return
     }
     if (!isRecord(value) || typeof value.type !== 'string') {
@@ -181,7 +194,7 @@ export class MobileWebTerminalLeaseStreams {
           this.retire(record)
         }
       })
-      .catch(() => this.retire(record))
+      .catch(() => this.retire(record, MOBILE_WEB_TERMINAL_DELIVERY_CLOSURE))
   }
 
   private isLive(subscriptionId: string, record: LeaseRecord): boolean {
@@ -199,7 +212,7 @@ export class MobileWebTerminalLeaseStreams {
     }
   }
 
-  private retire(record: LeaseRecord): void {
+  private retire(record: LeaseRecord, closure?: MobileWebSubscriptionClosure): void {
     if (!record.active) {
       return
     }
@@ -209,6 +222,9 @@ export class MobileWebTerminalLeaseStreams {
       record.unsubscribe()
     } catch {
       // The authenticated host subscription is already gone.
+    }
+    if (closure) {
+      this.options.postClosed(record.pageStreamId, closure)
     }
   }
 }
