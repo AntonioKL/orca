@@ -262,7 +262,6 @@ yay -S stably-orca-bin
 </p>
 
 ## Підписані білди
-
 Підписання коду для Windows надано за підтримки [SignPath.io](https://signpath.io), сертифікат надано [SignPath Foundation](https://signpath.org).
 
 ## Ліцензія

@@ -16160,6 +16160,9 @@
           "workspace": "Workspace",
           "copyPath": "Copy path",
           "jumpToWorkspace": "Jump to workspace"
+        },
+        "ActivityThreadRow": {
+          "clearNotification": "Clear notification"
         }
       },
       "confirmation": {
