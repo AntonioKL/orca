@@ -59,7 +59,7 @@ non-Orca subagent tool when Orca orchestration provenance was requested.
   terminal can still hold a dead or stuck agent.
 - Folder workspaces are valid; never require Git or assume a worktree.
 - Worktree selectors need the full `<repo-id>::<path>` value Orca returned,
-  passed as `id:<fullWorktreeId>`; a bare repo id is not a worktree id.
+  passed as `id:<newFullWorktreeId>`; a bare repo id is not a worktree id.
 - Clients and remote servers update independently. Treat unknown optional fields
   as absent. A new stream operation requires advertised capability because old
   decoders may silently drop unknown opcodes. Never fall back to local execution
