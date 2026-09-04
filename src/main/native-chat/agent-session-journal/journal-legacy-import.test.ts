@@ -7,7 +7,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { agentJournalItemKey } from '../../../shared/agent-session-journal-item-key'
-import type { AgentSessionJournalIdentity } from '../../../shared/agent-session-journal-types'
+import type {
+  AgentSessionJournalIdentity,
+  AgentSessionProviderHandle
+} from '../../../shared/agent-session-journal-types'
 import { createLegacyIdentityTracker } from './journal-legacy-identity'
 import {
   appendLegacyTranscriptMessages,
@@ -28,21 +31,29 @@ function tick(): number {
   return clock
 }
 
-function identity(agent: 'claude' | 'codex', sessionId: string): AgentSessionJournalIdentity {
+type ImportAgent = 'claude' | 'codex' | 'grok' | 'omp'
+
+function providerHandle(agent: ImportAgent, sessionId: string): AgentSessionProviderHandle {
+  if (agent === 'claude') {
+    return { kind: 'claude', sessionId, leafUuid: null }
+  }
+  return agent === 'codex'
+    ? { kind: 'codex', threadId: sessionId }
+    : { kind: 'opaque', agent, value: sessionId }
+}
+
+function identity(agent: ImportAgent, sessionId: string): AgentSessionJournalIdentity {
   return {
     sessionId,
     workspaceId: 'ws-1',
     hostId: 'host-1',
     agent,
-    providerHandle:
-      agent === 'claude'
-        ? { kind: 'claude', sessionId, leafUuid: null }
-        : { kind: 'codex', threadId: sessionId }
+    providerHandle: providerHandle(agent, sessionId)
   }
 }
 
 async function open(
-  agent: 'claude' | 'codex',
+  agent: ImportAgent,
   sessionId: string,
   overrides: Partial<Parameters<typeof openAgentSessionJournal>[0]> = {}
 ): Promise<AgentSessionJournal> {
@@ -551,5 +562,134 @@ describe('import failures', () => {
       options: { filePath: join(root, 'claude.jsonl') }
     })
     expect(result).toMatchObject({ ok: false })
+  })
+})
+
+// A tool call is only the SOLE block of its message when the provider wrote it
+// that way. Claude interleaves it with narration, Grok hangs `tool_calls` off a
+// row that also has text, and omp's execution cells always pair the invocation
+// with its output — so the multi-block path carries untrusted tool input too.
+describe('multi-block legacy messages', () => {
+  const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, inlineHeadBytes: 64 }
+  const oversized = 'x'.repeat(10_000)
+
+  /** The tool-call block of the first imported multi-block message. */
+  function importedToolCallBlock(journal: AgentSessionJournal): unknown {
+    for (const entry of journal.snapshot().items) {
+      if (entry.body.kind !== 'message') {
+        continue
+      }
+      const block = entry.body.blocks.find((candidate) => candidate.type === 'tool-call')
+      if (block) {
+        return block.input
+      }
+    }
+    return null
+  }
+
+  it('bounds a Claude tool call that shares its message with narration', async () => {
+    const journal = await open('claude', CLAUDE_SESSION, {
+      journalDir: join(root, 'claude-mixed-journal')
+    })
+    const filePath = await writeFixture('claude-mixed.jsonl', [
+      {
+        parentUuid: null,
+        isSidechain: false,
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Editing the file.' },
+            {
+              type: 'tool_use',
+              id: 'toolu_mixed',
+              name: 'Edit',
+              input: { file_path: 'a.ts', patch: oversized }
+            }
+          ]
+        },
+        uuid: 'dd22be00-1111-4222-8333-444455556666',
+        timestamp: '2026-08-05T10:00:09.000Z',
+        sessionId: CLAUDE_SESSION
+      }
+    ])
+
+    const result = await importLegacyTranscriptIntoJournal({
+      journal,
+      agent: 'claude',
+      sessionId: CLAUDE_SESSION,
+      fence: 1,
+      options: { filePath, limits }
+    })
+
+    expect(result.ok).toBe(true)
+    expect(importedToolCallBlock(journal)).toMatchObject({
+      truncated: true,
+      byteLength: expect.any(Number),
+      digest: expect.stringMatching(/^[0-9a-f]{64}$/),
+      head: expect.any(String)
+    })
+    expect(JSON.stringify(journal.snapshot().items)).not.toContain('x'.repeat(1_000))
+    await journal.close()
+  })
+
+  it('bounds a Grok tool call that shares its row with assistant text', async () => {
+    const journal = await open('grok', CODEX_SESSION, {
+      journalDir: join(root, 'grok-mixed-journal')
+    })
+    const filePath = await writeFixture('grok-mixed.jsonl', [
+      {
+        type: 'assistant',
+        id: 'asst-mixed',
+        timestamp: '2026-08-05T10:00:09.000Z',
+        content: [{ type: 'text', text: 'Searching.' }],
+        tool_calls: [{ id: 'c1', name: 'grep', arguments: JSON.stringify({ pattern: oversized }) }]
+      }
+    ])
+
+    const result = await importLegacyTranscriptIntoJournal({
+      journal,
+      agent: 'grok',
+      sessionId: CODEX_SESSION,
+      fence: 1,
+      options: { filePath, limits }
+    })
+
+    expect(result.ok).toBe(true)
+    expect(importedToolCallBlock(journal)).toMatchObject({ truncated: true })
+    expect(JSON.stringify(journal.snapshot().items)).not.toContain('x'.repeat(1_000))
+    await journal.close()
+  })
+
+  it('bounds an omp execution cell, whose invocation always ships with its output', async () => {
+    const journal = await open('omp', CODEX_SESSION, {
+      journalDir: join(root, 'omp-mixed-journal')
+    })
+    const filePath = await writeFixture('omp-mixed.jsonl', [
+      {
+        type: 'message',
+        id: 'omp-mixed-1',
+        timestamp: '2026-08-05T10:00:09.000Z',
+        message: {
+          role: 'bashExecution',
+          command: `echo ${oversized}`,
+          output: 'done',
+          exitCode: 0
+        }
+      }
+    ])
+
+    const result = await importLegacyTranscriptIntoJournal({
+      journal,
+      agent: 'omp',
+      sessionId: CODEX_SESSION,
+      fence: 1,
+      options: { filePath, limits }
+    })
+
+    expect(result.ok).toBe(true)
+    expect(importedToolCallBlock(journal)).toMatchObject({ truncated: true })
+    expect(JSON.stringify(journal.snapshot().items)).not.toContain('x'.repeat(1_000))
+    await journal.close()
   })
 })

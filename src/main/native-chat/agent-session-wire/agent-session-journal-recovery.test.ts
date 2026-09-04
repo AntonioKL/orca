@@ -245,7 +245,7 @@ describe('openAgentSessionJournalWithRecovery', () => {
   })
 
   // The rehydrate deletes every live row to publish its replacement epoch, so
-  // whatever replay rejected has to be in quarantine BEFORE the import runs.
+  // everything replay rejected is gone for good by the time the import runs.
   // Orca minted the submission, receipt and lifecycle identities; no provider
   // transcript can hand them back.
   it('rebuilds from provider history when the epoch row itself is gone', async () => {
@@ -306,6 +306,45 @@ describe('openAgentSessionJournalWithRecovery', () => {
     expect(opened.recovery?.error).toBeTruthy()
     // A missing provider transcript must not clear the intact journal prefix.
     expect(opened.journal.snapshot().items.map((entry) => entry.body.kind)).toEqual(['message'])
+  })
+
+  // A repair that KEEPS a prefix has no emptied epoch to anchor, so nothing
+  // about the surviving rows records that the deleted suffix was never rebuilt.
+  // Unmarked, the next probe reads a contiguous anchored prefix, calls it clean,
+  // and the dropped stretch of timeline is gone for good.
+  it('keeps a partially repaired journal corrupt until provider history replaces it', async () => {
+    await seedJournal(3)
+    await deleteRow(3)
+    const empty = join(root, 'empty.jsonl')
+    await writeFile(empty, '', 'utf-8')
+
+    const first = await openAgentSessionJournalWithRecovery({
+      identity: IDENTITY,
+      journalDir,
+      fence: 1,
+      historyFilePath: empty
+    })
+    journals.track(first.journal)
+    expect(first.recovery).toMatchObject({ trigger: 'journal_corrupt', imported: 0 })
+    expect(first.recovery?.error).toBeTruthy()
+    // Only the unanchored suffix went; the prefix the repair kept is still live.
+    expect(first.journal.snapshot().items.map((entry) => entry.body.kind)).toEqual(['message'])
+    await first.journal.close()
+
+    // The deletion is durable, so the demand for a rebuild has to be too.
+    expect(await loadJournal(journalDir, CODEX_SESSION)).toMatchObject({ corrupt: true })
+
+    // A readable transcript rebuilds the epoch, and THAT is what retires it.
+    const retried = await openAgentSessionJournalWithRecovery({
+      identity: IDENTITY,
+      journalDir,
+      fence: 1,
+      historyFilePath
+    })
+    journals.track(retried.journal)
+    expect(retried.recovery?.imported).toBeGreaterThan(0)
+    await retried.journal.close()
+    expect(await loadJournal(journalDir, CODEX_SESSION)).toMatchObject({ corrupt: false })
   })
 
   // The reproduced path. Deleting sequence 1 leaves every surviving row

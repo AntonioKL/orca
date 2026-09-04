@@ -253,16 +253,20 @@ function legacyItemBody(
   }
 }
 
-/** Inline block text keeps only a bounded head plus an explicit marker. No blob
- *  is written: the marker carries the digest and byte length, and the source
- *  transcript remains the full copy — a blob here would be unreferenced by the
- *  render model and pruned at the next compaction. */
+/** Every block that can carry untrusted bulk is bounded here, tool calls
+ *  included: a provider decoder is free to put one alongside narration, and the
+ *  sole-block path above never sees those. The remainder is discarded rather
+ *  than stored elsewhere — the marker keeps its digest and byte length, and the
+ *  source transcript remains the full copy. */
 function boundBlock(block: NativeChatBlock, limits: JournalPayloadLimits): NativeChatBlock {
   if (block.type === 'text') {
     return { ...block, text: boundInlineText(block.text, limits).text }
   }
   if (block.type === 'tool-result') {
     return { ...block, output: boundInlineText(block.output, limits).text }
+  }
+  if (block.type === 'tool-call') {
+    return { ...block, input: boundToolInput(block.input, limits) }
   }
   return block
 }

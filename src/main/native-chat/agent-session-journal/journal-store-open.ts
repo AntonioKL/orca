@@ -18,9 +18,11 @@ export async function openJournalStoreState(input: {
   journalDir: string
   loaded: JournalLoad | null | undefined
   replay: () => JournalLoad | null
-  /** Drops the rejected suffix. Corruption is not preserved; the load reports
-   *  `corrupt` and recovery rebuilds the epoch from provider history. */
-  deleteSuffix: (fromSeq: number) => number
+  /** Drops the rejected suffix and records the rebuild it owes, in ONE
+   *  transaction. Corruption is not preserved; replay keeps reporting `corrupt`
+   *  until provider history republishes the epoch or the session writes past
+   *  `contentFrom`, the first sequence the repair left free. */
+  deleteSuffix: (fromSeq: number, contentFrom: number) => number
   start: () => void
   adopt: (loaded: JournalLoad) => void
   /** Republishes an anchor row for an epoch a repair emptied. */
@@ -42,7 +44,7 @@ export async function openJournalStoreState(input: {
   }
   input.adopt(loaded)
   if (loaded.truncateFrom !== undefined && !loaded.readOnly) {
-    input.deleteSuffix(loaded.truncateFrom)
+    input.deleteSuffix(loaded.truncateFrom, loaded.state.lastSequence + 1)
   }
   // A repair that took every live row leaves the epoch with no anchor. Publish
   // one before anything can append into it: an ordinary row at sequence 1 would

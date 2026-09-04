@@ -1,7 +1,8 @@
 // Republishing a live item set into a fresh epoch.
 //
 // One transaction: discard every row, insert the epoch row plus the replacement
-// items, and move the session projection.
+// items, move the session projection, and retire any repair marker — this
+// republished history is exactly what the marker was holding out for.
 
 import type {
   AgentJournalItemBody,
@@ -10,6 +11,7 @@ import type {
 } from '../../../shared/agent-session-journal-types'
 import type Database from '../../sqlite/sync-database'
 import type { JournalLoad } from './journal-open'
+import { clearJournalRepairMarker } from './journal-repair-marker'
 import { applyJournalRow, createJournalReducerState } from './journal-reducer'
 import { buildJournalItemRow, journalRowBase } from './journal-row-builders'
 import {
@@ -64,6 +66,7 @@ export function replaceJournalEpoch(input: {
   input.db.exec('BEGIN IMMEDIATE')
   try {
     deleteAllJournalRows(input.db)
+    clearJournalRepairMarker(input.db, input.identity.sessionId)
     for (const row of rows) {
       insertJournalRow(input.db, input.identity.sessionId, row)
     }

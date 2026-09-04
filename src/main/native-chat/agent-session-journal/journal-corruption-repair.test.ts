@@ -155,6 +155,50 @@ describe('a sequence gap', () => {
     expect(reopened.repair).toEqual({ malformedRows: 0 })
     expect(reopened.snapshot().items.map((entry) => entry.body)).toEqual([body('m0'), body('m1')])
   })
+
+  // The prefix survives, so there is no emptied epoch to re-anchor and — a gap
+  // costing no malformed row — no disclosure either. Without a durable marker
+  // the next probe reads a contiguous anchored prefix and calls it clean, and
+  // the rows the repair deleted are never asked for again.
+  it('still reports corrupt on the next probe, with the deleted suffix unrebuilt', async () => {
+    const journal = await open()
+    for (let ordinal = 0; ordinal < 5; ordinal += 1) {
+      await journal.appendItem(item(ordinal), body(`m${ordinal}`), { fence: 1 })
+    }
+    await journal.close()
+    await withJournalDatabase((db) => {
+      db.prepare('DELETE FROM journal_rows WHERE seq = ?').run(4)
+    })
+
+    const repaired = await open()
+    await repaired.close()
+    expect(loadJournal(root, IDENTITY.sessionId)).toMatchObject({ corrupt: true })
+
+    // Same policy the emptied-epoch repair takes: a session that writes into the
+    // epoch owns it, and a later import must not replace rows the user has seen.
+    const writable = await open()
+    await writable.appendItem(item(9), body('typed after the repair'), { fence: 1 })
+    await writable.close()
+    expect(loadJournal(root, IDENTITY.sessionId)).toMatchObject({ corrupt: false })
+  })
+
+  // The disclosure is the repair talking about itself, not the session writing:
+  // counting it as content would retire the marker the instant it was raised.
+  it('is not settled by the repair disclosure it appends for a malformed row', async () => {
+    const journal = await open()
+    for (let ordinal = 0; ordinal < 3; ordinal += 1) {
+      await journal.appendItem(item(ordinal), body(`m${ordinal}`), { fence: 1 })
+    }
+    await journal.close()
+    await withJournalDatabase((db) => {
+      db.prepare('UPDATE journal_rows SET row_json = ? WHERE seq = ?').run('}{', 3)
+    })
+
+    const repaired = await open()
+    expect(repaired.repair.malformedRows).toBe(1)
+    await repaired.close()
+    expect(loadJournal(root, IDENTITY.sessionId)).toMatchObject({ corrupt: true })
+  })
 })
 
 describe('a missing epoch row', () => {

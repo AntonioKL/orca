@@ -1,13 +1,15 @@
 // Opening a new epoch.
 //
 // One transaction: discard every row of the superseded epoch, insert the new
-// epoch row at sequence 1, and move the session projection onto it. Superseded
-// rows are DELETED rather than retained — nothing would ever shed them.
+// epoch row at sequence 1, move the session projection onto it, and retire any
+// repair marker the superseded epoch was carrying. Superseded rows are DELETED
+// rather than retained — nothing would ever shed them.
 
 import { AGENT_SESSION_JOURNAL_SCHEMA_VERSION } from '../../../shared/agent-session-journal-types'
 import type { AgentSessionProviderHandle } from '../../../shared/agent-session-journal-types'
 import type Database from '../../sqlite/sync-database'
 import type { JournalLoad } from './journal-open'
+import { clearJournalRepairMarker } from './journal-repair-marker'
 import { applyJournalRow, createJournalReducerState } from './journal-reducer'
 import {
   deleteAllJournalRows,
@@ -41,6 +43,7 @@ export function publishNewEpoch(input: {
   input.db.exec('BEGIN IMMEDIATE')
   try {
     deleteAllJournalRows(input.db)
+    clearJournalRepairMarker(input.db, input.sessionId)
     insertJournalRow(input.db, input.sessionId, row)
     upsertJournalSessionRow(input.db, input.sessionId, input.epoch, input.now)
     input.db.exec('COMMIT')

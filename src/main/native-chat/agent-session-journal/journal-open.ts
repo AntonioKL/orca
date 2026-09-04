@@ -22,6 +22,7 @@ import {
   readJournalSessionEpoch
 } from './journal-row-table'
 import { JOURNAL_REPAIR_DISCLOSURE_ITEM_ID } from './journal-repair-disclosure'
+import { pendingJournalRepairSequence } from './journal-repair-marker'
 import { parseJournalRow, type JournalRow } from './journal-row-schema'
 
 /** Every epoch row is sequence 1, and no compaction moves that floor. */
@@ -59,6 +60,11 @@ export function replayJournal(
   }
   const state = createJournalReducerState(sessionId, epoch)
   const stored = readJournalEpochRows(db, sessionId, epoch)
+  // A partial repair keeps its prefix, so the surviving rows look contiguous and
+  // anchored however much of the timeline it deleted. Its marker is what still
+  // says otherwise, naming the sequence past which the epoch would be its own
+  // history again.
+  const repairedFrom = pendingJournalRepairSequence(db, sessionId, epoch)
   const rows: JournalRow[] = []
   let malformedRows = 0
   let latched = false
@@ -115,7 +121,12 @@ export function replayJournal(
   return {
     state,
     readOnly: latched,
-    corrupt: Boolean(gap) || malformedRows > 0 || unanchored || awaitsProviderHistory(rows),
+    corrupt:
+      Boolean(gap) ||
+      malformedRows > 0 ||
+      unanchored ||
+      (repairedFrom !== null && awaitsRebuild(rows, repairedFrom)) ||
+      awaitsProviderHistory(rows),
     malformedRows,
     ...(truncateFrom !== undefined && !latched ? { truncateFrom } : {})
   }
@@ -124,18 +135,29 @@ export function replayJournal(
 /**
  * The epoch a total repair published, still holding nothing but its own anchor
  * and disclosure. The rows it dropped were never reconstructed, so provider
- * history has to be retried rather than this being called a clean timeline. The
- * moment the session writes content of its own the epoch is its own history and
- * the retry stops.
+ * history has to be retried rather than this being called a clean timeline.
  */
 function awaitsProviderHistory(rows: readonly JournalRow[]): boolean {
   const anchor = rows[0]
   if (anchor?.kind !== 'epoch' || anchor.reason !== 'unreconcilable_prefix') {
     return false
   }
+  // The anchor sits at sequence 1, so content of the epoch's own starts at 2.
+  return awaitsRebuild(rows, FIRST_JOURNAL_SEQUENCE + 1)
+}
+
+/**
+ * True while everything at or above `contentFrom` is the repair's own
+ * bookkeeping: the deleted history was never rebuilt, so the provider has to be
+ * asked again. The moment the session writes content of its own past that
+ * sequence the epoch IS its own history, and the retry stops rather than a
+ * later import replacing rows the user has since seen.
+ */
+function awaitsRebuild(rows: readonly JournalRow[], contentFrom: number): boolean {
   return rows.every(
     (row) =>
-      row === anchor || (row.kind === 'item' && row.itemId === JOURNAL_REPAIR_DISCLOSURE_ITEM_ID)
+      row.seq < contentFrom ||
+      (row.kind === 'item' && row.itemId === JOURNAL_REPAIR_DISCLOSURE_ITEM_ID)
   )
 }
 
