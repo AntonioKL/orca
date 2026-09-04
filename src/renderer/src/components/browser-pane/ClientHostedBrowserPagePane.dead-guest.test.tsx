@@ -57,9 +57,13 @@ function page(overrides?: Partial<BrowserPage>): BrowserPage {
   }
 }
 
-function createGuest(): Electron.WebviewTag & { getURL: ReturnType<typeof vi.fn> } {
+function createGuest(): Electron.WebviewTag & {
+  getURL: ReturnType<typeof vi.fn>
+  reload: ReturnType<typeof vi.fn>
+} {
   const webview = document.createElement('webview') as Electron.WebviewTag & {
     getURL: ReturnType<typeof vi.fn>
+    reload: ReturnType<typeof vi.fn>
   }
   Object.assign(webview, {
     getURL: vi.fn(() => 'https://example.internal/'),
@@ -129,7 +133,14 @@ describe('client-hosted browser pane over a dead guest', () => {
     expect(mocks.detach).toHaveBeenCalled()
     expect(mocks.recordBreadcrumb).toHaveBeenCalledWith('browser_client_page_guest_unavailable', {
       browserPageId: 'page-a',
-      pageHostGeneration: PLACEMENT.pageHostGeneration
+      pageHostGeneration: PLACEMENT.pageHostGeneration,
+      reason: 'unreadable',
+      tagConnected: false
+    })
+    // Why: the catch is total, so the swallowed error must stay visible to diagnostics.
+    expect(mocks.recordBreadcrumb).toHaveBeenCalledWith('browser_client_page_guest_read_failed', {
+      errorName: 'Error',
+      errorMessage: 'Invalid guestInstanceId: 7'
     })
   })
 
@@ -142,6 +153,95 @@ describe('client-hosted browser pane over a dead guest', () => {
     render(paneElement(true, { browserTab: page({ loading: true }), onUpdatePageState }))
 
     expect(onUpdatePageState).toHaveBeenCalledWith('page-a', { loading: false })
+  })
+
+  it('flips to the unavailable notice when the guest renderer goes away after attach', () => {
+    const onUpdatePageState = vi.fn()
+    render(paneElement(true, { browserTab: page({ loading: true }), onUpdatePageState }))
+    expect(screen.queryByText('Client-hosted browser unavailable')).toBeNull()
+    onUpdatePageState.mockClear()
+
+    // The registry pulls the tag out of the DOM on this event without telling the pane.
+    webview.remove()
+    act(() => {
+      webview.dispatchEvent(new Event('render-process-gone'))
+    })
+
+    expect(screen.getByText('Client-hosted browser unavailable')).toBeTruthy()
+    expect(mocks.detach).toHaveBeenCalled()
+    expect(onUpdatePageState).toHaveBeenCalledWith('page-a', { loading: false })
+    expect(mocks.recordBreadcrumb).toHaveBeenCalledWith('browser_client_page_guest_unavailable', {
+      browserPageId: 'page-a',
+      pageHostGeneration: PLACEMENT.pageHostGeneration,
+      reason: 'render-process-gone',
+      tagConnected: false
+    })
+  })
+
+  it('flips to the unavailable notice when main destroys the guest after attach', () => {
+    render(paneElement(true))
+
+    act(() => {
+      webview.dispatchEvent(new Event('destroyed'))
+    })
+
+    expect(screen.getByText('Client-hosted browser unavailable')).toBeTruthy()
+    expect(mocks.recordBreadcrumb).toHaveBeenCalledWith(
+      'browser_client_page_guest_unavailable',
+      expect.objectContaining({ reason: 'destroyed' })
+    )
+    // The chrome must not keep driving the dead tag: Reload routes to the notice, not a throw.
+    webview.reload.mockImplementation(() => {
+      throw invalidGuestInstanceId()
+    })
+    expect(() => act(() => screen.getByRole('button', { name: 'Reload' }).click())).not.toThrow()
+    expect(webview.reload).not.toHaveBeenCalled()
+  })
+
+  it('does not freeze silently when a navigation event finds the guest gone', () => {
+    const onUpdatePageState = vi.fn()
+    render(paneElement(true, { onUpdatePageState }))
+    onUpdatePageState.mockClear()
+    webview.getURL.mockImplementation(() => {
+      throw invalidGuestInstanceId()
+    })
+
+    act(() => {
+      webview.dispatchEvent(new Event('did-navigate'))
+    })
+
+    expect(screen.getByText('Client-hosted browser unavailable')).toBeTruthy()
+    expect(onUpdatePageState).toHaveBeenCalledWith('page-a', { loading: false })
+  })
+
+  it('stops the spinner when the guest dies as a load starts', () => {
+    const onUpdatePageState = vi.fn()
+    render(paneElement(true, { onUpdatePageState }))
+    onUpdatePageState.mockClear()
+    webview.getURL.mockImplementation(() => {
+      throw invalidGuestInstanceId()
+    })
+
+    act(() => {
+      webview.dispatchEvent(new Event('did-start-loading'))
+    })
+
+    expect(screen.getByText('Client-hosted browser unavailable')).toBeTruthy()
+    // did-start-loading writes loading:true first; the loss must be the last word.
+    expect(onUpdatePageState.mock.calls.at(-1)).toEqual(['page-a', { loading: false }])
+  })
+
+  it('stops listening for guest loss once the pane lets go of the tag', () => {
+    const onUpdatePageState = vi.fn()
+    const view = render(paneElement(true, { onUpdatePageState }))
+    view.unmount()
+    onUpdatePageState.mockClear()
+    mocks.recordBreadcrumb.mockClear()
+
+    webview.dispatchEvent(new Event('destroyed'))
+
+    expect(onUpdatePageState).not.toHaveBeenCalled()
+    expect(mocks.recordBreadcrumb).not.toHaveBeenCalled()
   })
 
   it('survives activation focus after the retained tag left the DOM', () => {

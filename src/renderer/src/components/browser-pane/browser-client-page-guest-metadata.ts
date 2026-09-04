@@ -1,3 +1,4 @@
+import { recordRendererCrashBreadcrumb } from '@/lib/crash-breadcrumb-recorder'
 import { redactKagiSessionToken } from '../../../../shared/browser-url'
 import type { BrowserClientPageMetadataSnapshot } from './browser-client-page-metadata-publisher'
 
@@ -28,9 +29,13 @@ export function readBrowserClientPageGuestMetadataIfLive(
       canGoForward: webview.canGoForward()
     }
   } catch (error) {
-    // Why logged: the tag reporting a live guest id for a destroyed guest is an unfixed defect,
-    // and this is the only place the field can see it happen (or see a different read failure).
+    // Why recorded: the catch is total, so a read failure that is NOT guest death would otherwise
+    // be indistinguishable from one — the breadcrumb carries the error text the console cannot.
     console.warn('[browser-client-page] guest read failed, treating the page as gone:', error)
+    recordRendererCrashBreadcrumb('browser_client_page_guest_read_failed', {
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    })
     return null
   }
 }

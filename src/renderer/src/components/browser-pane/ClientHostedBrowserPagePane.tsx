@@ -1,6 +1,5 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { recordRendererCrashBreadcrumb } from '@/lib/crash-breadcrumb-recorder'
 import { useAppStore } from '@/store'
 import type {
   BrowserLoadError,
@@ -19,6 +18,7 @@ import { useBrowserClientHostedPopupNotices } from './browser-client-hosted-popu
 import { useBrowserClientHostedPermissionNotices } from './browser-client-hosted-permission-notices'
 import { useClientHostedBrowserIntroTour } from './use-client-hosted-browser-intro-tour'
 import { ClientHostedBrowserUnavailableNotice } from './client-hosted-browser-unavailable-notice'
+import { watchBrowserClientPageGuestLoss } from './host-guest/browser-client-page-guest-loss'
 import { useRestoredClientHostedRecoveryWindow } from './restored-client-hosted-recovery-window'
 import BrowserFind from './assemble-chrome/BrowserFind'
 import { BrowserNavigationControlRow } from './assemble-chrome/browser-navigation-control-row'
@@ -201,19 +201,23 @@ export function ClientHostedBrowserPagePane({
       return
     }
     const webview = attachment.webview
+    // Why one route: a dead guest must always land on the unavailable notice — the pane's existing
+    // recovery state, with its reopen-on-server escape — never on a mute pane or an endless spinner.
+    const guestLoss = watchBrowserClientPageGuestLoss({
+      webview,
+      webviewRef,
+      browserPageId: browserTab.id,
+      pageHostGeneration,
+      onLost: () => {
+        attachment.detach()
+        retryGuestRecoveryRef.current()
+      }
+    })
     // Why: main can destroy the guest while the tag stays in the DOM holding its id, and every
-    // read below then throws — that is page unavailability, which this pane already has a state for.
+    // read below then throws — that is page unavailability, not a crash.
     const attachedMetadata = readBrowserClientPageGuestMetadataIfLive(webview)
     if (!attachedMetadata) {
-      attachment.detach()
-      // Why the loading write: nothing is left to report progress, and a spinner beside the
-      // unavailable notice is the one state this pane must not sit in (as at retryGuestRecovery).
-      updatePageStateFromGuest(browserTab.id, { loading: false })
-      setAttachmentError('browser_client_page_guest_unavailable')
-      recordRendererCrashBreadcrumb('browser_client_page_guest_unavailable', {
-        browserPageId: browserTab.id,
-        pageHostGeneration
-      })
+      guestLoss.lose('unreadable')
       return
     }
     const publisher = startBrowserClientPageMetadataPublisher({
@@ -241,6 +245,7 @@ export function ClientHostedBrowserPagePane({
       const eventUrl = (event as (Event & { url?: string }) | undefined)?.url
       const metadata = readBrowserClientPageGuestMetadataIfLive(webview, eventUrl)
       if (!metadata) {
+        guestLoss.lose('unreadable')
         return
       }
       // Why: did-stop-loading fires after did-fail-load, so an unconditional null here would
@@ -271,9 +276,11 @@ export function ClientHostedBrowserPagePane({
       activeLoadFailureRef.current = null
       updatePageStateFromGuest(browserTab.id, { loading: true, loadError: null })
       const startMetadata = readBrowserClientPageGuestMetadataIfLive(webview, undefined, true)
-      if (startMetadata) {
-        publisher.publish(startMetadata)
+      if (!startMetadata) {
+        guestLoss.lose('unreadable')
+        return
       }
+      publisher.publish(startMetadata)
     }
     const onFailLoad = (event: Event): void => {
       const loadError = resolveBrowserWebviewLoadFailure(event as BrowserPageFailLoadEvent, {
@@ -307,9 +314,7 @@ export function ClientHostedBrowserPagePane({
       webview.removeEventListener('did-navigate-in-page', syncNavigation)
       webview.removeEventListener('page-title-updated', syncNavigation)
       webview.removeEventListener('did-fail-load', onFailLoad)
-      if (webviewRef.current === webview) {
-        webviewRef.current = null
-      }
+      guestLoss.dispose()
       publisher.dispose()
       forgetBrowserClientPageMetadataReports(browserTab.id)
       attachment.detach()
