@@ -57,7 +57,7 @@ export async function openAgentSessionJournalWithRecovery(input: {
   /** Resolve directly to a transcript instead of discovering it by session id. */
   historyFilePath?: string | null
 }): Promise<AgentSessionJournalOpened> {
-  const probe = await loadJournal(input.journalDir, input.identity.sessionId)
+  const probe = loadJournal(input.journalDir, input.identity.sessionId)
   if (probe?.readOnly) {
     const journal = await openAgentSessionJournal({
       identity: input.identity,
