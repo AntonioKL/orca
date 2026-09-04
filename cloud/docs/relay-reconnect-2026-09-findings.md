@@ -203,6 +203,19 @@ immediately so the bar can be re-tightened after the fleet is on the 500 ms lock
 - c7 side note: MIG autoheal recreated the c7 instance four times on 2026-09-01 08:02-08:42 PDT
   at ~13 min spacing. Same crash class as Finding 6 (health check failing during restart loops).
 
+### Canary observed effect (c7 drain, 2026-09-04 06:10Z)
+
+- c7 807 controls -> 0 between 06:08:52Z and 06:10:52Z. Director `/v1/assign`: 200s 32 (06:09) -> 2628 (06:10)
+  -> 340 (06:11); 5xx 1969 (06:10) -> 31 (06:11). Director max-concurrency p99 7.9 -> 79.75 (06:10) -> 84.75
+  (06:11), i.e. at the Cloud Run cap of 80 for ~2 min. My pre-dispatch estimate ("well under 64") was wrong.
+- Confounder: c10 (us-central1, instance 2803000337345335589) crashed 06:09:56Z on the old-image class
+  (Node.js banner + container die), so ~1,600 hosts re-dialed in the same minute, not ~800. Coincidental;
+  the fleet has one of these every ~15 min.
+- Implication for the batch phase: every drain will push director concurrency past the monitor's 64 bar
+  for ~1-2 min. The batch job rechecks safety *before* it drains (read-only step), so that is fine per wave,
+  but never run a monitor dry-run concurrently with a wave, and prefer batches of 2 over 4 until the fleet
+  is on the new image and the crash class is gone.
+
 ## Roll inputs (verified by the read-only `verify` run)
 
 - target-image-digest `sha256:85bf67993869a769642995d0863f4c2b6b569c3850c2d8390ec2ca5f2b179e28`
