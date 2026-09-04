@@ -79,7 +79,8 @@ export type FleetResourceProjection =
   | { state: 'absent'; reason: 'unsupervised' | 'not_materialized' }
 
 export type FleetNextAction = {
-  kind: 'inspect' | 'release' | 'none'
+  /** `recover` = proven exit with no worker outcome; read the transcript, then stop or abandon. */
+  kind: 'inspect' | 'release' | 'recover' | 'none'
   argv: string[]
 }
 

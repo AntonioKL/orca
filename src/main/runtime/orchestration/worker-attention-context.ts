@@ -52,6 +52,7 @@ export function projectWorkerAttentionContext(args: {
     liveness: projectLiveness(
       {
         workerState: args.facts.workerState,
+        terminationReason: args.facts.terminationReason,
         resource: args.facts.hostScope === undefined ? null : { hostScope: args.facts.hostScope }
       },
       args.status,

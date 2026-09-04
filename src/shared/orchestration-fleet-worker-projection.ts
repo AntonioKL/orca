@@ -15,7 +15,22 @@ const FLEET_STATUS_FUTURE_TOLERANCE_MS = 5_000
 export type FleetLivenessSubject = {
   workerStage?: string | null
   workerState?: string | null
+  terminationReason?: FleetDurableWorker['terminationReason']
   resource: { releaseState?: string | null; hostScope: string | null } | null
+}
+
+/** Worker states that carry an outcome; anything else is still supposed to be running. */
+const SETTLED_WORKER_STATES = new Set(['succeeded', 'failed', 'stopped', 'abandoned'])
+
+/** `termination_reason` is only ever written from an observed process end, so anything but
+ *  `unknown` is a death certificate — regardless of which state the worker settled into. */
+function hasCertifiedExit(worker: FleetLivenessSubject): boolean {
+  return (
+    worker.workerStage === 'process_exited' ||
+    worker.terminationReason === 'operator_close' ||
+    worker.terminationReason === 'signaled' ||
+    worker.terminationReason === 'exited'
+  )
 }
 
 /** `receivedAt` is the DELIVERY clock: a relay reconnect replays a cached row and restamps it,
@@ -39,6 +54,11 @@ export function projectLiveness(
   }
   if (worker.workerState === 'stopped') {
     return { verdict: 'exited', source: 'worker_stop' }
+  }
+  // An operator close settles the worker as `failed`, which used to fall through to
+  // `missing_status` and report a proven-dead worker as absence in the same receipt.
+  if (hasCertifiedExit(worker)) {
+    return { verdict: 'exited', source: 'execution_host' }
   }
   if (!status) {
     return { verdict: 'unverifiable', reason: 'missing_status' }
@@ -85,7 +105,7 @@ function projectResource(worker: FleetDurableWorker): FleetResourceProjection {
   }
 }
 
-function nextAction(worker: FleetDurableWorker): FleetNextAction {
+function nextAction(worker: FleetDurableWorker, liveness: FleetLiveness): FleetNextAction {
   if (worker.workerStage === 'released') {
     return { kind: 'none', argv: [] }
   }
@@ -100,6 +120,20 @@ function nextAction(worker: FleetDurableWorker): FleetNextAction {
     (worker.dispatchStatus === 'completed' && !worker.agentTerminalHandle)
   ) {
     return { kind: 'none', argv: [] }
+  }
+  // A proven exit under a worker that never settled is a stall; worker-show would
+  // only restate it. Read the transcript, then stop or abandon. `unverifiable` is
+  // absence and must never land here.
+  if (
+    liveness.verdict === 'exited' &&
+    !SETTLED_WORKER_STATES.has(worker.workerState) &&
+    !worker.pendingInput &&
+    !worker.pendingApproval
+  ) {
+    return {
+      kind: 'recover',
+      argv: ['orchestration', 'worker-read', '--dispatch', worker.dispatchId]
+    }
   }
   return {
     kind: 'inspect',
@@ -191,7 +225,7 @@ export function projectOrchestrationFleetWorker(
       lastObservedAt: status ? agentStatusFleetObservedAt(status) : null
     },
     resource: projectResource(worker),
-    nextAction: nextAction(worker),
+    nextAction: nextAction(worker, liveness),
     attention: projectOrchestrationFleetAttention({
       isRoot: worker.parentTaskId === null,
       outcome,
