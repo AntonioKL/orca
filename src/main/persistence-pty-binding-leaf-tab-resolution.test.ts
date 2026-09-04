@@ -24,7 +24,8 @@ describe('findTerminalTabIdForLeaf after persistPtyBinding grafts a leaf', () =>
   })
 
   // `persistPtyBinding` grafts the leaf by assigning `layout.root` on the SAME layout object inside
-  // the SAME layouts record (pty-binding-persistence.ts). Any membership cache must notice that.
+  // the SAME layouts record (pty-binding-persistence.ts), so the resolver has to answer from the
+  // tree that is there now, not from anything derived on an earlier call.
   it('resolves a leaf grafted in place by a split spawn', async () => {
     const store = await createStore()
     store.setWorkspaceSession({
