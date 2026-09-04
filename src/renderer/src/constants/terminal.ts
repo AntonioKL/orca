@@ -85,6 +85,9 @@ export type BackgroundMountTerminalWorktreeDetail = {
 
 export type WakeHibernatedAgentsWorktreeDetail = {
   worktreeId: string
+  /** Present on a mail-driven wake: only the named tab's panes may consume it,
+   *  so one inbound message cannot respawn every slept agent in the worktree. */
+  tabId?: string
   /** Mutable collector: mounted panes that consume (or latch) the in-place
    *  hibernation wake add their provider-session claim keys here so the
    *  dispatcher's follow-up generic resume skips those sessions instead of

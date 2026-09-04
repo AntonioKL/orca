@@ -156,6 +156,20 @@ describe('mail addressed to a listed slept pane', () => {
     db.close()
   })
 
+  it('does not wake a pane from a delivery sweep with nothing in the mailbox', async () => {
+    // Why: pty retirement redrives and restored-mailbox repoints run delivery
+    // for empty mailboxes at the exact moment hibernation kills the pane.
+    // Observed live: without the unread-mail gate, the kill itself scheduled a
+    // wake and the pane respawned two seconds after sleeping.
+    const { runtime, db, handle, tabMountSends } = await sleptPaneRuntime(sleepingRecord())
+    runtime.deliverPendingMessagesForHandle(handle)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(tabMountSends).toEqual([])
+    db.close()
+  })
+
   it('still refuses to wake a pane the user slept deliberately', async () => {
     const { runtime, db, handle, tabMountSends } = await sleptPaneRuntime(
       sleepingRecord({ restoreOnTabOpenOnly: true })

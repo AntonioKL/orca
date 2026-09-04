@@ -172,6 +172,18 @@ export class OrcaRuntimeWithWaitForLeafPtyId extends OrcaRuntimeWithRestoreLiveP
     if (!db) {
       return
     }
+    // Why the mail check: delivery also runs from sweeps that visit empty
+    // mailboxes — pty retirement redrives and restored-mailbox repoints fire
+    // right when hibernation kills the pane. Without proof someone is owed
+    // mail, the kill itself would schedule the wake that undoes it (observed
+    // live: pane slept and self-woke two seconds later). Unread is the
+    // evidence; delivered-but-unread still counts because a pointer staged to
+    // a dying pane is exactly the mail a wake must rescue. An answerless query
+    // wakes anyway: "could not look" must not read as "mailbox empty".
+    const unreadTypes = db.getUnreadDirectMessageTypes?.(mailboxHandle)
+    if (unreadTypes !== undefined && unreadTypes.length === 0) {
+      return
+    }
     const resolution = resolveSleepingPaneWakeTarget(mailboxHandle, {
       getRunCoordinatorPaneKey: (runId) => db.getRun?.(runId)?.coordinator_pane_key ?? undefined,
       getDispatchAssigneePaneKey: (dispatchId) =>
