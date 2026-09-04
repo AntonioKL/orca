@@ -131,6 +131,85 @@ describe('structured agent session launch', () => {
     expect(callStructuredAgentSession).toHaveBeenCalledOnce()
   })
 
+  /** A worktree is not resolvable for a beat after createWorktree resolves, so the probe fails with
+   *  selector_not_found instead of answering. That is "not ready", not "no". */
+  it('retries a probe the host cannot answer yet, then creates', async () => {
+    const notResolvableYet = Object.assign(new Error('selector_not_found'), {
+      code: 'selector_not_found'
+    })
+    vi.mocked(callStructuredAgentSession)
+      .mockRejectedValueOnce(notResolvableYet)
+      .mockRejectedValueOnce(notResolvableYet)
+      .mockImplementation(async (_target, method) =>
+        method === 'agentSession.createSupport'
+          ? { supported: true }
+          : { ok: true, replayed: false, value: { sessionId: 'claude_1', fence: 1 } }
+      )
+
+    const intent = createStructuredAgentSessionLaunchIntent('workspace-1', 'claude')
+    await expect(launchStructuredAgentSession(intent)).resolves.toMatchObject({
+      sessionId: 'claude_1'
+    })
+    expect(vi.mocked(callStructuredAgentSession).mock.calls.map(([, method]) => method)).toEqual([
+      'agentSession.createSupport',
+      'agentSession.createSupport',
+      'agentSession.createSupport',
+      'agentSession.create'
+    ])
+  })
+
+  it('refuses once the retry budget for an unresolvable selector is spent', async () => {
+    vi.mocked(callStructuredAgentSession).mockRejectedValue(
+      Object.assign(new Error('selector_not_found'), { code: 'selector_not_found' })
+    )
+
+    const intent = createStructuredAgentSessionLaunchIntent('workspace-1', 'claude')
+
+    await expect(launchStructuredAgentSession(intent)).rejects.toBeInstanceOf(
+      StructuredAgentSessionCreateRefusalError
+    )
+    // Bounded: the first ask plus the retry delays, and never agentSession.create.
+    expect(vi.mocked(callStructuredAgentSession).mock.calls.map(([, method]) => method)).toEqual([
+      'agentSession.createSupport',
+      'agentSession.createSupport',
+      'agentSession.createSupport',
+      'agentSession.createSupport'
+    ])
+  })
+
+  it('does not retry a host that answered no, or an unrelated failure', async () => {
+    vi.mocked(callStructuredAgentSession).mockResolvedValue({ supported: false, reason: 'wsl' })
+    await expect(
+      launchStructuredAgentSession(
+        createStructuredAgentSessionLaunchIntent('workspace-1', 'claude')
+      )
+    ).rejects.toBeInstanceOf(StructuredAgentSessionCreateRefusalError)
+    expect(callStructuredAgentSession).toHaveBeenCalledOnce()
+
+    vi.mocked(callStructuredAgentSession).mockReset()
+    vi.mocked(callStructuredAgentSession).mockRejectedValue(new Error('runtime unreachable'))
+    await expect(
+      launchStructuredAgentSession(
+        createStructuredAgentSessionLaunchIntent('workspace-1', 'claude')
+      )
+    ).rejects.toBeInstanceOf(StructuredAgentSessionCreateRefusalError)
+    expect(callStructuredAgentSession).toHaveBeenCalledOnce()
+  })
+
+  /** A message-wrapped token must not be confused with prose that merely mentions it. */
+  it('does not retry a failure that only mentions the token in passing', async () => {
+    vi.mocked(callStructuredAgentSession).mockRejectedValue(
+      new Error('Access denied after a prior selector_not_found')
+    )
+
+    await expect(
+      launchStructuredAgentSession(
+        createStructuredAgentSessionLaunchIntent('workspace-1', 'claude')
+      )
+    ).rejects.toBeInstanceOf(StructuredAgentSessionCreateRefusalError)
+    expect(callStructuredAgentSession).toHaveBeenCalledOnce()
+  })
+
   /** Codex's support answer is settled by the launch route and owned elsewhere; this pins that the
    *  Claude probe did not change Codex's wire traffic. */
   it('does not probe create support for Codex', async () => {
