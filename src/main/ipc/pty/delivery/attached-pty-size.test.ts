@@ -134,7 +134,7 @@ describe('commitAttachedPtySize', () => {
     ptySizes.delete('pty-commit')
   })
 
-  it('records the resolved grid and reflows the model only for a reattach', () => {
+  it('records the resolved grid and reflows the model onto it for a reattach', () => {
     const reflow = vi.fn()
     const committed = commitAttachedPtySize({
       result: {
@@ -152,7 +152,7 @@ describe('commitAttachedPtySize', () => {
     expect(reflow).toHaveBeenCalledWith('pty-commit', LIVE.cols, LIVE.rows)
   })
 
-  it('leaves a fresh spawn model alone: its emulator already starts at the request', () => {
+  it('reflows a fresh spawn onto the request too: bytes can create the model before the reply', () => {
     const reflow = vi.fn()
     commitAttachedPtySize({
       result: { id: 'pty-commit' },
@@ -161,6 +161,6 @@ describe('commitAttachedPtySize', () => {
       reflowHeadlessTerminalToPtyGrid: reflow
     })
     expect(ptySizes.get('pty-commit')).toEqual(REQUESTED)
-    expect(reflow).not.toHaveBeenCalled()
+    expect(reflow).toHaveBeenCalledWith('pty-commit', REQUESTED.cols, REQUESTED.rows)
   })
 })

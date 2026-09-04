@@ -24,7 +24,7 @@ import {
 } from '../pane/launch-authority'
 import type { PtyIpcSpawnState } from './spawn-state'
 import { persistPtyIpcSpawnCommit } from './spawn-commit-persist'
-import { reflowReattachedHeadlessTerminal } from '../delivery/attached-pty-size'
+import { reflowHeadlessTerminalToCommittedGrid } from '../delivery/attached-pty-size'
 
 export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawnResult> {
   const args = ctx.args
@@ -74,8 +74,8 @@ export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawn
     }
   }
   // Why after the seed: a seed skips an existing model, and live bytes may have lazily created
-  // one at the 80x24 default before the attach reply revealed the session's real grid.
-  reflowReattachedHeadlessTerminal({
+  // one at the 80x24 default before the spawn reply revealed the session's real grid.
+  reflowHeadlessTerminalToCommittedGrid({
     result: ctx.result,
     committedSize,
     reflowHeadlessTerminalToPtyGrid: ctx.deps.runtime?.reflowHeadlessTerminalToPtyGrid?.bind(

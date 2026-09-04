@@ -89,7 +89,20 @@ describe('spawn size cache on reattach', () => {
 
     expect(preAttachSize).toEqual({ cols: 120, rows: 40 })
     expect(ptySizes.get(SESSION_ID)).toEqual({ cols: 120, rows: 40 })
-    expect(runtime.reflowHeadlessTerminalToPtyGrid).not.toHaveBeenCalled()
+    expect(runtime.reflowHeadlessTerminalToPtyGrid).toHaveBeenCalledWith(SESSION_ID, 120, 40)
+  })
+
+  // Why: the pre-attach seed is withheld for an unmeasured attach, and a daemon that restarted
+  // re-creates the session instead of attaching, so only the commit can size the model.
+  it('reflows a hidden attach the daemon answered with a fresh session onto the request', async () => {
+    const { runtime, preAttachSize } = await runSpawn(
+      { cols: 100, rows: 30, sessionId: SESSION_ID, initiallyHidden: true },
+      { id: SESSION_ID }
+    )
+
+    expect(preAttachSize).toBeUndefined()
+    expect(ptySizes.get(SESSION_ID)).toEqual({ cols: 100, rows: 30 })
+    expect(runtime.reflowHeadlessTerminalToPtyGrid).toHaveBeenCalledWith(SESSION_ID, 100, 30)
   })
 
   it('keeps the size main already held when the reattach carries no snapshot grid', async () => {

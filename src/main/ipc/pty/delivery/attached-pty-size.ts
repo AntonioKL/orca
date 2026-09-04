@@ -47,24 +47,23 @@ export function resolveCommittedPtySize(args: {
 
 type HeadlessReflow = ((ptyId: string, cols: number, rows: number) => void) | undefined
 
-/** Reflow main's model onto the committed grid. Why only reattach: live bytes can lazily create
- *  the model at the 80x24 default before the attach reply reveals the session's real grid, and a
- *  seed skips an existing model entirely; a fresh spawn's model already starts at the request. */
-export function reflowReattachedHeadlessTerminal(args: {
-  result: Pick<PtySpawnResult, 'id' | 'isReattach'>
+/** Reflow main's model onto the committed grid, whatever the spawn was. Why unconditional: live
+ *  bytes can lazily create the model at the 80x24 default before the reply arrives, a seed skips an
+ *  existing model, and the pre-attach seed is now withheld for unmeasured attaches, so a session the
+ *  daemon re-created instead of attaching would otherwise keep the default forever. */
+export function reflowHeadlessTerminalToCommittedGrid(args: {
+  result: Pick<PtySpawnResult, 'id'>
   committedSize: PtyGrid
   reflowHeadlessTerminalToPtyGrid: HeadlessReflow
 }): void {
-  if (args.result.isReattach === true) {
-    args.reflowHeadlessTerminalToPtyGrid?.(
-      args.result.id,
-      args.committedSize.cols,
-      args.committedSize.rows
-    )
-  }
+  args.reflowHeadlessTerminalToPtyGrid?.(
+    args.result.id,
+    args.committedSize.cols,
+    args.committedSize.rows
+  )
 }
 
-/** Record the settled grid, then reflow for a reattach. Callers that seed the model between the
+/** Record the settled grid, then reflow the model onto it. Callers that seed the model between the
  *  two steps (ipc spawn commit) call the halves separately. */
 export function commitAttachedPtySize(args: {
   result: Pick<
@@ -77,6 +76,6 @@ export function commitAttachedPtySize(args: {
 }): PtyGrid {
   const committedSize = resolveCommittedPtySize(args)
   ptySizes.set(args.result.id, committedSize)
-  reflowReattachedHeadlessTerminal({ ...args, committedSize })
+  reflowHeadlessTerminalToCommittedGrid({ ...args, committedSize })
   return committedSize
 }
