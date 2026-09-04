@@ -234,6 +234,54 @@ instances x a small pool is within budget. Also consider the desktop's refresh b
 blind until re-authenticated (`gcloud auth login`, interactive). Last confirmed state 13:40Z: fleet 0
 controls, auth maxScale 2, 7,600 auth 429/min. All autonomous dispatch loops are stopped.**
 
+**17:19Z–17:21Z MITIGATION APPLIED (owner said "fix it NOW").** State at 17:19Z, four hours in: all 23
+cells at 0 controls, auth 429 ~2,000/min, auth 2xx ~40/min, and the 2xx that got through took 13–28 s
+(both instances saturated). Mutation 1: `gcloud run services update orca-cloud-auth --max-instances 20`
+created revision `orca-cloud-auth-00018-4jc` (same image `auth@sha256:1710ff6c`, same env/concurrency,
+only maxScale 2 -> 20) but the service pins traffic to `00023-qud` **by revision name**, so the new revision
+was immediately `Retired` and nothing changed. Mutation 2 (17:21:30Z): `gcloud run services update-traffic
+--to-revisions orca-cloud-auth-00018-4jc=100`. Lesson: the auth service's traffic block is name-pinned
+(the deploy workflow does an explicit traffic switch), so a bare `services update` never reaches users.
+Terraform still says `auth_max_instances = 2`; the next `deploy-auth-production.yml` run will revert this
+unless the tfvars and the workflow's `AUTH_MAX_INSTANCES` are changed first.
+
+## Finding 13 (2026-09-04 17:19Z–18:10Z): **the auth outage is a database problem, not (only) a Cloud Run cap; `refresh_tokens` has 63 M rows and reuse-revokes scan whole families**
+
+Mutations this window (all online, no restarts, all by hand in project onorca-cloud):
+1. 17:19Z `gcloud run services update orca-cloud-auth --max-instances 20` → new revision `00018-4jc`, but traffic is
+   pinned by revision name so it was `Retired`; 17:21:30Z `update-traffic --to-revisions 00018-4jc=100`.
+2. Still 2 instances at 17:31Z: the SERVICE has its own `scaling.maxInstanceCount=2` in **manual scaling mode**
+   (`run.googleapis.com/maxScale: '2'` on service metadata, set by Terraform `infra/terraform-apps/auth.tf`), which
+   overrides the revision cap. `--scaling=auto` then `--max 20` at 17:31:45Z. Instances 2→20 by 17:38Z; 429s fell
+   6,000/2 min → 60/2 min at 17:36Z and controls briefly reached 11.
+3. Then latency, not capacity, became the wall: every refresh took 100+ s inside Postgres (desktop client timeout
+   is 30 s, `CLOUD_REQUEST_TIMEOUT_MS`), so 20 instances × 80 concurrency filled again with requests nobody was
+   waiting for, and 429s returned (~1,500/2 min from 17:40Z).
+4. 17:27Z Cloud SQL disk 62 GB → 250 GB (IOPS ceiling 1,470 → ~7,500). 18:00Z `max_wal_size` 1.5 GB → 16 GB
+   (the checkpoint loop: `checkpoint starting: wal` every 45–60 s since 13:06Z).
+5. 18:07Z `CREATE INDEX CONCURRENTLY refresh_tokens_family_unrevoked ON refresh_tokens(family_id) WHERE
+   revoked_at IS NULL` (an earlier attempt with `AND rotated_at IS NULL` was wrong for the revoke predicate; its
+   invalid remnant `refresh_tokens_family_live` was dropped).
+
+Evidence: `refresh_tokens` = 63.3 M live tuples, 16 GB table + 10 GB indexes; every refresh inserts a row and
+nothing ever deletes (30-day TTL rows are never pruned). Query Insights 17:33–17:39Z: `UPDATE refresh_tokens SET
+revoked_at = $1 WHERE family_id = $2 AND revoked_at IS NULL` = 21,000 s of execution per 6 min, ~90–120 k rows
+updated per minute; io_time 15,000 s read; pg_stat_activity 180+ backends in `IO/DataFileRead` on that statement,
+200 backends total for orca_auth (20 instances × pool max 10). `session-refresh-reuse-detected` audit events per
+hour: ~100 all day → 8,805 (13Z), 15,511, 19,486, 24,897, 26,935 (17Z). Mechanism: a desktop's refresh times out
+client-side at 30 s, the server had already rotated the token, the desktop retries with the same token, the
+server calls that reuse and revokes the family (Bitmap scan on `refresh_tokens_family` + heap filter over every
+row the family ever had), then the desktop retries the dead token again, and each retry re-runs the same
+full-family scan (already-revoked families short-circuit nowhere). Reuse-detected 401 also **signs the user out**
+on the desktop (`isOrcaCloudAuthFailure` → `clearCloudSessionIfUnchanged`), so every user who hit this during the
+outage must sign in again.
+
+Durable fixes (orca-cloud PR in preparation on branch `auth-revoke-only-live-tokens`): `AUTH_MAX_INSTANCES` and
+`auth_max_instances` → 20; Terraform disk 250 + `max_wal_size=16384`; the partial index in the schema; an
+`already-revoked` short-circuit in `rotateRefreshToken` that skips the family UPDATE and the audit insert. Still
+open after that: prune `refresh_tokens` (expired or revoked rows older than N days), a server-side statement
+timeout shorter than the desktop's 30 s so the client and server agree on failure, and an alert on auth 429s.
+
 ## What actually blocks the roll now (12:58Z summary for the owner)
 
 0. **Cloud NAT ports** (Finding 11, found 12:55Z): every us-central1 cell reaches Cloud SQL's public IP
