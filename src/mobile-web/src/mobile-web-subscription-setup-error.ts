@@ -3,6 +3,7 @@ import {
   MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS,
   type MobileWebBridgeShellMessage
 } from '../../shared/mobile-web/bridge-contract'
+import { encodedMobileWebBridgeValueByteLength } from './mobile-web-bridge-request-encoding'
 import { MobileWebBridgeClientError } from './mobile-web-bridge-client-error'
 
 type OperationGrant = Extract<MobileWebBridgeShellMessage, { type: 'init' }>['grants'][number]
@@ -25,7 +26,7 @@ export function mobileWebSubscriptionSetupError(args: {
   if (!args.payloadValid) {
     return new MobileWebBridgeClientError('invalid_request', false)
   }
-  if (encodedByteLength(args.payload) > args.grant.limits.maxRequestBytes) {
+  if (encodedMobileWebBridgeValueByteLength(args.payload) > args.grant.limits.maxRequestBytes) {
     return new MobileWebBridgeClientError('too_large', false)
   }
   if (
@@ -35,15 +36,4 @@ export function mobileWebSubscriptionSetupError(args: {
     return new MobileWebBridgeClientError('rate_limited', true)
   }
   return null
-}
-
-function encodedByteLength(value: unknown): number {
-  try {
-    const encoded = JSON.stringify(value)
-    return encoded === undefined
-      ? Number.POSITIVE_INFINITY
-      : new TextEncoder().encode(encoded).byteLength
-  } catch {
-    return Number.POSITIVE_INFINITY
-  }
 }

@@ -98,7 +98,14 @@ describe('docs-only path classification', () => {
   })
 
   it('does not start desktop PR Checks for mobile-only diffs', () => {
-    expect(shouldRunPrChecks(['mobile/src/App.tsx'])).toBe(false)
+    // Native-only routes never enter the hosted export, whose router root is host-web-app.
+    expect(shouldRunPrChecks(['mobile/app/settings.tsx'])).toBe(false)
+    expect(shouldRunPrChecks(['mobile/ios/Podfile'])).toBe(false)
+  })
+
+  it('keeps mobile test-only diffs off the desktop matrix', () => {
+    expect(shouldRunPrChecks(['mobile/src/session/mobile-session-surface.test.tsx'])).toBe(false)
+    expect(shouldRunPrChecks(['mobile/app/h/[hostId]/tasks.test.tsx'])).toBe(false)
   })
 
   it('runs desktop packaging when a shared host route changes', () => {
@@ -106,6 +113,20 @@ describe('docs-only path classification', () => {
       package: true,
       package_windows: true
     })
+  })
+
+  // Why: mobile/host-web-app and mobile/app/h import broadly across mobile/src, and the
+  // export they feed becomes out/mobile-web-rnw, which every desktop installer carries. A
+  // mobile/src edit must reach the bundle's own budget and afterPack verification gates.
+  it('runs desktop packaging when hosted-page sources under mobile/src change', () => {
+    for (const file of [
+      'mobile/src/session/MobileSessionSurface.tsx',
+      'mobile/src/tasks/use-mobile-tasks-host-operations.ts',
+      'mobile/src/transport/types.ts',
+      'mobile/src/mobile-web/mobile-web-session-snapshot.ts'
+    ]) {
+      expectClassification([file], { package: true, package_windows: true })
+    }
   })
 
   it('does not start desktop PR Checks for cloud-only diffs', () => {
@@ -370,9 +391,12 @@ describe('per-job path classification', () => {
     ).toBe(true)
     // Why false: a mobile-only diff skips every desktop job, so the install step's own
     // job never runs and claiming the install is needed contradicts should_run.
-    expect(classifyPrJobs(['mobile/src/a.ts']).mobile_dependencies).toBe(false)
-    expect(classifyPrJobs(['mobile/src/a.ts']).should_run).toBe(false)
-    expect(classifyPrJobs(['README.md', 'mobile/src/a.ts']).mobile_dependencies).toBe(false)
+    expect(classifyPrJobs(['mobile/app/settings.tsx']).mobile_dependencies).toBe(false)
+    expect(classifyPrJobs(['mobile/app/settings.tsx']).should_run).toBe(false)
+    expect(classifyPrJobs(['README.md', 'mobile/app/settings.tsx']).mobile_dependencies).toBe(false)
+    // Hosted-page sources keep desktop jobs on, so the install they lint with is needed.
+    expect(classifyPrJobs(['mobile/src/a.ts']).should_run).toBe(true)
+    expect(classifyPrJobs(['mobile/src/a.ts']).mobile_dependencies).toBe(true)
     // The hosted page's dependency manifest is packaged by the desktop runtime, so
     // its diff keeps desktop jobs (and the install they lint with) enabled.
     expect(classifyPrJobs(['mobile/package.json']).should_run).toBe(true)

@@ -183,6 +183,9 @@ const SHARED_PACKAGE_PREFIXES = [
 // sources remain mobile-only.
 const DESKTOP_RELEVANT_MOBILE_PREFIXES = [
   'mobile/app/h/',
+  // Why: mobile/host-web-app and mobile/app/h import broadly across mobile/src, so a
+  // mobile/src edit changes out/mobile-web-rnw, which ships in every desktop installer.
+  'mobile/src/',
   'mobile/package.json',
   'mobile/pnpm-lock.yaml',
   'mobile/pnpm-workspace.yaml',
@@ -360,10 +363,14 @@ function isTestFile(file) {
 }
 
 function isDesktopIrrelevantPath(file) {
-  return (
-    matchesPrefix(file, DESKTOP_IRRELEVANT_PREFIXES) &&
-    !matchesPrefix(file, DESKTOP_RELEVANT_MOBILE_PREFIXES)
-  )
+  return matchesPrefix(file, DESKTOP_IRRELEVANT_PREFIXES) && !isDesktopRelevantMobilePath(file)
+}
+
+// Why: a mobile test file cannot reach out/mobile-web-rnw, so keep test-only mobile diffs
+// desktop-irrelevant — otherwise the mobile/src carve-out drags the full desktop matrix
+// onto every mobile PR.
+function isDesktopRelevantMobilePath(file) {
+  return !isTestFile(file) && matchesPrefix(file, DESKTOP_RELEVANT_MOBILE_PREFIXES)
 }
 
 function isNativeCacheInputPath(file) {
