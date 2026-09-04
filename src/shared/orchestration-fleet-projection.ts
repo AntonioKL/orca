@@ -1,8 +1,9 @@
 import type { AgentStatusIpcPayload } from './agent-status-ipc-payload'
 import { createFleetStatusIndex, statusForFleetWorker } from './orchestration-fleet-status-index'
-import type {
-  OrchestrationFleetAttention,
-  OrchestrationFleetAttentionCategory
+import {
+  projectOrchestrationFleetAttention,
+  type OrchestrationFleetAttention,
+  type OrchestrationFleetAttentionCategory
 } from './orchestration-fleet-attention'
 import { projectOrchestrationFleetWorker } from './orchestration-fleet-worker-projection'
 
@@ -92,6 +93,7 @@ export type OrchestrationFleetWorker = {
     detail: string | null
     activity: 'working' | 'blocked' | 'waiting' | 'done' | 'unknown'
   }
+  outcome: 'in_progress' | 'succeeded' | 'failed' | 'outcome_unknown' | 'finished_unverified'
   liveness: FleetLiveness
   evidence: {
     durable: true
@@ -113,19 +115,20 @@ export type OrchestrationFleetPage = {
   }
 }
 
+/** Re-runs the one attention projection against a newer host verdict. Re-deriving categories
+ *  from liveness alone dropped the `unverifiable` an unproven outcome contributed. */
 export function refreshOrchestrationFleetLivenessAttention(worker: OrchestrationFleetWorker): void {
-  const categories: OrchestrationFleetAttentionCategory[] = worker.attention.categories.filter(
-    (category) => category !== 'stale' && category !== 'unverifiable'
-  )
-  if (worker.liveness.verdict === 'unverifiable') {
-    categories.push(worker.liveness.reason === 'stale_status' ? 'stale' : 'unverifiable')
-  }
-  worker.attention = {
-    categories,
-    requiresAction: categories.some((category) =>
-      ['input', 'approval', 'failure', 'interruption', 'unverifiable'].includes(category)
-    )
-  }
+  const had = (category: OrchestrationFleetAttentionCategory): boolean =>
+    worker.attention.categories.includes(category)
+  worker.attention = projectOrchestrationFleetAttention({
+    isRoot: worker.parent === null,
+    outcome: worker.outcome,
+    pendingInput: had('input'),
+    pendingGuidance: had('guidance'),
+    pendingApproval: had('approval'),
+    interrupted: had('interruption'),
+    liveness: worker.liveness
+  })
 }
 
 export function projectOrchestrationFleet(args: {

@@ -11,8 +11,31 @@ import {
   type WorkerReleaseReceipt
 } from './orchestration-worker-release-completion'
 import { WorkerDispatchParams, WorkerRetainParams } from './orchestration-worker-release-schemas'
+import { sweepSettledWorkerResumeFences } from './settled-worker-resume-fence-sweep'
 
-export const ORCHESTRATION_WORKER_RELEASE_METHODS: RpcMethod[] = [
+// Release and retain both drop the worker's row from the legacy recovery plan, and a fenced pane
+// refuses a fresh spawn — so the sweep runs after every early return of both methods. workerList
+// is a pure read and is deliberately absent.
+const FENCE_SWEEPING_METHOD_NAMES = new Set([
+  'orchestration.workerRelease',
+  'orchestration.workerRetain'
+])
+
+function sweepingRetiredWorkerResumeFences(method: RpcMethod): RpcMethod {
+  if (!FENCE_SWEEPING_METHOD_NAMES.has(method.name)) {
+    return method
+  }
+  return {
+    ...method,
+    handler: async (params, ctx) => {
+      const result = await method.handler(params, ctx)
+      sweepSettledWorkerResumeFences(ctx.runtime)
+      return result
+    }
+  }
+}
+
+const WORKER_RELEASE_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'orchestration.workerRelease',
     params: WorkerDispatchParams,
@@ -136,8 +159,18 @@ export const ORCHESTRATION_WORKER_RELEASE_METHODS: RpcMethod[] = [
     params: z.object({ paneKey: requiredString('Missing paneKey') }),
     // Real user keystrokes durably relinquish orchestration ownership on the owning runtime, so
     // restarts, SSH drops, remote viewing, and renderer remounts cannot erase the takeover.
-    handler: (params, { runtime }) => ({
-      changed: runtime.getOrchestrationDb().markWorkerTerminalUserOwned(params.paneKey)
-    })
+    handler: (params, { runtime }) => {
+      const changed = runtime.getOrchestrationDb().markWorkerTerminalUserOwned(params.paneKey)
+      if (changed > 0) {
+        // Only a real takeover retires the resource; ordinary panes report here too and must not
+        // pay for a plan read on every keystroke window.
+        sweepSettledWorkerResumeFences(runtime)
+      }
+      return { changed }
+    }
   })
 ]
+
+export const ORCHESTRATION_WORKER_RELEASE_METHODS: RpcMethod[] = WORKER_RELEASE_METHODS.map(
+  sweepingRetiredWorkerResumeFences
+)

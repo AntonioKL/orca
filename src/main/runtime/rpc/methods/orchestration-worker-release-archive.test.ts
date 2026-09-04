@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { encodeWorkerOutputCursor } from '../../orchestration/worker-output-cursor'
-import { createOrchestrationWorkerReleaseHarness } from './orchestration-worker-release-test-harness'
+import { createOrchestrationWorkerReleaseHarness } from './orchestration-worker-release.test-support'
 
 function codexMessage(id: string, text: string): string {
   return JSON.stringify({

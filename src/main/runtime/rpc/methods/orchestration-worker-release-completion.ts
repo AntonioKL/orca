@@ -142,8 +142,7 @@ async function completeWorkerTerminalReleaseOnce(
           const reconciled = db.settleDeadWorkerTerminalRelease({
             requestingDispatchId: dispatchId,
             resourceId: resource.id,
-            processIncarnation: resource.process_incarnation,
-            requireArchive: true
+            processIncarnation: resource.process_incarnation
           })
           if (reconciled.disposition === 'released') {
             runtime.notifyMessageArrived(`dispatch:${dispatchId}`, 'status')

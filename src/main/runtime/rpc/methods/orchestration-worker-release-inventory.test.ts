@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createOrchestrationWorkerReleaseHarness } from './orchestration-worker-release-test-harness'
+import { createOrchestrationWorkerReleaseHarness } from './orchestration-worker-release.test-support'
 
 describe('orchestration worker release inventory', () => {
   const h = createOrchestrationWorkerReleaseHarness()
@@ -34,7 +34,7 @@ describe('orchestration worker release inventory', () => {
     expect(h.runtime.closeTerminal).toHaveBeenCalledWith('term_reminted')
   })
 
-  it('reconciles dead transferred ownership after the current owner settles', async () => {
+  it('refuses to settle dead transferred ownership with no durable archive', async () => {
     h.setup()
     const first = await h.startSettledWorker('succeeded')
     const second = await h.startWorker({ terminal: 'term_reminted' })
@@ -43,16 +43,19 @@ describe('orchestration worker release inventory', () => {
 
     await expect(
       h.call('orchestration.workerRelease', { dispatch: first.dispatchId })
-    ).resolves.toMatchObject({ state: 'released', processAction: 'none' })
+    ).resolves.toMatchObject({
+      state: 'retained',
+      reason: 'ownership_transferred',
+      processAction: 'none'
+    })
     expect(h.inspectProcessLiveness).toHaveBeenCalledWith(
       'runtime_test:term_worker:1',
       JSON.stringify({ kind: 'local', hostId: 'local' })
     )
     expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
-    expect(h.db.getWorkerTerminalResourceByOwner(second.dispatchId)).toMatchObject({
-      ownership_state: 'released',
-      release_state: 'released'
-    })
+    expect(h.db.getWorkerTerminalResourceByOwner(second.dispatchId)?.release_state).not.toBe(
+      'released'
+    )
   })
 
   it('rejects exact reuse after release intent instead of closing the new worker', async () => {
