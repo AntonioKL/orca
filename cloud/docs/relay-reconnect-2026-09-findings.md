@@ -213,6 +213,13 @@ immediately so the bar can be re-tightened after the fleet is on the 500 ms lock
   the fleet has one of these every ~15 min.
 - Recovery: 06:13 903 / 06:14 1471 assign 200s from 640 distinct desktop IPs; 503s 78 -> 183 -> 29/min.
   No cell crash 06:12–06:16Z. Drain step passed ~06:16Z; template/MIG apply started.
+- 06:16:03–06:17:08Z, during c7's template apply (not its drain): c27 (x4) and c29 (x3) crash-looped on the
+  old-image pg-pool connect timeout in `beginProof`, both MIGs autoheal-recreated (c27's second recreate in
+  40 min). Fleet 23 -> 21 reporting cells, controls 13286 -> 12462, assign 503s 1000/min at 06:17, director
+  concurrency p99 74.8. Cloud SQL CPU 0.70 max, backends 174 max (bar 250). Same multi-cell pattern occurred
+  at 01:31Z (4 cells) and 04:47Z (5 cells) with nothing rolling; the c7 drain's SQL load 6 min earlier may
+  have nudged the pool timeouts but the class is pre-existing. c7 MIG RECREATING onto new template
+  `…20260904061618…` = the expected image swap.
 - Implication for the batch phase: every drain will push director concurrency past the monitor's 64 bar
   for ~1-2 min. The batch job rechecks safety *before* it drains (read-only step), so that is fine per wave,
   but never run a monitor dry-run concurrently with a wave, and prefer batches of 2 over 4 until the fleet
