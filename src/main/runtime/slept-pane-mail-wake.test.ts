@@ -181,13 +181,41 @@ describe('mail addressed to a listed slept pane', () => {
         subject: 'worker done',
         type: 'worker_done'
       })
-      runtime.notifyMessageArrived('run:run_test', 'worker_done')
-      await Promise.resolve()
+      runtime.requestSleepingRecipientWake('run:run_test')
       await vi.advanceTimersByTimeAsync(1_500)
 
       expect(tabMountSends).toEqual([])
 
       runtime.markGraphReady(1)
+      await vi.advanceTimersByTimeAsync(1_500)
+
+      expect(tabMountSends).toHaveLength(1)
+      db.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('redrives a parked wake when a renderer graph reload is cancelled', async () => {
+    vi.useFakeTimers()
+    try {
+      const { runtime, db, handle, tabMountSends } = await sleptPaneRuntime(sleepingRecord())
+      db.setRun({ id: 'run_test', coordinator_handle: handle, coordinator_pane_key: PANE_KEY })
+      const fence = runtime.markRendererReloading(1)
+      if (!fence) {
+        throw new Error('expected renderer reload fence')
+      }
+      db.insertMessage({
+        from: 'term_worker',
+        to: 'run:run_test',
+        subject: 'worker done',
+        type: 'worker_done'
+      })
+      runtime.requestSleepingRecipientWake('run:run_test')
+      await vi.advanceTimersByTimeAsync(1_500)
+
+      expect(tabMountSends).toEqual([])
+      expect(runtime.markRendererReloadCancelled(1, fence)).toBe(true)
       await vi.advanceTimersByTimeAsync(1_500)
 
       expect(tabMountSends).toHaveLength(1)

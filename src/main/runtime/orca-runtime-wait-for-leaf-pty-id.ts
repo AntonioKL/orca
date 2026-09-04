@@ -170,8 +170,7 @@ export class OrcaRuntimeWithWaitForLeafPtyId extends OrcaRuntimeWithRestoreLiveP
       this.requestRendererTerminalTabMountForPane({ ...request, intent: 'inbound-message' })
   })
 
-  markGraphReady(windowId: number): void {
-    super.markGraphReady(windowId)
+  protected retrySleepingPaneWakesWhenGraphReady(windowId: number): void {
     if (windowId === this.authoritativeWindowId && this.graphStatus === 'ready') {
       this.sleepingPaneWakes.retryPending()
     }
