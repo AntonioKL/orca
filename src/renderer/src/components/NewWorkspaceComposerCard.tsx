@@ -100,10 +100,7 @@ export default function NewWorkspaceComposerCard(
   )
   // Why sticky: the dialog animates itself closed off its own `option` prop, so unmounting it
   // when the option clears would cut that animation short.
-  const setLocationDialogRequested = React.useRef(false)
-  if (setLocationOption !== null) {
-    setLocationDialogRequested.current = true
-  }
+  const [setLocationDialogMounted, setSetLocationDialogMounted] = React.useState(false)
 
   const selectedRepo = eligibleRepos.find((candidate) => candidate.id === repoId)
   const selectedRepoName = selectedRepo?.displayName ?? selectedRepo?.path ?? 'This project'
@@ -208,6 +205,7 @@ export default function NewWorkspaceComposerCard(
   }, [onAddProjectOverride, openModal])
   const handleSetLocation = React.useCallback(
     (option: NeedsProjectHostOption): void => {
+      setSetLocationDialogMounted(true)
       setSetLocationOption(option)
       onNestedDialogOpenChange?.(true)
     },
@@ -350,7 +348,7 @@ export default function NewWorkspaceComposerCard(
         submitShortcutModifierLabel={getScreenSubmitModifierLabel()}
       />
       <AddRemoteHostDialog mode={addRemoteHostMode} onOpenChange={setAddRemoteHostMode} />
-      {setLocationDialogRequested.current ? (
+      {setLocationDialogMounted ? (
         <React.Suspense fallback={null}>
           <SetProjectLocationDialog
             option={setLocationOption}
