@@ -59,6 +59,7 @@ export function buildDispatchPreamble(params: PreambleParams): string {
     ? ` --dispatch-capability ${params.dispatchCapability}`
     : ''
 
+  // Why: fencing keeps shell comments executable to agents without turning them into Chat UI headings.
   const header = `You are working inside Orca, a multi-agent IDE. You are a dispatched worker.
 Your coordinator's terminal handle is: ${params.coordinatorHandle}
 Your task ID is: ${params.taskId}
@@ -68,6 +69,7 @@ Slack, GitHub comments, or any other channel to reach a human during the run.
 
 === CLI COMMANDS ===
 
+\`\`\`sh
   # Report the terminal task outcome (REQUIRED exactly once).
   #
   # RULE: --body must be a 3-sentence executive summary (what you did,
@@ -129,6 +131,7 @@ Slack, GitHub comments, or any other channel to reach a human during the run.
 
   # Check for messages from the coordinator:
   ${cli} orchestration check --terminal ${params.workerHandle}
+\`\`\`
 
 ${postDoneInstructions}`
 
