@@ -42,6 +42,7 @@ import { useNow } from '@/hooks/use-now'
 type PaletteLiveStatus = {
   liveAgentStatusByWorktreeId: ReadonlyMap<string, LiveAgentWorktreeStatus>
   agentStatusPaneIdsByTabId: Record<string, ReadonlySet<string>>
+  restoredAgentStatusPaneIdsByTabId: Record<string, ReadonlySet<string>>
   paneSources: TabPaneInputSources
   tabsByWorktree: Record<string, TerminalTab[]>
   browserTabsByWorktree: Record<string, BrowserWorkspace[]>
@@ -106,6 +107,7 @@ export function PaletteLiveStatusProvider({
         now
       ),
       agentStatusPaneIdsByTabId: buildLiveAgentStatusPaneIdsByTabId(entriesByTabId, now),
+      restoredAgentStatusPaneIdsByTabId: buildRestoredAgentStatusPaneIdsByTabId(entriesByTabId),
       paneSources: {
         entriesByTabId,
         ptyIdsByTabId,
@@ -164,6 +166,28 @@ function buildLiveAgentStatusPaneIdsByTabId(
   return paneIdsByTabId
 }
 
+function buildRestoredAgentStatusPaneIdsByTabId(
+  entriesByTabId: ReadonlyMap<string, readonly AgentStatusEntry[]>
+): Record<string, ReadonlySet<string>> {
+  const paneIdsByTabId: Record<string, ReadonlySet<string>> = {}
+  for (const [tabId, entries] of entriesByTabId) {
+    const paneIds = new Set<string>()
+    for (const entry of entries) {
+      if (entry.restoredUnconfirmed !== true) {
+        continue
+      }
+      const paneId = parsePaneKey(entry.paneKey)?.leafId
+      if (paneId) {
+        paneIds.add(paneId)
+      }
+    }
+    if (paneIds.size > 0) {
+      paneIdsByTabId[tabId] = paneIds
+    }
+  }
+  return paneIdsByTabId
+}
+
 const EMPTY_LIVE_INPUTS = Object.freeze({
   agentStatusByPaneKey: {},
   runtimePaneTitlesByTabId: {},
@@ -200,7 +224,9 @@ export function PaletteWorktreeStatusDot({
     live.paneSources.runtimePaneTitlesByTabId,
     {
       liveAgentStatus: live.liveAgentStatusByWorktreeId.get(worktree.id),
-      agentStatusPaneIdsByTabId: live.agentStatusPaneIdsByTabId
+      agentStatusPaneIdsByTabId: live.agentStatusPaneIdsByTabId,
+      restoredAgentStatusPaneIdsByTabId: live.restoredAgentStatusPaneIdsByTabId,
+      terminalLayoutsByTabId: live.paneSources.terminalLayoutsByTabId
     }
   )
   return (

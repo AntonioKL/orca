@@ -277,6 +277,7 @@ export function collectTabPaneInputs(
   const panes: PaneInput[] = []
   // Why: leaves covered by a hook entry skip the title fallback so we don't double-count them.
   const hookLeafIds = new Set<string>()
+  const restoredHookLeafIds = new Set<string>()
   for (const entry of sources.entriesByTabId.get(tab.id) ?? []) {
     panes.push({ kind: 'hook', entry })
     // Why: restored rows own their co-restored title without asserting live state.
@@ -289,6 +290,9 @@ export function collectTabPaneInputs(
     const leafId = leafIdFromPaneKey(entry.paneKey)
     if (leafId !== null) {
       hookLeafIds.add(leafId)
+      if (entry.restoredUnconfirmed) {
+        restoredHookLeafIds.add(leafId)
+      }
     }
   }
 
@@ -318,6 +322,9 @@ export function collectTabPaneInputs(
     const hasSingleUnmappedHook =
       leafId === null && hookLeafIds.size === 1 && paneTitleEntries.length === 1
     if ((leafId !== null && hookLeafIds.has(leafId)) || hasSingleUnmappedHook) {
+      continue
+    }
+    if (leafId === null && restoredHookLeafIds.size > 0) {
       continue
     }
     panes.push({ kind: 'title', status: classifyTitleActivity(title), worktreeLastActivityAt })

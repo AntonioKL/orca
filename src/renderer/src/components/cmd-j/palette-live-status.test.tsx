@@ -144,6 +144,24 @@ describe('palette live status', () => {
     expect(dotLabels()).toEqual(['Needs permission'])
   })
 
+  it('ignores an unmapped stale title for a restored working pane', async () => {
+    useAppStore.setState({
+      agentStatusByPaneKey: {
+        [makePaneKey('term-a', LEAF)]: makeAgentEntry('term-a', 'working', {
+          restoredUnconfirmed: true
+        })
+      },
+      runtimePaneTitlesByTabId: {
+        'term-a': { 0: 'codex [working]', 1: 'codex [working]' }
+      }
+    } as Partial<AppState>)
+
+    await render()
+
+    expect(dotLabels()).toEqual(['Active'])
+    expect(testContainer.querySelector('[data-slot="tooltip-trigger"]')).toBeNull()
+  })
+
   it('shows monitoring when a covered pane retains a working title', async () => {
     setAgentState('working', { workingMode: 'monitoring' })
     useAppStore.setState({

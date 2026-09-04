@@ -710,6 +710,28 @@ describe('buildAttentionByWorktree', () => {
     expect(map.get(w.id)).toEqual(IDLE)
   })
 
+  it('does not rank unresolved sibling titles as working beside a restored row', () => {
+    const w = makeWorktree('wt-1')
+    const tab = makeTab('tab-1', w.id)
+    const key = paneKey(tab.id, LEAF_1)
+    const map = buildAttentionByWorktree(
+      [w],
+      { [w.id]: [tab] },
+      {
+        [key]: makeEntry({
+          paneKey: key,
+          state: 'working',
+          restoredUnconfirmed: true
+        })
+      },
+      { [tab.id]: { 1: '⠋ Claude', 2: '⠋ Codex' } },
+      ptyMap([tab.id]),
+      NOW
+    )
+
+    expect(map.get(w.id)).toEqual(IDLE)
+  })
+
   it('still uses one unmapped title when the hook is only age-stale', () => {
     const w = makeWorktree('wt-1')
     const tab = makeTab('tab-1', w.id)
