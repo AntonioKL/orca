@@ -203,8 +203,14 @@ immediately so the bar can be re-tightened after the fleet is on the 500 ms lock
 ## What actually blocks the roll now (12:40Z summary for the owner)
 
 1. **Cloud SQL disk** (Finding 10): 49 GB PD-SSD saturated since 11:58Z, checkpoint loop, fleet-wide
-   4–6 s stalls every ~45 s. Fix: bigger disk and/or `max_wal_size`, in the Terraform root that owns the
-   instance (orca-cloud). Online change. **This is now the first thing to do**; nothing else can pass a
+   4–6 s stalls every ~45 s. Fix: bigger disk and/or `max_wal_size`. Owner: `stablyai/orca-cloud`
+   `infra/terraform-foundation/database.tf` `google_sql_database_instance.auth` (no `disk_size`,
+   `disk_autoresize`, or `database_flags` set today, so Terraform is at defaults: 10 GB initial, autoresize
+   grew it to 49 GB). Add `disk_size = 200` (+ `disk_autoresize = true`) and optionally
+   `database_flags { name = "max_wal_size" value = "4096" }`; production tfvars are
+   `infra/terraform-foundation/environments/production.tfvars`; applied by `deploy-production.yml` in
+   that repo. Online, no restart for disk; `max_wal_size` is also a non-restart flag. Note Terraform
+   `disk_size` below the live 49 GB would be a destructive shrink, so 200 is safe and 49 is the floor. **This is now the first thing to do**; nothing else can pass a
    15-min gate while it persists, and it is also what is killing the old-image cells several times an hour.
 2. **Old cell image** (Finding 6): dies on every stall. Fixed by rolling 519f4914 (canary inputs ready).
 3. **Gate policy**: `directorErrors: 0` and per-cell health probes freeze on any single stall. Recalibrate
