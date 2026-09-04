@@ -318,8 +318,11 @@ with a large `refresh_tokens` before building the index concurrently there.
 - orca-cloud PR #475 (`auth-observability-alerts`): log metrics + policies for auth refresh 401 (> 100 per 5
   min; Sep 3 baseline 20–80 per hour), 429 (> 20 per 5 min; baseline 0), 5xx (> 10 per 5 min), and Cloud Run
   p99 latency > 10 s. Production routes to the relay Slack channel.
-- Desktop stale auth-status fix: Opus agent in an isolated worktree (push auth-status change on session clear,
-  re-fetch on pane mount, "Sign in again" pairing copy). Pending its report.
+- Desktop stale auth-status fix: stablyai/orca PR #18694 (`desktop-cloud-session-revoked-status`). Main pushes
+  an auth-status-changed IPC when a 401 clears the session; panes re-fetch on mount; the pairing notice says
+  "Your Orca account session expired. Sign in again to use Orca Relay" and hides Retry. StrictMode regression
+  test verified red on the old guard. Does not help desktops already revoked today (session cleared before
+  this code); it fixes every future revocation.
 - Phone-side copy when the desktop is signed out: today the relay answers the phone with `HOST_OFFLINE` (4404)
   and the phone shows "Can't reach desktop" after enough attempts; the relay cannot tell "desktop asleep" from
   "desktop signed out" because the desktop closes its control with no reason. Design note: have the desktop
