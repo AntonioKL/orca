@@ -541,7 +541,12 @@ proxies in bursts, which is exactly the "2 s connect timeout" the old image dies
 MATERIALIZED …`) and 469 s to the single-row reservation UPDATE: the lock queue is the *consequence* of
 connections stalling mid-transaction, not the cause. Not chased further; candidates are the proxy's
 connection churn under the crash loops (each recreated cell opens a fresh pool) and the instance's
-public-IP path. Relay code cannot fix this; it is Cloud SQL / network.
+public-IP path. Relay code cannot fix this; it is Cloud SQL / network. Dial timeouts by minute today: 12:20 24, 12:21
+66, 12:41 22, 12:42 6, 12:51 160, 12:52 137, i.e. bursts of 20–160 s each, and they hit c7 (new image,
+89 today) and c8 (93) hardest, so it is not the old image's connection churn either. Cloud SQL `up`=1
+throughout. The proxy dials the instance's public IP `35.188.82.89:3307`; a burst of i/o timeouts to a
+healthy instance points at the path (public-IP egress / NAT / proxy connection limits), not at Postgres.
+That is the same 2 s that the old image dies on and that the new director surfaces as a 500.
 
 ## Roll inputs (verified by the read-only `verify` run)
 
