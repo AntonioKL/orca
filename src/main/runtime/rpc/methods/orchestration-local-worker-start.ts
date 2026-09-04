@@ -62,6 +62,18 @@ export async function startLocalWorker(args: {
       : await runtime.showManagedTerminalWorkspace(requestedWorktree)
   if (params.terminal) {
     const explicitTerminal = await runtime.showTerminal(params.terminal)
+    const targetPane = runtime.getTerminalPaneKey(params.terminal)
+    const callerPane = coordinatorPane ?? runtime.getTerminalPaneKey(params.from)
+    if (
+      explicitTerminal.handle === coordinatorTerminal.handle ||
+      (targetPane !== null && targetPane === callerPane)
+    ) {
+      // A coordinator adopted as its own worker answers its own dispatch preamble forever.
+      throw new OrchestrationError(
+        'terminal_is_coordinator',
+        `Terminal ${params.terminal} is this coordinator's own terminal. Pass --terminal for a different agent pane, or omit it so worker-start creates one.`
+      )
+    }
     if (explicitTerminal.worktreeId !== resolvedWorktree?.id) {
       throw new OrchestrationError(
         'terminal_worktree_mismatch',
