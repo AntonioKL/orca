@@ -381,7 +381,10 @@ all `5aedbca5`, exitCode 1, Node banner, pg-pool `client closed the connection` 
 SQL CPU 0.84 -> 0.78 in the preceding minutes, director concurrency 18–22 (idle), so this one fired
 *without* a database or director spike. Fleet had just recovered to 13,015. Cadence today: 01:31 (4),
 04:47 (5), 08:40 (10), 09:00 (5), 09:31 (c13, c23), 09:34 (c23 again, c14, c20, c9; c14/c20 crash-looping).
-Director concurrency pinned at 85 for 09:32–09:33; 503s 4,141 and 4,396 per minute. The old image is now cascading roughly hourly regardless of load; the
+Director concurrency pinned at 85 for 09:32–09:33; 503s 4,141 and 4,396 per minute. 09:39: c21, c24
+(2,870 503s). Crashes per instance 08:10–09:40Z: c28 x14, c27 x5, c23 x5, c22 x4, c14 x4, c13/c20 x3,
+then c26/c9/c24/c16/c8 x2. Mean gap between cascades since 08:40: ~12 min. Every 15-min gate attempt
+now has well under even odds; the c7-style canary that ends this needs a gate it can pass. The old image is now cascading roughly hourly regardless of load; the
 only cell on a fixed image (c7) has 0 crashes in 2.5 h across all four.
 
 Director 500s: 4 in the 09:00 window, all 2.0 s latency on `/v1/assign` or `/v1/resolve` = pg-pool connect
