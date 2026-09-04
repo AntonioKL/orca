@@ -10,7 +10,8 @@ import type { ListDesktopLineageForHostArgs } from '../../../../shared/host-line
 import {
   buildDetectedGitWorktrees,
   createSshWorktreeMetaIndex,
-  listDisconnectedSshWorktrees
+  listDisconnectedSshWorktrees,
+  type SshWorktreeMetaIndex
 } from './ssh-worktree-fallback'
 import {
   buildDisconnectedDetectedWorktrees,
@@ -29,8 +30,7 @@ import {
   loggedWorktreeListFailures,
   warnOnce
 } from './worktree-listing-diagnostics'
-import { readAllWorktreeMetaForHost } from '../../../persistence/host-qualified-worktree-meta'
-import { getRepoExecutionHostId } from '../../../../shared/execution-host'
+import { readAllWorktreeMetaForRepo } from '../../../persistence/host-qualified-worktree-meta'
 
 export async function listDetectedWorktreesForCapturedRepo(
   store: Store,
@@ -43,12 +43,12 @@ export async function listDetectedWorktreesForCapturedRepo(
     providerAbort?.signal.aborted
       ? ({ providerAbortStatus: providerAbort.status() } as const)
       : undefined
-  const allMeta = isFolderRepo(repo)
-    ? undefined
-    : readAllWorktreeMetaForHost(store, getRepoExecutionHostId(repo))
-  const sshWorktreeMetaIndex = repo.connectionId
-    ? createSshWorktreeMetaIndex(Object.entries(allMeta ?? {}))
-    : new Map()
+  const allMeta = isFolderRepo(repo) ? undefined : readAllWorktreeMetaForRepo(store, repo)
+  // Why: only the disconnected fallbacks read this, so keep parseWorktreeId over the whole host snapshot
+  // off the connected path entirely.
+  let cachedSshWorktreeMetaIndex: SshWorktreeMetaIndex | undefined
+  const sshWorktreeMetaIndex = (): SshWorktreeMetaIndex =>
+    (cachedSshWorktreeMetaIndex ??= createSshWorktreeMetaIndex(Object.entries(allMeta ?? {})))
 
   try {
     let gitWorktrees: GitWorktreeInfo[]
@@ -90,7 +90,7 @@ export async function listDetectedWorktreesForCapturedRepo(
         if (!isCurrent()) {
           return null
         }
-        const worktrees = listDisconnectedSshWorktrees(store, repo, sshWorktreeMetaIndex)
+        const worktrees = listDisconnectedSshWorktrees(store, repo, sshWorktreeMetaIndex())
         return {
           repoId: repo.id,
           authoritative: false,
@@ -164,7 +164,7 @@ export async function listDetectedWorktreesForCapturedRepo(
     // Why: retention alone leaves inert rows with no explanation; the cause rides with the listing.
     const unavailableReason = describeWorktreeScanFailure(err)
     if (repo.connectionId) {
-      const worktrees = listDisconnectedSshWorktrees(store, repo, sshWorktreeMetaIndex)
+      const worktrees = listDisconnectedSshWorktrees(store, repo, sshWorktreeMetaIndex())
       return {
         repoId: repo.id,
         authoritative: false,
