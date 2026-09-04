@@ -27,7 +27,11 @@ import {
   WINDOWS_STDIN_WRITE_TIMEOUT_MS,
   writeBufferViaSystemSsh
 } from './system-ssh-file-binary-transfer'
-import { isSftpUnavailableError, makeDirectoriesViaSftp } from './system-ssh-sftp-transfer'
+import {
+  isSftpPathUnsupportedError,
+  isSftpUnavailableError,
+  makeDirectoriesViaSftp
+} from './system-ssh-sftp-transfer'
 import { getWindowsRemoteWriteCapabilities } from './system-ssh-windows-write-capabilities'
 
 type SystemSshOperationOptions = SystemSshBuildArgsOptions & {
@@ -189,7 +193,17 @@ async function createWindowsUploadDirectories(
     throwIfAborted(options.signal)
     await getWindowsRemoteWriteCapabilities(target).runWithFallback(
       'sftp-subsystem',
-      () => makeDirectoriesViaSftp(target, pending, options),
+      async () => {
+        try {
+          await makeDirectoriesViaSftp(target, pending, options)
+        } catch (error) {
+          // A directory sftp cannot address is this batch's problem, not the host's verdict.
+          if (!isSftpPathUnsupportedError(error)) {
+            throw error
+          }
+          await createWindowsUploadDirectoriesViaPowerShell(target, payload, options)
+        }
+      },
       () => createWindowsUploadDirectoriesViaPowerShell(target, payload, options),
       isSftpUnavailableError
     )

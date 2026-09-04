@@ -25,16 +25,31 @@ export class SftpSubsystemUnavailableError extends Error {
 }
 
 /**
- * True for the errors that mean "this host cannot do sftp", as opposed to "this transfer failed".
- * Deliberately narrow: a permission denial or a missing directory is a real failure that must
- * surface, not a reason to retry the whole upload down a slower path.
+ * True for the errors that mean "this host cannot serve sftp at all".
+ *
+ * Host-scoped, and therefore the only errors safe to remember: a capability cache keyed by host
+ * turns anything it accepts into a verdict about every later write to that host. Deliberately
+ * narrow — a permission denial or a missing directory is a real failure that must surface, not a
+ * reason to retry the whole upload down a slower path.
  */
 export function isSftpUnavailableError(error: unknown): boolean {
-  return (
-    error instanceof SftpSubsystemUnavailableError ||
-    error instanceof SftpArgTranslationError ||
-    error instanceof UnsupportedSftpPathError
-  )
+  return error instanceof SftpSubsystemUnavailableError || error instanceof SftpArgTranslationError
+}
+
+/**
+ * True when *this path* cannot be spelled for sftp, which says nothing about the host.
+ *
+ * Kept apart from the host verdict on purpose. A UNC destination, or a local file whose name
+ * contains a newline, is a property of one operation; caching it would degrade every subsequent
+ * write to that host for the cache's whole retry window on the strength of one odd filename.
+ */
+export function isSftpPathUnsupportedError(error: unknown): boolean {
+  return error instanceof UnsupportedSftpPathError
+}
+
+/** Neither kind of refusal moves a byte, so a staged file cannot exist to sweep. */
+export function isSftpRefusalBeforeStaging(error: unknown): boolean {
+  return isSftpUnavailableError(error) || isSftpPathUnsupportedError(error)
 }
 
 function systemSftpCandidates(sshPath: string | null, platform: NodeJS.Platform): string[] {

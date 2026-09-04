@@ -436,6 +436,51 @@ describe('Windows upload over sftp', () => {
     expect(fileWrites()).toHaveLength(0)
   })
 
+  it('does not let one unaddressable path become a verdict about the host', async () => {
+    writeFileSync(join(localDir, 'relay.js'), 'x')
+
+    // A UNC destination has no settled mapping in sftp's drive-rooted namespace, so this write
+    // falls back — but the host still serves sftp perfectly well for every other path.
+    await uploadFileViaSystemSsh(
+      target,
+      join(localDir, 'relay.js'),
+      '//fileserver/share/relay.js',
+      { hostPlatform }
+    )
+
+    expect(fileWrites().length).toBeGreaterThan(0)
+    expect(sftpBatches).toHaveLength(0)
+    // The 30-minute capability cache is keyed by host; caching this would send every later write
+    // to the same machine down the defective path on the strength of one odd destination.
+    expect(getWindowsRemoteWriteCapabilities(target).shouldTry('sftp-subsystem')).toBe(true)
+  })
+
+  it('keeps using sftp for the next file after one path it could not spell', async () => {
+    writeFileSync(join(localDir, 'relay.js'), 'x')
+
+    await uploadFileViaSystemSsh(target, join(localDir, 'relay.js'), '//fileserver/share/a.js', {
+      hostPlatform
+    })
+    await uploadFileViaSystemSsh(target, join(localDir, 'relay.js'), `${remoteRoot}/b.js`, {
+      hostPlatform
+    })
+
+    expect(putLines()).toHaveLength(1)
+    expect(putDestination(putLines()[0]!)).toContain('/C:/Users/dev/.orca-remote/b.js')
+  })
+
+  it('does not let a local filename sftp cannot quote become a verdict either', async () => {
+    // POSIX clients allow a newline in a filename, and sftp's batch lexer would read it as the end
+    // of one command and the start of another.
+    const awkward = join(localDir, 'two\nlines.js')
+    writeFileSync(awkward, 'x')
+
+    await uploadFileViaSystemSsh(target, awkward, `${remoteRoot}/relay.js`, { hostPlatform })
+
+    expect(fileWrites().length).toBeGreaterThan(0)
+    expect(getWindowsRemoteWriteCapabilities(target).shouldTry('sftp-subsystem')).toBe(true)
+  })
+
   it('translates the ssh argument list rather than passing it to a client that reads it differently', async () => {
     writeFileSync(join(localDir, 'relay.js'), 'x')
 

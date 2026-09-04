@@ -6,7 +6,12 @@ import {
   throwIfAborted,
   waitForChannelClose
 } from './system-ssh-operation-lifecycle'
-import { isSftpUnavailableError, runSftpBatch } from './system-ssh-sftp-transfer'
+import {
+  isSftpPathUnsupportedError,
+  isSftpRefusalBeforeStaging,
+  isSftpUnavailableError,
+  runSftpBatch
+} from './system-ssh-sftp-transfer'
 import { quoteSftpBatchArgument, toSftpRemotePath } from './system-ssh-sftp-path'
 import { getWindowsRemoteWriteCapabilities } from './system-ssh-windows-write-capabilities'
 import {
@@ -108,7 +113,30 @@ async function stageThenPublish(
   }
 }
 
-function writeViaSftp(
+/**
+ * A path sftp cannot address falls back for this write alone, without touching the host verdict.
+ *
+ * The distinction matters because the capability cache is keyed by host and holds for half an hour:
+ * routing one UNC destination, or one local filename containing a newline, into
+ * `rememberUnsupported` would send every later write to that host down the defective path too.
+ */
+async function writeViaSftp(
+  target: SshTarget,
+  remotePath: string,
+  source: WindowsWriteSource,
+  options: WindowsWriteOptions
+): Promise<void> {
+  try {
+    await attemptSftpWrite(target, remotePath, source, options)
+  } catch (error) {
+    if (!isSftpPathUnsupportedError(error)) {
+      throw error
+    }
+    await writeViaRemoteStdin(target, remotePath, source, options)
+  }
+}
+
+function attemptSftpWrite(
   target: SshTarget,
   remotePath: string,
   source: WindowsWriteSource,
@@ -133,7 +161,7 @@ function writeViaSftp(
           options
         )
       ),
-    isSftpUnavailableError
+    isSftpRefusalBeforeStaging
   )
 }
 
