@@ -24,10 +24,12 @@ const AUDITED_NON_NET_FETCH_CALLS = new Map<string, number>([
 ])
 
 // `globalThis.fetch` / `global.fetch` belong to global-fetch-call-site-audit.test.ts.
-const FETCH_CALL = /\.fetch\(/g
+// `\s*` before `(`: the formatter never emits `net.fetch (url)`, but an unformatted call must not
+// be a hole in a guard whose whole job is to fail on the call nobody reviewed.
+const FETCH_CALL = /\.fetch\s*\(/g
 const RECEIVER_IDENTIFIER = /(?:^|[^.\w$])([A-Za-z_$][\w$]*)\s*$/
 const DEFAULT_SESSION_RECEIVERS = new Set(['net', 'globalThis', 'global'])
-const NET_REQUEST_CALL = /(?<![.\w$])net\.(?:fetch|request)\(/g
+const NET_REQUEST_CALL = /(?<![.\w$])net\.(?:fetch|request)\s*\(/g
 // Matches `{ session: x }` and the `{ url, session }` shorthand both `net.request` overloads take.
 const SESSION_SCOPED_OPTION = /(?:^|[{,\s])(?:session|partition)\s*[:,}]/
 

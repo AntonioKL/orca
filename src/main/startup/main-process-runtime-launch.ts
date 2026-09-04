@@ -229,7 +229,12 @@ async function launchDesktopMode(
       )
   ])
   if (!runtimeRpcStartResult.ok) {
-    void showRuntimeRpcStartupFailureDialog(win, runtimeRpcStartResult.error)
+    // Why gated: this dialog is the only launch-phase text read through translateMain, and i18n
+    // now settles alongside this phase — without the wait a non-English user could get the
+    // English defaultValue fallback. Still off the renderer's path (it is failure-only).
+    void state.mainProcessI18nReady.then(() =>
+      showRuntimeRpcStartupFailureDialog(win, runtimeRpcStartResult.error)
+    )
   }
   // Why after the window and not before it: the default-session request guard already holds every
   // fetcher until the persisted proxy lands, so this only has to keep the launch phase itself

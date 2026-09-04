@@ -120,6 +120,22 @@ describe('initial proxy application ordering', () => {
     expect(relayIndex).toBeGreaterThan(proxyIndex)
   })
 
+  it('waits for i18n before the only launch-phase dialog that reads a translated string', () => {
+    const ready = readStartupSource('main-process-ready.ts')
+    const launch = readStartupSource('main-process-runtime-launch.ts')
+
+    // Published before the launch phase starts, or the barrier the dialog awaits is still the
+    // default resolved promise.
+    const publishIndex = ready.indexOf('state.mainProcessI18nReady = ')
+    expect(publishIndex).toBeGreaterThanOrEqual(0)
+    expect(ready.indexOf('initializeMainProcessRuntimeLaunch(options)')).toBeGreaterThan(
+      publishIndex
+    )
+    expect(launch).toMatch(
+      /state\.mainProcessI18nReady\.then\(\(\) =>\s*\n?\s*showRuntimeRpcStartupFailureDialog\(/
+    )
+  })
+
   it('keeps headless serve strictly ordered behind the proxy apply', () => {
     const launch = readStartupSource('main-process-runtime-launch.ts')
     const serveStart = launch.indexOf('async function launchServeMode(')

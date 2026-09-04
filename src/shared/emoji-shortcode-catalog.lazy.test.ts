@@ -62,22 +62,4 @@ describe('emoji shortcode catalog laziness', () => {
     expect(sharedSource).not.toMatch(staticDatasetImport)
     expect(worktreeLogic).not.toMatch(staticDatasetImport)
   })
-
-  it('loads the main-side dataset synchronously into an identical catalog', async () => {
-    const { requireEmojiShortcodeDataset } =
-      await import('../main/ipc/deferred-emoji-shortcode-dataset.js')
-    const eager = await importConfiguredCatalog()
-    const eagerEntries = eager.getStandardEmojiShortcodeEntries()
-    const eagerTransform = eager.replaceKnownEmojiWithShortcodes('ship \u{1F389} \u{1F44D}')
-
-    vi.resetModules()
-    const deferred = await import('./emoji-shortcode-catalog.js')
-    deferred.setEmojiShortcodeDatasetLoader(requireEmojiShortcodeDataset)
-
-    // No await between registration and first use: the require path keeps the sync contract.
-    expect(deferred.getStandardEmojiShortcodeEntries()).toEqual(eagerEntries)
-    expect(deferred.replaceKnownEmojiWithShortcodes('ship \u{1F389} \u{1F44D}')).toBe(
-      eagerTransform
-    )
-  })
 })

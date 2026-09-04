@@ -103,6 +103,10 @@ export const mainProcessState = {
   // Why published: the default-session proxy must be applied before the first app-owned fetcher,
   // but window creation has no reason to queue behind it (the request guard already fences it).
   initialProxyApplicationReady: Promise.resolve(),
+  // Why published: i18n/menu init no longer precedes the launch phase, so the one launch-phase
+  // path that reads a translated string (the runtime-RPC startup failure dialog) waits on this.
+  // Never rejects: the phase's own failure is surfaced by initializeMainProcessReady.
+  mainProcessI18nReady: Promise.resolve(),
   managedWslCliReconciliationReady: Promise.resolve(),
   managedWslCliStartupBarrierReady: Promise.resolve(),
   // Why: the serve barrier fails open, so this state tells headless clients a WSL PTY launch may still race an un-migrated registration ('settled' = off-Windows no-op).
