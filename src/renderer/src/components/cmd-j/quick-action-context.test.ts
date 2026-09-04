@@ -254,6 +254,60 @@ describe('Cmd+J quick action context', () => {
     expect(context.isLoading).toBe(true)
   })
 
+  it('does not expose chat split actions outside the workspace surface', () => {
+    const worktree = {
+      id: 'wt-1',
+      repoId: 'repo-1',
+      path: '/repo/wt',
+      displayName: 'Workspace',
+      branch: 'main',
+      createdAt: 0
+    } as Worktree
+    const state = {
+      activeWorktreeId: 'wt-1',
+      worktreesByRepo: { 'repo-1': [worktree] },
+      repos: [{ id: 'repo-1', path: '/repo', displayName: 'Repo', addedAt: 0 }],
+      sshConnectionStates: new Map(),
+      activeGroupIdByWorktree: { 'wt-1': 'group-1' },
+      groupsByWorktree: {
+        'wt-1': [
+          {
+            id: 'group-1',
+            worktreeId: 'wt-1',
+            activeTabId: 'chat-1',
+            tabOrder: ['chat-1', 'other-1']
+          }
+        ]
+      },
+      unifiedTabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'chat-1',
+            entityId: 'session-1',
+            groupId: 'group-1',
+            worktreeId: 'wt-1',
+            contentType: 'agent-session'
+          }
+        ]
+      },
+      activeView: 'settings',
+      settings: null
+    } as unknown as AppState
+
+    const context = buildCmdJQuickActionContext({
+      state,
+      activeGroupSnapshot: null,
+      openNewBrowserTab: async () => {},
+      openNewMarkdownFile: async () => {},
+      openNewTerminalTab: async () => {},
+      openCreateWorkspace: () => {},
+      deleteActiveWorkspace: () => {},
+      openAddQuickCommand: () => {}
+    })
+
+    expect(context.canSplitActiveChat).toBe(false)
+  })
+
   it('runtime re-check returns unavailable without invoking the action helper', async () => {
     const calls: string[] = []
     const action = getCmdJQuickActions().find((entry) => entry.id === 'new-terminal-tab')

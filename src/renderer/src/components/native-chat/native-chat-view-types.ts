@@ -37,6 +37,7 @@ export type NativeChatBridgeViewProps = NativeChatOrchestrationProps & {
 export type NativeChatStructuredViewProps = NativeChatOrchestrationProps & {
   mode: 'structured'
   tabId: string
+  groupId?: string
   sessionId: string
   target: RuntimeClientTarget
   agent: AgentType

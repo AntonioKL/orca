@@ -14,33 +14,19 @@ import { runNativeChatSplitTarget } from './native-chat-layout-actions'
 
 export function useStructuredNativeChatPaneCommands({
   tabId,
+  groupId,
+  isVisible,
   rootRef,
   composerRef,
   terminalPaneActions
 }: {
   tabId: string
+  groupId?: string
+  isVisible: boolean
   rootRef: RefObject<HTMLDivElement | null>
   composerRef: RefObject<NativeChatComposerHandle | null>
   terminalPaneActions?: Omit<NativeChatContextMenuActions, 'onPaste'>
 }) {
-  const groupId = useAppStore((state) => {
-    for (const tabs of Object.values(state.unifiedTabsByWorktree)) {
-      const tab = tabs.find((entry) => entry.id === tabId)
-      if (tab) {
-        return tab.groupId
-      }
-    }
-    return undefined
-  })
-  const isWorkspaceChatTab = useAppStore((state) => {
-    for (const tabs of Object.values(state.unifiedTabsByWorktree)) {
-      const tab = tabs.find((entry) => entry.id === tabId)
-      if (tab) {
-        return tab.contentType === 'agent-session'
-      }
-    }
-    return false
-  })
   const keybindings = useAppStore((state) => state.keybindings)
   const pasteClipboardIntoComposer = useNativeChatPasteBridge({ rootRef, composerRef })
   const contextMenu = useNativeChatContextMenu({
@@ -50,13 +36,14 @@ export function useStructuredNativeChatPaneCommands({
       ...terminalPaneActions,
       onPaste: pasteClipboardIntoComposer
     },
+    enabled: isVisible,
     showTerminalPaneActions: terminalPaneActions !== undefined,
     splitShortcutLabels: {
       right: formatShortcutLabel('terminal.splitRight', keybindings),
       down: formatShortcutLabel('terminal.splitDown', keybindings)
     },
     workspaceLayout:
-      groupId && isWorkspaceChatTab
+      groupId && terminalPaneActions === undefined
         ? {
             unifiedTabId: tabId,
             groupId,
@@ -69,7 +56,7 @@ export function useStructuredNativeChatPaneCommands({
   })
   const onKeyDownCapture = useCallback<KeyboardEventHandler<HTMLDivElement>>(
     (event) => {
-      if (event.repeat || !groupId) {
+      if (event.repeat) {
         return
       }
       const direction = matchNativeChatSplitShortcut(event, getShortcutPlatform(), keybindings)
@@ -84,7 +71,7 @@ export function useStructuredNativeChatPaneCommands({
           terminalPaneActions.onSplitDown()
         }
         handled = true
-      } else if (isWorkspaceChatTab) {
+      } else if (groupId) {
         handled = runNativeChatSplitTarget(
           { kind: 'workspace-tab', unifiedTabId: tabId, groupId },
           direction
@@ -96,7 +83,7 @@ export function useStructuredNativeChatPaneCommands({
       event.preventDefault()
       event.stopPropagation()
     },
-    [groupId, isWorkspaceChatTab, keybindings, tabId, terminalPaneActions]
+    [groupId, keybindings, tabId, terminalPaneActions]
   )
 
   return { ...contextMenu, onKeyDownCapture }

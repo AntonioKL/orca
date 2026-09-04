@@ -41,6 +41,7 @@ type NativeChatContextMenuState = {
 
 type UseNativeChatContextMenuArgs = {
   rootRef: RefObject<HTMLElement | null>
+  enabled?: boolean
   /** Bridge-only escape hatch; structured sessions have no terminal view. */
   onSwitchToTerminal?: () => void
   actions: NativeChatContextMenuActions
@@ -97,6 +98,7 @@ export const emptyNativeChatContextMenuActions: Omit<NativeChatContextMenuAction
 
 export function useNativeChatContextMenu({
   rootRef,
+  enabled = true,
   onSwitchToTerminal,
   actions,
   showTerminalPaneActions = true,
@@ -124,9 +126,18 @@ export function useNativeChatContextMenu({
   }, [rootRef])
 
   useEffect(() => {
+    if (!enabled) {
+      return
+    }
     document.addEventListener('selectionchange', rememberCurrentSelection)
     return () => document.removeEventListener('selectionchange', rememberCurrentSelection)
-  }, [rememberCurrentSelection])
+  }, [enabled, rememberCurrentSelection])
+
+  useEffect(() => {
+    if (!enabled) {
+      setState((current) => (current.open ? { ...current, open: false } : current))
+    }
+  }, [enabled])
 
   const onContextMenuCapture = useCallback(
     (event: React.MouseEvent<HTMLElement>) => {
@@ -154,7 +165,7 @@ export function useNativeChatContextMenu({
     onContextMenuCapture,
     onSelectionCapture: rememberCurrentSelection,
     menu: (
-      <DropdownMenu open={state.open} onOpenChange={setOpen} modal={false}>
+      <DropdownMenu open={enabled && state.open} onOpenChange={setOpen} modal={false}>
         <DropdownMenuTrigger asChild>
           <button
             aria-hidden

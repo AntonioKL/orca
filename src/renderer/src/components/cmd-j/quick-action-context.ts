@@ -175,11 +175,10 @@ export function buildCmdJQuickActionContext(args: {
   const managedBrowserCreationEnabled =
     getClientCreationActionPolicy(args.state, activeWorktreeId)['managed-browser'].state ===
     'enabled'
-  const activeChatTarget = resolveActiveNativeChatSplitTarget(
-    args.state,
-    activeWorktreeId,
-    activeGroupId
-  )
+  const activeChatTarget =
+    args.state.activeView === 'terminal'
+      ? resolveActiveNativeChatSplitTarget(args.state, activeWorktreeId, activeGroupId)
+      : null
 
   return {
     activeView: args.state.activeView,
