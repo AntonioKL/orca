@@ -1,6 +1,6 @@
 /**
  * Verbatim pre-guard copy of `cross-platform-path.ts` and `parseWslUncPath`, kept only so
- * `cross-platform-path-guard-equivalence.test.ts` can differentially fuzz the guarded versions
+ * `cross-platform-path-guards.test.ts` can differentially fuzz the guarded versions
  * against what shipped. Comments were stripped; the code is otherwise unchanged. Update this file
  * only when the guarded originals are meant to change behaviour.
  */
