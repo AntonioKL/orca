@@ -3,6 +3,7 @@ import { OrcaRuntimeWithStopStructuredSessionProcess } from './orca-runtime-stop
 import type { AgentSessionOwnerBinding } from '../../shared/agent-session-host-authority'
 import { agentSessionOwnerBindingsEqual } from '../../shared/claimed-agent-pty-owner-snapshot'
 import { resolvePinnedCodexRolloutProof } from '../codex/codex-tui-rollout-proof'
+import { supportsCodexStructuredLocation } from '../codex/codex-structured-location-support'
 import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { AgentStatusIpcPayload } from '../../shared/agent-status-types'
@@ -48,8 +49,10 @@ export class OrcaRuntimeWithResolveRecoveredStructuredTuiTranscript extends Orca
     agent: 'codex'
   ): Promise<{ supported: boolean; reason?: 'agent' | 'remote' | 'wsl' }> {
     const location = await this.resolveStructuredAgentSessionLocation(worktreeSelector)
-    await this.ensureStructuredAgentSessionHost()
-    if (getStructuredAgentSessionHost()?.supportsCreate(location, agent)) {
+    // Asking whether a create is possible must not perform the create's lifecycle work: installing
+    // the host opens the durable record store, attaches the PTY write gate and starts the orphan
+    // reaper. This is the predicate `supportsCreate` resolves to for the Codex adapter anyway.
+    if (agent === 'codex' && supportsCodexStructuredLocation(location)) {
       return { supported: true }
     }
     return {
