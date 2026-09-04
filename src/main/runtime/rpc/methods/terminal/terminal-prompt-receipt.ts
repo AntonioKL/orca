@@ -52,7 +52,7 @@ export function ensureUnsupportedTerminalPromptReceipt(
   if (send.prompt) {
     return send
   }
-  const binding = runtime.getTerminalPromptRequestBinding(handle)!
+  const binding = runtime.getTerminalPromptRequestBinding(handle)
   return {
     ...send,
     prompt: {

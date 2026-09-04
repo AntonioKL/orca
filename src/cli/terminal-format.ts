@@ -209,6 +209,9 @@ function formatTerminalPromptObservationWarning(
       ? 'this host predates durable prompt receipts. Update Orca on the execution host, and inspect the terminal before retrying an ambiguous send.'
       : 'input was accepted, but this provider cannot report delivery. Inspect the terminal before retrying.'
   }
+  if (!prompt.stages.includes('turn_started')) {
+    return `input was accepted but no turn start was observed, so the Enter may have been swallowed. Confirm delivery by reissuing the exact command with --retry-request ${prompt.requestId} --wait-submit <seconds>; the same request ID replays the receipt instead of sending the prompt again.`
+  }
   return null
 }
 

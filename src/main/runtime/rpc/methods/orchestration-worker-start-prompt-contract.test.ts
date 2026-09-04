@@ -296,7 +296,7 @@ describe('orchestration worker-start prompt contract', () => {
     expect(send).toMatchObject({
       prompt: {
         requestId: 'busy-swallowed',
-        stages: ['input_accepted', 'queued_pending_turn']
+        stages: ['input_accepted']
       }
     })
     const observed = runtime.observeTerminalAgentPrompt(handle, send.prompt!, 1_000)
@@ -306,7 +306,7 @@ describe('orchestration worker-start prompt contract', () => {
     await vi.runAllTimersAsync()
 
     await expect(observed).resolves.toMatchObject({
-      stages: ['input_accepted', 'queued_pending_turn']
+      stages: ['input_accepted']
     })
   })
 

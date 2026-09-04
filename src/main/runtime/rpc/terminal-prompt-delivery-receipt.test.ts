@@ -112,7 +112,7 @@ describe('durable terminal prompt delivery receipts', () => {
           send: {
             prompt: {
               provider: agent,
-              stages: ['input_accepted', 'submission_observed', 'turn_started']
+              stages: ['input_accepted', 'turn_started']
             }
           }
         }
@@ -138,7 +138,7 @@ describe('durable terminal prompt delivery receipts', () => {
       expect(response).toMatchObject({
         ok: true,
         result: {
-          send: { prompt: { stages: ['input_accepted', 'queued_pending_turn'] } }
+          send: { prompt: { stages: ['input_accepted'] } }
         }
       })
     }
@@ -245,7 +245,7 @@ describe('durable terminal prompt delivery receipts', () => {
       result: {
         send: {
           prompt: {
-            stages: ['input_accepted', 'submission_observed', 'turn_started']
+            stages: ['input_accepted', 'turn_started']
           }
         },
         mutation: { replayed: true }
@@ -270,11 +270,11 @@ describe('durable terminal prompt delivery receipts', () => {
     const second = await secondPromise
     expect(first).toMatchObject({
       ok: true,
-      result: { send: { prompt: { stages: ['input_accepted', 'queued_pending_turn'] } } }
+      result: { send: { prompt: { stages: ['input_accepted'] } } }
     })
     expect(second).toMatchObject({
       ok: true,
-      result: { send: { prompt: { stages: ['input_accepted', 'queued_pending_turn'] } } }
+      result: { send: { prompt: { stages: ['input_accepted'] } } }
     })
 
     harness.runtime.onPtyData(
@@ -296,13 +296,13 @@ describe('durable terminal prompt delivery receipts', () => {
     await expect(firstObserved).resolves.toMatchObject({
       ok: true,
       result: {
-        send: { prompt: { stages: ['input_accepted', 'submission_observed', 'turn_started'] } }
+        send: { prompt: { stages: ['input_accepted', 'turn_started'] } }
       }
     })
     await expect(secondObserved).resolves.toMatchObject({
       ok: true,
       result: {
-        send: { prompt: { stages: ['input_accepted', 'queued_pending_turn'] } }
+        send: { prompt: { stages: ['input_accepted'] } }
       }
     })
     harness.db.close()
@@ -340,12 +340,12 @@ describe('durable terminal prompt delivery receipts', () => {
 
     await expect(secondObserved).resolves.toMatchObject({
       ok: true,
-      result: { send: { prompt: { stages: ['input_accepted', 'queued_pending_turn'] } } }
+      result: { send: { prompt: { stages: ['input_accepted'] } } }
     })
     await expect(firstObserved).resolves.toMatchObject({
       ok: true,
       result: {
-        send: { prompt: { stages: ['input_accepted', 'submission_observed', 'turn_started'] } }
+        send: { prompt: { stages: ['input_accepted', 'turn_started'] } }
       }
     })
     harness.db.close()
@@ -378,7 +378,7 @@ describe('durable terminal prompt delivery receipts', () => {
       result: {
         send: {
           prompt: {
-            stages: ['input_accepted', 'queued_pending_turn'],
+            stages: ['input_accepted'],
             observation: 'incarnation_replaced'
           }
         },

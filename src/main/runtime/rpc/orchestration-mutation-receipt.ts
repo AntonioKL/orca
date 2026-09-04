@@ -20,7 +20,7 @@ export function replayStableCallerParams(runtime: OrcaRuntimeService, params: un
   const source = params as Record<string, unknown>
   const result = { ...source }
   delete result.waitSubmitMs
-  for (const property of ['from', 'callerTerminalHandle'] as const) {
+  for (const property of ['from', 'callerTerminalHandle', 'terminal'] as const) {
     const handle = source[property]
     if (typeof handle !== 'string') {
       continue
@@ -45,6 +45,27 @@ export function hashCanonical(value: unknown): string {
 
 export function readPromptBasePayloadHash(payloadHash: string): string {
   return payloadHash.split(':', 1)[0] ?? payloadHash
+}
+
+/** Absent on receipts recorded before the binding was hashed into the payload. */
+export function readPromptBindingPayloadHash(payloadHash: string): string | null {
+  const separator = payloadHash.indexOf(':')
+  return separator === -1 ? null : payloadHash.slice(separator + 1)
+}
+
+/** A stored `observation` only describes the incarnation the prompt was written to. */
+export function markReplayedPromptIncarnationReplaced(receipt: unknown): unknown {
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
+    return receipt
+  }
+  const send = (receipt as { send?: { prompt?: { observation?: string } } }).send
+  if (!send?.prompt) {
+    return receipt
+  }
+  return {
+    ...(receipt as Record<string, unknown>),
+    send: { ...send, prompt: { ...send.prompt, observation: 'incarnation_replaced' } }
+  }
 }
 
 export function shouldObserveCompletedMutation(

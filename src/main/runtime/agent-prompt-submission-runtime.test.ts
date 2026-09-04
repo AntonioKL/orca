@@ -464,7 +464,7 @@ describe('agent prompt submission runtime', () => {
     await vi.runAllTimersAsync()
 
     await expect(submission).resolves.toMatchObject({
-      prompt: { stages: ['input_accepted', 'queued_pending_turn'] }
+      prompt: { stages: ['input_accepted'] }
     })
   })
 
@@ -573,7 +573,7 @@ describe('agent prompt submission runtime', () => {
     })
     await vi.runAllTimersAsync()
     const first = await firstPromise
-    expect(first.prompt?.stages).toEqual(['input_accepted', 'queued_pending_turn'])
+    expect(first.prompt?.stages).toEqual(['input_accepted'])
 
     const firstObserved = runtime.observeTerminalAgentPrompt(handle, first.prompt!, 20_000)
     runtime.setPtyController({
@@ -596,11 +596,11 @@ describe('agent prompt submission runtime', () => {
     await vi.runAllTimersAsync()
 
     await expect(firstObserved).resolves.toMatchObject({
-      stages: ['input_accepted', 'submission_observed', 'turn_started']
+      stages: ['input_accepted', 'turn_started']
     })
     const second = await secondPromise
     expect(second).toMatchObject({
-      prompt: { stages: ['input_accepted', 'queued_pending_turn'] }
+      prompt: { stages: ['input_accepted'] }
     })
 
     const secondObserved = runtime.observeTerminalAgentPrompt(handle, second.prompt!, 1_000)
@@ -608,7 +608,7 @@ describe('agent prompt submission runtime', () => {
     await vi.advanceTimersByTimeAsync(50)
 
     await expect(secondObserved).resolves.toMatchObject({
-      stages: ['input_accepted', 'submission_observed', 'turn_started']
+      stages: ['input_accepted', 'turn_started']
     })
   })
 
@@ -790,10 +790,10 @@ describe('agent prompt submission runtime', () => {
     await vi.runAllTimersAsync()
 
     await expect(firstObserved).resolves.toMatchObject({
-      stages: ['input_accepted', 'submission_observed', 'turn_started']
+      stages: ['input_accepted', 'turn_started']
     })
     await expect(secondObserved).resolves.toMatchObject({
-      stages: ['input_accepted', 'queued_pending_turn']
+      stages: ['input_accepted']
     })
   })
 
