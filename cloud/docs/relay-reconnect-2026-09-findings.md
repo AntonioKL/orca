@@ -297,6 +297,14 @@ signing in, not by infrastructure. Total `session-refresh-reuse-detected` events
 **21,605 distinct users**. Only ~3,800 desktops had seen their 401 by 19:15Z; the rest were closed or asleep
 and will find themselves signed out on next launch, so sign-ins will trickle for days.
 
+**Desktop UX finding (owner's own Mac, 19:22Z):** a revoked desktop keeps showing the account card as
+"Connected" and the pairing pane as "Orca Relay: Unavailable" / `relay_control_not_active` indefinitely; the
+local trace writes no relay events. Only quit + relaunch surfaced the sign-out prompt, after which sign-in →
+relay-token → `/v1/assign` 200 (0.15 s) → working pairing, all within 10 s. Follow-ups: the relay coordinator's
+401 path should flip the account card to reconnect-required immediately, and the pairing error should say "Sign
+in again to use Relay" when the cause is an auth failure. Announcement wording: "If Relay shows Unavailable, quit
+and reopen Orca, then sign in when prompted."
+
 orca-cloud PR #474 (branch `auth-revoke-only-live-tokens`): caps → 20, disk 250 / max_wal_size 16384 in
 Terraform, partial index in the schema, `already-revoked` short-circuit. Do not deploy auth to any environment
 with a large `refresh_tokens` before building the index concurrently there.
