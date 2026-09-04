@@ -1,4 +1,8 @@
-import { WORKER_SETTLED_STATES } from '../../worker-terminal-ownership'
+import {
+  decideWorkerTerminalRelease,
+  WORKER_SETTLED_STATES,
+  WORKER_TERMINAL_RELEASABLE_ROW_SQL
+} from '../../worker-terminal-ownership'
 import type {
   WorkerTerminalResourceRow,
   WorkerTerminalRetainedReason
@@ -51,7 +55,8 @@ export function requestWorkerTerminalRelease(
         ? { disposition: 'retained', resource: transferred, reason: 'ownership_transferred' }
         : { disposition: 'retained', resource: null, reason: 'no_owned_resource' }
     }
-    if (resource.release_state === 'released' || resource.ownership_state === 'released') {
+    const decision = decideWorkerTerminalRelease(resource)
+    if (decision.action === 'already_released') {
       this.db.exec('COMMIT')
       return { disposition: 'already_released', resource }
     }
@@ -59,21 +64,9 @@ export function requestWorkerTerminalRelease(
       this.db.exec('COMMIT')
       return { disposition: 'retained', resource, reason: 'identity_unproven' }
     }
-    if (resource.ownership_state === 'external') {
+    if (decision.action === 'retained') {
       this.db.exec('COMMIT')
-      return {
-        disposition: 'retained',
-        resource,
-        reason: (resource.retained_reason as WorkerTerminalRetainedReason) ?? 'external_terminal'
-      }
-    }
-    if (resource.ownership_state === 'user_owned') {
-      this.db.exec('COMMIT')
-      return { disposition: 'retained', resource, reason: 'user_takeover' }
-    }
-    if (resource.ownership_state === 'transferred') {
-      this.db.exec('COMMIT')
-      return { disposition: 'retained', resource, reason: 'ownership_transferred' }
+      return { disposition: 'retained', resource, reason: decision.reason }
     }
     if (resource.release_state === 'retained' && resource.retained_reason === 'user_requested') {
       this.db.prepare('DELETE FROM worker_terminal_archives WHERE dispatch_id = ?').run(dispatchId)
@@ -88,7 +81,7 @@ export function requestWorkerTerminalRelease(
              retained_reason = NULL,
              release_requested_at = COALESCE(release_requested_at, datetime('now')),
              release_error = NULL, updated_at = datetime('now')
-         WHERE id = ? AND release_state IN ('not_requested', 'retained', 'requested', 'releasing', 'unknown')`
+         WHERE id = ? AND ${WORKER_TERMINAL_RELEASABLE_ROW_SQL}`
       )
       .run(resource.id)
     this.db.exec('COMMIT')
@@ -108,7 +101,6 @@ export function settleDeadWorkerTerminalRelease(
     requestingDispatchId: string
     resourceId: string
     processIncarnation: string
-    requireArchive?: boolean
   }
 ):
   | { disposition: 'released'; resource: WorkerTerminalResourceRow }
@@ -132,20 +124,16 @@ export function settleDeadWorkerTerminalRelease(
     const ownerSettled = Boolean(owner && WORKER_SETTLED_STATES.includes(owner.state))
     // A positive process-exit verdict only proves the exact process is gone; release is
     // terminal cleanup and must also have a durable output archive to preserve worker evidence.
-    const archive = params.requireArchive
-      ? this.getWorkerTerminalArchive(resource.owner_dispatch_id)
-      : undefined
+    const archive = this.getWorkerTerminalArchive(resource.owner_dispatch_id)
     if (
       !priorOwners ||
       !requesterRelated ||
       !requesterSettled ||
       !ownerSettled ||
       resource.process_incarnation !== params.processIncarnation ||
-      (params.requireArchive && (!archive || archive.resource_id !== resource.id)) ||
-      resource.ownership_state === 'released' ||
-      !['not_requested', 'retained', 'requested', 'releasing', 'unknown'].includes(
-        resource.release_state
-      )
+      !archive ||
+      archive.resource_id !== resource.id ||
+      decideWorkerTerminalRelease(resource).action !== 'proceed'
     ) {
       this.db.exec('COMMIT')
       return { disposition: 'retained', resource }
@@ -157,8 +145,7 @@ export function settleDeadWorkerTerminalRelease(
              release_requested_at = COALESCE(release_requested_at, datetime('now')),
              release_completed_at = datetime('now'), release_error = NULL,
              updated_at = datetime('now')
-         WHERE id = ? AND process_incarnation = ? AND ownership_state != 'released'
-           AND release_state IN ('not_requested', 'retained', 'requested', 'releasing', 'unknown')`
+         WHERE id = ? AND process_incarnation = ? AND ${WORKER_TERMINAL_RELEASABLE_ROW_SQL}`
       )
       .run(params.resourceId, params.processIncarnation)
     const released = this.getWorkerTerminalResource(params.resourceId) as WorkerTerminalResourceRow
