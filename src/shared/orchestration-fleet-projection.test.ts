@@ -47,6 +47,30 @@ function status(
 }
 
 describe('orchestration fleet projection', () => {
+  it('uses fresh WSL host evidence without requiring an SSH connection', () => {
+    const now = 10_000
+    const result = projectOrchestrationFleet({
+      workers: [
+        worker('wsl', {
+          resource: {
+            id: 'resource-wsl',
+            ownerDispatchId: 'wsl',
+            worktreeId: 'folder-wsl',
+            paneKey: 'tab-wsl:leaf-wsl',
+            hostScope: JSON.stringify({ kind: 'wsl', hostId: 'local', distro: 'Ubuntu' }),
+            ownershipState: 'owned',
+            releaseState: 'not_requested',
+            updatedAt: ''
+          }
+        })
+      ],
+      statuses: [status('wsl', now - 1)],
+      now
+    })
+    expect(result.workers[0].liveness).toMatchObject({ verdict: 'live' })
+    expect(result.workers[0].host).toEqual({ kind: 'local', id: 'local' })
+  })
+
   it('composes durable identity with redacted push-fed status', () => {
     const now = 10_000
     const result = projectOrchestrationFleet({

@@ -189,7 +189,7 @@ function projectHost(
       hostId?: unknown
       targetId?: unknown
     }
-    if (parsed.kind === 'local') {
+    if (parsed.kind === 'local' || (parsed.kind === 'wsl' && parsed.hostId === 'local')) {
       return { kind: 'local', id: typeof parsed.hostId === 'string' ? parsed.hostId : 'local' }
     }
     if (typeof parsed.kind === 'string') {
