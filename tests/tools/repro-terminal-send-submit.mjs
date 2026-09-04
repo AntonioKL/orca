@@ -281,7 +281,7 @@ async function parentMain() {
     const expectedUnsubmittedObserved =
       sendErrorCode === null &&
       summary.promptStages?.includes('input_accepted') &&
-      !summary.promptStages?.includes('submission_observed') &&
+      !summary.promptStages?.includes('turn_started') &&
       report.submitted === false &&
       report.receivedEnters === 1 &&
       report.swallowedEnters === 1
