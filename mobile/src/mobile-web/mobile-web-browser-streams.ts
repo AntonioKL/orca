@@ -1,9 +1,9 @@
-import type {
-  MobileWebPostSubscriptionClosed,
-  MobileWebSubscriptionClosure
-} from './mobile-web-subscription-closure'
+import {
+  MobileWebSubscriptionLedger,
+  type MobileWebSubscriptionLedgerConfig,
+  type MobileWebSubscriptionRecord
+} from './mobile-web-subscription-ledger'
 import { Buffer } from 'buffer/'
-import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-web/bridge-contract'
 import {
   MOBILE_WEB_BROWSER_FRAME_CHUNK_BYTES,
   MOBILE_WEB_BROWSER_FRAME_MAX_IMAGE_BYTES,
@@ -18,36 +18,26 @@ import type {
 import type { RpcClient } from '../transport/rpc-client'
 import type { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
 import { sanitizeMobileWebBrowserEvent } from './mobile-web-browser-event-sanitizer'
-import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 
-type SubscriptionRecord = {
-  requestId: string
-  operationKey: string
-  sequence: number
-  active: boolean
-  unsubscribe: () => void
-  delivery: Promise<void>
+type ScreencastRecord = MobileWebSubscriptionRecord & {
   frameQueued: boolean
   pendingFrame: BrowserScreencastFrame | null
 }
 
-export class MobileWebBrowserStreams {
-  private readonly records = new Map<string, SubscriptionRecord>()
+type BrowserLedgerConfig = MobileWebSubscriptionLedgerConfig<MobileWebBrowserEvent> & {
+  workspaceAuthority: MobileWebWorkspaceAuthority
+  browserAuthority: MobileWebBrowserAuthority
+}
 
-  constructor(
-    private readonly options: {
-      isActive: () => boolean
-      workspaceAuthority: MobileWebWorkspaceAuthority
-      browserAuthority: MobileWebBrowserAuthority
-      postEvent: (
-        subscriptionId: string,
-        sequence: number,
-        event: MobileWebBrowserEvent
-      ) => Promise<void>
-      postClosed: MobileWebPostSubscriptionClosed
-    }
-  ) {}
+export class MobileWebBrowserStreams extends MobileWebSubscriptionLedger<
+  MobileWebBrowserEvent,
+  ScreencastRecord
+> {
+  constructor(private readonly config: BrowserLedgerConfig) {
+    super({ ...config, operationKey: 'browser.subscribe' })
+  }
 
   start(args: {
     requestId: string
@@ -55,28 +45,17 @@ export class MobileWebBrowserStreams {
     payload: unknown
     client: RpcClient
   }): void {
-    if (this.records.has(args.subscriptionId)) {
-      throw new MobileWebBrokerError('invalid_request')
-    }
-    if (this.records.size >= MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS) {
-      throw new MobileWebBrokerError('rate_limited')
-    }
+    this.admit(args.subscriptionId)
     const payload = MobileWebBrowserStreamPayloadSchema.parse(args.payload)
-    const hostWorkspaceId = this.options.workspaceAuthority.hostWorkspaceId(payload.workspaceId)
-    const hostPageId = this.options.browserAuthority.hostPageId(hostWorkspaceId, payload.pageId)
-    const record: SubscriptionRecord = {
-      requestId: args.requestId,
-      operationKey: 'browser.subscribe',
-      sequence: 0,
-      active: true,
-      unsubscribe: () => {},
-      delivery: Promise.resolve(),
+    const hostWorkspaceId = this.config.workspaceAuthority.hostWorkspaceId(payload.workspaceId)
+    const hostPageId = this.config.browserAuthority.hostPageId(hostWorkspaceId, payload.pageId)
+    const record: ScreencastRecord = {
+      ...this.newRecord(args.requestId),
       frameQueued: false,
       pendingFrame: null
     }
-    this.records.set(args.subscriptionId, record)
-    try {
-      const unsubscribe = args.client.subscribe(
+    this.open(args.subscriptionId, record, () =>
+      args.client.subscribe(
         'browser.screencast',
         {
           worktree: `id:${hostWorkspaceId}`,
@@ -101,80 +80,34 @@ export class MobileWebBrowserStreams {
           onBinaryFrame: (frame) => this.receiveFrame(args.subscriptionId, record, frame)
         }
       )
-      if (record.active && this.records.get(args.subscriptionId) === record) {
-        record.unsubscribe = unsubscribe
-      } else {
-        unsubscribe()
-      }
-    } catch {
-      this.cancel(args.subscriptionId)
-      throw new MobileWebBrokerError('host_error')
-    }
+    )
   }
 
-  cancel(subscriptionId: string, closure?: MobileWebSubscriptionClosure): string | null {
-    const record = this.records.get(subscriptionId)
-    if (!record) {
-      return null
-    }
-    record.active = false
+  // Drops the parked image so a retired stream cannot pin a multi-megabyte frame.
+  protected override retire(record: ScreencastRecord): void {
     record.pendingFrame = null
-    this.records.delete(subscriptionId)
-    try {
-      record.unsubscribe()
-    } catch {
-      // The local record is already retired.
-    }
-    if (closure) {
-      this.options.postClosed(subscriptionId, closure)
-    }
-    return record.requestId
   }
 
-  cancelByRequest(requestId: string): void {
-    for (const [subscriptionId, record] of this.records) {
-      if (record.requestId === requestId) {
-        this.cancel(subscriptionId)
-      }
-    }
-  }
-
-  countForOperation(operationKey: string): number {
-    let count = 0
-    for (const record of this.records.values()) {
-      if (record.operationKey === operationKey) {
-        count += 1
-      }
-    }
-    return count
-  }
-
-  dispose(): void {
-    for (const subscriptionId of this.records.keys()) {
-      this.cancel(subscriptionId)
-    }
-  }
-
-  private receiveEvent(subscriptionId: string, record: SubscriptionRecord, value: unknown): void {
+  private receiveEvent(subscriptionId: string, record: ScreencastRecord, value: unknown): void {
     if (!this.isCurrent(subscriptionId, record)) {
       return
     }
     const event = sanitizeMobileWebBrowserEvent(value)
     if (event) {
-      this.enqueue(subscriptionId, record, () => this.deliver(subscriptionId, record, event))
+      this.enqueueTask(subscriptionId, record, () => this.deliver(subscriptionId, record, event))
     }
   }
 
   private receiveFrame(
     subscriptionId: string,
-    record: SubscriptionRecord,
+    record: ScreencastRecord,
     frame: BrowserScreencastFrame
   ): void {
     if (!this.isCurrent(subscriptionId, record)) {
       return
     }
     if (frame.image.byteLength > MOBILE_WEB_BROWSER_FRAME_MAX_IMAGE_BYTES) {
-      this.enqueue(subscriptionId, record, () =>
+      this.enqueueTask(subscriptionId, record, () =>
         this.deliver(subscriptionId, record, {
           type: 'error',
           message: 'Browser frame is too large to display safely.'
@@ -187,7 +120,7 @@ export class MobileWebBrowserStreams {
       return
     }
     record.frameQueued = true
-    this.enqueue(subscriptionId, record, async () => {
+    this.enqueueTask(subscriptionId, record, async () => {
       const latest = record.pendingFrame
       record.pendingFrame = null
       if (latest) {
@@ -202,25 +135,9 @@ export class MobileWebBrowserStreams {
     })
   }
 
-  private enqueue(
-    subscriptionId: string,
-    record: SubscriptionRecord,
-    task: () => Promise<void>
-  ): void {
-    record.delivery = record.delivery
-      .then(async () => {
-        if (this.isCurrent(subscriptionId, record)) {
-          await task()
-        }
-      })
-      .catch(() => {
-        this.cancel(subscriptionId, { code: 'unavailable', retryable: true })
-      })
-  }
-
   private async deliverFrame(
     subscriptionId: string,
-    record: SubscriptionRecord,
+    record: ScreencastRecord,
     frame: BrowserScreencastFrame
   ): Promise<void> {
     const chunkCount = Math.ceil(frame.image.byteLength / MOBILE_WEB_BROWSER_FRAME_CHUNK_BYTES)
@@ -243,19 +160,17 @@ export class MobileWebBrowserStreams {
     }
   }
 
+  // Why the sequence is claimed here and not at enqueue time: one queued frame task posts a whole
+  // chunk run, so the numbers must be handed out per post, in post order.
   private async deliver(
     subscriptionId: string,
-    record: SubscriptionRecord,
+    record: ScreencastRecord,
     value: MobileWebBrowserEvent
   ): Promise<void> {
     const event = MobileWebBrowserEventSchema.parse(value)
     const sequence = record.sequence
     record.sequence += 1
     await this.options.postEvent(subscriptionId, sequence, event)
-  }
-
-  private isCurrent(subscriptionId: string, record: SubscriptionRecord): boolean {
-    return record.active && this.options.isActive() && this.records.get(subscriptionId) === record
   }
 }
 

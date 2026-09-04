@@ -111,7 +111,8 @@ describe('mobile web session snapshot event budget', () => {
       nativeChatAuthority: authority.nativeChat,
       postEvent: async (_subscriptionId, _sequence, snapshot) => {
         posted.push(snapshot)
-      }
+      },
+      postClosed: vi.fn()
     })
 
     subscriptions.start({

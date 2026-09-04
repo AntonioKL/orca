@@ -1,5 +1,7 @@
 import { MobileWebAccountSubscriptions } from './mobile-web-account-subscriptions'
 import { mobileWebSubscriptionClosedPoster } from './mobile-web-subscription-closure'
+import type { MobileWebSubscriptionClosure } from './mobile-web-subscription-closure'
+import type { MobileWebSubscriptionLedgerHandle } from './mobile-web-subscription-ledger'
 import type { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
 import { MobileWebBrowserStreams } from './mobile-web-browser-streams'
 import type { MobileWebBrokerMessageSender } from './mobile-web-broker-message-sender'
@@ -17,6 +19,7 @@ export class MobileWebCapabilitySubscriptions {
   readonly session: MobileWebSessionSubscriptions
   readonly sourceControl: MobileWebSourceControlSubscriptions
   readonly workspace: MobileWebWorkspaceSubscriptions
+  private readonly ledgers: MobileWebSubscriptionLedgerHandle[]
 
   constructor(args: {
     isActive: () => boolean
@@ -28,82 +31,72 @@ export class MobileWebCapabilitySubscriptions {
     const postEvent = (subscriptionId: string, sequence: number, event: unknown) =>
       args.messages.event(subscriptionId, sequence, event)
     const postClosed = mobileWebSubscriptionClosedPoster(args.messages)
-    this.account = new MobileWebAccountSubscriptions({
-      isActive: args.isActive,
-      postEvent,
-      postClosed
-    })
+    const shared = { isActive: args.isActive, postEvent, postClosed }
+    this.account = new MobileWebAccountSubscriptions(shared)
     this.browser = new MobileWebBrowserStreams({
-      isActive: args.isActive,
+      ...shared,
       workspaceAuthority: args.workspaceAuthority,
-      browserAuthority: args.browserAuthority,
-      postEvent,
-      postClosed
+      browserAuthority: args.browserAuthority
     })
     this.nativeChat = new MobileWebNativeChatSubscriptions({
-      isActive: args.isActive,
+      ...shared,
       nativeChatAuthority: args.nativeChatAuthority,
-      workspaceAuthority: args.workspaceAuthority,
-      postEvent,
-      postClosed
+      workspaceAuthority: args.workspaceAuthority
     })
     this.session = new MobileWebSessionSubscriptions({
-      isActive: args.isActive,
+      ...shared,
       browserAuthority: args.browserAuthority,
-      nativeChatAuthority: args.nativeChatAuthority,
-      postEvent,
-      postClosed
+      nativeChatAuthority: args.nativeChatAuthority
     })
     this.sourceControl = new MobileWebSourceControlSubscriptions({
-      isActive: args.isActive,
-      workspaceAuthority: args.workspaceAuthority,
-      postEvent,
-      postClosed
+      ...shared,
+      workspaceAuthority: args.workspaceAuthority
     })
-    this.workspace = new MobileWebWorkspaceSubscriptions({
-      isActive: args.isActive,
-      postEvent,
-      postClosed
-    })
+    this.workspace = new MobileWebWorkspaceSubscriptions(shared)
+    this.ledgers = [
+      this.account,
+      this.browser,
+      this.nativeChat,
+      this.session,
+      this.sourceControl,
+      this.workspace
+    ]
   }
 
   countForOperation(operationKey: string): number {
-    return (
-      this.account.countForOperation(operationKey) +
-      this.browser.countForOperation(operationKey) +
-      this.nativeChat.countForOperation(operationKey) +
-      this.session.countForOperation(operationKey) +
-      this.sourceControl.countForOperation(operationKey) +
-      this.workspace.countForOperation(operationKey)
-    )
+    let count = 0
+    for (const ledger of this.ledgers) {
+      count += ledger.countForOperation(operationKey)
+    }
+    return count
   }
 
   cancel(subscriptionId: string): string | null {
-    return (
-      this.account.cancel(subscriptionId) ??
-      this.browser.cancel(subscriptionId) ??
-      this.nativeChat.cancel(subscriptionId) ??
-      this.session.cancel(subscriptionId) ??
-      this.sourceControl.cancel(subscriptionId) ??
-      this.workspace.cancel(subscriptionId)
-    )
+    for (const ledger of this.ledgers) {
+      const requestId = ledger.cancel(subscriptionId)
+      if (requestId !== null) {
+        return requestId
+      }
+    }
+    return null
   }
 
   cancelByRequest(requestId: string): void {
-    this.account.cancelByRequest(requestId)
-    this.browser.cancelByRequest(requestId)
-    this.nativeChat.cancelByRequest(requestId)
-    this.session.cancelByRequest(requestId)
-    this.sourceControl.cancelByRequest(requestId)
-    this.workspace.cancelByRequest(requestId)
+    for (const ledger of this.ledgers) {
+      ledger.cancelByRequest(requestId)
+    }
+  }
+
+  /** Used when the page survives but its host feed does not, so every live entry learns it is over. */
+  closeAll(closure: MobileWebSubscriptionClosure): void {
+    for (const ledger of this.ledgers) {
+      ledger.closeAll(closure)
+    }
   }
 
   dispose(): void {
-    this.account.dispose()
-    this.browser.dispose()
-    this.nativeChat.dispose()
-    this.session.dispose()
-    this.sourceControl.dispose()
-    this.workspace.dispose()
+    for (const ledger of this.ledgers) {
+      ledger.dispose()
+    }
   }
 }

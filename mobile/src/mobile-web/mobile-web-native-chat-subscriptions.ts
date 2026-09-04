@@ -1,8 +1,8 @@
-import type {
-  MobileWebPostSubscriptionClosed,
-  MobileWebSubscriptionClosure
-} from './mobile-web-subscription-closure'
-import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-web/bridge-contract'
+import {
+  MobileWebSubscriptionLedger,
+  type MobileWebSubscriptionLedgerConfig,
+  type MobileWebSubscriptionRecord
+} from './mobile-web-subscription-ledger'
 import {
   MOBILE_WEB_NATIVE_CHAT_EVENT_MAX_BYTES,
   MobileWebNativeChatEventSchema,
@@ -16,33 +16,23 @@ import { resolveFreshMobileWebNativeChatBinding } from './mobile-web-native-chat
 import { sanitizeMobileWebNativeChatMessages } from './mobile-web-native-chat-tool-input'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 
-type SubscriptionRecord = {
-  requestId: string
-  operationKey: string
-  sequence: number
-  active: boolean
+type TranscriptRecord = MobileWebSubscriptionRecord & {
   hostWorkspaceId: string
   pageSessionId: string
-  unsubscribe: () => void
-  delivery: Promise<void>
 }
 
-export class MobileWebNativeChatSubscriptions {
-  private readonly records = new Map<string, SubscriptionRecord>()
+type NativeChatLedgerConfig = MobileWebSubscriptionLedgerConfig<MobileWebNativeChatEvent> & {
+  nativeChatAuthority: MobileWebNativeChatAuthority
+  workspaceAuthority: MobileWebWorkspaceAuthority
+}
 
-  constructor(
-    private readonly options: {
-      isActive: () => boolean
-      postEvent: (
-        subscriptionId: string,
-        sequence: number,
-        event: MobileWebNativeChatEvent
-      ) => Promise<void>
-      postClosed: MobileWebPostSubscriptionClosed
-      nativeChatAuthority: MobileWebNativeChatAuthority
-      workspaceAuthority: MobileWebWorkspaceAuthority
-    }
-  ) {}
+export class MobileWebNativeChatSubscriptions extends MobileWebSubscriptionLedger<
+  MobileWebNativeChatEvent,
+  TranscriptRecord
+> {
+  constructor(private readonly config: NativeChatLedgerConfig) {
+    super({ ...config, operationKey: 'nativeChat.subscribe' })
+  }
 
   async start(args: {
     requestId: string
@@ -52,35 +42,24 @@ export class MobileWebNativeChatSubscriptions {
     isRequestActive: () => boolean
   }): Promise<void> {
     const payload = MobileWebNativeChatSubscribePayloadSchema.parse(args.payload)
-    if (
-      this.records.has(args.subscriptionId) ||
-      this.records.size >= MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS
-    ) {
-      throw new MobileWebBrokerError('rate_limited')
-    }
-    const hostWorkspaceId = this.options.workspaceAuthority.hostWorkspaceId(payload.workspaceId)
+    this.admit(args.subscriptionId)
+    const hostWorkspaceId = this.config.workspaceAuthority.hostWorkspaceId(payload.workspaceId)
     const binding = await resolveFreshMobileWebNativeChatBinding({
       client: args.client,
       hostWorkspaceId,
       sessionId: payload.sessionId,
-      nativeChatAuthority: this.options.nativeChatAuthority
+      nativeChatAuthority: this.config.nativeChatAuthority
     })
     if (!args.isRequestActive()) {
       throw new MobileWebBrokerError('cancelled')
     }
-    const record: SubscriptionRecord = {
-      requestId: args.requestId,
-      operationKey: 'nativeChat.subscribe',
-      sequence: 0,
-      active: true,
+    const record: TranscriptRecord = {
+      ...this.newRecord(args.requestId),
       hostWorkspaceId,
-      pageSessionId: payload.sessionId,
-      unsubscribe: () => {},
-      delivery: Promise.resolve()
+      pageSessionId: payload.sessionId
     }
-    this.records.set(args.subscriptionId, record)
-    try {
-      const unsubscribe = args.client.subscribe(
+    this.open(args.subscriptionId, record, () =>
+      args.client.subscribe(
         'nativeChat.subscribe',
         {
           agent: binding.agent,
@@ -94,65 +73,15 @@ export class MobileWebNativeChatSubscriptions {
         },
         (event) => this.receive(args.subscriptionId, record, event)
       )
-      if (record.active && this.records.get(args.subscriptionId) === record) {
-        record.unsubscribe = unsubscribe
-      } else {
-        unsubscribe()
-      }
-    } catch {
-      this.cancel(args.subscriptionId)
-      throw new MobileWebBrokerError('host_error')
-    }
+    )
   }
 
-  cancel(subscriptionId: string, closure?: MobileWebSubscriptionClosure): string | null {
-    const record = this.records.get(subscriptionId)
-    if (!record) {
-      return null
-    }
-    record.active = false
-    this.records.delete(subscriptionId)
-    try {
-      record.unsubscribe()
-    } catch {
-      // The record is already retired.
-    }
-    if (closure) {
-      this.options.postClosed(subscriptionId, closure)
-    }
-    return record.requestId
-  }
-
-  cancelByRequest(requestId: string): void {
-    for (const [subscriptionId, record] of this.records) {
-      if (record.requestId === requestId) {
-        this.cancel(subscriptionId)
-      }
-    }
-  }
-
-  countForOperation(operationKey: string): number {
-    let count = 0
-    for (const record of this.records.values()) {
-      if (record.operationKey === operationKey) {
-        count += 1
-      }
-    }
-    return count
-  }
-
-  dispose(): void {
-    for (const subscriptionId of this.records.keys()) {
-      this.cancel(subscriptionId)
-    }
-  }
-
-  private receive(subscriptionId: string, record: SubscriptionRecord, value: unknown): void {
-    if (!record.active || !this.options.isActive() || this.records.get(subscriptionId) !== record) {
+  private receive(subscriptionId: string, record: TranscriptRecord, value: unknown): void {
+    if (!this.isCurrent(subscriptionId, record)) {
       return
     }
     try {
-      this.options.nativeChatAuthority.resolve(record.hostWorkspaceId, record.pageSessionId)
+      this.config.nativeChatAuthority.resolve(record.hostWorkspaceId, record.pageSessionId)
     } catch {
       this.cancel(subscriptionId, { code: 'not_found', retryable: false })
       return
@@ -166,20 +95,7 @@ export class MobileWebNativeChatSubscriptions {
       this.cancel(subscriptionId, { code: 'too_large', retryable: false })
       return
     }
-    const sequence = record.sequence++
-    record.delivery = record.delivery
-      .then(async () => {
-        if (
-          record.active &&
-          this.options.isActive() &&
-          this.records.get(subscriptionId) === record
-        ) {
-          await this.options.postEvent(subscriptionId, sequence, event)
-        }
-      })
-      .catch(() => {
-        this.cancel(subscriptionId, { code: 'unavailable', retryable: true })
-      })
+    this.enqueue(subscriptionId, record, event)
   }
 }
 
