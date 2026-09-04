@@ -1,7 +1,7 @@
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
 import { ptyOwnership, ptyIncarnationById, deletePtyOwnership } from '../provider/ownership-state'
 import { ptySizes } from '../delivery/visibility-state'
-import { commitAttachedPtySize } from '../delivery/attached-pty-size'
+import { commitRuntimePtySize } from './spawn-commit-pty-size'
 import {
   shouldSkipCodexHomeEnvForWindowsShell,
   recordCodexPaneAccountForSpawn,
@@ -87,6 +87,9 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
         ...(ctx.env ? { launchEnv: ctx.env } : {})
       })
     }
+    // Why: an adoption attaches to a live session too, and this branch returns before the
+    // normal commit site; without this the cache keeps whatever the caller requested.
+    commitRuntimePtySize(ctx, { ...ctx.result, isReattach: true })
     // Why: the adopted branch returns before the normal settle site, so the
     // reservation must be resolved here or every later spawn for this pane
     // awaits a promise that never settles.
@@ -126,14 +129,7 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
   if (!ctx.hostSessionBinding) {
     persistSshLease()
   }
-  commitAttachedPtySize({
-    result: ctx.result,
-    requested: { cols: args.cols, rows: args.rows },
-    cachedBeforeAttach: ctx.sessionSizeBeforeAttach,
-    reflowHeadlessTerminalToPtyGrid: ctx.deps.runtime?.reflowHeadlessTerminalToPtyGrid?.bind(
-      ctx.deps.runtime
-    )
-  })
+  commitRuntimePtySize(ctx, ctx.result)
   if (ctx.effectiveSessionAppId !== undefined && ctx.effectiveSessionAppId !== ctx.result.id) {
     ptySizes.delete(ctx.effectiveSessionAppId)
   }

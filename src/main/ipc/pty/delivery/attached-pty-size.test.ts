@@ -98,6 +98,16 @@ describe('resolveCommittedPtySize', () => {
     ).toEqual(CACHED)
   })
 
+  it('rejects a non-integer provider grid as unproven', () => {
+    expect(
+      resolveCommittedPtySize({
+        result: { isReattach: true, snapshotCols: 120.5, snapshotRows: 40 },
+        requested: REQUESTED,
+        cachedBeforeAttach: CACHED
+      })
+    ).toEqual(CACHED)
+  })
+
   it('takes the request only when nothing better exists', () => {
     expect(
       resolveCommittedPtySize({

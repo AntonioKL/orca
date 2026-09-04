@@ -6,8 +6,8 @@ export type PtyGrid = { cols: number; rows: number }
 function positiveGrid(cols: unknown, rows: unknown): PtyGrid | undefined {
   return typeof cols === 'number' &&
     typeof rows === 'number' &&
-    Number.isFinite(cols) &&
-    Number.isFinite(rows) &&
+    Number.isInteger(cols) &&
+    Number.isInteger(rows) &&
     cols > 0 &&
     rows > 0
     ? { cols, rows }
