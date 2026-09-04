@@ -43,7 +43,7 @@ ordinary (49/29/13 per min). Best reading: a ~5 s Postgres-side wait event share
 | Monitor dry-run #16 | Dispatched 12:38:57Z; froze at sample 1 (12:40:11Z): `cell.production-gce-c27.latency_ms` 2071 > 2000, a fifth distinct freeze signal, the probe's own round-trip absorbing a checkpoint sync. **Loop stopped by me at 12:41Z**: with the disk in the checkpoint loop (Finding 10) no bar can hold for 15 min, so further dry-runs only burn the shared rollout lease. 16 dry-runs: 1 pass, 15 freezes. Re-arm after the disk change lands. |
 | Cloud SQL checkpoint loop | **Broke on its own 12:39–12:45Z**: disk writes 48 -> 4 MB/s at 12:39 with transactions and network flat and no Cloud SQL operation; 12:40:17 checkpoint synced 0.047 s; 12:45:53 checkpoint was `time`-triggered again (first since 11:55) with sync 0.096 s and write spread over 269 s. Cause of the break unknown (most likely WAL fell back under `max_wal_size` once a burst of full-page writes aged out). It can re-enter the loop on the next large checkpoint; the disk-size fix remains the durable one. |
 | Monitor dry-run #17 | Dispatched ~12:49Z (all guards clean); froze at sample 1 (12:52:05Z): `director.errors` 4, from the c9/c22 crash loop that began 12:50:34, ~90 s after dispatch. Checkpoints stayed healthy (85 ms), so this is the old image's baseline crash rate, not the disk. 17 dry-runs: 1 pass, 16 freezes. |
-| Monitor dry-run #18 | Waiter re-armed 12:53Z: same guards plus a 45 s post-quiet recheck. Chains canary c7 on green. Holding through the 12:50–12:53 cascade (c9, c22, c23 x7, c13, c10, c21). |
+| Monitor dry-run #18 | **Dispatched by mistake 13:48:56Z into the outage**: my gcloud credentials expired ~13:45Z, every guard query returned empty, and the waiter's `grep -c . || true` read empty as "quiet". Froze at sample 1 (13:49:43Z) on `director.ready=0`, `auth.health=0`, and cell probes; no canary dispatched, no production mutation. All waiter loops killed at 13:51Z. Lesson: a quiet-window check must fail closed when its data source errors. Waiter had been re-armed 12:53Z. |
 | Gate decision | Owner asked at 09:36Z to choose: A keep looping / B recalibrate `directorErrors` 0 -> small n / C human bypass. Ten dry-runs, four froze on this bar. Recommendation B+A. Note: B alone would not have passed #9 or #10 (cell health probes and a 12-error burst); it fixes the single-500 false freezes (#7, #8) only. | |
 | Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
 | PR #18606 lock removal (root cause) | **Merged** 09:2xZ as 7b108abf71 after review, fix, re-verify; CI green | https://github.com/stablyai/orca/pull/18606 |
@@ -229,6 +229,10 @@ the other apps' `max_instances = 10`), then land the same in `auth_max_instances
 revert it. Auth is stateless behind Cloud SQL (`refresh_tokens` table); backends 210 of 400, so 20
 instances x a small pool is within budget. Also consider the desktop's refresh backoff: it re-dials on
 401 immediately with no jitter, so a 429 storm sustains itself.
+
+**13:51Z status: my gcloud session lost auth at ~13:45Z; all production monitoring from this session is
+blind until re-authenticated (`gcloud auth login`, interactive). Last confirmed state 13:40Z: fleet 0
+controls, auth maxScale 2, 7,600 auth 429/min. All autonomous dispatch loops are stopped.**
 
 ## What actually blocks the roll now (12:58Z summary for the owner)
 
