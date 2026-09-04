@@ -73,8 +73,14 @@ function formatWorkerReadDetails(value: OrchestrationWorkerReadResult): string {
     lines.push(`Worker: ${value.status.worker}`)
   }
   lines.push(`Archived: ${value.archived === true}`)
+  // Two different verdicts: status.liveness is the PTY's, the fleet projection is the agent's.
   if (value.status?.liveness) {
-    lines.push(`Liveness: ${value.status.liveness}`)
+    lines.push(`Terminal liveness: ${value.status.liveness}`)
+  }
+  const agentLiveness = (value as { projection?: { liveness?: string } | null }).projection
+    ?.liveness
+  if (agentLiveness) {
+    lines.push(`Agent liveness: ${agentLiveness}`)
   }
   if (value.sourceExact !== undefined) {
     lines.push(`Source exact: ${value.sourceExact}`)

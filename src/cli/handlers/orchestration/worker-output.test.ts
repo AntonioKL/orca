@@ -171,6 +171,30 @@ describe('worker-read plain formatting', () => {
         'No transcript messages returned. This exact transcript read did not request terminal evidence.'
     )
   })
+  it('separates the PTY verdict from the fleet agent verdict', () => {
+    const output = formatWorkerRead({
+      dispatchId: 'dispatch_1',
+      status: { worker: 'ready', terminal: 'running', liveness: 'live' },
+      projection: { liveness: 'unverifiable' },
+      source: 'terminal',
+      sourceIdentity: 'private-source-identity',
+      terminal: {
+        handle: 'term_worker',
+        status: 'running',
+        tail: ['tail'],
+        truncated: false,
+        nextCursor: null
+      },
+      cursor: null,
+      fallbackReason: null,
+      warnings: []
+    } as unknown as OrchestrationWorkerReadResult)
+
+    expect(output).toContain('Terminal liveness: live')
+    expect(output).toContain('Agent liveness: unverifiable')
+    expect(output).not.toMatch(/^Liveness:/mu)
+  })
+
   it('distinguishes a released archive read from a live one', () => {
     const output = formatWorkerRead({
       dispatchId: 'dispatch_1',
@@ -191,7 +215,7 @@ describe('worker-read plain formatting', () => {
     } as unknown as OrchestrationWorkerReadResult)
 
     expect(output).toContain('Archived: true')
-    expect(output).toContain('Liveness: unverifiable')
+    expect(output).toContain('Terminal liveness: unverifiable')
     expect(output).toContain('Worker: succeeded')
   })
 })
