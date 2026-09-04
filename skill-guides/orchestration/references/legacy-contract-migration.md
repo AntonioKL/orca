@@ -77,8 +77,9 @@ ORCA orchestration run-use --id <adopted_run_id> --takeover-legacy --json
 ORCA orchestration check --run <adopted_run_id> --json
 ```
 
-Takeover fences only the old coordinator and moves pending mail into current Run
-delivery. It preserves live workers, Tasks, Dispatches, processes, and files.
+Takeover binds the authenticated invoking terminal; `--from` cannot nominate
+another coordinator. It fences only the old coordinator and moves pending mail
+into current Run delivery. It preserves live workers, Tasks, Dispatches, processes, and files.
 Never take over while the original coordinator is actively coordinating.
 
 Do not launch a replacement editor merely because Orca updated or authority is

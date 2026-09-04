@@ -131,10 +131,22 @@ describe('orchestration kernel', () => {
     expect(kernel).toContain("`worker-show`'s `observation.status` is PTY liveness only")
     expect(kernel).toContain('After three consecutive empty waits')
     expect(kernel).toContain('`ORCA orchestration worker-list --json`')
-    expect(kernel).toContain('`requiresAction`, and literal `nextAction` argv')
-    expect(kernel).toContain('`attention`')
-    expect(kernel).toContain('reports `agentWait` null')
+    expect(kernel).toContain(
+      '`projection.attention`, `projection.requiresAction`, and literal `projection.nextAction` argv'
+    )
     expect(kernel).toContain('choose `worker-stop` or `worker-abandon`')
+  })
+
+  it('lets only positive evidence of exit end a wait', () => {
+    const kernel = squash(readKernel())
+
+    expect(kernel).toContain('Leave the wait only on positive proof the agent stopped')
+    expect(kernel).toContain('`exited` liveness')
+    expect(kernel).toContain("the worker's own observation of process exit")
+    expect(kernel).toContain('transcript whose final agent turn sent no `worker_done`')
+    expect(kernel).toContain(
+      '`unverifiable` is absence \u2014 including when `worker-show` reports `agentWait` null \u2014 and never authorizes stop, abandon, retry, or release'
+    )
   })
 
   it('names --terminal, never --from, as the check caller flag', () => {
@@ -342,6 +354,17 @@ describe('owned orchestration references', () => {
     expect(reference).toContain('`attention` categories, `requiresAction`')
     expect(reference).toContain('`nextAction` argv')
     expect(reference).toContain('the fleet verdict decides')
+  })
+
+  it('requires positive evidence of exit before stop, abandon, retry, or release', () => {
+    const reference = squash(readReference('recovery-and-cleanup.md'))
+
+    expect(reference).toContain('Leave the wait only on positive proof the agent stopped')
+    expect(reference).toContain('`unverifiable` is always absence')
+    expect(reference).toContain('Absence never authorizes stop, abandon, retry, or release')
+    expect(reference).toContain(
+      '| `unverifiable` liveness | Keep waiting or inspect; never stop, abandon, retry, or release |'
+    )
   })
 
   it('owns the custom topology exception without claiming process ownership', () => {

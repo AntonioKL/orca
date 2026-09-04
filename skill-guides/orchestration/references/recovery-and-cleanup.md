@@ -10,7 +10,8 @@ decision, stop/abandon request, retention request, or uncertain release.
 | `outcome_unknown`       | Inspect, then choose `worker-stop` or explicit `worker-abandon`    |
 | Accepted `worker_done`  | Reuse, retain, or release                                          |
 | Remote contact lost     | Preserve `unverifiable`; do not stop or retry from absence alone   |
-| Live PTY, stalled agent | Enumerate with `worker-list`; follow its `nextAction`              |
+| `unverifiable` liveness | Keep waiting or inspect; never stop, abandon, retry, or release    |
+| Proven `exited` agent   | Enumerate with `worker-list`; follow its `nextAction`              |
 
 ## Inspect before acting
 
@@ -24,9 +25,20 @@ ORCA orchestration worker-read --dispatch <dispatch_id> --limit 50 --json
 each row carries `projection.liveness`, `attention` categories, `requiresAction`,
 and a literal `nextAction` argv to run. `worker-show`'s `observation.status` is
 PTY liveness only, so a `live` terminal whose agent died at a trust prompt still
-reads `live` there. When the two disagree, the fleet verdict decides. A worker
-that is not `live`, reports `agentWait` null, and shows no new `worker-read`
-progress is stalled: stop waiting and choose `worker-stop` or `worker-abandon`.
+reads `live` there. When the two disagree, the fleet verdict decides.
+
+## Stall needs positive evidence
+
+Leave the wait only on positive proof the agent stopped: `exited` liveness, the
+worker's own observation of process exit, or a transcript whose final agent turn
+sent no `worker_done`. Only then choose `worker-stop` or `worker-abandon`.
+
+`unverifiable` is always absence — `missing_status`, `stale_status`,
+`restored_unconfirmed`, or a remote worker with no connection — and a null
+`agentWait` or an unchanged `worker-read` tail is that same absence seen again.
+Absence never authorizes stop, abandon, retry, or release: keep waiting, or
+inspect until you hold one of the positive signals above. A `nextAction` that
+names an inspecting command is asking for evidence, not for cleanup.
 
 `worker-read --source auto` uses a proven provider transcript when available and
 otherwise returns bounded terminal output with a typed `fallbackReason`.

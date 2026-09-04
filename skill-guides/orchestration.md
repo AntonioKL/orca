@@ -40,8 +40,7 @@ connection is never proof of failure or exit.
 | No live preamble and no explicit supervision                                                                                                   | Ordinary terminal agent | Do not emit lifecycle messages; use `orca-cli` for terminal/worktree work      |
 
 Model or effort selection does not make a handoff supervised. Never substitute a
-non-Orca subagent tool when Orca orchestration provenance was requested. Before
-claiming a worker was orchestrated, verify its Task and Dispatch exist.
+non-Orca subagent tool when Orca orchestration provenance was requested.
 
 ## Authority and safety floor
 
@@ -57,8 +56,7 @@ claiming a worker was orchestrated, verify its Task and Dispatch exist.
 - Liveness is layered: `worker-list`'s `projection.liveness` is the fleet verdict
   for the agent; `worker-show`'s `observation.status` is PTY liveness only. A live
   terminal can still hold a dead or stuck agent.
-- Folder workspaces are valid. Do not require Git or assume every workspace is a
-  worktree.
+- Folder workspaces are valid; never require Git or assume a worktree.
 - Worktree selectors need the full `<repo-id>::<path>` value Orca returned,
   passed as `id:<fullWorktreeId>`; a bare repo id is not a worktree id.
 - Clients and remote servers update independently. Treat unknown optional fields
@@ -68,8 +66,6 @@ claiming a worker was orchestrated, verify its Task and Dispatch exist.
 - Use the executable selected by the discovery stub for the entire run. In the
   examples below, replace `ORCA` with it; do not create a shell variable or run
   `ORCA` literally. If it fails, report that exact error instead of switching.
-- Legacy takeover binds the authenticated invoking terminal; `--from` cannot
-  nominate another coordinator. Never take over while that coordinator is active.
 - A successful `orchestration send` proves durable enqueue; its wake or nudge is
   best-effort attention only and does not prove the recipient read or accepted it.
 
@@ -100,8 +96,7 @@ ORCA orchestration send --from <worker_handle> --dispatch-capability <capability
 ```
 
 A direct user instruction after completion starts new user-owned work and takes
-precedence over the idle rule. Do not reuse the settled lifecycle IDs. A
-coordinator-supervised follow-up arrives with a fresh preamble and Task block.
+precedence over the idle rule. Do not reuse the settled lifecycle IDs.
 
 ## Canonical supervised loop
 
@@ -138,11 +133,15 @@ a checkpoint, not a failure. Do not stop, retry, release, or launch a duplicate
 editor from timeout, idle state, heartbeat, relay loss, or missing client alone.
 
 After three consecutive empty waits, stop waiting blindly and enumerate with
-`ORCA orchestration worker-list --json`. Act on each row's `attention`,
-`requiresAction`, and literal `nextAction` argv. A worker that is not `live`,
-whose `worker-show` reports `agentWait` null, and whose `worker-read` shows no
-new progress is stalled, not working: load `references/recovery-and-cleanup.md`
-and choose `worker-stop` or `worker-abandon` explicitly.
+`ORCA orchestration worker-list --json`, acting on each row's
+`projection.attention`, `projection.requiresAction`, and literal
+`projection.nextAction` argv. Leave the wait only on positive proof the agent
+stopped: `exited` liveness, the worker's own observation of process exit, or a
+transcript whose final agent turn sent no `worker_done`. Then load
+`references/recovery-and-cleanup.md` and choose `worker-stop` or `worker-abandon`
+explicitly. `unverifiable` is absence — including when `worker-show` reports
+`agentWait` null — and never authorizes stop, abandon, retry, or release; keep
+waiting or inspect.
 
 `worker-start` is the normal path, composing placement, terminal readiness,
 prompt injection, and supervised resource ownership. `dispatch --inject` leaves
