@@ -21,15 +21,15 @@ import {
   inferWorktreeIdFromPtyId,
   runtimeWorktreeIdsEqual
 } from './runtime-worktree-path-identity'
-import {
-  indexPersistedPtySurfaceBindings,
-  indexPersistedPtyWorktreeBindings
-} from './runtime-worktree-binding-index'
 import { parseAppSshPtyId } from '../../shared/ssh-pty-id'
 import { NO_OBSERVING_PROVIDER_REASON } from '../../shared/pty-liveness-verdict'
 import { buildControllerTerminalIdentities } from './orca-runtime-build-controller-terminal-identities'
 import { retireOrchestrationAuthorityAbsentFromInventory } from './runtime-restored-orchestration-authority-sweep'
-
+import {
+  buildPtyInventoryListOptions,
+  createPersistedPtyIndexesReader,
+  isCurrentPtyInventoryGeneration
+} from './runtime-pty-inventory-bookkeeping'
 export class OrcaRuntimeWithRefreshPtyWorktreeRecordsWithControllerInventory extends OrcaRuntimeWithRefreshPtyWorktreeRecordsFromController {
   protected async refreshPtyWorktreeRecordsWithControllerInventory(
     resolvedWorktrees: ResolvedWorktree[],
@@ -69,16 +69,12 @@ export class OrcaRuntimeWithRefreshPtyWorktreeRecordsWithControllerInventory ext
       deadline === undefined
         ? PTY_CONTROLLER_LIST_TIMEOUT_MS
         : Math.max(1, Math.min(PTY_CONTROLLER_LIST_TIMEOUT_MS, deadline - Date.now()))
-    // Why: give each provider a deadline strictly inside our own, so a relay that
-    // never answers still leaves the aggregate time to return the providers that did
-    // — expiring at the same instant would discard the whole inventory instead.
-    const providerListOpts = {
-      deadlineMs: Date.now() + Math.max(1, listBudgetMs - PTY_CONTROLLER_LIST_PROVIDER_MARGIN_MS),
-      ...(inventoryOptions?.includeForegroundProcessEvidence === undefined
-        ? {}
-        : { includeForegroundProcessEvidence: inventoryOptions.includeForegroundProcessEvidence })
-      ...(inventoryOptions?.signal ? { signal: inventoryOptions.signal } : {})
-    }
+    // Keep provider work inside this refresh's deadline so partial inventories remain useful.
+    const providerListOpts = buildPtyInventoryListOptions({
+      listBudgetMs,
+      providerMarginMs: PTY_CONTROLLER_LIST_PROVIDER_MARGIN_MS,
+      inventoryOptions
+    })
     const processInventory =
       connectionId === undefined && this.ptyController.listProcessesWithHostScope
         ? this.ptyController.listProcessesWithHostScope(providerListOpts)
@@ -94,15 +90,13 @@ export class OrcaRuntimeWithRefreshPtyWorktreeRecordsWithControllerInventory ext
       // Why: a transient controller failure is not evidence that retained PTYs exited.
       return null
     }
-    const isCurrentInventory =
-      connectionId === undefined
-        ? this.ptyControllerAggregateInventoryGeneration === inventoryGeneration &&
-          ![...this.ptyControllerInventoryGenerationByProvider.values()].some(
-            (generation) => generation > inventoryGeneration
-          )
-        : this.ptyControllerInventoryGenerationByProvider.get(providerKey) ===
-            inventoryGeneration &&
-          this.ptyControllerAggregateInventoryGeneration <= inventoryGeneration
+    const isCurrentInventory = isCurrentPtyInventoryGeneration({
+      connectionId,
+      inventoryGeneration,
+      aggregateGeneration: this.ptyControllerAggregateInventoryGeneration,
+      providerGenerations: this.ptyControllerInventoryGenerationByProvider,
+      providerKey
+    })
     if (!isCurrentInventory) {
       // A fleet census that began after this targeted poll must not turn a
       // user-driven open into an empty result. Re-query the owning provider;
@@ -131,26 +125,7 @@ export class OrcaRuntimeWithRefreshPtyWorktreeRecordsWithControllerInventory ext
     }
     const { controllerIdentityByPtyId } = buildControllerTerminalIdentities(sessions)
     const findResolvedWorktree = createIncrementalResolvedWorktreeLookup(resolvedWorktrees)
-    const persistedIndexesByHostId = new Map<
-      ExecutionHostId,
-      {
-        worktreeIdByPtyId: ReadonlyMap<string, string>
-        surfaceByPtyId: ReturnType<typeof indexPersistedPtySurfaceBindings>
-      }
-    >()
-    const getPersistedIndexes = (hostId: ExecutionHostId) => {
-      const existing = persistedIndexesByHostId.get(hostId)
-      if (existing) {
-        return existing
-      }
-      const persistedSession = this.store?.getWorkspaceSession?.(hostId)
-      const indexes = {
-        worktreeIdByPtyId: indexPersistedPtyWorktreeBindings(persistedSession),
-        surfaceByPtyId: indexPersistedPtySurfaceBindings(persistedSession)
-      }
-      persistedIndexesByHostId.set(hostId, indexes)
-      return indexes
-    }
+    const getPersistedIndexes = createPersistedPtyIndexesReader(this.store)
     const allLivePtyIds = new Set(sessions.map((session) => session.id))
     const selectedLivePtyIds = new Set<string>()
     for (const session of sessions) {

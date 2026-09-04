@@ -232,7 +232,11 @@ function markSshInventoryUnverifiable(
 
 export async function listProcessesWithHostScopeFromRuntimeController(
   deps: PtyRuntimeControllerDeps,
-  opts?: { deadlineMs?: number; signal?: AbortSignal }
+  opts?: {
+    deadlineMs?: number
+    signal?: AbortSignal
+    includeForegroundProcessEvidence?: boolean
+  }
 ): Promise<{ processes: PtyProcessInfo[]; hostIds: ExecutionHostId[] }> {
   const providerSessions = await Promise.all(
     registeredPtyProviders().map(async ({ provider, connectionId }) => {
@@ -263,7 +267,11 @@ export async function listProcessesWithHostScopeFromRuntimeController(
 export async function listProcessesFromRuntimeController(
   deps: PtyRuntimeControllerDeps,
   connectionId?: string | null,
-  opts?: { deadlineMs?: number; signal?: AbortSignal }
+  opts?: {
+    deadlineMs?: number
+    signal?: AbortSignal
+    includeForegroundProcessEvidence?: boolean
+  }
 ) {
   if (connectionId === null) {
     return localProvider.listProcesses(opts)
