@@ -187,7 +187,7 @@ describe('orchestration federated setup evidence', () => {
       worker: {
         state: 'ready',
         stage: 'input_accepted',
-        setup_state: 'failed',
+        setupState: 'failed',
         effects: expect.arrayContaining([
           expect.objectContaining({ kind: 'setup', state: 'failed' }),
           expect.objectContaining({ kind: 'dispatch_input', state: 'accepted' })

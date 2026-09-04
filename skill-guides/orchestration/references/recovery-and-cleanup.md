@@ -3,20 +3,30 @@
 Load this reference only after a failed/stopped/unknown attempt, explicit retry
 decision, stop/abandon request, retention request, or uncertain release.
 
-| Proven state           | Safe action                                                        |
-| ---------------------- | ------------------------------------------------------------------ |
-| `ready` or active      | Keep waiting; optionally read bounded output                       |
-| `failed` or `stopped`  | Start a replacement with `--retry-of`; repeat placement explicitly |
-| `outcome_unknown`      | Inspect, then choose `worker-stop` or explicit `worker-abandon`    |
-| Accepted `worker_done` | Reuse, retain, or release                                          |
-| Remote contact lost    | Preserve `unverifiable`; do not stop or retry from absence alone   |
+| Proven state            | Safe action                                                        |
+| ----------------------- | ------------------------------------------------------------------ |
+| `ready` or active       | Keep waiting; optionally read bounded output                       |
+| `failed` or `stopped`   | Start a replacement with `--retry-of`; repeat placement explicitly |
+| `outcome_unknown`       | Inspect, then choose `worker-stop` or explicit `worker-abandon`    |
+| Accepted `worker_done`  | Reuse, retain, or release                                          |
+| Remote contact lost     | Preserve `unverifiable`; do not stop or retry from absence alone   |
+| Live PTY, stalled agent | Enumerate with `worker-list`; follow its `nextAction`              |
 
 ## Inspect before acting
 
 ```text
+ORCA orchestration worker-list --json
 ORCA orchestration worker-show --dispatch <dispatch_id> --json
 ORCA orchestration worker-read --dispatch <dispatch_id> --limit 50 --json
 ```
+
+`worker-list` is the enumerating command and the authority on agent liveness:
+each row carries `projection.liveness`, `attention` categories, `requiresAction`,
+and a literal `nextAction` argv to run. `worker-show`'s `observation.status` is
+PTY liveness only, so a `live` terminal whose agent died at a trust prompt still
+reads `live` there. When the two disagree, the fleet verdict decides. A worker
+that is not `live`, reports `agentWait` null, and shows no new `worker-read`
+progress is stalled: stop waiting and choose `worker-stop` or `worker-abandon`.
 
 `worker-read --source auto` uses a proven provider transcript when available and
 otherwise returns bounded terminal output with a typed `fallbackReason`.
@@ -26,6 +36,28 @@ transcript tail can return an EOF cursor that follows only newly appended record
 read `contentComplete`, `clipping`, and `warnings` before assuming omitted older
 records are pageable. Never guess a provider session ID, transcript path, or
 remote terminal handle.
+
+## Was the mutation applied?
+
+When a mutation's response was lost and named no Dispatch, do not replay blind.
+Every orchestration mutation accepts `--retry-request <id>`, which reuses one
+operation identity so Orca can replay, join, or recover it instead of starting a
+duplicate. Ask what happened first:
+
+```text
+ORCA orchestration request-show --request <request_id> --json
+```
+
+`completed` means the mutation already took effect; read its recorded receipt
+instead of rerunning. `pending` means the original mutation is still running or
+Orca restarted before recording its outcome; replay the original command with
+`--retry-request <request_id>`. `absent` means this runtime holds no receipt
+under your caller identity — that is not proof nothing happened, so inspect the
+affected Task, Dispatch, and terminal before deciding whether to retry.
+
+When a worker's terminal accepted input but the submit is unconfirmed, use
+`terminal send --wait-submit <seconds>`: it observes the accepted prompt for that
+long and, on timeout, returns the input-accepted receipt without resending.
 
 ## Retry, stop, and abandon
 

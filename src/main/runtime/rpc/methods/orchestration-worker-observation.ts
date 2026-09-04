@@ -3,6 +3,8 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { OrchestrationDb } from '../../orchestration/db'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { parseWorkerTerminalHostScope } from '../../orchestration/worker-terminal-process-liveness'
+import type { OrchestrationFleetWorker } from '../../../../shared/orchestration-fleet-projection'
+import { projectWorkerFleet } from './orchestration-worker-list-projection'
 import type {
   DispatchContextRow,
   FederatedDispatchRow,
@@ -83,22 +85,44 @@ export async function inspectWorkerTerminal(
   }
 }
 
+/** Why conditional: a present `agentWait: null` must mean "looked, nothing waiting"; an
+ *  unattached, missing or identity-changed worker was never looked at, and a bare
+ *  `unverifiable` is not actionable without naming what contact was lost. */
+export function exposeObservation(observation: Awaited<ReturnType<typeof inspectWorkerTerminal>>) {
+  return {
+    status: observation.status,
+    exactWorker: observation.exact,
+    ...(observation.reason ? { reason: observation.reason } : {}),
+    ...(observation.agentWait !== undefined ? { agentWait: observation.agentWait } : {})
+  }
+}
+
 export function exposeContextOnlyWorker(dispatch: DispatchContextRow) {
   return {
-    dispatch_id: dispatch.id,
-    runtime_epoch: null,
+    dispatchId: dispatch.id,
+    runtimeEpoch: null,
     state: 'unsupervised' as const,
     stage: dispatch.capability_hash ? 'injected' : 'context_only',
-    worktree_id: null,
-    agent_terminal_handle: dispatch.assignee_handle,
-    setup_state: 'not_applicable',
-    effects: [],
-    residualResources: [],
-    startOptions: {},
-    last_error: dispatch.last_failure,
-    created_at: dispatch.created_at,
-    updated_at: dispatch.completed_at ?? dispatch.created_at
+    worktreeId: null,
+    agentTerminalHandle: dispatch.assignee_handle,
+    setupState: 'not_applicable',
+    effects: [] as unknown[],
+    residualResources: [] as unknown[],
+    startOptions: {} as unknown,
+    lastError: dispatch.last_failure,
+    createdAt: dispatch.created_at,
+    updatedAt: dispatch.completed_at ?? dispatch.created_at
   }
+}
+
+// Why: `launch_token_hash` and `capability_hash` are authority material with no receipt
+// consumer, and `host_scope` shipped as a JSON string inside JSON. One camelCase shape.
+export function exposeDispatchContext(dispatch: DispatchContextRow) {
+  const exposed: Partial<DispatchContextRow> & { hostScope?: unknown } = { ...dispatch }
+  delete exposed.launch_token_hash
+  delete exposed.capability_hash
+  delete exposed.host_scope
+  return { ...exposed, hostScope: parseWorkerTerminalHostScope(dispatch.host_scope) }
 }
 
 export async function showContextOnlyWorker(
@@ -108,26 +132,62 @@ export async function showContextOnlyWorker(
 ) {
   const observation = await inspectWorkerTerminal(runtime, db, dispatch.id)
   return {
-    dispatch,
+    dispatch: exposeDispatchContext(dispatch),
     worker: exposeContextOnlyWorker(dispatch),
+    projection: projectFleetWorker(runtime, db, dispatch.id),
     terminal: observation.exact ? observation.terminal : null,
-    observation: {
-      status: observation.status,
-      exactWorker: observation.exact,
-      ...(observation.reason ? { reason: observation.reason } : {}),
-      ...(observation.agentWait !== undefined ? { agentWait: observation.agentWait } : {})
-    },
+    observation: exposeObservation(observation),
     terminalResource: null
   }
 }
 
+// Why: the row was spread verbatim beside its parsed copies, so a reader got
+// `residual_resources` (a JSON string) next to `residualResources` (an array) and had to
+// guess which was authoritative. Parse once, emit camelCase once.
 export function exposeWorker(worker: WorkerDispatchRow) {
   return {
-    ...worker,
+    dispatchId: worker.dispatch_id,
+    runtimeEpoch: worker.runtime_epoch,
+    state: worker.state,
+    stage: worker.stage,
+    worktreeId: worker.worktree_id,
+    agentTerminalHandle: worker.agent_terminal_handle,
+    setupState: worker.setup_state,
     effects: JSON.parse(worker.effects) as unknown[],
     residualResources: JSON.parse(worker.residual_resources) as unknown[],
-    startOptions: JSON.parse(worker.start_options) as unknown
+    startOptions: JSON.parse(worker.start_options) as unknown,
+    lastError: worker.last_error,
+    createdAt: worker.created_at,
+    updatedAt: worker.updated_at
   }
+}
+
+/**
+ * The same fleet verdict `worker-list` publishes, for one Dispatch.
+ *
+ * Why worker-show needs it: `observation.status` is PTY liveness, so an agent that died
+ * at a trust prompt inside a live pane read `live` here and `unverifiable` from
+ * `worker-list` — and `worker-list`'s own `nextAction` pointed back at this command.
+ */
+export function projectFleetWorker(
+  runtime: OrcaRuntimeService,
+  db: OrchestrationDb,
+  dispatchId: string
+): OrchestrationFleetWorker | null {
+  const rows = db.listWorkerTerminalResources({ dispatchIds: [dispatchId], limit: 1 })
+  if (rows.length === 0) {
+    return null
+  }
+  const now = Date.now()
+  return (
+    projectWorkerFleet({
+      rows,
+      attentionFacts: db.getWorkerAttentionFactsForDispatches([dispatchId], now),
+      statuses: runtime.getOrchestrationFleetAgentStatusSnapshot(),
+      limit: 1,
+      now
+    }).workers[0] ?? null
+  )
 }
 
 export function exposeFederatedWorkerObservation(

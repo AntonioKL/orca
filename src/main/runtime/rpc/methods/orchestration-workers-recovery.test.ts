@@ -290,7 +290,7 @@ describe('orchestration worker recovery', () => {
     await expect(
       call('orchestration.workerShow', { dispatch: started.dispatch.id })
     ).resolves.toMatchObject({
-      worker: { state: 'stopped', stage: 'process_stopped', last_error: null },
+      worker: { state: 'stopped', stage: 'process_stopped', lastError: null },
       observation: { status: 'exited', exactWorker: true }
     })
     expect(db.getTask(task.id)?.status).toBe('blocked')
@@ -370,7 +370,7 @@ describe('orchestration worker recovery', () => {
     })
 
     await expect(show).resolves.toMatchObject({
-      worker: { stage: 'released', agent_terminal_handle: null },
+      worker: { stage: 'released', agentTerminalHandle: null },
       remoteRuntimeEpoch: 'windows_epoch_new',
       terminal: null,
       observation: {

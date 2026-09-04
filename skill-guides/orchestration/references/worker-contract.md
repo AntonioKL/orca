@@ -30,6 +30,21 @@ ORCA orchestration ask --from <worker_handle> --dispatch-capability <capability>
 A timeout or disconnect leaves the original question pending. Resume its
 message ID; do not create a duplicate question.
 
+## Reading coordinator follow-ups
+
+The coordinator steers a running worker with `send --to dispatch:<id>`. That
+enqueue is durable but does not interrupt you, so nothing arrives unless you
+look:
+
+```text
+ORCA orchestration check --terminal <worker_handle> --json
+```
+
+Run it at each natural checkpoint — before starting a new file, after a test
+run — and once more immediately before `worker_done`, so a redirect or a
+cancellation lands before the Task settles. `check` names its caller with
+`--terminal`, never `--from`. Stop checking after `worker_done`.
+
 ## Escalation
 
 Escalate only before completion and only when the coordinator must intervene:

@@ -5,6 +5,7 @@ import {
   stripAutomationOwnerConflictCode
 } from '../shared/automation-owner-conflict'
 import { automationOwnerConflictRecovery } from './automation-owner-conflict-recovery'
+import { worktreeSelectorRecovery } from './worktree-selector-recovery'
 import { prepareComputerCliJsonResult } from './computer-format'
 import type { RuntimeRpcFailure, RuntimeRpcSuccess } from './runtime-client'
 import { RuntimeClientError, RuntimeRpcFailureError } from './runtime/types'
@@ -69,6 +70,21 @@ export {
 
 type CliErrorContext = {
   commandPath?: readonly string[]
+  /** The `--worktree` value this invocation sent; the runtime's error never echoes it. */
+  worktreeSelector?: string
+}
+
+function selectorRecovery(code: string | undefined, context: CliErrorContext) {
+  return code === 'selector_not_found' && context.worktreeSelector
+    ? worktreeSelectorRecovery(context.worktreeSelector)
+    : undefined
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (error instanceof RuntimeRpcFailureError) {
+    return error.response.error.code
+  }
+  return error instanceof RuntimeClientError ? error.code : undefined
 }
 
 export function printResult<TResult>(
@@ -85,6 +101,10 @@ export function printResult<TResult>(
 
 export function formatCliError(error: unknown, context: CliErrorContext = {}): string {
   const message = error instanceof Error ? error.message : String(error)
+  const selector = selectorRecovery(errorCode(error), context)
+  if (selector) {
+    return formatMessageWithNextSteps(message, selector.nextSteps)
+  }
   if (error instanceof RuntimeClientError && error.code === 'runtime_unavailable') {
     if (hasOrchestrationRequestId(error.data)) {
       return message
@@ -130,9 +150,19 @@ function hasOrchestrationRequestId(data: unknown): boolean {
 }
 
 export function reportCliError(error: unknown, json: boolean, context: CliErrorContext = {}): void {
+  const selector = selectorRecovery(errorCode(error), context)
   if (json) {
     if (error instanceof RuntimeRpcFailureError) {
-      console.log(JSON.stringify(withAutomationOwnerConflictRecovery(error.response), null, 2))
+      const response = withAutomationOwnerConflictRecovery(error.response)
+      console.log(
+        JSON.stringify(
+          selector
+            ? { ...response, error: { ...response.error, data: response.error.data ?? selector } }
+            : response,
+          null,
+          2
+        )
+      )
     } else {
       const response: RuntimeRpcFailure = {
         id: 'local',
@@ -200,6 +230,10 @@ function localCliErrorData(error: unknown, context: CliErrorContext): unknown {
   // Why: error-specific recovery must win over the generic computer fallback.
   if (error instanceof RuntimeClientError && error.data !== undefined) {
     return error.data
+  }
+  const selector = selectorRecovery(errorCode(error), context)
+  if (selector) {
+    return selector
   }
   const conflict = automationOwnerConflictRecovery(matchAutomationOwnerConflict(error))
   if (conflict) {

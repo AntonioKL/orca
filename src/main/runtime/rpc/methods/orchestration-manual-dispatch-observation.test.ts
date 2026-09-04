@@ -156,6 +156,7 @@ describe('manual Dispatch observation', () => {
         workerState: string
         terminalState: string | null
         agentTerminalHandle: string | null
+        projection: { liveness: { verdict: string } }
       }[]
     }
     expect(workerList.workers).toEqual([
@@ -167,12 +168,18 @@ describe('manual Dispatch observation', () => {
       })
     ])
 
-    await expect(
-      call('orchestration.workerShow', { dispatch: dispatch.id })
-    ).resolves.toMatchObject({
-      worker: { state: 'unsupervised', stage: 'injected', agent_terminal_handle: 'term_worker' },
+    const workerShow = (await call('orchestration.workerShow', {
+      dispatch: dispatch.id
+    })) as { projection: { liveness: { verdict: string } } | null }
+    expect(workerShow).toMatchObject({
+      worker: { state: 'unsupervised', stage: 'injected', agentTerminalHandle: 'term_worker' },
       observation: { status: 'live', exactWorker: true }
     })
+    // Why: worker-show published only PTY liveness, so it read `live` for a dispatch that
+    // worker-list called `unverifiable` — and worker-list's nextAction sent you back here.
+    expect(workerShow.projection?.liveness.verdict).toBe(
+      workerList.workers[0].projection.liveness.verdict
+    )
     await expect(
       call('orchestration.workerRead', { dispatch: dispatch.id, source: 'terminal' })
     ).resolves.toMatchObject({

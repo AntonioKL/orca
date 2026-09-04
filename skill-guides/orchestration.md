@@ -21,11 +21,9 @@ which attempt is authoritative, and when supervised work has settled.
 ## Outcome
 
 **Result:** every in-scope Task has one explicit outcome and every settled worker
-terminal has a next owner or cleanup decision.
-
-**Done:** all expected Dispatches have settled, every delivered message was
-processed before acknowledgment, and each settled worker was reused, explicitly
-retained, or released.
+terminal has a next owner or cleanup decision. **Done:** all expected Dispatches
+have settled, every delivered message was processed before acknowledgment, and
+each settled worker was reused, explicitly retained, or released.
 
 **Safe failure:** preserve work and authority and report the state as unknown or
 `unverifiable`. A timeout, quiet terminal, missing client, or lost remote
@@ -56,12 +54,13 @@ claiming a worker was orchestrated, verify its Task and Dispatch exist.
 - After remote start, address the worker by Dispatch ID. The execution host owns
   process, filesystem, transcript, stop, and cleanup facts. Preserve the verdicts
   `live` / `unverifiable` / `exited`; contact loss is not process death.
+- Liveness is layered: `worker-list`'s `projection.liveness` is the fleet verdict
+  for the agent; `worker-show`'s `observation.status` is PTY liveness only. A live
+  terminal can still hold a dead or stuck agent.
 - Folder workspaces are valid. Do not require Git or assume every workspace is a
   worktree.
-- When a command requires an exact worktree selector, use the full
-  `<repo-id>::<path>` value returned by Orca; a bare repo id is not a worktree id.
-- For a newly created workspace, pass that returned value as `id:<newFullWorktreeId>`;
-  do not shorten it to the repository id.
+- Worktree selectors need the full `<repo-id>::<path>` value Orca returned,
+  passed as `id:<fullWorktreeId>`; a bare repo id is not a worktree id.
 - Clients and remote servers update independently. Treat unknown optional fields
   as absent. A new stream operation requires advertised capability because old
   decoders may silently drop unknown opcodes. Never fall back to local execution
@@ -70,11 +69,9 @@ claiming a worker was orchestrated, verify its Task and Dispatch exist.
   examples below, replace `ORCA` with it; do not create a shell variable or run
   `ORCA` literally. If it fails, report that exact error instead of switching.
 - Legacy takeover binds the authenticated invoking terminal; `--from` cannot
-  nominate another coordinator. It preserves live work and fences the former
-  coordinator, so never take over while that coordinator is still active.
-- A successful `orchestration send` proves durable enqueue. Its wake or nudge is
-  best-effort attention only; it does not prove the recipient read the message,
-  started a turn, or accepted steering.
+  nominate another coordinator. Never take over while that coordinator is active.
+- A successful `orchestration send` proves durable enqueue; its wake or nudge is
+  best-effort attention only and does not prove the recipient read or accepted it.
 
 ## Worker obligations
 
@@ -85,10 +82,13 @@ The injected preamble is authoritative. A dispatched worker must:
    answer. Resume the same message ID after an ask timeout.
 2. Send heartbeats only at the cadence in the preamble. A heartbeat proves
    liveness, not completion.
-3. Send `worker_done` exactly once, from the dispatched terminal, with a
+3. Read coordinator follow-ups at each natural checkpoint — before starting a
+   new file, after a test run — and once more immediately before `worker_done`:
+   `ORCA orchestration check --terminal <your_handle> --json`.
+4. Send `worker_done` exactly once, from the dispatched terminal, with a
    three-sentence executive summary, both lifecycle IDs, and explicit
    `--outcome succeeded` or `--outcome failed`. Never encode failure only in prose.
-4. Append `--files-modified` and `--report-path` only with real values when
+5. Append `--files-modified` and `--report-path` only with real values when
    applicable. After `worker_done`, end the dispatched turn and idle; do not poll
    or start new work.
 
@@ -105,27 +105,27 @@ coordinator-supervised follow-up arrives with a fresh preamble and Task block.
 
 ## Canonical supervised loop
 
-Confirm the runtime, create or bind one Run, create all independent Tasks, and
-start the full independent wave before waiting:
+Confirm the runtime, bind one Run, and start the full independent wave before
+waiting. `worker-start --spec` creates the Task and its attempt in one call:
 
 ```text
 ORCA status --json
 ORCA orchestration run-create --objective "<objective>" --json
-ORCA orchestration task-create --spec "<worker A task>" --json
-ORCA orchestration task-create --spec "<worker B task>" --json
-ORCA orchestration worker-start --task <task_a> --worktree current --agent codex --json
-ORCA orchestration worker-start --task <task_b> --worktree current --agent claude --json
+ORCA orchestration worker-start --spec "<worker A task>" --worktree current --agent codex --json
+ORCA orchestration worker-start --spec "<worker B task>" --worktree current --agent claude --json
 ORCA orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json
 ```
 
-Use Task dependencies only for real ordering. Prefer parallel waves over chains
-deeper than three or four steps. Nested workers obey the configured depth limit;
-creating another Run does not reset the caller's depth.
+Use `task-create` plus `worker-start --task <task_id>` for planned fan-out with
+dependencies or a retry of a known Task. Use dependencies only for real ordering
+and prefer parallel waves over chains deeper than three or four steps; nested
+workers obey the depth limit, and a new Run does not reset the caller's depth.
 
-A consuming `check` returns the bound Run's oldest FIFO Delivery and replays that
-batch until acknowledged. Process every message. Reply to questions, validate
-that each `worker_done` belongs to the expected active Dispatch, and decide each
-settled terminal's next owner before acknowledging:
+A consuming `check` names its caller with `--terminal <handle>`, never `--from`;
+omit it inside the coordinator's own Orca terminal. It returns the bound Run's
+oldest FIFO Delivery and replays that batch until acknowledged. Process every
+message: reply to questions, validate each `worker_done` against the expected
+active Dispatch, and decide each settled terminal's next owner before the ack:
 
 ```text
 ORCA orchestration reply --id <message_id> --body "<answer>" --json
@@ -137,10 +137,16 @@ Keep waiting until every expected Dispatch settles. A timeout or empty result is
 a checkpoint, not a failure. Do not stop, retry, release, or launch a duplicate
 editor from timeout, idle state, heartbeat, relay loss, or missing client alone.
 
-`worker-start` is the normal path. It composes placement, terminal readiness,
-prompt injection, and supervised resource ownership. Low-level
-`dispatch --inject` is reserved for an expressiveness gap and leaves an
-operator-created process unsupervised.
+After three consecutive empty waits, stop waiting blindly and enumerate with
+`ORCA orchestration worker-list --json`. Act on each row's `attention`,
+`requiresAction`, and literal `nextAction` argv. A worker that is not `live`,
+whose `worker-show` reports `agentWait` null, and whose `worker-read` shows no
+new progress is stalled, not working: load `references/recovery-and-cleanup.md`
+and choose `worker-stop` or `worker-abandon` explicitly.
+
+`worker-start` is the normal path, composing placement, terminal readiness,
+prompt injection, and supervised resource ownership. `dispatch --inject` leaves
+an operator-created process unsupervised and is only for an expressiveness gap.
 
 ## Task-spec contract
 
@@ -162,22 +168,22 @@ After an accepted success or failure report, immediately do exactly one:
 
 Release is post-settlement cleanup, not cancellation. Never release because of
 idle state, timeout, heartbeat, status, question, escalation, or a rejected or
-stale completion. If release is uncertain, follow its exact recovery receipt;
-never substitute `terminal close`. Released output remains readable through
+stale completion. If release is uncertain, follow its exact recovery receipt and
+never substitute `terminal close`. Released output stays readable via
 `worker-read`.
 
-A valid `worker_done` settles the Task and Dispatch automatically. Do not follow
-it with `task-update --status completed`. Do not end the coordinator turn until
-all expected Dispatches and settled terminals are accounted for.
+A valid `worker_done` settles the Task and Dispatch automatically; do not follow
+it with `task-update --status completed`. Enumerate the terminals still owing a
+decision with `worker-list --terminal-state reclaimable --json`, and do not end
+the coordinator turn until it returns none.
 
 ## Conditional references
 
 This compact guide is sufficient for the normal local loop. At an action gate
 below, run `ORCA skills get orchestration --full` once and read only the named
-bundled reference. `--full` returns this exact kernel and every reference from
-the same CLI build in one deterministic document. If an older CLI rejects
-`--full`, keep this kernel's safety floor and use that command's `--help`; do not
-guess newer flags.
+bundled reference: it returns this exact kernel and every reference from the same
+CLI build. If an older CLI rejects `--full`, keep this kernel's safety floor, use
+that command's `--help`, and never guess newer flags.
 
 | Action gate                                                                         | Bundled reference                         |
 | ----------------------------------------------------------------------------------- | ----------------------------------------- |

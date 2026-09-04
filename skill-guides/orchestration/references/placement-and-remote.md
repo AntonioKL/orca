@@ -25,6 +25,16 @@ Current and exact existing workspaces create a fresh terminal unless
 `--terminal` is explicit. Folder workspaces are first-class; do not invoke Git
 or require worktree lineage when the selected workspace is a folder.
 
+Register a folder workspace through project setup. `repo add --path <dir>`
+requires a valid Git repository and rejects a plain directory:
+
+```text
+ORCA project setup-existing-folder --project <project_id> --host <host_id> --path <abs_path> --kind folder --json
+```
+
+Then place work on the returned workspace with an exact selector. `new-child`
+and `new-top-level` are worktree creation and do not apply to a folder.
+
 New worktrees use agent-first creation and run setup by default. Preserve the
 repository's startup policy: `start-immediately` can report setup as `running`,
 while `wait-for-setup` gates prompt delivery on success. Orca lineage, Git base,
