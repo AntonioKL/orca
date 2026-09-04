@@ -174,6 +174,116 @@ describe('folder workspace execution host', () => {
     expect(resolveFolderWorkspaceHost(state({ repos: [] }), 'fw-1')).toEqual({ kind: 'local' })
   })
 
+  // SSH ownership has two spellings on a repo row. A row carrying only `executionHostId: 'ssh:*'`
+  // has no `connectionId`, and reading the raw field counted it as a local repo — so a workspace
+  // whose files live on an SSH host resolved `local`, which is an execute-here answer for a remote
+  // path. These fire on well-formed rows; nothing malformed is involved.
+  it('resolves a repo that names its SSH host only through executionHostId', () => {
+    const resolved = resolveFolderWorkspaceHost(
+      state({
+        repos: [
+          repo({
+            id: 'repo-1',
+            path: '/work/app/a',
+            projectGroupId: 'group-1',
+            executionHostId: 'ssh:box'
+          })
+        ]
+      }),
+      'fw-1'
+    )
+
+    expect(resolved).toEqual({ kind: 'ssh', targetId: 'box' })
+  })
+
+  it('mixes such a repo with a local one as ambiguous rather than local', () => {
+    const resolved = resolveFolderWorkspaceHost(
+      state({
+        repos: [
+          repo({ id: 'repo-1', path: '/work/app/a', projectGroupId: 'group-1' }),
+          repo({
+            id: 'repo-2',
+            path: '/work/app/b',
+            projectGroupId: 'group-1',
+            executionHostId: 'ssh:box'
+          })
+        ]
+      }),
+      'fw-1'
+    )
+
+    expect(resolved).toEqual({ kind: 'ambiguous' })
+  })
+
+  it('matches a scope connection against such a repo instead of calling it ambiguous', () => {
+    const resolved = resolveFolderWorkspaceHost(
+      state({
+        folderWorkspaces: [workspace({ connectionId: 'box' })],
+        repos: [
+          repo({
+            id: 'repo-1',
+            path: '/work/app/a',
+            projectGroupId: 'group-1',
+            executionHostId: 'ssh:box'
+          })
+        ]
+      }),
+      'fw-1'
+    )
+
+    expect(resolved).toEqual({ kind: 'ssh', targetId: 'box' })
+  })
+
+  it('reads the target off the host, so a percent-encoded id decodes', () => {
+    const resolved = resolveFolderWorkspaceHost(
+      state({
+        repos: [
+          repo({
+            id: 'repo-1',
+            path: '/work/app/a',
+            projectGroupId: 'group-1',
+            executionHostId: `ssh:${encodeURIComponent('box 1')}`
+          })
+        ]
+      }),
+      'fw-1'
+    )
+
+    expect(resolved).toEqual({ kind: 'ssh', targetId: 'box 1' })
+  })
+
+  // Deliberately unchanged: a `runtime:` row's nested SSH target is not this client's to dial, but
+  // narrowing that here would be a second behaviour change riding on the SSH fix.
+  it('leaves a runtime row contributing its nested connection exactly as before', () => {
+    const resolved = resolveFolderWorkspaceHost(
+      state({
+        repos: [
+          repo({
+            id: 'repo-1',
+            path: '/work/app/a',
+            projectGroupId: 'group-1',
+            executionHostId: 'runtime:env-1',
+            connectionId: 'nested-box'
+          })
+        ]
+      }),
+      'fw-1'
+    )
+
+    expect(resolved).toEqual({ kind: 'ssh', targetId: 'nested-box' })
+  })
+
+  it('still answers local for a runtime pin, which the type cannot express otherwise', () => {
+    const resolved = resolveFolderWorkspaceHost(
+      state({
+        folderWorkspaces: [workspace({ executionHostId: 'runtime:env-1' })]
+      }),
+      'fw-1'
+    )
+
+    expect(resolved).toEqual({ kind: 'local' })
+  })
+
   it('reads each repository membership once while collecting candidates', () => {
     let membershipReads = 0
     const repos = Array.from({ length: 32 }, (_, index) => {

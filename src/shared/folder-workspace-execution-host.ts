@@ -17,7 +17,7 @@ import type { ProjectGroup } from './project-group-types'
 import type { Repo } from './repo-types'
 import { isPathInsideOrEqual } from './cross-platform-path'
 import { getProjectGroupSubtreeIds } from './project-groups'
-import { parseExecutionHostId } from './execution-host'
+import { getRepoExecutionHostId, parseExecutionHostId } from './execution-host'
 
 export type FolderWorkspaceHostState = {
   folderWorkspaces: readonly FolderWorkspace[]
@@ -102,6 +102,12 @@ export function resolveFolderWorkspaceHost(
   }
   const explicitHost = parseExecutionHostId(workspace.executionHostId)
   if (explicitHost) {
+    // A `runtime:` workspace deliberately answers `local`, and `FolderWorkspaceHost` has no runtime
+    // variant to answer with instead. That omission is known: a runtime environment's own server
+    // normalizes its work to `local`, and the nested SSH target on such a row is addressable only as
+    // the pair (environmentId, targetId) — handing it to this client's SSH table would dial a
+    // same-named box in the wrong namespace. Widening the type is its own change, not an oversight
+    // here.
     return explicitHost.kind === 'ssh'
       ? { kind: 'ssh', targetId: explicitHost.targetId }
       : { kind: 'local' }
@@ -114,7 +120,17 @@ export function resolveFolderWorkspaceHost(
   let hasLocalRepo = false
   const connectionIds = new Set<string>()
   for (const repo of candidateRepos) {
-    const connectionId = normalizeConnectionId(repo.connectionId)
+    // Why not `repo.connectionId` alone: SSH ownership has two spellings on a repo row, and a row
+    // carrying only `executionHostId: 'ssh:<target>'` has no `connectionId` to read. Reading the raw
+    // field counted it as a local repo, so a folder workspace whose files live on an SSH host
+    // resolved `local` — an execute-here answer for a remote path (#11163).
+    //
+    // Resolve the host first, then read the target off it. Every other row keeps its existing
+    // contribution, including a `runtime:` row's nested target: that is not this client's to dial,
+    // but narrowing it here would be a second behaviour change riding on this one.
+    const host = parseExecutionHostId(getRepoExecutionHostId(repo))
+    const connectionId =
+      host?.kind === 'ssh' ? host.targetId : normalizeConnectionId(repo.connectionId)
     if (connectionId) {
       connectionIds.add(connectionId)
     } else {
