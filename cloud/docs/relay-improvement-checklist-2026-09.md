@@ -107,16 +107,16 @@ independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is p
 ## Checklists
 
 ### 1.1 Cell image roll (Roll 1)
-- [ ] Confirm fleet is quiet: 15-min monitor dry-run passes (no cell health 0, no crash in window).
+- [x] Confirm fleet is quiet: 15-min monitor dry-run passes. #19 green 23:07:53Z (run 33927238469). Canary then failed the evidence provenance check because main moved during the gate; re-gating with a same-commit chain.
 - [x] Confirm director is on 519f4914 and c7 on 85bf6799 (confirmed 2026-09-04 via instance-template census; 20 serving cells still on `5aedbca5`) (`verify` mode of the same-cap workflow).
 - [ ] Dispatch `cloud-deploy-relay-production-same-cap` waves per the plan in the findings doc; one wave, verify, next.
 - [ ] After each wave: controls recover on the recreated cells within 5 min; no `container die`; 4408/1006 burst subsides.
 - [ ] Record image census (all 23 on the same digest) in the findings doc.
 
 ### 1.2 Enable pruning
-- [ ] `auth_token_pruner_image` = digest of `orca-cloud-auth-00031-tox` (`343a0915…`; it contains the entrypoint).
-- [ ] `auth_token_pruner_enabled = true`, `auth_token_pruner_max_deleted_rows` small (20k) for the first day.
-- [ ] Targeted plan: only `google_cloud_run_v2_job.auth_token_pruner`, scheduler, IAM create. Apply.
+- [x] `auth_token_pruner_image` = digest of `orca-cloud-auth-00031-tox` (`343a0915…`; it contains the entrypoint). orca-cloud #479 merged.
+- [x] `auth_token_pruner_enabled = true`, `auth_token_pruner_max_rows_per_run = 20000` for the first day (orca-cloud #479).
+- [ ] Targeted plan asserted 9 create / 0 change / 0 destroy (job, scheduler, 2 SAs, 5 IAM grants). Apply after the Roll 1 canary lands so the first hourly run does not overlap a drain.
 - [ ] Trigger one run by hand; read the summary event: `stopReason`, `deletedRows`, category counts.
 - [ ] Raise the budget to the default 200k after a clean day; watch Cloud SQL write MB/s and the checkpoint alert.
 - [ ] 1.5: log metric + policy on `stopReason != complete`.
@@ -157,7 +157,7 @@ independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is p
 - [x] `rotateRefreshToken`: if `rotated_at` within 60 s and not revoked, return the existing successor (idempotent), no revoke, no audit.
 - [x] Outside the window or a third presentation: unchanged (revoke + audit).
 - [x] Tests: replay inside window returns same successor; outside revokes; concurrent double-present yields one successor.
-- [ ] Deploy via `deploy-auth-production` (candidate → smoke → promote). **Awaiting owner go.** (candidate → smoke → promote).
+- [x] Deploy via `deploy-auth-production` (candidate → smoke → promote). Deployed 2026-09-04 23:15Z as `orca-cloud-auth-00035-gos`, cap 20 kept, 0 5xx; `successor_material` column present; sealed successors being written. (candidate → smoke → promote).
 
 ### 3.2 / 4.3 Desktop (merged stablyai/orca #18719; ships next desktop release)
 - [x] 3.2: on refresh timeout, re-read stored session before retrying; do not re-send a token already rotated locally.
@@ -173,7 +173,7 @@ independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is p
 - [ ] Measure with `orca_relay_runtime_metrics` region counters before/after.
 
 ### 5.x Observability
-- [ ] **Relay-root runtime-metric drift**: `relay_snapshot[*]` in Terraform carries a `region` label the 21 live metrics lack; applying replaces all 21 (history reset, alert policies blank during swap). Decide: apply in a quiet window as an intentional replacement, or drop the label from Terraform. The incident dashboard (#18717) is blocked behind this.
+- [x] **Relay-root runtime-metric drift**: resolved by dropping the `region` label to match live state (stablyai/orca #18734). Applied 2026-09-04 23:11Z: 8 never-applied `control_*` renewal metrics + the incident dashboard created, 0 destroyed, 21 live metrics untouched.
 - [x] 5.1 `container die` log metric per cell (`relay_cell_process_exit`, applied 2026-09-04 via #18717), > 3 / 15 min, relay channel.
 - [ ] 5.2 Add a paging channel (**needs owner input**: destination) to `auth_alert_notification_channels` for refresh rejections + latency.
-- [ ] 5.4 One dashboard (merged #18717; apply blocked behind the label drift above): `orca_relay_cloud_sql_wal_checkpoint`, NAT drops, `orca_auth_refresh_401`, summed `controls`.
+- [x] 5.4 One dashboard (applied 2026-09-04 23:11Z): `orca_relay_cloud_sql_wal_checkpoint`, NAT drops, `orca_auth_refresh_401`, summed `controls`.
