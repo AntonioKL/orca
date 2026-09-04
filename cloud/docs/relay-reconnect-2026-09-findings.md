@@ -216,7 +216,12 @@ Without a fresh relay token every desktop's `/v1/assign` gets 401 (1,433 distinc
 since 13:07) and every cell closes its control with `4401 relay authorization expired`. Fleet controls:
 13,375 (12:55) -> 7,633 (13:08) -> **249 (13:12)**, splices 1. Auth container CPU 0.15–0.5, so the cap is
 the limit, not the code. Every desktop is now in its refresh-retry loop hammering the same 2 instances:
-this is a self-sustaining thundering herd and will not clear on its own.
+this is a self-sustaining thundering herd and will not clear on its own. At 13:14Z: fleet **30 controls**
+across 23 cells; successful relay-token issuance 5,000–6,500/min until 13:05, then 1,059 / 734 / 733 /
+443 / 220 / 214 / 148 / **4** per minute through 13:13; auth 429s 54k -> 25k/min only because desktops
+are backing off, not because the service recovered. Note `AUTH_MAX_INSTANCES: 2` is also hardcoded in
+orca-cloud `.github/workflows/deploy-auth-production.yml` (lines 33–34), so a redeploy would re-pin it;
+change both the workflow env and the tfvars.
 
 **Immediate mitigation (owner action, not applied):** raise the auth service's max instances. Fastest:
 `gcloud run services update orca-cloud-auth --region us-central1 --max-instances 20` (or `10`, matching
