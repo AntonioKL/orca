@@ -26,7 +26,8 @@ export type AgentSessionJournalRecovery = {
   reset: AgentJournalResetReason
   epoch: string
   imported: number
-  /** Set when provider history could not be read; the intact journal prefix remains live. */
+  /** Set when provider history could not be read, or held nothing to restore; the
+   *  intact journal prefix remains live. */
   error?: string
 }
 
@@ -113,13 +114,16 @@ async function rehydrate(input: {
     fence: input.fence,
     ...(input.historyFilePath ? { options: { filePath: input.historyFilePath } } : {})
   })
-  if (!result.ok) {
+  // A transcript that held nothing is the same outcome as one that could not be
+  // read: nothing was restored, so the repair's marker has to stand and be
+  // retried on a later attach rather than being retired as a completed recovery.
+  if (!result.ok || !result.replaced) {
     return {
       trigger: input.trigger,
       reset,
       epoch: input.journal.epoch,
       imported: 0,
-      error: result.error
+      error: result.ok ? 'Provider history held no messages to restore' : result.error
     }
   }
   return {

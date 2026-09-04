@@ -49,7 +49,14 @@ export type LegacyImportOptions = ResolveSessionFileOptions & {
 const MAX_LEGACY_IMPORT_SOURCE_BYTES = 16 * 1024 * 1024
 
 export type LegacyImportResult =
-  | { ok: true; epoch: string; cursor: AgentJournalCursor; imported: number }
+  | {
+      ok: true
+      epoch: string
+      cursor: AgentJournalCursor
+      imported: number
+      /** False when the transcript held no messages and the epoch was left as it stood. */
+      replaced: boolean
+    }
   | { ok: false; error: string }
 
 export async function appendLegacyTranscriptMessages(input: {
@@ -142,8 +149,22 @@ export async function importLegacyTranscriptIntoJournal(input: {
       observedAt: message.timestamp ?? undefined
     })
   }
+  // A transcript that decodes to nothing reconstructs nothing, and an empty
+  // replacement is not a harmless no-op: it would delete the repair's anchor and
+  // its disclosure, leaving the quarantined rows with nothing asking for them
+  // again. The epoch stands so a later read can still rebuild it.
+  if (replacement.length === 0) {
+    const current = input.journal.cursor()
+    return { ok: true, epoch: current.epoch, cursor: current, imported: 0, replaced: false }
+  }
   const cursor = await input.journal.replaceEpochItems('legacy_import', input.fence, replacement)
-  return { ok: true, epoch: cursor.epoch, cursor, imported: decoded.messages.length }
+  return {
+    ok: true,
+    epoch: cursor.epoch,
+    cursor,
+    imported: decoded.messages.length,
+    replaced: true
+  }
 }
 
 const TRANSCRIPT_DECODERS = {

@@ -757,6 +757,39 @@ describe('import failures', () => {
     expect(journal.epoch).toBe(before)
   })
 
+  // A transcript with no decodable messages recovers nothing. Publishing an
+  // empty replacement would roll the epoch and drop whatever the journal held —
+  // including a repair's own anchor and disclosure.
+  it('leaves the epoch untouched when the transcript decodes to no messages', async () => {
+    const journal = await open('codex', CODEX_SESSION)
+    await journal.appendItem(
+      { provider: 'codex', threadId: CODEX_SESSION, turnId: 'turn-1', ordinal: 1 },
+      { kind: 'message', role: 'assistant', blocks: [{ type: 'text', text: 'kept' }] },
+      { fence: 1 }
+    )
+    const before = journal.epoch
+    const metadataOnly = await writeFixture('metadata-only.jsonl', [
+      {
+        type: 'session_meta',
+        timestamp: '2026-08-05T10:00:00.000Z',
+        payload: { id: CODEX_SESSION, session_id: CODEX_SESSION, cwd: '/Users/dev/project' }
+      }
+    ])
+
+    const result = await importLegacyTranscriptIntoJournal({
+      journal,
+      agent: 'codex',
+      sessionId: CODEX_SESSION,
+      fence: 1,
+      options: { filePath: metadataOnly }
+    })
+
+    expect(result).toMatchObject({ ok: true, imported: 0, replaced: false })
+    expect(journal.epoch).toBe(before)
+    expect(journal.snapshot().items).toHaveLength(1)
+    await journal.close()
+  })
+
   it('rejects an agent with no transcript decoder', async () => {
     const journal = await open('claude', CLAUDE_SESSION)
     const result = await importLegacyTranscriptIntoJournal({

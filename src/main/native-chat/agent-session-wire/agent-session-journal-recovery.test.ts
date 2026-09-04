@@ -373,6 +373,64 @@ describe('openAgentSessionJournalWithRecovery', () => {
     })
   })
 
+  // An empty transcript is a plausible transient provider state, and it used to
+  // end recovery for good: the import published an empty replacement epoch that
+  // deleted the repair's anchor and disclosure, the next probe called that clean,
+  // and the user's rows stayed in quarantine with nothing asking for them again.
+  it('does not retire the repair marker when provider history exists but holds no messages', async () => {
+    await seedRepairableSession()
+    const empty = join(root, 'empty.jsonl')
+    await writeFile(empty, '', 'utf-8')
+
+    const first = await openAgentSessionJournalWithRecovery({
+      identity: IDENTITY,
+      journalDir,
+      fence: 1,
+      historyFilePath: empty
+    })
+    journals.track(first.journal)
+    expect(first.recovery).toMatchObject({ trigger: 'journal_corrupt', imported: 0 })
+    expect(first.recovery?.error).toBeTruthy()
+    // The anchor the repair published, and its disclosure, are still the epoch.
+    expect(first.journal.snapshot().items.map((entry) => entry.body.kind)).toEqual(['status'])
+    expect(
+      first.journal
+        .snapshot()
+        .items.some(
+          (entry) => entry.body.kind === 'status' && entry.body.text.includes('set aside')
+        )
+    ).toBe(true)
+    const epoch = first.journal.epoch
+    await first.journal.close()
+    await withJournalDatabase(journalDir, (db) => {
+      const rows = readJournalEpochRows(db, CODEX_SESSION, epoch)
+      expect(JSON.parse(rows[0]?.rowJson ?? '{}')).toMatchObject({
+        kind: 'epoch',
+        seq: 1,
+        reason: 'unreconcilable_prefix'
+      })
+    })
+
+    // The session still reports corrupt, so the next attach retries.
+    expect(await loadJournal(journalDir, CODEX_SESSION)).toMatchObject({ corrupt: true })
+
+    // And a transcript that DOES have content still rebuilds the timeline.
+    const retried = await openAgentSessionJournalWithRecovery({
+      identity: IDENTITY,
+      journalDir,
+      fence: 1,
+      historyFilePath
+    })
+    journals.track(retried.journal)
+    expect(retried.recovery?.imported).toBeGreaterThan(0)
+    expect(JSON.stringify(retried.journal.snapshot().items.map((entry) => entry.body))).toContain(
+      'add a retry'
+    )
+    expect(
+      retried.journal.recoverQuarantinedRows().map((row) => JSON.parse(row.rowJson).kind)
+    ).toEqual(['submission', 'dispatch'])
+  })
+
   it('rebuilds the emptied epoch once provider history is readable again', async () => {
     await seedRepairableSession()
 
