@@ -455,6 +455,35 @@ hitting every process that happens to need a fresh pool connection in that windo
 on it (unhandled), new-image director logs a 2 s 500 and continues. Root cause of the stall itself is
 outside the relay code (Cloud SQL proxy or instance); not chased further here.
 
+## Finding 10 (2026-09-04 12:40Z): Cloud SQL disk write saturation since 11:58Z is driving the stalls
+
+`orca-cloud-auth-db` is `db-custom-4-15360` on a **49 GB PD-SSD** (81% used). PD-SSD performance scales
+with size: 49 GB gives roughly 1,470 write IOPS and ~23 MB/s write throughput. Measured:
+
+| | before 11:58Z | 11:59Z onward |
+|---|---|---|
+| disk write MB/s | 4–6 | **30–50** (over the ~23 MB/s cap) |
+| disk write IOPS | 500–800 | 800–1,475 (at the ~1,470 cap in 11:59, 12:15, 12:24, 12:34) |
+| checkpoint `sync=` | 0.07–0.2 s (Sep 3 max 0.65 s, 290 checkpoints) | 2–20 s; 27 of 39 checkpoints in 12Z were >= 2 s |
+| checkpoints per hour | 12 (timed, every 5 min) | 39 (WAL-triggered, every ~45 s; `write=` fell from 270 s to 30 s) |
+| Cloud SQL CPU / memory | 0.5–0.8 / 0.47 | same (not the bottleneck) |
+
+Every 4 s+ fleet-wide SQL stall since 11:04 (11:04, 11:17, 11:31, 11:34, 12:09, 12:10, 12:18, 12:20,
+12:30) sits inside a slow checkpoint `sync` window; the 12:30:49 checkpoint synced 5.88 s (longest file
+5.47 s), matching the 12:30:02–41 stall. During fsync the WAL writer stalls and every session waits, which
+is why the stall hit all 23 cells and the director at once regardless of the relay lock changes. The
+old-image cells then die on the pool timeout; the new image survives. What raised write volume ~8x at
+11:58Z is not established (autovacuum ran on every relay table 11:55–11:57 and checkpoints are being
+forced by WAL volume, so a write amplifier inside Postgres is the leading candidate; relay transaction
+rate and Cloud SQL network bytes were flat). This is the first cause found today that is *upstream* of
+the relay code and it explains the afternoon acceleration (11Z 68 dies, 12Z 47 by 12:34).
+
+**Owning workflow / mitigation (not applied):** the disk is Terraform-owned under `cloud/infra/terraform`
+(`google_sql_database_instance`); PD-SSD IOPS/throughput grow linearly with size, so raising
+`disk_size` (e.g. 49 -> 200 GB) roughly quadruples the ceiling and is online, no restart. That change
+belongs in a reviewed Terraform PR applied by the infra workflow, per the standing rule not to apply
+relay config/capacity changes from this session.
+
 ## Roll inputs (verified by the read-only `verify` run)
 
 - target-image-digest `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` (lock fix; supersedes 85bf6799 as target)
