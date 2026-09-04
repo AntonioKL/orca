@@ -115,6 +115,15 @@ describe('terminal path helpers', () => {
   })
 
   describe('extractTerminalFileLinks local path tokens', () => {
+    it('keeps Unicode path segments in the detected range', () => {
+      expect(extractTerminalFileLinks('/tmp/报告.html').map((link) => link.displayText)).toEqual([
+        '/tmp/报告.html'
+      ])
+      expect(
+        extractTerminalFileLinks('docs/café/report.pdf').map((link) => link.displayText)
+      ).toEqual(['docs/café/report.pdf'])
+    })
+
     it('detects tilde-prefixed POSIX paths', () => {
       const links = extractTerminalFileLinks('~/Documents/Path/file_name')
       expect(links).toHaveLength(1)

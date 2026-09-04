@@ -259,6 +259,47 @@ describe('CommentMarkdown link click handler', () => {
     )
   })
 
+  it('links complete Unicode paths and extensions that begin with a digit', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content="Open /tmp/报告.html, docs/报告/file.html, docs/café/report.pdf, and docs/archive.7z."
+          onLinkClick={vi.fn()}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    expect(Array.from(container.querySelectorAll('a')).map((anchor) => anchor.textContent)).toEqual(
+      ['/tmp/报告.html', 'docs/报告/file.html', 'docs/café/report.pdf', 'docs/archive.7z']
+    )
+  })
+
+  it('never links an ASCII suffix inside a path containing an unsupported character', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content="Leave /tmp/$draft/report.html as one path or plain text."
+          onLinkClick={vi.fn()}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    expect(container.querySelectorAll('a')).toHaveLength(0)
+    expect(container.textContent).toContain('/tmp/$draft/report.html')
+  })
+
   it('prevents the default action for an unresolved internal file href', () => {
     const onLinkClick = vi.fn()
     container = document.createElement('div')

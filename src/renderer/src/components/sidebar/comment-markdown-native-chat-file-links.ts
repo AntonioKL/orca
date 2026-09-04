@@ -16,11 +16,26 @@ const ROOTED_PATH_PREFIX_PATTERN = /^(?:~[\\/]|\.{1,2}[\\/]|[\\/]|[A-Za-z]:[\\/]
 function isLinkifiableFile(link: ParsedTerminalFileLink, requireSeparator: boolean): boolean {
   const hasRootedPrefix = ROOTED_PATH_PREFIX_PATTERN.test(link.pathText)
   const hasLineSuffix = link.line !== null || link.column !== null
-  const hasAlphabeticExtension = /\.[A-Za-z][A-Za-z0-9_+-]*$/.test(link.pathText)
+  const hasAlphabeticExtension = /\.[\p{L}][\p{L}\p{N}\p{M}_+-]*$/u.test(link.pathText)
+  const hasPathExtension = /\.[\p{L}\p{N}][\p{L}\p{N}\p{M}_+-]*$/u.test(link.pathText)
   return (
     (!requireSeparator || /[\\/]/.test(link.pathText)) &&
-    (hasRootedPrefix || hasLineSuffix || hasAlphabeticExtension) &&
+    (hasRootedPrefix ||
+      hasLineSuffix ||
+      (requireSeparator ? hasPathExtension : hasAlphabeticExtension)) &&
     routeNativeChatHref(link.displayText).kind === 'file'
+  )
+}
+
+const SAFE_LEADING_BOUNDARY_PATTERN = /[\s([{'",;]/
+const SAFE_TRAILING_BOUNDARY_PATTERN = /[\s)\]}>'",;.:]/
+
+function hasPartialPathBoundary(value: string, link: ParsedTerminalFileLink): boolean {
+  const before = value[link.startIndex - 1]
+  const after = value[link.endIndex]
+  return (
+    (before !== undefined && !SAFE_LEADING_BOUNDARY_PATTERN.test(before)) ||
+    (after !== undefined && !SAFE_TRAILING_BOUNDARY_PATTERN.test(after))
   )
 }
 
@@ -58,6 +73,7 @@ function splitProseJoinedLinks(link: ParsedTerminalFileLink): ParsedTerminalFile
 
 function splitTextNode(value: string): MarkdownNode[] {
   const links = extractTerminalFileLinks(value)
+    .filter((link) => !hasPartialPathBoundary(value, link))
     .filter((link) => isLinkifiableFile(link, true))
     .flatMap(splitProseJoinedLinks)
   if (links.length === 0) {
