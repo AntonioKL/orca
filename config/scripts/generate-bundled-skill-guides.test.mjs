@@ -22,15 +22,21 @@ import {
 const projectDir = path.resolve(import.meta.dirname, '..', '..')
 const temporaryDirectories = []
 const execFileAsync = promisify(execFile)
-const ORCHESTRATION_REFERENCES = [
-  'coordinator-loop.md',
-  'legacy-contract-migration.md',
-  'low-level-topology.md',
-  'messaging-and-gates.md',
-  'placement-and-remote.md',
-  'recovery-and-cleanup.md',
-  'worker-contract.md'
-]
+const GUIDE_REFERENCES = {
+  'orca-cli': ['automations.md', 'browser.md', 'publishing.md'],
+  orchestration: [
+    'coordinator-loop.md',
+    'legacy-contract-migration.md',
+    'low-level-topology.md',
+    'messaging-and-gates.md',
+    'placement-and-remote.md',
+    'recovery-and-cleanup.md',
+    'worker-contract.md'
+  ]
+}
+const GUIDE_REFERENCE_PATHS = Object.entries(GUIDE_REFERENCES).flatMap(([guide, references]) =>
+  references.map((reference) => [guide, reference])
+)
 
 async function createFixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'orca-bundled-skill-guides-'))
@@ -204,19 +210,20 @@ describe('bundled skill guide generator', () => {
       expect(guide.description).toBe(frontmatter.description)
       expect(guide.markdown).toBe(source)
       expect(guide.aliases).toEqual(GUIDE_ALIASES[guide.name])
-      if (guide.name !== 'orchestration') {
+      const references = GUIDE_REFERENCES[guide.name]
+      if (!references) {
         expect(guide.fullMarkdown).toBe(source)
         continue
       }
       expect(guide.fullMarkdown).not.toBe(guide.markdown)
       expect(guide.fullMarkdown.length).toBeGreaterThan(guide.markdown.length)
       expect(guide.fullMarkdown.startsWith(source.trimEnd())).toBe(true)
-      for (const reference of ORCHESTRATION_REFERENCES) {
+      for (const reference of references) {
         const marker = `<!-- bundled-reference: references/${reference} -->`
         expect(guide.fullMarkdown.split(marker)).toHaveLength(2)
         expect(guide.fullMarkdown).toContain(
           await readFile(
-            path.join(projectDir, 'skill-guides', 'orchestration', 'references', reference),
+            path.join(projectDir, 'skill-guides', guide.name, 'references', reference),
             'utf8'
           )
         )
@@ -228,9 +235,15 @@ describe('bundled skill guide generator', () => {
     for (const name of ['orca-cli', 'computer-use', 'orca-emulator', 'orca-emulator-android']) {
       const source = await readFile(path.join(projectDir, 'skill-guides', `${name}.md`), 'utf8')
 
-      expect(source).toContain('ORCA_CLI_COMMAND')
-      expect(source).toContain('orca-dev')
-      expect(source).toContain('orca-ide')
+      // Why: orca-cli and computer-use delegate executable resolution to their discovery
+      // stubs, so the `ORCA_CLI_COMMAND` / `orca-dev` / `orca-ide` ladder is asserted against
+      // `skills/<name>/SKILL.md` in their own guidance tests. Every guide still has to keep
+      // the placeholder substitution safe for PowerShell and cmd.exe.
+      if (!['orca-cli', 'computer-use'].includes(name)) {
+        expect(source).toContain('ORCA_CLI_COMMAND')
+        expect(source).toContain('orca-dev')
+        expect(source).toContain('orca-ide')
+      }
       expect(source).toContain('PowerShell')
       expect(source).toContain('cmd.exe')
       expect(source).toMatch(/^ORCA .+--json$/mu)
@@ -262,14 +275,8 @@ describe('bundled skill guide generator', () => {
       const stubSource = await readFile(stubPath, 'utf8')
       await writeFile(stubPath, stubSource.replaceAll('\n', '\r\n'))
     }
-    for (const reference of ORCHESTRATION_REFERENCES) {
-      const referencePath = path.join(
-        root,
-        'skill-guides',
-        'orchestration',
-        'references',
-        reference
-      )
+    for (const [guide, reference] of GUIDE_REFERENCE_PATHS) {
+      const referencePath = path.join(root, 'skill-guides', guide, 'references', reference)
       const source = await readFile(referencePath, 'utf8')
       await writeFile(referencePath, source.replaceAll('\n', '\r\n'))
     }
