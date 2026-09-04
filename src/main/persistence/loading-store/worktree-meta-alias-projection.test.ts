@@ -375,4 +375,47 @@ describe('worktree meta alias projection', () => {
       expect(openStore(dataFile).getAllWorktreeMeta()).toEqual(store.getAllWorktreeMeta())
     }
   })
+
+  /**
+   * A file that never had an identity map must not gain one: the rebuild returns the parsed value
+   * unchanged for a non-record, so an unconditional spread would give the loaded state an own
+   * `worktreeMetaByIdentity: undefined` -- a key that outranks the defaults spread and reaches
+   * every `Object.hasOwn`/`in` reader as present-but-empty.
+   */
+  it('never materializes an identity map a file did not have', () => {
+    const dataFile = tempDataFile()
+    writeFileSync(
+      dataFile,
+      JSON.stringify({
+        repos: [{ id: REPO_ID, name: REPO_ID, path: '/tmp/repo-1', worktreesPath: '/tmp' }],
+        worktreeMeta: { [worktreeId(0)]: meta(0, seededRandom(1)) },
+        worktreeLineageById: {
+          [`${REPO_ID}::/tmp/child`]: {
+            parentWorktreeId: `${REPO_ID}::/tmp/parent`,
+            createdAt: RECENTLY
+          }
+        },
+        workspaceLineageByChildKey: {
+          [`worktree:${REPO_ID}::/tmp/child`]: {
+            parentWorkspaceKey: `worktree:${REPO_ID}::/tmp/parent`,
+            createdAt: RECENTLY
+          }
+        }
+      }),
+      'utf-8'
+    )
+
+    const store = openStore(dataFile)
+    expect(Object.keys(store.getAllWorktreeMeta())).toEqual([worktreeId(0)])
+    store.flush()
+
+    const onDisk = JSON.parse(readFileSync(dataFile, 'utf-8')) as PersistedState
+    expect(Object.hasOwn(onDisk, 'worktreeMetaByIdentity')).toBe(false)
+    // The locator map and its lineage companions are all still there, untouched by the projection.
+    expect(Object.keys(onDisk.worktreeMeta)).toEqual([worktreeId(0)])
+    expect(Object.keys(onDisk.worktreeLineageById)).toEqual([`${REPO_ID}::/tmp/child`])
+    expect(Object.keys(onDisk.workspaceLineageByChildKey)).toEqual([
+      `worktree:${REPO_ID}::/tmp/child`
+    ])
+  })
 })
