@@ -190,7 +190,11 @@ until this process is complete." Owner has had multi-day experiences with cell r
    fails on any inline `relay_cells FOR UPDATE` outside the named helpers. Three-cell Postgres test moves
    an activity high->low while the target row is held; 5/5 revert-mutants fail it. 480 SQLite tests +
    tsc green. Also fixed a pre-existing test leak (`relay_cell_connection_snapshots`) that made
-   `assignment-control-supersession-postgres` fail on reruns.* Make `activateControl` superseded-control cleanup, `acquireActivity`
+   `assignment-control-supersession-postgres` fail on reruns. Reviewer re-verified 65569be3de: cycle
+   repro completes in 7 ms (was 1022 ms + paired 55P03); no remaining out-of-order pair in the store;
+   flagged two evasions in the new census guard, closed in the third commit (whole-statement scan,
+   covers query() too, mutation-checked with both evasions). Headroom Postgres test's one failure is
+   pre-existing on main (verified by swapping in main's store).* Make `activateControl` superseded-control cleanup, `acquireActivity`
    existing-lease branch, and `changeActivity` use the existing single-row
    `adjustCellReservationAtomically` instead of the 23-row `lockCellInventory`. Keep the global lock only
    for placement (`resolve`/assignment) and sweeps. Real-Postgres contention test on port 55440.
