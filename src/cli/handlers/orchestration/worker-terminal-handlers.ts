@@ -156,7 +156,11 @@ export const ORCHESTRATION_WORKER_TERMINAL_HANDLERS: Record<string, CommandHandl
                 const details = projection
                   ? `/${stage}] attention=${attention} liveness=${liveness} provider=${provider} host=${projection.host.id} workspace=${workspace}`
                   : `]`
-                return `${worker.dispatchId} task=${worker.taskId} [${worker.workerState}${details} terminal=${worker.terminalState ?? 'none'}`
+                // Why: the enumerating command owes the literal argv the guides tell callers to run.
+                const next = projection
+                  ? ` next=${projection.nextAction.argv.join(' ') || 'none'}`
+                  : ''
+                return `${worker.dispatchId} task=${worker.taskId} [${worker.workerState}${details} terminal=${worker.terminalState ?? 'none'}${next}`
               })
               .join('\n')
       const counts = Object.entries(value.counts)
