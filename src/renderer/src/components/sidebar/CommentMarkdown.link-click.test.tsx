@@ -238,6 +238,27 @@ describe('CommentMarkdown link click handler', () => {
     )
   })
 
+  it('links each relative path separately when prose joins them', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content="Updated src/foo.ts and src/bar.ts, then docs/My Folder/notes.md."
+          onLinkClick={vi.fn()}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    expect(Array.from(container.querySelectorAll('a')).map((anchor) => anchor.textContent)).toEqual(
+      ['src/foo.ts', 'src/bar.ts', 'docs/My Folder/notes.md']
+    )
+  })
+
   it('prevents the default action for an unresolved internal file href', () => {
     const onLinkClick = vi.fn()
     container = document.createElement('div')

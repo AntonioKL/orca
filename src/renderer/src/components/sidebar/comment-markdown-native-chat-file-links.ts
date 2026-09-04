@@ -11,8 +11,10 @@ type MarkdownNode = {
   children?: MarkdownNode[]
 }
 
+const ROOTED_PATH_PREFIX_PATTERN = /^(?:~[\\/]|\.{1,2}[\\/]|[\\/]|[A-Za-z]:[\\/])/
+
 function isLinkifiableFile(link: ParsedTerminalFileLink, requireSeparator: boolean): boolean {
-  const hasRootedPrefix = /^(?:~[\\/]|\.{1,2}[\\/]|[\\/]|[A-Za-z]:[\\/])/.test(link.pathText)
+  const hasRootedPrefix = ROOTED_PATH_PREFIX_PATTERN.test(link.pathText)
   const hasLineSuffix = link.line !== null || link.column !== null
   const hasAlphabeticExtension = /\.[A-Za-z][A-Za-z0-9_+-]*$/.test(link.pathText)
   return (
@@ -30,8 +32,34 @@ function createFileLinkNode(value: string, child: MarkdownNode): MarkdownNode {
   }
 }
 
+// Why: the terminal extractor spans "src/a.ts and src/b.ts" as one spaced path.
+// An unrooted span holding a bare word or several linkable tokens is prose
+// joining paths, so link the tokens on their own; a spaced folder name keeps
+// every token path-shaped and stays one link.
+function splitProseJoinedLinks(link: ParsedTerminalFileLink): ParsedTerminalFileLink[] {
+  if (ROOTED_PATH_PREFIX_PATTERN.test(link.pathText)) {
+    return [link]
+  }
+  const tokens = Array.from(link.displayText.matchAll(/\S+/g))
+  const tokenLinks: ParsedTerminalFileLink[] = []
+  for (const match of tokens) {
+    const token = match[0]
+    const exactLink = extractTerminalFileLinks(token).find(
+      (candidate) => candidate.startIndex === 0 && candidate.endIndex === token.length
+    )
+    if (exactLink && isLinkifiableFile(exactLink, true)) {
+      const startIndex = link.startIndex + (match.index ?? 0)
+      tokenLinks.push({ ...exactLink, startIndex, endIndex: startIndex + token.length })
+    }
+  }
+  const hasBareWord = tokens.some((match) => !/[\\/.]/.test(match[0]))
+  return hasBareWord || tokenLinks.length > 1 ? tokenLinks : [link]
+}
+
 function splitTextNode(value: string): MarkdownNode[] {
-  const links = extractTerminalFileLinks(value).filter((link) => isLinkifiableFile(link, true))
+  const links = extractTerminalFileLinks(value)
+    .filter((link) => isLinkifiableFile(link, true))
+    .flatMap(splitProseJoinedLinks)
   if (links.length === 0) {
     return [{ type: 'text', value }]
   }
