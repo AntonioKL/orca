@@ -1,7 +1,9 @@
 // Recovery drives the real journal loader against real on-disk damage: a hole
-// punched in the log, and a row stamped with a schema this host cannot read.
+// punched in the row sequence, and a row stamped with a schema this host cannot
+// read — on both version axes, because only one of them is detectable before a
+// read.
 
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -9,7 +11,12 @@ import type {
   AgentJournalItemIdentity,
   AgentSessionJournalIdentity
 } from '../../../shared/agent-session-journal-types'
-import { openAgentSessionJournal } from '../agent-session-journal/journal-store-factory'
+import { openJournalDatabase } from '../agent-session-journal/journal-database'
+import { JOURNAL_DB_SCHEMA_VERSION } from '../agent-session-journal/journal-database-schema'
+import { journalDatabaseFile } from '../agent-session-journal/journal-paths'
+import { readJournalEpochRows } from '../agent-session-journal/journal-row-table'
+import { createTrackedJournalOpener } from '../agent-session-journal/journal-store-test-open'
+import type Database from '../../sqlite/sync-database'
 import {
   openAgentSessionJournalWithRecovery,
   providerHistoryId,
@@ -53,14 +60,15 @@ const CODEX_LINES = [
 let root: string
 let journalDir: string
 let historyFilePath: string
+const journals = createTrackedJournalOpener()
 
 function item(ordinal: number): AgentJournalItemIdentity {
   return { provider: 'codex', threadId: CODEX_SESSION, turnId: 'turn-1', ordinal }
 }
 
-/** Fills a journal with `count` items and hands back the raw log lines. */
-async function seedJournal(count: number): Promise<string[]> {
-  const journal = await openAgentSessionJournal({ identity: IDENTITY, journalDir })
+/** Fills a journal with `count` items and hands back its epoch. */
+async function seedJournal(count: number): Promise<string> {
+  const journal = await journals.open({ identity: IDENTITY, journalDir })
   for (let ordinal = 1; ordinal <= count; ordinal += 1) {
     await journal.appendItem(
       item(ordinal),
@@ -68,8 +76,28 @@ async function seedJournal(count: number): Promise<string[]> {
       { fence: 1 }
     )
   }
-  const raw = await readFile(join(journalDir, 'log.jsonl'), 'utf-8')
-  return raw.split('\n').filter((line) => line.trim().length > 0)
+  const epoch = journal.epoch
+  await journal.close()
+  return epoch
+}
+
+async function withJournalDatabase(
+  directory: string,
+  run: (db: Database.Database) => void
+): Promise<void> {
+  const opened = openJournalDatabase(journalDatabaseFile(directory))
+  try {
+    run(opened.db)
+  } finally {
+    opened.db.close()
+  }
+}
+
+/** The same logical hole `findSequenceGap` detects at replay. */
+async function deleteRow(seq: number): Promise<void> {
+  await withJournalDatabase(journalDir, (db) => {
+    db.prepare('DELETE FROM journal_rows WHERE seq = ?').run(seq)
+  })
 }
 
 beforeEach(async () => {
@@ -84,6 +112,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  await journals.closeAll()
   await rm(root, { recursive: true, force: true })
 })
 
@@ -99,20 +128,20 @@ describe('providerHistoryId', () => {
 describe('openAgentSessionJournalWithRecovery', () => {
   it('opens a healthy journal untouched', async () => {
     await seedJournal(2)
-    const opened = await openAgentSessionJournalWithRecovery({
-      identity: IDENTITY,
-      journalDir,
-      fence: 1,
-      historyFilePath
-    })
-    expect(opened.recovery).toBeNull()
-    expect(opened.journal.snapshot().items).toHaveLength(2)
+    const opened = journals.track(
+      await openAgentSessionJournalWithRecovery({
+        identity: IDENTITY,
+        journalDir,
+        fence: 1,
+        historyFilePath
+      }).then((result) => result.journal)
+    )
+    expect(opened.snapshot().items).toHaveLength(2)
   })
 
   it('rebuilds a holed journal in place on a fresh epoch', async () => {
-    const lines = await seedJournal(3)
-    const holed = lines.filter((_line, index) => index !== 1)
-    await writeFile(join(journalDir, 'log.jsonl'), `${holed.join('\n')}\n`, 'utf-8')
+    await seedJournal(3)
+    await deleteRow(3)
 
     const opened = await openAgentSessionJournalWithRecovery({
       identity: IDENTITY,
@@ -120,6 +149,7 @@ describe('openAgentSessionJournalWithRecovery', () => {
       fence: 1,
       historyFilePath
     })
+    journals.track(opened.journal)
     expect(opened.recovery).toMatchObject({ trigger: 'journal_corrupt', reset: 'epoch_changed' })
     expect(opened.recovery?.imported).toBeGreaterThan(0)
     expect(opened.journal.isReadOnly).toBe(false)
@@ -130,12 +160,46 @@ describe('openAgentSessionJournalWithRecovery', () => {
     expect(texts.some((text) => text.includes('add a retry'))).toBe(true)
   })
 
-  it('reconstructs a future-schema journal into a schema-scoped sibling, never in place', async () => {
-    const lines = await seedJournal(1)
-    await writeFile(
-      join(journalDir, 'log.jsonl'),
-      `${lines.join('\n')}\n${JSON.stringify({ v: 99, seq: 2, epoch: 'e', kind: 'item' })}\n`,
-      'utf-8'
+  it('reconstructs a future row-body version into a sibling, never in place', async () => {
+    const epoch = await seedJournal(1)
+    await withJournalDatabase(journalDir, (db) => {
+      db.prepare(
+        'INSERT INTO journal_rows (session_id, epoch, seq, ts, row_json) VALUES (?, ?, ?, ?, ?)'
+      ).run(
+        CODEX_SESSION,
+        epoch,
+        3,
+        1,
+        JSON.stringify({ v: 99, seq: 3, epoch, kind: 'item', fence: 1, ts: 1 })
+      )
+    })
+
+    const opened = journals.track(
+      await openAgentSessionJournalWithRecovery({
+        identity: IDENTITY,
+        journalDir,
+        fence: 1,
+        historyFilePath
+      }).then((result) => result.journal)
+    )
+
+    // The unreadable journal is left exactly as found; a newer host still owns it.
+    await withJournalDatabase(journalDir, (db) => {
+      const rows = readJournalEpochRows(db, CODEX_SESSION, epoch)
+      expect(rows.some((entry) => entry.rowJson.includes('"v":99'))).toBe(true)
+      expect(rows).toHaveLength(3)
+    })
+    await opened.close()
+    await withJournalDatabase(recoveryJournalDir(journalDir), (db) => {
+      const sibling = db.prepare('SELECT row_json FROM journal_rows').all()
+      expect(JSON.stringify(sibling)).toContain('add a retry')
+    })
+  })
+
+  it('reconstructs a future database version into a sibling, never in place', async () => {
+    await seedJournal(1)
+    await withJournalDatabase(journalDir, (db) =>
+      db.pragma(`user_version = ${JOURNAL_DB_SCHEMA_VERSION + 1}`)
     )
 
     const opened = await openAgentSessionJournalWithRecovery({
@@ -144,23 +208,24 @@ describe('openAgentSessionJournalWithRecovery', () => {
       fence: 1,
       historyFilePath
     })
+    journals.track(opened.journal)
     expect(opened.recovery).toMatchObject({
       trigger: 'schema_unreadable',
       reset: 'schema_unreadable'
     })
     expect(opened.recovery?.imported).toBeGreaterThan(0)
-
-    // The unreadable journal is left exactly as found; a newer host still owns it.
-    const untouched = await readFile(join(journalDir, 'log.jsonl'), 'utf-8')
-    expect(untouched).toContain('"v":99')
-    const sibling = await readFile(join(recoveryJournalDir(journalDir), 'log.jsonl'), 'utf-8')
-    expect(sibling).toContain('add a retry')
+    // No schema change, no row written, no row deleted.
+    await withJournalDatabase(journalDir, (db) => {
+      expect(db.pragma('user_version', { simple: true })).toBe(JOURNAL_DB_SCHEMA_VERSION + 1)
+      expect(db.prepare('SELECT count(*) AS total FROM journal_rows').get()).toMatchObject({
+        total: 2
+      })
+    })
   })
 
   it('still opens the session when provider history cannot be read', async () => {
-    const lines = await seedJournal(3)
-    const holed = lines.filter((_line, index) => index !== 2)
-    await writeFile(join(journalDir, 'log.jsonl'), `${holed.join('\n')}\n`, 'utf-8')
+    await seedJournal(3)
+    await deleteRow(3)
 
     const opened = await openAgentSessionJournalWithRecovery({
       identity: IDENTITY,
@@ -168,6 +233,7 @@ describe('openAgentSessionJournalWithRecovery', () => {
       fence: 1,
       historyFilePath: join(root, 'missing.jsonl')
     })
+    journals.track(opened.journal)
     expect(opened.recovery).toMatchObject({ trigger: 'journal_corrupt', imported: 0 })
     expect(opened.recovery?.error).toBeTruthy()
     // A missing provider transcript must not clear the intact journal prefix.

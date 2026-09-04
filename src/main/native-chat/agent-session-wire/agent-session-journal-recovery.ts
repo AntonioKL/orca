@@ -61,10 +61,7 @@ export async function openAgentSessionJournalWithRecovery(input: {
       identity: input.identity,
       journalDir: recoveryJournalDir(input.journalDir)
     })
-    return {
-      journal,
-      recovery: await rehydrate({ ...input, journal, trigger: 'schema_unreadable' })
-    }
+    return { journal, recovery: await rehydrateOrClose(input, journal, 'schema_unreadable') }
   }
   const journal = await openAgentSessionJournal({
     identity: input.identity,
@@ -73,9 +70,29 @@ export async function openAgentSessionJournalWithRecovery(input: {
   if (!probe?.corrupt) {
     return { journal, recovery: null }
   }
-  // `open()` quarantines the unusable suffix; a successful import rolls once
-  // more so the rebuilt timeline is the only content of its epoch.
-  return { journal, recovery: await rehydrate({ ...input, journal, trigger: 'journal_corrupt' }) }
+  // `open()` drops the unusable suffix; a successful import rolls once more so
+  // the rebuilt timeline is the only content of its epoch.
+  return { journal, recovery: await rehydrateOrClose(input, journal, 'journal_corrupt') }
+}
+
+/** `importLegacyTranscriptIntoJournal` can THROW rather than report `ok: false`
+ *  — a journal write failure, for instance — and nothing else holds a reference
+ *  to the journal this function just opened. */
+async function rehydrateOrClose(
+  input: {
+    identity: AgentSessionJournalIdentity
+    fence: number
+    historyFilePath?: string | null
+  },
+  journal: AgentSessionJournal,
+  trigger: AgentSessionJournalRecovery['trigger']
+): Promise<AgentSessionJournalRecovery> {
+  try {
+    return await rehydrate({ ...input, journal, trigger })
+  } catch (error) {
+    await journal.close().catch(() => undefined)
+    throw error
+  }
 }
 
 async function rehydrate(input: {

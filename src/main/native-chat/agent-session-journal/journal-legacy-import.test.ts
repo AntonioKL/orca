@@ -2,7 +2,7 @@
 // results by identity read off the same raw lines. Fixtures are shaped like the
 // files the providers actually write.
 
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -451,8 +451,7 @@ describe('payload bounds on import', () => {
     ])
     const journal = await open('claude', CLAUDE_SESSION, {
       journalDir,
-      limits,
-      autoCompact: false
+      limits
     })
 
     await importLegacyTranscriptIntoJournal({
@@ -508,8 +507,7 @@ describe('payload bounds on import', () => {
     ])
     const journal = await open('claude', CLAUDE_SESSION, {
       journalDir,
-      limits,
-      autoCompact: false
+      limits
     })
 
     await importLegacyTranscriptIntoJournal({
@@ -541,14 +539,10 @@ describe('payload bounds on import', () => {
     const limits = {
       ...DEFAULT_JOURNAL_PAYLOAD_LIMITS,
       inlineHeadBytes: 128,
-      maxSessionBytes: 8_000
+      maxSessionBytes: 1024 * 1024
     }
-    const journal = await open('codex', CODEX_SESSION, {
-      journalDir,
-      limits,
-      autoCompact: false
-    })
-    const output = 'z'.repeat(12_000)
+    const journal = await open('codex', CODEX_SESSION, { journalDir, limits })
+    const output = 'z'.repeat(4 * 1024 * 1024)
     const bounded = boundPayload(output, limits)
 
     await expect(
@@ -567,10 +561,16 @@ describe('payload bounds on import', () => {
           }
         ]
       })
-    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
+    ).resolves.toBe(1)
 
+    // The oversized remainder never reaches disk, and the item that lands says
+    // so instead of silently claiming a truncated output is the whole thing.
     expect(await readJournalBlob(journalDir, bounded.digest)).toBeNull()
-    expect(journal.snapshot().items).toEqual([])
+    expect(journal.snapshot().items.map((item) => item.body.kind)).toEqual(['tool-call', 'status'])
+    expect(journal.snapshot().items.at(-1)?.body).toMatchObject({
+      kind: 'status',
+      text: 'The tool completed, but its output could not be retained within the session storage limit.'
+    })
   })
 })
 
@@ -579,8 +579,7 @@ describe('import failures', () => {
     const journalDir = join(root, 'oversized-source-journal')
     const journal = await open('claude', CLAUDE_SESSION, {
       journalDir,
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 256 * 1024 * 1024 },
-      autoCompact: false
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 256 * 1024 * 1024 }
     })
     const filePath = join(root, 'oversized-source.jsonl')
     await writeFile(filePath, 'x'.repeat(16 * 1024 * 1024 + 1), 'utf8')
@@ -603,7 +602,7 @@ describe('import failures', () => {
   })
 
   it('keeps the live epoch intact when a staged rebuild runs out of budget', async () => {
-    const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 2_000 }
+    const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 1024 * 1024 }
     const journal = await open('codex', CODEX_SESSION, { limits })
     await appendLegacyTranscriptMessages({
       journal,
@@ -627,16 +626,11 @@ describe('import failures', () => {
       {
         type: 'event_msg',
         timestamp: '2026-08-05T10:00:03.000Z',
-        payload: { type: 'agent_message', message: 'x'.repeat(2_000) }
+        payload: { type: 'agent_message', message: 'x'.repeat(4 * 1024 * 1024) }
       }
     ])
     const epoch = journal.epoch
-    const snapshotPath = join(root, 'snapshot.json')
-    const logPath = join(root, 'log.jsonl')
-    const before = {
-      snapshot: await readFile(snapshotPath, 'utf-8'),
-      log: await readFile(logPath, 'utf-8')
-    }
+    const before = journal.snapshot()
 
     await expect(
       importLegacyTranscriptIntoJournal({
@@ -648,8 +642,8 @@ describe('import failures', () => {
       })
     ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
     expect(journal.epoch).toBe(epoch)
-    expect(await readFile(snapshotPath, 'utf-8')).toBe(before.snapshot)
-    expect(await readFile(logPath, 'utf-8')).toBe(before.log)
+    // The refused replacement rolled back whole: the live epoch is byte-identical.
+    expect(journal.snapshot()).toEqual(before)
     expect(journal.snapshot().items[0]?.body).toMatchObject({
       kind: 'message',
       blocks: [{ type: 'text', text: 'keep me' }]
@@ -661,14 +655,10 @@ describe('import failures', () => {
     const limits = {
       ...DEFAULT_JOURNAL_PAYLOAD_LIMITS,
       inlineHeadBytes: 128,
-      maxSessionBytes: 8_000
+      maxSessionBytes: 1024 * 1024
     }
-    const journal = await open('claude', CLAUDE_SESSION, {
-      journalDir,
-      limits,
-      autoCompact: false
-    })
-    const output = 'q'.repeat(12_000)
+    const journal = await open('claude', CLAUDE_SESSION, { journalDir, limits })
+    const output = 'q'.repeat(4 * 1024 * 1024)
     const bounded = boundPayload(output, limits)
     const filePath = await writeFixture('oversized-tool-result.jsonl', [
       {
@@ -698,9 +688,9 @@ describe('import failures', () => {
 
     expect(journal.epoch).toBe(epoch)
     expect(await readJournalBlob(journalDir, bounded.digest)).toBeNull()
-    expect((await readdir(journalDir)).some((name) => name.startsWith('.epoch-replacement-'))).toBe(
-      false
-    )
+    // A ROLLBACK covers rows and nothing at all for files: the blobs written
+    // ahead of the refused transaction must be removed by hand.
+    expect(await readdir(join(journalDir, JOURNAL_BLOB_DIR)).catch(() => [])).toEqual([])
   })
 
   it('bounds oversized legacy tool-call input before journal publication', async () => {
@@ -708,8 +698,7 @@ describe('import failures', () => {
     const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, inlineHeadBytes: 64 }
     const journal = await open('claude', CLAUDE_SESSION, {
       journalDir,
-      limits,
-      autoCompact: false
+      limits
     })
     const filePath = await writeFixture('oversized-tool-input.jsonl', [
       {

@@ -1,18 +1,25 @@
+// Republishing an epoch is ONE transaction, and blobs are the half a ROLLBACK
+// does not cover.
+
 import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type {
   AgentJournalItemBody,
+  AgentJournalItemIdentity,
   AgentSessionJournalIdentity
 } from '../../../shared/agent-session-journal-types'
-import { DEFAULT_JOURNAL_COMPACTION_POLICY } from './journal-compaction'
-import { replaceJournalEpoch } from './journal-epoch-replacement'
 import { putJournalBlob, readJournalBlob } from './journal-blob-store'
+import { openJournalDatabase, type OpenJournalDatabase } from './journal-database'
+import { replaceJournalEpoch } from './journal-epoch-replacement'
+import type { JournalLoad } from './journal-open'
+import { journalDatabaseFile } from './journal-paths'
 import { boundPayload, DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
 import { journalDirectoryBytes } from './journal-physical-quota'
+import { readJournalEpochRows, readJournalSessionEpoch } from './journal-row-table'
+import { createTrackedJournalOpener } from './journal-store-test-open'
 import { JournalAppendBudget } from './journal-write-guards'
-import { openAgentSessionJournal } from './journal-store-factory'
 
 const IDENTITY: AgentSessionJournalIdentity = {
   sessionId: 'session-1',
@@ -24,150 +31,151 @@ const IDENTITY: AgentSessionJournalIdentity = {
 
 let root: string
 let clock = 1_000
-
-beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'orca-journal-replace-'))
-  clock = 1_000
-})
-
-afterEach(async () => {
-  await rm(root, { recursive: true, force: true })
-})
+let database: OpenJournalDatabase
+const journals = createTrackedJournalOpener()
 
 function now(): number {
   clock += 1
   return clock
 }
 
-function toolBody(output: ReturnType<typeof boundPayload>): AgentJournalItemBody {
-  return {
-    kind: 'tool-call',
-    name: 'shell',
-    input: {},
-    state: 'completed',
-    output
-  }
+function item(ordinal: number): AgentJournalItemIdentity {
+  return { provider: 'codex', threadId: 'thread-1', turnId: 'turn-1', ordinal }
 }
 
+function toolBody(output: ReturnType<typeof boundPayload>): AgentJournalItemBody {
+  return { kind: 'tool-call', name: 'shell', input: {}, state: 'completed', output }
+}
+
+function replace(input: {
+  items: Parameters<typeof replaceJournalEpoch>[0]['items']
+  maxSessionBytes?: number
+  onPublished?: (loaded: JournalLoad) => void
+}): Promise<void> {
+  return replaceJournalEpoch({
+    db: database.db,
+    pageSize: database.pageSize,
+    journalDir: root,
+    dbPath: journalDatabaseFile(root),
+    identity: IDENTITY,
+    reason: 'legacy_import',
+    fence: 1,
+    items: input.items,
+    budget: new JournalAppendBudget(IDENTITY.sessionId, {
+      ...DEFAULT_JOURNAL_PAYLOAD_LIMITS,
+      ...(input.maxSessionBytes === undefined ? {} : { maxSessionBytes: input.maxSessionBytes })
+    }),
+    now,
+    mintEpoch: () => `epoch-${clock}`,
+    onPublished: input.onPublished ?? (() => undefined)
+  })
+}
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), 'orca-journal-replace-'))
+  clock = 1_000
+  database = openJournalDatabase(journalDatabaseFile(root))
+})
+
+afterEach(async () => {
+  try {
+    database.db.close()
+  } catch {
+    // Already closed by the case.
+  }
+  await journals.closeAll()
+  await rm(root, { recursive: true, force: true })
+})
+
 describe('journal epoch replacement', () => {
-  it('publishes one observable replacement and prunes stale root blobs afterward', async () => {
+  it('publishes one observable replacement and prunes stale blobs afterward', async () => {
     const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, inlineHeadBytes: 8 }
     const stalePayload = 'stale'.repeat(1_000)
     const retainedPayload = 'retained'.repeat(1_000)
     const stale = boundPayload(stalePayload, limits)
     const retained = boundPayload(retainedPayload, limits)
-    const published: unknown[] = []
     await putJournalBlob(root, stale.digest, stalePayload)
+    const published: JournalLoad[] = []
 
-    await replaceJournalEpoch({
-      journalDir: root,
-      identity: IDENTITY,
-      reason: 'handle_forked',
-      fence: 2,
+    await replace({
       items: [
         {
-          identity: { provider: 'codex', threadId: 'thread-1', turnId: 'turn-1', ordinal: 0 },
+          identity: item(1),
           body: toolBody(retained),
           blobs: [{ digest: retained.digest, payload: retainedPayload }]
         }
       ],
-      budget: new JournalAppendBudget(IDENTITY.sessionId, {
-        ...limits,
-        maxSessionBytes: 512 * 1024
-      }),
-      compaction: DEFAULT_JOURNAL_COMPACTION_POLICY,
-      now,
-      mintEpoch: () => 'epoch-new',
-      onSnapshotPublished: (loaded) => published.push(loaded)
+      onPublished: (loaded) => published.push(loaded)
     })
 
     expect(published).toHaveLength(1)
-    expect(await readJournalBlob(root, stale.digest)).toBeNull()
     expect(await readJournalBlob(root, retained.digest)).toBe(retainedPayload)
-    expect((published[0] as { sizeBytes: number }).sizeBytes).toBe(
-      await journalDirectoryBytes(root)
-    )
+    expect(await readJournalBlob(root, stale.digest)).toBeNull()
+    expect(await readdir(join(root, 'blobs'))).toEqual([retained.digest])
+    const epoch = readJournalSessionEpoch(database.db, IDENTITY.sessionId)
+    expect(epoch).toBe(published[0]?.state.epoch)
+    expect(readJournalEpochRows(database.db, IDENTITY.sessionId, epoch ?? '')).toHaveLength(2)
   })
 
-  it('keeps root blobs and reports no publication when replacement never becomes authoritative', async () => {
-    const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, inlineHeadBytes: 8, maxSessionBytes: 6_000 }
-    const stalePayload = 'stale'.repeat(500)
-    const stale = boundPayload(stalePayload, limits)
-    const published: unknown[] = []
-    await putJournalBlob(root, stale.digest, stalePayload)
+  it('discards every superseded row in the same transaction', async () => {
+    const journal = await journals.open({ identity: IDENTITY, journalDir: root })
+    await journal.appendItem(item(1), { kind: 'status', text: 'old' }, { fence: 1 })
+    await journal.appendItem(item(2), { kind: 'status', text: 'older' }, { fence: 1 })
+    const before = journal.epoch
+
+    await journal.replaceEpochItems('legacy_import', 1, [
+      { identity: item(9), body: { kind: 'status', text: 'republished' } }
+    ])
+
+    expect(journal.epoch).not.toBe(before)
+    expect(readJournalEpochRows(database.db, IDENTITY.sessionId, before)).toHaveLength(0)
+    expect(journal.snapshot().items.map((entry) => entry.body)).toEqual([
+      { kind: 'status', text: 'republished' }
+    ])
+  })
+
+  it('rolls back and cleans its orphan blobs when the transaction cannot be admitted', async () => {
+    const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, inlineHeadBytes: 8 }
+    const keptPayload = 'kept'.repeat(1_000)
+    const kept = boundPayload(keptPayload, limits)
+    await putJournalBlob(root, kept.digest, keptPayload)
+    const oversizedPayload = 'o'.repeat(4 * 1024 * 1024)
+    const oversized = boundPayload(oversizedPayload, limits)
+    const published: JournalLoad[] = []
+    const before = await journalDirectoryBytes(root)
 
     await expect(
-      replaceJournalEpoch({
-        journalDir: root,
-        identity: IDENTITY,
-        reason: 'handle_forked',
-        fence: 2,
+      replace({
+        maxSessionBytes: 1024 * 1024,
         items: [
           {
-            identity: { provider: 'codex', threadId: 'thread-1', turnId: 'turn-1', ordinal: 0 },
-            body: {
-              kind: 'message',
-              role: 'assistant',
-              blocks: [{ type: 'text', text: 'x'.repeat(10_000) }]
-            }
+            identity: item(1),
+            body: toolBody(oversized),
+            blobs: [{ digest: oversized.digest, payload: oversizedPayload }]
           }
         ],
-        budget: new JournalAppendBudget(IDENTITY.sessionId, limits),
-        compaction: DEFAULT_JOURNAL_COMPACTION_POLICY,
-        now,
-        mintEpoch: () => 'epoch-new',
-        onSnapshotPublished: (loaded) => published.push(loaded)
+        onPublished: (loaded) => published.push(loaded)
       })
     ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
 
     expect(published).toHaveLength(0)
-    expect(await readJournalBlob(root, stale.digest)).toBe(stalePayload)
-    expect((await readdir(root)).some((name) => name.startsWith('.epoch-replacement-'))).toBe(false)
+    expect(await readJournalBlob(root, oversized.digest)).toBeNull()
+    // The blob that was already there is untouched — the rollback returns the
+    // directory to its pre-replacement state and no further.
+    expect(await readJournalBlob(root, kept.digest)).toBe(keptPayload)
+    expect(await journalDirectoryBytes(root)).toBeLessThanOrEqual(before)
   })
 
-  it('charges replacement blobs cumulatively and rolls back staging on quota refusal', async () => {
-    const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, inlineHeadBytes: 8, maxSessionBytes: 7_000 }
-    const journal = await openAgentSessionJournal({
-      identity: IDENTITY,
-      journalDir: root,
-      limits,
-      autoCompact: false,
-      now,
-      mintEpoch: () => `epoch-${clock}`
+  it('charges the whole multi-row transaction, not one row at a time', async () => {
+    const items = Array.from({ length: 40 }, (_, index) => ({
+      identity: item(index),
+      body: { kind: 'status' as const, text: 'x'.repeat(30_000) }
+    }))
+
+    await expect(replace({ maxSessionBytes: 1024 * 1024, items })).rejects.toMatchObject({
+      code: 'journal_bound_exceeded'
     })
-    const existingPayload = 'existing'.repeat(250)
-    const existing = boundPayload(existingPayload, limits)
-    await journal.appendItemWithBlobs(
-      { provider: 'codex', threadId: 'thread-1', turnId: 'turn-1', ordinal: 0 },
-      toolBody(existing),
-      [{ digest: existing.digest, payload: existingPayload }],
-      { fence: 1 }
-    )
-
-    const replacementPayload = 'replacement'.repeat(200)
-    const replacement = boundPayload(replacementPayload, limits)
-    const secondPayload = 'second'.repeat(200)
-    const second = boundPayload(secondPayload, limits)
-    await expect(
-      journal.replaceEpochItems('handle_forked', 2, [
-        {
-          identity: { provider: 'codex', threadId: 'thread-1', turnId: 'turn-1', ordinal: 1 },
-          body: toolBody(replacement),
-          blobs: [{ digest: replacement.digest, payload: replacementPayload }]
-        },
-        {
-          identity: { provider: 'codex', threadId: 'thread-1', turnId: 'turn-1', ordinal: 2 },
-          body: toolBody(second),
-          blobs: [{ digest: second.digest, payload: secondPayload }]
-        }
-      ])
-    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
-
-    expect(journal.epoch).toMatch(/^epoch-/)
-    expect(await readJournalBlob(root, existing.digest)).toBe(existingPayload)
-    expect(await readJournalBlob(root, replacement.digest)).toBeNull()
-    expect(await readJournalBlob(root, second.digest)).toBeNull()
-    expect((await readdir(root)).some((name) => name.startsWith('.epoch-replacement-'))).toBe(false)
-    expect(await journalDirectoryBytes(root)).toBeLessThanOrEqual(limits.maxSessionBytes)
+    expect(readJournalSessionEpoch(database.db, IDENTITY.sessionId)).toBeNull()
+    expect(await journalDirectoryBytes(root)).toBeLessThanOrEqual(1024 * 1024)
   })
 })

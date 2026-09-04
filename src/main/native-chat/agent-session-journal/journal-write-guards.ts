@@ -4,7 +4,6 @@
 // missing from the transcript with nothing to explain it.
 
 import type { JournalPayloadLimits } from './journal-payload-bounds'
-import { journalRowByteLength, type JournalRow } from './journal-row-schema'
 
 export class AgentSessionJournalError extends Error {
   constructor(
@@ -12,7 +11,8 @@ export class AgentSessionJournalError extends Error {
       | 'journal_read_only'
       | 'journal_stale_fence'
       | 'journal_bound_exceeded'
-      | 'journal_rate_exceeded',
+      | 'journal_rate_exceeded'
+      | 'journal_closed',
     message: string
   ) {
     super(message)
@@ -74,12 +74,14 @@ export class JournalAppendBudget {
     this.appendsInWindow = checkpoint.appendsInWindow
   }
 
-  wouldExceedSize(row: JournalRow, sizeBytes: number): boolean {
-    return sizeBytes + journalRowByteLength(row) > this.limits.maxSessionBytes
+  /** `rowCostBytes` is the transaction's physical page charge, not the row's
+   *  JSON length: under SQLite those are different numbers (§ physical quota). */
+  wouldExceedSize(rowCostBytes: number, sizeBytes: number): boolean {
+    return sizeBytes + rowCostBytes > this.limits.maxSessionBytes
   }
 
-  assert(row: JournalRow, ts: number, sizeBytes: number): void {
-    if (this.wouldExceedSize(row, sizeBytes)) {
+  assert(rowCostBytes: number, ts: number, sizeBytes: number): void {
+    if (this.wouldExceedSize(rowCostBytes, sizeBytes)) {
       throw new AgentSessionJournalError(
         'journal_bound_exceeded',
         `agent-session journal for ${this.sessionId} reached its ${this.limits.maxSessionBytes}-byte bound`
@@ -89,14 +91,14 @@ export class JournalAppendBudget {
   }
 
   /** Lifecycle capacity cannot bypass the session-wide append rate. */
-  assertLifecycle(row: JournalRow, sizeBytes: number): void {
-    if (this.wouldExceedSize(row, sizeBytes)) {
+  assertLifecycle(rowCostBytes: number, ts: number, sizeBytes: number): void {
+    if (this.wouldExceedSize(rowCostBytes, sizeBytes)) {
       throw new AgentSessionJournalError(
         'journal_bound_exceeded',
         `agent-session journal for ${this.sessionId} reached its ${this.limits.maxSessionBytes}-byte bound`
       )
     }
-    this.assertRate(row.ts)
+    this.assertRate(ts)
   }
 
   /**
@@ -104,8 +106,8 @@ export class JournalAppendBudget {
    * rows still observe the physical quota, but do not spend ordinary window
    * rate headroom that may be needed by unrelated traffic.
    */
-  assertReservedLifecycle(row: JournalRow, sizeBytes: number): void {
-    if (this.wouldExceedSize(row, sizeBytes)) {
+  assertReservedLifecycle(rowCostBytes: number, sizeBytes: number): void {
+    if (this.wouldExceedSize(rowCostBytes, sizeBytes)) {
       throw new AgentSessionJournalError(
         'journal_bound_exceeded',
         `agent-session journal for ${this.sessionId} reached its ${this.limits.maxSessionBytes}-byte bound`

@@ -2,6 +2,7 @@ import type {
   AgentJournalItemBody,
   AgentJournalSnapshot
 } from '../../../shared/agent-session-journal-types'
+import { journalTxnPhysicalCost } from './journal-database-space'
 
 export type JournalLifecycleReservation = {
   id: string
@@ -9,9 +10,15 @@ export type JournalLifecycleReservation = {
   appendSlots: number
 }
 
+// Logical budgets. Every use site converts them through `journalTxnPhysicalCost`
+// so a token covers the PAGE cost of the row it was granted for.
 export const JOURNAL_TURN_TERMINAL_RESERVATION_BYTES = 128 * 1024
 export const JOURNAL_ITEM_TERMINAL_RESERVATION_BYTES = 64 * 1024
 export const JOURNAL_DISPATCH_RESERVATION_BYTES = 32 * 1024
+
+export function journalReservationPhysicalBytes(logicalBytes: number, pageSize: number): number {
+  return journalTxnPhysicalCost([logicalBytes], pageSize)
+}
 
 export class JournalLifecycleCapacity {
   private readonly reservations = new Map<string, JournalLifecycleReservation>()
@@ -101,7 +108,8 @@ export class JournalLifecycleCapacity {
     snapshot: AgentJournalSnapshot,
     maxBytes: number,
     currentPhysicalBytes: number,
-    maxAppendSlots = Number.MAX_SAFE_INTEGER
+    maxAppendSlots = Number.MAX_SAFE_INTEGER,
+    pageSize = 4096
   ): boolean {
     this.reservations.clear()
     for (const item of snapshot.items) {
@@ -112,7 +120,7 @@ export class JournalLifecycleCapacity {
         !this.reserve(
           {
             id: lifecycleReservationIdForItem(item.itemId),
-            bytes: terminalReservationBytes(item.body),
+            bytes: terminalReservationBytes(item.body, pageSize),
             appendSlots: 1
           },
           currentPhysicalBytes,
@@ -135,7 +143,7 @@ export class JournalLifecycleCapacity {
         !this.reserve(
           {
             id: dispatchReservationId(submission.clientMessageId),
-            bytes: JOURNAL_DISPATCH_RESERVATION_BYTES,
+            bytes: journalReservationPhysicalBytes(JOURNAL_DISPATCH_RESERVATION_BYTES, pageSize),
             appendSlots: 1
           },
           currentPhysicalBytes,
@@ -149,7 +157,10 @@ export class JournalLifecycleCapacity {
         !this.reserve(
           {
             id: tentativeTurnReservationId(submission.clientMessageId),
-            bytes: JOURNAL_TURN_TERMINAL_RESERVATION_BYTES,
+            bytes: journalReservationPhysicalBytes(
+              JOURNAL_TURN_TERMINAL_RESERVATION_BYTES,
+              pageSize
+            ),
             appendSlots: 1
           },
           currentPhysicalBytes,
@@ -186,8 +197,11 @@ export function requiresTerminalSettlement(body: AgentJournalItemBody): boolean 
   return body.kind === 'status' && body.turnLifecycle?.state === 'running'
 }
 
-export function terminalReservationBytes(body: AgentJournalItemBody): number {
-  return body.kind === 'status' && body.turnLifecycle?.state === 'running'
-    ? JOURNAL_TURN_TERMINAL_RESERVATION_BYTES
-    : JOURNAL_ITEM_TERMINAL_RESERVATION_BYTES
+export function terminalReservationBytes(body: AgentJournalItemBody, pageSize = 4096): number {
+  return journalReservationPhysicalBytes(
+    body.kind === 'status' && body.turnLifecycle?.state === 'running'
+      ? JOURNAL_TURN_TERMINAL_RESERVATION_BYTES
+      : JOURNAL_ITEM_TERMINAL_RESERVATION_BYTES,
+    pageSize
+  )
 }

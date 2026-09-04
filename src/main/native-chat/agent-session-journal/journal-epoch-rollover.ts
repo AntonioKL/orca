@@ -1,21 +1,38 @@
 // Opening a new epoch.
 //
-// The snapshot is what names the live epoch, so it is published BEFORE the log
-// is reset. A crash mid-rollover therefore leaves stale-epoch rows behind the
-// new snapshot, which `loadJournal` drops — the reverse order would leave a
-// journal whose log no longer matches any epoch anyone can name.
+// One transaction: discard every row of the superseded epoch, insert the new
+// epoch row at sequence 1, and move the session projection onto it. Superseded
+// rows are DELETED rather than retained — retaining them would grow the file
+// against the physical bound forever, with nothing that ever sheds them.
 
 import { AGENT_SESSION_JOURNAL_SCHEMA_VERSION } from '../../../shared/agent-session-journal-types'
 import type { AgentSessionProviderHandle } from '../../../shared/agent-session-journal-types'
-import { compactJournal } from './journal-compaction'
-import { applyJournalRow, createJournalReducerState } from './journal-reducer'
-import type { AgentJournalEpochReason, JournalRow } from './journal-row-schema'
-import { journalRowByteLength } from './journal-row-schema'
+import type Database from '../../sqlite/sync-database'
+import {
+  checkpointJournalWal,
+  journalReclaimBandBytes,
+  journalTxnPhysicalCost,
+  journalWalBytes,
+  reclaimJournalDatabaseSpace
+} from './journal-database-space'
 import type { JournalLoad } from './journal-open'
 import { DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
+import { journalDirectoryBytes } from './journal-physical-quota'
+import { applyJournalRow, createJournalReducerState } from './journal-reducer'
+import {
+  deleteAllJournalRows,
+  insertJournalRow,
+  upsertJournalSessionRow
+} from './journal-row-table'
+import { journalRowByteLength } from './journal-row-schema'
+import type { AgentJournalEpochReason, JournalRow } from './journal-row-schema'
+import { AgentSessionJournalError } from './journal-write-guards'
 
 export async function publishNewEpoch(input: {
+  db: Database.Database
+  pageSize: number
   journalDir: string
+  dbPath: string
   sessionId: string
   providerHandle: AgentSessionProviderHandle
   epoch: string
@@ -34,25 +51,64 @@ export async function publishNewEpoch(input: {
     fence: input.fence,
     ts: input.now
   }
-  const state = createJournalReducerState(input.sessionId, input.epoch)
-  await compactJournal({
+  const maxSessionBytes = input.maxSessionBytes ?? DEFAULT_JOURNAL_PAYLOAD_LIMITS.maxSessionBytes
+  await assertEpochTransactionFits({ ...input, maxSessionBytes, rows: [row] })
+
+  input.db.exec('BEGIN IMMEDIATE')
+  try {
+    deleteAllJournalRows(input.db)
+    insertJournalRow(input.db, input.sessionId, row)
+    upsertJournalSessionRow(input.db, input.sessionId, input.epoch, input.now)
+    input.db.exec('COMMIT')
+  } catch (error) {
+    input.db.exec('ROLLBACK')
+    throw error
+  }
+  // Without reclamation the discarded pages sit on the freelist and the file
+  // stays exactly as large as it was.
+  checkpointJournalWal(input.db)
+  await reclaimJournalDatabaseSpace({
+    db: input.db,
     journalDir: input.journalDir,
-    state,
-    tailRows: [row],
-    policy: { minTailRows: 1, retainTailMs: Number.POSITIVE_INFINITY },
-    now: input.now,
-    maxSessionBytes: input.maxSessionBytes ?? DEFAULT_JOURNAL_PAYLOAD_LIMITS.maxSessionBytes,
-    sessionId: input.sessionId
+    dbPath: input.dbPath,
+    maxBytes: maxSessionBytes,
+    pageSize: input.pageSize
   })
+
+  const state = createJournalReducerState(input.sessionId, input.epoch)
   applyJournalRow(state, row)
   state.oldestSequence = 1
   return {
     state,
-    tailRows: [row],
-    compactedThrough: 0,
     readOnly: false,
     corrupt: false,
     malformedRows: 0,
-    sizeBytes: journalRowByteLength(row)
+    sizeBytes: await journalDirectoryBytes(input.journalDir)
+  }
+}
+
+/** Charges the candidate transaction's own page cost, plus the band the
+ *  shrinking operations need and any WAL a blocked checkpoint deferred. */
+export async function assertEpochTransactionFits(input: {
+  journalDir: string
+  dbPath: string
+  sessionId: string
+  pageSize: number
+  maxSessionBytes: number
+  rows: readonly JournalRow[]
+  additionalBytes?: number
+}): Promise<void> {
+  const measured = await journalDirectoryBytes(input.journalDir)
+  const projected =
+    measured +
+    (input.additionalBytes ?? 0) +
+    journalTxnPhysicalCost(input.rows.map(journalRowByteLength), input.pageSize) +
+    journalReclaimBandBytes(measured, input.pageSize) +
+    (await journalWalBytes(input.dbPath))
+  if (projected > input.maxSessionBytes) {
+    throw new AgentSessionJournalError(
+      'journal_bound_exceeded',
+      `agent-session journal for ${input.sessionId} reached its ${input.maxSessionBytes}-byte physical bound`
+    )
   }
 }

@@ -5,11 +5,13 @@ import type {
 import {
   dispatchReservationId,
   JournalLifecycleCapacity,
+  journalReservationPhysicalBytes,
   lifecycleReservationIdForItem,
   requiresTerminalSettlement,
   terminalReservationBytes,
   type JournalLifecycleReservation
 } from './journal-lifecycle-capacity'
+import { journalTxnPhysicalCost } from './journal-database-space'
 import type { JournalRow } from './journal-row-schema'
 import { journalRowByteLength } from './journal-row-schema'
 import { AgentSessionJournalError } from './journal-write-guards'
@@ -28,7 +30,11 @@ export class JournalLifecycleAdmission {
     private readonly sessionId: string,
     private readonly maxBytes: number,
     private readonly canonicalItemId: (itemId: string) => string,
-    private readonly maxAppendSlots = Number.MAX_SAFE_INTEGER
+    private readonly maxAppendSlots = Number.MAX_SAFE_INTEGER,
+    /** Page size of the session's database. Reservations are granted in the
+     *  same currency the write path is charged in, so a granted token always
+     *  covers the write it promised. */
+    private readonly pageSize: () => number = () => 4096
   ) {}
 
   get state(): { reservedBytes: number; reservedAppendSlots: number } {
@@ -40,14 +46,27 @@ export class JournalLifecycleAdmission {
 
   rebuild(snapshot: AgentJournalSnapshot, currentPhysicalBytes: number): void {
     if (
-      !this.capacity.rebuild(snapshot, this.maxBytes, currentPhysicalBytes, this.maxAppendSlots)
+      !this.capacity.rebuild(
+        snapshot,
+        this.maxBytes,
+        currentPhysicalBytes,
+        this.maxAppendSlots,
+        this.pageSize()
+      )
     ) {
       throw this.capacityError('cannot rebuild lifecycle capacity')
     }
   }
 
+  /** Callers reserve in LOGICAL bytes; the token is held in the page currency
+   *  the write path is charged in, so a granted token covers its own write. */
   reserve(token: JournalLifecycleReservation, currentPhysicalBytes: number): boolean {
-    return this.capacity.reserve(token, currentPhysicalBytes, this.maxBytes, this.maxAppendSlots)
+    return this.capacity.reserve(
+      { ...token, bytes: journalReservationPhysicalBytes(token.bytes, this.pageSize()) },
+      currentPhysicalBytes,
+      this.maxBytes,
+      this.maxAppendSlots
+    )
   }
 
   transfer(fromId: string, toId: string): boolean {
@@ -69,7 +88,11 @@ export class JournalLifecycleAdmission {
     return {
       releaseAfter,
       protectedBytes: proposedCapacity.reservedBytes - releasedBytes,
-      lifecycleCovered: proposedCapacity.covers(releaseAfter, journalRowByteLength(row), 1),
+      lifecycleCovered: proposedCapacity.covers(
+        releaseAfter,
+        journalTxnPhysicalCost([journalRowByteLength(row)], this.pageSize()),
+        1
+      ),
       proposedCapacity
     }
   }
@@ -115,7 +138,7 @@ export class JournalLifecycleAdmission {
     }
     if (
       !capacity.reserve(
-        { id, bytes: terminalReservationBytes(body), appendSlots: 1 },
+        { id, bytes: terminalReservationBytes(body, this.pageSize()), appendSlots: 1 },
         currentPhysicalBytes,
         this.maxBytes,
         this.maxAppendSlots

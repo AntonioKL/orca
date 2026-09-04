@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentSessionJournalIdentity } from '../../../shared/agent-session-journal-types'
-import { openAgentSessionJournal } from '../agent-session-journal/journal-store-factory'
+import type { openAgentSessionJournal } from '../agent-session-journal/journal-store-factory'
+import { createTrackedJournalOpener } from '../agent-session-journal/journal-store-test-open'
 import type { StructuredAgentSessionAdapter } from './structured-agent-session-adapter'
 import {
   performCancel,
@@ -11,6 +12,10 @@ import {
   type AgentSessionTurnContext
 } from './structured-agent-session-turns'
 import { DEFAULT_JOURNAL_PAYLOAD_LIMITS } from '../agent-session-journal/journal-payload-bounds'
+import {
+  journalReservationPhysicalBytes,
+  JOURNAL_TURN_TERMINAL_RESERVATION_BYTES
+} from '../agent-session-journal/journal-lifecycle-capacity'
 
 const IDENTITY: AgentSessionJournalIdentity = {
   sessionId: 'session-1',
@@ -21,8 +26,10 @@ const IDENTITY: AgentSessionJournalIdentity = {
 }
 
 let root: string | null = null
+const journals = createTrackedJournalOpener()
 
 afterEach(async () => {
+  await journals.closeAll()
   if (root) {
     await rm(root, { recursive: true, force: true })
     root = null
@@ -32,7 +39,7 @@ afterEach(async () => {
 describe('performCancel', () => {
   it('acknowledges only the request and leaves the running lifecycle row intact', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-turn-cancel-'))
-    const journal = await openAgentSessionJournal({ identity: IDENTITY, journalDir: root })
+    const journal = await journals.open({ identity: IDENTITY, journalDir: root })
     const lifecycleIdentity = {
       provider: 'legacy' as const,
       agent: 'codex' as const,
@@ -81,10 +88,10 @@ describe('performCancel', () => {
 describe('performSend lifecycle capacity', () => {
   it('refuses before provider contact when dispatch plus terminal capacity cannot fit', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-turn-capacity-'))
-    const journal = await openAgentSessionJournal({
+    const journal = await journals.open({
       identity: IDENTITY,
       journalDir: root,
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 100 * 1024 }
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 768 * 1024 }
     })
     const dispatch = vi.fn()
     const ctx = turnContext(journal, { dispatch } as unknown as StructuredAgentSessionAdapter)
@@ -103,10 +110,10 @@ describe('performSend lifecycle capacity', () => {
 
   it('binds a synchronous turn start to tentative capacity and releases only on terminality', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-turn-capacity-'))
-    const journal = await openAgentSessionJournal({
+    const journal = await journals.open({
       identity: IDENTITY,
       journalDir: root,
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 400 * 1024 }
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 4 * 1024 * 1024 }
     })
     const turnIdentity = {
       provider: 'legacy' as const,
@@ -144,7 +151,7 @@ describe('performSend lifecycle capacity', () => {
 
     expect(result).toMatchObject({ ok: true })
     expect(journal.lifecycleCapacityState()).toEqual({
-      reservedBytes: 128 * 1024,
+      reservedBytes: journalReservationPhysicalBytes(JOURNAL_TURN_TERMINAL_RESERVATION_BYTES, 4096),
       reservedAppendSlots: 1
     })
     await journal.appendLifecycleBatch({
@@ -157,10 +164,10 @@ describe('performSend lifecycle capacity', () => {
 
   it('keeps response-before-start capacity on the Codex turn lifecycle identity', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-turn-capacity-'))
-    const journal = await openAgentSessionJournal({
+    const journal = await journals.open({
       identity: IDENTITY,
       journalDir: root,
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 220 * 1024 }
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 4 * 1024 * 1024 }
     })
     const turnIdentity = {
       provider: 'legacy' as const,
@@ -212,10 +219,10 @@ describe('performSend lifecycle capacity', () => {
 
   it('transfers non-Codex reservations so repeated sends can settle without leaking capacity', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-turn-capacity-'))
-    const journal = await openAgentSessionJournal({
+    const journal = await journals.open({
       identity: IDENTITY,
       journalDir: root,
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 220 * 1024 }
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 4 * 1024 * 1024 }
     })
     const dispatch = vi.fn(async ({ clientMessageId }: { clientMessageId: string }) => ({
       state: 'accepted' as const,

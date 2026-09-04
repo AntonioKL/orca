@@ -162,9 +162,16 @@ export async function attachJournal(input: {
     fence,
     historyFilePath
   })
-  return {
-    ...opened,
-    unconfirmedClientMessageIds: await opened.journal.markPendingSubmissionsUnknown(fence)
+  try {
+    // That await is a WRITE. A failure in it leaves the journal with no caller
+    // holding a reference to close it.
+    return {
+      ...opened,
+      unconfirmedClientMessageIds: await opened.journal.markPendingSubmissionsUnknown(fence)
+    }
+  } catch (error) {
+    await opened.journal.close().catch(() => undefined)
+    throw error
   }
 }
 

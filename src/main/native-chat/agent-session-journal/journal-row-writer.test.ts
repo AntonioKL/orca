@@ -1,3 +1,9 @@
+// The write path's transaction and its reservation rollback.
+//
+// A transaction either commits or does not, so the old "a post-append failure
+// makes durability ambiguous" latch has nothing left to latch on: every case
+// that used to assert the latch now asserts the rollback instead.
+
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -5,55 +11,64 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentJournalItemBody } from '../../../shared/agent-session-journal-types'
 import { AGENT_SESSION_JOURNAL_SCHEMA_VERSION } from '../../../shared/agent-session-journal-types'
 import { readJournalBlob } from './journal-blob-store'
-import { appendJournalRows } from './journal-log-file'
+import { openJournalDatabase, type OpenJournalDatabase } from './journal-database'
+import { journalTxnPhysicalCost } from './journal-database-space'
 import { JournalLifecycleAdmission } from './journal-lifecycle-admission'
-import { JOURNAL_ITEM_TERMINAL_RESERVATION_BYTES } from './journal-lifecycle-capacity'
-import { loadJournal } from './journal-open'
+import {
+  journalReservationPhysicalBytes,
+  JOURNAL_ITEM_TERMINAL_RESERVATION_BYTES
+} from './journal-lifecycle-capacity'
+import { journalDatabaseFile } from './journal-paths'
 import { boundPayload, DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
+import { journalDirectoryBytes } from './journal-physical-quota'
+import {
+  insertJournalRow,
+  readJournalEpochRows,
+  upsertJournalSessionRow
+} from './journal-row-table'
 import { journalRowByteLength, type JournalRow } from './journal-row-schema'
 import { JournalRowWriter } from './journal-row-writer'
 import { JournalAppendBudget } from './journal-write-guards'
 
 const SESSION_ID = 'session-1'
+const EPOCH = 'epoch-1'
 
 function row(seq: number, ts: number): JournalRow {
   return {
     v: AGENT_SESSION_JOURNAL_SCHEMA_VERSION,
-    epoch: 'epoch-1',
+    epoch: EPOCH,
     seq,
     fence: 0,
     ts,
     kind: 'item',
     itemId: 'item-1',
     revision: 1,
-    body: { kind: 'status', text: 'ambiguous append' }
+    body: { kind: 'status', text: 'plain append' }
   }
 }
 
 function rowWithBlob(seq: number, ts: number, output: ReturnType<typeof boundPayload>): JournalRow {
   return {
     v: AGENT_SESSION_JOURNAL_SCHEMA_VERSION,
-    epoch: 'epoch-1',
+    epoch: EPOCH,
     seq,
     fence: 0,
     ts,
     kind: 'item',
     itemId: 'item-with-blob',
     revision: 1,
-    body: {
-      kind: 'tool-call',
-      name: 'shell',
-      input: {},
-      state: 'completed',
-      output
-    }
+    body: { kind: 'tool-call', name: 'shell', input: {}, state: 'completed', output }
   }
+}
+
+function runningToolBody(): AgentJournalItemBody {
+  return { kind: 'tool-call', name: 'shell', input: {}, state: 'running' }
 }
 
 function runningToolRow(seq: number, ts: number, itemId = 'running-tool'): JournalRow {
   return {
     v: AGENT_SESSION_JOURNAL_SCHEMA_VERSION,
-    epoch: 'epoch-1',
+    epoch: EPOCH,
     seq,
     fence: 0,
     ts,
@@ -64,20 +79,24 @@ function runningToolRow(seq: number, ts: number, itemId = 'running-tool'): Journ
   }
 }
 
-function runningToolBody(): AgentJournalItemBody {
-  return { kind: 'tool-call', name: 'shell', input: {}, state: 'running' }
-}
-
-describe('journal row writer read-only latch', () => {
+describe('journal row writer', () => {
   let root: string
+  let database: OpenJournalDatabase
   let readOnly = false
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-journal-row-writer-'))
+    database = openJournalDatabase(journalDatabaseFile(root))
+    upsertJournalSessionRow(database.db, SESSION_ID, EPOCH, 1)
     readOnly = false
   })
 
   afterEach(async () => {
+    try {
+      database.db.close()
+    } catch {
+      // Already closed by the case.
+    }
     await rm(root, { recursive: true, force: true })
   })
 
@@ -89,15 +108,15 @@ describe('journal row writer read-only latch', () => {
       appendWindowMs
     })
 
-    budget.assertLifecycle(row(1, 1), 0)
-    expect(() => budget.assertLifecycle(row(2, 1), 0)).toThrow(
+    budget.assertLifecycle(1, 1, 0)
+    expect(() => budget.assertLifecycle(1, 1, 0)).toThrow(
       expect.objectContaining({ code: 'journal_rate_exceeded' })
     )
-    expect(() => budget.assertLifecycle(row(2, appendWindowMs + 1), 0)).not.toThrow()
+    expect(() => budget.assertLifecycle(1, appendWindowMs + 1, 0)).not.toThrow()
   })
 
   it('refuses lifecycle reservations once aggregate append capacity is saturated', () => {
-    const admission = new JournalLifecycleAdmission(SESSION_ID, 1_000_000, (itemId) => itemId, 2)
+    const admission = new JournalLifecycleAdmission(SESSION_ID, 100_000_000, (id) => id, 2)
     expect(admission.reserve({ id: 'first', bytes: 1, appendSlots: 1 }, 0)).toBe(true)
     expect(admission.reserve({ id: 'second', bytes: 1, appendSlots: 1 }, 0)).toBe(true)
     expect(admission.reserve({ id: 'third', bytes: 1, appendSlots: 1 }, 0)).toBe(false)
@@ -106,8 +125,6 @@ describe('journal row writer read-only latch', () => {
   function writerHarness(
     overrides: {
       limits?: typeof DEFAULT_JOURNAL_PAYLOAD_LIMITS
-      physicalBytes?: number
-      appendRows?: (journalDir: string, rows: readonly JournalRow[]) => Promise<void>
       commit?: (row: JournalRow, physicalBytes: number) => void
     } = {}
   ) {
@@ -115,141 +132,80 @@ describe('journal row writer read-only latch', () => {
     const lifecycleAdmission = new JournalLifecycleAdmission(
       SESSION_ID,
       limits.maxSessionBytes,
-      (itemId) => itemId
+      (itemId) => itemId,
+      limits.maxAppendsPerWindow,
+      () => database.pageSize
     )
-    let physicalBytes = overrides.physicalBytes ?? 0
     let nextSequence = 1
     const committedRows: JournalRow[] = []
     const writer = new JournalRowWriter({
       journalDir: root,
+      dbPath: journalDatabaseFile(root),
       sessionId: SESSION_ID,
       budget: new JournalAppendBudget(SESSION_ID, limits),
       lifecycleAdmission,
-      autoCompact: false,
-      compaction: { minTailRows: 0, retainTailMs: 0 },
       now: () => 1,
       serialize: (run) => run(),
+      database: () => database,
       readOnly: () => readOnly,
-      setReadOnly: (value) => {
-        readOnly = value
-      },
-      physicalBytes: () => physicalBytes,
       highestFence: () => 0,
       nextSequence: () => nextSequence,
-      tailRows: () => committedRows,
       referencedBlobDigests: () => new Set(),
-      compact: async () => undefined,
-      commit: (row, nextPhysicalBytes) => {
-        overrides.commit?.(row, nextPhysicalBytes)
-        committedRows.push(row)
-        physicalBytes = nextPhysicalBytes
-        nextSequence = row.seq + 1
-      },
-      ...(overrides.appendRows ? { appendRows: overrides.appendRows } : {})
+      commit: (committed, nextPhysicalBytes) => {
+        overrides.commit?.(committed, nextPhysicalBytes)
+        committedRows.push(committed)
+        nextSequence = committed.seq + 1
+      }
     })
     return { writer, lifecycleAdmission, committedRows }
   }
 
-  it('latches read-only when a post-append failure makes durability ambiguous', async () => {
-    let committed = false
-    const writer = new JournalRowWriter({
-      journalDir: root,
-      sessionId: 'session-1',
-      budget: new JournalAppendBudget('session-1', DEFAULT_JOURNAL_PAYLOAD_LIMITS),
-      lifecycleAdmission: new JournalLifecycleAdmission(
-        'session-1',
-        DEFAULT_JOURNAL_PAYLOAD_LIMITS.maxSessionBytes,
-        (itemId) => itemId
-      ),
-      autoCompact: false,
-      compaction: { minTailRows: 0, retainTailMs: 0 },
-      now: () => 1,
-      serialize: (run) => run(),
-      readOnly: () => readOnly,
-      setReadOnly: (value) => {
-        readOnly = value
-      },
-      physicalBytes: () => 0,
-      highestFence: () => 0,
-      nextSequence: () => 1,
-      tailRows: () => [],
-      referencedBlobDigests: () => new Set(),
-      compact: async () => undefined,
-      commit: () => {
-        committed = true
-      },
-      appendRows: async (journalDir, rows) => {
-        await appendJournalRows(journalDir, rows)
-        throw new Error('fsync failed after append')
-      }
+  it('rolls the transaction back and sets no latch when the insert fails', async () => {
+    const { writer, committedRows } = writerHarness()
+    // A row already occupies sequence 1, so the insert violates the primary key.
+    insertJournalRow(database.db, SESSION_ID, row(1, 1))
+
+    await expect(writer.enqueue(row)).rejects.toThrow()
+
+    expect(readOnly).toBe(false)
+    expect(committedRows).toHaveLength(0)
+    expect(readJournalEpochRows(database.db, SESSION_ID, EPOCH)).toHaveLength(1)
+    // Still writable: there is no ambiguity for a latch to protect against.
+    await expect(writer.enqueue((seq, ts) => row(seq + 1, ts))).resolves.toMatchObject({
+      kind: 'item'
     })
-
-    await expect(writer.enqueue(row)).rejects.toThrow('fsync failed after append')
-
-    expect(readOnly).toBe(true)
-    expect(committed).toBe(false)
-    await expect(writer.enqueue(row)).rejects.toMatchObject({ code: 'journal_read_only' })
   })
 
-  it('keeps blobs for a durable row when a post-append crash is reported', async () => {
-    const payload = 'durable blob payload'.repeat(2_000)
+  it('removes the blobs of a rolled-back row', async () => {
+    const payload = 'speculative blob payload'.repeat(2_000)
     const bounded = boundPayload(payload, {
       ...DEFAULT_JOURNAL_PAYLOAD_LIMITS,
       inlineHeadBytes: 32
     })
-    const writer = new JournalRowWriter({
-      journalDir: root,
-      sessionId: 'session-1',
-      budget: new JournalAppendBudget('session-1', DEFAULT_JOURNAL_PAYLOAD_LIMITS),
-      lifecycleAdmission: new JournalLifecycleAdmission(
-        'session-1',
-        DEFAULT_JOURNAL_PAYLOAD_LIMITS.maxSessionBytes,
-        (itemId) => itemId
-      ),
-      autoCompact: false,
-      compaction: { minTailRows: 0, retainTailMs: 0 },
-      now: () => 1,
-      serialize: (run) => run(),
-      readOnly: () => readOnly,
-      setReadOnly: (value) => {
-        readOnly = value
-      },
-      physicalBytes: () => 0,
-      highestFence: () => 0,
-      nextSequence: () => 1,
-      tailRows: () => [],
-      referencedBlobDigests: () => new Set(),
-      compact: async () => undefined,
-      commit: () => undefined,
-      appendRows: async (journalDir, rows) => {
-        await appendJournalRows(journalDir, rows)
-        throw new Error('crash after row append')
-      }
-    })
+    const { writer } = writerHarness()
+    insertJournalRow(database.db, SESSION_ID, row(1, 1))
 
     await expect(
       writer.enqueue(
         (seq, ts) => rowWithBlob(seq, ts, bounded),
         [{ digest: bounded.digest, payload }]
       )
-    ).rejects.toThrow('crash after row append')
+    ).rejects.toThrow()
 
-    expect(readOnly).toBe(true)
-    await expect(writer.enqueue(row)).rejects.toMatchObject({ code: 'journal_read_only' })
-    expect(await readJournalBlob(root, bounded.digest)).toBe(payload)
-    const reopened = await loadJournal(root, 'session-1')
-    const item = reopened?.state.items.get('item-with-blob')
-    expect(item?.body).toMatchObject({
-      kind: 'tool-call',
-      output: { digest: bounded.digest, truncated: true }
-    })
+    expect(readOnly).toBe(false)
+    expect(await readJournalBlob(root, bounded.digest)).toBeNull()
   })
 
   it('does not leak a lifecycle reservation after budget refusal', async () => {
     const probe = runningToolRow(1, 1)
+    const measured = await journalDirectoryBytes(root)
     const limits = {
       ...DEFAULT_JOURNAL_PAYLOAD_LIMITS,
-      maxSessionBytes: JOURNAL_ITEM_TERMINAL_RESERVATION_BYTES + journalRowByteLength(probe) - 1
+      maxSessionBytes:
+        measured +
+        journalReservationPhysicalBytes(JOURNAL_ITEM_TERMINAL_RESERVATION_BYTES, 4096) +
+        journalTxnPhysicalCost([journalRowByteLength(probe)], 4096) -
+        1
     }
     const { writer, lifecycleAdmission, committedRows } = writerHarness({ limits })
 
@@ -258,20 +214,17 @@ describe('journal row writer read-only latch', () => {
     })
 
     expect(lifecycleAdmission.state).toEqual({ reservedBytes: 0, reservedAppendSlots: 0 })
-    await expect(writer.enqueue(row)).resolves.toMatchObject({ kind: 'item', itemId: 'item-1' })
-    expect(
-      committedRows.map((entry) => (entry.kind === 'item' ? entry.itemId : 'non-item'))
-    ).toEqual(['item-1'])
+    expect(committedRows).toHaveLength(0)
   })
 
-  it('preflights existing durable-write temps before creating a blob or row', async () => {
+  it('counts an existing durable-write temp before creating a blob or row', async () => {
     const tempBytes = 512
-    const tempPath = join(root, 'log.jsonl.existing-write.tmp')
-    await writeFile(tempPath, 't'.repeat(tempBytes), 'utf8')
-    const probe = row(1, 1)
+    await writeFile(join(root, 'blobs.existing-write.tmp'), 't'.repeat(tempBytes), 'utf8')
+    const measured = await journalDirectoryBytes(root)
     const limits = {
       ...DEFAULT_JOURNAL_PAYLOAD_LIMITS,
-      maxSessionBytes: tempBytes + journalRowByteLength(probe) - 1
+      maxSessionBytes:
+        measured + journalTxnPhysicalCost([journalRowByteLength(row(1, 1))], 4096) - 1
     }
     const { writer, committedRows } = writerHarness({ limits })
 
@@ -298,7 +251,10 @@ describe('journal row writer read-only latch', () => {
       itemId: 'running-tool'
     })
     expect(lifecycleAdmission.state).toEqual({
-      reservedBytes: JOURNAL_ITEM_TERMINAL_RESERVATION_BYTES,
+      reservedBytes: journalReservationPhysicalBytes(
+        JOURNAL_ITEM_TERMINAL_RESERVATION_BYTES,
+        database.pageSize
+      ),
       reservedAppendSlots: 1
     })
   })
@@ -331,30 +287,15 @@ describe('journal row writer read-only latch', () => {
     expect(committedRows).toHaveLength(1)
   })
 
-  it('does not leak a lifecycle reservation after durable append failure', async () => {
-    const { writer, lifecycleAdmission } = writerHarness({
-      appendRows: async () => {
-        throw new Error('append failed before a durable row existed')
-      }
-    })
-
-    await expect(writer.enqueue((seq, ts) => runningToolRow(seq, ts))).rejects.toThrow(
-      'append failed before a durable row existed'
-    )
-
-    expect(readOnly).toBe(true)
-    expect(lifecycleAdmission.state).toEqual({ reservedBytes: 0, reservedAppendSlots: 0 })
-  })
-
   it('does not leak a lifecycle reservation after reducer commit failure', async () => {
     const { writer, lifecycleAdmission } = writerHarness({
       commit: () => {
-        throw new Error('commit failed after durable append')
+        throw new Error('commit failed after the transaction')
       }
     })
 
     await expect(writer.enqueue((seq, ts) => runningToolRow(seq, ts))).rejects.toThrow(
-      'commit failed after durable append'
+      'commit failed after the transaction'
     )
 
     expect(lifecycleAdmission.state).toEqual({ reservedBytes: 0, reservedAppendSlots: 0 })

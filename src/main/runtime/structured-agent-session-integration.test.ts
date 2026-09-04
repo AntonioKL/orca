@@ -28,7 +28,7 @@ import { journalDirectoryFor } from '../native-chat/agent-session-journal/journa
 import { readJournalBlob } from '../native-chat/agent-session-journal/journal-blob-store'
 import { appendLegacyTranscriptMessages } from '../native-chat/agent-session-journal/journal-legacy-import'
 import type { AgentSessionJournal } from '../native-chat/agent-session-journal/journal-store'
-import { openAgentSessionJournal } from '../native-chat/agent-session-journal/journal-store-factory'
+import { createTrackedJournalOpener } from '../native-chat/agent-session-journal/journal-store-test-open'
 import type { OrcaRuntimeService } from './orca-runtime'
 import type { RpcRequest, RpcResponse } from './rpc/core'
 import { RpcDispatcher } from './rpc/dispatcher'
@@ -37,6 +37,8 @@ import {
   ensureStructuredAgentSessionHost,
   stopStructuredAgentSessionRuntime
 } from './structured-agent-session-runtime'
+
+const journals = createTrackedJournalOpener()
 
 const SESSION = 'session-integration-1'
 const THREAD = 'thread-integration'
@@ -363,6 +365,7 @@ function cursorOf(frames: AgentSessionSubscribeEvent[]): { epoch: string; sequen
 }
 
 afterEach(async () => {
+  await journals.closeAll()
   await stopStructuredAgentSessionRuntime()
   await rm(root, { recursive: true, force: true })
 })
@@ -376,7 +379,7 @@ describe('a structured codex session over agentSession.*', () => {
       agent: 'codex' as const,
       providerHandle: { kind: 'codex' as const, threadId: THREAD }
     }
-    const journal = await openAgentSessionJournal({
+    const journal = await journals.open({
       identity,
       journalDir: journalDirectoryFor(root, identity)
     })
@@ -761,7 +764,7 @@ describe('a structured codex session over agentSession.*', () => {
       agent: 'codex' as const,
       providerHandle: { kind: 'codex' as const, threadId: THREAD }
     }
-    const reopened = await openAgentSessionJournal({
+    const reopened = await journals.open({
       identity,
       journalDir: journalDirectoryFor(root, identity)
     })
