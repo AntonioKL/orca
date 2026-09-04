@@ -208,6 +208,8 @@ export type RemoteDispatchAttachmentRow = {
   to_worker_imported_sequence: number
   /** Nesting depth propagated from the Run home; 1 when an old client omitted it. */
   depth: number
+  /** Worker-host mailbox generation; the home's dispatch_contexts row is not visible here. */
+  consumer_generation: number
   last_error: string | null
   created_at: string
   updated_at: string
@@ -290,6 +292,8 @@ export type DispatchContextRow = {
   termination_reason: TerminalExitCause['kind'] | null
   /** Nesting depth; a root coordinator's worker is 1. Never 0 on a persisted row. */
   depth: number
+  /** Bumped on every re-attach; fences the prior consumer's `dispatch:<id>` Delivery. */
+  consumer_generation: number
   dispatched_at: string | null
   completed_at: string | null
   created_at: string

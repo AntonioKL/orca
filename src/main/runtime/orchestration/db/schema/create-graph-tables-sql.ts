@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS remote_dispatch_attachments (
   -- Nesting depth of the worker this attachment represents. Propagated from the
   -- Run home; absent from an old client means 1, which fails closed.
   depth                   INTEGER NOT NULL DEFAULT 1,
+  -- Its own counter: a federated worker host has no dispatch_contexts row to borrow one from.
+  consumer_generation     INTEGER NOT NULL DEFAULT 0,
   last_error              TEXT,
   created_at              TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
@@ -157,6 +159,9 @@ CREATE TABLE IF NOT EXISTS dispatch_contexts (
   -- Nesting depth: a root coordinator's worker is 1, its worker's worker is 2.
   -- Defaults to 1 so an unstamped row fails closed rather than reading as a root.
   depth               INTEGER NOT NULL DEFAULT 1,
+  -- Bumped whenever the Dispatch is re-pointed at a pane/process, fencing the prior consumer's
+  -- outstanding dispatch mailbox Delivery.
+  consumer_generation INTEGER NOT NULL DEFAULT 0,
   dispatched_at       TEXT,
   completed_at        TEXT,
   created_at          TEXT NOT NULL DEFAULT (datetime('now')),
