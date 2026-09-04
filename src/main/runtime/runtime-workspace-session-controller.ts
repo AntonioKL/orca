@@ -110,19 +110,20 @@ export class RuntimeWorkspaceSessionController {
   }
 
   /** Every persisted host partition. Callers that key off pane identity — which
-   *  carries no host — must search all of them, not just 'local'. */
+   *  carries no host — must search all of them, not just 'local'.
+   *
+   *  Why persisted ids only, not the repo list: reading repos would drag the
+   *  worktree inventory into hot poll paths that must never resolve it (#9343),
+   *  and a host with no persisted partition has nothing to find anyway. */
   listSessions(): WorkspaceSessionState[] {
     const store = this.deps.getStore()
     if (!store) {
       return []
     }
-    const hostIds = new Set<ExecutionHostId>([LOCAL_EXECUTION_HOST_ID])
-    for (const repo of store.getRepos?.() ?? []) {
-      hostIds.add(getRepoExecutionHostId(repo))
-    }
-    for (const hostId of store.getWorkspaceSessionHostIds?.() ?? []) {
-      hostIds.add(hostId)
-    }
+    const hostIds = new Set<ExecutionHostId>([
+      LOCAL_EXECUTION_HOST_ID,
+      ...(store.getWorkspaceSessionHostIds?.() ?? [])
+    ])
     return [...hostIds].flatMap((hostId) => {
       const session = store.getWorkspaceSession?.(hostId)
       return session ? [session] : []

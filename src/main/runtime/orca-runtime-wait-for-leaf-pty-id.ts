@@ -10,7 +10,7 @@ import {
   isInboundMessageTabMount,
   type TerminalTabMountIntent
 } from '../../shared/terminal-tab-mount-intent'
-import { makePaneKey } from '../../shared/stable-pane-id'
+import { isTerminalLeafId, makePaneKey } from '../../shared/stable-pane-id'
 import { findSleepingAgentSessionRecord } from './sleeping-pane-record-lookup'
 import { resolveSleepingPaneWakeTarget } from './orchestration/sleeping-pane-wake-target'
 import { SleepingPaneWakeScheduler } from './orchestration/sleeping-pane-wake-scheduler'
@@ -85,11 +85,15 @@ export class OrcaRuntimeWithWaitForLeafPtyId extends OrcaRuntimeWithRestoreLiveP
     if (!record?.worktreeId) {
       return false
     }
+    const tabId = record.tabId.startsWith('pty:') ? undefined : record.tabId
     return this.requestRendererTerminalTabMountForPane({
       worktreeId: record.worktreeId,
-      tabId: record.tabId.startsWith('pty:') ? undefined : record.tabId,
+      tabId,
       ptyId: record.ptyId ?? undefined,
-      paneKey: record.leafId ? makePaneKey(record.tabId, record.leafId) : undefined,
+      // Why: synthetic pty-form handles carry no real pane identity, and
+      // makePaneKey rejects their ids outright.
+      paneKey:
+        tabId && isTerminalLeafId(record.leafId) ? makePaneKey(tabId, record.leafId) : undefined,
       intent
     })
   }

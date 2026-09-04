@@ -133,7 +133,13 @@ describe('terminal list with slept panes', () => {
     const result = await list.list('wt-1', 10, { includeVisualLayouts: false })
     const rows = result.terminals.filter((terminal) => terminal.tabId === 'tab-slept')
     expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({ connected: false, resumable: true })
+    // The leaf row, not the synthesized one: it carries the pane's real title,
+    // preview and last-output time that persistence alone cannot supply.
+    expect(rows[0]).toMatchObject({
+      handle: 'term_tab-slept',
+      connected: false,
+      resumable: true
+    })
   })
 
   it('still drops a PTY-less leaf that has no resume record', async () => {
