@@ -11,12 +11,12 @@ and will a user notice.
 | 1 | 1.1 cell image roll | Removes the only crash mode we have seen in production. 22 of 23 cells still have it. One afternoon. |
 | 2 | 3.1 refresh rotation grace window | Turns the entire "slow auth → mass sign-out" class into a slowdown. One day. |
 | 3 | 4.1 inventory lock contention | The floor under every 503 and slow phone accept, every day, not just incidents. One week. |
-| 4 | 2.2 relay/auth database split | Biggest structural fix; a login problem can never again stall the data plane. 1–2 weeks. |
-| 5 | 1.2 + 1.3 pruning and reclaim | Defuses the 63 M-row time bomb. Low effort, mostly waiting. |
-| 6 | 5.1 + 5.2 crash alert, page a human | Cheapest detection uplift; today's incident ran 4 h unpaged. |
-| 7 | 2.1 private IP | Durable version of a fix that already landed (dynamic NAT ports). Pairs with 2.2. |
-| 8 | 4.3 + 3.2 desktop hardening | Small, ride the normal desktop release. |
-| 9 | 4.2, 4.4, 5.4, 1.4, 1.5 | Housekeeping and quality-of-life. |
+| — | 2.2 relay/auth database split | **Deferred 2026-09-04** to ~2026-11-01. Biggest structural fix, but the concrete cause is fixed and alerts now page; see roadmap 2.2 for re-open triggers. |
+| 4 | 1.2 + 1.3 pruning and reclaim | Defuses the 63 M-row time bomb. Low effort, mostly waiting. |
+| 5 | 5.1 + 5.2 crash alert, page a human | Cheapest detection uplift; today's incident ran 4 h unpaged. |
+| 6 | 2.1 private IP | Durable version of a fix that already landed (dynamic NAT ports). Do it on the existing instance. |
+| 7 | 4.3 + 3.2 desktop hardening | Small, ride the normal desktop release. |
+| 8 | 4.2, 4.4, 5.4, 1.4, 1.5 | Housekeeping and quality-of-life. |
 
 ## The shared bottleneck: cell rolls
 
@@ -36,15 +36,15 @@ So batch. Two rolls, not five:
 ```
 Lane A  data plane   1.1 roll ──────────────────► Roll 2 (2.1 flag + 2.3 + 4.1) ──► 4.4 recalibrate
 Lane B  auth/DB      1.2 enable pruning ──(10 d)──► 1.3 reclaim      3.1 grace window (any time)
-Lane C  network      2.1 peering + private IP ─────┐ (feeds Roll 2)   ──► 2.2 DB split (after 2.1)
+Lane C  network      2.1 peering + private IP ─────┐ (feeds Roll 2)   (2.2 DB split deferred)
 Lane D  desktop      3.2 no same-token retry, 4.3 lease jitter (any release; wire-compatible)
 Lane E  observability 1.5, 5.1, 5.2, 5.4 (Terraform only, any time)
 Lane F  director     4.2 region preference (Cloud Run deploy, any time)
 Misc                 1.4 full apps-root apply (any time; see its check)
 ```
 
-Hard dependencies: Roll 2 waits on 2.1's network work; 1.3 waits on 1.2 finishing; 2.2 should come after
-2.1 so the new instance is private from day one. Everything else is independent.
+Hard dependencies: Roll 2 waits on 2.1's network work; 1.3 waits on 1.2 finishing. Everything else is
+independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is private from day one.)
 
 ## Disruption summary
 
@@ -56,7 +56,7 @@ Hard dependencies: Roll 2 waits on 2.1's network work; 1.3 waits on 1.2 finishin
 | 1.4 full apps apply | Should be none, **verify** | Terraform will create a new auth revision (env added). Traffic is pinned to `00031-tox` by name, so the new revision should receive 0 %. | Confirm in the plan that no `traffic` change appears. If it does, stop: the Terraform image variable is not the serving image. |
 | 1.5, 5.x alerts | No | | |
 | 2.1 private IP | **Possibly, verify** | Adding a private IP to an existing Cloud SQL instance may restart it (1–2 min DB unavailability: sign-in fails, relay renewals retry). Google's docs are inconsistent across versions; treat it as a restart. The proxy flag change rides Roll 2. | Off-peak; the relay's bounded retry survives a 2 min DB blip on the new image (not the old one: do Roll 1 first). |
-| 2.2 DB split | **Yes, scheduled** | Relay unavailable for the cutover (drain all cells → copy relay tables → flip `DATABASE_URL` → restart). Minutes if rehearsed. Desktops and phones reconnect automatically after. | Rehearse on staging; do it in the US night; announce. |
+| 2.2 DB split (deferred) | **Yes, scheduled** | Relay unavailable for the cutover (drain all cells → copy relay tables → flip `DATABASE_URL` → restart). Minutes if rehearsed. Desktops and phones reconnect automatically after. | Rehearse on staging; do it in the US night; announce. |
 | 2.3 statement timeout | No beyond Roll 2 | | |
 | 3.1 grace window | No | Auth deploys are no-traffic candidate → smoke → promote. | Security trade-off: a stolen token replayed inside the window is served once instead of revoking. 60 s is the usual choice. |
 | 3.2, 4.3 desktop | No | Normal app update. | |
@@ -98,7 +98,7 @@ Hard dependencies: Roll 2 waits on 2.1's network work; 1.3 waits on 1.2 finishin
 - [ ] Cell template: proxy args add `--private-ip`. Director: Direct VPC egress or connector, then the same flag. Both ride Roll 2.
 - [ ] After Roll 2: NAT `port_usage` for relay gateways drops to ~0; then consider `ipv4_enabled = false` (removes the public IP; breaks the local `cloud-sql-proxy --token` workflow unless it also goes private).
 
-### 2.2 Database split
+### 2.2 Database split (deferred to ~2026-11-01; checklist kept for when it is revived)
 - [ ] New `google_sql_database_instance.relay` (private IP from day one, its own size and flags). Staging first.
 - [ ] Relay schema applies cleanly to an empty instance (it does at startup).
 - [ ] Rehearsal on staging: drain → `pg_dump` relay tables → restore → flip `relay_database_url` secret → restart director + cells → phones/desktops reconnect. Time it.
