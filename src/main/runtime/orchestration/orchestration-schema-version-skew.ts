@@ -41,6 +41,7 @@ const VERSIONED_POST_V6_COLUMNS = [
   { version: 31, table: 'dispatch_contexts', column: 'resource_id' },
   { version: 31, table: 'worker_terminal_resources', column: 'endpoint_id' },
   { version: 31, table: 'worker_terminal_resources', column: 'endpoint_incarnation' },
+  { version: 33, table: 'messages', column: 'pointer_enter_pending' },
   { version: 34, table: 'deliveries', column: 'mailbox_handle' }
 ] as const
 

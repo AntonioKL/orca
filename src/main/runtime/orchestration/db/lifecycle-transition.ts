@@ -13,7 +13,7 @@ import { generateId } from './generated-id'
  */
 export type LifecycleEntity = 'task' | 'dispatch' | 'worker'
 
-export type LifecycleWriteTransaction = {
+type LifecycleWriteTransaction = {
   savepoint: string | null
 }
 
@@ -76,8 +76,10 @@ const LEGAL_TRANSITIONS: Record<LifecycleEntity, Record<string, readonly string[
     ready: ['ready', 'dispatched', 'completed', 'failed', 'blocked'],
     dispatched: ['dispatched', 'completed', 'failed', 'blocked', 'ready'],
     blocked: ['blocked', 'ready', 'dispatched', 'failed'],
-    completed: ['completed'],
-    failed: ['failed', 'dispatched']
+    // A settled Task stays reopenable/overturnable: orchestration.taskUpdate still accepts
+    // every status, and coordinators overturn a review result through it.
+    completed: ['completed', 'ready', 'failed'],
+    failed: ['failed', 'ready', 'dispatched']
   },
   dispatch: {
     pending: ['pending', 'dispatched', 'completed', 'failed', 'circuit_broken'],
@@ -90,7 +92,7 @@ const LEGAL_TRANSITIONS: Record<LifecycleEntity, Record<string, readonly string[
     starting: ['starting', 'ready', 'start_unknown', 'failed', 'stopping', 'stopped', 'abandoned'],
     start_unknown: ['start_unknown', 'ready', 'failed', 'stopping', 'stopped', 'abandoned'],
     ready: ['ready', 'succeeded', 'failed', 'stopping', 'abandoned'],
-    stopping: ['stopping', 'stopped', 'stop_unknown', 'ready', 'abandoned'],
+    stopping: ['stopping', 'stopped', 'stop_unknown', 'ready', 'failed', 'abandoned'],
     stop_unknown: ['stop_unknown', 'failed', 'stopped', 'abandoned'],
     succeeded: ['succeeded'],
     failed: ['failed'],
@@ -216,7 +218,7 @@ export function transitionLifecycleWithDb(
   return { changed: true, receipt }
 }
 
-export function appendLifecycleTransitionReceipt(
+function appendLifecycleTransitionReceipt(
   db: Database.Database,
   params: {
     entity: LifecycleEntity

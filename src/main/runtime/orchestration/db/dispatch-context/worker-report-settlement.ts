@@ -272,7 +272,8 @@ export function settleWorkerReportInTransaction(
     transitionLifecycleWithDb(this.db, {
       entity: 'worker',
       id: params.dispatchId,
-      from: ['ready', 'start_unknown'],
+      // A start_unknown success report reconnects through 'ready' above; only failure settles here.
+      from: params.outcome === 'succeeded' ? 'ready' : ['ready', 'start_unknown'],
       to: params.outcome === 'succeeded' ? 'succeeded' : 'failed',
       projection: { stage: 'settled', updated_at: new Date().toISOString() },
       receipt: { kind: 'worker_report_settled', details: { outcome: params.outcome } }

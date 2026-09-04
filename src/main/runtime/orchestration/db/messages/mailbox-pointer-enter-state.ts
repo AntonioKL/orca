@@ -1,7 +1,6 @@
 import type { MessageRow } from '../../types'
 import type { OrchestrationDb } from '../orchestration-db'
-
-const POINTER_BATCH_LIMIT = 50
+import { ORCHESTRATION_DELIVERY_BATCH_LIMIT } from './mailbox-routing-page'
 
 export const MAILBOX_POINTER_RESERVED = 1
 export const MAILBOX_POINTER_WRITE_ATTEMPTED = 2
@@ -23,7 +22,7 @@ export function getPendingMailboxPointerMessages(
          AND delivery_contract = 'current_delivery'
        ORDER BY sequence LIMIT ?`
     )
-    .all(mailboxHandle, POINTER_BATCH_LIMIT) as MessageRow[]
+    .all(mailboxHandle, ORCHESTRATION_DELIVERY_BATCH_LIMIT) as MessageRow[]
 }
 
 export function getPendingMailboxPointerHandles(this: OrchestrationDb): string[] {
@@ -183,8 +182,8 @@ function mutatePointerMessages(
   let changed = 0
   db.db.exec('SAVEPOINT mailbox_pointer_enter_mutation')
   try {
-    for (let offset = 0; offset < ids.length; offset += POINTER_BATCH_LIMIT) {
-      const batch = ids.slice(offset, offset + POINTER_BATCH_LIMIT)
+    for (let offset = 0; offset < ids.length; offset += ORCHESTRATION_DELIVERY_BATCH_LIMIT) {
+      const batch = ids.slice(offset, offset + ORCHESTRATION_DELIVERY_BATCH_LIMIT)
       const mutation = build(batch.map(() => '?').join(','))
       changed += Number(
         db.db.prepare(mutation.sql).run(...mutation.leadingParams, ...batch).changes

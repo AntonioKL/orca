@@ -9,7 +9,7 @@ export function createMailboxDeliveryIndexesIfPossible(this: OrchestrationDb): v
   if (this.hasColumn('deliveries', 'mailbox_handle')) {
     this.db.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_deliveries_one_outstanding
-        ON deliveries(mailbox_handle) WHERE status = 'outstanding';
+        ON deliveries(mailbox_handle) WHERE status = 'outstanding' AND mailbox_handle != '';
     `)
   }
   const hasDeliveredAt = this.hasColumn('messages', 'delivered_at')
@@ -23,7 +23,7 @@ export function createMailboxDeliveryIndexesIfPossible(this: OrchestrationDb): v
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_messages_pending_pointer_enter
         ON messages(to_handle, sequence)
-        WHERE read = 0 AND pointer_enter_pending = 1;
+        WHERE read = 0 AND pointer_enter_pending > 0;
     `)
   }
 

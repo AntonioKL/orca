@@ -101,16 +101,22 @@ export class InMemoryOrchestrationMessages {
     target: { ptyId: string; processIncarnation: string }
   ): boolean {
     const stagedIds = new Set(ids)
-    let changed = 0
-    for (const message of this.messages) {
-      if (stagedIds.has(message.id) && message.read === 0) {
-        message.pointer_enter_pending = 1
-        message.pointer_pty_id = target.ptyId
-        message.pointer_process_incarnation = target.processIncarnation
-        changed += 1
-      }
+    const claimed = this.messages.filter(
+      (message) =>
+        stagedIds.has(message.id) &&
+        message.read === 0 &&
+        (message.pointer_enter_pending ?? 0) === 0
+    )
+    // Production claims all-or-nothing, so a stolen reservation must not half-succeed here.
+    if (claimed.length !== ids.length) {
+      return false
     }
-    return changed === ids.length
+    for (const message of claimed) {
+      message.pointer_enter_pending = 1
+      message.pointer_pty_id = target.ptyId
+      message.pointer_process_incarnation = target.processIncarnation
+    }
+    return true
   }
 
   markMailboxPointerWriteAttempted(
@@ -289,20 +295,21 @@ export class InMemoryOrchestrationMessages {
     to: number
   ): boolean {
     const selected = new Set(ids)
-    let changed = 0
-    for (const message of this.messages) {
-      if (
+    const advanced = this.messages.filter(
+      (message) =>
         selected.has(message.id) &&
         message.read === 0 &&
         message.pointer_enter_pending === from &&
         message.pointer_pty_id === target.ptyId &&
         message.pointer_process_incarnation === target.processIncarnation
-      ) {
-        message.pointer_enter_pending = to
-        changed += 1
-      }
+    )
+    if (advanced.length !== ids.length) {
+      return false
     }
-    return changed === ids.length
+    for (const message of advanced) {
+      message.pointer_enter_pending = to
+    }
+    return true
   }
 
   private matchMailboxPointerEnter(

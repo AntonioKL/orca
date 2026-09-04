@@ -80,7 +80,8 @@ END;
 CREATE TABLE IF NOT EXISTS deliveries (
   id                    TEXT PRIMARY KEY,
   run_id                TEXT NOT NULL,
-  mailbox_handle        TEXT NOT NULL,
+  -- Default keeps a downgraded binary's column-less INSERT working against a v34 database.
+  mailbox_handle        TEXT NOT NULL DEFAULT '',
   consumer_generation   INTEGER NOT NULL,
   message_ids           TEXT NOT NULL,
   status                TEXT NOT NULL DEFAULT 'outstanding'

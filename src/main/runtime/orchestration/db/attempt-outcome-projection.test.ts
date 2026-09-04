@@ -3,12 +3,43 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { OrchestrationDb } from './orchestration-db'
+import { projectAttemptOutcome } from './attempt-outcome-projection'
 import { createRootDispatch } from './root-dispatch-test-fixture'
 import type {
   AttemptObservationFactInput,
   AttemptObservationFacet,
   AttemptObservationPayloadByFacet
 } from './attempt-observation-types'
+
+// Mirrors the inputs worker-terminal-attention-query assembles for the production projection.
+function projectOutcome(
+  db: OrchestrationDb,
+  dispatchId: string,
+  authorityNow: { execution?: number; home: number },
+  freshAfterMs?: number
+): ReturnType<typeof projectAttemptOutcome> {
+  const dispatch = db.getDispatchContextById(dispatchId)!
+  const activeSibling = Boolean(
+    db.db
+      .prepare(
+        `SELECT active.id FROM dispatch_contexts active
+         JOIN worker_dispatches worker ON worker.dispatch_id = active.id
+         WHERE active.task_id = ? AND active.id != ?
+           AND active.status IN ('pending', 'dispatched')
+           AND worker.state NOT IN ('failed', 'succeeded', 'stopped', 'abandoned')
+         LIMIT 1`
+      )
+      .get(dispatch.task_id, dispatchId)
+  )
+  return projectAttemptOutcome({
+    dispatchId,
+    taskId: dispatch.task_id,
+    facts: db.getAttemptObservationFacts(dispatchId),
+    activeSibling,
+    authorityNow,
+    freshAfterMs
+  })
+}
 
 describe('durable Attempt observation and outcome projection', () => {
   let db: OrchestrationDb | undefined
@@ -97,9 +128,7 @@ describe('durable Attempt observation and outcome projection', () => {
     }
 
     expect(db!.getAttemptObservationFacts(dispatchId)).toHaveLength(6)
-    expect(
-      db!.getAttemptOutcomeProjection(dispatchId, { execution: 1_010, home: 50_010 })
-    ).toMatchObject({
+    expect(projectOutcome(db!, dispatchId, { execution: 1_010, home: 50_010 })).toMatchObject({
       outcome: 'finished_unverified',
       taskOutcome: 'finished_unverified',
       outcomeSource: 'additive_fact',
@@ -146,9 +175,7 @@ describe('durable Attempt observation and outcome projection', () => {
       db.close()
       db = new OrchestrationDb(path)
 
-      expect(
-        db.getAttemptOutcomeProjection(dispatch.id, { execution: 1_001, home: 50_001 })
-      ).toMatchObject({
+      expect(projectOutcome(db, dispatch.id, { execution: 1_001, home: 50_001 })).toMatchObject({
         outcome: 'outcome_unknown',
         outcomeSource: 'additive_fact',
         outcomeReason: 'host disconnected'
@@ -195,7 +222,7 @@ describe('durable Attempt observation and outcome projection', () => {
     expect(db.settleWorkerReport(report)).toMatchObject({ action: 'settled', duplicate: false })
     expect(db.settleWorkerReport(report)).toMatchObject({ action: 'settled', duplicate: true })
     expect(db.getAttemptObservationFacts(started.dispatch.id)).toHaveLength(1)
-    expect(db.getAttemptOutcomeProjection(started.dispatch.id, { home: 1_001 })).toMatchObject({
+    expect(projectOutcome(db, started.dispatch.id, { home: 1_001 })).toMatchObject({
       outcome: 'succeeded',
       taskOutcome: 'succeeded',
       outcomeSource: 'worker_report'
@@ -230,9 +257,9 @@ describe('durable Attempt observation and outcome projection', () => {
     expect(() => db!.recordAttemptObservation({ ...earlier, id: 'sequence_collision' })).toThrow(
       /sequence 1 is already/
     )
-    expect(
-      db!.getAttemptOutcomeProjection(dispatchId, { execution: 1_001, home: 50_001 }).processTurn
-    ).toEqual({ process: 'running', turn: 'working' })
+    expect(projectOutcome(db!, dispatchId, { execution: 1_001, home: 50_001 }).processTurn).toEqual(
+      { process: 'running', turn: 'working' }
+    )
   })
 
   it('keeps a late accepted report on its Attempt without settling an active sibling Task', () => {
@@ -253,9 +280,7 @@ describe('durable Attempt observation and outcome projection', () => {
       })
     )
 
-    expect(
-      db!.getAttemptOutcomeProjection(dispatchId, { execution: 1_001, home: 50_001 })
-    ).toMatchObject({
+    expect(projectOutcome(db!, dispatchId, { execution: 1_001, home: 50_001 })).toMatchObject({
       outcome: 'succeeded',
       taskOutcome: 'outcome_unknown',
       outcomeSource: 'worker_report',
@@ -284,9 +309,7 @@ describe('durable Attempt observation and outcome projection', () => {
       })
     )
 
-    expect(
-      db!.getAttemptOutcomeProjection(dispatchId, { execution: 1_001, home: 50_001 })
-    ).toMatchObject({
+    expect(projectOutcome(db!, dispatchId, { execution: 1_001, home: 50_001 })).toMatchObject({
       outcome: 'finished_unverified',
       outcomeSource: 'observation'
     })
@@ -323,9 +346,9 @@ describe('durable Attempt observation and outcome projection', () => {
       db!.recordAttemptObservation(observation)
     }
 
-    expect(
-      db!.getAttemptOutcomeProjection(dispatchId, { execution: 1_001, home: 50_001 }).outcome
-    ).toBe('in_progress')
+    expect(projectOutcome(db!, dispatchId, { execution: 1_001, home: 50_001 }).outcome).toBe(
+      'in_progress'
+    )
   })
 
   it('computes freshness only in the selected authority host clock domain', () => {
@@ -343,7 +366,7 @@ describe('durable Attempt observation and outcome projection', () => {
     )
 
     expect(
-      db!.getAttemptOutcomeProjection(dispatchId, { execution: 1_025, home: 900_000 }, 100).liveness
+      projectOutcome(db!, dispatchId, { execution: 1_025, home: 900_000 }, 100).liveness
     ).toEqual({
       status: 'live',
       ptyIds: ['pty-1'],
@@ -368,8 +391,7 @@ describe('durable Attempt observation and outcome projection', () => {
     )
 
     expect(
-      db!.getAttemptOutcomeProjection(dispatchId, { execution: 1_000_000, home: 50_025 }, 100)
-        .liveness
+      projectOutcome(db!, dispatchId, { execution: 1_000_000, home: 50_025 }, 100).liveness
     ).toEqual({
       status: 'live',
       ptyIds: ['pty-1'],
@@ -397,7 +419,7 @@ describe('durable Attempt observation and outcome projection', () => {
     )
 
     expect(
-      db!.getAttemptOutcomeProjection(dispatchId, { execution: 1_010, home: 50_010 }).liveness
+      projectOutcome(db!, dispatchId, { execution: 1_010, home: 50_010 }).liveness
     ).toMatchObject(expected)
   })
 
@@ -414,7 +436,7 @@ describe('durable Attempt observation and outcome projection', () => {
     )
 
     expect(
-      db!.getAttemptOutcomeProjection(dispatchId, { execution: 1_000, home: 50_010 }).liveness
+      projectOutcome(db!, dispatchId, { execution: 1_000, home: 50_010 }).liveness
     ).toMatchObject({ status: 'unverifiable', freshness: { status: 'future' } })
   })
 })

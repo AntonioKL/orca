@@ -5,6 +5,15 @@ import type { OrchestrationMailboxLeaf, OrchestrationMailboxOwner } from './mail
 import type { OrchestrationMailboxPointerSubmitTarget } from './mailbox-pointer-submit'
 import type { OrchestrationCliCommand } from './cli-command'
 
+export type OrchestrationMailboxPointerMessage = {
+  id: string
+  type: string
+  sequence: number
+  pointer_enter_pending?: number
+  pointer_pty_id?: string | null
+  pointer_process_incarnation?: string | null
+}
+
 export type PointerDeliveryDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   mailboxOwner: OrchestrationMailboxOwner
   deliveryTarget: OrchestrationMailboxDeliveryTarget

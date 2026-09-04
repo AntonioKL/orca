@@ -1,12 +1,14 @@
 import { isCursorAgentTitle } from '../../../shared/agent-detection'
 import { formatMessagePointer } from './formatter'
-import type { PointerDeliveryDependencies } from './mailbox-pointer-delivery-contract'
+import type {
+  OrchestrationMailboxPointerMessage,
+  PointerDeliveryDependencies
+} from './mailbox-pointer-delivery-contract'
 import {
   shouldReleaseOrchestrationPointer,
   type OrchestrationMessageWaiter
 } from './mailbox-pointer-eligibility'
 import type { OrchestrationMailboxLeaf } from './mailbox-owner'
-import type { OrchestrationMailboxPointerMessage } from './mailbox-pointer-batch'
 import type {
   OrchestrationMailboxDeliveryFlight,
   OrchestrationMailboxPointerState
@@ -56,14 +58,15 @@ export function stageOrchestrationMailboxPointer<TWaiter extends OrchestrationMe
   }
   const flight = args.state.beginFlight(ptyId)
   flight.stagedMessageIds = args.messages.map((message) => message.id)
-  args.state.setWatermark(args.mailboxHandle, args.newestSequence, ptyId, args.leafKey)
   try {
     if (
       !db.stageMailboxPointerEnter(flight.stagedMessageIds, reservationTarget) ||
       !db.markMailboxPointerWriteAttempted(flight.stagedMessageIds, reservationTarget)
     ) {
       args.settle(ptyId, flight)
-      args.redrive(args.mailboxHandle, true)
+      // Not forced: a retry would fail on the same reservation, but a park from an
+      // earlier flight still has to drain.
+      args.redrive(args.mailboxHandle)
       return
     }
   } catch {
@@ -71,6 +74,8 @@ export function stageOrchestrationMailboxPointer<TWaiter extends OrchestrationMe
     args.settle(ptyId, flight)
     return
   }
+  // The watermark parks concurrent deliveries, so it must never outlive the DB reservation.
+  args.state.setWatermark(args.mailboxHandle, args.newestSequence, ptyId, args.leafKey)
   const finishPointerWrite = (accepted: boolean): void =>
     finishPointerWriteAndStageEnter(args, ptyId, flight, expectedTarget, accepted)
   try {

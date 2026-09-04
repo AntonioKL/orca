@@ -1,7 +1,9 @@
-import type { PointerDeliveryDependencies } from './mailbox-pointer-delivery-contract'
+import type {
+  OrchestrationMailboxPointerMessage,
+  PointerDeliveryDependencies
+} from './mailbox-pointer-delivery-contract'
 import type { OrchestrationMessageWaiter } from './mailbox-pointer-eligibility'
 import type { OrchestrationMailboxLeaf } from './mailbox-owner'
-import type { OrchestrationMailboxPointerMessage } from './mailbox-pointer-batch'
 import {
   MAILBOX_POINTER_ENTER_ATTEMPTED,
   MAILBOX_POINTER_RESERVED,

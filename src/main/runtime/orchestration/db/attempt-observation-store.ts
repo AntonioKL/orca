@@ -1,10 +1,8 @@
 import { OrchestrationError } from '../orchestration-error'
-import { projectAttemptOutcome } from './attempt-outcome-projection'
 import type {
   AttemptObservationFact,
   AttemptObservationFactInput,
-  AttemptObservationFacet,
-  AttemptOutcomeProjection
+  AttemptObservationFacet
 } from './attempt-observation-types'
 import type { OrchestrationDb } from './orchestration-db'
 
@@ -163,48 +161,14 @@ export function getAttemptObservationFacts(
   ).map(exposeAttemptObservationFact)
 }
 
-export function getAttemptOutcomeProjection(
-  this: OrchestrationDb,
-  dispatchId: string,
-  authorityNow: { execution?: number; home: number },
-  freshAfterMs?: number
-): AttemptOutcomeProjection {
-  const dispatch = this.getDispatchContextById(dispatchId)
-  if (!dispatch) {
-    throw new OrchestrationError('dispatch_not_found', `Dispatch ${dispatchId} was not found.`)
-  }
-  const activeSibling = Boolean(
-    this.db
-      .prepare(
-        `SELECT active.id FROM dispatch_contexts active
-         JOIN worker_dispatches worker ON worker.dispatch_id = active.id
-         WHERE active.task_id = ? AND active.id != ?
-           AND active.status IN ('pending', 'dispatched')
-           AND worker.state NOT IN ('failed', 'succeeded', 'stopped', 'abandoned')
-         LIMIT 1`
-      )
-      .get(dispatch.task_id, dispatchId)
-  )
-  return projectAttemptOutcome({
-    dispatchId,
-    taskId: dispatch.task_id,
-    facts: this.getAttemptObservationFacts(dispatchId),
-    activeSibling,
-    authorityNow,
-    freshAfterMs
-  })
-}
-
 export type AttemptObservationStoreMethods = {
   recordAttemptObservation: typeof recordAttemptObservation
   getAttemptObservationFacts: typeof getAttemptObservationFacts
-  getAttemptOutcomeProjection: typeof getAttemptOutcomeProjection
 }
 
 export function attachAttemptObservationStore(ctor: { prototype: object }): void {
   Object.assign(ctor.prototype, {
     recordAttemptObservation,
-    getAttemptObservationFacts,
-    getAttemptOutcomeProjection
+    getAttemptObservationFacts
   })
 }

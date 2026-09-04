@@ -1,9 +1,9 @@
+import { ORCHESTRATION_DELIVERY_BATCH_LIMIT } from './db'
 import type { PointerDeliveryDependencies } from './mailbox-pointer-delivery-contract'
 import {
   hasUnfilteredOrchestrationWaiter,
   type OrchestrationMessageWaiter
 } from './mailbox-pointer-eligibility'
-import { selectOrchestrationMailboxPointerBatch } from './mailbox-pointer-batch'
 import type { OrchestrationMailboxLeaf } from './mailbox-owner'
 import {
   OrchestrationMailboxPointerState,
@@ -104,11 +104,16 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
     ) {
       return
     }
-    const unread = selectOrchestrationMailboxPointerBatch({
-      db,
-      mailboxHandle,
-      reservedTypes: options.reservedTypes,
-      waiters
+    // Every waiter here is type-filtered (unfiltered ones returned above), so SQL exclusion is exact.
+    const excludedTypes = new Set(options.reservedTypes)
+    for (const waiter of waiters ?? []) {
+      for (const type of waiter.typeFilter ?? []) {
+        excludedTypes.add(type)
+      }
+    }
+    const unread = db.getUndeliveredUnreadMessages(mailboxHandle, undefined, {
+      excludeTypes: [...excludedTypes],
+      limit: ORCHESTRATION_DELIVERY_BATCH_LIMIT
     })
     if (unread.length === 0 || !leaf.writable || !leaf.ptyId) {
       return
@@ -156,13 +161,13 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
     this.state.parkRedelivery(mailboxHandle, reservedTypes)
   }
 
-  retirePty(ptyId: string, preserveAttemptedDelivery = false): void {
+  retirePty(ptyId: string): void {
     this.coldParkedPtys.delete(ptyId)
     const { flight, releasedMailboxes } = this.state.retirePty(ptyId)
     if (flight?.enterTimer != null) {
       clearTimeout(flight.enterTimer)
     }
-    if (flight?.stagedMessageIds.length && !preserveAttemptedDelivery) {
+    if (flight?.stagedMessageIds.length) {
       this.deps.getDb()?.markAsUndelivered(flight.stagedMessageIds)
     }
     for (const mailboxHandle of releasedMailboxes) {

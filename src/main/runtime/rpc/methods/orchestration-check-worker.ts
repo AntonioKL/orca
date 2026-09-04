@@ -13,6 +13,15 @@ type RemoteAttachment = NonNullable<
   ReturnType<OrchestrationDb['findActiveRemoteAttachmentForPane']>
 >
 
+// Why: a Dispatch mailbox has no consumer-generation counter of its own, and every identity that
+// could stand in for one (the pane's PTY incarnation, the runtime id, dispatch_contexts
+// .process_incarnation) is either read server-side from the handle — identical for both callers —
+// or is never refreshed when a worker terminal restarts, which would fence the live worker out of
+// its own mailbox. Fencing this mailbox needs a per-Dispatch generation bumped on attach, with the
+// outstanding Delivery fenced at the same point (see runs/run-binding.ts). Until then the single
+// constant keeps every consumer on one generation instead of wedging a restarted one.
+const DISPATCH_MAILBOX_CONSUMER_GENERATION = 0
+
 export async function checkWorkerMailbox(args: {
   params: CheckParamsInput
   runtime: OrcaRuntimeService
@@ -149,7 +158,7 @@ export async function checkWorkerMailbox(args: {
     ? db.acknowledgeMailboxDelivery({
         runId: deliveryRunId,
         mailboxHandle: address,
-        consumerGeneration: 0,
+        consumerGeneration: DISPATCH_MAILBOX_CONSUMER_GENERATION,
         deliveryId: params.ack
       })
     : undefined
@@ -159,7 +168,7 @@ export async function checkWorkerMailbox(args: {
     db.getOrCreateMailboxDelivery({
       runId: deliveryRunId,
       mailboxHandle: address,
-      consumerGeneration: 0,
+      consumerGeneration: DISPATCH_MAILBOX_CONSUMER_GENERATION,
       wakeTypes
     })
   if (showAll) {

@@ -12,7 +12,7 @@ export function migrateRoleMailboxDeliveryV34(this: OrchestrationDb, current: nu
     this.db.exec(`
       DROP INDEX IF EXISTS idx_deliveries_one_outstanding;
       CREATE UNIQUE INDEX idx_deliveries_one_outstanding
-        ON deliveries(mailbox_handle) WHERE status = 'outstanding';
+        ON deliveries(mailbox_handle) WHERE status = 'outstanding' AND mailbox_handle != '';
       CREATE INDEX IF NOT EXISTS idx_deliveries_run_created
         ON deliveries(run_id, created_at);
     `)
@@ -26,7 +26,7 @@ export function migrateRoleMailboxDeliveryV34(this: OrchestrationDb, current: nu
     CREATE TABLE deliveries_new (
       id                    TEXT PRIMARY KEY,
       run_id                TEXT NOT NULL,
-      mailbox_handle        TEXT NOT NULL,
+      mailbox_handle        TEXT NOT NULL DEFAULT '',
       consumer_generation   INTEGER NOT NULL,
       message_ids           TEXT NOT NULL,
       status                TEXT NOT NULL DEFAULT 'outstanding'
@@ -46,7 +46,7 @@ export function migrateRoleMailboxDeliveryV34(this: OrchestrationDb, current: nu
     ALTER TABLE deliveries_new RENAME TO deliveries;
 
     CREATE UNIQUE INDEX idx_deliveries_one_outstanding
-      ON deliveries(mailbox_handle) WHERE status = 'outstanding';
+      ON deliveries(mailbox_handle) WHERE status = 'outstanding' AND mailbox_handle != '';
     CREATE INDEX idx_deliveries_run_created
       ON deliveries(run_id, created_at);
   `)
