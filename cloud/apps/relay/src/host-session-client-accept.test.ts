@@ -296,24 +296,28 @@ describe('control lease jitter', () => {
     vi.useRealTimers()
   })
 
-  it('grants a lease inside [55min - jitter, 55min] so cohorts drift apart', async () => {
+  it('grants a lease uniformly around 55min so cohorts drift apart at the same mean rate', async () => {
     const now = 1_700_000_000_000
     const helloAck = (socket: FakeSocket) =>
       JSON.parse(
         String(socket.send.mock.calls.find((call) => String(call[0]).includes('host-hello-ack'))![0])
       ) as { leaseExpiresAt: number }
 
-    const shortest = harness({ now: () => now, random: () => 0.999999 })
+    const shortest = harness({ now: () => now, random: () => 0 })
     const shortestAck = helloAck(await activeHost(shortest))
-    const longest = harness({ now: () => now, random: () => 0 })
+    const centered = harness({ now: () => now, random: () => 0.5 })
+    const centeredAck = helloAck(await activeHost(centered))
+    const longest = harness({ now: () => now, random: () => 0.999999 })
     const longestAck = helloAck(await activeHost(longest))
 
-    expect(longestAck.leaseExpiresAt).toBe(now + CONTROL_LEASE_MS)
-    expect(shortestAck.leaseExpiresAt).toBeGreaterThan(now + CONTROL_LEASE_MS - CONTROL_LEASE_JITTER_MS)
-    expect(shortestAck.leaseExpiresAt).toBeLessThan(longestAck.leaseExpiresAt)
-    // Nine of ten hosts that connected together now differ by minutes, not zero.
+    expect(shortestAck.leaseExpiresAt).toBe(now + CONTROL_LEASE_MS - CONTROL_LEASE_JITTER_MS)
+    expect(centeredAck.leaseExpiresAt).toBe(now + CONTROL_LEASE_MS)
+    expect(longestAck.leaseExpiresAt).toBeLessThan(now + CONTROL_LEASE_MS + CONTROL_LEASE_JITTER_MS)
+    // The mean grant stays at 55 min, so steady-state rebind load is unchanged;
+    // hosts that connected together now differ by minutes, not zero.
     expect(longestAck.leaseExpiresAt - shortestAck.leaseExpiresAt).toBeGreaterThan(9 * 60 * 1000)
     shortest.registry.drain(0)
+    centered.registry.drain(0)
     longest.registry.drain(0)
     vi.advanceTimersByTime(0)
   })
@@ -325,14 +329,14 @@ describe('control lease jitter', () => {
     const first = await activeHost(h)
     const session = h.registry.get({ userId: identity.sub, relayHostId: identity.relayHostId })!
     const firstLease = session.leaseExpiresAt
-    roll = 0.5
+    roll = 0.75
     const rebind = new FakeSocket()
     await (
       h.registry as unknown as {
         activate: (...args: unknown[]) => Promise<void>
       }
     ).activate(rebind as unknown as WebSocket, identity, session, 1, true, 1, '1.4.197')
-    expect(session.leaseExpiresAt).toBe(now + CONTROL_LEASE_MS - CONTROL_LEASE_JITTER_MS / 2)
+    expect(session.leaseExpiresAt).toBe(now + CONTROL_LEASE_MS + CONTROL_LEASE_JITTER_MS / 2)
     expect(session.leaseExpiresAt).not.toBe(firstLease)
     expect(first.close).toHaveBeenCalledWith(RELAY_CLOSE_CODE.PEER_DROPPED, 'control rebound')
     h.registry.drain(0)

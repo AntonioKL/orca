@@ -127,12 +127,15 @@ function send(socket: WebSocket, type: string, message: object): void {
 // stalled predecessor only accumulates doomed sockets.
 const ACTIVATION_QUEUE_WAIT_MS = 30_000
 
-// Why: hosts rebind 1-2 min before this expires, so every host that (re)connected
-// in the same minute (a cell recreate dumps hundreds at once) rebinds as one
-// cohort every cycle, forever, and each cohort lands on the cell-inventory lock
-// as a single wave. Jittering the grant walks the cohort apart across cycles.
+// Why: hosts rebind a few minutes before this expires, so every host that
+// (re)connected in the same minute (a cell recreate dumps hundreds at once)
+// rebinds as one cohort every cycle, forever, and each cohort lands on the
+// cell-inventory lock as a single wave. A symmetric jitter walks the cohort
+// apart across cycles without raising the mean rebind rate. The lease only
+// drives the desktop's rotation timer; auth expiry (5 min token) and the 75 s
+// silence watchdog are enforced separately, so a longer grant risks nothing.
 export const CONTROL_LEASE_MS = 55 * 60 * 1000
-export const CONTROL_LEASE_JITTER_MS = 10 * 60 * 1000
+export const CONTROL_LEASE_JITTER_MS = 5 * 60 * 1000
 
 export class HostSessionRegistry {
   private readonly sessions = new Map<string, HostSession>()
@@ -150,8 +153,10 @@ export class HostSessionRegistry {
     private readonly random: () => number = Math.random
   ) {}
 
+  // Uniform over [CONTROL_LEASE_MS - jitter, CONTROL_LEASE_MS + jitter).
   private controlLeaseExpiresAt(): number {
-    return this.now() + CONTROL_LEASE_MS - Math.floor(this.random() * CONTROL_LEASE_JITTER_MS)
+    const offset = Math.floor((this.random() * 2 - 1) * CONTROL_LEASE_JITTER_MS)
+    return this.now() + CONTROL_LEASE_MS + offset
   }
 
   async acceptClient(
