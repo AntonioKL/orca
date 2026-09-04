@@ -36,6 +36,24 @@ export function normalizeConnectionId(value: string | null | undefined): string 
   return value?.trim() || null
 }
 
+/**
+ * The SSH target whose filesystem holds this repo's files, or `null` for anything else.
+ *
+ * SSH ownership has two spellings on a repo row — the legacy `connectionId` field and the unified
+ * `executionHostId` — so reading the raw field sees only one of them and a row carrying only
+ * `executionHostId: 'ssh:<target>'` reads as if it had no connection at all. Every comparison in
+ * this file goes through here: the candidate filters decide which rows reach the resolver, so
+ * reading raw in either place drops the row before the resolver can classify it.
+ *
+ * A non-SSH host falls back to the raw field so a `runtime:` row keeps contributing its nested
+ * target exactly as it does today. That target is not this client's to dial, but changing it is a
+ * separate defect with its own reasoning — see the note in `resolveFolderWorkspaceHost`.
+ */
+function getRepoScopeConnectionId(repo: Repo): string | null {
+  const host = parseExecutionHostId(getRepoExecutionHostId(repo))
+  return host?.kind === 'ssh' ? host.targetId : normalizeConnectionId(repo.connectionId)
+}
+
 function getFolderScopeCandidateRepos(args: {
   folderPath: string
   projectGroupId: string
@@ -59,18 +77,18 @@ function getFolderScopeCandidateRepos(args: {
   if (args.connectionId) {
     return [
       ...groupRepos,
-      ...pathRepos.filter((repo) => normalizeConnectionId(repo.connectionId) === args.connectionId)
+      ...pathRepos.filter((repo) => getRepoScopeConnectionId(repo) === args.connectionId)
     ]
   }
   if (groupRepos.length === 0) {
     return pathRepos
   }
-  const groupConnectionIds = new Set(
-    groupRepos.map((repo) => normalizeConnectionId(repo.connectionId))
-  )
+  // Both sides resolved: comparing a resolved path repo against a raw group read would reintroduce
+  // the same mismatch from the other direction.
+  const groupConnectionIds = new Set(groupRepos.map(getRepoScopeConnectionId))
   return [
     ...groupRepos,
-    ...pathRepos.filter((repo) => groupConnectionIds.has(normalizeConnectionId(repo.connectionId)))
+    ...pathRepos.filter((repo) => groupConnectionIds.has(getRepoScopeConnectionId(repo)))
   ]
 }
 
@@ -120,17 +138,7 @@ export function resolveFolderWorkspaceHost(
   let hasLocalRepo = false
   const connectionIds = new Set<string>()
   for (const repo of candidateRepos) {
-    // Why not `repo.connectionId` alone: SSH ownership has two spellings on a repo row, and a row
-    // carrying only `executionHostId: 'ssh:<target>'` has no `connectionId` to read. Reading the raw
-    // field counted it as a local repo, so a folder workspace whose files live on an SSH host
-    // resolved `local` — an execute-here answer for a remote path (#11163).
-    //
-    // Resolve the host first, then read the target off it. Every other row keeps its existing
-    // contribution, including a `runtime:` row's nested target: that is not this client's to dial,
-    // but narrowing it here would be a second behaviour change riding on this one.
-    const host = parseExecutionHostId(getRepoExecutionHostId(repo))
-    const connectionId =
-      host?.kind === 'ssh' ? host.targetId : normalizeConnectionId(repo.connectionId)
+    const connectionId = getRepoScopeConnectionId(repo)
     if (connectionId) {
       connectionIds.add(connectionId)
     } else {

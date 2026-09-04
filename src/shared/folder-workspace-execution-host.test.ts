@@ -284,6 +284,84 @@ describe('folder workspace execution host', () => {
     expect(resolved).toEqual({ kind: 'local' })
   })
 
+  // The candidate FILTER decides which rows reach the resolver, and it read `repo.connectionId` raw
+  // too — so an SSH-only repo outside the project-group subtree was dropped before any of the above
+  // could classify it. Every test before this one uses a repo inside the subtree, which is never
+  // filtered, so none of them could have caught it (found in review by CodeRabbit).
+  describe('a repo matched only by path, outside the project-group subtree', () => {
+    const sshOnlyPathRepo = repo({
+      id: 'repo-path',
+      path: '/work/app/nested',
+      executionHostId: 'ssh:box'
+    })
+
+    it('survives the scope-connection filter instead of being dropped as connectionless', () => {
+      const scoped = state({
+        folderWorkspaces: [workspace({ connectionId: 'box' })],
+        repos: [sshOnlyPathRepo]
+      })
+
+      expect(findFolderWorkspaceCandidateRepos(scoped, 'fw-1')).toEqual([sshOnlyPathRepo])
+      expect(resolveFolderWorkspaceHost(scoped, 'fw-1')).toEqual({ kind: 'ssh', targetId: 'box' })
+    })
+
+    // Pins the resolver, not the filter: under the old raw read BOTH rows came back connectionless,
+    // so they matched each other by accident and this case survived the filter either way. The
+    // legacy-vs-unified pairing below is the one that discriminates.
+    it('survives the group-connection filter when the group is on that same SSH host', () => {
+      const scoped = state({
+        repos: [
+          repo({
+            id: 'repo-group',
+            path: '/work/app/group',
+            projectGroupId: 'group-1',
+            executionHostId: 'ssh:box'
+          }),
+          sshOnlyPathRepo
+        ]
+      })
+
+      expect(findFolderWorkspaceCandidateRepos(scoped, 'fw-1')).toHaveLength(2)
+      expect(resolveFolderWorkspaceHost(scoped, 'fw-1')).toEqual({ kind: 'ssh', targetId: 'box' })
+    })
+
+    // Both sides of the group comparison are resolved, so the legacy spelling on one side and the
+    // unified spelling on the other still match.
+    it('matches a legacy-spelled group repo against a unified-spelled path repo', () => {
+      const scoped = state({
+        repos: [
+          repo({
+            id: 'repo-group',
+            path: '/work/app/group',
+            projectGroupId: 'group-1',
+            connectionId: 'box'
+          }),
+          sshOnlyPathRepo
+        ]
+      })
+
+      expect(findFolderWorkspaceCandidateRepos(scoped, 'fw-1')).toHaveLength(2)
+      expect(resolveFolderWorkspaceHost(scoped, 'fw-1')).toEqual({ kind: 'ssh', targetId: 'box' })
+    })
+
+    // A `runtime:` row's nested target is still read from the raw field, so it matches a scope
+    // connection exactly as it does today. Pinned so the carve-out stays a decision.
+    it('leaves a runtime row matching the scope connection through its nested target', () => {
+      const runtimePathRepo = repo({
+        id: 'repo-path',
+        path: '/work/app/nested',
+        executionHostId: 'runtime:env-1',
+        connectionId: 'box'
+      })
+      const scoped = state({
+        folderWorkspaces: [workspace({ connectionId: 'box' })],
+        repos: [runtimePathRepo]
+      })
+
+      expect(findFolderWorkspaceCandidateRepos(scoped, 'fw-1')).toEqual([runtimePathRepo])
+    })
+  })
+
   it('reads each repository membership once while collecting candidates', () => {
     let membershipReads = 0
     const repos = Array.from({ length: 32 }, (_, index) => {
