@@ -96,6 +96,30 @@ function currentModelId(models: ListedModel[], reportedModel: string | undefined
   )
 }
 
+/**
+ * The effort levels the session's current model advertises, or null when nothing
+ * identified it. `apply_flag_settings` accepts and stores any level for a model
+ * with no effort control, so the catalog is the only evidence of a refusal — and
+ * an absent or unlisted one is not evidence, or a live CLI that predates
+ * `list_models` would have every effort refused under it.
+ */
+export async function readClaudeModelEffortLevels(
+  session: ClaudeSession,
+  timeoutMs: number | undefined
+): Promise<ReadonlySet<string> | null> {
+  const modelId = session.options.get('model') ?? session.reportedOptions.model
+  if (!modelId) {
+    return null
+  }
+  const catalog = await session.connection.supportedModels({ timeoutMs }).catch(() => null)
+  const matched = catalog
+    ? listedModels({ models: catalog }).find(
+        (model) => model.id === modelId || model.resolvedModel === modelId
+      )
+    : undefined
+  return matched ? new Set(matched.efforts.map((choice) => choice.value)) : null
+}
+
 export async function readClaudeStructuredSessionOptions(
   session: ClaudeSession,
   timeoutMs: number | undefined

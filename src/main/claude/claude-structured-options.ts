@@ -4,7 +4,10 @@ import {
   AgentSessionOptionRejectedError,
   isAgentSessionOptionRejectedError
 } from '../native-chat/agent-session-wire/structured-agent-session-option-error'
-import { readClaudeSettingsEffort } from './claude-structured-session-options'
+import {
+  readClaudeModelEffortLevels,
+  readClaudeSettingsEffort
+} from './claude-structured-session-options'
 import type { ClaudeSession } from './claude-structured-session-state'
 
 const OPTION_ORDER = ['model', 'effort', 'permissionMode'] as const
@@ -49,6 +52,18 @@ export async function setClaudeStructuredOption(
     throw new AgentSessionOptionRejectedError(
       `claude stream-json has no session option named ${input.key}`
     )
+  }
+  // The child stores an effort its model has no control for and keeps it across
+  // every later model switch and restore, so refuse before the write rather than
+  // read the acceptance back as adoption. Refused here, restore drops the stale
+  // value instead of replaying it onto a model that cannot use it.
+  if (input.key === 'effort') {
+    const levels = await readClaudeModelEffortLevels(session, timeoutMs)
+    if (levels && !levels.has(input.value)) {
+      throw new AgentSessionOptionRejectedError(
+        `claude model ${session.options.get('model') ?? session.reportedOptions.model} does not accept effort ${input.value}`
+      )
+    }
   }
   const mutationSequence = ++session.optionMutationSequence
   try {
