@@ -27,6 +27,8 @@ import {
   WINDOWS_STDIN_WRITE_TIMEOUT_MS,
   writeBufferViaSystemSsh
 } from './system-ssh-file-binary-transfer'
+import { isSftpUnavailableError, makeDirectoriesViaSftp } from './system-ssh-sftp-transfer'
+import { getWindowsRemoteWriteCapabilities } from './system-ssh-windows-write-capabilities'
 
 type SystemSshOperationOptions = SystemSshBuildArgsOptions & {
   signal?: AbortSignal
@@ -161,9 +163,14 @@ async function collectWindowsUploadPlan(
   return plan
 }
 
-// Why the JSON envelope survives here: a path list is metadata, so this payload stays in the
-// hundreds of bytes even for a deep tree. Batched anyway, so a pathological tree cannot walk back
-// into the same stdin size that wedges PowerShell.
+/**
+ * Creates the upload's directories, preferring sftp's own `mkdir`.
+ *
+ * The PowerShell fallback keeps the JSON envelope, batched under one stdin's worth: a path list is
+ * metadata, so it stays in the hundreds of bytes even for a deep tree. It is still a redirected
+ * stdin read though, so on Windows PowerShell 5.1 it carries the same defect as any other — which
+ * is why sftp is tried first even for a payload this small.
+ */
 async function createWindowsUploadDirectories(
   target: SshTarget,
   directories: readonly string[],
@@ -175,23 +182,17 @@ async function createWindowsUploadDirectories(
     if (batch.length === 0) {
       return
     }
+    const pending = batch
     const payload = JSON.stringify(batch)
     batch = []
     batchBytes = 0
     throwIfAborted(options.signal)
-    const channel = spawnSystemSshCommand(target, makeWindowsCreateDirectoriesCommand(), {
-      wrapCommand: false,
-      ...getSystemSshBuildArgsFromOperationOptions(options)
-    })
-    const closePromise = awaitWithSystemSshAbort(
-      options.signal,
-      () => channel.close(),
-      waitForChannelClose(channel, 'windows relay upload mkdir', WINDOWS_STDIN_WRITE_TIMEOUT_MS)
+    await getWindowsRemoteWriteCapabilities(target).runWithFallback(
+      'sftp-subsystem',
+      () => makeDirectoriesViaSftp(target, pending, options),
+      () => createWindowsUploadDirectoriesViaPowerShell(target, payload, options),
+      isSftpUnavailableError
     )
-    if (!options.signal?.aborted) {
-      channel.stdin.end(payload)
-    }
-    await closePromise
   }
   for (const directory of directories) {
     const entryBytes = Buffer.byteLength(directory) + 4
@@ -204,12 +205,33 @@ async function createWindowsUploadDirectories(
   await flush()
 }
 
+async function createWindowsUploadDirectoriesViaPowerShell(
+  target: SshTarget,
+  payload: string,
+  options: SystemSshOperationOptions
+): Promise<void> {
+  const channel = spawnSystemSshCommand(target, makeWindowsCreateDirectoriesCommand(), {
+    wrapCommand: false,
+    ...getSystemSshBuildArgsFromOperationOptions(options)
+  })
+  const closePromise = awaitWithSystemSshAbort(
+    options.signal,
+    () => channel.close(),
+    waitForChannelClose(channel, 'windows relay upload mkdir', WINDOWS_STDIN_WRITE_TIMEOUT_MS)
+  )
+  if (!options.signal?.aborted) {
+    channel.stdin.end(payload)
+  }
+  await closePromise
+}
+
 function makeWindowsCreateDirectoriesCommand(): string {
   return powerShellCommand(
     [
       '$ErrorActionPreference = "Stop"',
-      // The reporter measured this reader surviving 50KB where `[Console]::In` wedged at the same
-      // size (#16432); the batch above stays under that.
+      // Reached only where the host has no sftp subsystem. Windows PowerShell 5.1 can lose a
+      // redirected stdin for good when a read finds it empty (#16432); a batch this small usually
+      // arrives in one piece, and "usually" is exactly why sftp is preferred.
       '$reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput())',
       'try { $json = $reader.ReadToEnd() } finally { $reader.Dispose() }',
       'if ([string]::IsNullOrWhiteSpace($json)) { return }',
