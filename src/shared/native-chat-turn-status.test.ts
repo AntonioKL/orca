@@ -186,6 +186,62 @@ describe('reduceNativeChatTurnTiming', () => {
     ).toEqual({})
   })
 
+  it('carries the elapsed start across an optimistic echo becoming a transcript row', () => {
+    // The mobile composer renders an accepted send as `pending-N` until the
+    // transcript echo lands under its real id. Without the carry-over the active
+    // turn key flips mid-turn and "Working for 8s" restarts at 0s.
+    const working = reduceNativeChatTurnTiming(
+      {},
+      {
+        activeTurnKey: 'pending-1',
+        validTurnKeys: new Set<string>(),
+        isWorking: true,
+        now: 1_000
+      }
+    )
+    expect(working['pending-1']?.startedAt).toBe(1_000)
+    const swapped = reduceNativeChatTurnTiming(working, {
+      activeTurnKey: 'u9',
+      previousActiveTurnKey: 'pending-1',
+      validTurnKeys: new Set(['u9']),
+      isWorking: true,
+      now: 9_000
+    })
+    expect(swapped.u9).toEqual({ startedAt: 1_000, workedSeconds: null })
+    expect(swapped['pending-1']).toBeUndefined()
+  })
+
+  it('does not carry the start into a genuinely new turn', () => {
+    // The previous turn is still in the transcript, so this is the user sending
+    // again — that turn starts its own clock.
+    const working = reduceNativeChatTurnTiming(
+      {},
+      { activeTurnKey: 'u1', validTurnKeys: new Set(['u1']), isWorking: true, now: 1_000 }
+    )
+    const next = reduceNativeChatTurnTiming(working, {
+      activeTurnKey: 'u2',
+      previousActiveTurnKey: 'u1',
+      validTurnKeys: new Set(['u1', 'u2']),
+      isWorking: true,
+      now: 9_000
+    })
+    expect(next.u2?.startedAt).toBe(9_000)
+  })
+
+  it('does not carry a start from a turn that had already settled', () => {
+    const settled: NativeChatTurnTimingByTurn = {
+      'pending-1': { startedAt: 1_000, workedSeconds: 5 }
+    }
+    const next = reduceNativeChatTurnTiming(settled, {
+      activeTurnKey: 'u9',
+      previousActiveTurnKey: 'pending-1',
+      validTurnKeys: new Set(['u9']),
+      isWorking: true,
+      now: 9_000
+    })
+    expect(next.u9?.startedAt).toBe(9_000)
+  })
+
   it('drops timings for turns that left the transcript, keeping the active one', () => {
     const current: NativeChatTurnTimingByTurn = {
       gone: { startedAt: 1, workedSeconds: 2 },

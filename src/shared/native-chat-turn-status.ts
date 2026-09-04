@@ -99,18 +99,32 @@ export function reduceNativeChatTurnTiming(
   current: NativeChatTurnTimingByTurn,
   {
     activeTurnKey,
+    previousActiveTurnKey,
     validTurnKeys,
     isWorking,
     workingStartedAt,
     now
   }: {
     activeTurnKey: string
+    /** The key this turn had on the previous pass. When it names a turn that has
+     *  since left the transcript, the two are the same turn under two ids — an
+     *  optimistic echo that the transcript replaced — so the clock carries over
+     *  instead of restarting. Omit it to keep the plain restart behavior. */
+    previousActiveTurnKey?: string
     validTurnKeys: ReadonlySet<string>
     isWorking: boolean
     workingStartedAt?: number | null
     now: number
   }
 ): NativeChatTurnTimingByTurn {
+  const replacedTiming =
+    previousActiveTurnKey !== undefined &&
+    previousActiveTurnKey !== activeTurnKey &&
+    !validTurnKeys.has(previousActiveTurnKey)
+      ? current[previousActiveTurnKey]
+      : undefined
+  const carriedStartedAt =
+    replacedTiming?.workedSeconds == null ? replacedTiming?.startedAt : undefined
   let retained = current
   for (const turnKey of Object.keys(current)) {
     if (turnKey !== activeTurnKey && !validTurnKeys.has(turnKey)) {
@@ -126,7 +140,8 @@ export function reduceNativeChatTurnTiming(
     // An in-flight turn keeps the start it already had; only a fresh turn (or an
     // authoritative host timestamp) restamps it.
     const startedAt =
-      workingStartedAt ?? (timing && timing.workedSeconds == null ? timing.startedAt : now)
+      workingStartedAt ??
+      (timing && timing.workedSeconds == null ? timing.startedAt : (carriedStartedAt ?? now))
     if (timing?.startedAt === startedAt && timing.workedSeconds == null) {
       return retained
     }

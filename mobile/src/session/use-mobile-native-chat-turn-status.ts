@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import {
   nativeChatTurnHasResponse,
@@ -32,6 +32,9 @@ export function useMobileNativeChatTurnStatus({
   const latestUserId = latestUserIndex !== -1 ? (messages[latestUserIndex]?.id ?? null) : null
   const activeTurnKey = latestUserId ?? MOBILE_UNANCHORED_TURN_KEY
   const [timingByTurn, setTimingByTurn] = useState<NativeChatTurnTimingByTurn>({})
+  // An accepted send renders as `pending-N` until the transcript echo lands under
+  // its real id. That is one turn under two keys, so the clock must survive the swap.
+  const previousActiveTurnKey = useRef<string | undefined>(undefined)
 
   useEffect(() => {
     const validTurnKeys = new Set(
@@ -40,12 +43,14 @@ export function useMobileNativeChatTurnStatus({
     setTimingByTurn((current) =>
       reduceNativeChatTurnTiming(current, {
         activeTurnKey,
+        previousActiveTurnKey: previousActiveTurnKey.current,
         validTurnKeys,
         isWorking,
         workingStartedAt,
         now: Date.now()
       })
     )
+    previousActiveTurnKey.current = activeTurnKey
   }, [activeTurnKey, isWorking, messages, workingStartedAt])
 
   // Why: the selection rebuilds its status objects on every call, and a streaming
