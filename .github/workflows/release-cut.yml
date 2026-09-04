@@ -2063,6 +2063,10 @@ jobs:
       # (`IS_OFFICIAL_BUILD === false`) — the exact failure mode flagged
       # in PR #1385's deferred follow-up.
       - name: Verify telemetry constants present in app.asar
+        # Windows artifact rebuilds are intentionally skipped on reruns to
+        # avoid creating duplicate SignPath requests; there is no dist/
+        # directory to inspect in that path.
+        if: matrix.platform != 'win' || github.run_attempt == 1
         run: node config/scripts/verify-telemetry-constants.mjs
 
   build-mac:
