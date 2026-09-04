@@ -208,10 +208,7 @@ export class MobileWebBridgeSubscriptionClient {
     }
     const pending = this.pending.get(message.requestId)
     if (!pending) {
-      // Why: the shell reports a dropped stream on the subscribe request id, which is
-      // no longer pending once `ready` resolved. Ignoring it strands the page waiting
-      // on events that will never arrive.
-      return message.status === 'error' && this.failByRequest(message.requestId, message.error)
+      return false
     }
     clearTimeout(pending.timer)
     this.pending.delete(message.requestId)
@@ -276,19 +273,6 @@ export class MobileWebBridgeSubscriptionClient {
     subscription.nextSequence += 1
     subscription.onEvent(parsed.data)
     return true
-  }
-
-  private failByRequest(
-    requestId: string,
-    error: { code: MobileWebBridgeClientError['code']; retryable: boolean }
-  ): boolean {
-    for (const [subscriptionId, subscription] of this.active) {
-      if (subscription.requestId === requestId) {
-        this.fail(subscriptionId, new MobileWebBridgeClientError(error.code, error.retryable))
-        return true
-      }
-    }
-    return false
   }
 
   private unsubscribe(subscriptionId: string, expected: MobileWebActiveSubscription): void {

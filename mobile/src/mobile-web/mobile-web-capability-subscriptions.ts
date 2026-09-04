@@ -1,4 +1,3 @@
-import type { MobileWebBridgeErrorCode } from '../../../src/shared/mobile-web/bridge-contract'
 import { MobileWebAccountSubscriptions } from './mobile-web-account-subscriptions'
 import type { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
 import { MobileWebBrowserStreams } from './mobile-web-browser-streams'
@@ -27,8 +26,6 @@ export class MobileWebCapabilitySubscriptions {
   }) {
     const postEvent = (subscriptionId: string, sequence: number, event: unknown) =>
       args.messages.event(subscriptionId, sequence, event)
-    const postError = (requestId: string, code: MobileWebBridgeErrorCode, retryable: boolean) =>
-      args.messages.error(requestId, code, retryable)
     this.account = new MobileWebAccountSubscriptions({ isActive: args.isActive, postEvent })
     this.browser = new MobileWebBrowserStreams({
       isActive: args.isActive,
@@ -44,7 +41,6 @@ export class MobileWebCapabilitySubscriptions {
     })
     this.session = new MobileWebSessionSubscriptions({
       isActive: args.isActive,
-      postError,
       browserAuthority: args.browserAuthority,
       nativeChatAuthority: args.nativeChatAuthority,
       postEvent

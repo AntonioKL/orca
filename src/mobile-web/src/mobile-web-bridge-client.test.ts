@@ -257,41 +257,6 @@ describe('mobile web bridge client', () => {
     })
   })
 
-  it('retires a live session subscription when the shell reports it dropped', async () => {
-    const messages: MobileWebBridgePageMessage[] = []
-    const ids = ['Q'.repeat(22), 'S'.repeat(22)]
-    const onEvent = vi.fn()
-    const onError = vi.fn()
-    const client = new MobileWebBridgeClient({
-      context: CONTEXT,
-      grants: [sessionSubscriptionGrant()],
-      postMessage: (message) => {
-        messages.push(message)
-        return true
-      },
-      createRequestId: () => ids.shift() ?? 'Z'.repeat(22)
-    })
-    const subscription = client.sessionSubscribe({ workspaceId: 'workspace-1' }, onEvent, onError)
-    client.receive(subscriptionResponse())
-    await subscription.ready
-
-    client.receive({
-      version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-      type: 'response',
-      shellSessionId: CONTEXT.shellSessionId,
-      buildId: CONTEXT.buildId,
-      requestId: 'Q'.repeat(22),
-      status: 'error',
-      error: { code: 'host_error', retryable: true }
-    })
-
-    expect(onError).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'host_error', retryable: true })
-    )
-    client.receive(subscriptionEvent(0, 1))
-    expect(onEvent).not.toHaveBeenCalled()
-  })
-
   it('retires a session subscription on a cross-workspace event', async () => {
     const messages: MobileWebBridgePageMessage[] = []
     const ids = ['Q'.repeat(22), 'S'.repeat(22)]

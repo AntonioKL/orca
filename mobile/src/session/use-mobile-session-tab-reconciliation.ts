@@ -117,7 +117,7 @@ export function useMobileSessionTabReconciliation(scope: MobileSessionMarkdownAc
     getPendingTerminalRecoveryContextKey,
     onPendingTerminalRecoveryParked: setParkedPendingTerminalContext,
     getApplicationRevision: getSessionTabsApplicationRevision,
-    ...sessionTabsFetchReporting.reporting
+    ...sessionTabsFetchReporting
   })
 
   useEffect(
@@ -168,8 +168,6 @@ export function useMobileSessionTabReconciliation(scope: MobileSessionMarkdownAc
     hasSessionTabsRecoveryNeed,
     getSessionTabsApplicationRevision,
     sessionTabsFetchReporting,
-    sessionTabsLoadFailure: sessionTabsFetchReporting.loadFailure,
-    clearSessionTabsLoadFailure: sessionTabsFetchReporting.clearLoadFailure,
     fetchSessionTabs,
     ensureSessionTabs,
     fetchPendingBrowserSessionTabs,
