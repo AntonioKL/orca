@@ -988,7 +988,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ab7706780a2dfa9b355b2d398749d40d
  };
  
 diff --git a/lib/windowsPtyAgent.js b/lib/windowsPtyAgent.js
-index a358ffb..fb3a96f 100644
+index a358ffb177357e177661033c1b092f9c9d0e5f5a..26c2a4c58799ce649f5113131e4c52f7ed2d87ad 100644
 --- a/lib/windowsPtyAgent.js
 +++ b/lib/windowsPtyAgent.js
 @@ -136,6 +136,9 @@ var WindowsPtyAgent = /** @class */ (function () {
@@ -1001,6 +1001,20 @@ index a358ffb..fb3a96f 100644
                  this._outSocket.readable = false;
                  this._getConsoleProcessList().then(function (consoleProcessList) {
                      consoleProcessList.forEach(function (pid) {
+@@ -154,9 +157,10 @@ var WindowsPtyAgent = /** @class */ (function () {
+                 // Close the input write handle to signal the end of session.
+                 this._inSocket.destroy();
+                 this._ptyNative.kill(this._pty, this._useConptyDll);
+-                this._outSocket.on('data', function () {
+-                    _this._conoutSocketWorker.dispose();
+-                });
++                // Orca: dispose unconditionally, as the non-DLL branch above does.
++                // Waiting for another 'data' event leaks the conout worker on every
++                // self-exiting shell, because no more data ever arrives (F24).
++                this._conoutSocketWorker.dispose();
+             }
+         }
+         else {
 diff --git a/lib/windowsTerminal.js b/lib/windowsTerminal.js
 index 3c38f89..e20b3e6 100644
 --- a/lib/windowsTerminal.js
@@ -1086,7 +1100,7 @@ index 3c38f89..e20b3e6 100644
 \ No newline at end of file
 +//# sourceMappingURL=windowsTerminal.js.map
 diff --git a/src/windowsPtyAgent.ts b/src/windowsPtyAgent.ts
-index d705444..ce611b8 100644
+index d7054449516f0c9a62af351c2caa17331206d530..0c28a32e2e1db2b3f208ddde8443cd4e67bb1ad6 100644
 --- a/src/windowsPtyAgent.ts
 +++ b/src/windowsPtyAgent.ts
 @@ -143,6 +143,9 @@ export class WindowsPtyAgent {
@@ -1099,6 +1113,20 @@ index d705444..ce611b8 100644
          this._outSocket.readable = false;
          this._getConsoleProcessList().then(consoleProcessList => {
            consoleProcessList.forEach((pid: number) => {
+@@ -159,9 +162,10 @@ export class WindowsPtyAgent {
+         // Close the input write handle to signal the end of session.
+         this._inSocket.destroy();
+         (this._ptyNative as IConptyNative).kill(this._pty, this._useConptyDll);
+-        this._outSocket.on('data', () => {
+-          this._conoutSocketWorker.dispose();
+-        });
++        // Orca: dispose unconditionally, as the non-DLL branch above does.
++        // Waiting for another 'data' event leaks the conout worker on every
++        // self-exiting shell, because no more data ever arrives (F24).
++        this._conoutSocketWorker.dispose();
+       }
+     } else {
+       // Because pty.kill closes the handle, it will kill most processes by itself.
 diff --git a/src/windowsTerminal.ts b/src/windowsTerminal.ts
 index 13f6c6d..eda63c8 100644
 --- a/src/windowsTerminal.ts

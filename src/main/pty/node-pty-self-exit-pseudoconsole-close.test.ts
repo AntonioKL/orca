@@ -14,16 +14,23 @@ import { describe, expect, it } from 'vitest'
  * `exit`, which is how panes usually close) that lookup missed, `PtyKill` did
  * nothing at all, and the pseudoconsole was never closed.
  *
- * Measured on Windows 11 / awin, 20 self-exit cycles, handles bucketed by NT
- * object type, per terminal:
+ * There is a SECOND, independent defect on the same path: the `useConptyDll`
+ * branch of `WindowsPtyAgent.kill()` disposed the conout worker only from an
+ * `_outSocket.on('data')` handler, and no more data arrives once the shell has
+ * gone — so that worker leaked too. The non-DLL branch beside it already
+ * disposed unconditionally. The desktop always sets `useConptyDll`, so it hit
+ * both; the relay sets neither and hit only the first.
  *
- *   relay spawn (no useConptyDll)   before  +1 Process +2 File   after  FLAT
- *   desktop spawn (useConptyDll)    before  +1 Process +5 File   after  +4 File
+ * Measured on Windows 11 / awin, 20 cycles, handles bucketed by NT object type,
+ * totals before -> after:
  *
- * The desktop residue is a *separate* defect in the `useConptyDll` branch of
- * `WindowsPtyAgent.kill()`, which disposes the conout worker only from an
- * `_outSocket.on('data')` handler — and no more data arrives after the shell has
- * gone. That one is tracked with F23; both are needed for the desktop to be flat.
+ *   self-exit,     relay spawn     225 -> 285   becomes  219 -> 219  FLAT
+ *   self-exit,     desktop spawn   239 -> 439   becomes  222 -> 222  FLAT
+ *   explicit kill, relay spawn     225 -> 285   becomes  219 -> 219  FLAT
+ *   explicit kill, desktop spawn   235 -> 395   becomes  219 -> 219  FLAT
+ *
+ * Neither fix alone is enough on the desktop: the pseudoconsole close is worth
+ * +1 Process +1 File per terminal, the dispose +2 Thread +4 File.
  *
  * WHY THIS IS A PATCH-CONTENT PIN AND NOT A BEHAVIOURAL TEST: the defect is
  * only observable as a per-NT-type handle count, which needs
@@ -71,5 +78,20 @@ describe('node-pty patch: pseudoconsole close on the self-exit path', () => {
   it('keeps the close idempotent so a second kill cannot double-close', () => {
     expect(PATCH).toContain('+    if (handle != nullptr && !handle->consoleClosed) {')
     expect(PATCH).toContain('+      handle->consoleClosed = true;')
+  })
+})
+
+describe('node-pty patch: conout worker disposal on the self-exit path', () => {
+  // The desktop's larger half: 8 of its 10 leaked handles per terminal.
+  it('disposes the conout worker unconditionally in the useConptyDll branch', () => {
+    expect(PATCH).toContain('+                this._conoutSocketWorker.dispose();')
+    // The data handler is what never fired once the shell had gone.
+    expect(PATCH).toContain("-                this._outSocket.on('data', function () {")
+    expect(PATCH).toContain('-                    _this._conoutSocketWorker.dispose();')
+  })
+
+  it('applies the same change to the TypeScript source the patch also carries', () => {
+    expect(PATCH).toContain('+        this._conoutSocketWorker.dispose();')
+    expect(PATCH).toContain("-        this._outSocket.on('data', () => {")
   })
 })
