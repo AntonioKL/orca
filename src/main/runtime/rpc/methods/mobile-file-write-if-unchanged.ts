@@ -51,7 +51,7 @@ async function writeMobileFileIfUnchanged(
   const nextBytes = Buffer.from(params.contentBase64, 'base64')
   let content: string
   try {
-    content = new TextDecoder('utf-8', { fatal: true }).decode(nextBytes)
+    content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(nextBytes)
   } catch {
     throw new InvalidArgumentError('File content must be valid UTF-8')
   }

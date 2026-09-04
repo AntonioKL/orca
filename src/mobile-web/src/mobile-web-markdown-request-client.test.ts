@@ -18,6 +18,29 @@ const TARGET = {
 }
 
 describe('mobile web markdown request client', () => {
+  it.each(['markdownRead', 'markdownSave', 'markdownDraftRead'] as const)(
+    'preserves a leading BOM in %s responses',
+    async (operation) => {
+      const harness = createHarness(operation)
+      const content = '\ufeff# Notes\r\nλ'
+      const contentBase64 = Buffer.from(content).toString('base64')
+      const pending =
+        operation === 'markdownRead'
+          ? harness.client.markdown.read({ ...TARGET, tabIsDirty: false })
+          : operation === 'markdownSave'
+            ? harness.client.markdown.save({ ...TARGET, content, baseVersion: 'v1' })
+            : harness.client.markdown.loadDraft(TARGET)
+      harness.client.receive(
+        response(
+          operation === 'markdownDraftRead'
+            ? { ...TARGET, draft: { contentBase64, baseVersion: 'v1' } }
+            : { ...TARGET, contentBase64, baseVersion: 'v1', editable: true, stale: false }
+        )
+      )
+      await expect(pending).resolves.toMatchObject({ content, baseVersion: 'v1' })
+    }
+  )
+
   it('encodes saves and decodes exact-identity results', async () => {
     const harness = createHarness('markdownSave')
     const saving = harness.client.markdown.save({
@@ -69,7 +92,7 @@ describe('mobile web markdown request client', () => {
   })
 })
 
-function createHarness(operation: 'markdownRead' | 'markdownSave') {
+function createHarness(operation: 'markdownRead' | 'markdownSave' | 'markdownDraftRead') {
   const messages: MobileWebBridgePageMessage[] = []
   const client = new MobileWebBridgeClient({
     context: CONTEXT,

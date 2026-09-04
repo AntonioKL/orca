@@ -146,7 +146,7 @@ function encodeMarkdownContent(content: string): string {
 function decodeMarkdownContent(contentBase64: string): string {
   try {
     const bytes = decodeMobileWebFileBytes(contentBase64, MOBILE_MARKDOWN_EDIT_MAX_BYTES)
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
   } catch (error) {
     if (error instanceof MobileWebBridgeClientError) {
       throw error

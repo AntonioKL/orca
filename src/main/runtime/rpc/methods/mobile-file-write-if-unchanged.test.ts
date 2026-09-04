@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { RpcRequest } from '../core'
@@ -6,6 +9,54 @@ import { RpcDispatcher } from '../dispatcher'
 import { MOBILE_FILE_WRITE_METHODS } from './mobile-file-write-if-unchanged'
 
 describe('mobile conflict-safe file write RPC', () => {
+  it('preserves a UTF-8 BOM on disk and returns a revision usable by the next save', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'orca-mobile-file-write-'))
+    const path = join(directory, 'notes.md')
+    try {
+      await writeFile(path, 'before')
+      const runtime = fileRuntime('before')
+      vi.mocked(runtime.readFileExplorerChunk).mockImplementation(async () => {
+        const bytes = await readFile(path)
+        return { contentBase64: bytes.toString('base64'), bytesRead: bytes.length, eof: true }
+      })
+      runtime.writeFileExplorerFile.mockImplementation(
+        async (_worktree, _relativePath, content) => {
+          await writeFile(path, content, 'utf8')
+          return { ok: true }
+        }
+      )
+      const dispatcher = new RpcDispatcher({ runtime, methods: MOBILE_FILE_WRITE_METHODS })
+      const content = '\ufeff# Notes\r\nλ'
+      const response = await dispatcher.dispatch(
+        request({
+          expectedRevision: revision('before'),
+          contentBase64: Buffer.from(content).toString('base64'),
+          expectedExecutionHostId: 'local'
+        })
+      )
+      expect(await readFile(path)).toEqual(Buffer.from(content))
+      expect(response).toMatchObject({
+        ok: true,
+        result: {
+          ok: true,
+          revision: revision(content),
+          byteLength: Buffer.byteLength(content)
+        }
+      })
+      const next = await dispatcher.dispatch(
+        request({
+          expectedRevision: revision(content),
+          contentBase64: Buffer.from(`${content}\nnext`).toString('base64'),
+          expectedExecutionHostId: 'local'
+        })
+      )
+      expect(next).toMatchObject({ ok: true, result: { ok: true } })
+      expect(await readFile(path, 'utf8')).toBe(`${content}\nnext`)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('writes UTF-8 only after the current authorized content matches', async () => {
     const runtime = fileRuntime('before')
     const dispatcher = new RpcDispatcher({ runtime, methods: MOBILE_FILE_WRITE_METHODS })

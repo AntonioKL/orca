@@ -12,7 +12,7 @@ export function decodeMobileWebFileContent(
   return {
     workspaceId: result.workspaceId,
     relativePath: result.relativePath,
-    content: new TextDecoder().decode(bytes),
+    content: new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes),
     truncated: result.truncated,
     byteLength: result.byteLength
   }
