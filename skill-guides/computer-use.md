@@ -13,20 +13,16 @@ description: >-
 
 Use this skill for desktop UI through `orca computer`. For a website or web app, use it only when the page is in an external desktop browser window that needs desktop-level control. Do not use it for page-only automation: use `orca-cli` for Orca's embedded pages and a page-automation tool such as Playwright or CDP for external pages.
 
-## Done
-
-An action is done only when its verification class was read and reported to the caller.
-`unverified` in any form means the action is not proven to have landed: re-read the UI
-state before the next step and never report it as success. When an unverified action had
-an external effect such as sending, submitting, purchasing, or deleting, say that the
-effect is unproven.
-
 ## Preconditions
 
-- In every command example, `ORCA` is a placeholder for the executable you used to run
-  `skills get`, including examples that name a specific shell. Replace it before running
-  the command; do not create a shell variable or run `ORCA` literally. Blocks that name no
-  shell are intentionally shell-neutral for POSIX shells, PowerShell, and cmd.exe.
+- Choose the Orca executable once: use the `ORCA_CLI_COMMAND` environment value when set;
+  otherwise use `orca-dev` in a dev session exposing `ORCA_DEV_REPO_ROOT`, `orca-ide` on
+  Linux outside an Orca-managed terminal, and `orca` everywhere else. Never try bare
+  `orca` first on unmanaged Linux because it normally resolves to the GNOME screen reader.
+- In every command example, `ORCA` is a documentation placeholder — including examples that
+  name a specific shell. Replace it with that chosen executable before running the command;
+  do not create a shell variable or run `ORCA` literally. Blocks that name no shell are
+  intentionally shell-neutral for POSIX shells, PowerShell, and cmd.exe.
 - Prefer `--json`; see Screenshots below for image output.
 - Do not push, submit forms, send messages, buy items, delete data, change account settings, or expose secrets unless the user explicitly asked for that action.
 - If an app contains sensitive content, read only what the user requested.
@@ -96,7 +92,7 @@ printf '%s' "$TEXT" | ORCA computer set-value --app <app> --element-index <index
 
 ## Action Rules
 
-- An action's verification is separate from whether its provider call succeeded:
+- Read every action's verification separately from whether its provider call succeeded:
   - `verified` means the changed value was read back.
   - `unverified (accessibility action unasserted)` means the accessibility call succeeded but no post-state assertion was made.
   - `unverified (synthetic input)` means input was fired into the void and is unverifiable.
