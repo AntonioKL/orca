@@ -40,17 +40,13 @@ type LocalTranscriptReadResult =
 export async function readInitialLocalWorkerTranscriptPage(
   filePath: string,
   limit: number,
-  decode: NativeChatLineDecoder,
-  endOffset?: number
+  decode: NativeChatLineDecoder
 ): Promise<LocalTranscriptReadResult> {
   const before = await readLocalTranscriptSourceIdentity(filePath)
   if (!before) {
     return { ok: false, reason: 'transcript_unreadable', warnings: [] }
   }
-  if (endOffset !== undefined && before.size < endOffset) {
-    return sourceChanged()
-  }
-  const page = await readNativeChatTranscriptTailFile(filePath, limit, decode, false, endOffset)
+  const page = await readNativeChatTranscriptTailFile(filePath, limit, decode, false)
   const after = await readLocalTranscriptSourceIdentity(filePath)
   if (workerTranscriptSourceChanged(before, after, page.consumedTo)) {
     return sourceChanged()
@@ -81,17 +77,13 @@ export async function readForwardLocalWorkerTranscriptPage(
   startOffset: number,
   limit: number,
   decode: NativeChatLineDecoder,
-  endOffset?: number,
   expectedBoundaryCheckpoint?: string
 ): Promise<LocalTranscriptReadResult> {
   const sourceIdentity = await readLocalTranscriptSourceIdentity(filePath)
   if (!sourceIdentity) {
     return { ok: false, reason: 'transcript_unreadable', warnings: [] }
   }
-  if (endOffset !== undefined && sourceIdentity.size < endOffset) {
-    return sourceChanged()
-  }
-  const fileSize = Math.min(sourceIdentity.size, endOffset ?? Number.MAX_SAFE_INTEGER)
+  const fileSize = sourceIdentity.size
   if (startOffset > fileSize) {
     return sourceChanged()
   }
@@ -120,7 +112,6 @@ export async function readForwardLocalWorkerTranscriptPage(
             startOffset,
             scanEnd,
             fileSize,
-            endOffset,
             limit,
             decode
           })
@@ -131,7 +122,7 @@ export async function readForwardLocalWorkerTranscriptPage(
     )
     const handleAfter = localWorkerTranscriptSourceIdentity(await handle.stat({ bigint: true }))
     const pathAfter = await readLocalTranscriptSourceIdentity(filePath)
-    const minimumSize = Math.max(page.nextOffset, endOffset ?? 0)
+    const minimumSize = page.nextOffset
     return !afterCheckpoint ||
       (expectedBoundaryCheckpoint !== undefined &&
         afterCheckpoint !== expectedBoundaryCheckpoint) ||
@@ -152,7 +143,6 @@ async function scanForwardPage(args: {
   startOffset: number
   scanEnd: number
   fileSize: number
-  endOffset?: number
   limit: number
   decode: NativeChatLineDecoder
 }): Promise<LocalTranscriptPage> {

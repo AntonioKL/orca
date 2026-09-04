@@ -41,7 +41,6 @@ export async function readWorkerTranscript(args: {
   /** Attested local WSL distro. Keeps host path translation on the selected guest. */
   wslDistro?: string
   offset?: number
-  endOffset?: number
   limit?: number
   /** Prior file identity from the cursor owner, when it retains that evidence. */
   expectedSourceFingerprint?: string
@@ -92,13 +91,12 @@ export async function readWorkerTranscript(args: {
   try {
     const page =
       args.offset === undefined
-        ? await readInitialLocalWorkerTranscriptPage(filePath, limit, decode, args.endOffset)
+        ? await readInitialLocalWorkerTranscriptPage(filePath, limit, decode)
         : await readForwardLocalWorkerTranscriptPage(
             filePath,
             args.offset,
             limit,
             decode,
-            args.endOffset,
             args.expectedBoundaryCheckpoint
           )
     if (!page.ok) {

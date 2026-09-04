@@ -11,7 +11,6 @@ import type {
 } from '../../orchestration/worker-terminal-ownership'
 import type {
   WorkerTerminalTailArchive,
-  WorkerTranscriptPinArchive,
   WorkerTranscriptSnapshotArchive
 } from '../../orchestration/worker-output-archive'
 import { clampWorkerTranscriptLimit } from '../../orchestration/worker-transcript-payload'
@@ -20,13 +19,12 @@ import {
   decodeWorkerOutputCursor,
   encodeWorkerOutputCursor
 } from '../../orchestration/worker-output-cursor'
-import { readWorkerTranscript } from '../../orchestration/worker-transcript-read'
 
 const ARCHIVED_TERMINAL_PAGE_LINES = 2_000
 
-// Serves the frozen output source after the live PTY is gone. Transcript pins read the exact
-// provider transcript directly; terminal archives page the stored redacted tail. Cursors stay
-// Dispatch-scoped and source-pinned exactly like live reads.
+// Serves the frozen output source after the live PTY is gone: a decoded transcript snapshot or
+// the stored redacted terminal tail. Cursors stay Dispatch-scoped and source-pinned exactly like
+// live reads.
 export async function readArchivedWorkerOutput(args: {
   db: OrchestrationDb
   dispatchId: string
@@ -52,12 +50,11 @@ export async function readArchivedWorkerOutput(args: {
         `Dispatch ${args.dispatchId} preserved structured transcript output only; terminal output was released.`
       )
     }
-    const content = JSON.parse(archive.content) as
-      | WorkerTranscriptPinArchive
-      | WorkerTranscriptSnapshotArchive
-    return isTranscriptSnapshot(content)
-      ? readFrozenTranscript(args, archive, content)
-      : readLegacyPinnedTranscript(args, content)
+    return readFrozenTranscript(
+      args,
+      archive,
+      JSON.parse(archive.content) as WorkerTranscriptSnapshotArchive
+    )
   }
   if (args.source === 'transcript') {
     throw new OrchestrationError(
@@ -117,82 +114,6 @@ function readFrozenTranscript(
     ],
     archived: true
   }
-}
-
-async function readLegacyPinnedTranscript(
-  args: Parameters<typeof readArchivedWorkerOutput>[0],
-  pin: WorkerTranscriptPinArchive
-): Promise<OrchestrationWorkerReadResult> {
-  const cursor = decodeWorkerOutputCursor(args.cursor, args.dispatchId)
-  if (cursor && (cursor.source !== 'transcript' || !cursor.boundaryCheckpoint)) {
-    throw sourceChanged()
-  }
-  const transcript = await readWorkerTranscript({
-    agent: pin.agent,
-    sessionId: pin.providerSessionId,
-    transcriptPath: pin.transcriptPath ?? undefined,
-    offset: cursor?.position,
-    endOffset: pin.endOffset,
-    expectedBoundaryCheckpoint: cursor?.boundaryCheckpoint ?? undefined,
-    limit: args.limit
-  })
-  if (!transcript.ok) {
-    if (transcript.reason === 'source_changed') {
-      throw sourceChanged()
-    }
-    throw new OrchestrationError(
-      'transcript_required',
-      `The pinned transcript for released Dispatch ${args.dispatchId} is unavailable: ${transcript.reason}.`,
-      { reason: transcript.reason }
-    )
-  }
-  const sourceIdentity = createWorkerOutputSourceIdentity([
-    'released-transcript',
-    pin.processIncarnation,
-    pin.agent,
-    pin.providerSessionKey,
-    pin.providerSessionId,
-    pin.transcriptPath ?? '',
-    String(pin.endOffset),
-    transcript.sourceFingerprint
-  ])
-  if (cursor && cursor.sourceIdentity !== sourceIdentity) {
-    throw sourceChanged()
-  }
-  const nextCursor = encodeWorkerOutputCursor(
-    args.dispatchId,
-    'transcript',
-    sourceIdentity,
-    transcript.nextOffset,
-    transcript.boundaryCheckpoint
-  )
-  const status = archivedStatus(args)
-  return {
-    dispatchId: args.dispatchId,
-    source: 'transcript',
-    sourceIdentity,
-    provider: pin.agent,
-    transcript: {
-      messages: transcript.messages,
-      nextCursor,
-      limited: transcript.limited,
-      returnedMessageCount: transcript.messages.length
-    },
-    cursor: nextCursor,
-    status,
-    fallbackReason: null,
-    sourceExact: true,
-    contentComplete: !transcript.limited,
-    ...(transcript.clipping.length > 0 ? { clipping: transcript.clipping } : {}),
-    warnings: transcript.warnings,
-    archived: true
-  }
-}
-
-function isTranscriptSnapshot(
-  content: WorkerTranscriptPinArchive | WorkerTranscriptSnapshotArchive
-): content is WorkerTranscriptSnapshotArchive {
-  return 'version' in content && content.version === 2
 }
 
 function readArchivedTerminalTail(

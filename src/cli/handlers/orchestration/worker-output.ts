@@ -68,6 +68,14 @@ function formatWorkerReadDetails(value: OrchestrationWorkerReadResult): string {
       ? `Source: transcript (provider=${value.provider})`
       : 'Source: terminal'
   const lines = [source]
+  // A released archive read otherwise prints identically to a live one.
+  if (value.status?.worker) {
+    lines.push(`Worker: ${value.status.worker}`)
+  }
+  lines.push(`Archived: ${value.archived === true}`)
+  if (value.status?.liveness) {
+    lines.push(`Liveness: ${value.status.liveness}`)
+  }
   if (value.sourceExact !== undefined) {
     lines.push(`Source exact: ${value.sourceExact}`)
   }
