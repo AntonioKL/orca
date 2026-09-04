@@ -300,6 +300,51 @@ describe('OrchestrationPeerCapabilityCache', () => {
     expect(newProbe).toHaveBeenCalledOnce()
     expect(redundantProbe).not.toHaveBeenCalled()
   })
+
+  it('ignores a remember() for an epoch the peer already moved off', async () => {
+    const cache = new OrchestrationPeerCapabilityCache()
+    let releaseProbe!: (value: ReturnType<typeof runtimeStatus>) => void
+    const inFlight = cache.resolve({
+      peerFingerprint: 'peer-a',
+      expectedRuntimeEpoch: 'epoch-a',
+      capability,
+      probe: () =>
+        new Promise<ReturnType<typeof runtimeStatus>>((resolve) => {
+          releaseProbe = resolve
+        })
+    })
+
+    cache.observeEpoch('peer-a', 'epoch-b')
+    cache.remember('peer-a', 'epoch-b', capability, true)
+    expect(cache.knownSupport('peer-a', null, capability)).toEqual({
+      runtimeEpoch: 'epoch-b',
+      supported: true,
+      cached: true
+    })
+
+    // The retired epoch-a answer lands last; it used to mint the highest sequence and win.
+    cache.remember('peer-a', 'epoch-a', capability, false)
+    releaseProbe(runtimeStatus('epoch-a', false))
+    await inFlight.catch(() => undefined)
+
+    expect(cache.knownSupport('peer-a', null, capability)).toEqual({
+      runtimeEpoch: 'epoch-b',
+      supported: true,
+      cached: true
+    })
+  })
+
+  it('still records the first remember() for a peer it has never observed', () => {
+    const cache = new OrchestrationPeerCapabilityCache()
+
+    cache.remember('peer-a', 'epoch-a', capability, true)
+
+    expect(cache.knownSupport('peer-a', null, capability)).toEqual({
+      runtimeEpoch: 'epoch-a',
+      supported: true,
+      cached: true
+    })
+  })
 })
 
 function runtimeStatus(runtimeId: string, supported: boolean) {

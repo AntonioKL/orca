@@ -137,6 +137,12 @@ export class OrchestrationPeerCapabilityCache {
     capability: RuntimeCapability,
     supported: boolean
   ): void {
+    const latestEpoch = this.latestEpochs.get(peerFingerprint)
+    // A late answer from a retired epoch used to mint the highest sequence, so it always cleared
+    // the stale guard and evicted the live epoch's maps on its way back in.
+    if (latestEpoch !== undefined && latestEpoch !== runtimeEpoch) {
+      return
+    }
     const generation = this.touchPeer(peerFingerprint)
     this.observeEpochAt(
       peerFingerprint,
