@@ -56,6 +56,7 @@ export const DISPATCH_CONTEXT_COLUMNS = [
   'last_failure',
   'termination_reason',
   'depth',
+  'consumer_generation',
   'dispatched_at',
   'completed_at',
   'created_at',

@@ -56,7 +56,8 @@ export function prepareStartingWorkerAuthority(
          SET assignee_handle = ?, assignee_pane_key = ?, process_incarnation = ?,
              host_scope = ?,
              capability_hash = ?, launch_token_hash = COALESCE(launch_token_hash, ?),
-             capability_revoked_at = NULL
+             capability_revoked_at = NULL,
+             consumer_generation = consumer_generation + 1
          WHERE id = ? AND status = 'pending'`
       )
       .run(
@@ -74,6 +75,7 @@ export function prepareStartingWorkerAuthority(
         `Dispatch ${params.dispatchId} is not starting.`
       )
     }
+    this.fenceOutstandingMailboxDelivery(`dispatch:${params.dispatchId}`)
     const workerUpdate = this.db
       .prepare(
         `UPDATE worker_dispatches

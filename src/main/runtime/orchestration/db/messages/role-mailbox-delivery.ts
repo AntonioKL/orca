@@ -187,12 +187,24 @@ export function hasOutstandingMailboxDelivery(
   )
 }
 
+export function fenceOutstandingMailboxDelivery(
+  this: OrchestrationDb,
+  mailboxHandle: string
+): void {
+  this.db
+    .prepare(
+      "UPDATE deliveries SET status = 'fenced' WHERE mailbox_handle = ? AND status = 'outstanding'"
+    )
+    .run(mailboxHandle)
+}
+
 export type RoleMailboxDeliveryMethods = {
   getDeliveryRaw: typeof getDeliveryRaw
   getDeliveryMessages: typeof getDeliveryMessages
   getOrCreateMailboxDelivery: typeof getOrCreateMailboxDelivery
   acknowledgeMailboxDelivery: typeof acknowledgeMailboxDelivery
   hasOutstandingMailboxDelivery: typeof hasOutstandingMailboxDelivery
+  fenceOutstandingMailboxDelivery: typeof fenceOutstandingMailboxDelivery
 }
 
 export function attachRoleMailboxDelivery(ctor: { prototype: object }): void {
@@ -201,6 +213,7 @@ export function attachRoleMailboxDelivery(ctor: { prototype: object }): void {
     getDeliveryMessages,
     getOrCreateMailboxDelivery,
     acknowledgeMailboxDelivery,
-    hasOutstandingMailboxDelivery
+    hasOutstandingMailboxDelivery,
+    fenceOutstandingMailboxDelivery
   })
 }
