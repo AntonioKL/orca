@@ -18,9 +18,9 @@ import {
 } from '../worktree/workspace-list-picker-options'
 import { isWorktreePinned } from '../worktree/workspace-list-sections'
 import { hostScreenStyles as styles } from './host-screen-styles'
-import type { HostScreenController } from './use-host-screen-controller'
+import type { HybridHostScreenController } from './use-hybrid-host-screen-controller'
 
-export function HostScreenOverlays({ controller }: { controller: HostScreenController }) {
+export function HostScreenOverlays({ controller }: { controller: HybridHostScreenController }) {
   const {
     actions,
     catalog,
