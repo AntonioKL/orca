@@ -91,10 +91,31 @@ function migrateJournalDatabase(db: Database.Database, stored: number): void {
   }
   db.exec('BEGIN IMMEDIATE')
   try {
+    rekeyQuarantineOnSurrogate(db)
     db.pragma(`user_version = ${JOURNAL_DB_SCHEMA_VERSION}`)
     db.exec('COMMIT')
   } catch (error) {
     db.exec('ROLLBACK')
     throw error
   }
+}
+
+/**
+ * v1 keyed `journal_quarantine` on `(session_id, epoch, seq)`, which a second
+ * repair in the same epoch overwrote once the live journal reused the sequences
+ * the first repair freed. Rebuild it on the surrogate key, carrying every row
+ * across in its existing order.
+ */
+function rekeyQuarantineOnSurrogate(db: Database.Database): void {
+  const columns = db.pragma('table_info(journal_quarantine)') as { name: string }[]
+  if (columns.some((column) => column.name === 'quarantine_id')) {
+    return
+  }
+  db.exec('ALTER TABLE journal_quarantine RENAME TO journal_quarantine_seq_keyed')
+  db.exec(createJournalTablesSql())
+  db.exec(`INSERT INTO journal_quarantine
+  (session_id, epoch, seq, ts, row_json, quarantined_at)
+SELECT session_id, epoch, seq, ts, row_json, quarantined_at
+FROM journal_quarantine_seq_keyed ORDER BY epoch ASC, seq ASC`)
+  db.exec('DROP TABLE journal_quarantine_seq_keyed')
 }

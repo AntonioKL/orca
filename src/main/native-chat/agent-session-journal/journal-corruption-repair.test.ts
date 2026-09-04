@@ -23,9 +23,10 @@ import type {
 import type Database from '../../sqlite/sync-database'
 import { openJournalDatabase } from './journal-database'
 import { journalDatabaseFile } from './journal-paths'
-import { journalTxnPhysicalCost } from './journal-database-space'
+import { JOURNAL_MIN_SESSION_BYTES, journalTxnPhysicalCost } from './journal-database-space'
 import { DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
 import { journalDirectoryBytes } from './journal-physical-quota'
+import { JournalPeakSampler } from './journal-quota-test-peak'
 import { countJournalRowSuffix } from './journal-row-table'
 import { parseJournalRow, type JournalRow } from './journal-row-schema'
 import type { openAgentSessionJournal } from './journal-store-factory'
@@ -256,5 +257,151 @@ describe('the quota', () => {
 
     // Nothing was dropped on the way to that refusal.
     expect(await liveSequences()).toEqual([1, 2, 4, 5])
+  })
+})
+
+describe('a missing epoch row', () => {
+  // Sequence 1 is the anchor for the whole epoch. Validating from the first row
+  // that HAPPENS to remain declares the leftovers contiguous, and the corrupt
+  // probe then hands them to a provider-history replacement that deletes every
+  // live row — so the Orca-minted ones have to be set aside before that runs.
+  it('rejects the whole surviving range rather than declaring it contiguous', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('anchor'), { fence: 1 })
+    await journal.appendSubmission({
+      clientMessageId: 'client-message-1',
+      payloadFingerprint: 'fingerprint-1',
+      body: {
+        kind: 'message',
+        role: 'user',
+        blocks: [{ type: 'text', text: 'the user typed this' }]
+      },
+      fence: 1
+    })
+    await journal.resolveDispatch({
+      clientMessageId: 'client-message-1',
+      state: 'accepted',
+      providerIdentity: item(1),
+      fence: 1
+    })
+    await journal.close()
+    await withJournalDatabase((db) => {
+      db.prepare('DELETE FROM journal_rows WHERE seq = ?').run(1)
+    })
+
+    const reopened = await open()
+    expect(reopened.repair).toEqual({ malformedRows: 0, quarantinedRows: 3 })
+    expect(await liveSequences()).toEqual([])
+    expect(recovered(reopened).map((row) => row.kind)).toEqual(['item', 'submission', 'dispatch'])
+  })
+})
+
+describe('a second repair in the same epoch', () => {
+  // A repair frees the sequence numbers it removed, and the live journal reuses
+  // them. Keying the quarantine on `(session, epoch, seq)` alone therefore makes
+  // the second repair overwrite what the first one preserved.
+  it('keeps the earlier quarantined row when a later repair reuses its sequence', async () => {
+    const first = await open()
+    await first.appendItem(item(0), body('m0'), { fence: 1 })
+    await first.appendItem(item(1), body('survives first fault'), { fence: 1 })
+    await first.close()
+    await withJournalDatabase((db) => {
+      db.prepare('DELETE FROM journal_rows WHERE seq = ?').run(2)
+    })
+
+    const repaired = await open()
+    expect(repaired.repair.quarantinedRows).toBe(1)
+    // The live epoch is back to its anchor row, so these reuse sequences 2 and 3.
+    await repaired.appendItem(item(2), body('reused'), { fence: 1 })
+    await repaired.appendItem(item(3), body('survives second fault'), { fence: 1 })
+    await repaired.close()
+    await withJournalDatabase((db) => {
+      db.prepare('DELETE FROM journal_rows WHERE seq = ?').run(2)
+    })
+
+    const twice = await open()
+    expect(twice.repair.quarantinedRows).toBe(1)
+    expect(
+      recovered(twice).map((row) =>
+        row.kind === 'item' && row.body.kind === 'message' && row.body.blocks[0]?.type === 'text'
+          ? row.body.blocks[0].text
+          : null
+      )
+    ).toEqual(['survives first fault', 'survives second fault'])
+  })
+})
+
+describe('the admission charge', () => {
+  // `journalTxnPhysicalCost` is page arithmetic over PHYSICAL bytes. SQLite's
+  // `length()` on a TEXT value counts characters, so a multibyte suffix was
+  // charged at up to a third of what it actually writes.
+  it('charges physical UTF-8 bytes for a multibyte suffix, not characters', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('€'.repeat(100)), { fence: 1 })
+    const epoch = journal.epoch
+    await journal.close()
+
+    await withJournalDatabase((db) => {
+      const stored = db.prepare('SELECT row_json FROM journal_rows WHERE seq = 2').get() as {
+        row_json: string
+      }
+      const physical = Buffer.byteLength(stored.row_json, 'utf8')
+      expect(physical).toBeGreaterThan(stored.row_json.length)
+      expect(countJournalRowSuffix(db, IDENTITY.sessionId, epoch, 2).rowJsonByteLengths).toEqual([
+        physical
+      ])
+    })
+  })
+
+  it('refuses a multibyte lifecycle batch it cannot afford, and stays bounded where it fits', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('anchor'), { fence: 1 })
+    await journal.appendLifecycleBatch({
+      settlementId: 'multibyte',
+      fence: 1,
+      mutations: [
+        {
+          kind: 'item',
+          identity: { provider: 'orca', clientMessageId: 'lifecycle-1' },
+          body: { kind: 'status', text: '€'.repeat(120_000) }
+        }
+      ]
+    })
+    await journal.close()
+    await withJournalDatabase((db) => {
+      db.prepare('DELETE FROM journal_rows WHERE seq = ?').run(2)
+    })
+
+    // The charge is recomputed from the row's real byte length, so this bound
+    // cannot drift into passing because the counting primitive shrank.
+    let charge = 0
+    await withJournalDatabase((db) => {
+      const stored = db.prepare('SELECT row_json FROM journal_rows WHERE seq = 3').get() as {
+        row_json: string
+      }
+      const opened = openJournalDatabase(journalDatabaseFile(root))
+      const pageSize = opened.pageSize
+      opened.db.close()
+      charge = journalTxnPhysicalCost([Buffer.byteLength(stored.row_json, 'utf8')], pageSize)
+    })
+    const measured = await journalDirectoryBytes(root)
+
+    await expect(
+      open({
+        limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: measured + charge - 1 }
+      })
+    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
+    expect(await liveSequences()).toEqual([1, 3])
+
+    // The same charge plus the documented cost of materializing a connection:
+    // the copy now fits, and the repair's observed peak has to stay inside it.
+    const bound = (await journalDirectoryBytes(root)) + charge + JOURNAL_MIN_SESSION_BYTES
+    const peak = new JournalPeakSampler(root)
+    const reopened = await open({
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: bound }
+    })
+    await peak.sample()
+    expect(reopened.repair.quarantinedRows).toBe(1)
+    expect(peak.peak).toBeLessThanOrEqual(bound)
   })
 })

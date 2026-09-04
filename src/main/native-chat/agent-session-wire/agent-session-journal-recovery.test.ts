@@ -223,6 +223,55 @@ describe('openAgentSessionJournalWithRecovery', () => {
     })
   })
 
+  // The rehydrate deletes every live row to publish its replacement epoch, so
+  // whatever replay rejected has to be in quarantine BEFORE the import runs.
+  // Orca minted the submission, receipt and lifecycle identities; no provider
+  // transcript can hand them back.
+  it('keeps Orca-owned rows recoverable when the epoch row itself is gone', async () => {
+    const journal = await journals.open({ identity: IDENTITY, journalDir })
+    await journal.appendSubmission({
+      clientMessageId: 'client-message-1',
+      payloadFingerprint: 'fingerprint-1',
+      body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'add a retry' }] },
+      fence: 1
+    })
+    await journal.resolveDispatch({
+      clientMessageId: 'client-message-1',
+      state: 'accepted',
+      providerIdentity: item(1),
+      fence: 1
+    })
+    await journal.appendLifecycleBatch({
+      settlementId: 'settlement-1',
+      fence: 1,
+      mutations: [
+        {
+          kind: 'item',
+          identity: { provider: 'orca', clientMessageId: 'approval-1' },
+          body: { kind: 'status', text: 'approved' }
+        }
+      ]
+    })
+    await journal.close()
+    // Sequence 1 is the epoch row: everything behind it is valid but unanchored.
+    await deleteRow(1)
+
+    const opened = await openAgentSessionJournalWithRecovery({
+      identity: IDENTITY,
+      journalDir,
+      fence: 1,
+      historyFilePath
+    })
+    journals.track(opened.journal)
+    expect(opened.recovery).toMatchObject({ trigger: 'journal_corrupt' })
+    expect(opened.recovery?.imported).toBeGreaterThan(0)
+
+    const kinds = opened.journal
+      .recoverQuarantinedRows()
+      .map((row) => (JSON.parse(row.rowJson) as { kind: string }).kind)
+    expect(kinds).toEqual(['submission', 'dispatch', 'lifecycle-batch'])
+  })
+
   it('still opens the session when provider history cannot be read', async () => {
     await seedJournal(3)
     await deleteRow(3)

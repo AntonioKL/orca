@@ -21,16 +21,21 @@ WHERE session_id = ? AND epoch = ? ORDER BY seq ASC`
 const SELECT_ROWS_AFTER = `SELECT epoch, seq, ts, row_json FROM journal_rows
 WHERE session_id = ? AND epoch = ? AND seq > ? ORDER BY seq ASC`
 const DELETE_SUFFIX = 'DELETE FROM journal_rows WHERE session_id = ? AND epoch = ? AND seq >= ?'
-const SELECT_SUFFIX_LENGTHS = `SELECT length(row_json) AS bytes FROM journal_rows
+// `CAST(... AS BLOB)`, because `length()` on a TEXT value counts CHARACTERS and
+// the physical charge is byte arithmetic — a multibyte suffix was charged at a
+// third of what it writes.
+const SELECT_SUFFIX_LENGTHS = `SELECT length(CAST(row_json AS BLOB)) AS bytes FROM journal_rows
 WHERE session_id = ? AND epoch = ? AND seq >= ? ORDER BY seq ASC`
-// `INSERT OR REPLACE`, so a repair interrupted between chunks resumes instead of
-// failing on the rows it already preserved.
-const QUARANTINE_SUFFIX = `INSERT OR REPLACE INTO journal_quarantine
+// A plain INSERT: the quarantine is append-only across repair generations, and
+// the live epoch reuses the sequences an earlier repair freed. The copy and the
+// source delete share one transaction, so a crash between chunks cannot leave a
+// half-copied chunk for a resume to duplicate.
+const QUARANTINE_SUFFIX = `INSERT INTO journal_quarantine
   (session_id, epoch, seq, ts, row_json, quarantined_at)
 SELECT session_id, epoch, seq, ts, row_json, ? FROM journal_rows
 WHERE session_id = ? AND epoch = ? AND seq >= ?`
 const SELECT_QUARANTINED = `SELECT epoch, seq, ts, row_json FROM journal_quarantine
-WHERE session_id = ? ORDER BY epoch ASC, seq ASC`
+WHERE session_id = ? ORDER BY epoch ASC, seq ASC, quarantine_id ASC`
 
 export function readJournalSessionEpoch(db: Database.Database, sessionId: string): string | null {
   const row = db.prepare(SELECT_SESSION).get(sessionId) as { epoch?: string } | undefined
@@ -83,8 +88,8 @@ export function deleteAllJournalRows(db: Database.Database): void {
   db.exec('DELETE FROM journal_rows')
 }
 
-/** Row-body lengths of a rejected suffix, in sequence order. The quarantine
- *  charges the copy from these before it writes a byte of it. */
+/** Physical row-body byte lengths of a rejected suffix, in sequence order. The
+ *  quarantine charges the copy from these before it writes a byte of it. */
 export function countJournalRowSuffix(
   db: Database.Database,
   sessionId: string,

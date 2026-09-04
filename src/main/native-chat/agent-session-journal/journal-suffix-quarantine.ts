@@ -8,11 +8,15 @@
 //
 // So the suffix is copied into `journal_quarantine` and only then deleted from
 // `journal_rows`, both in ONE transaction per chunk. A crash between the two is
-// impossible; a crash between chunks leaves a valid prefix and a partially
-// quarantined suffix, and the next open resumes from the same point because the
-// copy is an upsert. If the copy does not fit inside the session's physical
-// bound the open FAILS instead of destroying the rows — the same answer the
-// file-backed journal gave when its quarantine did not fit.
+// impossible; a crash between chunks leaves a valid prefix and an already-copied
+// tail, and the next open quarantines only what is still live. The copy is a
+// plain append, never an upsert: a repair frees the sequences it removed and the
+// live epoch reuses them, so replacing on `(epoch, seq)` would let a later
+// repair delete what an earlier one preserved.
+//
+// If the copy does not fit inside the session's physical bound the open FAILS
+// instead of destroying the rows — the same answer the file-backed journal gave
+// when its quarantine did not fit.
 
 import type Database from '../../sqlite/sync-database'
 import { checkpointJournalWal, reclaimJournalDatabaseSpace } from './journal-database-space'

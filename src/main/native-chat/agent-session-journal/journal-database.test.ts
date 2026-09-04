@@ -178,6 +178,51 @@ describe('journal row statements', () => {
     }
   })
 
+  // A v1 database keyed the quarantine on `(session_id, epoch, seq)`, so a
+  // second repair overwrote what the first preserved once the live journal
+  // reused the freed sequences. Carry those rows forward, then prove the
+  // rebuilt table accepts the collision v1 dropped.
+  it('rekeys a sequence-keyed quarantine onto the surrogate without losing a row', () => {
+    const seeded = new Database(dbPath)
+    seeded.exec(`CREATE TABLE journal_quarantine (
+  session_id     TEXT    NOT NULL,
+  epoch          TEXT    NOT NULL,
+  seq            INTEGER NOT NULL,
+  ts             INTEGER NOT NULL,
+  row_json       TEXT    NOT NULL,
+  quarantined_at INTEGER NOT NULL,
+  PRIMARY KEY (session_id, epoch, seq)
+)`)
+    seeded
+      .prepare('INSERT INTO journal_quarantine VALUES (?, ?, ?, ?, ?, ?)')
+      .run('session-1', 'epoch-1', 3, 7, '{"first":true}', 11)
+    seeded.pragma('user_version = 1')
+    seeded.close()
+
+    const opened = openJournalDatabase(dbPath)
+    try {
+      expect(journalPragmaNumber(opened.db, 'user_version')).toBe(JOURNAL_DB_SCHEMA_VERSION)
+      expect(readJournalQuarantinedRows(opened.db, 'session-1')).toEqual([
+        { epoch: 'epoch-1', seq: 3, ts: 7, rowJson: '{"first":true}' }
+      ])
+
+      insertJournalRow(opened.db, 'session-1', epochRow(3))
+      moveJournalRowSuffixChunkToQuarantine({
+        db: opened.db,
+        sessionId: 'session-1',
+        epoch: 'epoch-1',
+        floorSeq: 3,
+        quarantinedAt: 12
+      })
+      expect(readJournalQuarantinedRows(opened.db, 'session-1').map((row) => row.rowJson)).toEqual([
+        '{"first":true}',
+        expect.stringContaining('"kind":"epoch"')
+      ])
+    } finally {
+      opened.db.close()
+    }
+  })
+
   it('refuses a duplicate sequence inside one epoch', () => {
     const opened = openJournalDatabase(dbPath)
     try {

@@ -24,6 +24,9 @@ import {
 } from './journal-row-table'
 import { parseJournalRow, type JournalRow } from './journal-row-schema'
 
+/** Every epoch row is sequence 1, and no compaction moves that floor. */
+const FIRST_JOURNAL_SEQUENCE = 1
+
 export type JournalLoad = {
   state: JournalReducerState
   /** A future schema version was met: no writes, no deletion. */
@@ -78,13 +81,17 @@ export function replayJournal(
     break
   }
 
-  const oldest = rows[0]?.seq ?? 1
+  // Anchored at 1, never at the first row that HAPPENS to remain: nothing trims
+  // a prefix, so a missing epoch row is a hole like any other and everything
+  // behind it is unanchored. Validating from `rows[0].seq` would call the
+  // leftovers contiguous and leave them out of the quarantine that runs before
+  // provider history replaces the epoch.
   const gap = findSequenceGap(
     rows.map((row) => row.seq),
-    oldest
+    FIRST_JOURNAL_SEQUENCE
   )
   if (gap) {
-    const firstBad = rows.findIndex((row, index) => row.seq !== oldest + index)
+    const firstBad = rows.findIndex((row, index) => row.seq !== FIRST_JOURNAL_SEQUENCE + index)
     if (firstBad !== -1) {
       truncateFrom = rows[firstBad]?.seq ?? truncateFrom
       rows.length = firstBad
@@ -93,12 +100,12 @@ export function replayJournal(
   for (const row of rows) {
     applyJournalRow(state, row)
   }
-  state.oldestSequence = oldest
+  state.oldestSequence = FIRST_JOURNAL_SEQUENCE
 
   return {
     state,
     readOnly: latched,
-    corrupt: Boolean(gap) || oldest !== 1 || malformedRows > 0,
+    corrupt: Boolean(gap) || malformedRows > 0,
     malformedRows,
     sizeBytes: 0,
     ...(truncateFrom !== undefined && !latched ? { truncateFrom } : {})
