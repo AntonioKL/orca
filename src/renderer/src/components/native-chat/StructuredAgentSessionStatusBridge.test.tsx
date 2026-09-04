@@ -130,19 +130,19 @@ const historyResult = {
   }
 }
 
-function ActiveSessionRead(): null {
+function ActiveSessionRead({ isVisible = true }: { isVisible?: boolean }): null {
   useStructuredAgentSessionRead({
     sessionId: structuredTab.entityId,
     target: { kind: 'local' },
-    isVisible: true
+    isVisible
   })
   return null
 }
 
-function ActiveComposition(): React.JSX.Element {
+function ActiveComposition({ isVisible = true }: { isVisible?: boolean }): React.JSX.Element {
   return (
     <>
-      <ActiveSessionRead />
+      <ActiveSessionRead isVisible={isVisible} />
       <StructuredAgentSessionStatusBridge />
     </>
   )
@@ -213,6 +213,66 @@ describe('StructuredAgentSessionStatusBridge', () => {
       providerSession: historyResult.providerSession,
       terminalResumeEligible: false
     })
+  })
+
+  it('keeps observing a hidden active turn until its settlement removes the running item', async () => {
+    const runningItem = {
+      itemId: 'turn-running',
+      revision: 1,
+      sequence: 2,
+      observedAt: 2,
+      body: {
+        kind: 'status',
+        text: 'Working',
+        turnLifecycle: { turnId: 'turn-1', state: 'running' }
+      }
+    } as const
+    mocks.call.mockResolvedValue({
+      ...historyResult,
+      page: {
+        ...historyResult.page,
+        items: [userItem, runningItem],
+        window: {
+          ...historyResult.page.window,
+          newest: { epoch: 'epoch-1', sequence: 2 },
+          nextCursor: { epoch: 'epoch-1', sequence: 2 }
+        },
+        liveCursor: { epoch: 'epoch-1', sequence: 2 }
+      }
+    })
+    const view = render(<ActiveComposition />)
+
+    await waitFor(() =>
+      expect(Object.values(mocks.store?.getState().agentStatusByPaneKey ?? {})).toEqual([
+        expect.objectContaining({ state: 'working' })
+      ])
+    )
+    expect(mocks.subscribe).toHaveBeenCalledOnce()
+
+    view.rerender(<ActiveComposition isVisible={false} />)
+    await act(() => Promise.resolve())
+    expect(mocks.unsubscribe).not.toHaveBeenCalled()
+
+    const onEvent = mocks.subscribe.mock.calls[0]?.[2] as (event: unknown) => void
+    act(() =>
+      onEvent({
+        type: 'batch',
+        sessionId: 'session-1',
+        batch: {
+          cursor: { epoch: 'epoch-1', sequence: 3 },
+          items: [],
+          removedItemIds: ['turn-running'],
+          submissions: []
+        }
+      })
+    )
+
+    await waitFor(() =>
+      expect(Object.values(mocks.store?.getState().agentStatusByPaneKey ?? {})).toEqual([
+        expect.objectContaining({ state: 'done' })
+      ])
+    )
+    await waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledOnce())
   })
 
   it('keeps the status map reference stable for coalesced assistant deltas', async () => {

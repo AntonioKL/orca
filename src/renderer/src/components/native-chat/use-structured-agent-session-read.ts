@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react'
+import { activeStructuredAgentSessionTurnId } from '../../../../shared/structured-agent-session-projection'
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import {
   getStructuredAgentSessionReadOwner,
@@ -24,7 +25,13 @@ export function useStructuredAgentSessionReadObservation(args: {
   sessionId: string
   target: RuntimeClientTarget
 }): StructuredAgentSessionReadSnapshot {
-  return useReadOwnerSnapshot(args.sessionId, args.target).snapshot
+  const { owner, snapshot } = useReadOwnerSnapshot(args.sessionId, args.target)
+  const hasActiveTurn = activeStructuredAgentSessionTurnId(snapshot.state.items) !== null
+
+  // Why: a background status projection must keep receiving the real settlement after its pane hides.
+  useEffect(() => (hasActiveTurn ? owner.activate() : undefined), [hasActiveTurn, owner])
+
+  return snapshot
 }
 
 export function useStructuredAgentSessionRead(args: {
