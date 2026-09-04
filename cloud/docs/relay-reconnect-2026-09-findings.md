@@ -180,11 +180,15 @@ Owner: "feel free to improve operations to make things more effective ... contin
 until this process is complete." Owner has had multi-day experiences with cell rolls and does not want a
 9-hour sequential roll.
 
-1. **Lock-removal PR** (root cause). *Status 07:20Z: committed 5a6e4754d7 on branch
-   `relay-single-row-reservation` (worktree /tmp/wt-retries-bar). 4 call sites converted; census updated;
-   new `control-rebind-inventory-lock-postgres.test.ts` passes on pg17:55440 and fails with the lock
-   re-added; 479 SQLite unit tests green; tsc clean. Opus adversarial review + full Postgres smoke running.
-   Not yet pushed.* Make `activateControl` superseded-control cleanup, `acquireActivity`
+1. **Lock-removal PR** (root cause). *Status 08:55Z: pushed as branch `relay-single-row-reservation`
+   (2 commits). Opus adversarial review found one real defect: `acquireActivity` moving a client-chosen
+   activity id across cells locked the old cell's row before the new one, cycling with placement's
+   ascending inventory lock (reviewer reproduced it as paired 55P03s on real Postgres; no 40P01 because
+   lock_timeout == deadlock_timeout == 1 s). Fixed with `lockCellRows` (ordered, 500 ms bound); census now
+   fails on any inline `relay_cells FOR UPDATE` outside the named helpers. Three-cell Postgres test moves
+   an activity high->low while the target row is held; 5/5 revert-mutants fail it. 480 SQLite tests +
+   tsc green. Also fixed a pre-existing test leak (`relay_cell_connection_snapshots`) that made
+   `assignment-control-supersession-postgres` fail on reruns.* Make `activateControl` superseded-control cleanup, `acquireActivity`
    existing-lease branch, and `changeActivity` use the existing single-row
    `adjustCellReservationAtomically` instead of the 23-row `lockCellInventory`. Keep the global lock only
    for placement (`resolve`/assignment) and sweeps. Real-Postgres contention test on port 55440.
