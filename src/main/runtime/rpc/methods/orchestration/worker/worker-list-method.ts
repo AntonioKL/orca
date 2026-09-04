@@ -1,6 +1,7 @@
 import { ORCHESTRATION_FLEET_PAGE_MAX } from '../../../../../../shared/orchestration-fleet-projection'
 import type { WorkerTerminalListState } from '../../../../orchestration/worker-terminal-ownership'
 import type { OrchestrationDb } from '../../../../orchestration/db'
+import { WORKER_LIST_CURSOR_EXPIRED_MESSAGE } from '../../../../orchestration/db/worker-terminal/worker-terminal-listing'
 import { OrchestrationError } from '../../../../orchestration/orchestration-error'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import { defineMethod, type RpcMethod } from '../../../core'
@@ -152,10 +153,7 @@ function readSnapshotRows(
     rows.length !== dispatchIds.length ||
     rows.some((row, index) => row.dispatchId !== dispatchIds[index])
   ) {
-    throw new OrchestrationError(
-      'worker_list_cursor_expired',
-      'The worker inventory changed destructively while paging. Restart without --cursor.'
-    )
+    throw new OrchestrationError('worker_list_cursor_expired', WORKER_LIST_CURSOR_EXPIRED_MESSAGE)
   }
   return rows
 }
@@ -223,17 +221,22 @@ async function projectWorkerListPageWithFilteredSnapshot(
   if (federated) {
     applyFederatedFleetObservations(fleet, federated)
   }
-  // Counts must share the page's row extent; a live scan behind a pinned total reports an
-  // inventory the cursor can never reach.
-  const inventory = db.countWorkerTerminalInventory({
-    runId: params.run,
-    terminalState: params.terminalState,
-    snapshot: filteredSnapshot ? { databaseId: filteredSnapshot.databaseId } : args.snapshot
-  })
+  // Total and counts must come out of one row set. A pinned filtered cursor's row set is its
+  // membership; deriving the total from that and the counts from a live scan of the extent
+  // reported a total no count could reach once a pinned row left the filter.
+  const pinnedCount = filteredSnapshot?.dispatchIds.length
+  const inventory =
+    pinnedCount !== undefined && params.terminalState
+      ? { total: pinnedCount, counts: { [params.terminalState]: pinnedCount } }
+      : db.countWorkerTerminalInventory({
+          runId: params.run,
+          terminalState: params.terminalState,
+          snapshot: args.snapshot
+        })
   const nextRow = pageRows.at(-1)
   fleet.page = {
     limit,
-    total: filteredSnapshot?.dispatchIds.length ?? inventory.total,
+    total: inventory.total,
     hasMore,
     nextCursor:
       hasMore && nextRow
