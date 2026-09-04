@@ -17,7 +17,9 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | Owner decision 2026-09-04 ~05:10Z | **Option B approved**: "you can raise the bar. or remove it altogether ... whats the most logical move". Kept the bar (removal would leave contention unwatched during the roll) and recalibrated from measured data. | this thread |
 | PR #18580 monitor `relayPostgresRetries` 300 -> 2000 | Open, awaiting CI; mutation-checked (300 fails the new test) | https://github.com/stablyai/orca/pull/18580 |
 | PR #18565 CI | Was red on `root directory guard` because this findings file sat at repo root; moved to `cloud/docs/` in 8ebff89106 | |
-| Cell canary / batch roll | **Not dispatched.** No production mutation has happened. | |
+| PR #18580 | **Merged** 2026-09-04 05:23Z as 79d5fb469a (Pullfrog cancelled by the merge; independent Opus review requested instead, per owner) | |
+| Monitor dry-run #4 | Dispatched 05:24Z at main 79d5fb469a (new bar live) | run 33840364323 |
+| Cell canary / batch roll | **Not dispatched yet.** No production mutation has happened. | |
 | Terraform alert `relay_postgres_retry_exhausted` at `> 0` | Firing continuously since #18521; recalibration not done (own change) | `cloud/infra/terraform/relay-observability.tf:447,469` |
 
 ## Mutations performed (complete list)
@@ -166,6 +168,24 @@ immediately so the bar can be re-tightened after the fleet is on the 500 ms lock
    `adjustCellReservationAtomically` single-row update. Own PR, after the roll.
 4. Recalibrate the Terraform alert `relay_postgres_retry_exhausted` to 300/300 s (observability root).
 5. Whether to raise `relayPostgresRetries` is a human call; the data is in Finding 5.
+
+## Canary blast radius (read before dispatching c7)
+
+- What `canary-apply` does to c7, in order: isolate (selector -> migration-only, no new
+  assignments), `/v1/admin/drain graceMs:0` (every control on c7 re-dials the director and is
+  reassigned), Terraform template + MIG update to the target image, wait stable, verify new
+  incarnation + exact digest + protocol, prove per-host trust, restore c7 to general admission.
+  On any failure c7 is left isolated (migration-only) with rehome disabled; nothing else is touched.
+- c7 at 05:20Z: 788 controls, 5 splices, 800 connections. So ~790 desktops re-dial once. The fleet
+  already absorbs this exact event 201 times / 48 h uncontrolled (Finding 6); the controlled version
+  isolates first, so no new assignment lands on c7 mid-roll. Expect a director concurrency blip, not
+  a freeze-class one (six cells at once gave 85; one cell should stay well under 64).
+- Precedent: the identical workflow (pre-move, in orca-cloud) ran 9 successful `apply` canaries and
+  batches on 2026-08-27 (last: c20 -> 5aedbca5). Its failures that day all stopped at the read-only
+  "Recheck aggregate SQL..." or "Require durable rehome disabled" step, before `MUTATION_STARTED`.
+  The moved copy in this repo has one run: the read-only `verify` of c7 (passed, including WIF auth).
+- c7 side note: MIG autoheal recreated the c7 instance four times on 2026-09-01 08:02-08:42 PDT
+  at ~13 min spacing. Same crash class as Finding 6 (health check failing during restart loops).
 
 ## Roll inputs (verified by the read-only `verify` run)
 
