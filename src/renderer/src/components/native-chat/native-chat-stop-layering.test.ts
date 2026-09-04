@@ -6,6 +6,15 @@ function source(path: string): string {
   return readFileSync(join(process.cwd(), path), 'utf8')
 }
 
+function workingChatZIndex(css: string): number {
+  const match =
+    /\.native-chat-pane-shell:has\(\[data-native-chat-working='true'\]\)[^{]*\{[^}]*z-index:\s*(\d+);/s.exec(
+      css
+    )
+  expect(match, 'working native-chat z-index rule not found in main.css').not.toBeNull()
+  return Number(match?.[1])
+}
+
 describe('native chat Stop layering', () => {
   it('keeps a working chat pane above bottom-right product chrome', () => {
     const css = source('src/renderer/src/assets/main.css')
@@ -15,9 +24,19 @@ describe('native chat Stop layering', () => {
 
     expect(terminalPane).toContain('native-chat-pane-shell absolute inset-0 z-10')
     expect(css).toMatch(/\[data-sonner-toaster\][^{]*\{[^}]*z-index:\s*40\s*!important;/s)
-    expect(css).toMatch(
-      /\.native-chat-pane-shell:has\(\[data-native-chat-working='true'\]\)[^{]*\{[^}]*z-index:\s*50;/s
+    expect(workingChatZIndex(css)).toBeGreaterThan(40)
+  })
+
+  // Why both bounds: raising the working pane over the panel hides a summoned
+  // floating workspace behind the chat column while an agent streams.
+  it('stays under the floating workspace panel while working', () => {
+    const panel = source(
+      'src/renderer/src/components/floating-terminal/FloatingTerminalPanelSurface.tsx'
     )
+    const panelZIndex = Number(/data-floating-terminal-panel[\s\S]*?z-\[(\d+)\]/.exec(panel)?.[1])
+
+    expect(panelZIndex).toBe(45)
+    expect(workingChatZIndex(source('src/renderer/src/assets/main.css'))).toBeLessThan(panelZIndex)
   })
 
   it('publishes working state from both structured and bridge chat roots', () => {
