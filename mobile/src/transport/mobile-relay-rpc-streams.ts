@@ -4,10 +4,12 @@ import {
   type TerminalSnapshotState
 } from './rpc-client-terminal-binary-frame'
 import {
+  buildStreamUnsubscribe,
   buildTerminalUnsubscribeParams,
   updateTerminalSubscriptionViewport
 } from './rpc-client-terminal-subscription'
 import type { RpcClient } from './rpc-client'
+import { buildServerSubscriptionUnsubscribe } from './rpc-client-server-subscription'
 import { decodeTerminalStreamFrame } from './terminal-stream-protocol'
 import type { RpcResponse, RpcSuccess } from './types'
 
@@ -26,6 +28,7 @@ type StreamRecord = {
   streamIds: Set<number>
   subscriptionId?: string
   cancelled: boolean
+  sent?: boolean
 }
 
 type StreamManagerOptions = {
@@ -64,7 +67,8 @@ export class MobileRelayRpcStreams {
       .waitForConnected()
       .then(() => {
         if (!stream.cancelled) {
-          if (!this.options.sendFrame({ id, method, params: stream.params })) {
+          stream.sent = this.options.sendFrame({ id, method, params: stream.params })
+          if (!stream.sent) {
             this.fail(id, stream, 'Connection interrupted')
           }
         }
@@ -86,6 +90,10 @@ export class MobileRelayRpcStreams {
       return false
     }
     if (!response.ok) {
+      if (stream.cancelled) {
+        this.remove(response.id)
+        return true
+      }
       this.fail(response.id, stream, response.error.message, response.error)
       return true
     }
@@ -94,6 +102,13 @@ export class MobileRelayRpcStreams {
       const metadata = result as { subscriptionId?: unknown; streamId?: unknown; type?: unknown }
       if (typeof metadata.subscriptionId === 'string') {
         stream.subscriptionId = metadata.subscriptionId
+      }
+      if (stream.cancelled) {
+        if (stream.subscriptionId || metadata.type === 'end') {
+          this.sendServerUnsubscribe(stream)
+          this.remove(response.id)
+        }
+        return true
       }
       if (typeof metadata.streamId === 'number') {
         stream.streamIds.add(metadata.streamId)
@@ -153,6 +168,10 @@ export class MobileRelayRpcStreams {
       return
     }
     stream.cancelled = true
+    if (!stream.sent) {
+      this.remove(id)
+      return
+    }
     if (stream.method === 'terminal.subscribe') {
       const params = buildTerminalUnsubscribeParams(stream.params)
       if (params) {
@@ -162,14 +181,35 @@ export class MobileRelayRpcStreams {
           params
         })
       }
-    } else if (stream.subscriptionId) {
-      this.options.sendFrame({
-        id: this.options.nextId(),
-        method: stream.method.replace(/\.subscribe$/, '.unsubscribe'),
-        params: { subscriptionId: stream.subscriptionId }
-      })
+    } else if (buildServerSubscriptionUnsubscribe(stream.method, 'pending')) {
+      if (!stream.subscriptionId) {
+        return
+      }
+      this.sendServerUnsubscribe(stream)
+    } else {
+      const unsubscribe =
+        buildStreamUnsubscribe(stream.method, stream.params) ??
+        (stream.subscriptionId
+          ? {
+              method: stream.method.replace(/\.subscribe$/, '.unsubscribe'),
+              params: { subscriptionId: stream.subscriptionId }
+            }
+          : null)
+      if (unsubscribe) {
+        this.options.sendFrame({ id: this.options.nextId(), ...unsubscribe })
+      }
     }
     this.remove(id)
+  }
+
+  private sendServerUnsubscribe(stream: StreamRecord): void {
+    if (!stream.subscriptionId) {
+      return
+    }
+    const unsubscribe = buildServerSubscriptionUnsubscribe(stream.method, stream.subscriptionId)
+    if (unsubscribe) {
+      this.options.sendFrame({ id: this.options.nextId(), ...unsubscribe })
+    }
   }
 
   private remove(id: string): void {
