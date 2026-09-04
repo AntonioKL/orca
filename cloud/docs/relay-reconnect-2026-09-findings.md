@@ -411,6 +411,16 @@ connection timeout` with cause `Connection terminated unexpectedly` in `verifyCe
 `beginProof`, the same unhandled path. Conclusion: no evidence the deploy worsened it; the old image's
 crash rate simply climbed all day. Director lock retries stayed ~10x lower after the deploy.
 
+**Checkpoint-phase check (10:00Z, negative result):** Postgres checkpoints complete every 5 min at ~:07.
+Cell crashes bucketed by phase within that 5-min cycle show a mild :00–:29 s cluster today (22 of 103)
+that is absent on Sep 3 (7 of 114), so checkpoints are not the trigger. Disk write bytes in cascade
+minutes are at or below the median except 09:00. Cloud SQL memory 0.47, transaction rate flat. The
+09:55 stall (11 director + 4 cell pg-connect timeouts in the same 4 s) came with `could not obtain lock
+on row in relation "relay_cells"` from a NOWAIT sweep at 09:55:36, i.e. someone was holding the full
+inventory at that moment. On the new director that can only be placement or a sweep; on the old cells it
+is still every rebind. What stalls *connections* (not locks) for 2 s fleet-wide remains unexplained;
+Cloud SQL is `db-custom-4-15360` REGIONAL PD_SSD 49 GB at 0.5–0.75 CPU when it happens.
+
 ## Roll inputs (verified by the read-only `verify` run)
 
 - target-image-digest `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` (lock fix; supersedes 85bf6799 as target)
