@@ -228,6 +228,29 @@ describe('unknown command surfaces a suggestion', () => {
     expect(stderr).toContain('--json')
   })
 
+  it('names the offending --worktree value and the valid forms on selector_not_found', async () => {
+    const { RuntimeRpcFailureError } = await import('./runtime/types.js')
+    callMock.mockRejectedValue(
+      new RuntimeRpcFailureError({
+        id: 'req_selector',
+        ok: false,
+        error: { code: 'selector_not_found', message: 'selector_not_found' },
+        _meta: { runtimeId: 'runtime_local' }
+      })
+    )
+
+    await main(
+      ['orchestration', 'worker-start', '--task', 't1', '--worktree', 'repo-1', '--agent', 'codex'],
+      '/tmp/repo'
+    )
+
+    expect(process.exitCode).toBe(1)
+    const stderr = errorSpy.mock.calls.map((call) => String(call[0])).join('\n')
+    expect(stderr).toContain('No Orca workspace matched the worktree selector "repo-1"')
+    expect(stderr).toContain('id:repo-1::<absolute-path>')
+    expect(stderr).toContain('Valid selector forms:')
+  })
+
   it('reports a pre-command flag that belongs to another command', async () => {
     await main(['--workspace', 'worktree', 'list'], '/tmp/repo')
 

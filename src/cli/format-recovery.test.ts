@@ -1,7 +1,54 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { formatCliError } from './format'
+import { formatCliError, reportCliError } from './format'
 import { RuntimeClientError, RuntimeRpcFailureError } from './runtime-client'
+
+function selectorNotFound(): RuntimeRpcFailureError {
+  return new RuntimeRpcFailureError({
+    id: 'req_selector',
+    ok: false,
+    error: { code: 'selector_not_found', message: 'selector_not_found' },
+    _meta: { runtimeId: 'runtime_local' }
+  })
+}
+
+describe('worktree selector recovery', () => {
+  it('names the offending value and the valid forms on a bare repo id', () => {
+    const output = formatCliError(selectorNotFound(), {
+      commandPath: ['orchestration', 'worker-start'],
+      worktreeSelector: 'id:github:stablyai/orca'
+    })
+
+    expect(output).toContain('No Orca workspace matched the worktree selector')
+    expect(output).toContain('id:github:stablyai/orca')
+    expect(output).toContain('Did you mean: id:github:stablyai/orca::<absolute-path>')
+    expect(output).toContain('Valid selector forms:')
+    expect(output).toContain('a bare repository id is not a worktree id')
+  })
+
+  it('carries the same recovery into the --json failure envelope', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    reportCliError(selectorNotFound(), true, {
+      commandPath: ['terminal', 'create'],
+      worktreeSelector: 'path:/nope'
+    })
+
+    expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toMatchObject({
+      error: {
+        code: 'selector_not_found',
+        data: { selector: 'path:/nope', validSelectorForms: expect.arrayContaining(['current']) }
+      }
+    })
+    log.mockRestore()
+  })
+
+  it('stays silent when no worktree selector was passed', () => {
+    expect(formatCliError(selectorNotFound(), { commandPath: ['worktree', 'show'] })).toBe(
+      'selector_not_found'
+    )
+  })
+})
 
 describe('CLI error recovery', () => {
   it('prints did-you-mean next steps for an unknown-command error carrying data', () => {
