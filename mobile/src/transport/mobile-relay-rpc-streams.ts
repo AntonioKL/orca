@@ -10,7 +10,7 @@ import {
 } from './rpc-client-terminal-subscription'
 import type { RpcClient } from './rpc-client'
 import { buildServerSubscriptionUnsubscribe } from './rpc-client-server-subscription'
-import { decodeTerminalStreamFrame } from './terminal-stream-protocol'
+import { routeTerminalMultiplexFrame } from './rpc-client-terminal-multiplex'
 import type { RpcResponse, RpcSuccess } from './types'
 
 type StreamRecord = {
@@ -138,10 +138,9 @@ export class MobileRelayRpcStreams {
       this.activeBrowserStream.onBinaryFrame(browserFrame)
       return
     }
-    const terminalFrame = decodeTerminalStreamFrame(bytes)
     if (
-      terminalFrame &&
-      this.activeTerminalMultiplexStream?.onTerminalBinaryFrame?.(terminalFrame) === true
+      this.activeTerminalMultiplexStream &&
+      routeTerminalMultiplexFrame(bytes, [this.activeTerminalMultiplexStream])
     ) {
       return
     }
