@@ -66,11 +66,12 @@ const HOST_COMPONENT_NAMES = new Set([
   'View'
 ])
 
-const HEAD_MAIN_HOOK_SHA256 = '4fae0d13d86c343b380969797051a376a101176cfaed2f945b4fb13e86b7fc25'
-const HEAD_HOOK_BINDING_SHA256 = 'f4405cb67d0879c66e87260653f68fbe8c51de6e386e75c3bdc793012cb15c4d'
+// Activation source fencing adds two hooks; session-tab-activation-source-race tests the behavior.
+const HEAD_MAIN_HOOK_SHA256 = '8a65c402639980ffda9132ce3dba84da8d85998f5c6b933a8c8eb09817a04783'
+const HEAD_HOOK_BINDING_SHA256 = 'e43ab1ae9e6fd0eb126558207868f1da6322ba50bdeb4a6f7132e6a1f29a9474'
 const HEAD_CALLBACK_IDENTITY_SHA256 =
   '3ad3c833aa99bbfd3a4038bae70a0247192f51fb938a2fe3df86626dcfa3386e'
-const HEAD_CALLBACK_BODY_SHA256 = '7da7b4dd9a184f3e583213e30e77383b5ecda1360ec53a59f16fbdbdae2d0257'
+const HEAD_CALLBACK_BODY_SHA256 = '9168096f0e16c9bfe39e6c24b2365254c18f6d5a7b0611082b8723ee826fedfc'
 const HEAD_EFFECT_SHA256 = 'f81ef4b4794875643dd429e9dfb6cffab037feb68a334e260c0045a258c07d51'
 const HEAD_CONTENT_HOOK_SHA256 = 'd74431115b27c22dd38c29a510604554ca767cdd2585beaa73ec2e2dae0c5de4'
 const HEAD_NESTED_FUNCTION_SHA256 =
@@ -479,7 +480,7 @@ describe('mobile session route extraction parity', () => {
     const contentBindings = CONTENT_COMPONENT_NAMES.flatMap(
       (name) => readHookFacts(name, definitions).bindings
     )
-    expect(main.hooks).toHaveLength(288)
+    expect(main.hooks).toHaveLength(290)
     expect(hash(main.hooks)).toBe(HEAD_MAIN_HOOK_SHA256)
     expect(hash(main.bindings)).toBe(HEAD_HOOK_BINDING_SHA256)
     expect(main.callbacks).toHaveLength(84)
