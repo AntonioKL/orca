@@ -203,8 +203,14 @@ The same-cap roll is blocked only by the monitor gate, and the gate is blocked b
 My recommendation: B, with the number chosen from the table in Finding 5 and the roll following
 immediately so the bar can be re-tightened after the fleet is on the 500 ms lock wait.
 
-## What actually blocks the roll now (12:40Z summary for the owner)
+## What actually blocks the roll now (12:58Z summary for the owner)
 
+0. **Cloud NAT ports** (Finding 11, found 12:55Z): every us-central1 cell reaches Cloud SQL's public IP
+   through a NAT with the default 64 ports/VM; port_usage pinned at 64 and 1,514 dropped SYNs to
+   Cloud SQL:3307 in one 4-min window. This is the 2 s connect stall that kills old-image cells and is
+   still active after the disk loop broke. Fix: `min_ports_per_vm = 1024` (or dynamic allocation) on
+   `google_compute_router_nat.relay_gce` in `cloud/infra/terraform/relay-gce-foundation.tf`, targeted
+   apply; durable fix is a private IP on the Cloud SQL instance. Online, no VM restart.
 1. **Cloud SQL disk** (Finding 10): 49 GB PD-SSD saturated since 11:58Z, checkpoint loop, fleet-wide
    4–6 s stalls every ~45 s. Fix: bigger disk and/or `max_wal_size`. Owner: `stablyai/orca-cloud`
    `infra/terraform-foundation/database.tf` `google_sql_database_instance.auth` (no `disk_size`,
@@ -556,6 +562,13 @@ loop broke at 12:39.
 Cloud SQL instance a **private IP** and pointing the proxy at `--private-ip`, which takes DB traffic off
 NAT entirely; that is a Cloud SQL instance change in the orca-cloud foundation root plus a startup-script
 flag here. Per the standing rule, not applied from this session.
+
+Direct proof: `resource.type="nat_gateway" AND jsonPayload.allocation_status="DROPPED"` shows **1,514
+dropped allocations to 35.188.82.89:3307** in 12:50–12:54 alone, every one of them the Cloud SQL public
+IP. The NAT has zero manual IPs (AUTO_ONLY) and no port settings in Terraform, so it is at Google's
+default 64 ports/VM. No workflow in this repo applies `relay-gce-foundation.tf` broadly (the roll
+workflows apply cell templates with `-target`), so the NAT change needs a targeted apply of
+`google_compute_router_nat.relay_gce`, which is an owner-run Terraform step.
 
 Original write-up of the symptom before the NAT correlation follows.
 
