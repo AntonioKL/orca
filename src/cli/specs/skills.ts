@@ -40,7 +40,7 @@ export const SKILL_COMMAND_SPECS: CommandSpec[] = [
     notes: [
       'Reads bundled guide metadata locally without contacting the Orca runtime.',
       'With --json, prints a topics array of canonical names and one-line descriptions.',
-      'Use `orca skills get <name>` for the full guide, or `orca skills install` to install skills.'
+      'Use `orca skills get <name>` for the compact guide, `--full` for its full reference package, or `orca skills install` to install skills.'
     ]
   },
   {
@@ -52,7 +52,7 @@ export const SKILL_COMMAND_SPECS: CommandSpec[] = [
     positionalArgs: ['topic'],
     notes: [
       'Reads bundled guide content locally without contacting the Orca runtime.',
-      'Use --full to include bundled reference documents when the guide provides them.',
+      'Prints the compact guide by default. Use --full to print the full guide with bundled references when provided.',
       'Use --json for a deterministic object containing canonical topic metadata and content.'
     ],
     examples: ['orca skills get orca-cli', 'orca skills get orchestration --full']
