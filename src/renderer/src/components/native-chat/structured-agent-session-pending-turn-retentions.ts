@@ -41,6 +41,7 @@ export function createStructuredAgentSessionPendingTurnRetentions(
     }
   >()
   let observedActiveTurnId: string | null = null
+  const observedTurnIds = new Set<string>()
 
   const observe = (): void => {
     if (retentions.size === 0) {
@@ -54,6 +55,9 @@ export function createStructuredAgentSessionPendingTurnRetentions(
     }
     const lifecycleItems = turnLifecycleItems(items)
     const activeTurnId = activeStructuredAgentSessionTurnId(lifecycleItems)
+    if (activeTurnId && retentions.size > 0) {
+      observedTurnIds.add(activeTurnId)
+    }
     if (observedActiveTurnId && observedActiveTurnId !== activeTurnId) {
       for (const retention of retentions.values()) {
         if (retention.turnId === observedActiveTurnId) {
@@ -78,7 +82,7 @@ export function createStructuredAgentSessionPendingTurnRetentions(
       }
     }
     if (!activeTurnId) {
-      const claimedTurnIds = new Set(observedActiveTurnId ? [observedActiveTurnId] : [])
+      const claimedTurnIds = new Set(observedTurnIds)
       for (const retention of retentions.values()) {
         if (retention.turnId !== null) {
           continue
@@ -124,7 +128,11 @@ export function createStructuredAgentSessionPendingTurnRetentions(
       }
       const lifecycleItems = turnLifecycleItems(getState().items)
       if (retentions.size === 0) {
+        observedTurnIds.clear()
         observedActiveTurnId = activeStructuredAgentSessionTurnId(lifecycleItems)
+        if (observedActiveTurnId) {
+          observedTurnIds.add(observedActiveTurnId)
+        }
       }
       const releaseActivation = acquireActivation()
       const retention = {
@@ -133,6 +141,9 @@ export function createStructuredAgentSessionPendingTurnRetentions(
         release: (): void => {
           if (!retentions.delete(clientMessageId)) {
             return
+          }
+          if (retentions.size === 0) {
+            observedTurnIds.clear()
           }
           releaseActivation()
         }

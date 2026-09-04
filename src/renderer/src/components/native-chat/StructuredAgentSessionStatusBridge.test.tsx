@@ -284,7 +284,7 @@ describe('StructuredAgentSessionStatusBridge', () => {
     await waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledOnce())
   })
 
-  it('does not settle a pending hidden send when the previous turn completes', async () => {
+  it('does not settle pending hidden sends when earlier turns complete', async () => {
     const firstTurnRunning = {
       itemId: 'turn-a-running',
       revision: 1,
@@ -319,6 +319,7 @@ describe('StructuredAgentSessionStatusBridge', () => {
     act(() => {
       expect(retainPendingTurn).not.toBeNull()
       retainPendingTurn?.('client-b')
+      retainPendingTurn?.('client-c')
     })
     view.rerender(<ActiveComposition isVisible={false} />)
     await act(() => Promise.resolve())
@@ -390,6 +391,56 @@ describe('StructuredAgentSessionStatusBridge', () => {
           cursor: { epoch: 'epoch-1', sequence: 5 },
           items: [],
           removedItemIds: ['turn-b-running'],
+          submissions: []
+        }
+      })
+    )
+
+    await waitFor(() =>
+      expect(Object.values(mocks.store?.getState().agentStatusByPaneKey ?? {})).toEqual([
+        expect.objectContaining({ state: 'done' })
+      ])
+    )
+    expect(mocks.unsubscribe).not.toHaveBeenCalled()
+
+    act(() =>
+      onEvent({
+        type: 'batch',
+        sessionId: 'session-1',
+        batch: {
+          cursor: { epoch: 'epoch-1', sequence: 6 },
+          items: [
+            {
+              itemId: 'turn-c-running',
+              revision: 1,
+              sequence: 6,
+              observedAt: 6,
+              body: {
+                kind: 'status',
+                text: 'Working',
+                turnLifecycle: { turnId: 'turn-c', state: 'running' }
+              }
+            }
+          ],
+          removedItemIds: [],
+          submissions: []
+        }
+      })
+    )
+
+    await waitFor(() =>
+      expect(Object.values(mocks.store?.getState().agentStatusByPaneKey ?? {})).toEqual([
+        expect.objectContaining({ state: 'working' })
+      ])
+    )
+    act(() =>
+      onEvent({
+        type: 'batch',
+        sessionId: 'session-1',
+        batch: {
+          cursor: { epoch: 'epoch-1', sequence: 7 },
+          items: [],
+          removedItemIds: ['turn-c-running'],
           submissions: []
         }
       })
