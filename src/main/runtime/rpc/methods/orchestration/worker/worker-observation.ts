@@ -116,13 +116,36 @@ export function exposeContextOnlyWorker(dispatch: DispatchContextRow) {
 }
 
 // Why: `launch_token_hash` and `capability_hash` are authority material with no receipt
-// consumer, and `host_scope` shipped as a JSON string inside JSON. One camelCase shape.
+// consumer, and `host_scope` shipped as a JSON string inside JSON. One camelCase shape,
+// the same one `exposeWorker` publishes beside it.
 export function exposeDispatchContext(dispatch: DispatchContextRow) {
-  const exposed: Partial<DispatchContextRow> & { hostScope?: unknown } = { ...dispatch }
-  delete exposed.launch_token_hash
-  delete exposed.capability_hash
-  delete exposed.host_scope
-  return { ...exposed, hostScope: parseWorkerTerminalHostScope(dispatch.host_scope) }
+  return {
+    id: dispatch.id,
+    runId: dispatch.run_id,
+    taskId: dispatch.task_id,
+    contractVersion: dispatch.contract_version,
+    assigneeHandle: dispatch.assignee_handle,
+    assigneePaneKey: dispatch.assignee_pane_key,
+    processIncarnation: dispatch.process_incarnation,
+    capabilityRevokedAt: dispatch.capability_revoked_at,
+    retryOfDispatchId: dispatch.retry_of_dispatch_id,
+    creatorDispatchId: dispatch.creator_dispatch_id,
+    creatorRole: dispatch.creator_role,
+    endpointId: dispatch.endpoint_id,
+    endpointIncarnation: dispatch.endpoint_incarnation,
+    hostScope: parseWorkerTerminalHostScope(dispatch.host_scope),
+    attachmentKind: dispatch.attachment_kind,
+    resourceId: dispatch.resource_id,
+    status: dispatch.status,
+    failureCount: dispatch.failure_count,
+    lastFailure: dispatch.last_failure,
+    terminationReason: dispatch.termination_reason,
+    depth: dispatch.depth,
+    dispatchedAt: dispatch.dispatched_at,
+    completedAt: dispatch.completed_at,
+    createdAt: dispatch.created_at,
+    lastHeartbeatAt: dispatch.last_heartbeat_at
+  }
 }
 
 export async function showContextOnlyWorker(

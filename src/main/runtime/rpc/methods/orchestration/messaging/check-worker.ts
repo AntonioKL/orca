@@ -2,6 +2,7 @@ import type { MessageType, OrchestrationDb } from '../../../../orchestration/db'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import { OrchestrationError } from '../../../../orchestration/orchestration-error'
 import { formatMessageBanner } from '../../../../orchestration/formatter'
+import { exposeMessages } from './mailbox-message-receipt'
 import { ORCHESTRATION_LEGACY_RUN_ID } from '../../../../../../shared/orchestration-rpc-contract'
 import { routeAllMailboxPages } from '../schemas'
 import type { CheckParams } from '../schemas'
@@ -176,7 +177,7 @@ export async function checkWorkerMailbox(args: {
     return {
       ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
       dispatchId: workerMailbox.dispatchId,
-      messages,
+      messages: exposeMessages(messages),
       count: messages.length,
       acknowledged: acknowledged?.delivery.id ?? null,
       ...(params.format || params.inject
@@ -190,7 +191,7 @@ export async function checkWorkerMailbox(args: {
       return {
         ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
         dispatchId: workerMailbox.dispatchId,
-        messages,
+        messages: exposeMessages(messages),
         count: messages.length,
         acknowledged: acknowledged?.delivery.id ?? null,
         ...(params.format || params.inject
@@ -205,7 +206,7 @@ export async function checkWorkerMailbox(args: {
         ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
         dispatchId: workerMailbox.dispatchId,
         deliveryId: current?.delivery.id ?? null,
-        messages: current?.messages ?? [],
+        messages: exposeMessages(current?.messages ?? []),
         count: current?.messages.length ?? 0,
         replayed: current?.replayed ?? false,
         acknowledged: acknowledged?.delivery.id ?? null,
@@ -241,7 +242,7 @@ export async function checkWorkerMailbox(args: {
     return {
       ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
       dispatchId: workerMailbox.dispatchId,
-      messages: arrived,
+      messages: exposeMessages(arrived),
       count: arrived.length,
       acknowledged: acknowledged?.delivery.id ?? null,
       ...(params.format || params.inject
@@ -254,7 +255,7 @@ export async function checkWorkerMailbox(args: {
     ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
     dispatchId: workerMailbox.dispatchId,
     deliveryId: arrived?.delivery.id ?? null,
-    messages: arrived?.messages ?? [],
+    messages: exposeMessages(arrived?.messages ?? []),
     count: arrived?.messages.length ?? 0,
     replayed: arrived?.replayed ?? false,
     acknowledged: acknowledged?.delivery.id ?? null,

@@ -15,7 +15,7 @@ import { formatWorkerRead, type LegacyWorkerReadResult } from './worker-output'
 export const ORCHESTRATION_WORKER_OBSERVATION_HANDLERS: Record<string, CommandHandler> = {
   'orchestration worker-show': async ({ flags, client, json }) => {
     const result = await client.call<{
-      dispatch: { id: string; task_id: string; status: string } | null
+      dispatch: { id: string; taskId: string; status: string } | null
       worker: { state: string; stage: string; agentTerminalHandle: string | null }
       projection?: { liveness: { verdict: string }; nextAction: { argv: string[] } } | null
       observation?: { agentWait?: { source: string; reason?: string } | null }
@@ -24,7 +24,7 @@ export const ORCHESTRATION_WORKER_OBSERVATION_HANDLERS: Record<string, CommandHa
     })
     printResult(result, json, (value) => {
       const lines = [
-        `${value.dispatch?.id ?? 'unknown'} task=${value.dispatch?.task_id ?? 'unknown'} [${value.worker.state}] stage=${value.worker.stage}`
+        `${value.dispatch?.id ?? 'unknown'} task=${value.dispatch?.taskId ?? 'unknown'} [${value.worker.state}] stage=${value.worker.stage}`
       ]
       // Why: PTY status alone read `live` for an agent that died at a trust prompt, so the
       // fleet verdict and its next action print beside it rather than in another command.

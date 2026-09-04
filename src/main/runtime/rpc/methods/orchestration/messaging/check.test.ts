@@ -549,6 +549,36 @@ describe('orchestration RPC methods', () => {
       expect(second.count).toBe(0)
     })
 
+    it('withholds delivery plumbing columns from check receipts', async () => {
+      setup()
+      db.insertMessage({
+        from: 'term_worker',
+        to: `run:${activeRunId}`,
+        subject: 'plumbing',
+        senderPaneKey: 'tab_worker:leaf_worker',
+        runId: activeRunId
+      })
+
+      const result = (await call('orchestration.check', { terminal: 'term_coord' })) as {
+        messages: Record<string, unknown>[]
+      }
+
+      expect(result.messages[0]).toMatchObject({
+        subject: 'plumbing',
+        delivery_contract: 'current_delivery'
+      })
+      for (const column of [
+        'read',
+        'sequence',
+        'sender_pane_key',
+        'pointer_enter_pending',
+        'pointer_pty_id',
+        'pointer_process_incarnation'
+      ]) {
+        expect(result.messages[0]).not.toHaveProperty(column)
+      }
+    })
+
     it('rejects a consuming check whose --terminal no longer resolves to a pane', async () => {
       setup()
       db.insertMessage({ from: 'a', to: 'term_gone', subject: 'stranded' })

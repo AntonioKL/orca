@@ -112,10 +112,14 @@ describe('worker-show receipt shape', () => {
 
     expect(exposed).toMatchObject({
       id: DISPATCH_ID,
+      runId: 'run-1',
+      taskId: 'task-1',
       hostScope: { kind: 'local', hostId: 'local' }
     })
     expect(exposed).not.toHaveProperty('host_scope')
     expect(exposed).not.toHaveProperty('launch_token_hash')
     expect(exposed).not.toHaveProperty('capability_hash')
+    // The row shipped raw beside a camelCase `worker`; no snake_case key may survive.
+    expect(Object.keys(exposed).filter((key) => key.includes('_'))).toEqual([])
   })
 })
