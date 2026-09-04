@@ -112,6 +112,7 @@ docs/**
 !docs/reference/plans/2026-07-22-mobile-hybrid-webview-implementation-checklist.md
 !docs/reference/plans/2026-07-22-mobile-hybrid-webview-parity-inventory.md
 !docs/reference/macos-press-and-hold.md
+!docs/reference/mobile-hybrid-webview-devtools.md
 !docs/reference/orcad-operations.md
 !docs/reference/relay-grace-time-reconfiguration.md
 !docs/reference/windows-edr-posture.md

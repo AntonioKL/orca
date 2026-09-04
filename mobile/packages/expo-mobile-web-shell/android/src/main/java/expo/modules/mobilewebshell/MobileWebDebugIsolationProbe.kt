@@ -16,11 +16,11 @@ internal fun installMobileWebDebugIsolationProbe(
   appContext: AppContext,
   allowedOrigin: String
 ): ScriptHandler? {
-  val isDebuggable =
-    webView.context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-  val debuggingEnabled = BuildConfig.DEBUG && isDebuggable
-  WebView.setWebContentsDebuggingEnabled(debuggingEnabled)
-  if (!debuggingEnabled) return null
+  val applicationFlags = webView.context.applicationInfo.flags
+  val isDebuggable = applicationFlags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+  WebView.setWebContentsDebuggingEnabled(isMobileWebInspectionEnabled(applicationFlags))
+  // The loopback security probe stays DEBUG-only; an inspectable release gets DevTools without it.
+  if (!BuildConfig.DEBUG || !isDebuggable) return null
   val intent = appContext.currentActivity?.intent ?: return null
   val script = createMobileWebDebugIsolationProbeScript(
     intent.getStringExtra(NETWORK_PROBE_PORT_EXTRA),

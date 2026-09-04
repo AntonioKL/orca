@@ -647,9 +647,10 @@ describe('hosted WebView CDP target selection', () => {
   it('keeps the Android probe debuggable-only and installs it at document start', () => {
     expect(androidProbeSource).toContain('BuildConfig.DEBUG')
     expect(androidProbeSource).toContain('ApplicationInfo.FLAG_DEBUGGABLE')
-    expect(androidProbeSource).toContain('val debuggingEnabled = BuildConfig.DEBUG && isDebuggable')
-    expect(androidProbeSource).toContain('WebView.setWebContentsDebuggingEnabled(debuggingEnabled)')
-    expect(androidProbeSource).toContain('if (!debuggingEnabled) return')
+    expect(androidProbeSource).toContain(
+      'WebView.setWebContentsDebuggingEnabled(isMobileWebInspectionEnabled(applicationFlags))'
+    )
+    expect(androidProbeSource).toContain('if (!BuildConfig.DEBUG || !isDebuggable) return null')
     expect(androidProbeSource).toContain('ORCA_E2E_MOBILE_WEB_NETWORK_PROBE_PORT')
     expect(androidProbeSource).toContain('ORCA_E2E_MOBILE_WEB_NETWORK_PROBE_TOKEN')
     expect(androidProbeSource).toContain('http://127.0.0.1:')

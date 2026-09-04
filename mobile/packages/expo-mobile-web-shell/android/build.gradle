@@ -12,6 +12,12 @@ useDefaultAndroidSdkVersions()
 
 android {
   namespace 'expo.modules.mobilewebshell'
+
+  defaultConfig {
+    // Mirrors the app's -PorcaInspectableRelease so a dogfood release can opt its WebViews into DevTools.
+    buildConfigField 'boolean', 'ORCA_INSPECTABLE_RELEASE',
+      (findProperty('orcaInspectableRelease') ?: 'false').toBoolean().toString()
+  }
 }
 
 dependencies {
