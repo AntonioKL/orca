@@ -298,7 +298,7 @@ describe('awaitMacUpdateInstall', () => {
   })
 
   it('leaves a failed attempt on disk so the app can still report it', () => {
-    // Deleting here would lose install_did_not_apply and the wedged-installer heal (#14732).
+    // Deleting here would lose the install_did_not_apply diagnostic.
     writeMarker()
     getShipItLivenessMock.mockReturnValue('exited')
     isProcessAliveMock.mockReturnValue(false)

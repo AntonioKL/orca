@@ -168,8 +168,8 @@ export async function awaitMacUpdateInstall(
   ) {
     // Why leave the marker: deleting here loses the record of a failed install. After a silent
     // -9 the writer is dead and ShipIt has exited, so this branch is exactly the aborted-install
-    // case — and unlinking it means the next app start reports no install_did_not_apply and never
-    // heals the wedged installer state (#14732). Expiry reclaims it instead.
+    // case — and unlinking it means the next app start cannot report install_did_not_apply.
+    // Expiry reclaims the marker without touching ShipIt's shared state.
     return { kind: 'proceed' }
   }
 
