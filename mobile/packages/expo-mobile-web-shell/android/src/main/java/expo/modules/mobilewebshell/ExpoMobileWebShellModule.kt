@@ -94,6 +94,8 @@ class ExpoMobileWebShellModule : Module() {
 
       OnViewDestroys { view ->
         sessionViews.entries.removeAll { it.value === view }
+        // Deregister first: nothing may reach a WebView whose renderer process is being torn down.
+        view.destroy()
       }
 
       AsyncFunction("activateSessionView") { view: MobileWebShellView, sessionId: String ->

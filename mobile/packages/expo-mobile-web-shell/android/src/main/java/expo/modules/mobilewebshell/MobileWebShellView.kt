@@ -2,6 +2,7 @@ package expo.modules.mobilewebshell
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.view.View
@@ -76,6 +77,7 @@ internal class MobileWebShellView(
   private var networkBlockerScriptHandler: ScriptHandler? = null
   private var debugProbeScriptHandler: ScriptHandler? = null
   private var bridgeMessageListenerAttached = false
+  private var destroyed = false
   private var webView: WebView
 
   init {
@@ -125,6 +127,7 @@ internal class MobileWebShellView(
   }
 
   fun setSessionId(sessionId: String?) {
+    if (destroyed) return
     if (sessionId == null) {
       deactivateSessionView()
       return
@@ -158,6 +161,7 @@ internal class MobileWebShellView(
   }
 
   fun deactivateSessionView() {
+    if (destroyed) return
     removeBridgeMessageListener()
     networkBlockerScriptHandler?.remove()
     networkBlockerScriptHandler = null
@@ -176,6 +180,7 @@ internal class MobileWebShellView(
     require(message.toByteArray(Charsets.UTF_8).size <= MOBILE_WEB_MESSAGE_BYTE_LIMIT) {
       "mobile_web_bridge_message_too_large"
     }
+    if (destroyed) return
     webView.evaluateJavascript(
       """
       (function(value){
@@ -196,14 +201,36 @@ internal class MobileWebShellView(
     if (activeSessionId == sessionId) postMessage(message)
   }
 
+  /**
+   * Detaching only parks the WebView — a deactivated view is reactivated in place — so the renderer
+   * process, the JavaScript context and both script handlers only go away here. Expo calls this once
+   * the view is unmounted, which is what a package swap, a host switch and a route exit all do.
+   */
+  fun destroy() {
+    if (destroyed) return
+    destroyed = true
+    removeBridgeMessageListener()
+    networkBlockerScriptHandler?.remove()
+    networkBlockerScriptHandler = null
+    debugProbeScriptHandler?.remove()
+    debugProbeScriptHandler = null
+    activeSessionId = null
+    documentLoaded = false
+    webView.stopLoading()
+    webView.loadUrl("about:blank")
+    removeView(webView)
+    webView.destroy()
+  }
+
   override fun onDetachedFromWindow() {
     removeBridgeMessageListener()
-    webView.stopLoading()
+    if (!destroyed) webView.stopLoading()
     super.onDetachedFromWindow()
   }
 
   override fun onAttachedToWindow() {
     super.onAttachedToWindow()
+    if (destroyed) return
     attachWebView()
     val sessionId = activeSessionId ?: return
     addBridgeMessageListener(sessionId)
@@ -282,6 +309,15 @@ internal class MobileWebShellView(
         onNavigationBlocked(mapOf("url" to url.toString().take(2_048)))
       }
       return !allowed
+    }
+
+    override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+      // The page can replace its own document (the route error boundary reloads on a failed chunk),
+      // and that is the only signal the shell gets. Every load start is reported so the shell can
+      // retire the outgoing page's grants before the new document initializes.
+      if (!isAllowedDocumentRequestUrl(Uri.parse(url))) return
+      documentLoaded = false
+      onLoadState(mapOf("state" to "loading"))
     }
 
     override fun onPageFinished(view: WebView, url: String) {

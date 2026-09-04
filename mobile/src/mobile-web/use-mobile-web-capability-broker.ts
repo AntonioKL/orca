@@ -5,12 +5,15 @@ export type MobileWebBrokerPageIdentity = { sessionId: string; buildId: string }
 
 // A view-epoch bump loads a fresh document over the same shell session, so the previous page's
 // broker (subscriptions, terminal streams, speech authority, replay window, rate limiter) has to
-// be retired before the new document can post against it.
+// be retired before the new document can post against it. A document epoch is the same boundary
+// without a native remount: the shell replaces the document in place on a native-route return, an
+// in-page reload and a re-attach, and each of those pages is just as new.
 export function useMobileWebCapabilityBroker({
   brokerRef,
   sessionId,
   buildId,
   viewEpoch,
+  documentEpoch,
   createBroker,
   onBrokerReady,
   onBrokerSessionChange
@@ -19,6 +22,7 @@ export function useMobileWebCapabilityBroker({
   sessionId: string | undefined
   buildId: string | undefined
   viewEpoch: number
+  documentEpoch: number
   createBroker: (page: MobileWebBrokerPageIdentity) => MobileWebCapabilityBroker | null
   onBrokerReady: () => void
   onBrokerSessionChange: (sessionId: string | undefined) => void
@@ -52,6 +56,7 @@ export function useMobileWebCapabilityBroker({
     brokerRef,
     buildId,
     createBroker,
+    documentEpoch,
     onBrokerReady,
     onBrokerSessionChange,
     retireBroker,

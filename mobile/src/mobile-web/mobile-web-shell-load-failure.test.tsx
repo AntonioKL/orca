@@ -57,6 +57,7 @@ describe('hosted shell document load failures', () => {
           onClearCache: noop,
           onRecoveryFailure: noop,
           onBridgeMessage: noop,
+          onDocumentLoadStarted: noop,
           onPageLoaded: loaded,
           onLoadFailed: (reason) => failures.push(reason),
           onNavigationBlocked: noop,

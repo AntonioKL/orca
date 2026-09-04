@@ -106,7 +106,7 @@ describe('mobile native shell route ownership', () => {
     const readyBranch = hybridShell.match(
       /if \(parsed\.value\.type === 'ready'\) \{([\s\S]*?)\} else if/
     )?.[1]
-    expect(readyBranch).toContain('setPageReadySessionId(current.sessionId)')
+    expect(readyBranch).toContain('setReadySessionId(current.sessionId)')
     expect(readyBranch).not.toContain('postInit')
   })
 
