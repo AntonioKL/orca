@@ -274,8 +274,13 @@ export function registerRemoteWorkspaceHandlers(
             (target) => hydratedTargetIds.has(target.id) && getActiveMultiplexer(target.id)
           ) ?? []
 
+      if (targets.length === 0) {
+        // Nothing to project onto, so skip the session and repo-catalog reads entirely.
+        return []
+      }
+
       const workspaceSession = args.session ?? store.getWorkspaceSession()
-      // One repo read and one ownership resolution for every target: neither depends on the target.
+      // One repo read, and ownership resolutions shared across targets: neither depends on the target.
       const resolveWorktreeTarget = createWorktreeTargetResolver(
         createRepoRowExecutionHostLookup(store.getRepos())
       )

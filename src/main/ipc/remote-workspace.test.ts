@@ -324,6 +324,25 @@ describe('remoteWorkspace:setForConnectedTargets', () => {
     expect(resolveWorktreeExecutionHostCalls.count).toBe(6)
   })
 
+  it('skips the session and repo-catalog reads when no hydrated target is connected', async () => {
+    // A hydrated but disconnected target leaves nothing to project onto, so hoisting the catalog
+    // read must not make the idle path pay for a full repo hydration it never used before.
+    getActiveMultiplexerMock.mockReturnValue(undefined)
+    getReposMock.mockClear()
+    getWorkspaceSessionMock.mockClear()
+
+    await expect(
+      callSetForConnectedTargets({
+        hydratedTargetIds: ['target-1'],
+        expectedRevisionsByTargetId: { 'target-1': 7 },
+        expectedHostObservationTokensByTargetId: { 'target-1': 'token' }
+      })
+    ).resolves.toEqual([])
+
+    expect(getReposMock).not.toHaveBeenCalled()
+    expect(getWorkspaceSessionMock).not.toHaveBeenCalled()
+  })
+
   it('does not write without an explicit non-empty hydrated target set', async () => {
     await expect(callSetForConnectedTargets({ session: baseSession })).resolves.toEqual([])
     await expect(
