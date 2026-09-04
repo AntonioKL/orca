@@ -309,7 +309,27 @@ orca-cloud PR #474 (branch `auth-revoke-only-live-tokens`): caps → 20, disk 25
 Terraform, partial index in the schema, `already-revoked` short-circuit. Do not deploy auth to any environment
 with a large `refresh_tokens` before building the index concurrently there.
 
-**Alerting + NAT follow-ups (19:58Z, both open, neither applied):**
+**Landing (2026-09-04 20:50Z–21:02Z, owner: "if you are confident the cloud changes are valid, you can land them"):**
+
+- Merged: orca-cloud #474, #475, #476; stablyai/orca #18693, #18694, #18698. Neither repo has branch
+  protection or environment reviewers; `verify` / `cloud-verify` green on main after each.
+- Applied to production by targeted saved plans (each plan asserted create-only / exact-attribute before
+  apply, via `terraform show -json`): 4 relay resources (WAL-checkpoint log metric + 3 alert policies), 8 auth
+  resources (3 log metrics, propagation sleep, 4 alert policies), and the us-central1 NAT
+  (`enable_dynamic_port_allocation` false→true, ports 64..4096). Google's docs: switching to dynamic does not
+  break existing connections when max ≥ 1024 and max ≥ old min; only lowering max or reverting to static is
+  disruptive. asia-east2 NAT deliberately left for after a US soak.
+- Not applied: the untargeted apps-root plan also carries 4 unrelated drifts (`ORCA_CLOUD_REFRESH_TOKEN_TTL_DAYS`
+  env on the auth service from #476, a skill log exclusion filter change, skill pressure threshold 16→8, an
+  artifacts bucket lifecycle rule) and fails on the 1Password Cloudflare data source locally. The foundation
+  root plans clean (disk 250 / max_wal_size already match). Those drifts belong to whoever runs the next full
+  apps apply in CI.
+- Dispatched `deploy-auth-production` on main 8034955 (run 33919143723): candidate → smoke → promote →
+  rollback tag on the previous revision. The deploy script strips env vars it does not own, so the Terraform
+  TTL var will not be on the new revision until the full apps apply lands; the auth code defaults to 30 d.
+- Terraform locally needs `GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token)"`; ADC is stale.
+
+**Alerting + NAT follow-ups (19:58Z, superseded by the landing block above):**
 
 - stablyai/orca PR #18693 (`relay-nat-ports-and-sql-alerts`): both relay NATs switch to dynamic port
   allocation (64–4096 per VM); new relay-channel alerts for the Cloud SQL WAL checkpoint loop (log metric on
