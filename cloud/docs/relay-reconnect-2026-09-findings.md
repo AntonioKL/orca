@@ -880,3 +880,17 @@ require owner go.
 - Director lines are `textPayload`; cell lines are `jsonPayload.message`
 - Cloud Run concurrency: Monitoring API `run.googleapis.com/container/max_request_concurrencies`
 - Dry-run final state: download artifact `relay-monitor-dry-run-<run>-<attempt>`, read `*.state.json` (the log's `schemaVersion` lines are only checkpoints, not the final verdict)
+
+## 2026-09-04 22:50Z onward: owner go received; driving the gates
+
+Owner: "sure, feel free to drive these." Sequence chosen: Roll 1 first (highest uplift), auth deploy with
+#478 second, pruner enable third, label drift resolved by matching Terraform to live state, #477 still held.
+
+| Step | Result |
+| --- | --- |
+| Monitor dry-run #19 (gen 112, strict) | **Passed** 23:07:53Z, run 33927238469 attempt 1. First green since the probe fix (#18723). 16 samples, no freeze. Dispatched 22:51:33Z after confirming: 0 `container die` in 3 h, director 5xx in the last 4 h were all 503s (excluded by the `director.errors` filter). |
+| c8 `canary-apply` onto 519f4914 (rollback 5aedbca5) | **Failed at 23:09:07Z before any mutation**: `relay monitor evidence provenance does not match` in `verify-authority`. Run 33928330631. Gate job passed, `cell_1 / rollout` failed on the manifest check, `seal_canary` skipped, lease released. Cause: the manifest binds `commitSha`; the dry-run ran at main `264c9ed8d2`, the canary dispatched at `--ref main` resolved to `4fab8e2f15` because unrelated PRs merged to main during the 15-minute gate. Verified no side effects: c8 MIG still on template `…c8-20260827…` (5aedbca5), stable, 25 controls; no `/v1/admin/drain` or isolate calls in the director log. |
+| Constraint learned | Both workflows must run at the **same main commit**. The production environment's deployment branch policy allows only `main`, and the job gates on `github.ref == 'refs/heads/main'`, so a pinned tag/branch is not an option. Any merge to stablyai/orca main during the 15-minute dry-run invalidates the evidence. Mitigation for the retry: dispatch the canary within seconds of the green, and do not merge anything to stablyai/orca main myself during the window. A durable fix (accept evidence whose commit is an ancestor with identical workflow/script content) is a follow-up, not a same-day change to a safety check. |
+| Label drift (5.x) | Resolved by dropping the `region` label from Terraform to match the 21 live metrics (stablyai/orca #18734, merged). Targeted plan asserted `27 no-op, 9 create, 0 destroy`; applied 23:11Z: 8 `orca_relay_control_*` renewal metrics that had never been applied, plus `google_monitoring_dashboard.relay_incident`. `orca_relay_controls` createTime unchanged (2026-07-13), label extractors unchanged. |
+| Pruner enable (1.2) | orca-cloud #479 merged: `auth_token_pruner_enabled = true`, image digest of `00031-tox`, `max_rows_per_run = 20000`. Targeted plan asserted 9 create / 0 change / 0 destroy (job, scheduler at `41 * * * *` UTC, two service accounts, five IAM grants). **Not yet applied**: waiting until the roll canary has landed so the first hourly run does not overlap a drain. |
+| Auth deploy with #478 (3.1) | Dispatched 23:13Z from orca-cloud main `f0fa4b5` (run 33928663526). Candidate startup adds nullable `successor_material` under a brief ACCESS EXCLUSIVE lock. |
