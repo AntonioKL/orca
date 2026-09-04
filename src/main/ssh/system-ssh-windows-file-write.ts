@@ -69,7 +69,10 @@ export function makeWindowsPublishStagedFileCommand(
   return powerShellCommand(
     [
       ...preamble,
-      'try { [System.IO.File]::Replace($staging, $path, $null) } catch [System.IO.FileNotFoundException] { [System.IO.File]::Move($staging, $path) }'
+      // `[NullString]::Value`, not `$null`: PowerShell coerces a bare `$null` to an empty string
+      // when binding a .NET `string` parameter, and `Replace` rejects that with "The path is not
+      // of a legal form" — so every publish would fail. Measured on WindowsPowerShell 5.1.26100.
+      'try { [System.IO.File]::Replace($staging, $path, [NullString]::Value) } catch [System.IO.FileNotFoundException] { [System.IO.File]::Move($staging, $path) }'
     ].join('; ')
   )
 }

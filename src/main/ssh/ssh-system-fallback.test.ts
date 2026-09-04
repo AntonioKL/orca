@@ -737,7 +737,7 @@ describe('spawnSystemSsh', () => {
     const publish = (spawnMock.mock.calls[1][1] as string[]).at(-1) ?? ''
     expect(publish).toContain('powershell.exe')
     expect(decodePowerShellCommand(publish)).toContain(
-      '[System.IO.File]::Replace($staging, $path, $null)'
+      '[System.IO.File]::Replace($staging, $path, [NullString]::Value)'
     )
     expect(publish).not.toContain('/bin/sh')
   })

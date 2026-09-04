@@ -249,8 +249,14 @@ function makeWindowsCreateDirectoriesCommand(): string {
       '$reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput())',
       'try { $json = $reader.ReadToEnd() } finally { $reader.Dispose() }',
       'if ([string]::IsNullOrWhiteSpace($json)) { return }',
-      'foreach ($path in @($json | ConvertFrom-Json)) {',
-      '  $null = [System.IO.Directory]::CreateDirectory([string]$path)',
+      // `[string[]]`, not `@(...)`: ConvertFrom-Json emits the parsed array as a single pipeline
+      // object, so `@(...)` wraps it in *another* array and the loop variable binds to the whole
+      // thing. `[string]` of that is the paths joined by spaces, which CreateDirectory rejects with
+      // "The given path's format is not supported". It only ever worked for a one-element batch,
+      // where stringifying a single-element array happens to yield the element. Measured on
+      // WindowsPowerShell 5.1.26100 against a three-directory tree.
+      'foreach ($path in [string[]]($json | ConvertFrom-Json)) {',
+      '  $null = [System.IO.Directory]::CreateDirectory($path)',
       '}'
     ].join('; ')
   )

@@ -263,7 +263,9 @@ describe('Windows upload over sftp', () => {
     expect(destination).toContain(WINDOWS_STAGED_WRITE_SUFFIX)
     expect(destination).not.toBe(`/C:${remotePath.slice(2)}`)
     const publish = commands.at(-1)!
-    expect(publish.script).toContain('[System.IO.File]::Replace($staging, $path, $null)')
+    expect(publish.script).toContain(
+      '[System.IO.File]::Replace($staging, $path, [NullString]::Value)'
+    )
     // The publish reads the staged file, never a pipe, so it is safe on PowerShell 5.1.
     expect(publish.script).not.toContain('OpenStandardInput')
   })
@@ -280,7 +282,9 @@ describe('Windows upload over sftp', () => {
     // exposes a window where a reader sees no file at all — worse than the truncated partial the
     // staging discipline exists to prevent. `File.Replace` is the atomic swap.
     expect(publish.script).not.toContain('[System.IO.File]::Delete($path)')
-    expect(publish.script).toContain('[System.IO.File]::Replace($staging, $path, $null)')
+    expect(publish.script).toContain(
+      '[System.IO.File]::Replace($staging, $path, [NullString]::Value)'
+    )
     // An absent destination cannot be Replaced, so that case falls back to a plain Move.
     expect(publish.script).toContain(
       'catch [System.IO.FileNotFoundException] { [System.IO.File]::Move($staging, $path) }'
@@ -502,6 +506,24 @@ describe('Windows upload over sftp', () => {
 describe('Windows upload on a host with no sftp subsystem', () => {
   beforeEach(() => {
     refuseSftp()
+  })
+
+  it('creates a multi-directory tree, which the one-element case never exercised', async () => {
+    mkdirSync(join(localDir, 'node', 'deep'), { recursive: true })
+    writeFileSync(join(localDir, 'index.js'), 'a')
+    writeFileSync(join(localDir, 'node', 'deep', 'x.js'), 'b')
+
+    await uploadDirectoryViaSystemSsh(target, localDir, remoteRoot, { hostPlatform })
+
+    const mkdir = commands.find((command) => command.script.includes('ConvertFrom-Json'))!
+    // `@($json | ConvertFrom-Json)` wraps the parsed array in another array, so the loop variable
+    // binds to the whole thing and `[string]` of it is the paths joined by spaces — which
+    // CreateDirectory rejects. It only ever worked for a single directory, where stringifying a
+    // one-element array happens to yield the element, so no batch of one can catch this.
+    expect(mkdir.script).toContain('[string[]]($json | ConvertFrom-Json)')
+    expect(mkdir.script).not.toContain('@($json | ConvertFrom-Json)')
+    const batch = JSON.parse(mkdir.stdin.toString('utf-8')) as string[]
+    expect(batch.length).toBeGreaterThan(1)
   })
 
   it('falls back rather than failing the transfer', async () => {
