@@ -338,6 +338,9 @@ describe('owned orchestration references', () => {
 
     expect(reference).toContain('oldest FIFO Delivery')
     expect(squash(reference)).toContain('Process every row')
+    expect(squash(reference)).toContain(
+      'A Delivery therefore always carries the whole FIFO batch whatever its types, and a `check` without `--wait` hands that batch over unfiltered'
+    )
     expect(reference).toContain('send --to dispatch:<dispatch_id>')
     for (const group of ['@all', '@grok', '@cursor', '@worktree:<id>']) {
       expect(reference).toContain(group)
