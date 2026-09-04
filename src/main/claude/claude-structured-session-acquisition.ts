@@ -30,6 +30,7 @@ import {
 } from './claude-structured-options'
 import { ClaudePromptRegistry } from './claude-structured-prompt-replies'
 import { createClaudeSessionJournalTranslator } from './claude-structured-journal-translation'
+import { readClaudeSettingsEffort } from './claude-structured-session-options'
 import { createClaudeSessionPublication } from './claude-structured-session-publication'
 import {
   cancelClaudeAcquisitionAttempt,
@@ -243,6 +244,7 @@ export async function acquireClaudeSession({
       claudeConfigDir: launch.claudeConfigDir,
       leafUuid: observedLeafUuid,
       fence: input.fence,
+      effort: readClaudeSettingsEffort(settings),
       resumed: launch.resumed,
       prompts,
       translator,

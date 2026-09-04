@@ -21,9 +21,11 @@ export function createClaudeSessionPublication(input: {
   observedAt: number
   options?: ReadonlyMap<string, string>
   capabilities: readonly string[]
+  /** Read from `get_settings`; `system/init` never reports an effort. */
+  effort: string | null
 }): { acquisition: AgentSessionAcquisition; session: ClaudeSession } {
   const model = readClaudeFrameString(input.init.message, 'model')
-  const effort = readClaudeFrameString(input.init.message, 'effortLevel')
+  const effort = input.effort
   return {
     acquisition: {
       process: input.process,
