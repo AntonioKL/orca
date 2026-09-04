@@ -97,6 +97,7 @@ describe('Claude effort the settings readback cannot report', () => {
       session: {
         options: new Map<string, string>(),
         optionMutationSequence: 0,
+        confirmedOptions: new Set<string>(),
         connection: {
           applyFlagSettings: async (settings: { effortLevel?: string }) => {
             calls.push(`apply:${settings.effortLevel}`)

@@ -96,6 +96,10 @@ export async function restoreClaudeStructuredSessionOptions(
   // Any write that was already in flight belongs to the previous acquisition
   // state and must not repopulate this map after restore starts.
   session.optionMutationSequence += 1
+  // The fence bump is not a write, so the report the session already holds is still
+  // current as of this instant; leaving the stamp behind would make every restored
+  // session read as unconfirmed until its next turn.
+  session.reportedModelMutation = session.optionMutationSequence
   const options = [...session.options.entries()]
   session.options.clear()
   for (const [key, value] of options) {

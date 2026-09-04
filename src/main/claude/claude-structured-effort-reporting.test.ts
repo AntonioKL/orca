@@ -70,6 +70,7 @@ describe('Claude effort readback', () => {
       session: {
         options: new Map<string, string>(),
         optionMutationSequence: 0,
+        confirmedOptions: new Set<string>(),
         connection: {
           applyFlagSettings: async (settings: { effortLevel?: string }) => {
             // The measured behaviour: an unknown effort is accepted and ignored.

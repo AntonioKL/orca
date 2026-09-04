@@ -19,6 +19,7 @@ function sessionFor(setModel: ClaudeSession['connection']['setModel']): ClaudeSe
     options: new Map(),
     reportedOptions: {},
     reportedModelMutation: 0,
+    confirmedOptions: new Set(),
     restoreSkippedOptions: new Set(),
     capabilities: [],
     events: undefined,
