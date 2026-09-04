@@ -35,6 +35,8 @@ export type MobileNativeChatTab = {
 
 export type MobileNativeChatAgentStatusWithProvider = MobileWebNativeChatAgentStatus & {
   model?: string
+  /** Host flag marking `lastAssistantMessage` as tool output rather than a reply. */
+  lastAssistantMessageIsToolOutput?: boolean
   providerSession?: {
     id: string
     transcriptPath?: string

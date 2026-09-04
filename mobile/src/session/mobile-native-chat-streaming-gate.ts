@@ -18,6 +18,22 @@ export type MobileNativeChatStreamingGate = {
   baselineTailId: string | null
 }
 
+/** The live status line doubles as a tool-output mirror: when the host marks the
+ *  last assistant message as tool stdout/stderr there is no reply to preview, and
+ *  rendering it paints raw command output as a streaming chat bubble. */
+export function mobileNativeChatStreamPreview(
+  status:
+    | { lastAssistantMessage?: string; lastAssistantMessageIsToolOutput?: boolean }
+    | null
+    | undefined,
+  working: boolean
+): string | undefined {
+  if (!working || status?.lastAssistantMessageIsToolOutput === true) {
+    return undefined
+  }
+  return status?.lastAssistantMessage
+}
+
 export function createMobileNativeChatStreamingGate(
   scopeKey: string | null = null
 ): MobileNativeChatStreamingGate {

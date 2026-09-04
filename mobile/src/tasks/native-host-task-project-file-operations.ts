@@ -7,12 +7,16 @@ export function nativeHostTaskProjectFileOperations(
 ): HostTaskProjectFileOperations {
   return {
     async refreshChecks(target, repoId, headSha) {
-      return request(client, 'github.prChecks', {
+      const checks = await request(client, 'github.prChecks', {
         ...repoPayload(target, repoId),
         prNumber: target.number,
         headSha,
         noCache: true
       })
+      if (!Array.isArray(checks)) {
+        throw new Error('Invalid checks response')
+      }
+      return checks
     },
     async setFileViewed(target, repoId, payload) {
       const result = await request(client, 'github.setPRFileViewed', {

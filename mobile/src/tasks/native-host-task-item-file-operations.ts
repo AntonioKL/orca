@@ -3,13 +3,17 @@ import type { RpcClient } from '../transport/rpc-client'
 
 export function nativeHostTaskItemFileOperations(client: RpcClient): HostTaskItemFileOperations {
   return {
-    refreshChecks(target, headSha) {
-      return request(client, 'github.prChecks', {
+    async refreshChecks(target, headSha) {
+      const checks = await request(client, 'github.prChecks', {
         ...repoPayload(target),
         prNumber: target.number,
         headSha,
         noCache: true
       })
+      if (!Array.isArray(checks)) {
+        throw new Error('Invalid checks response')
+      }
+      return checks
     },
     async rerunChecks(target, headSha, failedOnly) {
       const result = await request<{ ok?: boolean; error?: string }>(

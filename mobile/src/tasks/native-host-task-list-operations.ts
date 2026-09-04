@@ -41,7 +41,11 @@ export function nativeHostTaskListOperations(client: RpcClient): HostTaskListOpe
       )
     },
     async listGitLabTodos(repoId) {
-      return successfulResult(client.sendRequest('gitlab.todos', { repo: `id:${repoId}` }))
+      // An empty todo list comes back as null from older hosts; the seam promises an array.
+      const todos = await successfulResult(
+        client.sendRequest('gitlab.todos', { repo: `id:${repoId}` })
+      )
+      return Array.isArray(todos) ? todos : []
     },
     async listLinear(payload) {
       const response = payload.query

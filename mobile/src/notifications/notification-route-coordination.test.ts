@@ -196,4 +196,15 @@ describe('notification route coordination', () => {
     // A bare push into the nested host route lands on a blank host screen (#12001).
     expect(notificationEffect).not.toContain('mobileHomeDestination(')
   })
+
+  it('validates the tap against the full host catalog, not just token-backed hosts', () => {
+    const start = rootLayoutSource.indexOf('// ─── Notification tap routing ───')
+    const end = rootLayoutSource.indexOf('// ─── End notification tap routing ───', start)
+    const notificationEffect = rootLayoutSource.slice(start, end)
+
+    // loadHosts() omits any host whose keychain read failed, which both kills the tap
+    // (unknown host id) and hides the credential-recovery status.
+    expect(notificationEffect).toContain('resolve(data, loadHostCatalog)')
+    expect(notificationEffect).not.toContain('resolve(data, loadHosts)')
+  })
 })

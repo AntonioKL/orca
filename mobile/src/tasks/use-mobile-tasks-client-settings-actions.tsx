@@ -12,7 +12,6 @@ export function useMobileTasksClientSettingsActions(model: ProjectRepositoryReso
   const {
     defaultRepoSelectionRef,
     githubProjectFieldVisibilityScope,
-    githubProjectHiddenFieldIdsByView,
     repoSelectionHydratedRef,
     setDefaultGitHubPreset,
     setGithubCurrentPage,
@@ -104,24 +103,25 @@ export function useMobileTasksClientSettingsActions(model: ProjectRepositoryReso
       if (!githubProjectFieldVisibilityScope) {
         return
       }
-      const hidden = new Set(
-        githubProjectHiddenFieldIdsByView[githubProjectFieldVisibilityScope] ?? []
-      )
-      if (hidden.has(fieldId)) {
-        hidden.delete(fieldId)
-      } else {
-        hidden.add(fieldId)
-      }
-      const next = { ...githubProjectHiddenFieldIdsByView }
-      if (hidden.size === 0) {
-        delete next[githubProjectFieldVisibilityScope]
-      } else {
-        next[githubProjectFieldVisibilityScope] = [...hidden]
-      }
-      setGithubProjectHiddenFieldIdsByView(next)
-      persistTaskResumeState({ githubProjectHiddenFieldIdsByView: next })
+      // Why: two toggles in one batch both read render scope and the first is lost.
+      setGithubProjectHiddenFieldIdsByView((current) => {
+        const hidden = new Set(current[githubProjectFieldVisibilityScope] ?? [])
+        if (hidden.has(fieldId)) {
+          hidden.delete(fieldId)
+        } else {
+          hidden.add(fieldId)
+        }
+        const next = { ...current }
+        if (hidden.size === 0) {
+          delete next[githubProjectFieldVisibilityScope]
+        } else {
+          next[githubProjectFieldVisibilityScope] = [...hidden]
+        }
+        persistTaskResumeState({ githubProjectHiddenFieldIdsByView: next })
+        return next
+      })
     },
-    [githubProjectFieldVisibilityScope, githubProjectHiddenFieldIdsByView, persistTaskResumeState]
+    [githubProjectFieldVisibilityScope, persistTaskResumeState]
   )
   const persistTaskSource = useCallback(
     (nextProvider: TaskProvider) => {

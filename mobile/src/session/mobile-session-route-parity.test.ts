@@ -84,7 +84,10 @@ const HEAD_TIMER_CREATION_SHA256 =
 const HEAD_TIMER_CLEANUP_SHA256 = '8a45ae3c8a01a639a40ffaf3c0fc89a2e0b610623306818c86bad4ef9195b824'
 const HEAD_RUNTIME_STRING_SHA256 =
   '77fce1bf3cd5c150255a191a107569b11d334da95d3cb47459189965f57f901b'
-const HEAD_HOST_JSX_SHA256 = '2911efcb57dbc9f6de1f2a7b3ed6ca4fa8a9735d48649fe062cb400df756e1ce'
+// Re-frozen when the repeatable accessory key's press handler dropped its duplicate
+// handleAccessoryKey call: startAccessoryRepeat already sends at press time, so every
+// tap emitted the key twice. Same element count, one attribute body changed.
+const HEAD_HOST_JSX_SHA256 = '5b6acbcb34eaa59aa0020f7d6337ccbeb40b3195ff0d798911d9c035d49042fa'
 const HEAD_LEAF_JSX_SHA256 = '7551bacf163f59c150cc8a9150c443df9804a882365f459053d3ab73ac557f42'
 const HEAD_STYLE_REFERENCE_SHA256 =
   '3e4f57e5c8691d443187ffe306eae28506d5505276ea3de7a4f2f1df1cfa3885'

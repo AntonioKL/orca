@@ -33,7 +33,8 @@ export function useMobileTasksWorkspaceCreateActions(model: WorkspaceSshStateMod
     taskWorkspaceCreationOperations,
     tasksSupported,
     trustedOrcaHooks,
-    workspaceDetectedAgentIds
+    workspaceDetectedAgentIds,
+    workspaceLastAutoName
   } = model
   const createWorkspace = useCallback(
     async (
@@ -139,6 +140,10 @@ export function useMobileTasksWorkspaceCreateActions(model: WorkspaceSshStateMod
           })
           return
         }
+        const trimmedWorkspaceName = workspaceNameOverride?.trim() ?? ''
+        // A typed name that still matches the generated one stays auto-managed.
+        const nameIsAutoManaged =
+          !trimmedWorkspaceName || trimmedWorkspaceName === workspaceLastAutoName
         let selection: MobileComposerCreateSelection
         if (item.provider === 'github') {
           const source = item.source
@@ -232,6 +237,7 @@ export function useMobileTasksWorkspaceCreateActions(model: WorkspaceSshStateMod
           workspaceName: workspaceNameOverride,
           note: comment,
           sparseCheckout: sparseCheckoutOverride,
+          nameIsAutoManaged,
           worktreeCreateIdempotency: taskWorkspaceCreationOperations
             .readRuntimeCapabilities()
             .then((capabilities) => capabilities.worktreeCreateIdempotency)
@@ -267,7 +273,8 @@ export function useMobileTasksWorkspaceCreateActions(model: WorkspaceSshStateMod
       taskWorkspaceCreationOperations,
       tasksSupported,
       trustedOrcaHooks,
-      workspaceDetectedAgentIds
+      workspaceDetectedAgentIds,
+      workspaceLastAutoName
     ]
   )
   return Object.assign(model, {

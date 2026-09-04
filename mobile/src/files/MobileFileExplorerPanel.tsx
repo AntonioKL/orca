@@ -65,6 +65,12 @@ export function MobileFileExplorerPanel(props: {
         : null),
     [forceReconnect, hostId, nativeHost.client, operationsProp]
   )
+  // Why: `operations` is null in exactly the disconnected state Retry exists for
+  // (no client), so the revive path cannot hang off it (#5049).
+  const reconnect = useCallback(
+    () => (operations ? operations.reconnect() : forceReconnect(hostId)),
+    [forceReconnect, hostId, operations]
+  )
   const connState = connectionState ?? nativeHost.state
   const scopeRef = useRef('')
   const scope = `${hostId}:${worktreeId}`
@@ -233,12 +239,12 @@ export function MobileFileExplorerPanel(props: {
     (relativePath: string) => {
       if (connState !== 'connected' && hostId) {
         pendingDirectoryRetriesRef.current.add(relativePath)
-        void operations?.reconnect()
+        void reconnect()
         return
       }
       void loadDirectory(relativePath)
     },
-    [connState, hostId, loadDirectory, operations]
+    [connState, hostId, loadDirectory, reconnect]
   )
 
   const previewFile = useCallback(
@@ -316,9 +322,7 @@ export function MobileFileExplorerPanel(props: {
       <Pressable
         style={styles.retryButton}
         onPress={() =>
-          connState !== 'connected' && hostId
-            ? void operations?.reconnect()
-            : void loadDirectory('')
+          connState !== 'connected' && hostId ? void reconnect() : void loadDirectory('')
         }
       >
         <Text style={styles.retryText}>Retry</Text>

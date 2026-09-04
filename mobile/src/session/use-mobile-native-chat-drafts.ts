@@ -4,6 +4,7 @@ import type { HostSessionChatDraftOperations } from './host-session-chat-draft-o
 import type { HostSessionChatPendingDeliveryOperations } from './host-session-chat-pending-delivery-operations'
 import {
   findLandedUnconfirmedSends,
+  normalizeReconcileText,
   type UnconfirmedSend
 } from './mobile-native-chat-draft-reconcile'
 import { mobileNativeChatScopeKey } from './mobile-native-chat-scope-key'
@@ -149,7 +150,9 @@ export function useMobileNativeChatDrafts(args: {
         ? {
             draftKey,
             draftEditGeneration: draftEditGenerationsRef.current.readDraft(draftKey),
-            ...capturePendingOrigin(text.trim())
+            // Transcript rows are compared fully normalized (ANSI stripped, whitespace
+            // runs collapsed); a bare trim leaves every multi-line prompt unmatchable.
+            ...capturePendingOrigin(normalizeReconcileText(text))
           }
         : null,
     [capturePendingOrigin, draftKey]

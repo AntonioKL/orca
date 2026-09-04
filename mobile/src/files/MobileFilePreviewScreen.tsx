@@ -54,6 +54,16 @@ export function MobileFilePreviewScreen({
         : null),
     [forceReconnect, nativeHost.client, operationsProp, previewHostId]
   )
+  // Why: `operations` is null in exactly the disconnected state Retry exists for.
+  const reconnect = useCallback(
+    () =>
+      operations
+        ? operations.reconnect()
+        : previewHostId
+          ? forceReconnect(previewHostId)
+          : Promise.resolve(),
+    [forceReconnect, operations, previewHostId]
+  )
   const connState = connectionState ?? nativeHost.state
   const handleOpenExternalUrl = useCallback(
     (url: string) => {
@@ -221,11 +231,11 @@ export function MobileFilePreviewScreen({
       (preview.status === 'error' && preview.reconnect) ||
       connState !== 'connected'
     ) {
-      await operations?.reconnect()
+      await reconnect()
       return
     }
     void loadPreview()
-  }, [connState, loadPreview, operations, preview, previewParams])
+  }, [connState, loadPreview, preview, previewParams, reconnect])
 
   const displayPath =
     previewParams?.source === 'terminalArtifact'

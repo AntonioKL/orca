@@ -13,6 +13,8 @@ import {
   fetchResolveReviewThread
 } from '../session/github-pr-mutations'
 
+const PROJECT_PR_MUTATION_TIMEOUT_MS = 60_000
+
 export function nativeHostTaskProjectMutationOperations(
   client: RpcClient
 ): HostTaskProjectMutationOperations {
@@ -116,20 +118,23 @@ export function nativeHostTaskProjectMutationOperations(
     },
     async rerunChecks(target, repoId, payload) {
       requirePrMutation(
-        await fetchRerunPRChecks(client, repoId, {
-          prNumber: target.number,
-          ...payload,
-          prRepo: slugPayload(target)
-        })
+        await fetchRerunPRChecks(
+          client,
+          repoId,
+          { prNumber: target.number, ...payload, prRepo: slugPayload(target) },
+          // A CI rerun and a merge both routinely outrun the 30s default.
+          { timeoutMs: PROJECT_PR_MUTATION_TIMEOUT_MS }
+        )
       )
     },
     async merge(target, repoId, method) {
       requirePrMutation(
-        await fetchMergePR(client, repoId, {
-          prNumber: target.number,
-          method,
-          prRepo: slugPayload(target)
-        })
+        await fetchMergePR(
+          client,
+          repoId,
+          { prNumber: target.number, method, prRepo: slugPayload(target) },
+          { timeoutMs: PROJECT_PR_MUTATION_TIMEOUT_MS }
+        )
       )
     }
   }
