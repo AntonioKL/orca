@@ -60,7 +60,9 @@ function snapshot(
     ...(rootPgid === null ? {} : { root: { pid: 10, startedAt: 'Mon Jul 13 12:54:47 2026' } }),
     rootPgid,
     descendants,
-    capturedAtMs
+    capturedAtMs,
+    // Everything a walk returns was re-derived by it.
+    ...(rootPgid === null ? {} : { reDerivedPids: new Set(descendants.map((row) => row.pid)) })
   }
 }
 
@@ -454,7 +456,9 @@ describe('terminateDescendantSnapshotAndWait', () => {
     const pending = terminateDescendantSnapshotWithVerdict(
       {
         ...snapshot([retained, fresh], 10, refreshBoundary),
-        capturedAtMsByPid: { '20': oldBoundary, '30': refreshBoundary }
+        capturedAtMsByPid: { '20': oldBoundary, '30': refreshBoundary },
+        // What a merge produces: only the refresh re-derived 30; 20 is retained.
+        reDerivedPids: new Set([30])
       },
       {
         sendSignal,

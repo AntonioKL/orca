@@ -32,6 +32,14 @@ export type DescendantSnapshot = {
   capturedAtMs: number
   /** Per-PID identity boundaries for merged captures. */
   capturedAtMsByPid?: Readonly<Record<string, number>>
+  /**
+   * PIDs this walk re-derived from a live root. A ppid walk only reaches what
+   * the root actually parents, so membership is proof of ownership that owes
+   * nothing to `lstart`'s one-second resolution: a stranger would have to have
+   * been forked into our own tree, and then it is not a stranger. Rows a merge
+   * retained from an earlier walk are absent, and still answer to start time.
+   */
+  reDerivedPids?: ReadonlySet<number>
 }
 
 export type ProcessTableCapture = {
@@ -204,7 +212,8 @@ export function collectDescendantRows(
     root: { pid: rootRow.pid, startedAt: rootRow.startedAt },
     rootPgid: rootRow.pgid,
     descendants,
-    capturedAtMs
+    capturedAtMs,
+    reDerivedPids: new Set(descendants.map((row) => row.pid))
   }
 }
 

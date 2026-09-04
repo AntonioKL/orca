@@ -10,9 +10,6 @@ export type ClaudeCapturedTree =
  * Process-table reads are not atomic: a refresh can omit a still-live row, but
  * it can also observe a new process after the old row exited. Retain rows absent
  * from the refresh, but reject a PID whose identity changed between reads.
- *
- * Each row also carries the instant its membership of the tree was last proved,
- * which is what the forced sweep fences on.
  */
 function mergeRowsByPid<Row extends { pid: number }>(
   previous: readonly Row[],
@@ -37,11 +34,9 @@ function mergeRowsByPid<Row extends { pid: number }>(
     if (prior && !sameIdentity(prior, row)) {
       return null
     }
-    // Why a retained row may take the later boundary: this walk re-derived it
-    // from the live root by ppid, which proves the process holding that pid is
-    // ours at this instant without appealing to its start time. A row only the
-    // earlier walk saw keeps the earlier boundary -- nothing re-proved it.
-    capturedAtMsByPid[String(row.pid)] = nextBoundary(row)
+    if (!prior) {
+      capturedAtMsByPid[String(row.pid)] = nextBoundary(row)
+    }
     merged.set(row.pid, row)
   }
   const boundaries = Object.values(capturedAtMsByPid)

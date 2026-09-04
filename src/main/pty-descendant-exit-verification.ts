@@ -142,7 +142,15 @@ export async function terminateDescendantSnapshotWithVerdict(
       if (!forced && Date.now() >= deadline - verifyMs + graceMs) {
         forced = true
         for (const row of live) {
+          // A row a walk re-derived from a live root is ours whatever second it
+          // was born in, which start time alone can never establish for one born
+          // in its own capture second. Rows no walk re-derived still answer to
+          // the second-resolution fence, which is all the evidence they have.
+          // Scoped to the identity-revalidating callers; the same argument holds
+          // for the rest, but widening it is a deliberate change of its own.
           if (
+            (deps.requireIdentityBeforeSignal === true &&
+              snapshot.reDerivedPids?.has(row.pid) === true) ||
             hasUnambiguousStartIdentity(
               row,
               snapshot.capturedAtMsByPid?.[String(row.pid)] ?? snapshot.capturedAtMs
