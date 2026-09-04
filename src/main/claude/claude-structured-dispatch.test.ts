@@ -23,6 +23,7 @@ function sessionFor(send = vi.fn().mockResolvedValue(undefined)): ClaudeSession 
     optionMutationSequence: 0,
     options: new Map(),
     reportedOptions: {},
+    reportedModelMutation: 0,
     restoreSkippedOptions: new Set(),
     capabilities: [],
     events: undefined,

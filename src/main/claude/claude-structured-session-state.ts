@@ -109,6 +109,9 @@ export type ClaudeSession = {
   replayContentFallbackBlocked: boolean
   options: Map<string, string>
   reportedOptions: { model?: string; effort?: string }
+  /** `optionMutationSequence` when `reportedOptions.model` was last observed, so a
+   *  write still awaiting its first turn outranks the report it will replace. */
+  reportedModelMutation: number
   restoreSkippedOptions: Set<string>
   /** CLI-advertised protocol capabilities from init; gates interrupt-receipt handling. */
   capabilities: readonly string[]

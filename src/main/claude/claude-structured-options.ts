@@ -9,6 +9,14 @@ import type { ClaudeSession } from './claude-structured-session-state'
 
 const OPTION_ORDER = ['model', 'effort', 'permissionMode'] as const
 
+/**
+ * Efforts the settings readback cannot report. `max` applies for the rest of the
+ * session and is excluded from the persisted `effortLevel` by contract, so
+ * `get_settings` answers with the level underneath it — an absence of evidence
+ * that must not be read as the child refusing a level its own catalog offers.
+ */
+const UNREPORTED_EFFORTS: ReadonlySet<string> = new Set(['max'])
+
 export function restoredClaudeStructuredSessionOptions(
   options: Readonly<Record<string, string>> | undefined
 ): Map<string, string> {
@@ -54,7 +62,7 @@ export async function setClaudeStructuredOption(
   // apply_flag_settings answers `success` for an effort it then ignores, so the
   // absence of a throw proves nothing. Ask what the child actually holds.
   const adopted =
-    input.key === 'effort'
+    input.key === 'effort' && !UNREPORTED_EFFORTS.has(input.value)
       ? await session.connection
           .getSettings({ timeoutMs })
           .then(readClaudeSettingsEffort)

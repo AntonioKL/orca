@@ -1,5 +1,5 @@
 import type { AgentSessionAcquisition } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
-import { readClaudeFrameString, type ClaudeInitObservation } from './claude-structured-init-proof'
+import type { ClaudeInitObservation } from './claude-structured-init-proof'
 import { claudeProviderHandleLink } from './claude-structured-owner-identity'
 import type { ClaudePromptRegistry } from './claude-structured-prompt-replies'
 import type { ClaudeJournalTranslator } from './claude-structured-journal-translation'
@@ -24,7 +24,7 @@ export function createClaudeSessionPublication(input: {
   /** Read from `get_settings`; `system/init` never reports an effort. */
   effort: string | null
 }): { acquisition: AgentSessionAcquisition; session: ClaudeSession } {
-  const model = readClaudeFrameString(input.init.message, 'model')
+  const model = input.init.model
   const effort = input.effort
   return {
     acquisition: {
@@ -58,6 +58,7 @@ export function createClaudeSessionPublication(input: {
         ...(model ? { model } : {}),
         ...(effort ? { effort } : {})
       },
+      reportedModelMutation: 0,
       restoreSkippedOptions: new Set(),
       translator: input.translator,
       events: input.events
