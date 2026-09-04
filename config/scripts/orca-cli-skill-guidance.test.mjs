@@ -10,7 +10,12 @@ const guidePath = join(projectDir, 'skill-guides', 'orca-cli.md')
 const stubPath = join(projectDir, 'skills', 'orca-cli', 'SKILL.md')
 // Why: orchestration and orca-emulator also ship hybrid stubs now, so their version-sensitive
 // command guidance lives in the guide sources — read the cross-guide worktree-id contract there.
-const orchestrationSkillPath = join(projectDir, 'skill-guides', 'orchestration.md')
+// 3252d28d71 pinned the orchestration form in the always-loaded kernel; it now sits on the
+// placement route that consumes an exact selector.
+const orchestrationPlacementPath = join(
+  projectDir,
+  'skill-guides/orchestration/references/placement-and-remote.md'
+)
 const emulatorSkillPath = join(projectDir, 'skill-guides', 'orca-emulator.md')
 
 function readSkill(path = guidePath) {
@@ -95,7 +100,7 @@ describe('orca CLI skill guidance', () => {
 
   it('requires full worktree ids across bundled agent guidance', () => {
     const cliSkill = readSkill()
-    const orchestrationSkill = readSkill(orchestrationSkillPath)
+    const orchestrationSkill = readSkill(orchestrationPlacementPath)
     const emulatorSkill = readSkill(emulatorSkillPath)
 
     for (const skill of [cliSkill, orchestrationSkill, emulatorSkill]) {
