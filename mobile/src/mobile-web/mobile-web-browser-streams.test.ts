@@ -31,7 +31,8 @@ describe('mobile web browser streams', () => {
       isActive: () => true,
       workspaceAuthority,
       browserAuthority,
-      postEvent
+      postEvent,
+      postClosed: vi.fn()
     })
 
     streams.start({

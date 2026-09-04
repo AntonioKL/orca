@@ -105,7 +105,9 @@ export class MobileWebCapabilityBroker {
   replaceClient(client: RpcClient | null): void {
     this.authorities.clear()
     this.commitMessageGeneration.replaceClient(client)
-    this.subscriptions.dispose()
+    // The page document outlives the swap, so every live subscription needs a terminal frame; a
+    // silent teardown leaves it waiting on a feed the new client will never resume.
+    this.subscriptions.closeAll({ code: 'unavailable', retryable: true })
     this.terminalStreams.dispose(null)
     this.speechAuthority.replaceClient()
     for (const [requestId, pending] of this.pending) {

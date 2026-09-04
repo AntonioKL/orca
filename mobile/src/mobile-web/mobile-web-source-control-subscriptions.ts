@@ -1,42 +1,32 @@
-import type {
-  MobileWebPostSubscriptionClosed,
-  MobileWebSubscriptionClosure
-} from './mobile-web-subscription-closure'
-import { MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS } from '../../../src/shared/mobile-web/bridge-contract'
+import {
+  MobileWebSubscriptionLedger,
+  type MobileWebSubscriptionLedgerConfig,
+  type MobileWebSubscriptionRecord
+} from './mobile-web-subscription-ledger'
 import type { MobileWebSourceControlStatusInvalidation } from '../../../src/shared/mobile-web/source-control-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
-import { MobileWebBrokerError } from './mobile-web-broker-error'
 
-type SubscriptionRecord = {
-  requestId: string
-  operationKey: string
+type WatchRecord = MobileWebSubscriptionRecord & {
   pageWorkspaceId: string
   hostWorkspaceId: string
-  sequence: number
-  active: boolean
   closing: boolean
-  unsubscribe: () => void
-  delivery: Promise<void>
 }
+
+type SourceControlLedgerConfig =
+  MobileWebSubscriptionLedgerConfig<MobileWebSourceControlStatusInvalidation> & {
+    workspaceAuthority: MobileWebWorkspaceAuthority
+  }
 
 const MAX_FILE_WATCH_EVENTS = 5_000
 
-export class MobileWebSourceControlSubscriptions {
-  private readonly records = new Map<string, SubscriptionRecord>()
-
-  constructor(
-    private readonly options: {
-      isActive: () => boolean
-      workspaceAuthority: MobileWebWorkspaceAuthority
-      postEvent: (
-        subscriptionId: string,
-        sequence: number,
-        event: MobileWebSourceControlStatusInvalidation
-      ) => Promise<void>
-      postClosed: MobileWebPostSubscriptionClosed
-    }
-  ) {}
+export class MobileWebSourceControlSubscriptions extends MobileWebSubscriptionLedger<
+  MobileWebSourceControlStatusInvalidation,
+  WatchRecord
+> {
+  constructor(private readonly config: SourceControlLedgerConfig) {
+    super({ ...config, operationKey: 'sourceControl.subscribe' })
+  }
 
   start(args: {
     requestId: string
@@ -45,94 +35,34 @@ export class MobileWebSourceControlSubscriptions {
     hostWorkspaceId: string
     client: RpcClient
   }): void {
-    if (this.records.has(args.subscriptionId)) {
-      throw new MobileWebBrokerError('invalid_request')
-    }
-    if (this.records.size >= MOBILE_WEB_BRIDGE_MAX_SUBSCRIPTIONS) {
-      throw new MobileWebBrokerError('rate_limited')
-    }
-    const record: SubscriptionRecord = {
-      requestId: args.requestId,
-      operationKey: 'sourceControl.subscribe',
+    this.admit(args.subscriptionId)
+    const record: WatchRecord = {
+      ...this.newRecord(args.requestId),
       pageWorkspaceId: args.pageWorkspaceId,
       hostWorkspaceId: args.hostWorkspaceId,
-      sequence: 0,
-      active: true,
-      closing: false,
-      unsubscribe: () => {},
-      delivery: Promise.resolve()
+      closing: false
     }
-    this.records.set(args.subscriptionId, record)
-    try {
-      const unsubscribe = args.client.subscribe(
-        'files.watch',
-        { worktree: `id:${args.hostWorkspaceId}` },
-        (event) => this.receive(args.subscriptionId, record, event)
+    this.open(args.subscriptionId, record, () =>
+      args.client.subscribe('files.watch', { worktree: `id:${args.hostWorkspaceId}` }, (event) =>
+        this.receive(args.subscriptionId, record, event)
       )
-      if (record.active && this.records.get(args.subscriptionId) === record) {
-        record.unsubscribe = unsubscribe
-      } else {
-        unsubscribe()
-      }
-    } catch {
-      this.cancel(args.subscriptionId)
-      throw new MobileWebBrokerError('host_error')
-    }
+    )
   }
 
-  cancel(subscriptionId: string, closure?: MobileWebSubscriptionClosure): string | null {
-    const record = this.records.get(subscriptionId)
-    if (!record) {
-      return null
+  protected override canDeliver(subscriptionId: string, record: WatchRecord): boolean {
+    if (this.isAuthorized(record)) {
+      return true
     }
-    record.active = false
-    this.records.delete(subscriptionId)
-    try {
-      record.unsubscribe()
-    } catch {
-      // The logical subscription is retired even if transport cleanup fails.
-    }
-    if (closure) {
-      this.options.postClosed(subscriptionId, closure)
-    }
-    return record.requestId
+    this.cancel(subscriptionId, { code: 'not_found', retryable: false })
+    return false
   }
 
-  cancelByRequest(requestId: string): void {
-    for (const [subscriptionId, record] of this.records) {
-      if (record.requestId === requestId) {
-        this.cancel(subscriptionId)
-      }
-    }
-  }
-
-  countForOperation(operationKey: string): number {
-    let count = 0
-    for (const record of this.records.values()) {
-      if (record.operationKey === operationKey) {
-        count += 1
-      }
-    }
-    return count
-  }
-
-  dispose(): void {
-    for (const subscriptionId of this.records.keys()) {
-      this.cancel(subscriptionId)
-    }
-  }
-
-  private receive(subscriptionId: string, record: SubscriptionRecord, value: unknown): void {
+  private receive(subscriptionId: string, record: WatchRecord, value: unknown): void {
     if (!this.isAuthorized(record)) {
       this.cancel(subscriptionId, { code: 'not_found', retryable: false })
       return
     }
-    if (
-      !record.active ||
-      record.closing ||
-      !this.options.isActive() ||
-      this.records.get(subscriptionId) !== record
-    ) {
+    if (record.closing || !this.isCurrent(subscriptionId, record)) {
       return
     }
     if (!isRecord(value)) {
@@ -143,17 +73,7 @@ export class MobileWebSourceControlSubscriptions {
       return
     }
     if (value.type === 'changed') {
-      if (value.worktree !== `id:${record.hostWorkspaceId}` || !Array.isArray(value.events)) {
-        this.cancel(subscriptionId, { code: 'invalid_message', retryable: false })
-        return
-      }
-      const overflow =
-        value.events.length > MAX_FILE_WATCH_EVENTS ||
-        value.events.some((event) => isRecord(event) && event.kind === 'overflow')
-      this.enqueue(subscriptionId, record, {
-        workspaceId: record.pageWorkspaceId,
-        reason: overflow ? 'overflow' : 'changed'
-      })
+      this.receiveChange(subscriptionId, record, value)
       return
     }
     if (value.type === 'error' || value.type === 'end') {
@@ -169,41 +89,28 @@ export class MobileWebSourceControlSubscriptions {
     this.cancel(subscriptionId, { code: 'invalid_message', retryable: false })
   }
 
-  private enqueue(
+  private receiveChange(
     subscriptionId: string,
-    record: SubscriptionRecord,
-    event: MobileWebSourceControlStatusInvalidation,
-    retireAfterDelivery = false
+    record: WatchRecord,
+    value: Record<string, unknown>
   ): void {
-    const sequence = record.sequence
-    record.sequence += 1
-    record.delivery = record.delivery
-      .then(async () => {
-        if (
-          !record.active ||
-          !this.options.isActive() ||
-          this.records.get(subscriptionId) !== record
-        ) {
-          return
-        }
-        if (!this.isAuthorized(record)) {
-          this.cancel(subscriptionId, { code: 'not_found', retryable: false })
-          return
-        }
-        await this.options.postEvent(subscriptionId, sequence, event)
-        if (retireAfterDelivery) {
-          this.cancel(subscriptionId)
-        }
-      })
-      .catch(() => {
-        this.cancel(subscriptionId, { code: 'unavailable', retryable: true })
-      })
+    if (value.worktree !== `id:${record.hostWorkspaceId}` || !Array.isArray(value.events)) {
+      this.cancel(subscriptionId, { code: 'invalid_message', retryable: false })
+      return
+    }
+    const overflow =
+      value.events.length > MAX_FILE_WATCH_EVENTS ||
+      value.events.some((event) => isRecord(event) && event.kind === 'overflow')
+    this.enqueue(subscriptionId, record, {
+      workspaceId: record.pageWorkspaceId,
+      reason: overflow ? 'overflow' : 'changed'
+    })
   }
 
-  private isAuthorized(record: SubscriptionRecord): boolean {
+  private isAuthorized(record: WatchRecord): boolean {
     try {
       return (
-        this.options.workspaceAuthority.hostWorkspaceId(record.pageWorkspaceId) ===
+        this.config.workspaceAuthority.hostWorkspaceId(record.pageWorkspaceId) ===
         record.hostWorkspaceId
       )
     } catch {

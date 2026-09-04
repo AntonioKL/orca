@@ -42,24 +42,28 @@ function ledgerStarters(): { name: string; start: (subscriptionId: string) => vo
   const pageId = browserAuthority.register('host-workspace', 'raw-page')
   const nativeChatAuthority = new MobileWebNativeChatAuthority(randomBytes)
 
-  const account = new MobileWebAccountSubscriptions({ isActive, postEvent })
-  const workspace = new MobileWebWorkspaceSubscriptions({ isActive, postEvent })
+  const postClosed = (): void => {}
+  const account = new MobileWebAccountSubscriptions({ isActive, postEvent, postClosed })
+  const workspace = new MobileWebWorkspaceSubscriptions({ isActive, postEvent, postClosed })
   const session = new MobileWebSessionSubscriptions({
     isActive,
     postEvent,
+    postClosed,
     browserAuthority,
     nativeChatAuthority
   })
   const sourceControl = new MobileWebSourceControlSubscriptions({
     isActive,
     workspaceAuthority,
-    postEvent
+    postEvent,
+    postClosed
   })
   const browser = new MobileWebBrowserStreams({
     isActive,
     workspaceAuthority,
     browserAuthority,
-    postEvent
+    postEvent,
+    postClosed
   })
   return [
     {
