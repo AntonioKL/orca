@@ -107,6 +107,26 @@ describe('hosted document replacement', () => {
     expect(errorFor(harness.messages, 'A')).toEqual([])
   })
 
+  it('retires every replacement when native loading and loaded events are batched', async () => {
+    await mount()
+    await loadDocument()
+    await handle(subscribeRequest('A', 'Z'))
+
+    const shell = renderer!.root.findByType('MobileWebShellView' as never)
+    await act(async () => {
+      shell.props.onLoadState({ nativeEvent: { state: 'loading' } })
+      shell.props.onLoadState({ nativeEvent: { state: 'loaded' } })
+    })
+    await handle(subscribeRequest('B', 'Y'))
+    await loadDocument()
+    await handle(subscribeRequest('C', 'X'))
+
+    expect(harness.created).toBe(3)
+    expect(harness.unsubscribe).toHaveBeenCalledTimes(2)
+    expect(harness.subscribe).toHaveBeenCalledTimes(3)
+    expect(errorFor(harness.messages, 'C')).toEqual([])
+  })
+
   it('is the wiring the hosted screen uses', () => {
     // The harness above composes the two seams by hand; this pins the screen to the same pair.
     const source = readFileSync(

@@ -2,18 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import type { MobileWebHealthDeadline } from './mobile-web-health-deadline'
 import type { MobileWebNativeRouteHandoff } from './mobile-web-native-route-handoff'
 
-/**
- * The shell owns the document lifecycle, so it also owns the page-scoped state that dies with a
- * document: what was initialized, what reported ready, and the health deadline armed for it.
- *
- * A document is replaced without the shell session, its build or the view epoch moving at all — a
- * native-route excursion deactivates the view to about:blank and reloads on return, the route error
- * boundary reloads in place, and a re-attached view reloads its URL. Each of those mints a new page
- * with new subscription ids while the previous page's broker survives, and its records keep holding
- * every per-operation grant (one for workspace, account and source control), so the new document's
- * subscribes are refused with `rate_limited` for the life of the shell session. The document epoch
- * is that boundary: it retires the outgoing page's broker before the incoming one initializes.
- */
+// In-place reloads must retire page authority even when the native view and session survive.
 export function useMobileWebPageDocument({
   sessionId,
   viewEpoch,
@@ -37,24 +26,28 @@ export function useMobileWebPageDocument({
   const [epoch, setEpoch] = useState(0)
   const [readySessionId, setReadySessionId] = useState<string>()
 
-  useEffect(() => {
+  const resetDocument = useCallback(() => {
     initializedSessionRef.current = undefined
     loadedRef.current = false
     routeHandoffRef.current.clear()
     setReadySessionId(undefined)
     healthDeadlineRef.current.clear()
+  }, [healthDeadlineRef, routeHandoffRef])
+
+  useEffect(() => {
+    resetDocument()
     return () => healthDeadlineRef.current.clear()
-  }, [epoch, healthDeadlineRef, routeHandoffRef, sessionId, viewEpoch])
+  }, [healthDeadlineRef, resetDocument, sessionId, viewEpoch])
 
   const onLoadStart = useCallback(() => {
-    // Only a load that displaces a document that finished loading is a replacement. The shell posts
-    // `loading` for the first load too, and more than once per load, and neither is a new page.
+    // Duplicate loading notifications do not represent another document.
     if (!loadedRef.current) {
       return
     }
-    loadedRef.current = false
+    // Reset before loaded can arrive in the same batch, rather than in the epoch's effect.
+    resetDocument()
     setEpoch((current) => current + 1)
-  }, [])
+  }, [resetDocument])
 
   const onLoaded = useCallback(() => {
     loadedRef.current = true
