@@ -41,10 +41,18 @@ function stubStructuredHostInstall(runtime: OrcaRuntimeService): {
   return { effects, ensure }
 }
 
-function createRuntime(location: {
+type TestLocation = {
   executionHostId: string
   wslDistro: string | null
-}): OrcaRuntimeService {
+  workspaceKind?: 'folder' | 'git-worktree'
+}
+
+type SupportResult = {
+  supported: boolean
+  reason?: 'agent' | 'remote' | 'wsl'
+}
+
+function createRuntime(location: TestLocation): OrcaRuntimeService {
   const runtime = new OrcaRuntimeService({ getSettings: () => ({}) } as never)
   const internal = runtime as unknown as {
     resolveStructuredAgentSessionLocation: () => Promise<unknown>
@@ -53,9 +61,35 @@ function createRuntime(location: {
     executionHostId: location.executionHostId,
     wslDistro: location.wslDistro,
     workspaceId: 'workspace-1',
-    workspaceKind: 'git-worktree' as const
+    workspaceKind: location.workspaceKind ?? 'git-worktree'
   }))
   return runtime
+}
+
+async function expectSupportWithoutInstall(input: {
+  agent: 'claude' | 'codex'
+  location: TestLocation
+  expected: SupportResult
+  repetitions?: number
+}): Promise<void> {
+  const runtime = createRuntime(input.location)
+  const { effects, ensure } = stubStructuredHostInstall(runtime)
+
+  const answers: SupportResult[] = []
+  for (let index = 0; index < (input.repetitions ?? 1); index += 1) {
+    answers.push(
+      await runtime.getStructuredAgentSessionCreateSupport('id:workspace-1', input.agent)
+    )
+  }
+
+  expect(answers).toEqual(Array(input.repetitions ?? 1).fill(input.expected))
+  expect(ensure).not.toHaveBeenCalled()
+  expect(effects).toEqual({
+    storeOpened: false,
+    writeGateAttached: false,
+    reaperStarted: false
+  })
+  expect(getStructuredAgentSessionHost()).toBeNull()
 }
 
 describe('structured agent-session create-support probe', () => {
@@ -65,37 +99,54 @@ describe('structured agent-session create-support probe', () => {
     vi.restoreAllMocks()
   })
 
-  it('answers repeatedly without installing the host', async () => {
-    const runtime = createRuntime({ executionHostId: 'local', wslDistro: null })
-    const { effects, ensure } = stubStructuredHostInstall(runtime)
+  it.each(['codex', 'claude'] as const)(
+    'answers %s support repeatedly without installing the host',
+    async (agent) => {
+      await expectSupportWithoutInstall({
+        agent,
+        location: { executionHostId: 'local', wslDistro: null },
+        expected: { supported: true },
+        repetitions: 3
+      })
+    }
+  )
 
-    const answers = [
-      await runtime.getStructuredAgentSessionCreateSupport('id:workspace-1', 'codex'),
-      await runtime.getStructuredAgentSessionCreateSupport('id:workspace-1', 'codex'),
-      await runtime.getStructuredAgentSessionCreateSupport('id:workspace-1', 'codex')
-    ]
+  it.each(['codex', 'claude'] as const)(
+    'still reports an unsupported remote %s location without installing the host',
+    async (agent) => {
+      await expectSupportWithoutInstall({
+        agent,
+        location: { executionHostId: 'ssh-host-1', wslDistro: null },
+        expected: { supported: false, reason: 'remote' }
+      })
+    }
+  )
 
-    expect(answers).toEqual([{ supported: true }, { supported: true }, { supported: true }])
-    expect(ensure).not.toHaveBeenCalled()
-    expect(effects).toEqual({
-      storeOpened: false,
-      writeGateAttached: false,
-      reaperStarted: false
-    })
-    expect(getStructuredAgentSessionHost()).toBeNull()
-  })
+  it.each(['codex', 'claude'] as const)(
+    'still reports an unsupported WSL %s location without installing the host',
+    async (agent) => {
+      await expectSupportWithoutInstall({
+        agent,
+        location: { executionHostId: 'local', wslDistro: 'Ubuntu' },
+        expected: { supported: false, reason: 'wsl' }
+      })
+    }
+  )
 
-  it('still reports an unsupported location without installing the host', async () => {
-    const runtime = createRuntime({ executionHostId: 'ssh-host-1', wslDistro: null })
-    const { effects, ensure } = stubStructuredHostInstall(runtime)
-
-    await expect(
-      runtime.getStructuredAgentSessionCreateSupport('id:workspace-1', 'codex')
-    ).resolves.toEqual({ supported: false, reason: 'remote' })
-    expect(ensure).not.toHaveBeenCalled()
-    expect(effects.storeOpened).toBe(false)
-    expect(getStructuredAgentSessionHost()).toBeNull()
-  })
+  it.each(['codex', 'claude'] as const)(
+    'supports a local folder workspace for %s without installing the host',
+    async (agent) => {
+      await expectSupportWithoutInstall({
+        agent,
+        location: {
+          executionHostId: 'local',
+          wslDistro: null,
+          workspaceKind: 'folder'
+        },
+        expected: { supported: true }
+      })
+    }
+  )
 
   it('still installs and reconciles on startup when a store is already persisted', async () => {
     const runtime = createRuntime({ executionHostId: 'local', wslDistro: null })
