@@ -31,6 +31,16 @@ function cliFence(result: string): string {
   return match?.[1] ?? ''
 }
 
+function markdownBlocks(result: string) {
+  const tree = unified().use(remarkParse).parse(result)
+  return {
+    headings: tree.children.filter((node) => node.type === 'heading'),
+    codeBlocks: tree.children.filter((node) => node.type === 'code')
+  }
+}
+
+const driftParams = { base: 'origin/main', behind: 3, recentSubjects: ['fix: a', 'feat: b'] }
+
 describe('buildDispatchPreamble', () => {
   it('substitutes template variables', () => {
     const result = buildDispatchPreamble(baseParams())
@@ -73,13 +83,34 @@ describe('buildDispatchPreamble', () => {
 
   it('fences shell comments so Markdown does not promote them to headings', () => {
     const result = buildDispatchPreamble(baseParams())
-    const tree = unified().use(remarkParse).parse(result)
-    const headings = tree.children.filter((node) => node.type === 'heading')
-    const codeBlocks = tree.children.filter((node) => node.type === 'code')
+    const { headings, codeBlocks } = markdownBlocks(result)
 
     expect(headings).toHaveLength(0)
     expect(codeBlocks).toHaveLength(1)
     expect(codeBlocks[0]).toMatchObject({ lang: 'sh', value: cliFence(result) })
+  })
+
+  // Why: a `---` rule directly under a paragraph is a setext H2, so the optional
+  // sections' closing rules must not turn their last sentence into a heading.
+  it('renders no Markdown headings when the sub-dispatch and drift sections are present', () => {
+    const result = buildDispatchPreamble(
+      baseParams({ canDispatchSubWorkers: true, baseDrift: driftParams })
+    )
+    const { headings, codeBlocks } = markdownBlocks(result)
+
+    expect(headings).toHaveLength(0)
+    expect(codeBlocks).toHaveLength(2)
+    expect(codeBlocks[1]).toMatchObject({ lang: 'sh' })
+    expect(codeBlocks[1].value).toContain('orchestration worker-start --task <task_id>')
+    expect(result).toContain('able to dispatch further.\n\n---')
+    expect(result).toContain('before starting.\n\n---')
+  })
+
+  it('sub-dispatch fence passes bash -n', { timeout: 15_000 }, () => {
+    const result = buildDispatchPreamble(baseParams({ canDispatchSubWorkers: true }))
+    const { codeBlocks } = markdownBlocks(result)
+    const check = spawnSync('bash', ['-n'], { input: codeBlocks[1].value, encoding: 'utf8' })
+    expect(check.status).toBe(0)
   })
 
   it('includes heartbeat CLI block with taskId and dispatchId and 5-minute cadence', () => {
