@@ -3,7 +3,6 @@ import type {
   OrchestrationWorkerReadResult
 } from '../../../../shared/orchestration-worker-output'
 import { ORCHESTRATION_FEDERATION_STRUCTURED_READ_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
-import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import type { OrchestrationDb } from '../../orchestration/db'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { getOrchestrationPeerCapabilityCache } from '../../orchestration/orchestration-peer-capability-cache'
@@ -30,24 +29,18 @@ export async function readFederatedWorkerOutput(args: {
     )
   }
   const capabilities = getOrchestrationPeerCapabilityCache(args.runtime)
-  const capability = await capabilities.resolve({
-    peerFingerprint: args.federated.peer_fingerprint,
-    expectedRuntimeEpoch: args.federated.remote_runtime_epoch,
-    capability: ORCHESTRATION_FEDERATION_STRUCTURED_READ_RUNTIME_CAPABILITY,
-    probe: () =>
-      args.runtime.callOrchestrationWorkerServer(
-        args.server.environmentId,
-        'status.get',
-        undefined,
-        15_000,
-        undefined,
-        { expectedEnvironmentPairingRevision: args.server.pairingRevision }
-      ) as Promise<RuntimeStatus>
-  })
-  if (!capability.supported) {
+  // Hosts that serve `orchestration.federationReadOutput` shipped before the capability string
+  // did, so ask the method itself and let `method_not_found` be the only downgrade signal.
+  const known = capabilities.knownSupport(
+    args.federated.peer_fingerprint,
+    args.federated.remote_runtime_epoch,
+    ORCHESTRATION_FEDERATION_STRUCTURED_READ_RUNTIME_CAPABILITY
+  )
+  const expectedRuntimeEpoch = known?.runtimeEpoch ?? args.federated.remote_runtime_epoch
+  if (known?.supported === false) {
     const legacy = await readLegacy(args)
     projectRemoteRuntimeEpoch(args.db, observationFence, legacy.remoteRuntimeEpoch)
-    if (legacy.remoteRuntimeEpoch !== capability.runtimeEpoch) {
+    if (legacy.remoteRuntimeEpoch !== expectedRuntimeEpoch) {
       capabilities.observeEpoch(args.federated.peer_fingerprint, legacy.remoteRuntimeEpoch)
     }
     return legacy
@@ -82,17 +75,14 @@ export async function readFederatedWorkerOutput(args: {
     if (!(error instanceof OrchestrationError) || error.code !== 'method_not_found') {
       throw error
     }
+    const legacy = await readLegacy(args)
     capabilities.remember(
       args.federated.peer_fingerprint,
-      capability.runtimeEpoch,
+      legacy.remoteRuntimeEpoch,
       ORCHESTRATION_FEDERATION_STRUCTURED_READ_RUNTIME_CAPABILITY,
       false
     )
-    const legacy = await readLegacy(args)
     projectRemoteRuntimeEpoch(args.db, observationFence, legacy.remoteRuntimeEpoch)
-    if (legacy.remoteRuntimeEpoch !== capability.runtimeEpoch) {
-      capabilities.observeEpoch(args.federated.peer_fingerprint, legacy.remoteRuntimeEpoch)
-    }
     return legacy
   }
 }

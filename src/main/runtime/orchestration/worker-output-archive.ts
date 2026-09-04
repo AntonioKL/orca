@@ -17,16 +17,6 @@ import { isWslHookRelayConnectionId } from '../../../shared/wsl-hook-relay-contr
 // Bound the durable copy of raw terminal output; the tail end is the evidence that matters.
 const TERMINAL_ARCHIVE_MAX_CHARS = 262_144
 
-export type WorkerTranscriptPinArchive = {
-  agent: AgentType
-  providerSessionKey: string
-  providerSessionId: string
-  transcriptPath: string | null
-  processIncarnation: string
-  observedAfter: number
-  endOffset?: number
-}
-
 export type WorkerTranscriptSnapshotArchive = {
   version: 2
   agent: AgentType

@@ -1,8 +1,7 @@
-import { appendFile, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { encodeWorkerOutputCursor } from '../../orchestration/worker-output-cursor'
 import { createOrchestrationWorkerReleaseHarness } from './orchestration-worker-release.test-support'
 
 function codexMessage(id: string, text: string): string {
@@ -152,80 +151,6 @@ describe('orchestration worker release archive', () => {
           messages: [{ id: 'snapshot-two', blocks: [{ type: 'text', text: 'frozen second' }] }]
         }
       })
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
-  })
-
-  it('pins legacy transcript cursors to their content boundary', async () => {
-    h.setup()
-    const directory = await mkdtemp(join(tmpdir(), 'orca-worker-release-legacy-pin-'))
-    const transcriptPath = join(directory, 'rollout.jsonl')
-    const original = `${codexMessage('one', 'first')}\n${codexMessage('two', 'second')}\n`
-    try {
-      await writeFile(transcriptPath, original)
-      const { dispatchId } = await h.startSettledWorker()
-      await h.call('orchestration.workerRelease', { dispatch: dispatchId })
-      const resource = h.db.getWorkerTerminalResourceByOwner(dispatchId)
-      if (!resource) {
-        throw new Error('Expected a released worker terminal resource')
-      }
-      h.db.storeWorkerTerminalArchive({
-        dispatchId,
-        resourceId: resource.id,
-        kind: 'transcript_pin',
-        content: JSON.stringify({
-          agent: 'codex',
-          providerSessionKey: 'codex:legacy-pin',
-          providerSessionId: 'legacy-pin',
-          transcriptPath,
-          processIncarnation: resource.process_incarnation,
-          observedAfter: 0,
-          endOffset: Buffer.byteLength(original)
-        })
-      })
-
-      const page = (await h.call('orchestration.workerRead', {
-        dispatch: dispatchId,
-        limit: 1
-      })) as {
-        sourceIdentity: string
-        transcript: { messages: { id: string }[] }
-        cursor: string
-      }
-      expect(page.transcript.messages).toMatchObject([{ id: 'two' }])
-
-      const checkpointFreeCursor = encodeWorkerOutputCursor(
-        dispatchId,
-        'transcript',
-        page.sourceIdentity,
-        Buffer.byteLength(original)
-      )
-      await expect(
-        h.call('orchestration.workerRead', { dispatch: dispatchId, cursor: checkpointFreeCursor })
-      ).rejects.toMatchObject({
-        code: 'source_changed',
-        message:
-          'The worker output source changed. Start a fresh worker-read without the old cursor.'
-      })
-
-      await appendFile(transcriptPath, `${codexMessage('three', 'after release')}\n`)
-      await expect(
-        h.call('orchestration.workerRead', { dispatch: dispatchId, cursor: page.cursor })
-      ).resolves.toMatchObject({ transcript: { messages: [] }, contentComplete: true })
-
-      const before = await stat(transcriptPath, { bigint: true })
-      const replacement = `${codexMessage('red', 'other')}\n${codexMessage('new', 'REWRIT')}\n`
-      expect(Buffer.byteLength(replacement)).toBe(Buffer.byteLength(original))
-      await writeFile(transcriptPath, replacement)
-      const after = await stat(transcriptPath, { bigint: true })
-      expect(after.dev).toBe(before.dev)
-      expect(after.ino).toBe(before.ino)
-      expect(Number(after.size)).toBeGreaterThanOrEqual(Buffer.byteLength(original))
-
-      await expect(
-        h.call('orchestration.workerRead', { dispatch: dispatchId, cursor: page.cursor })
-      ).rejects.toMatchObject({ code: 'source_changed' })
     } finally {
       await rm(directory, { recursive: true, force: true })
     }

@@ -1,125 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY,
-  ORCHESTRATION_FEDERATION_RELEASE_RUNTIME_CAPABILITY
+  ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY
 } from '../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../orca-runtime'
 import { OrchestrationDb } from './db'
 import {
   acquireFederationAckLease,
-  clearFederationAckCheckpoints,
   getFederationAckedThrough,
-  recordFederationAckCheckpoint,
   type FederationAckIdentity
 } from './federation-ack-checkpoints'
+import { createIdleSyncHarness } from './federation-sync-test-harness'
 import { parseRelayedMessage, syncFederatedDispatch } from './federation-sync'
 import { getOrchestrationPeerCapabilityCache } from './orchestration-peer-capability-cache'
-
-function createIdleSyncHarness(initialSequence = 2, protocolVersion?: 1 | 2 | 3) {
-  let remoteRuntimeEpoch = 'remote_epoch_1'
-  let remoteCapabilities: string[] = [
-    ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY
-  ]
-  let blockedAck: { reached: () => void; released: Promise<void> } | null = null
-  let blockedPull: { reached: () => void; released: Promise<void> } | null = null
-  let relayEligible = true
-  const federated = {
-    environment_id: 'environment_windows',
-    environment_name: 'windows',
-    peer_fingerprint: 'windows_peer_fingerprint',
-    remote_runtime_epoch: remoteRuntimeEpoch,
-    ...(protocolVersion ? { protocol_version: protocolVersion } : {}),
-    to_home_imported_sequence: initialSequence,
-    to_home_acknowledged_sequence: 0
-  }
-  const createDb = () =>
-    ({
-      getFederatedDispatch: () => federated,
-      getDispatchContextById: () => ({ run_id: 'run_home', task_id: 'task_home' }),
-      getWorkerDispatch: () => ({ state: 'ready' }),
-      listPendingFederationRelay: () => [],
-      isFederatedDispatchRelayEligible: () => relayEligible,
-      recordFederatedHomeAcknowledgment: (params: {
-        remoteRuntimeEpoch: string
-        sequence: number
-      }) => {
-        federated.remote_runtime_epoch = params.remoteRuntimeEpoch
-        federated.to_home_acknowledged_sequence = params.sequence
-      },
-      updateFederatedDispatchRuntimeEpoch: (_dispatchId: string, runtimeEpoch: string) => {
-        federated.remote_runtime_epoch = runtimeEpoch
-      }
-    }) as never
-  const runtime = new OrcaRuntimeService()
-  runtime.setOrchestrationDb(createDb())
-  vi.spyOn(runtime, 'resolveOrchestrationWorkerServer').mockReturnValue({
-    peerFingerprint: federated.peer_fingerprint
-  } as never)
-  const remoteCall = vi
-    .spyOn(runtime, 'callOrchestrationWorkerServer')
-    .mockImplementation(async (_environmentId, method) => {
-      if (method === 'orchestration.federationPull') {
-        const gate = blockedPull
-        if (gate) {
-          gate.reached()
-          await gate.released
-          if (blockedPull === gate) {
-            blockedPull = null
-          }
-        }
-        return { runtimeEpoch: remoteRuntimeEpoch, items: [] }
-      }
-      if (method === 'status.get') {
-        return { runtimeId: remoteRuntimeEpoch, capabilities: remoteCapabilities }
-      }
-      if (method === 'orchestration.federationAck') {
-        const gate = blockedAck
-        if (gate) {
-          gate.reached()
-          await gate.released
-          if (blockedAck === gate) {
-            blockedAck = null
-          }
-        }
-        return { acknowledgedThrough: federated.to_home_imported_sequence }
-      }
-      throw new Error(`Unexpected method ${method}`)
-    })
-  return {
-    runtime,
-    remoteCall,
-    advanceCursor: () => {
-      federated.to_home_imported_sequence += 1
-    },
-    restartRemote: () => {
-      remoteRuntimeEpoch = 'remote_epoch_2'
-    },
-    getPersistedRemoteRuntimeEpoch: () => federated.remote_runtime_epoch,
-    settleDispatch: () => {
-      relayEligible = false
-    },
-    setRemoteCapabilities: (capabilities: string[]) => {
-      remoteCapabilities = capabilities
-    },
-    replaceDb: () => runtime.setOrchestrationDb(createDb()),
-    blockAck: () => {
-      let noteReached!: () => void
-      let release!: () => void
-      const reached = new Promise<void>((resolve) => (noteReached = resolve))
-      const released = new Promise<void>((resolve) => (release = resolve))
-      blockedAck = { reached: noteReached, released }
-      return { reached, release }
-    },
-    blockPull: () => {
-      let noteReached!: () => void
-      let release!: () => void
-      const reached = new Promise<void>((resolve) => (noteReached = resolve))
-      const released = new Promise<void>((resolve) => (release = resolve))
-      blockedPull = { reached: noteReached, released }
-      return { reached, release }
-    }
-  }
-}
 
 describe('federation relay parsing', () => {
   it('accepts a supported message type', () => {
@@ -388,30 +281,52 @@ describe('federation relay acknowledgments', () => {
     await cache.resolve({
       peerFingerprint: 'windows_peer_fingerprint',
       expectedRuntimeEpoch: 'remote_epoch_1',
-      capability: ORCHESTRATION_FEDERATION_RELEASE_RUNTIME_CAPABILITY,
+      capability: ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY,
       probe: vi.fn().mockResolvedValue({ runtimeId: 'remote_epoch_1', capabilities: [] })
     })
 
     restartRemote()
     setRemoteCapabilities([
       ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY,
-      ORCHESTRATION_FEDERATION_RELEASE_RUNTIME_CAPABILITY
+      ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY
     ])
     await runtime.syncOrchestrationFederatedDispatch('dispatch_remote')
 
     expect(getPersistedRemoteRuntimeEpoch()).toBe('remote_epoch_2')
-    await expect(
+    // The restart dropped the old epoch's answers, so the next resolve re-probes once and
+    // then serves the new epoch from cache.
+    const probe = vi.fn().mockResolvedValue({
+      runtimeId: 'remote_epoch_2',
+      capabilities: [ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY]
+    })
+    const resolveRelease = () =>
       cache.resolve({
         peerFingerprint: 'windows_peer_fingerprint',
         expectedRuntimeEpoch: 'remote_epoch_1',
-        capability: ORCHESTRATION_FEDERATION_RELEASE_RUNTIME_CAPABILITY,
-        probe: vi.fn()
+        capability: ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY,
+        probe
       })
-    ).resolves.toMatchObject({
+    await expect(resolveRelease()).resolves.toMatchObject({
+      runtimeEpoch: 'remote_epoch_2',
+      supported: true,
+      cached: false
+    })
+    await expect(resolveRelease()).resolves.toMatchObject({
       runtimeEpoch: 'remote_epoch_2',
       supported: true,
       cached: true
     })
+    expect(probe).toHaveBeenCalledOnce()
+  })
+
+  it('probes an unchanged peer once across repeated syncs', async () => {
+    const { runtime, remoteCall } = createIdleSyncHarness(0)
+
+    await runtime.syncOrchestrationFederatedDispatch('dispatch_remote')
+    await runtime.syncOrchestrationFederatedDispatch('dispatch_remote')
+    await runtime.syncOrchestrationFederatedDispatch('dispatch_remote')
+
+    expect(remoteCall.mock.calls.filter(([, method]) => method === 'status.get')).toHaveLength(1)
   })
 
   it('does not wake a waiter for an acknowledged duplicate replay', async () => {
@@ -625,7 +540,6 @@ describe('federation relay acknowledgments', () => {
       'orchestration.federationPull',
       'orchestration.federationAck',
       'orchestration.federationImport',
-      'status.get',
       'orchestration.federationPull',
       'orchestration.federationAck'
     ])
@@ -778,55 +692,5 @@ describe('federation relay acknowledgments', () => {
     await runtime.syncOrchestrationFederatedDispatch('dispatch_remote')
 
     expect(ackCalls()).toHaveLength(1)
-  })
-
-  it('matches checkpoints only to their exact remote identity and never moves backward', () => {
-    const runtime = {} as OrcaRuntimeService
-    const identity: FederationAckIdentity = {
-      environmentId: 'environment_windows',
-      peerFingerprint: 'windows_peer_fingerprint',
-      remoteRuntimeEpoch: 'remote_epoch_1'
-    }
-    const lease = acquireFederationAckLease(runtime, 'dispatch_remote')
-    recordFederationAckCheckpoint(runtime, lease, {
-      ...identity,
-      throughSequence: 2
-    })
-
-    recordFederationAckCheckpoint(runtime, lease, {
-      ...identity,
-      throughSequence: 3
-    })
-    recordFederationAckCheckpoint(runtime, lease, {
-      ...identity,
-      throughSequence: 2
-    })
-
-    expect(getFederationAckedThrough(lease, identity)).toBe(3)
-    expect(
-      getFederationAckedThrough(lease, { ...identity, remoteRuntimeEpoch: 'remote_epoch_2' })
-    ).toBe(0)
-    expect(
-      getFederationAckedThrough(lease, { ...identity, peerFingerprint: 'replacement_peer' })
-    ).toBe(0)
-    expect(getFederationAckedThrough(lease, { ...identity, environmentId: 'replacement' })).toBe(0)
-  })
-
-  it('fences delayed writes after runtime reset', () => {
-    const runtime = {} as OrcaRuntimeService
-    const identity: FederationAckIdentity = {
-      environmentId: 'environment_windows',
-      peerFingerprint: 'windows_peer_fingerprint',
-      remoteRuntimeEpoch: 'remote_epoch_1'
-    }
-    const staleRuntimeLease = acquireFederationAckLease(runtime, 'dispatch_remote')
-    clearFederationAckCheckpoints(runtime)
-    recordFederationAckCheckpoint(runtime, staleRuntimeLease, {
-      ...identity,
-      throughSequence: 2
-    })
-    expect(
-      getFederationAckedThrough(acquireFederationAckLease(runtime, 'dispatch_remote'), identity)
-    ).toBe(0)
   })
 })

@@ -51,8 +51,6 @@ export class OrchestrationPeerCapabilityCache {
     expectedRuntimeEpoch: string | null
     capability: RuntimeCapability
     probe: () => Promise<RuntimeStatus>
-    /** Require a status probe even when the expected epoch has a cached answer. */
-    forceProbe?: boolean
   }): Promise<PeerCapabilityDecision> {
     return this.resolveAttempt(args, 1)
   }
@@ -63,16 +61,14 @@ export class OrchestrationPeerCapabilityCache {
       expectedRuntimeEpoch: string | null
       capability: RuntimeCapability
       probe: () => Promise<RuntimeStatus>
-      forceProbe?: boolean
     },
     staleRetriesRemaining: number
   ): Promise<PeerCapabilityDecision> {
     const generation = this.touchPeer(args.peerFingerprint)
     const knownEpoch = this.latestEpochs.get(args.peerFingerprint) ?? args.expectedRuntimeEpoch
-    const cached =
-      !args.forceProbe && knownEpoch
-        ? this.cached(args.peerFingerprint, knownEpoch, args.capability)
-        : null
+    const cached = knownEpoch
+      ? this.cached(args.peerFingerprint, knownEpoch, args.capability)
+      : null
     if (cached) {
       return cached
     }
@@ -115,6 +111,24 @@ export class OrchestrationPeerCapabilityCache {
     })
     this.store(args.peerFingerprint, status.runtimeId, args.capability, supported)
     return { runtimeEpoch: status.runtimeId, supported, cached: false }
+  }
+
+  /**
+   * What the peer's own answers proved, or null when nothing has. Deliberately ignores the
+   * advertised capability list: shipped hosts serve federation methods they never advertise, so
+   * only a real `method_not_found` may downgrade one.
+   */
+  knownSupport(
+    peerFingerprint: string,
+    expectedRuntimeEpoch: string | null,
+    capability: RuntimeCapability
+  ): PeerCapabilityDecision | null {
+    const epoch = this.latestEpochs.get(peerFingerprint) ?? expectedRuntimeEpoch
+    const state = epoch ? this.states.get(this.key(peerFingerprint, epoch))?.get(capability) : null
+    if (!state || (!state.supported && (state.negativeExpiresAt ?? 0) <= this.now())) {
+      return null
+    }
+    return { runtimeEpoch: state.runtimeEpoch, supported: state.supported, cached: true }
   }
 
   remember(

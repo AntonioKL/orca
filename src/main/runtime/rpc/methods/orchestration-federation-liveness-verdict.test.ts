@@ -248,7 +248,8 @@ describe('federation host liveness verdicts', () => {
         archive: { source: 'terminal', status: 'empty' }
       })
       expect(host.hostDb.getWorkerTerminalArchive(DISPATCH_ID)).toBeDefined()
-      expect(closeTerminal).not.toHaveBeenCalled()
+      // The exited worker still owns a terminal record and tab; release must close it.
+      expect(closeTerminal).toHaveBeenCalledOnce()
     } finally {
       host.hostDb.close()
     }

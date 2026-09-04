@@ -94,6 +94,8 @@ describe('worker-read plain formatting', () => {
       )
     ).toBe(
       'Source: transcript (provider=codex)\n' +
+        'Worker: ready\n' +
+        'Archived: false\n' +
         'Source exact: true\n' +
         'Content complete: false\n' +
         'Clipping: message_limit_or_scan_window\n' +
@@ -126,6 +128,8 @@ describe('worker-read plain formatting', () => {
       )
     ).toBe(
       'Source: terminal\n' +
+        'Worker: ready\n' +
+        'Archived: false\n' +
         'Source exact: false\n' +
         'Fallback reason: session_not_reported\n' +
         'Content complete: false\n' +
@@ -159,11 +163,36 @@ describe('worker-read plain formatting', () => {
       )
     ).toBe(
       'Source: transcript (provider=codex)\n' +
+        'Worker: ready\n' +
+        'Archived: false\n' +
         'Source exact: true\n' +
         'Content complete: true\n' +
         'Continuation cursor (opaque; pass unchanged to --cursor): owr1_empty\n\n' +
         'No transcript messages returned. This exact transcript read did not request terminal evidence.'
     )
+  })
+  it('distinguishes a released archive read from a live one', () => {
+    const output = formatWorkerRead({
+      dispatchId: 'dispatch_1',
+      status: { worker: 'succeeded', terminal: 'released', liveness: 'unverifiable' },
+      source: 'terminal',
+      sourceIdentity: 'private-source-identity',
+      terminal: {
+        handle: 'term_worker',
+        status: 'exited',
+        tail: ['archived tail'],
+        truncated: false,
+        nextCursor: null
+      },
+      cursor: null,
+      fallbackReason: null,
+      warnings: [],
+      archived: true
+    } as unknown as OrchestrationWorkerReadResult)
+
+    expect(output).toContain('Archived: true')
+    expect(output).toContain('Liveness: unverifiable')
+    expect(output).toContain('Worker: succeeded')
   })
 })
 

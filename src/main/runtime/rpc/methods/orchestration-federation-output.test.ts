@@ -8,7 +8,6 @@ import {
   ORCHESTRATION_CONTRACT_VERSION,
   ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY,
   ORCHESTRATION_FEDERATION_RELEASE_ARCHIVE_RUNTIME_CAPABILITY,
-  ORCHESTRATION_FEDERATION_RELEASE_RUNTIME_CAPABILITY,
   ORCHESTRATION_FEDERATION_STRUCTURED_READ_RUNTIME_CAPABILITY
 } from '../../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../../orca-runtime'
@@ -78,7 +77,7 @@ describe('orchestration federated worker output', () => {
                       [
                         ORCHESTRATION_FEDERATION_STRUCTURED_READ_RUNTIME_CAPABILITY,
                         ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY,
-                        ORCHESTRATION_FEDERATION_RELEASE_RUNTIME_CAPABILITY
+                        ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY
                       ].includes(capability as never)) ||
                     ((!workerAdvertisesNewCapabilities || !workerAdvertisesDurableRelease) &&
                       capability === ORCHESTRATION_FEDERATION_RELEASE_ARCHIVE_RUNTIME_CAPABILITY)
@@ -89,6 +88,17 @@ describe('orchestration federated worker output', () => {
           }
         }
         if (method === 'orchestration.federationReadOutput' && !workerSupportsStructuredRead) {
+          return {
+            id: `remote_${method}`,
+            ok: false,
+            error: { code: 'method_not_found', message: `Unknown method: ${method}` }
+          }
+        }
+        if (
+          method === 'orchestration.federationFleetSnapshot' &&
+          !workerAdvertisesNewCapabilities
+        ) {
+          // A host old enough to lack the capability lacks the method too.
           return {
             id: `remote_${method}`,
             ok: false,
@@ -687,6 +697,9 @@ describe('orchestration federated worker output', () => {
 
   it('keeps reads, fleet snapshots, and release on legacy fallbacks for an old peer', async () => {
     workerAdvertisesNewCapabilities = false
+    // A shipped host that does not advertise structured read still has to be asked; only its
+    // own method_not_found may downgrade the read to a terminal scrape.
+    workerSupportsStructuredRead = false
     const dispatchId = await startRemoteWorker()
     remoteCalls = []
     const read = await homeDispatcher.dispatch({
@@ -722,8 +735,8 @@ describe('orchestration federated worker output', () => {
       ok: true,
       result: { state: 'retained', reason: 'federation_unsupported' }
     })
-    expect(remoteCalls).not.toContain('orchestration.federationReadOutput')
-    expect(remoteCalls).not.toContain('orchestration.federationFleetSnapshot')
+    expect(remoteCalls).toContain('orchestration.federationReadOutput')
+    expect(remoteCalls).toContain('orchestration.federationFleetSnapshot')
     expect(remoteCalls).not.toContain('orchestration.federationRelease')
   })
 
@@ -761,7 +774,8 @@ describe('orchestration federated worker output', () => {
       method: 'orchestration.workerRead',
       params: { dispatch: dispatchId }
     })
-    expect(remoteCalls).not.toContain('orchestration.federationReadOutput')
+    // The unadvertised capability never blocks the call; only method_not_found would.
+    expect(remoteCalls).toContain('orchestration.federationReadOutput')
 
     const oldEpoch = homeDb.getFederatedDispatch(dispatchId)?.remote_runtime_epoch
     expect(oldEpoch).toBe(workerRuntime.getRuntimeId())
@@ -789,6 +803,8 @@ describe('orchestration federated worker output', () => {
       method: 'orchestration.workerList',
       params: { includeRemote: true }
     })
+    // Read and fleet negotiate through the methods themselves, so neither spends a probe.
+    expect(remoteCalls.filter((method) => method === 'status.get')).toHaveLength(0)
     const release = await homeDispatcher.dispatch({
       id: 'rpc_restarted_peer_release',
       authToken: 'coordinator-token',
@@ -801,9 +817,7 @@ describe('orchestration federated worker output', () => {
     expect(read).toMatchObject({ ok: true, result: { source: 'terminal' } })
     expect(fleet).toMatchObject({ ok: true })
     expect(release).toMatchObject({ ok: true, result: { state: 'released' } })
-    // One forced probe after the restart seeds all capability decisions for the
-    // new epoch; read, fleet, and release reuse that result.
-    expect(remoteCalls.filter((method) => method === 'status.get')).toHaveLength(1)
+    // Only release still probes: its capability asserts a durable archive, not method existence.
     expect(remoteCalls).toContain('orchestration.federationReadOutput')
     expect(remoteCalls).toContain('orchestration.federationFleetSnapshot')
     expect(remoteCalls).toContain('orchestration.federationRelease')
