@@ -23,6 +23,10 @@ export class RuntimeLegacyWorkerTerminalRecoveryPersistence {
     private readonly notifyFenceChanged?: (paneKey: string, blocked: boolean) => void
   ) {}
 
+  /** Panes announced as fenced before any sleeping record existed; the only place a lift for one
+   *  can come from, because `liftRetiredFences` can only see panes that already have a record. */
+  private readonly announcedBlockedPaneKeys = new Set<string>()
+
   prepare(): LegacyWorkerTerminalRecoveryPlan {
     const plan = this.getPlan()
     if (!plan) {
@@ -45,6 +49,12 @@ export class RuntimeLegacyWorkerTerminalRecoveryPersistence {
     const changedHostIds = new Set<ExecutionHostId>()
     const fenceChanges: [string, boolean][] = []
     for (const blocked of plan.blockedPanes) {
+      // A worker can settle while its tab is still open, so there is no sleeping record to stamp
+      // yet. Tell the live renderer anyway: it mints the record on close and must fence it there.
+      if (!this.announcedBlockedPaneKeys.has(blocked.paneKey)) {
+        this.announcedBlockedPaneKeys.add(blocked.paneKey)
+        fenceChanges.push([blocked.paneKey, true])
+      }
       let hostIds: ExecutionHostId[]
       try {
         const hostId = this.getHostId(blocked.worktreeId)
@@ -82,14 +92,10 @@ export class RuntimeLegacyWorkerTerminalRecoveryPersistence {
           [blocked.paneKey]: { ...record, automaticResumeBlockedBy: 'legacy-orchestration-worker' }
         }
         changedHostIds.add(hostId)
-        fenceChanges.push([blocked.paneKey, true])
       }
     }
     this.liftRetiredFences(store, plan, sessions, changedHostIds, fenceChanges)
     const changed = [...sessions].filter(([hostId]) => changedHostIds.has(hostId))
-    if (changed.length === 0) {
-      return plan
-    }
     try {
       for (const [hostId, state] of changed) {
         store.setWorkspaceSession(state.next, hostId)
@@ -115,6 +121,12 @@ export class RuntimeLegacyWorkerTerminalRecoveryPersistence {
     fenceChanges: [string, boolean][]
   ): void {
     const blockedPaneKeys = new Set(plan.blockedPanes.map((blocked) => blocked.paneKey))
+    for (const paneKey of this.announcedBlockedPaneKeys) {
+      if (!blockedPaneKeys.has(paneKey)) {
+        this.announcedBlockedPaneKeys.delete(paneKey)
+        fenceChanges.push([paneKey, false])
+      }
+    }
     for (const hostId of store.getWorkspaceSessionHostIds?.() ?? [LOCAL_EXECUTION_HOST_ID]) {
       const staged = sessions.get(hostId)
       const session = staged?.next ?? store.getWorkspaceSession?.(hostId)

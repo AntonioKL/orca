@@ -36,7 +36,11 @@ describe('settled worker automatic-resume fence persistence', () => {
 
   afterEach(() => db?.close())
 
-  function harness(onFenceChanged?: (paneKey: string, blocked: boolean) => void): {
+  function harness(
+    onFenceChanged?: (paneKey: string, blocked: boolean) => void,
+    /** False models a worker that settles while its tab is still open: no record to stamp yet. */
+    withSleepingRecord = true
+  ): {
     db: OrchestrationDb
     taskId: string
     dispatchId: string
@@ -45,7 +49,9 @@ describe('settled worker automatic-resume fence persistence', () => {
   } {
     const orchestrationDb = new OrchestrationDb(':memory:')
     db = orchestrationDb
-    let session = sessionWithSleepingWorker()
+    let session = withSleepingRecord
+      ? sessionWithSleepingWorker()
+      : (getDefaultWorkspaceSession() as WorkspaceSessionState)
     const store = {
       getWorkspaceSession: () => session,
       setWorkspaceSession: (next: WorkspaceSessionState) => {
@@ -100,6 +106,25 @@ describe('settled worker automatic-resume fence persistence', () => {
     h.persistence.prepare()
 
     expect(fenceChanges).toEqual([[PANE_KEY, true]])
+  })
+
+  it('announces the fence for a pane that has no sleeping record to stamp yet', () => {
+    const fenceChanges: [string, boolean][] = []
+    const h = harness((paneKey, blocked) => fenceChanges.push([paneKey, blocked]), false)
+    settle(h.db, h.taskId, h.dispatchId)
+
+    h.persistence.prepare()
+    expect(fenceChanges).toEqual([[PANE_KEY, true]])
+
+    const requested = h.db.requestWorkerTerminalRelease(h.dispatchId)
+    h.db.settleWorkerTerminalRelease((requested as { resource: { id: string } }).resource.id)
+    h.persistence.prepare()
+
+    // A fence the plan no longer claims must be lifted even with no record to read it from.
+    expect(fenceChanges).toEqual([
+      [PANE_KEY, true],
+      [PANE_KEY, false]
+    ])
   })
 
   // The STA-4577 repro: worker_done, no release, restart, open the worktree — the pane still

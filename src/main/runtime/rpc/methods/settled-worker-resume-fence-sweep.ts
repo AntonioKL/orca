@@ -24,7 +24,10 @@ const FENCE_SWEEPING_METHOD_NAMES = new Set([
   'orchestration.workerRelease',
   'orchestration.workerRetain',
   'orchestration.workerStop',
-  'orchestration.workerAbandon'
+  'orchestration.workerAbandon',
+  // Reusing a settled worker's pane for a new Dispatch drops the old row from the plan; without
+  // this the stale fence stays on the pane it just relaunched into.
+  'orchestration.workerStart'
 ])
 
 export function sweepingSettledWorkerResumeFences(method: RpcMethod): RpcMethod {
