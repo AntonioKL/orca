@@ -218,11 +218,7 @@ export type RuntimeTerminalSend = {
   prompt?: RuntimeTerminalPromptDelivery
 }
 
-export type RuntimeTerminalPromptStage =
-  | 'input_accepted'
-  | 'queued_pending_turn'
-  | 'submission_observed'
-  | 'turn_started'
+export type RuntimeTerminalPromptStage = 'input_accepted' | 'turn_started'
 
 export type RuntimeTerminalPromptDelivery = {
   requestId: string

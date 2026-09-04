@@ -3,6 +3,7 @@ import { TERMINAL_PROMPT_DELIVERY_RUNTIME_CAPABILITY } from '../../shared/protoc
 import type { CommandHandler } from '../dispatch'
 import { formatTerminalSend, printResult } from '../format'
 import { getOptionalPositiveIntegerFlag, getOptionalStringFlag } from '../flags'
+import { readRetryRequestFlag } from '../retry-request-flag'
 import { RuntimeClientError } from '../runtime-client'
 import { attachUnverifiedTerminalPromptRecovery } from '../runtime/terminal-prompt-mutation-recovery'
 import { getTerminalHandle } from '../selectors'
@@ -12,7 +13,7 @@ export const terminalSendHandler: CommandHandler = async ({ flags, client, cwd, 
   const enter = flags.get('enter') === true
   const interrupt = flags.get('interrupt') === true
   const promptCandidate = !!text && enter && !interrupt
-  const retryRequest = getOptionalStringFlag(flags, 'retry-request')
+  const retryRequest = readRetryRequestFlag(flags)
   const waitSubmitSeconds = getOptionalPositiveIntegerFlag(flags, 'wait-submit')
   if ((retryRequest || waitSubmitSeconds) && !promptCandidate) {
     throw new RuntimeClientError(

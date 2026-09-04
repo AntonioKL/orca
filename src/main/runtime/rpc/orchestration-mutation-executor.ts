@@ -12,7 +12,9 @@ import {
   getPendingWorkerStartRecovery,
   hashCanonical,
   isResumablePendingWorkerDone,
+  markReplayedPromptIncarnationReplaced,
   readPromptBasePayloadHash,
+  readPromptBindingPayloadHash,
   replayStableCallerParams,
   shouldObserveCompletedMutation
 } from './orchestration-mutation-receipt'
@@ -77,6 +79,15 @@ export class OrchestrationMutationExecutor {
         `Mutation request ${requestId} was already used with different input.`
       )
     }
+    const recordedPromptBindingHash = existingPromptReceipt
+      ? readPromptBindingPayloadHash(existingPromptReceipt.payload_hash)
+      : null
+    // The recorded observation is only true while the prompt's terminal incarnation survives, so
+    // every replay re-checks the binding rather than only the --wait-submit ones.
+    const promptBindingChanged =
+      recordedPromptBindingHash !== null &&
+      recordedPromptBindingHash !==
+        this.readTerminalPromptBindingHash((params as { terminal: string }).terminal)
     const payloadHash = existingPromptReceipt
       ? existingPromptReceipt.payload_hash
       : isPromptMutation
@@ -132,6 +143,13 @@ export class OrchestrationMutationExecutor {
         return attachMutationReceipt(await active.promise, requestId, true)
       }
       const receipt = JSON.parse(begun.row.receipt ?? 'null')
+      if (promptBindingChanged) {
+        return attachMutationReceipt(
+          markReplayedPromptIncarnationReplaced(receipt),
+          requestId,
+          true
+        )
+      }
       if (!shouldObserveCompletedMutation(request.method, params, receipt)) {
         return attachMutationReceipt(receipt, requestId, true)
       }
@@ -233,6 +251,15 @@ export class OrchestrationMutationExecutor {
       throw error
     } finally {
       this.inFlight.delete(key)
+    }
+  }
+
+  // A replayed prompt may name a terminal that is gone; an unreadable binding is a changed one.
+  private readTerminalPromptBindingHash(handle: string): string | null {
+    try {
+      return hashCanonical(this.runtime.getTerminalPromptRequestBinding(handle))
+    } catch {
+      return null
     }
   }
 

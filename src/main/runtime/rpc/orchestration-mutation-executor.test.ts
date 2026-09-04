@@ -37,12 +37,20 @@ function createHarness() {
   const db = new OrchestrationDb(':memory:')
   const runtime = new OrcaRuntimeService()
   runtime.setOrchestrationDb(db)
-  vi.spyOn(runtime, 'getTerminalPromptRequestBinding').mockReturnValue({
+  const binding = vi.spyOn(runtime, 'getTerminalPromptRequestBinding').mockReturnValue({
     ptyId: 'pty-prompt',
     processIncarnation: 'incarnation-1',
     generation: 1
   })
-  return { db, executor: new OrchestrationMutationExecutor(runtime) }
+  // Every handle for this PTY resolves to one pane, so a re-minted handle is the same terminal.
+  vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue('window-1:leaf-prompt')
+  return {
+    db,
+    executor: new OrchestrationMutationExecutor(runtime),
+    bindTerminal: (next: { generation: number; processIncarnation: string }) => {
+      binding.mockReturnValue({ ptyId: 'pty-prompt', ...next })
+    }
+  }
 }
 
 describe('terminal prompt mutation receipt retry boundary', () => {
@@ -109,19 +117,60 @@ describe('terminal prompt mutation receipt retry boundary', () => {
     const invoke = vi
       .fn()
       .mockResolvedValueOnce({
-        send: { prompt: { stages: ['input_accepted', 'queued_pending_turn'] } }
+        send: { prompt: { stages: ['input_accepted'] } }
       })
       .mockRejectedValueOnce(new Error('terminal was parked'))
 
     await expect(harness.executor.run(request, params, invoke)).resolves.toMatchObject({
-      send: { prompt: { stages: ['input_accepted', 'queued_pending_turn'] } },
+      send: { prompt: { stages: ['input_accepted'] } },
       mutation: { replayed: false }
     })
     await expect(harness.executor.run(request, params, invoke)).resolves.toMatchObject({
-      send: { prompt: { stages: ['input_accepted', 'queued_pending_turn'] } },
+      send: { prompt: { stages: ['input_accepted'] } },
       mutation: { replayed: true }
     })
     expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports a replay as incarnation_replaced once the PTY generation advances', async () => {
+    const harness = createHarness()
+    databases.push(harness.db)
+    const requestId = 'stale-binding-replay'
+    const invoke = vi.fn().mockResolvedValue({
+      send: { prompt: { stages: ['input_accepted', 'turn_started'], observation: 'supported' } }
+    })
+
+    await expect(
+      harness.executor.run(promptRequest(requestId), promptParams, invoke)
+    ).resolves.toMatchObject({ send: { prompt: { observation: 'supported' } } })
+
+    harness.bindTerminal({ generation: 2, processIncarnation: 'incarnation-2' })
+    await expect(
+      harness.executor.run(promptRequest(requestId), promptParams, invoke)
+    ).resolves.toMatchObject({
+      send: { prompt: { observation: 'incarnation_replaced' } },
+      mutation: { replayed: true }
+    })
+    expect(invoke).toHaveBeenCalledOnce()
+  })
+
+  it('replays a byte-identical prompt after the handle is re-minted', async () => {
+    const harness = createHarness()
+    databases.push(harness.db)
+    const requestId = 'rebound-handle-replay'
+    const invoke = vi.fn().mockResolvedValue({
+      send: { prompt: { stages: ['input_accepted', 'turn_started'], observation: 'supported' } }
+    })
+
+    await harness.executor.run(promptRequest(requestId), promptParams, invoke)
+    const reminted = { ...promptParams, terminal: 'term_00000000-0000-4000-8000-000000000000' }
+    const request = { ...promptRequest(requestId), params: reminted }
+
+    await expect(harness.executor.run(request, reminted, invoke)).resolves.toMatchObject({
+      send: { prompt: { observation: 'supported' } },
+      mutation: { replayed: true }
+    })
+    expect(invoke).toHaveBeenCalledOnce()
   })
 
   it('keeps an uncheckpointed pending worker_done fenced after restart', async () => {

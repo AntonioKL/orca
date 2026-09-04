@@ -55,17 +55,14 @@ describe('agent prompt receipt correlation', () => {
       Date.now()
     )
 
+    const writesAfterSubmission = writes.length
     await expect(
       runtime.observeTerminalAgentPrompt(handle, second.prompt!, 0)
-    ).resolves.toMatchObject({
-      stages: ['input_accepted', 'submission_observed', 'turn_started']
-    })
+    ).resolves.toMatchObject({ stages: ['input_accepted', 'turn_started'] })
     await expect(
       runtime.observeTerminalAgentPrompt(handle, first.prompt!, 0)
-    ).resolves.toMatchObject({
-      stages: ['input_accepted', 'submission_observed', 'turn_started']
-    })
-    const writesAfterSubmission = writes.length
+    ).resolves.toMatchObject({ stages: ['input_accepted', 'turn_started'] })
+    // Observing a queued receipt must never write to the PTY again.
     expect(writes).toHaveLength(writesAfterSubmission)
   })
 })

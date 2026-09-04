@@ -70,7 +70,7 @@ describe('formatTerminalSend', () => {
           bytesWritten: 8,
           prompt: {
             requestId: 'prompt-healthy',
-            stages: ['input_accepted', 'submission_observed', 'turn_started'],
+            stages: ['input_accepted', 'turn_started'],
             provider: 'codex',
             observation: 'supported',
             processIncarnation: 'inc-1',
@@ -81,7 +81,7 @@ describe('formatTerminalSend', () => {
       })
     ).toBe(
       [
-        'Prompt prompt-healthy on term_worker: input_accepted -> submission_observed -> turn_started.',
+        'Prompt prompt-healthy on term_worker: input_accepted -> turn_started.',
         'provider: codex',
         'delivery observation: supported'
       ].join('\n')
@@ -122,5 +122,27 @@ describe('formatTerminalSend', () => {
     expect(output).toContain(`warning: delivery was not observed`)
     expect(output).toContain(warning)
     expect(output).toContain(nextStep)
+  })
+
+  it('names the next command when a supported send never reached turn_started', () => {
+    const output = formatTerminalSend({
+      send: {
+        handle: 'term_worker',
+        accepted: true,
+        bytesWritten: 8,
+        prompt: {
+          requestId: 'prompt-swallowed',
+          stages: ['input_accepted'],
+          provider: 'claude',
+          observation: 'supported',
+          processIncarnation: 'inc-1',
+          generation: 1,
+          baselineWorkingSequence: 0
+        }
+      }
+    })
+
+    expect(output).toContain('no turn start was observed')
+    expect(output).toContain('--retry-request prompt-swallowed --wait-submit <seconds>')
   })
 })

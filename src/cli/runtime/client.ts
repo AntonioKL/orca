@@ -18,7 +18,7 @@ import {
   attachDurableMutationRecovery,
   attachLegacyTerminalPromptRecovery,
   attachUnverifiedTerminalPromptRecovery,
-  isFailureFromPreflightRuntime
+  didAnotherRuntimeHandleTerminalPrompt
 } from './terminal-prompt-mutation-recovery'
 import { markEnvironmentUsed } from './environments'
 import { resolveRemotePairing } from './runtime-remote-pairing'
@@ -104,14 +104,18 @@ export class RuntimeClient {
     const originalCommand = durableMutation
       ? buildOrchestrationRecoveryCommand(method, params, this.cliExecutable, this.originalArgs)
       : undefined
-    const recover = (error: unknown) => {
+    const recover = (error: unknown, targetRuntimeId: string | null) => {
       if (legacyTerminalPrompt) {
         return attachLegacyTerminalPromptRecovery(error)
       }
       if (
         terminalPromptMutation &&
         options?.terminalPromptPreflight &&
-        !isFailureFromPreflightRuntime(error, options.terminalPromptPreflight.runtimeId)
+        didAnotherRuntimeHandleTerminalPrompt(
+          error,
+          options.terminalPromptPreflight.runtimeId,
+          targetRuntimeId
+        )
       ) {
         return attachUnverifiedTerminalPromptRecovery(error)
       }
@@ -145,10 +149,10 @@ export class RuntimeClient {
           envelope
         })
       } catch (error) {
-        throw recover(error)
+        throw recover(error, null)
       }
       if (response.ok === false) {
-        throw recover(new RuntimeRpcFailureError(response))
+        throw recover(new RuntimeRpcFailureError(response), null)
       }
       if (this.environmentSelector) {
         markEnvironmentUsed(this.userDataPath, this.environmentSelector, {
@@ -162,10 +166,10 @@ export class RuntimeClient {
     try {
       response = await sendRequest<TResult>(metadata, method, params, effectiveTimeoutMs, envelope)
     } catch (error) {
-      throw recover(error)
+      throw recover(error, metadata.runtimeId ?? null)
     }
     if (response.ok === false) {
-      throw recover(new RuntimeRpcFailureError(response))
+      throw recover(new RuntimeRpcFailureError(response), metadata.runtimeId ?? null)
     }
     return response
   }

@@ -111,10 +111,7 @@ export class OrcaRuntimeWithWriteTerminalAgentPrompt extends OrcaRuntimeWithReso
         : null
     const inputAccepted: RuntimeTerminalPromptDelivery = {
       requestId: options.requestId,
-      stages:
-        baseline.status === 'working'
-          ? ['input_accepted', 'queued_pending_turn']
-          : ['input_accepted'],
+      stages: ['input_accepted'],
       provider: settlementAgent ?? 'unsupported',
       observation: settlementAgent ? 'supported' : 'unsupported',
       processIncarnation: binding.processIncarnation,
@@ -165,7 +162,7 @@ export class OrcaRuntimeWithWriteTerminalAgentPrompt extends OrcaRuntimeWithReso
         submits: 1,
         prompt: {
           ...inputAccepted,
-          stages: ['input_accepted', 'submission_observed', 'turn_started']
+          stages: ['input_accepted', 'turn_started']
         }
       }
     } catch (error) {
