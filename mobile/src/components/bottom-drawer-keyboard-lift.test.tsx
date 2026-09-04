@@ -27,7 +27,12 @@ describe('bottom drawer keyboard lift', () => {
     renderer = null
   })
 
-  type ProbeProps = { ridesKeyboard: boolean; height: number; duration: number }
+  type ProbeProps = {
+    ridesKeyboard: boolean
+    height: number
+    duration: number
+    setInset?: (inset: number) => void
+  }
 
   // Why one stable component type: a fresh inline component per update remounts the tree and
   // resets the hook's refs, which would hide the very seeding behaviour under test.
@@ -38,7 +43,7 @@ describe('bottom drawer keyboard lift', () => {
       fillAvailable: false,
       keyboard: { height: props.height, duration: props.duration },
       keyboardOffset: offset as { value: number },
-      setKeyboardInset
+      setKeyboardInset: props.setInset ?? setKeyboardInset
     })
     return null
   }
@@ -79,6 +84,20 @@ describe('bottom drawer keyboard lift', () => {
     render({ ridesKeyboard: true, height: 340, duration: 200 })
 
     expect(offset.value).toEqual({ animated: 306, duration: 200 })
+  })
+
+  // Why: the hook keeps its targets in a ref so a re-created setter cannot re-run the lift
+  // effects. That ref now syncs in an effect, which must land before the lift effects of the
+  // same commit or the drawer would report its inset to the previous render's owner.
+  it('reports the inset to the setter from the same render as the height change', () => {
+    const first = vi.fn()
+    const second = vi.fn()
+    render({ ridesKeyboard: true, height: 0, duration: 0, setInset: first })
+
+    render({ ridesKeyboard: true, height: 300, duration: 250, setInset: second })
+
+    expect(second).toHaveBeenLastCalledWith(266)
+    expect(first).not.toHaveBeenCalledWith(266)
   })
 
   it('drops the lift for a sheet pinned under a picker', () => {

@@ -23,7 +23,12 @@ export function useBottomDrawerKeyboardLift(args: {
   const { ridesKeyboard, bottomInset, fillAvailable, keyboard } = args
   const duration = keyboard.duration || DEFAULT_KEYBOARD_DURATION_MS
   const targetsRef = useRef(args)
-  targetsRef.current = args
+  // Why an effect rather than a render write: React can discard a render, so a mutation there
+  // leaks from UI that never commits. Declared first, so the lift effects below read this
+  // commit's offset and setter.
+  useEffect(() => {
+    targetsRef.current = args
+  })
   useEffect(() => {
     if (!ridesKeyboard) {
       targetsRef.current.keyboardOffset.value = 0
