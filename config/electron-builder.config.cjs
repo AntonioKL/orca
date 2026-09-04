@@ -205,6 +205,12 @@ module.exports = {
     // Why: out/electron-dev caches `pnpm dev`'s per-branch Electron.app copies (~270MB each).
     // CI never creates it, but packaging on a machine that has run dev would pack them all.
     '!out/electron-dev{,/**/*}',
+    // Why: the hosted mobile-web bundle ships through mobileWebExtraResource to
+    // Resources/mobile-web, which is the only copy resolveMobileWebPackageRoot reads when
+    // packaged. Packing it here duplicated it, and -export is the pre-hardening Metro
+    // artifact that still carries the eval/new Function forms the packager strips.
+    '!out/mobile-web-rnw{,/**/*}',
+    '!out/mobile-web-rnw-export{,/**/*}',
     '!electron.vite.config.{js,ts,mjs,cjs}',
     '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,CHANGELOG.md,README.md}',
     '!{.env,.env.*,.npmrc,pnpm-lock.yaml}',
