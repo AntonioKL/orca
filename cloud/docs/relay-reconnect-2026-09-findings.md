@@ -26,7 +26,7 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
 | PR #18606 lock removal (root cause) | **Merged** 09:2xZ as 7b108abf71 after review, fix, re-verify; CI green | https://github.com/stablyai/orca/pull/18606 |
 | Image publish for 7b108abf71 | **Done** 08:36:49Z run 33854111305: `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` | |
-| Director deploy on 519f4914 | Dispatched ~08:40Z (blue/green; prior revision 00565-fes on 85bf6799 kept as rollback) | `cloud-deploy-relay-production-director.yml` |
+| Director deploy on 519f4914 | Dispatched 08:37:45Z run 33854355791 (blue/green; prior revision 00565-fes on 85bf6799 kept as rollback). Note: `predecessor-image-digest` is a required input even with bootstrap=false; pass the serving digest. | `cloud-deploy-relay-production-director.yml` |
 | c7 on new image, 2 h in | 817 controls, **0 container die** since restore (was ~1 per 15 min on old image); `sqlLatencyMsMax` still 1.0 s = lock wait unchanged, which #18606 targets | |
 | Terraform alert `relay_postgres_retry_exhausted` at `> 0` | Firing continuously since #18521; recalibration not done (own change) | `cloud/infra/terraform/relay-observability.tf:447,469` |
 
@@ -339,7 +339,8 @@ image.
    on main). Resolve the digest by tag, never by parsing the log (it mixes relay and fence-broker digests):
    `gcloud artifacts docker images describe us-central1-docker.pkg.dev/onorca-cloud/orca-cloud/relay:sha-<merge-sha> --format='value(image_summary.digest)'`.
 2. Director: `gh workflow run cloud-deploy-relay-production-director.yml --ref main -f image-digest=<new>
-   -f regional-placement-mode=preserve -f prune-incompatible-revisions=false -f expected-rehome-generation=12`
+   -f regional-placement-mode=preserve -f prune-incompatible-revisions=false -f expected-rehome-generation=12
+   -f bootstrap-runtime-identity=false -f predecessor-image-digest=<currently serving digest>`
    (no monitor evidence needed; requires rehome disabled at gen 12, which it is). Last run 33826514754 used
    the same shape. Watch director `orca_relay_postgres_transaction_retry` per minute before/after.
 3. Cells: same-cap `verify` c7 with target=<new>, rollback=85bf6799; fresh dry-run; `canary-apply` c7;
