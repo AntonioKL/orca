@@ -14,14 +14,15 @@ type RemoteAttachment = NonNullable<
   ReturnType<OrchestrationDb['findActiveRemoteAttachmentForPane']>
 >
 
-// Why: a Dispatch mailbox has no consumer-generation counter of its own, and every identity that
-// could stand in for one (the pane's PTY incarnation, the runtime id, dispatch_contexts
-// .process_incarnation) is either read server-side from the handle — identical for both callers —
-// or is never refreshed when a worker terminal restarts, which would fence the live worker out of
-// its own mailbox. Fencing this mailbox needs a per-Dispatch generation bumped on attach, with the
-// outstanding Delivery fenced at the same point (see runs/run-binding.ts). Until then the single
-// constant keeps every consumer on one generation instead of wedging a restarted one.
-const DISPATCH_MAILBOX_CONSUMER_GENERATION = 0
+const DISPATCH_FENCED_MESSAGE =
+  'This Dispatch was re-attached to another worker; this process no longer owns its mailbox.'
+
+/** Delivery fencing is generic; a worker needs to hear that it lost the Dispatch, not the Run. */
+function asDispatchFence(error: unknown): unknown {
+  return error instanceof OrchestrationError && error.code === 'consumer_fenced'
+    ? new OrchestrationError('consumer_fenced', DISPATCH_FENCED_MESSAGE)
+    : error
+}
 
 export async function checkWorkerMailbox(args: {
   params: CheckParamsInput
@@ -46,14 +47,28 @@ export async function checkWorkerMailbox(args: {
     remoteAttachment
   } = args
   const workerMailbox = activeDispatch
-    ? { dispatchId: activeDispatch.id, runId: activeDispatch.run_id }
+    ? {
+        dispatchId: activeDispatch.id,
+        runId: activeDispatch.run_id,
+        generation: activeDispatch.consumer_generation
+      }
     : remoteAttachment
-      ? { dispatchId: remoteAttachment.dispatch_id, runId: undefined }
+      ? {
+          dispatchId: remoteAttachment.dispatch_id,
+          runId: undefined,
+          generation: remoteAttachment.consumer_generation
+        }
       : undefined
   if (!workerMailbox) {
     return undefined
   }
   const address = `dispatch:${workerMailbox.dispatchId}`
+  // Why: a federated worker host has no dispatch_contexts row, so its generation lives on the
+  // remote_dispatch_attachments row instead.
+  const readCurrentGeneration = (): number | undefined =>
+    activeDispatch
+      ? db.getDispatchContextById(workerMailbox.dispatchId)?.consumer_generation
+      : db.getRemoteDispatchAttachment(workerMailbox.dispatchId)?.consumer_generation
   const routeDirectSnapshot = async (
     runId: string,
     directHandle: string,
@@ -155,23 +170,33 @@ export async function checkWorkerMailbox(args: {
   }
   await revalidateWorkerMailbox()
   const deliveryRunId = workerMailbox.runId ?? ORCHESTRATION_LEGACY_RUN_ID
-  const acknowledged = params.ack
-    ? db.acknowledgeMailboxDelivery({
-        runId: deliveryRunId,
-        mailboxHandle: address,
-        consumerGeneration: DISPATCH_MAILBOX_CONSUMER_GENERATION,
-        deliveryId: params.ack
-      })
-    : undefined
+  let acknowledged
+  try {
+    acknowledged = params.ack
+      ? db.acknowledgeMailboxDelivery({
+          runId: deliveryRunId,
+          mailboxHandle: address,
+          consumerGeneration: workerMailbox.generation,
+          deliveryId: params.ack
+        })
+      : undefined
+  } catch (error) {
+    throw asDispatchFence(error)
+  }
   const showAll = params.all === true || (params.unread === false && params.peek !== true)
   const readPeek = () => db.getUnreadMessages(address, typeFilter)
-  const readDelivery = (wakeTypes?: MessageType[]) =>
-    db.getOrCreateMailboxDelivery({
-      runId: deliveryRunId,
-      mailboxHandle: address,
-      consumerGeneration: DISPATCH_MAILBOX_CONSUMER_GENERATION,
-      wakeTypes
-    })
+  const readDelivery = (wakeTypes?: MessageType[]) => {
+    try {
+      return db.getOrCreateMailboxDelivery({
+        runId: deliveryRunId,
+        mailboxHandle: address,
+        consumerGeneration: workerMailbox.generation,
+        wakeTypes
+      })
+    } catch (error) {
+      throw asDispatchFence(error)
+    }
+  }
   if (showAll) {
     const messages = db.getAllMessagesForHandle(address, 100, typeFilter)
     return {
@@ -225,6 +250,9 @@ export async function checkWorkerMailbox(args: {
     signal
   })
   await revalidateWorkerMailbox()
+  if (readCurrentGeneration() !== workerMailbox.generation) {
+    throw new OrchestrationError('consumer_fenced', DISPATCH_FENCED_MESSAGE)
+  }
   if (waitResult === 'timed_out' || waitResult === 'cancelled') {
     return {
       ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
