@@ -1,16 +1,17 @@
 ---
 name: orchestration
 description: >-
-  Coordinate supervised Orca workers with durable Runs, Tasks, Dispatches,
-  messages, questions, gates, and completion tracking. Use when the user asks
-  to supervise, monitor, wait for results, coordinate a DAG, or manage blocking
-  agent-to-agent questions. For full ownership handoffs or ordinary terminal,
-  worktree, and built-in-browser control, use `orca-cli`. Use Computer Use for
-  external browser windows, webviews, Orca app UI, or desktop UI outside Orca's
-  embedded browser only when the task requires OS/window-level control such as
-  focus, menus, dialogs, coordinates, or screenshots. Use `orca-cli` for Orca's
-  embedded pages and a page-automation tool such as Playwright or CDP for
-  external pages.
+  Coordinate supervised Orca workers: threaded messages, blocking ask/reply,
+  task dispatch, worker_done/escalation waits, task DAGs, decision gates, and
+  coordinator loops. Use `orca-cli` instead for full ownership handoffs — "hand
+  off", "handoff", "handover", "give this to another agent", "another worktree"
+  — unless the user asked to supervise, monitor, or coordinate a DAG, and for
+  terminal control, reading or waiting on terminals, and Orca's embedded
+  browser. Use Computer Use for external browser windows, webviews, Orca app
+  UI, or desktop UI outside Orca's embedded browser only when the task requires
+  OS/window-level control such as focus, menus, dialogs, coordinates, or
+  screenshots. Use `orca-cli` for Orca's embedded pages and a page-automation
+  tool such as Playwright or CDP for external pages.
 ---
 
 # Orca Orchestration

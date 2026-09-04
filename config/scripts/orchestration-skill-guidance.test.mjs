@@ -24,6 +24,24 @@ function squash(text) {
 }
 
 describe('orchestration skill routing', () => {
+  it('keeps the verbatim routing triggers a model matches the skill on', () => {
+    const description = squash(readKernel())
+
+    for (const trigger of [
+      'threaded messages',
+      'worker_done/escalation waits',
+      'decision gates',
+      '"hand off"',
+      '"handoff"',
+      '"handover"',
+      '"give this to another agent"',
+      '"another worktree"',
+      'reading or waiting on terminals'
+    ]) {
+      expect(description).toContain(trigger)
+    }
+  })
+
   it('keeps external browser routing at the OS/page boundary', () => {
     const description = squash(readKernel())
 
