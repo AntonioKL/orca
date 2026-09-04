@@ -349,6 +349,18 @@ describe('marker directory hygiene', () => {
     expect(isMacUpdateInstallInFlight()).toBe(true)
   })
 
+  it('trusts its own marker when the shutdown process probe is unavailable', () => {
+    getVersionMock.mockReturnValue('1.4.194')
+    markMacUpdateInstallInFlight('1.4.195')
+    getProcessStartTimesMock.mockReset().mockReturnValue(null)
+    getShipItLivenessMock.mockReturnValue('exited')
+    isProcessAliveMock.mockReturnValue(false)
+
+    expect(isMacUpdateInstallInFlight()).toBe(true)
+    expect(getProcessStartTimesMock).toHaveBeenCalledWith([])
+    expect(isProcessAliveMock).not.toHaveBeenCalled()
+  })
+
   it('does not yield a relaunch once the writer is gone and the installer is gone', () => {
     writeMarker()
     getShipItLivenessMock.mockReturnValue('exited')

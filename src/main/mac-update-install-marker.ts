@@ -76,6 +76,10 @@ export function markMacUpdateInstallInFlight(targetVersion: string): void {
 // lives under a different name, so it can never be the thing an older owner unlinks.
 let ownedMarkerPath: string | null = null
 
+function isOwnedMarker(bundlePath: string, marker: MacUpdateInstallMarker): boolean {
+  return getMacUpdateInstallMarkerPath(bundlePath, marker) === ownedMarkerPath
+}
+
 /**
  * Drop attempt files older than the age cap.
  *
@@ -152,16 +156,24 @@ export function isMacUpdateInstallInFlight(): boolean {
       return false
     }
     let shipItLiveness: 'live' | 'unverifiable' | 'exited' | undefined
-    const processStarts = getProcessStartTimes(markers.map((marker) => marker.requestedByPid))
+    const processStarts = getProcessStartTimes(
+      markers
+        .filter((marker) => !isOwnedMarker(bundlePath, marker))
+        .map((marker) => marker.requestedByPid)
+    )
     // Why inspect every attempt: a dead newer marker can otherwise mask an older writer that is
     // still in the pre-spawn window and must keep relaunches out of the bundle.
     return Boolean(
       selectInFlightMarker(markers, now, (marker) => {
-        const writerAlive = isRecordedProcessAlive(
-          marker.requestedByPid,
-          marker.requestedByStartedAtMs,
-          processStarts
-        )
+        // This process is authoritative for the exact marker it successfully published. Re-probing
+        // its own PID can time out during shutdown and misclassify a live pre-spawn handoff as dead.
+        const writerAlive =
+          isOwnedMarker(bundlePath, marker) ||
+          isRecordedProcessAlive(
+            marker.requestedByPid,
+            marker.requestedByStartedAtMs,
+            processStarts
+          )
         return isAttemptInFlight({
           marker,
           now,
