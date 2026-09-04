@@ -400,6 +400,16 @@ it. Two consecutive dry-runs (#7, #8) froze on exactly this: one, isolated, 2 s 
 recalibration (own PR, not done): `directorErrors` 0 -> 2 per 5 min, or exclude the monitor's own
 user-agent. Not changing it unasked; noting that at ~3 per hour the 15-min gate passes ~1 in 2 attempts.
 
+**Did the director deploy make cells crash more? (checked 09:45Z)** Cell `container die` per 30 min:
+06:00 9, 07:00 2, 07:30 9, **08:30 30** (director candidate 08:38, traffic 08:43–08:45; the 10-cell burst
+was 08:40:20, before the move), 09:00 11, 09:30 12. Per hour today 05:4 06:9 07:11 08:30 09:23 vs Sep 3
+same hours 2/7/8. So today is 2–3x worse than yesterday and was rising before the deploy; after the deploy
+it is ~11–12 per 30 min, in line with 06:00–07:30. Cloud SQL backends (~230 max) and new connections
+(~5k/30 min) are flat across the deploy. Latest crash (c21 09:39:11) is `Connection terminated due to
+connection timeout` with cause `Connection terminated unexpectedly` in `verifyCellAssignment` <-
+`beginProof`, the same unhandled path. Conclusion: no evidence the deploy worsened it; the old image's
+crash rate simply climbed all day. Director lock retries stayed ~10x lower after the deploy.
+
 ## Roll inputs (verified by the read-only `verify` run)
 
 - target-image-digest `sha256:519f4914217f08cabcdcd34825965db8473ec37c6591553a3af0d65dcdeeb183` (lock fix; supersedes 85bf6799 as target)
