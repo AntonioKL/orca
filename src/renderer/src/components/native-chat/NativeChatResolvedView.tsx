@@ -52,6 +52,8 @@ import { useNativeChatFileLinkClick } from './use-native-chat-file-link-click'
 import type { NativeChatResolvedViewProps } from './native-chat-view-types'
 import { useNativeChatFileLinkContext } from './use-native-chat-file-link-context'
 import { NativeChatOrchestrationPausedNotice } from './NativeChatOrchestrationPausedNotice'
+import { NativeChatMonitoringStatus } from './NativeChatMonitoringStatus'
+import { useNativeChatMonitoringStatus } from './use-native-chat-hook-status'
 
 /** Renders the bridge UI after NativeChatSessionGate resolves its agent session. */
 export function NativeChatResolvedView({
@@ -136,6 +138,7 @@ export function NativeChatResolvedView({
       ...(contextMenuActions ?? emptyNativeChatContextMenuActions)
     }
   })
+  const monitoring = useNativeChatMonitoringStatus(paneKey)
 
   // Optimistic "queued" sends (mobile parity): a composer send is echoed
   // immediately and pruned once its real user turn lands in the transcript, so
@@ -324,6 +327,7 @@ export function NativeChatResolvedView({
       ref={rootRef}
       data-native-chat-root="true"
       data-native-chat-working={isWorking ? 'true' : 'false'}
+      data-native-chat-monitoring={monitoring ? 'true' : 'false'}
       tabIndex={-1}
       onPointerDownCapture={(event) => {
         if (event.button === 2) {
@@ -358,6 +362,7 @@ export function NativeChatResolvedView({
       className="flex h-full min-h-0 w-full flex-col bg-background focus:outline-none"
     >
       <NativeChatOrchestrationPausedNotice dispatchStatus={orchestrationDispatchStatus} />
+      <NativeChatMonitoringStatus monitoring={monitoring} />
       <div className="flex min-h-0 flex-1 flex-col">
         {viewState.kind === 'loading' ? (
           <NativeChatEmptyState kind="loading" />

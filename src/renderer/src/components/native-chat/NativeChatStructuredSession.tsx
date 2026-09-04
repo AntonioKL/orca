@@ -23,6 +23,8 @@ import { translate } from '@/i18n/i18n'
 import { NativeChatOrchestrationPausedNotice } from './NativeChatOrchestrationPausedNotice'
 import { useNativeChatPasteBridge } from './use-native-chat-paste-bridge'
 import { useNativeChatImageRuntimeContext } from './native-chat-image-runtime-context'
+import { NativeChatMonitoringStatus } from './NativeChatMonitoringStatus'
+import { useNativeChatMonitoringStatus } from './use-native-chat-hook-status'
 
 function encodeQuestionAnswer(questionId: string, answer: string): string {
   return `${encodeURIComponent(questionId)}:${encodeURIComponent(answer)}`
@@ -49,6 +51,7 @@ export function NativeChatStructuredSession(props: {
   )
   const rootRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<NativeChatComposerHandle>(null)
+  const monitoring = useNativeChatMonitoringStatus(paneKey)
   useNativeChatPasteBridge({ rootRef, composerRef })
   const session = useMemo<NativeChatLiveSession>(
     () => ({
@@ -126,10 +129,12 @@ export function NativeChatStructuredSession(props: {
       ref={rootRef}
       data-native-chat-root="true"
       data-native-chat-working={controller.isWorking ? 'true' : 'false'}
+      data-native-chat-monitoring={monitoring ? 'true' : 'false'}
       tabIndex={-1}
       className="flex h-full min-h-0 w-full flex-col bg-background focus:outline-none"
     >
       <NativeChatOrchestrationPausedNotice dispatchStatus={props.orchestrationDispatchStatus} />
+      <NativeChatMonitoringStatus monitoring={monitoring} />
       <div className="flex min-h-0 flex-1 flex-col">
         {viewState.kind === 'loading' ? (
           <NativeChatEmptyState kind="loading" />

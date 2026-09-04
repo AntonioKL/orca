@@ -16,10 +16,40 @@ export function resolveNativeChatHookState(
     | undefined,
   now = Date.now()
 ): AgentStatusState | null {
+  return resolveNativeChatHookStatus(entry, now).state
+}
+
+export function resolveNativeChatMonitoringStatus(
+  entry:
+    | Pick<AgentStatusEntry, 'state' | 'workingMode' | 'updatedAt' | 'restoredUnconfirmed'>
+    | undefined,
+  now = Date.now()
+): boolean {
+  return resolveNativeChatHookStatus(entry, now).monitoring
+}
+
+function resolveNativeChatHookStatus(
+  entry:
+    | Pick<AgentStatusEntry, 'state' | 'workingMode' | 'updatedAt' | 'restoredUnconfirmed'>
+    | undefined,
+  now: number
+): { state: AgentStatusState | null; monitoring: boolean } {
   if (!entry || !isExplicitAgentStatusFresh(entry, now, AGENT_STATUS_STALE_AFTER_MS)) {
-    return null
+    return { state: null, monitoring: false }
   }
-  return entry.state === 'working' && entry.workingMode === 'monitoring' ? null : entry.state
+  if (entry.state === 'working' && entry.workingMode === 'monitoring') {
+    return { state: null, monitoring: true }
+  }
+  return { state: entry.state, monitoring: false }
+}
+
+export function useNativeChatMonitoringStatus(paneKey: string): boolean {
+  // Why: monitoring stays out of foreground lifecycle while remaining visible from the tab glyph's pane-status source.
+  const agentStatusEpoch = useAppStore((store) => store.agentStatusEpoch)
+  void agentStatusEpoch
+  return useAppStore((store) =>
+    resolveNativeChatMonitoringStatus(store.agentStatusByPaneKey[paneKey])
+  )
 }
 
 export function useNativeChatHookStatus(
