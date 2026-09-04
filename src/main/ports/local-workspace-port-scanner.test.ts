@@ -460,6 +460,45 @@ describe('scanWorkspacePorts with delayed process creation', () => {
     expect(second.ports).toEqual(first.ports)
   })
 
+  it('re-probes every port of a pid when any one of them needs metadata', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    let secondSocket = 'd0xbbbb'
+    let cwd = '/repo'
+    runPortScanCommandMock.mockImplementation(async (command: string, args: string[]) => {
+      if (command === 'lsof' && args.includes('-iTCP')) {
+        return {
+          stdout: [
+            'p123',
+            'cnode',
+            'f10',
+            'd0xaaaa',
+            'n127.0.0.1:5173',
+            'f11',
+            secondSocket,
+            'n127.0.0.1:5174'
+          ].join('\n'),
+          spawnMs: 5
+        }
+      }
+      if (command === 'lsof') {
+        return { stdout: ['p123', `n${cwd}`].join('\n'), spawnMs: 5 }
+      }
+      return { stdout: `123 node ${cwd}/server.js`, spawnMs: 5 }
+    })
+
+    await scanWorkspacePorts(worktrees, urlWatcherStub())
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(3)
+
+    // One socket is replaced and the process has since moved, so this pid must be re-derived for
+    // BOTH its rows — serving one from cache would report two different workspaces for one process.
+    secondSocket = 'd0xcccc'
+    cwd = '/elsewhere'
+    const scan = await scanWorkspacePorts(worktrees, urlWatcherStub())
+
+    expect(runPortScanCommandMock).toHaveBeenCalledTimes(6)
+    expect(new Set(scan.ports.map((entry) => entry.kind)).size).toBe(1)
+  })
+
   it('always probes metadata for a requireMetadata scan, even when the cache is warm', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     runPortScanCommandMock.mockImplementation(async (command: string, args: string[]) => {

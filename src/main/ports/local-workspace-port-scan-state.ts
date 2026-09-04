@@ -85,6 +85,7 @@ export function shouldSkipMetadataCommands(
   return skip
 }
 
+// dedupeRawPorts already collapses rows by connectHost:port:pid, so this key is unique per row.
 function listenerMetadataKey(port: RawListeningPort): string {
   return `${port.pid ?? 'unknown'}:${port.host}:${port.port}`
 }
@@ -130,9 +131,9 @@ export function partitionListenersNeedingMetadata(ports: readonly RawListeningPo
   reusedListenerKeys = new Set()
   const hydrated: RawListeningPort[] = []
   const pidsNeedingMetadata = new Set<number>()
+  const reusableByPort = new Map<RawListeningPort, ProcessMetadata>()
   for (const port of ports) {
-    const key = listenerMetadataKey(port)
-    const remembered = lastListenerMetadata.get(key)
+    const remembered = lastListenerMetadata.get(listenerMetadataKey(port))
     // Why require commandLine: a probe that returned nothing must not be cached as an answer.
     if (
       remembered?.commandLine !== undefined &&
@@ -141,7 +142,23 @@ export function partitionListenersNeedingMetadata(ports: readonly RawListeningPo
       metadataScanSequence - remembered.probedAtScan < METADATA_REPROBE_INTERVAL_SCANS &&
       port.pid !== undefined
     ) {
-      reusedListenerKeys.add(key)
+      reusableByPort.set(port, remembered)
+      continue
+    }
+    if (port.pid !== undefined) {
+      pidsNeedingMetadata.add(port.pid)
+    }
+  }
+  // Why the second pass: if any of a pid's sockets needs a probe, none of its sockets may be
+  // served from cache — otherwise one process reports a fresh cwd on one row and a remembered
+  // cwd on another, i.e. two different workspace attributions.
+  for (const port of ports) {
+    const remembered =
+      port.pid !== undefined && !pidsNeedingMetadata.has(port.pid)
+        ? reusableByPort.get(port)
+        : undefined
+    if (remembered) {
+      reusedListenerKeys.add(listenerMetadataKey(port))
       hydrated.push({
         ...port,
         commandLine: port.commandLine ?? remembered.commandLine,
@@ -150,9 +167,6 @@ export function partitionListenersNeedingMetadata(ports: readonly RawListeningPo
       continue
     }
     hydrated.push(port)
-    if (port.pid !== undefined) {
-      pidsNeedingMetadata.add(port.pid)
-    }
   }
   return { hydrated, pidsNeedingMetadata }
 }
