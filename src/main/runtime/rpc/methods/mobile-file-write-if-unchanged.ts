@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
+import { runKeyedSerializedOperation } from '../../../cli/keyed-promise-queue'
 import {
   MOBILE_WEB_FILE_EDIT_MAX_BYTES,
   MobileWebFileWritePayloadSchema
@@ -19,12 +20,23 @@ const MobileFileWriteIfUnchangedParamsSchema = MobileWebFileWritePayloadSchema.o
   .strict()
 
 type MobileFileWriteIfUnchangedParams = z.infer<typeof MobileFileWriteIfUnchangedParamsSchema>
+const writeQueues = new WeakMap<OrcaRuntimeService, Map<string, Promise<void>>>()
 
 export const MOBILE_FILE_WRITE_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'files.writeIfUnchanged',
     params: MobileFileWriteIfUnchangedParamsSchema,
-    handler: async (params, { runtime }) => writeMobileFileIfUnchanged(runtime, params)
+    handler: async (params, { runtime }) => {
+      let queues = writeQueues.get(runtime)
+      if (!queues) {
+        queues = new Map()
+        writeQueues.set(runtime, queues)
+      }
+      // Host-wide ordering covers aliases for the same file without trusting a client path key.
+      return runKeyedSerializedOperation(queues, params.expectedExecutionHostId, () =>
+        writeMobileFileIfUnchanged(runtime, params)
+      )
+    }
   })
 ]
 

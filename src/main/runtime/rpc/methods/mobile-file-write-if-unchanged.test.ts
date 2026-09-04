@@ -9,6 +9,55 @@ import { RpcDispatcher } from '../dispatcher'
 import { MOBILE_FILE_WRITE_METHODS } from './mobile-file-write-if-unchanged'
 
 describe('mobile conflict-safe file write RPC', () => {
+  it('allows only one concurrent save to consume a revision', async () => {
+    let content = 'before'
+    const runtime = fileRuntime(content)
+    vi.mocked(runtime.readFileExplorerChunk).mockImplementation(async () => {
+      const bytes = Buffer.from(content)
+      return { contentBase64: bytes.toString('base64'), bytesRead: bytes.length, eof: true }
+    })
+    runtime.writeFileExplorerFile.mockImplementation(async (_worktree, _path, next) => {
+      content = next
+      return { ok: true }
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: MOBILE_FILE_WRITE_METHODS })
+    const responses = await Promise.all(
+      ['first', 'second'].map((next) =>
+        dispatcher.dispatch(
+          request({
+            expectedRevision: revision('before'),
+            contentBase64: Buffer.from(next).toString('base64'),
+            expectedExecutionHostId: 'local'
+          })
+        )
+      )
+    )
+    expect(responses).toMatchObject([
+      { ok: true, result: { ok: true, revision: revision('first') } },
+      { ok: true, result: { ok: false, code: 'conflict' } }
+    ])
+    expect(runtime.writeFileExplorerFile).toHaveBeenCalledOnce()
+    expect(content).toBe('first')
+  })
+
+  it('releases a failed write so the next request can retry the same revision', async () => {
+    const runtime = fileRuntime('before')
+    runtime.writeFileExplorerFile.mockRejectedValueOnce(new Error('write failed'))
+    const dispatcher = new RpcDispatcher({ runtime, methods: MOBILE_FILE_WRITE_METHODS })
+    const saving = () =>
+      dispatcher.dispatch(
+        request({
+          expectedRevision: revision('before'),
+          contentBase64: Buffer.from('after').toString('base64'),
+          expectedExecutionHostId: 'local'
+        })
+      )
+    const [failed, retried] = await Promise.all([saving(), saving()])
+    expect(failed).toMatchObject({ ok: false })
+    expect(retried).toMatchObject({ ok: true, result: { ok: true } })
+    expect(runtime.writeFileExplorerFile).toHaveBeenCalledTimes(2)
+  })
+
   it('preserves a UTF-8 BOM on disk and returns a revision usable by the next save', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'orca-mobile-file-write-'))
     const path = join(directory, 'notes.md')
