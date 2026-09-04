@@ -47,6 +47,14 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
     }
     try {
       const leaf = this.deps.getLiveLeafForHandle(terminalHandle)
+      // Why before the status check: a leaf with no PTY still resolves once the
+      // pane is listable, and its status reads the same as a busy pane's. Waiting
+      // for an idle edge that no process will ever emit is the silent give-up
+      // this path exists to end, so treat "no process" as the wake evidence.
+      if (!leaf.ptyId) {
+        this.deps.requestSleepingRecipientWake?.(handle)
+        return
+      }
       if (leaf.lastAgentStatus !== 'idle' || !leaf.lastAgentStatusObservedLive) {
         return
       }
