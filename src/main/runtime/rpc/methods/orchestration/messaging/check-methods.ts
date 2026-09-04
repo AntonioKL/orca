@@ -84,6 +84,13 @@ export const ORCHESTRATION_CHECK_METHODS: RpcMethod[] = [
         })
       }
       const consumingCheck = params.peek !== true && params.all !== true && params.unread !== false
+      // Why: an empty consuming check is the worker contract's "checkpoint, not a failure", so a
+      // caller whose Attempt moved on has to be told rather than handed an empty direct mailbox.
+      // This outranks the pane guard: a paneless loser cannot run-use anyway, it has to stop.
+      const settledDispatch = consumingCheck ? db.getLatestDispatchForTerminal(handle) : undefined
+      if (settledDispatch && isSupersededDispatch(settledDispatch)) {
+        throw dispatchFenced()
+      }
       // Why: a consuming check on a handle with no live pane and no Dispatch can never see
       // Run mail, so an empty inbox would read as "nothing yet" instead of a stale caller.
       if (!paneKey && consumingCheck) {
@@ -92,12 +99,6 @@ export const ORCHESTRATION_CHECK_METHODS: RpcMethod[] = [
           `Terminal ${handle} has no live pane bound to a Run, so this inbox can never receive Run mail. Rebind this terminal with orchestration run-use, or read the Run mailbox with --run <run_id>.`,
           orchestrationSkillRecoveryData()
         )
-      }
-      // Why: an empty consuming check is the worker contract's "checkpoint, not a failure", so a
-      // caller whose Attempt moved on has to be told rather than handed an empty direct mailbox.
-      const settledDispatch = consumingCheck ? db.getLatestDispatchForTerminal(handle) : undefined
-      if (settledDispatch && isSupersededDispatch(settledDispatch)) {
-        throw dispatchFenced()
       }
       return checkDirectMailbox({ params, runtime, db, handle, typeFilter, signal })
     }

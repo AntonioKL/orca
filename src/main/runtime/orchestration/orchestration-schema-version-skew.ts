@@ -22,9 +22,7 @@ const POST_V6_COLUMNS = [
   ['legacy_adoptions', 'source_run_id'],
   ['legacy_compatibility_principals', 'id'],
   ['legacy_operation_receipts', 'principal_id'],
-  ['legacy_mail_receipts', 'principal_id'],
-  ['worker_terminal_resources', 'recovery_attempt_count'],
-  ['worker_terminal_resources', 'last_recovery_at']
+  ['legacy_mail_receipts', 'principal_id']
 ] as const
 
 const VERSIONED_POST_V6_COLUMNS = [
@@ -36,6 +34,9 @@ const VERSIONED_POST_V6_COLUMNS = [
   { version: 31, table: 'dispatch_contexts', column: 'host_scope' },
   { version: 31, table: 'worker_terminal_resources', column: 'endpoint_id' },
   { version: 31, table: 'worker_terminal_resources', column: 'endpoint_incarnation' },
+  // Why: unversioned, these made every shipped v30 database read as v6 and replay the whole chain.
+  { version: 32, table: 'worker_terminal_resources', column: 'recovery_attempt_count' },
+  { version: 32, table: 'worker_terminal_resources', column: 'last_recovery_at' },
   { version: 33, table: 'messages', column: 'pointer_enter_pending' },
   { version: 34, table: 'deliveries', column: 'mailbox_handle' },
   { version: 36, table: 'dispatch_contexts', column: 'consumer_generation' },

@@ -231,6 +231,24 @@ describe('OrchestrationDb version-skew migration', () => {
     ).toBeDefined()
   })
 
+  // The two v32 recovery columns were listed as unversioned, so every shipped database below v32
+  // read as v6 and replayed the whole chain, re-running the v23 resource backfill over live rows.
+  it('starts a genuine pre-v32 database at its own version, not the v6 floor', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-db-version-skew-v31-'))
+    const dbPath = join(tempDir, 'orchestration.db')
+    db = new OrchestrationDb(dbPath)
+    db.close()
+    db = undefined
+
+    const raw = new Database(dbPath)
+    raw.exec(
+      'ALTER TABLE worker_terminal_resources DROP COLUMN recovery_attempt_count; ALTER TABLE worker_terminal_resources DROP COLUMN last_recovery_at;'
+    )
+    raw.pragma('user_version = 31')
+    expect(resolveOrchestrationMigrationStartVersion(raw, 31, SCHEMA_VERSION)).toBe(31)
+    raw.close()
+  })
+
   it('creates fresh delivery mailboxes with a non-null schema invariant', () => {
     db = new OrchestrationDb(':memory:')
 
