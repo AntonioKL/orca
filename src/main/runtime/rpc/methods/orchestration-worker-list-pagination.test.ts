@@ -345,6 +345,106 @@ describe('orchestration worker-list pagination', () => {
     expect(filtered.page.total).toBe(2)
     expect(filtered.counts).toEqual(page.counts)
   })
+
+  it('never re-emits a row whose worker registers between pages', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const run = db.createRun({
+      objective: 'Stable order key',
+      coordinatorHandle: 'term-coordinator',
+      coordinatorPaneKey: 'tab-coordinator:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    })
+    insertDispatch(db, run.id, 'dispatch-a')
+    insertDispatch(db, run.id, 'dispatch-z')
+
+    const seen: string[] = []
+    let cursor: string | null = null
+    for (let page = 0; page < 5; page += 1) {
+      const result: WorkerListResult = await callWorkerList(runtime, {
+        run: run.id,
+        limit: 1,
+        ...(cursor ? { cursor } : {})
+      })
+      seen.push(...result.workers.map((worker) => worker.dispatchId))
+      if (page === 0) {
+        // A worker row lands for the page-1 row; its COALESCE(created_at) sort key moves forward.
+        sqliteFor(db)
+          .prepare(
+            `INSERT INTO worker_dispatches (dispatch_id, state, stage, agent_terminal_handle, created_at)
+             VALUES (?, 'ready', 'ready', ?, '2026-08-27 01:00:00')`
+          )
+          .run('dispatch-a', 'term-dispatch-a')
+      }
+      cursor = result.page.nextCursor
+      if (!cursor) {
+        break
+      }
+    }
+
+    expect(seen).toEqual(['dispatch-a', 'dispatch-z'])
+  })
+
+  it('counts only the rows a pinned filtered cursor can still reach', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const run = db.createRun({
+      objective: 'Pinned filtered counts',
+      coordinatorHandle: 'term-coordinator',
+      coordinatorPaneKey: 'tab-coordinator:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    })
+    insertDispatch(db, run.id, 'dispatch-a')
+    insertDispatch(db, run.id, 'dispatch-z')
+
+    const first = await callWorkerList(runtime, {
+      run: run.id,
+      terminalState: 'retained',
+      limit: 1
+    })
+    expect(first.page).toMatchObject({ total: 2, hasMore: true })
+    expect(first.counts).toEqual({ retained: 2 })
+
+    insertDispatch(db, run.id, 'dispatch-m')
+    const second = await callWorkerList(runtime, {
+      run: run.id,
+      terminalState: 'retained',
+      limit: 1,
+      cursor: first.page.nextCursor
+    })
+
+    expect(second.workers.map((worker) => worker.dispatchId)).toEqual(['dispatch-z'])
+    expect(second.page.total).toBe(2)
+    expect(second.counts).toEqual({ retained: 2 })
+  })
+
+  it('filters and labels terminal state through one projection', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const run = db.createRun({
+      objective: 'Unsupervised owned resource',
+      coordinatorHandle: 'term-coordinator',
+      coordinatorPaneKey: 'tab-coordinator:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    })
+    // An owned, unreleased resource whose dispatch has no worker_dispatches row.
+    insertDispatch(db, run.id, 'dispatch-unsupervised')
+    sqliteFor(db)
+      .prepare(
+        `INSERT INTO worker_terminal_resources (
+           id, origin_dispatch_id, owner_dispatch_id, terminal_handle,
+           ownership_state, release_state
+         ) VALUES (?, ?, ?, ?, 'owned', 'not_requested')`
+      )
+      .run('resource-unsupervised', 'dispatch-unsupervised', 'dispatch-unsupervised', 'term-x')
+
+    const all = await callWorkerList(runtime, { run: run.id })
+    const active = await callWorkerList(runtime, { run: run.id, terminalState: 'active' })
+
+    expect(all.counts).toEqual({ active: 1 })
+    expect(active.workers.map((worker) => worker.dispatchId)).toEqual(['dispatch-unsupervised'])
+    expect(active.page.total).toBe(1)
+  })
 })
 
 async function callWorkerList(

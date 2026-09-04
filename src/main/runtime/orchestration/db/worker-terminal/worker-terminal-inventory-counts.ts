@@ -1,18 +1,18 @@
-import type { WorkerTerminalListState } from '../../worker-terminal-ownership'
+import { deriveWorkerTerminalListState } from '../../worker-terminal-ownership'
+import type {
+  WorkerDispatchListState,
+  WorkerTerminalListState,
+  WorkerTerminalOwnershipState,
+  WorkerTerminalReleaseState
+} from '../../worker-terminal-ownership'
 import type { OrchestrationDb } from '../orchestration-db'
 import type { WorkerTerminalListingSnapshot } from './worker-terminal-listing'
 
-export const WORKER_TERMINAL_STATE_EXPRESSION = `CASE
-  WHEN r.id IS NULL THEN CASE WHEN COALESCE(w.agent_terminal_handle, d.assignee_handle) IS NOT NULL THEN 'retained' ELSE NULL END
-  WHEN r.release_state = 'released' THEN 'released'
-  WHEN r.release_state = 'unknown' THEN 'release_unknown'
-  WHEN r.release_state IN ('requested', 'releasing') THEN 'release_pending'
-  WHEN r.ownership_state <> 'owned' OR r.release_state = 'retained' THEN 'retained'
-  WHEN COALESCE(w.state, 'unsupervised') <> 'unsupervised' AND COALESCE(w.state, '') IN ('succeeded', 'failed') THEN 'reclaimable'
-  WHEN COALESCE(w.state, 'unsupervised') <> 'unsupervised' AND COALESCE(w.state, '') IN ('succeeded', 'failed', 'stopped', 'abandoned') THEN 'retained'
-  WHEN COALESCE(w.state, 'unsupervised') <> 'unsupervised' THEN 'active'
-  ELSE NULL
-END`
+export type WorkerTerminalStateRow = {
+  dispatchId: string
+  databaseId: number
+  terminalState: WorkerTerminalListState | null
+}
 
 type WorkerTerminalInventoryParams = {
   runId?: string
@@ -43,25 +43,61 @@ function buildInventoryScope(params: WorkerTerminalInventoryParams): {
   return { where, values }
 }
 
+/** The only place worker terminal state is derived for filtering or counting: raw columns out of
+ *  SQL, the verdict from the one TS state machine, so no second copy can drift from it. */
+export function scanWorkerTerminalStates(
+  this: OrchestrationDb,
+  where: string[],
+  values: (string | number)[]
+): WorkerTerminalStateRow[] {
+  const rows = this.db
+    .prepare(
+      `SELECT d.id AS dispatch_id,
+              d.rowid AS database_id,
+              COALESCE(w.state, 'unsupervised') AS worker_state,
+              COALESCE(w.agent_terminal_handle, d.assignee_handle) AS agent_terminal_handle,
+              r.id AS resource_id, r.ownership_state, r.release_state
+         FROM dispatch_contexts d
+         LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
+         LEFT JOIN worker_terminal_resources r ON r.owner_dispatch_id = d.id
+        ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+        ORDER BY d.rowid ASC`
+    )
+    .all(...values) as {
+    dispatch_id: string
+    database_id: number
+    worker_state: WorkerDispatchListState
+    agent_terminal_handle: string | null
+    resource_id: string | null
+    ownership_state: WorkerTerminalOwnershipState | null
+    release_state: WorkerTerminalReleaseState | null
+  }[]
+  return rows.map((row) => ({
+    dispatchId: row.dispatch_id,
+    databaseId: row.database_id,
+    terminalState: deriveWorkerTerminalListState({
+      workerState: row.worker_state,
+      agentTerminalHandle: row.agent_terminal_handle,
+      resource:
+        row.resource_id === null
+          ? null
+          : {
+              ownership_state: row.ownership_state as WorkerTerminalOwnershipState,
+              release_state: row.release_state as WorkerTerminalReleaseState
+            }
+    })
+  }))
+}
+
 export function countWorkerTerminalResources(
   this: OrchestrationDb,
   params: WorkerTerminalInventoryParams = {}
 ): number {
   const { where, values } = buildInventoryScope(params)
-  if (params.terminalState) {
-    where.push(`${WORKER_TERMINAL_STATE_EXPRESSION} = ?`)
-    values.push(params.terminalState)
-  }
-  const row = this.db
-    .prepare(
-      `SELECT COUNT(*) AS count
-         FROM dispatch_contexts d
-         LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
-         LEFT JOIN worker_terminal_resources r ON r.owner_dispatch_id = d.id
-        ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}`
-    )
-    .get(...values) as { count: number }
-  return Number(row.count)
+  const rows = scanWorkerTerminalStates.call(this, where, values)
+  return params.terminalState
+    ? rows.filter((row) => row.terminalState === params.terminalState).length
+    : rows.length
 }
 
 export function countWorkerTerminalInventory(
@@ -72,30 +108,15 @@ export function countWorkerTerminalInventory(
   counts: Partial<Record<WorkerTerminalListState, number>>
 } {
   const { where, values } = buildInventoryScope(params)
-  const rows = this.db
-    .prepare(
-      `SELECT terminal_state, COUNT(*) AS count
-         FROM (
-           SELECT ${WORKER_TERMINAL_STATE_EXPRESSION} AS terminal_state
-             FROM dispatch_contexts d
-             LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
-             LEFT JOIN worker_terminal_resources r ON r.owner_dispatch_id = d.id
-            ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
-         ) inventory
-        GROUP BY terminal_state`
-    )
-    .all(...values) as { terminal_state: WorkerTerminalListState | null; count: number }[]
+  const rows = scanWorkerTerminalStates.call(this, where, values)
   const counts: Partial<Record<WorkerTerminalListState, number>> = {}
-  let total = 0
   for (const row of rows) {
-    const count = Number(row.count)
-    total += count
-    if (row.terminal_state) {
-      counts[row.terminal_state] = count
+    if (row.terminalState) {
+      counts[row.terminalState] = (counts[row.terminalState] ?? 0) + 1
     }
   }
   return {
-    total: params.terminalState ? (counts[params.terminalState] ?? 0) : total,
+    total: params.terminalState ? (counts[params.terminalState] ?? 0) : rows.length,
     counts
   }
 }

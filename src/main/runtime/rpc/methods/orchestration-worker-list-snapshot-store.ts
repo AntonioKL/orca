@@ -12,6 +12,9 @@ const ORCHESTRATION_WORKER_LIST_SNAPSHOT_MAX_ENTRY_BYTES = 512 * 1024
 type WorkerListSnapshot = {
   runId: string | null
   terminalState: WorkerTerminalListState
+  /** Dispatch-context watermark the ids were selected under; counts reuse it so later pages
+   *  never report an inventory that includes rows the cursor cannot reach. */
+  databaseId: number
   dispatchIds: string[]
 }
 
@@ -27,6 +30,7 @@ export function createWorkerListSnapshot(
   params: {
     runId?: string
     terminalState: WorkerTerminalListState
+    databaseId: number
     dispatchIds: string[]
   }
 ): string {
@@ -34,6 +38,7 @@ export function createWorkerListSnapshot(
   const snapshot = {
     runId: params.runId ?? null,
     terminalState: params.terminalState,
+    databaseId: params.databaseId,
     dispatchIds: params.dispatchIds
   }
   const store = storeFor(runtime)
@@ -143,7 +148,8 @@ function canRetainWithPinnedSnapshots(
 }
 
 function retainedSnapshotBytes(snapshot: WorkerListSnapshot): number {
-  let bytes = Buffer.byteLength(snapshot.runId ?? '') + Buffer.byteLength(snapshot.terminalState)
+  let bytes =
+    Buffer.byteLength(snapshot.runId ?? '') + Buffer.byteLength(snapshot.terminalState) + 8
   for (const dispatchId of snapshot.dispatchIds) {
     bytes += Buffer.byteLength(dispatchId) + 8
   }

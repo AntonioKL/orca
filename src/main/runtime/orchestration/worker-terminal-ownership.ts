@@ -85,7 +85,7 @@ export const WORKER_RELEASABLE_STATES: readonly WorkerDispatchState[] = ['succee
 export function deriveWorkerTerminalListState(params: {
   workerState: WorkerDispatchListState
   agentTerminalHandle: string | null
-  resource: WorkerTerminalResourceRow | null
+  resource: Pick<WorkerTerminalResourceRow, 'ownership_state' | 'release_state'> | null
 }): WorkerTerminalListState | null {
   const { resource } = params
   if (!resource) {

@@ -14,7 +14,7 @@ import {
 import {
   countWorkerTerminalInventory,
   countWorkerTerminalResources,
-  WORKER_TERMINAL_STATE_EXPRESSION
+  scanWorkerTerminalStates
 } from './worker-terminal-inventory-counts'
 import { markWorkerTerminalUserOwned } from './worker-terminal-user-takeover'
 
@@ -26,7 +26,12 @@ export {
   markWorkerTerminalUserOwned
 }
 
-export type WorkerTerminalOrderingKey = { createdAt: string; dispatchId: string }
+/** `databaseId` is the real order key; the timestamp fields only satisfy pre-v3 cursors. */
+export type WorkerTerminalOrderingKey = {
+  createdAt: string
+  dispatchId: string
+  databaseId?: number
+}
 export type WorkerTerminalListingSnapshot =
   | { databaseId: number }
   | { createdAt: string; dispatchId: string }
@@ -96,17 +101,33 @@ export function listWorkerTerminalResources(
     }
   }
   if (params.after) {
-    where.push(`(${orderExpression} > ? OR (${orderExpression} = ? AND d.id > ?))`)
-    values.push(params.after.createdAt, params.after.createdAt, params.after.dispatchId)
+    // Order and fence must share one key, or a row created between pages moves across the cut.
+    where.push(
+      params.after.databaseId === undefined
+        ? 'd.rowid > (SELECT rowid FROM dispatch_contexts WHERE id = ?)'
+        : 'd.rowid > ?'
+    )
+    values.push(params.after.databaseId ?? params.after.dispatchId)
   }
+  let detailWhere = where
+  let detailValues = values
+  let detailLimit = params.limit
   if (params.terminalState) {
-    // Keep filtering in lockstep with deriveWorkerTerminalListState before LIMIT.
-    where.push(`${WORKER_TERMINAL_STATE_EXPRESSION} = ?`)
-    values.push(params.terminalState)
+    // Terminal state is derived by one TS function; page it before reading detail columns.
+    const matching = scanWorkerTerminalStates
+      .call(this, where, values)
+      .filter((row) => row.terminalState === params.terminalState)
+    const page = detailLimit === undefined ? matching : matching.slice(0, detailLimit)
+    if (page.length === 0) {
+      return []
+    }
+    detailWhere = [`d.rowid IN (${page.map(() => '?').join(',')})`]
+    detailValues = page.map((row) => row.databaseId)
+    detailLimit = undefined
   }
-  const limitClause = params.limit === undefined ? '' : ' LIMIT ?'
-  if (params.limit !== undefined) {
-    values.push(params.limit)
+  const limitClause = detailLimit === undefined ? '' : ' LIMIT ?'
+  if (detailLimit !== undefined) {
+    detailValues.push(detailLimit)
   }
   const rows = this.db
     .prepare(
@@ -133,10 +154,10 @@ export function listWorkerTerminalResources(
          LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
          LEFT JOIN tasks t ON t.id = d.task_id AND t.run_id = d.run_id
          LEFT JOIN worker_terminal_resources r ON r.owner_dispatch_id = d.id
-        ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
-        ORDER BY ${orderExpression} ASC, d.id ASC${limitClause}`
+        ${detailWhere.length > 0 ? `WHERE ${detailWhere.join(' AND ')}` : ''}
+        ORDER BY d.rowid ASC${limitClause}`
     )
-    .all(...values) as {
+    .all(...detailValues) as {
     dispatch_id: string
     worker_state: WorkerDispatchListState
     agent_terminal_handle: string | null
@@ -211,13 +232,16 @@ export function getWorkerTerminalOrderingKey(
 ): WorkerTerminalOrderingKey | null {
   const row = this.db
     .prepare(
-      `SELECT d.id AS dispatch_id, COALESCE(w.created_at, d.created_at) AS created_at
+      `SELECT d.id AS dispatch_id, d.rowid AS database_id,
+              COALESCE(w.created_at, d.created_at) AS created_at
          FROM dispatch_contexts d
          LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
         WHERE d.id = ?`
     )
-    .get(dispatchId) as { dispatch_id: string; created_at: string } | undefined
-  return row ? { createdAt: row.created_at, dispatchId: row.dispatch_id } : null
+    .get(dispatchId) as { dispatch_id: string; created_at: string; database_id: number } | undefined
+  return row
+    ? { createdAt: row.created_at, dispatchId: row.dispatch_id, databaseId: row.database_id }
+    : null
 }
 
 export type WorkerTerminalListingMethods = {

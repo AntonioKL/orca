@@ -1,13 +1,17 @@
+/** `databaseId` is the real order key. `createdAt`/`dispatchId` stay required so a cursor this
+ *  server mints is still decodable by an older peer. */
+type WorkerListCursorAfter = { createdAt: string; dispatchId: string; databaseId?: number }
+
 type WorkerListCursorV1 = {
   version: 1
   snapshot: { createdAt: string; dispatchId: string }
-  after: { createdAt: string; dispatchId: string }
+  after: WorkerListCursorAfter
 }
 
 type WorkerListCursorV2 = {
   version: 2
   snapshot: { databaseId: number }
-  after: { createdAt: string; dispatchId: string }
+  after: WorkerListCursorAfter
 }
 
 type WorkerListCursorV3 = {
@@ -41,6 +45,12 @@ export function decodeWorkerListCursor(value: string): WorkerListCursor | null {
     }
     if (!('after' in parsed) || !parsed.after) {
       return null
+    }
+    if (
+      'databaseId' in parsed.after &&
+      !(Number.isSafeInteger(parsed.after.databaseId) && Number(parsed.after.databaseId) > 0)
+    ) {
+      delete parsed.after.databaseId
     }
     if (
       parsed.version === 1 &&

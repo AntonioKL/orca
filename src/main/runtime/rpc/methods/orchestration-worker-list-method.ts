@@ -126,6 +126,7 @@ export const ORCHESTRATION_WORKER_LIST_METHOD: RpcMethod = defineMethod({
       const snapshotId = createWorkerListSnapshot(runtime, {
         runId: params.run,
         terminalState: params.terminalState,
+        databaseId: snapshot.databaseId,
         dispatchIds: rows.map((row) => row.dispatchId)
       })
       return projectWorkerListPage({
@@ -228,10 +229,12 @@ async function projectWorkerListPageWithFilteredSnapshot(
   if (federated) {
     applyFederatedFleetObservations(fleet, federated)
   }
+  // Counts must share the page's row extent; a live scan behind a pinned total reports an
+  // inventory the cursor can never reach.
   const inventory = db.countWorkerTerminalInventory({
     runId: params.run,
     terminalState: params.terminalState,
-    snapshot: args.snapshot
+    snapshot: filteredSnapshot ? { databaseId: filteredSnapshot.databaseId } : args.snapshot
   })
   const nextRow = pageRows.at(-1)
   fleet.page = {
@@ -250,12 +253,20 @@ async function projectWorkerListPageWithFilteredSnapshot(
                 ? {
                     version: 2,
                     snapshot: args.snapshot,
-                    after: { createdAt: nextRow.createdAt, dispatchId: nextRow.dispatchId }
+                    after: {
+                      createdAt: nextRow.createdAt,
+                      dispatchId: nextRow.dispatchId,
+                      databaseId: nextRow.databaseId
+                    }
                   }
                 : {
                     version: 1,
                     snapshot: args.snapshot!,
-                    after: { createdAt: nextRow.createdAt, dispatchId: nextRow.dispatchId }
+                    after: {
+                      createdAt: nextRow.createdAt,
+                      dispatchId: nextRow.dispatchId,
+                      databaseId: nextRow.databaseId
+                    }
                   }
             )
         : null
