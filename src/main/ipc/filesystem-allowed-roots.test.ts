@@ -320,15 +320,21 @@ describe('resolveAuthorizedPath allowed-root reuse', () => {
     expect.soft(vi.mocked(getProjectGroupSubtreeIds)).not.toHaveBeenCalled()
   })
 
-  it('still refuses a symlink that escapes every allowed root', async () => {
-    const secret = join(outsideRoot, 'secret.txt')
-    await writeFile(secret, 'secret\n')
-    const escape = join(repoRoot, 'escape.txt')
-    await symlink(secret, escape)
+  // Why (both symlink cases): creating a symlink on Windows needs elevation or
+  // Developer Mode, so these would fail EPERM in setup rather than exercise the
+  // escape check. Every non-symlink case still runs there.
+  it.skipIf(process.platform === 'win32')(
+    'still refuses a symlink that escapes every allowed root',
+    async () => {
+      const secret = join(outsideRoot, 'secret.txt')
+      await writeFile(secret, 'secret\n')
+      const escape = join(repoRoot, 'escape.txt')
+      await symlink(secret, escape)
 
-    await expect(resolveAuthorizedPath(escape, store)).rejects.toThrow('Access denied')
-    expect(vi.mocked(listRepoWorktreeGraph)).toHaveBeenCalled()
-  })
+      await expect(resolveAuthorizedPath(escape, store)).rejects.toThrow('Access denied')
+      expect(vi.mocked(listRepoWorktreeGraph)).toHaveBeenCalled()
+    }
+  )
 
   it('builds no allowed-root list at all for a granted external path', async () => {
     const external = join(outsideRoot, 'external.md')
@@ -349,15 +355,18 @@ describe('resolveAuthorizedPath allowed-root reuse', () => {
     expect.soft(vi.mocked(buildProjectGroupChildIndex)).not.toHaveBeenCalled()
   })
 
-  it('still refuses a directory symlink that escapes every allowed root', async () => {
-    const outsideDir = join(outsideRoot, 'nested')
-    await mkdir(outsideDir)
-    await writeFile(join(outsideDir, 'file.txt'), 'secret\n')
-    const escape = join(repoRoot, 'escape-dir')
-    await symlink(outsideDir, escape)
+  it.skipIf(process.platform === 'win32')(
+    'still refuses a directory symlink that escapes every allowed root',
+    async () => {
+      const outsideDir = join(outsideRoot, 'nested')
+      await mkdir(outsideDir)
+      await writeFile(join(outsideDir, 'file.txt'), 'secret\n')
+      const escape = join(repoRoot, 'escape-dir')
+      await symlink(outsideDir, escape)
 
-    await expect(resolveAuthorizedPath(join(escape, 'file.txt'), store)).rejects.toThrow(
-      'Access denied'
-    )
-  })
+      await expect(resolveAuthorizedPath(join(escape, 'file.txt'), store)).rejects.toThrow(
+        'Access denied'
+      )
+    }
+  )
 })
