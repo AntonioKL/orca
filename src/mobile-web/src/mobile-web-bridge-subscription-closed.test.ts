@@ -19,7 +19,7 @@ const SUBSCRIPTION_ID = 'S'.repeat(22)
 
 function envelope() {
   return {
-    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION as typeof MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
     shellSessionId: CONTEXT.shellSessionId,
     buildId: CONTEXT.buildId
   }

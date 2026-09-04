@@ -1,7 +1,6 @@
 import {
   TerminalStreamOpcode,
   decodeTerminalStreamJson,
-  decodeTerminalStreamText,
   type TerminalStreamFrame
 } from '../../../../../shared/terminal-stream-protocol'
 import {
@@ -9,8 +8,7 @@ import {
   TerminalMultiplexSnapshotRequestFrame,
   TerminalMultiplexSourceRangeAckFrame
 } from './stream-schemas'
-import { isTerminalInputLockedForClient, sendTerminalStreamInput } from './terminal-input-delivery'
-import { isAcceptableTerminalQueryReplyFrame } from './terminal-query-reply-guard'
+import { handleMultiplexInputFrame, isMultiplexInputFrame } from './terminal-multiplex-input-frame'
 import {
   getOutputAfterSnapshotSeq,
   normalizeMultiplexSnapshotScrollbackRows
@@ -61,45 +59,8 @@ export function installMultiplexSlotFrames(
       }
       return
     }
-    if (
-      frame.opcode === TerminalStreamOpcode.Input ||
-      (frame.opcode === TerminalStreamOpcode.QueryReply && stream.supportsQueryReply)
-    ) {
-      const text = decodeTerminalStreamText(frame.payload)
-      if (!text) {
-        return
-      }
-      if (isTerminalInputLockedForClient(runtime, stream.ptyId, stream.client)) {
-        return
-      }
-      // Mobile already has the higher-priority floor, so a rejected desktop claim must not suppress later phone input.
-      const inputClaimTail = stream.isMobile ? Promise.resolve(true) : stream.desktopClaimTail
-      const isQueryReply = frame.opcode === TerminalStreamOpcode.QueryReply
-      void inputClaimTail.then(async (claimed) => {
-        if (!claimed || isTerminalInputLockedForClient(runtime, stream.ptyId, stream.client)) {
-          return
-        }
-        // Why: opcode 18 skips the mobile input floor, so it needs every guard terminal.send applies; drop otherwise.
-        if (
-          isQueryReply &&
-          !isAcceptableTerminalQueryReplyFrame({
-            runtime,
-            ptyId: stream.ptyId,
-            text,
-            client: stream.client
-          })
-        ) {
-          return
-        }
-        const outcome = await sendTerminalStreamInput(runtime, {
-          terminal: stream.terminal,
-          text,
-          client: stream.client,
-          isMobile: stream.isMobile,
-          inputKind: isQueryReply ? 'query-reply' : 'input'
-        })
-        state.notifyStreamWriteUnavailable(stream, outcome)
-      })
+    if (isMultiplexInputFrame(stream, frame)) {
+      handleMultiplexInputFrame(state, stream, frame)
       return
     }
     if (frame.opcode === TerminalStreamOpcode.SetOutputPaused && stream.supportsOutputPause) {
