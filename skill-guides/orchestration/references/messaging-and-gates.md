@@ -10,10 +10,15 @@ accepted steering.
 ## Coordinator delivery loop
 
 ```text
-ORCA orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json
+ORCA orchestration check --terminal <handle> --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json
 ORCA orchestration reply --id <message_id> --body "<answer>" --json
 ORCA orchestration check --ack <delivery_id> --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json
 ```
+
+`check` names its caller with `--terminal <handle>` and is the only verb that
+rejects `--from`. Omit `--terminal` inside an Orca terminal, where Orca resolves
+the caller; pass it explicitly from anywhere else, including a dispatched
+worker reading coordinator follow-ups.
 
 A consuming coordinator `check` returns the bound Run's oldest FIFO Delivery,
 up to 50 messages, and replays that exact batch until acknowledged. Process
@@ -35,7 +40,8 @@ ORCA orchestration send --to dispatch:<dispatch_id> --subject "Follow-up" --body
 
 Do not substitute a remote terminal handle. Omit `--from` for ordinary
 coordinator calls; a dispatched worker instead copies the exact `--from` and
-capability arguments in its preamble.
+capability arguments in its preamble. `check` is the exception: it identifies
+its caller with `--terminal`, never `--from`.
 
 Group addresses include `@all`, `@idle`, `@claude`, `@codex`, `@opencode`,
 `@gemini`, `@droid`, `@grok`, `@cursor`, and `@worktree:<id>`. Use them only for
