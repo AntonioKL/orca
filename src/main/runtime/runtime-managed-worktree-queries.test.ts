@@ -171,6 +171,48 @@ describe('RuntimeManagedWorktreeQueries.list host scope', () => {
     expect(scoped.hostScope?.omittedHostIds).toEqual(['ssh:conn-1'])
   })
 
+  // `getRepoExecutionHostId` derives the host from two spellings, and a scoped listing that named
+  // the wrong one would be worse than naming none. These pin both.
+  it('names the local host for a scoped local repo', async () => {
+    const repo = folderRepo({ id: 'repo-local', kind: 'git', path: '/workspace/local' })
+    const store = {
+      getRepos: () => [repo],
+      getRepo: () => repo,
+      getAllWorktreeMeta: () => ({}),
+      getWorktreeMeta: () => undefined,
+      setWorktreeMeta: vi.fn(),
+      getAllWorktreeLineage: () => ({}),
+      getSettings: () => settings
+    } as unknown as RuntimeStore
+
+    const result = await queries(store).list('repo-local', 50)
+
+    expect(result.hostScope?.omittedHostIds).toEqual(['local'])
+  })
+
+  it('prefers executionHostId over connectionId for the scoped host', async () => {
+    const repo = folderRepo({
+      id: 'repo-runtime',
+      kind: 'git',
+      connectionId: 'conn-legacy',
+      executionHostId: 'runtime:env-1',
+      path: '/workspace/runtime'
+    })
+    const store = {
+      getRepos: () => [repo],
+      getRepo: () => repo,
+      getAllWorktreeMeta: () => ({}),
+      getWorktreeMeta: () => undefined,
+      setWorktreeMeta: vi.fn(),
+      getAllWorktreeLineage: () => ({}),
+      getSettings: () => settings
+    } as unknown as RuntimeStore
+
+    const result = await queries(store).list('repo-runtime', 50)
+
+    expect(result.hostScope?.omittedHostIds).toEqual(['runtime:env-1'])
+  })
+
   it('still reports every configured host when the listing is unscoped', async () => {
     const unscoped = await queries(sshStore(), {
       listKnownHostIds: () => ['local', 'ssh:conn-1'] as never
