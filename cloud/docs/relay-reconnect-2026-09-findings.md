@@ -23,7 +23,9 @@ never raw ids. Nothing here is a production mutation record unless the "Mutation
 | Monitor dry-run #6 | **Passed** 06:06:31Z: 16 samples, no freeze (started 05:47:42Z) | run 33841783747 attempt 1 |
 | c7 `canary-apply` | **Succeeded.** Dispatched 06:07:15Z; drain 06:10Z; MIG recreate 06:16–06:23Z; new image listening 06:23:42Z; verify + trust proof passed; restored to `admission=general` 06:25:21Z; canary authority sealed. c7 is on `85bf6799…`. | run 33843071283 |
 | PR #18581 doc reconcile (Aug 23 figure: 2,200–3,000 raw log lines vs 1,510 on the gate metric) | **Merged** | https://github.com/stablyai/orca/pull/18581 |
-| Batch roll | **Not dispatched.** Stopped after the canary per plan; owner decides next. Batch needs a fresh dry-run (evidence single-use) + `canary-run-id=33843071283` + 2–4 cells. | |
+| Batch roll | **Deferred by plan**: roll once with the lock-fix image instead of twice. | |
+| PR #18606 lock removal (root cause) | **Open** 08:57Z; Opus reviewed + fixed; 5/5 mutants; re-verification requested | https://github.com/stablyai/orca/pull/18606 |
+| c7 on new image, 2 h in | 817 controls, **0 container die** since restore (was ~1 per 15 min on old image); `sqlLatencyMsMax` still 1.0 s = lock wait unchanged, which #18606 targets | |
 | Terraform alert `relay_postgres_retry_exhausted` at `> 0` | Firing continuously since #18521; recalibration not done (own change) | `cloud/infra/terraform/relay-observability.tf:447,469` |
 
 ## Mutations performed (complete list)
@@ -314,6 +316,9 @@ image.
   paths, and cell-side `acquireActivity`/`activateControl` still ride the global lock (step 3 in next steps).
   Watch: does c7's sqlLatencyMsMax settle below the old 1.0–1.2 s pin once refill finishes, and does c7 stop
   appearing in `container die` (the real win: guardSessionTask).
+- 08:25Z (2 h after restore): c7 817 controls, 0 crashes since 06:25Z. Fleet crashes last 2 h: c27 x6,
+  c28 x5, all old-image Asia cells. The new image stops the crash class as predicted; it does not move
+  lock latency (c7 sqlLatencyMsMax 1005 ms), which is #18606's job.
 - Implication for the batch phase: every drain will push director concurrency past the monitor's 64 bar
   for ~1-2 min. The batch job rechecks safety *before* it drains (read-only step), so that is fine per wave,
   but never run a monitor dry-run concurrently with a wave, and prefer batches of 2 over 4 until the fleet
