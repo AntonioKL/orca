@@ -491,10 +491,22 @@ not new relay load. Instance label `managed_by=terraform`, created 2026-07-09; t
 [[orca-cloud-terraform-split-findings]]). `storageAutoResize=true` with limit 0, so Cloud SQL will grow
 the disk only when it fills, not when IOPS saturate; disk is 81% full.
 
+Onset precisely: the 11:55:37 `time` checkpoint wrote 67,258 buffers (10.5% of shared_buffers, the
+day's largest) over 163 s and completed 11:58:24. Every checkpoint since has been `wal`-triggered at
+~45 s spacing (`max_wal_size` reached), each writing 13–20k buffers with 9–11 WAL files recycled. This is a
+self-sustaining loop: a checkpoint completes -> every subsequent write to a hot page emits a full-page
+image into WAL -> WAL fills `max_wal_size` in ~45 s -> next checkpoint -> repeat. The relay's hot rows
+(`relay_cells`, `relay_assignments`, activity leases, cell runtime) are updated tens of thousands of
+times a minute, so full-page-write amplification is large. Before 11:58 the 5-min timed checkpoints kept
+WAL well under the limit; a one-off larger checkpoint tipped it over and the disk's write ceiling keeps
+it there. Query Insights: io_time +30% in the 12:00 bucket, lock_time flat.
+
 **Owning workflow / mitigation (not applied):** raise the Cloud SQL data disk (PD-SSD IOPS and MB/s scale
 linearly with GB; 49 -> 200 GB roughly quadruples the ceiling, online, no restart) in the Terraform root
 that owns `google_sql_database_instance` for `orca-cloud-auth-db`, applied through that root's workflow.
-Per the standing rule, not applied from this session. Until then the fleet-wide 4–6 s stalls recur on
+A second, flag-level lever is raising `max_wal_size` (default 1 GB) so timed checkpoints resume; that is
+also a Cloud SQL instance setting in the owning Terraform root. Per the standing rule, not applied from
+this session. Until then the fleet-wide 4–6 s stalls recur on
 every slow checkpoint sync, the old-image cells die on each one, and no 15-min gate window will exist.
 
 ## Roll inputs (verified by the read-only `verify` run)
