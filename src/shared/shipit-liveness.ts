@@ -75,16 +75,6 @@ export function getShipItLivenessForBundle(bundlePath: string): ShipItLiveness {
   }
 }
 
-/** Destructive cleanup requires positive evidence of absence; uncertainty never qualifies. */
-export function isShipItProvenExited(bundlePath: string): boolean {
-  return getShipItLivenessForBundle(bundlePath) === 'exited'
-}
-
-/** True while the installer may still be working — live, or we could not tell. */
-export function mayShipItBeRunning(bundlePath: string): boolean {
-  return getShipItLivenessForBundle(bundlePath) !== 'exited'
-}
-
 /** Read process birth times in one bounded probe so marker count cannot multiply subprocesses. */
 export function getProcessStartTimes(pids: readonly number[]): ReadonlyMap<number, number> | null {
   const uniquePids = [...new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0))]

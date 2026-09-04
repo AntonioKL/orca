@@ -26,10 +26,7 @@ import {
   getShipItLivenessForBundle,
   isRecordedProcessAlive
 } from '../shared/shipit-liveness'
-import { clearWedgedShipItState } from './mac-update-shipit-state'
 import { recordUpdaterLifecycle } from './updater-lifecycle-diagnostics'
-
-export { _setShipItStatePathForTests, canDeleteShipItState } from './mac-update-shipit-state'
 
 /**
  * Publish "an install is in flight for this bundle" where a launching process can see it.
@@ -271,12 +268,8 @@ export function reconcileMacUpdateInstallMarker(): void {
   //
   // Only the reported attempt is settled. An unexpired older sibling can therefore report its own
   // outcome on a later startup — telemetry noise, bounded by expiry, and preferable to settling
-  // attempts this pass never examined. The ShipIt cleanup below stays guarded by proven-exited, so
-  // a duplicate report cannot act on a swap that has since become real.
+  // attempts this pass never examined.
   settleMacUpdateInstallMarker(marker)
-  if (!applied) {
-    clearWedgedShipItState(bundlePath)
-  }
 }
 
 /**

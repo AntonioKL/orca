@@ -1,12 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync
-} from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -16,7 +8,6 @@ const {
   getVersionMock,
   recordUpdaterLifecycleMock,
   markerPathRef,
-  isShipItProvenExitedMock,
   getShipItLivenessMock,
   getProcessStartTimesMock,
   isProcessAliveMock
@@ -24,7 +15,6 @@ const {
   getVersionMock: vi.fn(),
   recordUpdaterLifecycleMock: vi.fn(),
   markerPathRef: { dir: '', bundle: '/Applications/Orca.app' },
-  isShipItProvenExitedMock: vi.fn(),
   getShipItLivenessMock: vi.fn(),
   getProcessStartTimesMock: vi.fn(),
   isProcessAliveMock: vi.fn()
@@ -35,7 +25,6 @@ vi.mock('./updater-lifecycle-diagnostics', () => ({
   recordUpdaterLifecycle: recordUpdaterLifecycleMock
 }))
 vi.mock('../shared/shipit-liveness', () => ({
-  isShipItProvenExited: isShipItProvenExitedMock,
   getShipItLivenessForBundle: getShipItLivenessMock,
   getProcessStartTimes: getProcessStartTimesMock,
   isRecordedProcessAlive: isProcessAliveMock
@@ -73,8 +62,6 @@ vi.mock('../shared/mac-update-install-marker', async (importOriginal) => {
 
 import type * as MarkerModule from '../shared/mac-update-install-marker'
 import {
-  _setShipItStatePathForTests,
-  canDeleteShipItState,
   isMacUpdateInstallInFlight,
   markMacUpdateInstallInFlight,
   reconcileMacUpdateInstallMarker,
@@ -116,21 +103,16 @@ beforeEach(() => {
   markerPathRef.bundle = '/Applications/Orca.app'
   recordUpdaterLifecycleMock.mockReset()
   getVersionMock.mockReset()
-  isShipItProvenExitedMock.mockReset()
-  isShipItProvenExitedMock.mockReturnValue(false)
   getShipItLivenessMock.mockReset()
   getShipItLivenessMock.mockReturnValue('live')
   getProcessStartTimesMock.mockReset()
   getProcessStartTimesMock.mockReturnValue(new Map())
   isProcessAliveMock.mockReset()
   isProcessAliveMock.mockReturnValue(false)
-  // Never let a test resolve this to the real Squirrel cache.
-  _setShipItStatePathForTests(join(dir, 'ShipItState.plist'))
 })
 
 afterEach(() => {
   Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
-  _setShipItStatePathForTests(null)
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -234,38 +216,6 @@ describe('shouldExitForInFlightMacUpdateInstall', () => {
   })
 })
 
-describe('reconcile safety', () => {
-  it('leaves the installer state alone while a swap is still running', () => {
-    // A Dock or alternate-profile launch can reconcile while ShipIt is legitimately mid-swap;
-    // deleting its state there would cancel a working install.
-    const shipItState = join(dir, 'ShipItState.plist')
-    writeFileSync(shipItState, 'live installer state', 'utf8')
-    writeMarker()
-    getVersionMock.mockReturnValue('1.4.194')
-    isShipItProvenExitedMock.mockReturnValue(false)
-
-    reconcileMacUpdateInstallMarker()
-
-    expect(lifecycleNames()).toContain('install_did_not_apply')
-    expect(existsSync(shipItState)).toBe(true)
-  })
-
-  it('clears state left by an installer that is gone, which otherwise blocks updates forever', () => {
-    // #14732 needed this deleted by hand; a resumed stale state pins the machine to an update
-    // that can never complete.
-    const shipItState = join(dir, 'ShipItState.plist')
-    writeFileSync(shipItState, 'stale installer state', 'utf8')
-    writeMarker()
-    getVersionMock.mockReturnValue('1.4.194')
-    isShipItProvenExitedMock.mockReturnValue(true)
-
-    reconcileMacUpdateInstallMarker()
-
-    expect(existsSync(shipItState)).toBe(false)
-    expect(lifecycleNames()).toContain('shipit_state_cleared')
-  })
-})
-
 describe('startup gate liveness', () => {
   it('exits during the pre-spawn window, before the installer exists', () => {
     // Pins the writerAlive wiring in the startup gate. Without it, reverting to a bare liveness
@@ -320,25 +270,14 @@ describe('startup gate liveness', () => {
     expect(shouldExitForInFlightMacUpdateInstall()).toBe(false)
   })
 
-  it('refuses to resolve a real home path under test, and allows it in production', () => {
-    // Asserting the decision directly. An absence check cannot tell "the guard worked" from "the
-    // real file happened not to exist" — which is how this test passed while still being able to
-    // delete a developer's own Squirrel state.
-    expect(canDeleteShipItState({ hasPathOverride: false, isUnderTest: true })).toBe(false)
-    expect(canDeleteShipItState({ hasPathOverride: true, isUnderTest: true })).toBe(true)
-    expect(canDeleteShipItState({ hasPathOverride: false, isUnderTest: false })).toBe(true)
-  })
-
-  it('keeps a concurrent install whose owner is still running', () => {
-    // Reconcile reads then clears; an install committed in between must survive, or the next
-    // launch is free to cancel it.
+  it('keeps an install committed while an older attempt is being settled', () => {
+    // Reconcile reads then renames one exact attempt; a concurrently written one must survive.
     writeMarker({ targetVersion: '1.4.195', createdAtMs: Date.now() - 30_000 })
     getVersionMock.mockReturnValue('1.4.194')
     const original = reconcileMacUpdateInstallMarker
-    // Simulate the race by rewriting the marker between read and clear.
+    // Simulate the race by writing another marker between read and settle.
     recordUpdaterLifecycleMock.mockImplementation(() => {
-      // A live owner (this process) means the attempt is still going; only a dead owner's marker
-      // is spent. A wall-clock cutoff would have wrongly cleared this.
+      // A live owner (this process) means the new attempt is still going.
       writeMarker({
         targetVersion: '1.4.196',
         createdAtMs: Date.now(),
