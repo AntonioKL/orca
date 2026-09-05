@@ -59,6 +59,8 @@ export type AgentSessionBackgroundTaskState = {
   state: 'monitoring'
   /** Optional so mixed-version clients can consume state-only hosts. */
   tasks?: AgentSessionBackgroundTask[]
+  /** Optional so clients only send targeted stops to hosts that accept them. */
+  supportsTaskStop?: boolean
 }
 
 /** Backward paging is the client's normal read; 40 matches the page size the
