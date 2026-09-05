@@ -28,6 +28,8 @@ type StatuslessCodexSubmitDependencies<TWaiter extends OrchestrationMessageWaite
   getMessageWaiters: (mailboxHandle: string) => ReadonlySet<TWaiter> | undefined
   getTerminalProcessIncarnation: (terminalHandle: string) => string | null
   submitStatuslessCodexPointer: SubmitStatuslessCodexPointer
+  deferRedriveUntilPtyOutput: (ptyId: string, mailboxHandle: string, sequence: number) => boolean
+  clearDeferredOutputRedrive: (ptyId: string, mailboxHandle: string, sequence: number) => void
   settle: (ptyId: string, flight: OrchestrationMailboxDeliveryFlight) => void
   redrive: (mailboxHandle: string, force?: boolean) => void
 }
@@ -61,6 +63,7 @@ export function submitStatuslessCodexMailboxPointer<TWaiter extends Orchestratio
   let submitted = false
   let clearAndRedrive = false
   let releaseWithoutRedrive = false
+  let deferredUntilOutput = false
   let finalizeReservation = true
   void Promise.resolve()
     .then(() =>
@@ -100,14 +103,20 @@ export function submitStatuslessCodexMailboxPointer<TWaiter extends Orchestratio
       const state = targetState(deps, input, ptyId, flight)
       clearAndRedrive = state === 'invalid'
       releaseWithoutRedrive = state === 'released'
+      deferredUntilOutput =
+        state === 'current' &&
+        deps.deferRedriveUntilPtyOutput(ptyId, input.mailboxHandle, input.newestSequence)
     })
     .finally(() => {
       let released = false
       if (finalizeReservation) {
         released =
-          submitted || clearAndRedrive || releaseWithoutRedrive
+          submitted || clearAndRedrive || releaseWithoutRedrive || deferredUntilOutput
             ? deps.state.clearWatermark(input.mailboxHandle, input.newestSequence, ptyId)
             : deps.state.deactivateWatermark(input.mailboxHandle, input.newestSequence, ptyId)
+      }
+      if (submitted) {
+        deps.clearDeferredOutputRedrive(ptyId, input.mailboxHandle, input.newestSequence)
       }
       deps.settle(ptyId, flight)
       if (released && clearAndRedrive) {

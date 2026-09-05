@@ -4,6 +4,7 @@ import type { OrchestrationMessageWaiter } from './mailbox-pointer-eligibility'
 import type { OrchestrationMailboxLeaf, OrchestrationMailboxOwner } from './mailbox-owner'
 import { getOrchestrationMailboxPointerCandidates } from './mailbox-pointer-candidates'
 import { OrchestrationMailboxStatuslessCodexProofCoordinator } from './mailbox-statusless-codex-proof-coordinator'
+import { OrchestrationMailboxStatuslessCodexRedrive } from './mailbox-statusless-codex-redrive'
 import { isStatuslessIdleProofCurrent } from './mailbox-statusless-idle-proof'
 import { stageOrchestrationMailboxPointer } from './mailbox-pointer-stage'
 import type { SubmitStatuslessCodexPointer } from './mailbox-statusless-codex-submit'
@@ -39,9 +40,13 @@ type PointerDeliveryDependencies<TWaiter extends OrchestrationMessageWaiter> = {
 export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMessageWaiter> {
   private readonly state = new OrchestrationMailboxPointerState()
   private readonly statuslessCodexProofs: OrchestrationMailboxStatuslessCodexProofCoordinator
+  private readonly statuslessCodexRedrives: OrchestrationMailboxStatuslessCodexRedrive
 
   constructor(private readonly deps: PointerDeliveryDependencies<TWaiter>) {
     this.statuslessCodexProofs = new OrchestrationMailboxStatuslessCodexProofCoordinator(deps)
+    this.statuslessCodexRedrives = new OrchestrationMailboxStatuslessCodexRedrive((mailboxHandle) =>
+      this.redrive(mailboxHandle, true)
+    )
   }
 
   deliverForHandle(handle: string, reservedTypes?: ReadonlySet<string>): void {
@@ -122,7 +127,7 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
     if (!db || !mailboxHandle.startsWith('run:')) {
       return
     }
-    if (!this.deps.getTerminalHandleForLeafKey(this.leafKey(leaf))) {
+    if (!this.deps.getTerminalHandleForLeafKey(this.deps.getLeafKey(leaf.tabId, leaf.leafId))) {
       return
     }
     if (
@@ -171,7 +176,7 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
         mailboxHandle,
         newestSequence,
         leaf.ptyId,
-        this.leafKey(leaf)
+        this.deps.getLeafKey(leaf.tabId, leaf.leafId)
       )
     ) {
       return
@@ -202,7 +207,19 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
           ? { requestSleepingRecipientWake: this.deps.requestSleepingRecipientWake }
           : {}),
         ...(this.deps.submitStatuslessCodexPointer
-          ? { submitStatuslessCodexPointer: this.deps.submitStatuslessCodexPointer }
+          ? {
+              submitStatuslessCodexPointer: this.deps.submitStatuslessCodexPointer,
+              deferRedriveUntilPtyOutput: (
+                ptyId: string,
+                mailboxHandle: string,
+                sequence: number
+              ) => this.statuslessCodexRedrives.schedule(ptyId, mailboxHandle, sequence),
+              clearDeferredOutputRedrive: (
+                ptyId: string,
+                mailboxHandle: string,
+                sequence: number
+              ) => this.statuslessCodexRedrives.clear(ptyId, mailboxHandle, sequence)
+            }
           : {}),
         writePty: this.deps.writePty,
         settle: (settledPtyId, settledFlight) => this.settle(settledPtyId, settledFlight),
@@ -224,6 +241,7 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
 
   retirePty(ptyId: string): void {
     this.statuslessCodexProofs.retirePty(ptyId)
+    this.statuslessCodexRedrives.retirePty(ptyId)
     const { flight, releasedMailboxes } = this.state.retirePty(ptyId)
     if (flight?.enterTimer != null) {
       clearTimeout(flight.enterTimer)
@@ -236,13 +254,17 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
     }
   }
 
+  redriveAfterPtyOutput(ptyId: string): void {
+    this.statuslessCodexRedrives.handlePtyOutput(ptyId)
+  }
+
   private redeliverAfterProbe(
     leaf: OrchestrationMailboxLeaf,
     ptyId: string,
     mailboxHandle: string,
     statuslessIdleProof?: OrchestrationStatuslessIdleProof
   ): void {
-    const currentLeaf = this.deps.getLeaf(this.leafKey(leaf))
+    const currentLeaf = this.deps.getLeaf(this.deps.getLeafKey(leaf.tabId, leaf.leafId))
     if (
       currentLeaf?.ptyId === ptyId &&
       ((currentLeaf.lastAgentStatus === 'idle' && currentLeaf.lastAgentStatusObservedLive) ||
@@ -267,7 +289,9 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
       return
     }
     for (const [mailboxHandle, delivery] of parked) {
-      const currentLeaf = this.deps.getLeaf(this.leafKey(delivery.leaf))
+      const currentLeaf = this.deps.getLeaf(
+        this.deps.getLeafKey(delivery.leaf.tabId, delivery.leaf.leafId)
+      )
       if (
         currentLeaf?.ptyId !== ptyId ||
         this.deps.mailboxOwner.resolve(currentLeaf, mailboxHandle) !== mailboxHandle
@@ -296,9 +320,5 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
         // Durable mail remains available to explicit check or a later idle edge.
       }
     })
-  }
-
-  private leafKey(leaf: OrchestrationMailboxLeaf): string {
-    return this.deps.getLeafKey(leaf.tabId, leaf.leafId)
   }
 }

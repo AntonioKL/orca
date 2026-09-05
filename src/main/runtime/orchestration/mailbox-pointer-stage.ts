@@ -33,6 +33,8 @@ type PointerStageDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   isLeafPtyProvenAbsent: (ptyId: string) => Promise<boolean>
   requestSleepingRecipientWake?: (mailboxHandle: string) => void
   submitStatuslessCodexPointer?: SubmitStatuslessCodexPointer
+  deferRedriveUntilPtyOutput?: (ptyId: string, mailboxHandle: string, sequence: number) => boolean
+  clearDeferredOutputRedrive?: (ptyId: string, mailboxHandle: string, sequence: number) => void
   writePty: (ptyId: string, data: string) => boolean | Promise<boolean>
   settle: (ptyId: string, flight: OrchestrationMailboxDeliveryFlight) => void
   redrive: (mailboxHandle: string, force?: boolean) => void
@@ -63,7 +65,12 @@ export function stageOrchestrationMailboxPointer<TWaiter extends OrchestrationMe
   ) {
     return
   }
-  if (input.statuslessIdleProof && deps.submitStatuslessCodexPointer) {
+  if (
+    input.statuslessIdleProof &&
+    deps.submitStatuslessCodexPointer &&
+    deps.deferRedriveUntilPtyOutput &&
+    deps.clearDeferredOutputRedrive
+  ) {
     submitStatuslessCodexMailboxPointer(
       {
         mailboxOwner: deps.mailboxOwner,
@@ -74,6 +81,8 @@ export function stageOrchestrationMailboxPointer<TWaiter extends OrchestrationMe
         getMessageWaiters: deps.getMessageWaiters,
         getTerminalProcessIncarnation: deps.getTerminalProcessIncarnation,
         submitStatuslessCodexPointer: deps.submitStatuslessCodexPointer,
+        deferRedriveUntilPtyOutput: deps.deferRedriveUntilPtyOutput,
+        clearDeferredOutputRedrive: deps.clearDeferredOutputRedrive,
         settle: deps.settle,
         redrive: deps.redrive
       },

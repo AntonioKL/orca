@@ -35,7 +35,11 @@ function makeHarness(
     db.insertMessage({ from: 'term-sender', to: MAILBOX, subject: 'wake work' })
   }
   const writePty = vi.fn().mockReturnValue(true)
-  const delivery = new OrchestrationMailboxPointerDelivery({
+  let delivery: OrchestrationMailboxPointerDelivery<never>
+  const redriveMailbox = vi.fn((mailboxHandle: string) => {
+    delivery.deliverForHandle(mailboxHandle)
+  })
+  delivery = new OrchestrationMailboxPointerDelivery({
     mailboxOwner: { resolve: () => MAILBOX } as unknown as OrchestrationMailboxOwner,
     deliveryTarget: {
       resolveTerminalHandle: () => TERMINAL_HANDLE,
@@ -51,7 +55,7 @@ function makeHarness(
     getTerminalProcessIncarnation: () => processIncarnation,
     isLeafPtyProvenAbsent: () => Promise.resolve(false),
     proveStatuslessCodexIdle,
-    redriveMailbox: () => undefined,
+    redriveMailbox,
     ...(options.submitStatuslessCodexPointer
       ? { submitStatuslessCodexPointer: options.submitStatuslessCodexPointer }
       : {}),
@@ -67,6 +71,7 @@ function makeHarness(
     setProcessIncarnation: (next: string) => {
       processIncarnation = next
     },
+    redriveMailbox,
     writePty
   }
 }
@@ -228,6 +233,48 @@ describe('statusless Codex mailbox pointer delivery', () => {
     expect(submitStatuslessCodexPointer).toHaveBeenCalledTimes(1)
     expect(harness.db.getUnreadMessages(MAILBOX)[0]?.delivered_at).toBeNull()
     expect(harness.writePty).not.toHaveBeenCalled()
+  })
+
+  it('retries once when ready output arrived before foreground ownership settled', async () => {
+    const firstSubmission = deferred<void>()
+    const submitStatuslessCodexPointer = vi
+      .fn<SubmitStatuslessCodexPointer>()
+      .mockImplementationOnce(async () => firstSubmission.promise)
+      .mockResolvedValueOnce()
+    const harness = makeHarness(() => Promise.resolve('pty-1:incarnation-1'), {
+      submitStatuslessCodexPointer
+    })
+
+    harness.delivery.deliverForHandle(MAILBOX)
+    await vi.waitFor(() => expect(submitStatuslessCodexPointer).toHaveBeenCalledTimes(1))
+    harness.delivery.redriveAfterPtyOutput('pty-1')
+    firstSubmission.reject(new Error('foreground_not_ready'))
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(submitStatuslessCodexPointer).toHaveBeenCalledTimes(2))
+
+    expect(harness.redriveMailbox).toHaveBeenCalledTimes(1)
+    expect(harness.db.getUnreadMessages(MAILBOX)[0]?.delivered_at).toEqual(expect.any(String))
+  })
+
+  it('bounds a permanent structured submission failure to one retry', async () => {
+    const submitStatuslessCodexPointer = vi
+      .fn<SubmitStatuslessCodexPointer>()
+      .mockRejectedValue(new Error('foreground_not_ready'))
+    const harness = makeHarness(() => Promise.resolve('pty-1:incarnation-1'), {
+      submitStatuslessCodexPointer
+    })
+
+    harness.delivery.deliverForHandle(MAILBOX)
+    await vi.waitFor(() => expect(submitStatuslessCodexPointer).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(submitStatuslessCodexPointer).toHaveBeenCalledTimes(2))
+    harness.delivery.redriveAfterPtyOutput('pty-1')
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(submitStatuslessCodexPointer).toHaveBeenCalledTimes(2)
+    expect(harness.redriveMailbox).toHaveBeenCalledTimes(1)
+    expect(harness.db.getUnreadMessages(MAILBOX)[0]?.delivered_at).toBeNull()
   })
 
   it('requeues staged mail when the process is replaced before submit', async () => {

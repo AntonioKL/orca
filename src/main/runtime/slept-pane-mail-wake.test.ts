@@ -6,6 +6,7 @@ import type { WorkspaceSessionState } from '../../shared/workspace-session-state
 import {
   InMemoryOrchestrationMessages,
   TEST_WORKTREE_ID,
+  deferred,
   makeRuntimeStoreWithWorkspaceSession,
   setInMemoryOrchestrationMessages
 } from './orca-runtime-test-fixtures.spec'
@@ -23,6 +24,12 @@ import { OrcaRuntimeService } from './orca-runtime-test-mocks.spec'
 const TAB_ID = 'tab-slept'
 const LEAF_ID = '11111111-1111-4111-8111-111111111111'
 const PANE_KEY = `${TAB_ID}:${LEAF_ID}`
+
+async function flushMicrotasks(): Promise<void> {
+  for (let index = 0; index < 10; index += 1) {
+    await Promise.resolve()
+  }
+}
 
 function sleepingRecord(
   overrides: Partial<SleepingAgentSessionRecord> = {}
@@ -61,6 +68,7 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
   connected: boolean
   tabMountSends: unknown[][]
   write: ReturnType<typeof vi.fn>
+  confirmForegroundProcess: ReturnType<typeof vi.fn>
   remountWithPty: (ptyId: string) => void
   remountStatuslessCodex: (ptyId: string) => void
   setForegroundProcess: (process: string | null) => void
@@ -76,12 +84,14 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
   let foregroundProcess: string | null = null
   let confirmedForegroundProcess: string | null | undefined
   let foregroundConfirmationSupported = true
+  const confirmForegroundProcess = vi.fn(async () =>
+    confirmedForegroundProcess === undefined ? foregroundProcess : confirmedForegroundProcess
+  )
   runtime.setPtyController({
     write,
     kill: vi.fn(),
     getForegroundProcess: async () => foregroundProcess,
-    confirmForegroundProcess: async () =>
-      confirmedForegroundProcess === undefined ? foregroundProcess : confirmedForegroundProcess,
+    confirmForegroundProcess,
     supportsForegroundProcessConfirmation: () => foregroundConfirmationSupported
   } as never)
   runtime.attachWindow(1)
@@ -143,6 +153,7 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
     connected: row!.connected,
     tabMountSends,
     write,
+    confirmForegroundProcess,
     setForegroundProcess: (process) => {
       foregroundProcess = process
     },
@@ -507,6 +518,67 @@ describe('mail addressed to a listed slept pane', () => {
       )
       expect(write).not.toHaveBeenCalledWith('pty-codex-woken', '\r')
       expect(message.delivered_at).toBeNull()
+      db.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('retries after a resumed Codex takes foreground just after its restored screen appears', async () => {
+    vi.useFakeTimers()
+    try {
+      const {
+        runtime,
+        db,
+        handle,
+        write,
+        confirmForegroundProcess,
+        remountStatuslessCodex,
+        setForegroundProcess
+      } = await sleptPaneRuntime(sleepingRecord({ agent: 'codex' }))
+      db.setRun({ id: 'run_test', coordinator_handle: handle, coordinator_pane_key: PANE_KEY })
+      const message = db.insertMessage({
+        from: 'term_worker',
+        to: 'run:run_test',
+        subject: 'worker done',
+        type: 'worker_done'
+      })
+      runtime.notifyMessageArrived('run:run_test', 'worker_done')
+      await Promise.resolve()
+      await Promise.resolve()
+
+      const firstForegroundConfirmation = deferred<string | null>()
+      confirmForegroundProcess
+        .mockImplementationOnce(() => firstForegroundConfirmation.promise)
+        .mockResolvedValue('codex')
+      setForegroundProcess('codex')
+      write.mockImplementation((ptyId: string, data: string) => {
+        if (data === '\r') {
+          runtime.onPtyData(ptyId, '\x1b]0;Codex working\x07', 102)
+        }
+        return true
+      })
+      remountStatuslessCodex('pty-codex-woken')
+      await vi.advanceTimersByTimeAsync(2_000)
+      await vi.waitFor(() => expect(confirmForegroundProcess).toHaveBeenCalledTimes(1))
+      runtime.onPtyData('pty-codex-woken', 'restored output\n', 101)
+      firstForegroundConfirmation.resolve('zsh')
+      await flushMicrotasks()
+      expect(write).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(12_000)
+      expect(confirmForegroundProcess).toHaveBeenCalledTimes(3)
+      await vi.waitFor(() =>
+        expect(write).toHaveBeenCalledWith(
+          'pty-codex-woken',
+          expect.stringContaining(
+            `${AGENT_PROMPT_BRACKETED_PASTE_START}\nYou have 1 orchestration message`
+          )
+        )
+      )
+
+      expect(write).toHaveBeenCalledWith('pty-codex-woken', '\r')
+      expect(message.delivered_at).toEqual(expect.any(String))
       db.close()
     } finally {
       vi.useRealTimers()
