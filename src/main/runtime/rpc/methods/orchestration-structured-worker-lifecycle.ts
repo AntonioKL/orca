@@ -34,6 +34,7 @@ import {
   structuredWorkerAgent,
   type StructuredWorkerObservation
 } from '../../structured-worker-authority'
+import { retireSettledStructuredWorkerTab } from '../../structured-agent-session-tab-retirement'
 import type { StructuredWorkerIdentity } from '../../structured-worker-identity'
 import { releaseStructuredWorkerSession } from './orchestration-structured-worker-session'
 
@@ -62,7 +63,10 @@ export function resolveStructuredWorkerForDispatch(
 export async function stopStructuredWorker(
   identity: StructuredWorkerIdentity,
   dispatchId: string,
-  runtime?: Pick<OrcaRuntimeService, 'forgetStructuredSessionMail'>
+  runtime?: Pick<
+    OrcaRuntimeService,
+    'forgetStructuredSessionMail' | 'retireStructuredAgentSessionTabFromSnapshot'
+  >
 ): Promise<{ stopped: boolean; reason?: string }> {
   const host = getStructuredAgentSessionHost()
   if (!host) {
@@ -79,9 +83,13 @@ export async function stopStructuredWorker(
   }
   releaseStructuredWorkerSession(dispatchId, runtime)
   const after = observeStructuredWorker(identity)
-  return after.status === 'live'
-    ? { stopped: false, reason: 'The structured session is still attached after close.' }
-    : { stopped: true }
+  if (after.status === 'live') {
+    return { stopped: false, reason: 'The structured session is still attached after close.' }
+  }
+  // Only past the proof, and structurally unable to throw: the worker's chat tab is retired from
+  // the live snapshot, which `setSessionTabVisibility(false)` above does not do.
+  retireSettledStructuredWorkerTab(identity.sessionId, runtime)
+  return { stopped: true }
 }
 
 /** The structured half of `worker-read`, or null when a PTY worker owns the dispatch. */

@@ -23,6 +23,7 @@ import {
   structuredPointerPayloadFingerprint
 } from '../../orchestration/structured-pointer-operation-id'
 import { structuredPointerCallerKey } from '../../orchestration/structured-mailbox-pointer-host'
+import { retireSettledStructuredWorkerTab } from '../../structured-agent-session-tab-retirement'
 import {
   mintStructuredWorkerHandle,
   structuredWorkerHostScope,
@@ -150,7 +151,7 @@ export async function createStructuredWorkerSession(args: {
     // that no dispatch owns and that nothing else in the runtime will ever retire.
     structuredWorkerIdentities.forget(identity.handle)
     if (structuredCreateMayHaveCommitted(created)) {
-      await discardCreatedSession(sessionId)
+      await discardCreatedSession(sessionId, args.runtime)
     }
     throw error
   }
@@ -174,13 +175,16 @@ function structuredCreateMayHaveCommitted(
 /**
  * Best-effort teardown of a session created by a worker start that then failed.
  *
- * Stops the provider child and drops the DURABLE tab reference, so nothing restores the chat after
- * a restart. It does not prune the live tab snapshot — the same shape `agentSession.close` has,
- * where the surface that opened the tab is what retires it — so the background tab this start
- * published stays on screen for the rest of the session. Both calls are no-ops for a session that
- * was never attached, which is why a non-definitive refusal can reach here unconditionally.
+ * Stops the provider child, drops the DURABLE tab reference so nothing restores the chat after a
+ * restart, and — only once the close came back without throwing — retires the background tab this
+ * start published from the live snapshot. All three are no-ops for a session that was never
+ * attached, which is why a non-definitive refusal can reach here unconditionally. A close that
+ * threw leaves the tab alone: the child may still be running, and the tab is the way to reach it.
  */
-async function discardCreatedSession(sessionId: string): Promise<void> {
+async function discardCreatedSession(
+  sessionId: string,
+  runtime: Pick<OrcaRuntimeService, 'retireStructuredAgentSessionTabFromSnapshot'>
+): Promise<void> {
   const host = getStructuredAgentSessionHost()
   if (!host) {
     return
@@ -194,7 +198,9 @@ async function discardCreatedSession(sessionId: string): Promise<void> {
       sessionId,
       error
     )
+    return
   }
+  retireSettledStructuredWorkerTab(sessionId, runtime)
 }
 
 /** Delivers the dispatch preamble as the worker's first turn. */
