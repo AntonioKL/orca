@@ -72,7 +72,12 @@ const CENSUS: readonly CensusRow[] = [
   {
     path: 'main/ipc/agent-status-ipc-boundary.ts',
     kind: 'produces',
-    role: 'enrichAgentStatusIpcPayload — the one enricher the pull and fleet paths share'
+    role: 'resolveAgentStatusBinding — the one identity lookup the pull and fleet paths share'
+  },
+  {
+    path: 'main/runtime/orchestration-fleet-agent-status-snapshot.ts',
+    kind: 'produces',
+    role: 'readOrchestrationFleetAgentStatusSnapshot — the minted fleet evidence (driven below)'
   },
   {
     path: 'main/startup/main-window-agent-status.ts',
@@ -97,7 +102,7 @@ const CENSUS: readonly CensusRow[] = [
   {
     path: 'main/runtime/orca-runtime-get-orchestration-dispatch-authority.ts',
     kind: 'produces',
-    role: 'getOrchestrationFleetAgentStatusSnapshot — the enriched fleet rows (driven below)'
+    role: 'getOrchestrationFleetAgentStatusSnapshot — delegates to the checked snapshot module'
   },
   {
     path: 'main/runtime/orca-runtime-stop-requested-pty-ids.ts',
@@ -148,7 +153,7 @@ const CENSUS: readonly CensusRow[] = [
 
 /** The names a hook row travels under. A new producer has to use one of them to reach a consumer. */
 const PRODUCER_TOKENS =
-  /getAgentStatusSnapshot|getAgentProviderSessionSnapshot|enrichAgentStatusIpcPayload|getOrchestrationFleetAgentStatusSnapshot|agentStatus:set/
+  /getAgentStatusSnapshot|getAgentProviderSessionSnapshot|enrichAgentStatusIpcPayload|mintAgentStatusFleetEvidence|resolveAgentStatusBinding|getOrchestrationFleetAgentStatusSnapshot|agentStatus:set/
 
 const PANE_KEY = 'tab-census:leaf-census'
 const TERMINAL_HANDLE = 'term_census'

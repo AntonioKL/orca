@@ -15,7 +15,7 @@ import {
 } from './orchestration/cli-command'
 import { getAppEnvironment } from '../../shared/app-environment'
 import type { FleetAgentStatusEvidence } from '../../shared/orchestration-fleet-agent-status-evidence'
-import { mintAgentStatusFleetEvidence } from '../ipc/agent-status-ipc-boundary'
+import { readOrchestrationFleetAgentStatusSnapshot } from './orchestration-fleet-agent-status-snapshot'
 
 export class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntimeWithVerifyOrchestrationCompatibilityCaller {
   /** Every pane key this PTY could be addressed by, including restored receipts. */
@@ -194,14 +194,8 @@ export class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntim
       : undefined
   }
 
-  /** Push-fed hook rows for local read-only fleet projection; callers must redact payload text. */
   getOrchestrationFleetAgentStatusSnapshot(): readonly FleetAgentStatusEvidence[] {
-    // Why: hook rows carry only a pane key, but the fleet matcher compares terminal identity.
-    // Minting evidence here is what stops every local worker failing identity and projecting
-    // `missing_status` while it is demonstrably running.
-    return (this.getAgentStatusSnapshotFn?.() ?? []).map((entry) =>
-      mintAgentStatusFleetEvidence(entry, this)
-    )
+    return readOrchestrationFleetAgentStatusSnapshot(this)
   }
 
   getTerminalOrchestrationCliCommand(handle: string): OrchestrationCliCommand {
