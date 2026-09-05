@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import { prepareWorktreeCreateStandby } from '../../../worktree-create-standby'
 import { prefetchWorktreeCreateBase } from '../../../worktree-create-base-prefetch'
 import { prepareWorktreeCreateForRepo } from '../../../worktree-create-preparation'
 import { getWorktreeCreatePrefetchGitOptions } from '../../../project-runtime-git-options'
@@ -6,6 +7,21 @@ import type { WorktreeIpcContext } from '../worktree-ipc-context'
 
 export function registerWorktreePrefetchHandler(context: WorktreeIpcContext): void {
   const { store, runtime } = context
+
+  ipcMain.handle(
+    'worktrees:prepareCreateCheckout',
+    async (_event, args: { repoId: string; baseBranch?: string }): Promise<void> => {
+      const repo = store.getRepo(args.repoId)
+      if (!repo) {
+        return
+      }
+      try {
+        await prepareWorktreeCreateStandby(store, repo, args.baseBranch)
+      } catch {
+        // Speculative failure must not interrupt the active workspace.
+      }
+    }
+  )
 
   ipcMain.handle(
     'worktrees:prefetchCreateBase',

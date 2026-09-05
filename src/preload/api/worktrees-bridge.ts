@@ -41,6 +41,8 @@ export const worktreesApi = {
     return () => ipcRenderer.removeListener('createWorktree:progress', listener)
   },
 
+  prepareCreateCheckout: (args) => ipcRenderer.invoke('worktrees:prepareCreateCheckout', args),
+
   prefetchCreateBase: (args) => ipcRenderer.invoke('worktrees:prefetchCreateBase', args),
 
   resolvePrBase: (args) => ipcRenderer.invoke('worktrees:resolvePrBase', args),

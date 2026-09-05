@@ -69,6 +69,7 @@ export type WorktreeApi = {
   onCreateProgress: (
     callback: (data: { creationId?: string; phase: 'fetching' | 'creating' }) => void
   ) => () => void
+  prepareCreateCheckout?: (args: { repoId: string; baseBranch?: string }) => Promise<void>
   prefetchCreateBase: (args: { repoId: string; baseBranch?: string }) => Promise<void>
   resolvePrBase: (args: {
     repoId: string
