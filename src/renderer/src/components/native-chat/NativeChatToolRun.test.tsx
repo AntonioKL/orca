@@ -465,7 +465,12 @@ describe('NativeChatToolRun', () => {
       body: {
         kind: 'diff',
         path: 'src/a.ts',
-        patch: { head: '@@ -1 +1 @@\n-was\n+now', truncated: false, byteLength: 24 }
+        patch: {
+          head: '@@ -1 +1 @@\n-was\n+now',
+          truncated: false,
+          byteLength: 24,
+          digest: 'a'.repeat(64)
+        }
       }
     })
 
