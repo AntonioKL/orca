@@ -14,6 +14,8 @@ export type WorktreeSetupLaunch = {
 }
 
 export type WorktreeStartupLaunch = {
+  /** False prepares the terminal without selecting the workspace. */
+  activate?: boolean
   command: string
   env?: Record<string, string>
   launchConfig?: SleepingAgentLaunchConfig

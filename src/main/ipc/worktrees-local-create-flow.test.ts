@@ -626,7 +626,7 @@ describe('registerWorktreeHandlers', () => {
   }
 
   it.each(['new-tab', 'split-horizontal', 'split-vertical'] as const)(
-    'starts blank-shell setup exactly once using %s',
+    'prepares background blank-shell setup exactly once using %s',
     async (setupScriptLaunchMode) => {
       stubStartupWorktreeListing()
       store.getSettings.mockReturnValue({
@@ -644,13 +644,14 @@ describe('registerWorktreeHandlers', () => {
       const result = (await handlers['worktrees:create'](null, {
         repoId: 'repo-1',
         name: 'improve-dashboard',
-        startup: { command: '' }
+        startup: { command: '', activate: false }
       })) as CreateWorktreeResult
       expect(result.startupTerminal?.spawned).toBe(true)
       expect(result.setup).toBeUndefined()
       expect(runtimeStub.createTerminal.mock.calls[0][1]).toMatchObject({
         command: '',
-        activate: true
+        activate: false,
+        surfaceOwner: false
       })
       if (setupScriptLaunchMode === 'new-tab') {
         expect(runtimeStub.createTerminal).toHaveBeenCalledTimes(2)
@@ -757,7 +758,11 @@ describe('registerWorktreeHandlers', () => {
     expect(startupCommand).toBe('claude --prefill test')
     expect(setupCommand).toBe('bash /workspace/repo/.git/orca/setup-runner.sh')
     expect(result.setup).toBeUndefined()
-    expect(result.startupTerminal).toEqual({ spawned: true, surface: 'visible' })
+    expect(result.startupTerminal).toMatchObject({
+      spawned: true,
+      handle: 'term-startup',
+      surface: 'visible'
+    })
     expect(runtimeStub.invalidateWorktreeCatalog).toHaveBeenCalledWith('repo-1')
     expect(runtimeStub.invalidateWorktreeCatalog.mock.invocationCallOrder[0]).toBeLessThan(
       runtimeStub.createTerminal.mock.invocationCallOrder[0]

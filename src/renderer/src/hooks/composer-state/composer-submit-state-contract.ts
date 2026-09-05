@@ -9,5 +9,5 @@ export type ComposerSubmitState = {
   quickSubmitSourcePreparation: Pick<ComposerModel, 'prepareQuickSubmitSource'>
   quickSubmitPreparation: Pick<ComposerModel, 'prepareQuickSubmit'>
   quickCreationExecution: Pick<ComposerModel, 'executeQuickCreation'>
-  quickSubmitAction: Pick<ComposerModel, 'submitQuick'>
+  quickSubmitAction: Pick<ComposerModel, 'submitQuick' | 'prepareQuickWorkspace'>
 }

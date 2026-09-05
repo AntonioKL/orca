@@ -10,6 +10,7 @@ import {
 } from '@/lib/new-workspace'
 import {
   ensureHooksConfirmed,
+  inspectHooksTrust,
   readAndConfirmRuntimeIssueCommand
 } from '@/lib/ensure-hooks-confirmed'
 import { useAppStore } from '@/store'
@@ -51,8 +52,10 @@ export function useQuickSubmitPreparation(input: QuickSubmitPreparationInput) {
     async (
       smartGitHubResolution: PendingSmartGitHubSubmitResolution,
       requestedAgent: TuiAgent | null,
-      workspaceNameSeed: string
+      workspaceNameSeed: string,
+      preparation?: { isCancelled: () => boolean }
     ) => {
+      const isCancelled = () => isSubmissionCancelled() || Boolean(preparation?.isCancelled())
       const source = prepareQuickSubmitSource(
         smartGitHubResolution,
         requestedAgent,
@@ -82,11 +85,14 @@ export function useQuickSubmitPreparation(input: QuickSubmitPreparationInput) {
         selectedRepoHookContextKey &&
         checkedHooksContextKey !== selectedRepoHookContextKey
       ) {
+        if (preparation) {
+          return null
+        }
         let hookCheck: HookCheckResult
         try {
           const hookCheckSettlement = await settleComposerSubmit(
             loadHookCheckForRepo(repoId),
-            isSubmissionCancelled
+            isCancelled
           )
           if (hookCheckSettlement.status === 'cancelled') {
             return null
@@ -109,22 +115,24 @@ export function useQuickSubmitPreparation(input: QuickSubmitPreparationInput) {
       }
 
       if (selectedRepoIsGit && submitSetupConfig && setupPolicy === 'ask' && !setupDecision) {
-        setAdvancedOpen(true)
+        if (!preparation) {
+          setAdvancedOpen(true)
+        }
         return null
       }
 
       const setupTrustSettlement = await settleComposerSubmit(
         selectedRepoIsGit
-          ? ensureHooksConfirmed(
+          ? (preparation ? inspectHooksTrust : ensureHooksConfirmed)(
               useAppStore.getState(),
               repoId,
               'setup',
               selectedRepoExecutionHostId ?? undefined,
               undefined,
-              isSubmissionCancelled
+              isCancelled
             )
           : Promise.resolve<'skip'>('skip'),
-        isSubmissionCancelled
+        isCancelled
       )
 
       if (setupTrustSettlement.status === 'cancelled') {
@@ -132,6 +140,9 @@ export function useQuickSubmitPreparation(input: QuickSubmitPreparationInput) {
       }
 
       const trustDecision = setupTrustSettlement.value
+      if (preparation && trustDecision !== 'run') {
+        return null
+      }
 
       const effectiveSetupDecision: SetupDecision =
         trustDecision === 'skip'
@@ -148,6 +159,10 @@ export function useQuickSubmitPreparation(input: QuickSubmitPreparationInput) {
         submitLinkedIssueNumber !== null &&
         canUseIssueCommandForLinkedItemProvider(submitLinkedWorkItemProvider)
 
+      if (preparation && shouldReadIssueCommand) {
+        return null
+      }
+
       let submitIssueCommandTemplate = ''
 
       let issueCommandTrustDecision: 'run' | 'skip' = 'skip'
@@ -163,9 +178,9 @@ export function useQuickSubmitPreparation(input: QuickSubmitPreparationInput) {
             useAppStore.getState(),
             repoId,
             selectedRepoExecutionHostId,
-            isSubmissionCancelled
+            isCancelled
           ),
-          isSubmissionCancelled
+          isCancelled
         )
         if (issueCommandSettlement.status === 'cancelled') {
           return null
@@ -221,7 +236,7 @@ export function useQuickSubmitPreparation(input: QuickSubmitPreparationInput) {
         selectedRepoIsGit
           ? resolveWorktreeCreateBaseBranch({ explicitBaseBranch: smartSubmitBaseBranch })
           : Promise.resolve(undefined),
-        isSubmissionCancelled
+        isCancelled
       )
 
       if (baseBranchSettlement.status === 'cancelled') {

@@ -140,6 +140,7 @@ export function useComposerSubmitOrchestration(
     workspaceSeedName: target.derivedComposerState.workspaceSeedName
   })
   const multipleCreateReset = useMultipleCreateReset({
+    refreshFallbackCreatureName: target.derivedComposerState.refreshFallbackCreatureName,
     handleClearSmartNameSelection: source.issueSourceActions.handleClearSmartNameSelection,
     lastAutoNameRef: target.asyncComposerState.lastAutoNameRef,
     nameInputRef: target.asyncComposerState.nameInputRef,

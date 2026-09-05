@@ -88,7 +88,8 @@ export type ComposerSubmitModel = {
     workspaceNameSeed: string,
     workspaceRunContext: WorktreeCreationRequest['workspaceRunContext'],
     repoId: string,
-    selectedRepo: Repo
+    selectedRepo: Repo,
+    preparation?: { isCancelled: () => boolean }
   ) => Promise<void>
   prepareFullSubmit: (
     resolution: PendingSmartGitHubSubmitResolution
@@ -99,7 +100,8 @@ export type ComposerSubmitModel = {
   prepareQuickSubmit: (
     resolution: PendingSmartGitHubSubmitResolution,
     requestedAgent: TuiAgent | null,
-    workspaceNameSeed: string
+    workspaceNameSeed: string,
+    preparation?: { isCancelled: () => boolean }
   ) => Promise<PreparedQuickSubmit | null>
   prepareQuickSubmitSource: (
     resolution: PendingSmartGitHubSubmitResolution,
@@ -108,6 +110,7 @@ export type ComposerSubmitModel = {
   ) => QuickSubmitSource | null
   resetForNextCreate: () => void
   submit: () => Promise<void>
+  prepareQuickWorkspace: (isCancelled: () => boolean) => Promise<void>
   submitQuick: (agent: TuiAgent | null) => Promise<void>
   submitFolderTarget: (requestedAgent: TuiAgent | null) => Promise<void>
 }

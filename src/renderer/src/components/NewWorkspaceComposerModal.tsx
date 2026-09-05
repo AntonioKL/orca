@@ -123,6 +123,7 @@ function QuickTabBody({
     onComposerNodeChange,
     nameInputRef,
     submitQuick,
+    prepareQuickWorkspace,
     createDisabled,
     selectAddedProjectRepo
   } = useComposerState({
@@ -182,6 +183,17 @@ function QuickTabBody({
   const handleQuickAgentChange = useCallback((agent: TuiAgent | null) => {
     setQuickAgentOverride(agent)
   }, [])
+
+  useEffect(() => {
+    if (!active || quickAgent !== null || createDisabled) {
+      return
+    }
+    let cancelled = false
+    void prepareQuickWorkspace(() => cancelled)
+    return () => {
+      cancelled = true
+    }
+  }, [active, quickAgent, createDisabled, prepareQuickWorkspace])
 
   const handleCreate = useCallback(async (): Promise<void> => {
     await submitQuick(quickAgent)

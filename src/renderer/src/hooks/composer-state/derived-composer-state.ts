@@ -1,6 +1,6 @@
 import type { DerivedComposerStateInput } from './composer-target-input-contracts'
 
-import { useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { normalizeSparseDirectoryLines, sparseDirectoriesMatch } from '@/lib/sparse-paths'
 import {
   parseGitHubIssueOrPRNumber,
@@ -170,10 +170,19 @@ export function useDerivedComposerState(input: DerivedComposerStateInput) {
 
   const retiredWorktreeNames = useRetiredWorktreeNames(repoId, retiredNamesRefreshKey)
 
-  const fallbackCreatureName = useMemo(
-    () => getSuggestedCreatureName(worktreesByRepo, undefined, retiredWorktreeNames),
-    [worktreesByRepo, retiredWorktreeNames]
+  // Keep the reserved name stable when its real workspace enters the catalog.
+  const [fallbackCreatureName, setFallbackCreatureName] = useState(() =>
+    getSuggestedCreatureName(worktreesByRepo, undefined, retiredWorktreeNames)
   )
+
+  const refreshFallbackCreatureName = useCallback(() => {
+    setFallbackCreatureName((previous) =>
+      getSuggestedCreatureName(worktreesByRepo, undefined, {
+        ...retiredWorktreeNames,
+        names: [...retiredWorktreeNames.names, previous]
+      })
+    )
+  }, [worktreesByRepo, retiredWorktreeNames])
 
   const workspaceSeedName = useMemo(
     () =>
@@ -267,6 +276,7 @@ export function useDerivedComposerState(input: DerivedComposerStateInput) {
     retiredNamesRefreshKey,
     retiredWorktreeNames,
     fallbackCreatureName,
+    refreshFallbackCreatureName,
     workspaceSeedName,
     shouldApplyLinkedOnlyTemplate,
     linkedOnlyTemplatePrompt,

@@ -93,6 +93,7 @@ function useSelectedSourceReset(
     handleClearSmartNameSelection: source.handleClearSmartNameSelection,
     lastAutoNameRef,
     nameInputRef: useRef(null),
+    refreshFallbackCreatureName: vi.fn(),
     setAgentPrompt: vi.fn(),
     setAttachmentPaths: vi.fn(),
     setCreateError: vi.fn(),

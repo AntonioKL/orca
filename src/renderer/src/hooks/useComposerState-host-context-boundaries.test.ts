@@ -771,7 +771,8 @@ describe('useComposerState host-context boundaries', () => {
     expect(submitSection).toContain(
       'const activeEphemeralVmRecipeId = ephemeralVmsEnabled ? selectedEphemeralVmRecipeId : null'
     )
-    expect(submitSection).toContain('recipeId: activeEphemeralVmRecipeId')
+    expect(submitSection).toContain('prepareQuickCreateVmRecipe(')
+    expect(submitSection).toContain('repoId,\n        activeEphemeralVmRecipeId,')
 
     const cardPropsSection = COMPOSER_SOURCE.cardProps
     expect(cardPropsSection).toContain('ephemeralVmRecipes:')

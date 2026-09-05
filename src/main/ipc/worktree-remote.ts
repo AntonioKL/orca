@@ -452,11 +452,16 @@ async function spawnLocalStartupAndSetupTerminals(args: {
       ...(sequencedStartup.viewMode ? { viewMode: sequencedStartup.viewMode } : {}),
       startupCommandDelivery: sequencedStartup.startupCommandDelivery,
       telemetry: sequencedStartup.telemetry,
-      activate: true
+      activate: sequencedStartup.activate !== false,
+      ...(sequencedStartup.activate === false ? { surfaceOwner: false } : {})
     })
     startupTerminalHandle = terminal.handle
     startupTerminal = {
       spawned: true,
+      handle: terminal.handle,
+      tabId: terminal.tabId,
+      paneKey: terminal.paneKey,
+      ptyId: terminal.ptyId,
       surface: terminal.surface
     }
   } catch (error) {

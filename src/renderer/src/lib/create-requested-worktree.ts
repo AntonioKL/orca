@@ -7,7 +7,8 @@ import type { CreateWorktreeResult } from '../../../shared/worktree/create-types
 /** Registers a durable workspace without revealing it or running renderer launch actions. */
 export function createRequestedWorktree(
   creationId: string,
-  preparedRequest: WorktreeCreationRequest
+  preparedRequest: WorktreeCreationRequest,
+  background = false
 ): Promise<CreateWorktreeResult> {
   const provisionedRoot = getProvisionedRootCreateOptions(preparedRequest)
   const structuredLaunch = preparedRequest.agentLaunchRoute === 'structured-native-chat'
@@ -32,7 +33,7 @@ export function createRequestedWorktree(
       preparedRequest.workspaceStatus,
       preparedRequest.linkedGitLabMR,
       preparedRequest.linkedGitLabIssue,
-      backendStartup,
+      backendStartup && background ? { ...backendStartup, activate: false } : backendStartup,
       structuredLaunch ? false : preparedRequest.pendingFirstAgentMessageRename,
       creationId,
       preparedRequest.linkedLinearIssueWorkspaceId,

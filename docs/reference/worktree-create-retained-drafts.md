@@ -4,9 +4,24 @@
 
 The user approved creating a real workspace and running checkout hooks and shell
 profiles before pressing Create, while retaining canceled drafts. This lifecycle
-belongs to the speculative worktree-creation PR, separate from the mechanical
-optimizations. It is not implemented by the current prefetch and backend-startup
-changes.
+belongs to the speculative worktree-creation work, separate from the mechanical
+optimizations. The quick composer's blank-terminal path now starts an ordinary
+persisted workspace, requests background shell startup, and adopts the same result
+on Create. Cancellation retains it in the normal workspace catalog.
+
+Automatic preparation currently requires the direct desktop API and the
+`worktree.background-startup.v1` capability. Runtime-environment and paired-web
+clients use ordinary Create until equivalent ownership/adoption is implemented.
+Agent launches, folder targets, VM recipes, unresolved PR/issue sources and missing
+hook approval are not automatically prepared yet. These remain implementation
+work, not exclusions from the near-instant creation objective.
+
+The optional `startup.activate: false` field leaves selection unchanged. Older
+callers omit it and retain ordinary activation. Preparing clients must verify the
+capability before sending it: an old host can ignore unknown optional fields.
+One automatic creation is allowed per composer; explicit Create more begins a new
+cycle. Edits after creation retain the old workspace and use ordinary Create when
+the final request or execution identity differs.
 
 ## Ownership contract
 
@@ -58,3 +73,18 @@ Before completing the retained-draft implementation, verify rendered warm and
 quick-submit paths, edits/cancellation, ignored and dirty profile output, base
 drift, concurrent names, shell failure, host loss, application crash recovery and
 single-PTY adoption. Verify that canceled drafts remain discoverable after restart.
+
+## First integrated composer measurements (development build, macOS)
+
+A rendered trial on the copied Orca test repository verified one backend create,
+selection unchanged while the composer remained open, then actual terminal input
+and output after Create. Clicking as soon as checkout returned showed the prompt
+after 1157 ms. Waiting another two seconds for shell startup reduced that to
+306.5 ms; typed-command output appeared 349.1 ms after the click (23.4 ms from
+Enter to output). Preparation itself took 4.4–5.2 seconds, largely waiting for the
+existing prepared checkout. These are single samples, not a performance guarantee.
+
+A generated-name canceled draft remained visible in the rendered sidebar after
+renderer reload. Application-process crash/restart, dirty/ignored profile output,
+and all remote topology cases still need verification. Warm-shell agent promotion
+is not yet implemented; terminal reattachment deliberately drops startup commands.

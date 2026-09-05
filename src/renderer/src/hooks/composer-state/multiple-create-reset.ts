@@ -5,6 +5,7 @@ type MultipleCreateResetInput = Pick<
   | 'handleClearSmartNameSelection'
   | 'lastAutoNameRef'
   | 'nameInputRef'
+  | 'refreshFallbackCreatureName'
   | 'setAgentPrompt'
   | 'setAttachmentPaths'
   | 'setCreateError'
@@ -19,6 +20,7 @@ export function useMultipleCreateReset(input: MultipleCreateResetInput) {
     handleClearSmartNameSelection,
     lastAutoNameRef,
     nameInputRef,
+    refreshFallbackCreatureName,
     setAgentPrompt,
     setAttachmentPaths,
     setCreateError,
@@ -28,6 +30,7 @@ export function useMultipleCreateReset(input: MultipleCreateResetInput) {
   const resetForNextCreate = useCallback(() => {
     // Clear the checkout source too, so a PR's resolved SHA cannot become the next selection.
     handleClearSmartNameSelection()
+    refreshFallbackCreatureName()
     setName('')
     lastAutoNameRef.current = ''
     setAgentPrompt('')
@@ -39,6 +42,7 @@ export function useMultipleCreateReset(input: MultipleCreateResetInput) {
     handleClearSmartNameSelection,
     lastAutoNameRef,
     nameInputRef,
+    refreshFallbackCreatureName,
     setAgentPrompt,
     setAttachmentPaths,
     setCreateError,

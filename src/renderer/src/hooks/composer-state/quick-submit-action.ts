@@ -66,7 +66,17 @@ export function useQuickSubmitAction(input: QuickSubmitActionInput) {
   } = input
 
   const submitQuick = useCallback(
-    async (requestedAgent: TuiAgent | null): Promise<void> => {
+    async (
+      requestedAgent: TuiAgent | null,
+      preparation?: { isCancelled: () => boolean }
+    ): Promise<void> => {
+      const isCancelled = () => isSubmissionCancelled() || Boolean(preparation?.isCancelled())
+      if (
+        preparation &&
+        (isProjectGroupTarget || linkedPR !== null || parsedLinkedIssueNumber !== null)
+      ) {
+        return
+      }
       if (isProjectGroupTarget) {
         await submitFolderTarget(requestedAgent)
         return
@@ -81,7 +91,9 @@ export function useQuickSubmitAction(input: QuickSubmitActionInput) {
       })
 
       if (!repoId || !selectedRepo) {
-        showProjectRequiredError()
+        if (!preparation) {
+          showProjectRequiredError()
+        }
         return
       }
 
@@ -119,6 +131,9 @@ export function useQuickSubmitAction(input: QuickSubmitActionInput) {
         }
       )
 
+      if (preparation && pendingCreationId) {
+        return
+      }
       if (pendingCreationId) {
         liveStore.setActivePendingWorktreeCreation(pendingCreationId)
         liveStore.setActiveView('terminal')
@@ -127,13 +142,16 @@ export function useQuickSubmitAction(input: QuickSubmitActionInput) {
         return
       }
 
-      setCreateError(null)
-
-      setCreating(true)
+      if (!preparation) {
+        setCreateError(null)
+        setCreating(true)
+      }
       try {
         const smartGitHubSettlement = await settleComposerSubmit(
-          resolvePendingSmartGitHubSubmit(),
-          isSubmissionCancelled
+          preparation
+            ? Promise.resolve({ kind: 'none' } as const)
+            : resolvePendingSmartGitHubSubmit(),
+          isCancelled
         )
         if (smartGitHubSettlement.status === 'cancelled') {
           return
@@ -144,17 +162,20 @@ export function useQuickSubmitAction(input: QuickSubmitActionInput) {
           workspaceNameSeed,
           workspaceRunContext,
           repoId,
-          selectedRepo
+          selectedRepo,
+          preparation ? { isCancelled } : undefined
         )
       } catch (error) {
-        if (isSubmissionCancelled()) {
+        if (preparation || isCancelled()) {
           return
         }
         const formattedError = formatWorkspaceCreateError(error)
         setCreateError(formattedError)
         toast.error(getWorkspaceCreateErrorToastMessage(formattedError))
       } finally {
-        setCreating(false)
+        if (!preparation) {
+          setCreating(false)
+        }
       }
     },
     [
@@ -183,5 +204,9 @@ export function useQuickSubmitAction(input: QuickSubmitActionInput) {
     ]
   )
 
-  return { submitQuick }
+  const prepareQuickWorkspace = useCallback(
+    (isCancelled: () => boolean) => submitQuick(null, { isCancelled }),
+    [submitQuick]
+  )
+  return { submitQuick, prepareQuickWorkspace }
 }

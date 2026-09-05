@@ -26,6 +26,7 @@ export type ComposerDerivedModel = {
   retiredNamesRefreshKey: string
   retiredWorktreeNames: RetiredNameRegistry
   fallbackCreatureName: string
+  refreshFallbackCreatureName: () => void
   workspaceSeedName: string
   shouldApplyLinkedOnlyTemplate: boolean
   linkedOnlyTemplatePrompt: string
