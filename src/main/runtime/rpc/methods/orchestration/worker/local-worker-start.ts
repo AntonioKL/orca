@@ -13,6 +13,8 @@ import {
   persistWorkerSetupWaitOutcome
 } from './worker-setup-gate'
 import { failWorkerStartWithReceipt } from './worker-start-receipt'
+import { resolveResidualAgentTerminal } from './failed-start-residual-terminal'
+import { parseTaskDeps } from './task-deps-argument'
 import {
   createExistingWorktreeWorkerTerminal,
   createWorkerWorktree,
@@ -270,6 +272,12 @@ export async function startLocalWorker(args: {
       ...(terminalRevealWarning ? { warning: terminalRevealWarning } : {})
     }
   } catch (error) {
+    const residualAgentTerminal = resolveResidualAgentTerminal({
+      runtime,
+      effects,
+      terminalHandle,
+      worktreeId: resolvedWorktree?.id ?? null
+    })
     return failWorkerStartWithReceipt({
       db,
       runId: run.id,
@@ -278,25 +286,8 @@ export async function startLocalWorker(args: {
       failedStage,
       error,
       setup: setupReceipt,
-      launch: launch.receipt
+      launch: launch.receipt,
+      ...(residualAgentTerminal ? { residualAgentTerminal } : {})
     })
-  }
-}
-
-function parseTaskDeps(value: string | undefined): string[] | undefined {
-  if (!value) {
-    return undefined
-  }
-  try {
-    const parsed = JSON.parse(value)
-    if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === 'string')) {
-      throw new Error('not an array of strings')
-    }
-    return parsed
-  } catch {
-    throw new OrchestrationError(
-      'invalid_argument',
-      'Invalid --deps: must be a JSON array of task IDs'
-    )
   }
 }

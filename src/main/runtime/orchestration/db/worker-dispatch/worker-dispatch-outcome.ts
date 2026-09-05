@@ -2,6 +2,10 @@ import type { WorkerDispatchRow } from '../../types'
 import { OrchestrationError } from '../../orchestration-error'
 import type { OrchestrationDb } from '../orchestration-db'
 import { transitionLifecycleWithDb } from '../lifecycle-transition'
+import {
+  adoptFailedStartTerminal,
+  type FailedStartTerminalAdoption
+} from '../worker-terminal/failed-start-terminal-adoption'
 
 export function markWorkerDispatchReady(
   this: OrchestrationDb,
@@ -47,7 +51,11 @@ export function failWorkerStart(
   // Why (#16095): revocation exists to stop a worker acting on a dispatch that never landed. A
   // prompt whose turn start went unobserved provably landed, so its worker keeps the authority its
   // own report needs.
-  options: { retainCapability?: boolean } = {}
+  options: {
+    retainCapability?: boolean
+    /** A start that died before authority attached still owns the terminal it created. */
+    adoptResidualTerminal?: FailedStartTerminalAdoption
+  } = {}
 ): WorkerDispatchRow {
   this.db.exec('BEGIN IMMEDIATE')
   try {
@@ -96,6 +104,11 @@ export function failWorkerStart(
       })
     }
     this.closeQuestionsForDispatch(dispatchId)
+    adoptFailedStartTerminal(
+      this,
+      this.getWorkerDispatch(dispatchId) as WorkerDispatchRow,
+      options.adoptResidualTerminal
+    )
     this.db.exec('COMMIT')
     return this.getWorkerDispatch(dispatchId) as WorkerDispatchRow
   } catch (error) {

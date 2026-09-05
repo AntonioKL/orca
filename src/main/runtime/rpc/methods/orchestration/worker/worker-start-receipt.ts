@@ -3,6 +3,7 @@ import { isAgentPromptStalledError } from '../../../../agent-prompt-submission-v
 import { isUnknownWorkerStartOutcome, type WorkerSetupReceipt } from './worker-topology'
 import type { OrchestrationWorkerLaunchReceipt } from './worker-launch-preferences'
 import { isAgentSessionPtyWriteRefusedError } from '../../../../../../shared/agent-session-pty-write-admission'
+import type { FailedStartTerminalAdoption } from '../../../../orchestration/db/worker-terminal/failed-start-terminal-adoption'
 import { structuredChatPtyWriteRefusalCopy } from '../../../../../../shared/agent-session-pty-write-refusal-copy'
 
 export function failWorkerStartWithReceipt(args: {
@@ -14,6 +15,8 @@ export function failWorkerStartWithReceipt(args: {
   error: unknown
   setup: WorkerSetupReceipt
   launch: OrchestrationWorkerLaunchReceipt
+  /** The terminal this start created and never handed to an owner. */
+  residualAgentTerminal?: FailedStartTerminalAdoption
 }): unknown {
   const agentSessionRefusal = isAgentSessionPtyWriteRefusedError(args.error)
     ? args.error.refusal
@@ -28,8 +31,14 @@ export function failWorkerStartWithReceipt(args: {
     : args.db.failWorkerStart(args.dispatchId, args.failedStage, reason, {
         // Why (#16095): the preamble is written before submission is verified, so a stalled
         // verdict never means the worker lacks its task — keep the authority its report needs.
-        retainCapability: isAgentPromptStalledError(args.error)
+        retainCapability: isAgentPromptStalledError(args.error),
+        ...(args.residualAgentTerminal ? { adoptResidualTerminal: args.residualAgentTerminal } : {})
       })
+  // Only claim cleanup the ownership table actually accepted; the adoption declines a terminal
+  // another resource already accounts for.
+  const adopted =
+    Boolean(args.residualAgentTerminal) &&
+    Boolean(args.db.getWorkerTerminalResourceByOwner(args.dispatchId))
   return {
     runId: args.runId,
     taskId: args.taskId,
@@ -43,6 +52,11 @@ export function failWorkerStartWithReceipt(args: {
     effects: JSON.parse(worker.effects) as unknown[],
     residualResources: JSON.parse(worker.residual_resources) as unknown[],
     ...(agentSessionRefusal ? { agentSessionRefusal } : {}),
+    ...(adopted
+      ? {
+          recovery: `This start created a terminal that never ran the Task. Close it with: orca orchestration worker-release --dispatch ${args.dispatchId}`
+        }
+      : {}),
     ...(unknown
       ? {
           nextCommands: [

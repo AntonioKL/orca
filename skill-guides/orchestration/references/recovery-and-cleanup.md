@@ -116,6 +116,10 @@ closes only the exact terminal owned by that settled Dispatch. Replays may call
 release again safely. Reused, pre-existing, setup, coordinator, active,
 user-taken-over, and unproven terminals are retained.
 
+A `worker-start` that failed before its agent was ready still owns the terminal
+it created. Its receipt names `worker-release`, and `worker-list` reports that
+row as `reclaimable`; release it there rather than closing the terminal by hand.
+
 Never release because of timeout, TUI idle, heartbeat, status, question,
 escalation, or stale/rejected completion. If the receipt says `release_pending`
 or `release_unknown`, follow its exact recovery action. Never substitute
