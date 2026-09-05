@@ -1,3 +1,4 @@
+import { CLI_BOOLEAN_FLAGS } from '../../shared/cli-argument-boundary'
 import { RemoteCliArgumentError, type ParsedRemoteCli } from './ssh-remote-cli-argument-error'
 import {
   isOrchestrationRetryRequestId,
@@ -5,24 +6,6 @@ import {
   VALUELESS_RETRY_REQUEST_GUIDANCE
 } from '../../shared/orchestration-retry-request-id'
 
-const REMOTE_BOOLEAN_FLAGS = new Set([
-  'all',
-  'attachments',
-  'children',
-  'comments',
-  'current',
-  'full',
-  'help',
-  'inject',
-  'include-archived',
-  'include-visual-layouts',
-  'json',
-  'me',
-  'relations',
-  'parent-current',
-  'unread',
-  'wait'
-])
 const REPEATED_FLAG_SEPARATOR = '\u0000'
 const REPEATABLE_REMOTE_STRING_FLAGS = new Set(['label'])
 
@@ -121,7 +104,7 @@ export function optionalRemoteCliNumber(
 function isRemoteBooleanFlag(flag: string, commandPath: string[]): boolean {
   // Why: Android launch already uses --activity <name>; only Linear issue reads use it as a boolean.
   return (
-    REMOTE_BOOLEAN_FLAGS.has(flag) ||
+    CLI_BOOLEAN_FLAGS.has(flag) ||
     (flag === 'activity' && commandPath[0] === 'linear' && commandPath[1] === 'issue')
   )
 }
