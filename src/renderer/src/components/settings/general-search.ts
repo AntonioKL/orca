@@ -103,10 +103,10 @@ export const getGeneralWorkspaceSearchEntries = createLocalizedCatalog(() => [
       ...translateSearchKeyword('auto.components.settings.general.search.8fb00fcd05', 'launcher'),
       ...translateSearchKeyword('auto.components.settings.general.search.0cb3d94f00', 'cursor'),
       ...translateSearchKeyword('auto.components.settings.general.search.ebf8f056b5', 'zed'),
-      ...translateSearchKeyword('auto.components.settings.general.search.87ef3e43e3', 'windsurf'),
-      ...translateSearchKeyword('auto.components.settings.general.search.2a25e9b6ce', 'devin'),
+      ...translateSearchKeyword('settings.general.openInMenu.keyword.windsurf', 'windsurf'),
+      ...translateSearchKeyword('settings.general.openInMenu.keyword.devin', 'devin'),
       ...translateSearchKeyword(
-        'auto.components.settings.general.search.8be3b60aa7',
+        'settings.general.openInMenu.keyword.devinDesktop',
         'devin desktop'
       ),
       ...translateSearchKeyword('auto.components.settings.general.search.dbeb1f348e', 'command'),

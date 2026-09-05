@@ -36,13 +36,13 @@ export const getOpenInAppPresets = createLocalizedCatalog(() => [
   },
   {
     id: 'windsurf',
-    label: translate('auto.lib.open.in.app.catalog.1a328cf09d', 'Windsurf'),
+    label: translate('settings.openInApp.preset.windsurf', 'Windsurf'),
     command: 'windsurf',
     faviconDomain: 'windsurf.com'
   },
   {
     id: 'devin-desktop',
-    label: translate('auto.lib.open.in.app.catalog.eba1a687fe', 'Devin Desktop'),
+    label: translate('settings.openInApp.preset.devinDesktop', 'Devin Desktop'),
     command: 'devin',
     faviconDomain: 'devin.ai',
     // Why: Devin's favicon is a black transparent mark, like Zed's.
