@@ -4,7 +4,7 @@
 // missing-Orca-env path, so their writer may break there.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { SFTPWrapper } from 'ssh2'
@@ -283,6 +283,16 @@ describe('Windows managed hook stdin structure', () => {
       expect(claude.indexOf('if "%ORCA_PANE_KEY%"=="" exit /b 0')).toBeLessThan(
         claude.indexOf('if not "%DEVIN_PROJECT_DIR%"=="" goto :orca_agent_hook_drain_stdin')
       )
+      // The Grok compat skips jump to the same label, so they carry the same ordering rule.
+      for (const guard of [
+        'if not "%GROK_HOOK_EVENT%"=="" goto :orca_agent_hook_drain_stdin',
+        'if not "%GROK_SESSION_ID%"=="" goto :orca_agent_hook_drain_stdin'
+      ]) {
+        expect(claude, `claude grok guard present: ${guard}`).toContain(guard)
+        expect(claude.indexOf('if "%ORCA_PANE_KEY%"=="" exit /b 0')).toBeLessThan(
+          claude.indexOf(guard)
+        )
+      }
 
       // Why (#11549 class): every Windows-local hook now guards before owning stdin —
       // the caller may abandon the pipe, and the payload is discarded on this path anyway.
@@ -538,6 +548,50 @@ describe.skipIf(process.platform === 'win32')('managed hook stdin lifecycle', ()
     expect(result.exitCode).toBe(0)
     expect(result.stdinErrors).toHaveLength(0)
   })
+
+  it.each([['GROK_HOOK_EVENT'], ['GROK_SESSION_ID']])(
+    'drains before Claude skips hooks imported by Grok (%s)',
+    async (variable) => {
+      const script = (await generatePosixScripts()).get('claude claude-hook.sh')
+      expect(script).toBeDefined()
+      const result = await runPosixHook(script!, { [variable]: 'grok-compat' })
+      expect(result.exitCode).toBe(0)
+      expect(result.stdinErrors).toHaveLength(0)
+    }
+  )
+
+  it.each([['GROK_HOOK_EVENT'], ['GROK_SESSION_ID']])(
+    'stops the Claude hook posting under Grok .claude compat (%s)',
+    async (variable) => {
+      const script = (await generatePosixScripts()).get('claude claude-hook.sh')
+      expect(script).toBeDefined()
+      const binDir = mkdtempSync(join(tmpdir(), 'orca-hook-grok-compat-'))
+      try {
+        const marker = join(binDir, 'posted')
+        // A stub curl records the post so the skip is observed, not inferred.
+        writeFileSync(join(binDir, 'curl'), `#!/bin/sh\ntouch '${marker}'\nexit 0\n`, {
+          mode: 0o755
+        })
+        const orcaEnv = {
+          ORCA_AGENT_HOOK_PORT: '1',
+          ORCA_AGENT_HOOK_TOKEN: 'token',
+          ORCA_PANE_KEY: 'pane',
+          PATH: `${binDir}:${process.env.PATH ?? ''}`
+        }
+
+        const baseline = await runPosixHook(script!, orcaEnv)
+        expect(baseline.exitCode).toBe(0)
+        expect(existsSync(marker), 'baseline posts to /hook/claude').toBe(true)
+        rmSync(marker)
+
+        const underGrok = await runPosixHook(script!, { ...orcaEnv, [variable]: 'grok-compat' })
+        expect(underGrok.exitCode).toBe(0)
+        expect(existsSync(marker), `no post while ${variable} is set`).toBe(false)
+      } finally {
+        rmSync(binDir, { recursive: true, force: true })
+      }
+    }
+  )
 
   it('drains a large payload when the configured script is missing', async () => {
     const result = await runPosixHook(wrapPosixHookCommand('/missing/orca-hook.sh'))
