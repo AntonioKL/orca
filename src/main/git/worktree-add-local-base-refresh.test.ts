@@ -1,5 +1,5 @@
 // addWorktree: fast-forwarding the local base ref (reset --hard / update-ref) and its safety bailouts.
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   gitExecFileAsyncMock,
@@ -32,11 +32,14 @@ import { registerWorktreeSuiteHooks } from './worktree-test-harness'
 registerWorktreeSuiteHooks()
 
 describe('addWorktree', () => {
+  afterEach(() => vi.restoreAllMocks())
   const resolveCreationBaseConfigWrite = () => {
     gitExecFileAsyncMock.mockResolvedValueOnce({ stdout: '' }) // config --local --replace-all branch.<branch>.base
   }
 
   beforeEach(() => {
+    // These branch-safety assertions use POSIX argv; Windows flags have separate coverage.
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     gitExecFileAsyncMock.mockReset()
     gitExecFileSyncMock.mockReset()
     translateWslOutputPathsMock.mockClear()
@@ -79,6 +82,7 @@ describe('addWorktree', () => {
       [['reset', '--hard', 'remote-main'], { cwd: '/repo' }],
       [
         [
+          ...(process.platform === 'darwin' ? ['-c', 'checkout.workers=4'] : []),
           'worktree',
           'add',
           '--no-track',
@@ -316,6 +320,7 @@ describe('addWorktree', () => {
       'refs/remotes/origin/main^{commit}'
     ])
     expect(gitExecFileAsyncMock.mock.calls[7]?.[0]).toEqual([
+      ...(process.platform === 'darwin' ? ['-c', 'checkout.workers=4'] : []),
       'worktree',
       'add',
       '--no-track',
@@ -375,6 +380,7 @@ describe('addWorktree', () => {
       ],
       [
         [
+          ...(process.platform === 'darwin' ? ['-c', 'checkout.workers=4'] : []),
           'worktree',
           'add',
           '--no-track',
@@ -431,6 +437,7 @@ describe('addWorktree', () => {
 
     expect(result.localBaseRefRefresh).toBeUndefined()
     expect(gitExecFileAsyncMock.mock.calls.map((call) => call[0])).toContainEqual([
+      ...(process.platform === 'darwin' ? ['-c', 'checkout.workers=4'] : []),
       'worktree',
       'add',
       '--no-track',
@@ -552,6 +559,7 @@ describe('addWorktree', () => {
       ],
       [
         [
+          ...(process.platform === 'darwin' ? ['-c', 'checkout.workers=4'] : []),
           'worktree',
           'add',
           '--no-track',

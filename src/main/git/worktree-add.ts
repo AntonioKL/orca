@@ -12,7 +12,7 @@ import {
   getLocalBaseRefUpdateSuggestionForWorktreeCreate,
   refreshLocalBaseRefForWorktreeCreate
 } from './worktree-base-refresh'
-import { hasWorktreeBaseCommitRef } from './worktree-base-ref-probe'
+import { resolveWorktreeBaseCommitOid } from './worktree-base-ref-probe'
 import type {
   AddWorktreeOptions,
   AddWorktreeResult,
@@ -20,9 +20,11 @@ import type {
 } from './worktree-operation-options'
 import { gitExecOptions, resolveWorktreeAddTimeoutMs } from './worktree-operation-options'
 import { bumpWorktreeScanGeneration } from './worktree-scan-cache'
+import { worktreeCheckoutGitArgs } from '../../shared/worktree-checkout-config'
 
 export type WorktreeAddBaseContext = AddWorktreeResult & {
   effectiveBase: string
+  effectiveBaseOid?: string
 }
 
 export async function resolveWorktreeAddBaseContext(
@@ -31,9 +33,11 @@ export async function resolveWorktreeAddBaseContext(
   refreshLocalBaseRef: boolean,
   options: AddWorktreeOptions
 ): Promise<WorktreeAddBaseContext> {
-  const effectiveBase = await resolveWorktreeAddBaseRef(baseBranch, (qualifiedRef) =>
-    hasWorktreeBaseCommitRef(repoPath, qualifiedRef, options)
-  )
+  let effectiveBaseOid: string | null = null
+  const effectiveBase = await resolveWorktreeAddBaseRef(baseBranch, async (qualifiedRef) => {
+    effectiveBaseOid = await resolveWorktreeBaseCommitOid(repoPath, qualifiedRef, options)
+    return effectiveBaseOid !== null
+  })
   const localBaseRefRefresh = refreshLocalBaseRef
     ? await refreshLocalBaseRefForWorktreeCreate(
         repoPath,
@@ -55,6 +59,10 @@ export async function resolveWorktreeAddBaseContext(
       : undefined
   return {
     effectiveBase,
+    // Refresh/suggestion work can span ref changes; only reuse the immediate resolution probe.
+    ...(!refreshLocalBaseRef && !options.suggestLocalBaseRefUpdate && effectiveBaseOid
+      ? { effectiveBaseOid }
+      : {}),
     ...(localBaseRefRefresh ? { localBaseRefRefresh } : {}),
     ...(localBaseRefUpdateSuggestion ? { localBaseRefUpdateSuggestion } : {})
   }
@@ -180,7 +188,12 @@ async function performAddWorktree(
   let localBaseRefRefresh: LocalBaseRefRefreshResult | undefined
   let localBaseRefUpdateSuggestion: LocalBaseRefUpdateSuggestion | undefined
   // Why: enable long paths for this Windows checkout without changing user Git config.
-  const args = [...windowsLongPathGitArgs(repoPath), 'worktree', 'add']
+  const args = [
+    ...windowsLongPathGitArgs(repoPath),
+    ...worktreeCheckoutGitArgs(options),
+    'worktree',
+    'add'
+  ]
   let effectiveBase: string | undefined
   if (noCheckout) {
     args.push('--no-checkout')
