@@ -32,13 +32,14 @@ whose agent died at a trust prompt still reads `live` there.
 
 When the two disagree, the fleet verdict decides — unless the fleet row is
 `unverifiable` for a reason that names a gap on this client rather than a fact
-about the worker. `missing_status` and `host_unavailable` are such gaps: the
-first means this runtime holds no status row, the second that it could not ask
-the execution host at all. Against either, a `worker-show` verdict sourced from
-the execution host is the better evidence and outranks the row. A stale peer
-that simply lacks the fleet-snapshot capability also reports `host_unavailable`
-on the row; the accompanying host warning names `capability_unsupported`, so
-read the warning before treating the row as contact loss.
+about the worker. `missing_status`, `host_unavailable`, and
+`capability_unsupported` are such gaps: the first means this runtime holds no
+status row, the second that it could not ask the execution host at all, and the
+third that a stale peer answered but lacks the fleet-snapshot capability.
+Against any of them, a `worker-show` verdict sourced from the execution host is
+the better evidence and outranks the row. Only `host_unavailable` is contact
+loss; the other two mean the host was never asked or answered without the
+capability.
 
 This never promotes absence. `unverifiable` from either command still authorizes
 nothing — only a positive `live` or `exited` verdict does.

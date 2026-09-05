@@ -352,6 +352,64 @@ describe('federated fleet snapshots', () => {
       'epoch-old'
     )
   })
+
+  it('keeps each host failure a distinct fleet reason', async () => {
+    const scenarios = [
+      {
+        dispatchId: 'dispatch-unsupported',
+        fail: () => new OrchestrationError('method_not_found', 'fleet snapshot unavailable'),
+        reason: 'capability_unsupported'
+      },
+      {
+        dispatchId: 'dispatch-repointed',
+        fail: () => new OrchestrationError('peer_changed', 'environment now names another server'),
+        reason: 'peer_changed'
+      },
+      {
+        dispatchId: 'dispatch-offline',
+        fail: () => new Error('socket hang up'),
+        reason: 'host_unavailable'
+      }
+    ] as const
+
+    for (const scenario of scenarios) {
+      const dispatch = federatedDispatch(scenario.dispatchId, 'peer-a', 'epoch-a')
+      const db = {
+        listFederatedDispatchesByIds: (ids: readonly string[]) => ids.map(() => dispatch),
+        updateFederatedDispatchRuntimeEpoch: vi.fn(),
+        ...observationFenceMethods()
+      } as unknown as OrchestrationDb
+      const runtime = {
+        resolveOrchestrationWorkerServer: () => ({
+          environmentId: dispatch.environment_id,
+          name: dispatch.environment_name,
+          peerFingerprint: dispatch.peer_fingerprint,
+          pairingRevision: 1
+        }),
+        callOrchestrationWorkerServer: vi.fn(async () => {
+          throw scenario.fail()
+        })
+      } as unknown as OrcaRuntimeService
+
+      const federated = await readFederatedFleetSnapshots({
+        runtime,
+        db,
+        dispatchIds: [scenario.dispatchId]
+      })
+      const fleet = projectOrchestrationFleet({
+        workers: [runningFederatedWorker(scenario.dispatchId)],
+        statuses: [],
+        now: 1
+      })
+
+      applyFederatedFleetObservations(fleet, federated, new Map())
+
+      expect({ dispatchId: scenario.dispatchId, liveness: fleet.workers[0].liveness }).toEqual({
+        dispatchId: scenario.dispatchId,
+        liveness: { verdict: 'unverifiable', reason: scenario.reason }
+      })
+    }
+  })
 })
 
 function federatedDispatch(
@@ -395,5 +453,22 @@ function observationFenceMethods() {
       projection()
       return true
     }
+  }
+}
+
+function runningFederatedWorker(dispatchId: string) {
+  return {
+    dispatchId,
+    taskId: `task-${dispatchId}`,
+    runId: 'run-home',
+    parentTaskId: null,
+    workerState: 'running',
+    dispatchStatus: 'dispatched',
+    workerStage: 'working',
+    agentTerminalHandle: 'handle-remote',
+    paneKey: 'pane-remote',
+    worktreeId: 'worktree-remote',
+    terminalState: 'active' as const,
+    resource: null
   }
 }

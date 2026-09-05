@@ -238,10 +238,11 @@ function refreshFleetWorkerVerdict(
   }
 }
 
+/** Every code but the transport one names a host that answered, so each keeps its own reason. */
 function unavailableLivenessReason(
   code: FederatedFleetHostError['code']
-): 'home_budget_exhausted' | 'peer_changed' | 'host_unavailable' {
-  return code === 'home_budget_exhausted' || code === 'peer_changed' ? code : 'host_unavailable'
+): 'home_budget_exhausted' | 'peer_changed' | 'capability_unsupported' | 'host_unavailable' {
+  return code === 'host_unavailable' ? 'host_unavailable' : code
 }
 
 const HOST_REPORTED_REASONS = new Set([

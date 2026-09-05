@@ -58,6 +58,8 @@ export type FleetLiveness =
         | 'future_status'
         | 'restored_unconfirmed'
         | 'host_unavailable'
+        /** The host answered and lacks the fleet-snapshot capability; contact was never lost. */
+        | 'capability_unsupported'
         /** Orca's own fleet budget ran out before it asked the host anything. */
         | 'home_budget_exhausted'
         /** The host answered and could not tell; contact was never lost. */
