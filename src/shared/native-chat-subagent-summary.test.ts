@@ -1,0 +1,91 @@
+import { describe, expect, it } from 'vitest'
+import {
+  isTerminalSubagentState,
+  normalizeSubagentState,
+  summarizeSubagentGroup
+} from './native-chat-subagent-summary'
+import type { NativeChatSubagentEntry } from './native-chat-types'
+
+function agent(entry: Partial<NativeChatSubagentEntry>): NativeChatSubagentEntry {
+  return { id: 'a', label: 'task', state: 'working', ...entry }
+}
+
+describe('summarizeSubagentGroup', () => {
+  it('collapses in-flight children into one working count', () => {
+    const summary = summarizeSubagentGroup([
+      agent({ id: 'a', state: 'working' }),
+      agent({ id: 'b', state: 'working' }),
+      agent({ id: 'c', state: 'completed' })
+    ])
+
+    expect(summary).toMatchObject({ total: 3, working: 2, settledState: null, settledCount: 0 })
+  })
+
+  it('ranks the settled verdict worst-first and reports ✓ completed last', () => {
+    const cascade: [NativeChatSubagentEntry['state'][], string][] = [
+      [['failed', 'stopped', 'idle', 'completed'], 'failed'],
+      [['stopped', 'idle', 'completed'], 'stopped'],
+      [['unverifiable', 'idle', 'completed'], 'unverifiable'],
+      [['idle', 'completed'], 'idle'],
+      [['completed', 'completed'], 'completed']
+    ]
+
+    for (const [states, expected] of cascade) {
+      const summary = summarizeSubagentGroup(
+        states.map((state, index) => agent({ id: `a${index}`, state }))
+      )
+      expect(summary.settledState).toBe(expected)
+    }
+  })
+
+  it('counts how many children hold the winning verdict', () => {
+    const summary = summarizeSubagentGroup([
+      agent({ id: 'a', state: 'failed' }),
+      agent({ id: 'b', state: 'failed' }),
+      agent({ id: 'c', state: 'completed' })
+    ])
+
+    expect(summary).toMatchObject({ settledState: 'failed', settledCount: 2 })
+  })
+
+  it('sums the per-child token snapshots and leaves them null when none reported', () => {
+    expect(
+      summarizeSubagentGroup([
+        agent({ id: 'a', tokens: 40661 }),
+        agent({ id: 'b', tokens: 1000 }),
+        agent({ id: 'c' })
+      ]).tokens
+    ).toBe(41661)
+    expect(summarizeSubagentGroup([agent({ id: 'a' })]).tokens).toBeNull()
+  })
+
+  it('reports the earliest start and withholds a settled time while work continues', () => {
+    const working = summarizeSubagentGroup([
+      agent({ id: 'a', state: 'completed', startedAt: 50, settledAt: 80 }),
+      agent({ id: 'b', state: 'working', startedAt: 20 })
+    ])
+    const settled = summarizeSubagentGroup([
+      agent({ id: 'a', state: 'completed', startedAt: 50, settledAt: 80 }),
+      agent({ id: 'b', state: 'stopped', startedAt: 20, settledAt: 95 })
+    ])
+
+    expect(working).toMatchObject({ startedAt: 20, settledAt: null })
+    expect(settled).toMatchObject({ startedAt: 20, settledAt: 95 })
+  })
+
+  it('reads a state this build does not know as unverifiable, never as working', () => {
+    expect(normalizeSubagentState('paused-for-review')).toBe('unverifiable')
+    expect(isTerminalSubagentState('paused-for-review')).toBe(true)
+    expect(summarizeSubagentGroup([agent({ state: 'unheard-of' as 'working' })])).toMatchObject({
+      working: 0,
+      settledState: 'unverifiable'
+    })
+  })
+
+  it('keeps working the only non-terminal state', () => {
+    expect(isTerminalSubagentState('working')).toBe(false)
+    for (const state of ['idle', 'completed', 'failed', 'stopped', 'unverifiable']) {
+      expect(isTerminalSubagentState(state)).toBe(true)
+    }
+  })
+})

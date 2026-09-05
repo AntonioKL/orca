@@ -197,7 +197,12 @@ function hasProviderError(payload: unknown): boolean {
 const CODEX_ITEM_CLASSIFICATIONS: Record<string, ProviderFrameClassification> = {
   // The `thread/compacted` notification is already chrome; its item form is the
   // same event and must not read as a mysterious opcode row.
-  contextCompaction: 'status-chrome'
+  contextCompaction: 'status-chrome',
+  // Subagent lifecycle renders as the spawn-group roster row. Leaving these
+  // substantive prints a gray `codex · item:<type>` row beside it for every
+  // event — and every one of them arrives twice.
+  subAgentActivity: 'status-chrome',
+  collabAgentToolCall: 'status-chrome'
 }
 
 function notificationKind(kind: string): string {

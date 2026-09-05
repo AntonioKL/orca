@@ -5,7 +5,8 @@ import { translate } from '@/i18n/i18n'
 import {
   isToolCallBlock,
   isToolResultBlock,
-  type NativeChatBlock
+  type NativeChatBlock,
+  type NativeChatSubagentGroupBlock
 } from '../../../../shared/native-chat-types'
 import { diffFromText, diffFromToolCall, type DiffLine } from './native-chat-diff'
 import {
@@ -15,6 +16,10 @@ import {
   truncateToolDetail
 } from './native-chat-tool-summary'
 import { NativeChatDiffView } from './NativeChatDiffView'
+import { NativeChatSubagentRun } from './NativeChatSubagentRun'
+
+/** Stable empty default: a fresh array literal per render breaks memoization. */
+const NO_SUBAGENT_GROUPS: NativeChatSubagentGroupBlock[] = []
 
 const COMMAND_TOOL_NAMES = new Set([
   'bash',
@@ -156,12 +161,15 @@ function ToolLine({
  *  toolbar toggle drive every run at once while still allowing per-run override. */
 export function NativeChatToolRun({
   blocks,
+  subagentGroups = NO_SUBAGENT_GROUPS,
   expandSignal,
   activeTurnIsWorking,
   expandOverride,
   structuredActivityUi = true
 }: {
   blocks: NativeChatBlock[]
+  /** Spawn-group rosters that belong with this run's activity, one row each. */
+  subagentGroups?: NativeChatSubagentGroupBlock[]
   /** Toolbar-driven desired open state. Each change re-syncs this run's state. */
   expandSignal: boolean
   /** Per-turn disclosure state controlled by the completed turn status row. */
@@ -174,6 +182,13 @@ export function NativeChatToolRun({
   // Re-sync when the global toolbar toggle flips.
   useEffect(() => setOpen(expandOverride ?? expandSignal), [expandOverride, expandSignal])
 
+  const subagentRows = subagentGroups.map((group) => (
+    <NativeChatSubagentRun
+      key={group.groupId}
+      block={group}
+      activeTurnIsWorking={activeTurnIsWorking}
+    />
+  ))
   const callCount = countToolCalls(blocks) || blocks.length
   const summary = summarizeToolRun(blocks)
   const calls = blocks.filter(isToolCallBlock)
@@ -212,10 +227,17 @@ export function NativeChatToolRun({
     return null
   }
 
+  // A roster with no tool calls beside it is the whole run: rendering the tool
+  // header too would announce "1 tool call" for activity that has none.
+  if (blocks.length === 0) {
+    return subagentRows.length > 0 ? <div className="mt-3">{subagentRows}</div> : null
+  }
+
   return (
     // Extra top margin sets the tool run apart from the assistant prose above it
     // so the turn's activity doesn't crowd the message text.
     <div className="mt-3">
+      {subagentRows}
       {latestActiveCall ? (
         <button
           type="button"

@@ -6,6 +6,7 @@ import {
   isDeltaShapedProviderFrameKind,
   PROVIDER_FRAME_CLASSIFICATIONS
 } from './provider-frame-disposition'
+import { unhandledProviderFrameJournalItem } from './unhandled-provider-frame'
 
 describe('provider frame classification catalog', () => {
   it('classifies every pinned Codex app-server notification method', () => {
@@ -111,5 +112,45 @@ describe('provider frame classification catalog', () => {
     )
     // An item type nobody has dispositioned still falls through visibly.
     expect(classifyProviderFrame('codex', 'item:futureThing', {})).toBe('timeline-substantive')
+  })
+})
+
+describe('codex subagent item disposition', () => {
+  it('keeps subagent lifecycle out of the transcript now that it renders as a roster row', () => {
+    expect(
+      classifyProviderFrame('codex', 'item:subAgentActivity', {
+        type: 'subAgentActivity',
+        kind: 'started',
+        agentThreadId: 'child-1',
+        agentPath: '/root/read'
+      })
+    ).toBe('status-chrome')
+    expect(
+      classifyProviderFrame('codex', 'item:collabAgentToolCall', {
+        type: 'collabAgentToolCall',
+        agentsStates: {}
+      })
+    ).toBe('status-chrome')
+  })
+
+  it('journals no fallback row for either type', () => {
+    expect(
+      unhandledProviderFrameJournalItem('codex', 'item:subAgentActivity', {
+        kind: 'completed',
+        agentThreadId: 'child-1'
+      })
+    ).toBeNull()
+    expect(
+      unhandledProviderFrameJournalItem('codex', 'item:collabAgentToolCall', { agentsStates: {} })
+    ).toBeNull()
+  })
+
+  it('still surfaces a subagent frame that reports a failure', () => {
+    expect(
+      classifyProviderFrame('codex', 'item:collabAgentToolCall', {
+        type: 'collabAgentToolCall',
+        status: 'failed'
+      })
+    ).toBe('error-surface')
   })
 })

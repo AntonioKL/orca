@@ -1,0 +1,117 @@
+// @vitest-environment happy-dom
+
+import '@testing-library/jest-dom/vitest'
+
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import type {
+  NativeChatSubagentEntry,
+  NativeChatSubagentGroupBlock
+} from '../../../../shared/native-chat-types'
+import { NativeChatSubagentRun, reconcileSubagentRoster } from './NativeChatSubagentRun'
+import { NativeChatToolRun } from './NativeChatToolRun'
+
+afterEach(cleanup)
+
+function group(agents: NativeChatSubagentEntry[]): NativeChatSubagentGroupBlock {
+  return { type: 'subagent-group', groupId: 'thread:turn-1', agents }
+}
+
+describe('NativeChatSubagentRun', () => {
+  it('reads as a live spawn while children work', () => {
+    render(
+      <NativeChatSubagentRun
+        block={group([
+          { id: 'a', label: 'read', state: 'working' },
+          { id: 'b', label: 'search', state: 'completed', tokens: 40661 }
+        ])}
+        activeTurnIsWorking
+      />
+    )
+
+    expect(screen.getByText('Kicked off 2 subagents')).toBeInTheDocument()
+    expect(screen.getByRole('button')).toHaveTextContent('1 working')
+    expect(screen.getByRole('button')).toHaveTextContent('40.7k tokens')
+  })
+
+  it('switches to Ran with a check once every child completed', () => {
+    render(
+      <NativeChatSubagentRun
+        block={group([
+          { id: 'a', label: 'read', state: 'completed' },
+          { id: 'b', label: 'search', state: 'completed' }
+        ])}
+        activeTurnIsWorking={false}
+      />
+    )
+
+    expect(screen.getByText('Ran 2 subagents')).toBeInTheDocument()
+    expect(screen.getByRole('button')).toHaveTextContent('completed')
+  })
+
+  it('shows the worst settled verdict, not the count of finished children', () => {
+    render(
+      <NativeChatSubagentRun
+        block={group([
+          { id: 'a', label: 'read', state: 'failed' },
+          { id: 'b', label: 'search', state: 'failed' },
+          { id: 'c', label: 'list', state: 'completed' }
+        ])}
+        activeTurnIsWorking={false}
+      />
+    )
+
+    expect(screen.getByRole('button')).toHaveTextContent('2 failed')
+  })
+
+  it('reconciles a roster persisted before a restart to unverifiable', () => {
+    render(
+      <NativeChatSubagentRun
+        block={group([{ id: 'a', label: 'read', state: 'working' }])}
+        activeTurnIsWorking={false}
+      />
+    )
+
+    expect(screen.getByRole('button')).toHaveTextContent('unverifiable')
+    expect(screen.getByRole('button')).not.toHaveTextContent('working')
+  })
+
+  it('leaves a live turn working — a settled roster is never asserted early', () => {
+    expect(
+      reconcileSubagentRoster([{ id: 'a', label: 'read', state: 'working' }], true)
+    ).toMatchObject([{ state: 'working' }])
+    expect(
+      reconcileSubagentRoster([{ id: 'a', label: 'read', state: 'working' }], false)
+    ).toMatchObject([{ state: 'unverifiable' }])
+  })
+})
+
+describe('NativeChatToolRun with a spawn group', () => {
+  it('renders a roster with no tool calls without inventing a tool count', () => {
+    render(
+      <NativeChatToolRun
+        blocks={[]}
+        subagentGroups={[group([{ id: 'a', label: 'read', state: 'working' }])]}
+        expandSignal={false}
+        activeTurnIsWorking
+      />
+    )
+
+    expect(screen.getByText('Kicked off 1 subagent')).toBeInTheDocument()
+    expect(screen.queryByText('1 tool call')).toBeNull()
+  })
+
+  it('renders the roster alongside the tool activity of its turn', () => {
+    render(
+      <NativeChatToolRun
+        blocks={[{ type: 'tool-call', name: 'shell', input: { command: 'ls' } }]}
+        subagentGroups={[group([{ id: 'a', label: 'read', state: 'completed' }])]}
+        expandSignal={false}
+        activeTurnIsWorking={false}
+      />
+    )
+
+    expect(screen.getByText('Ran 1 subagent')).toBeInTheDocument()
+    expect(screen.getByText('shell ls')).toBeInTheDocument()
+  })
+})
