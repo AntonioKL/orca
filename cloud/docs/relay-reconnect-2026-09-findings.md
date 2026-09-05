@@ -921,3 +921,4 @@ Owner: "sure, feel free to drive these." Sequence chosen: Roll 1 first (highest 
 | Monitor dry-run #31 | **Green** 03:13:26Z at gen 116; main at `cb7f7dd11a` with identical trusted code. Run 33940508865. |
 | Batch 1 attempt 2 (run 33941253533) | Dispatched 03:13:38Z: c10,c13,c14,c15, canary authority 33938818286. Runs at `cb7f7dd11a` (batch authority is accepted across the ancestor since trusted paths are unchanged). |
 | Merged 03:14Z | stablyai/orca #18778: `--retry-freshness` on every same-cap wave including the first, and the retry loop now stops before the next wait would push evidence past the wave's age bound (it was checked only at entry before). Twin carve-out in the capacity job filed as a follow-up. |
+| Batch 1 cell 1 (c10) | **Succeeded** 03:14–03:27Z (preflight, drain, apply, verify, restore). c13 started 03:27Z. |
