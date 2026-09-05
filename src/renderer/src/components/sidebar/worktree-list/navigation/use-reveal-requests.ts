@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { Crosshair } from 'lucide-react'
 import { useConfirmationDialog } from '@/components/confirmation-dialog-context'
 import { translate } from '@/i18n/i18n'
@@ -47,7 +47,9 @@ export function useSidebarRevealRequests(args: {
   const confirm = useConfirmationDialog()
   const confirmationPending = useRef(false)
   const latestArgs = useRef(args)
-  latestArgs.current = args
+  useLayoutEffect(() => {
+    latestArgs.current = args
+  })
 
   useEffect(() => {
     if (!pendingRevealSidebarRow) {
