@@ -53,7 +53,7 @@ import {
 } from './ssh-relay-deploy-timing'
 import { createSshOperationAbortError, shellEscape } from './ssh-connection-utils'
 import { isWindowsRelayPlatform } from '../../shared/relay-artifacts'
-import { exportLocalNodeHeadersPrefix } from './ssh-relay-node-headers'
+import { exportLocalNodeHeadersPrefix, localNodeHeadersFromOutput } from './ssh-relay-node-headers'
 import {
   probeBuildToolchain,
   formatMissingToolchainError,
@@ -1239,10 +1239,13 @@ async function installNativeDeps(
         return
       }
     }
-    // Why: the local-headers export already found nothing on this host, so what is left is a host
-    // that is both header-less and offline -- name it, or the log reads as a broken relay.
+    // Why: either the local-headers export found nothing (a host both header-less and offline) or
+    // it did and node-gyp downloaded anyway (the export is broken) -- name which, or the log reads
+    // as a broken relay either way.
     if (platform.startsWith('linux') && isNodeHeadersDownloadFailure(msg)) {
-      throw new Error(formatNodeHeadersDownloadError(msg), { cause: err })
+      throw new Error(formatNodeHeadersDownloadError(msg, localNodeHeadersFromOutput(msg)), {
+        cause: err
+      })
     }
     throw err
   }

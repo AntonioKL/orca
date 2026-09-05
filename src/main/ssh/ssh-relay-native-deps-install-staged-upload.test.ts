@@ -172,6 +172,8 @@ describe('installNativeDeps staged uploads', () => {
       // The export precedes the compile on the same command line, and only when the probe found headers.
       expect(command!.indexOf('npm_config_nodedir')).toBeLessThan(command!.indexOf(compileStep))
       expect(command).toContain('node_version.h')
+      // The marker lands in the captured output, so a failure after it can say what was exported.
+      expect(command).toContain('echo "ORCA-NODE-HEADERS:${ORCA_NODE_HEADERS_DIR:-none}"')
     }
   })
 
@@ -188,11 +190,30 @@ describe('installNativeDeps staged uploads', () => {
 
     const error = await deployAndLaunchRelay(conn).catch((e: Error) => e)
     expect((error as Error).message).toContain('could not download the Node.js headers')
+    expect((error as Error).message).toContain('does not ship them locally')
     expect((error as Error).message).toContain('ECONNREFUSED')
     // A full toolchain: the toolchain probe must not run, and this is not a "build tools" error.
     expect((error as Error).message).not.toContain('build tools')
     const commands = vi.mocked(execCommand).mock.calls.map(([, command]) => command)
     expect(commands.some((command) => command.includes('command -v "$t"'))).toBe(false)
+  })
+
+  it('reports an Orca defect when headers were exported but node-gyp downloaded anyway', async () => {
+    // The marker says the export happened; a download after it means node-gyp never read the env.
+    const conn = makeMockConnection(sftpCapture)
+    feed(
+      makeExecResponses({
+        npmInstall: {
+          reject:
+            'Command "npm install" failed (exit 1): ORCA-NODE-HEADERS:/usr/local\nnpm error gyp http fetch GET https://nodejs.org/download/release/v24.12.0/node-v24.12.0-headers.tar.gz attempt 1 failed with ECONNREFUSED'
+        }
+      })
+    )
+
+    const error = await deployAndLaunchRelay(conn).catch((e: Error) => e)
+    expect((error as Error).message).toContain('/usr/local/include/node')
+    expect((error as Error).message).toContain('Orca defect')
+    expect((error as Error).message).not.toContain('does not ship them locally')
   })
 
   it('promotes only after the first-install lock is acquired', async () => {

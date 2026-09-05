@@ -163,11 +163,21 @@ describe('isNodeHeadersDownloadFailure', () => {
 })
 
 describe('formatNodeHeadersDownloadError', () => {
-  it('names both remedies and keeps the underlying error', () => {
-    const msg = formatNodeHeadersDownloadError(HEADERS_REFUSED)
+  it('names both host remedies when the host ships no headers', () => {
+    const msg = formatNodeHeadersDownloadError(HEADERS_REFUSED, null)
+    expect(msg).toContain('does not ship them locally')
     expect(msg).toContain('<prefix>/include/node')
-    expect(msg).toContain('nodejs.org')
+    expect(msg).toContain('nvm, fnm, volta, n')
     expect(msg).toContain('disturl')
+    expect(msg).toContain('ECONNREFUSED')
+  })
+
+  it('reports an Orca defect, not a host problem, when headers were exported and ignored', () => {
+    const msg = formatNodeHeadersDownloadError(HEADERS_REFUSED, '/usr/local')
+    expect(msg).toContain('/usr/local/include/node')
+    expect(msg).toContain('Orca defect')
+    expect(msg).not.toContain('does not ship them locally')
+    expect(msg).not.toContain('nvm, fnm, volta, n')
     expect(msg).toContain('ECONNREFUSED')
   })
 })

@@ -4,17 +4,24 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
 import { afterEach, describe, expect, it } from 'vitest'
-import { exportLocalNodeHeadersPrefix } from './ssh-relay-node-headers'
+import { exportLocalNodeHeadersPrefix, localNodeHeadersFromOutput } from './ssh-relay-node-headers'
 
 const POSIX = process.platform !== 'win32'
 
 /** Runs the prefix under /bin/sh exactly as the relay does, then prints what node-gyp would see. */
-function runPrefix(nodePath: string): { nodedir: string; pkgNodedir: string } {
+function runPrefix(nodePath: string): {
+  nodedir: string
+  pkgNodedir: string
+  marker: string | null | undefined
+} {
   const script = `${exportLocalNodeHeadersPrefix(nodePath)}printf '%s\\n%s\\n' "$npm_config_nodedir" "$npm_package_config_node_gyp_nodedir"`
   const result = spawnSync('/bin/sh', ['-c', script], { encoding: 'utf8' })
   expect(result.status).toBe(0)
-  const [nodedir = '', pkgNodedir = ''] = result.stdout.split('\n')
-  return { nodedir, pkgNodedir }
+  const marker = localNodeHeadersFromOutput(result.stdout)
+  const [nodedir = '', pkgNodedir = ''] = result.stdout
+    .split('\n')
+    .filter((line) => !line.startsWith('ORCA-NODE-HEADERS:'))
+  return { nodedir, pkgNodedir, marker }
 }
 
 /** A fake `<prefix>/bin/node` whose `include/node/node_version.h` claims `version`. */
@@ -44,9 +51,10 @@ describe.skipIf(!POSIX)('exportLocalNodeHeadersPrefix', () => {
   it('exports nodedir when the running Node ships headers for its own version', () => {
     // The test runner's Node is an official build, so its prefix has include/node.
     const prefix = dirname(dirname(process.execPath))
-    const { nodedir, pkgNodedir } = runPrefix(process.execPath)
+    const { nodedir, pkgNodedir, marker } = runPrefix(process.execPath)
     expect(nodedir).toBe(prefix)
     expect(pkgNodedir).toBe(prefix)
+    expect(marker).toBe(prefix)
   })
 
   it('leaves nodedir unset when the shipped headers are for another Node version', () => {
@@ -64,9 +72,10 @@ describe.skipIf(!POSIX)('exportLocalNodeHeadersPrefix', () => {
     )
     const copied = join(prefix, 'bin', 'node')
     spawnSync('cp', [process.execPath, copied])
-    const { nodedir, pkgNodedir } = runPrefix(copied)
+    const { nodedir, pkgNodedir, marker } = runPrefix(copied)
     expect(nodedir).toBe('')
     expect(pkgNodedir).toBe('')
+    expect(marker).toBeNull()
   })
 
   it('leaves nodedir unset when the prefix has no headers at all', () => {
@@ -93,6 +102,16 @@ describe.skipIf(!POSIX)('exportLocalNodeHeadersPrefix', () => {
     const script = `${exportLocalNodeHeadersPrefix('/nonexistent/node')}echo "after:$npm_config_nodedir"`
     const result = spawnSync('/bin/sh', ['-c', script], { encoding: 'utf8' })
     expect(result.status).toBe(0)
-    expect(result.stdout.trim()).toBe('after:')
+    expect(result.stdout.trim()).toBe('ORCA-NODE-HEADERS:none\nafter:')
+  })
+})
+
+describe('localNodeHeadersFromOutput', () => {
+  it('distinguishes an exported dir, an explicit none, and no marker at all', () => {
+    expect(localNodeHeadersFromOutput('x\nORCA-NODE-HEADERS:/usr/local\ngyp ERR!')).toBe(
+      '/usr/local'
+    )
+    expect(localNodeHeadersFromOutput('ORCA-NODE-HEADERS:none\ngyp ERR!')).toBeNull()
+    expect(localNodeHeadersFromOutput('gyp ERR! only')).toBeUndefined()
   })
 })

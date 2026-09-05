@@ -37,6 +37,12 @@ export const LOCAL_NODE_HEADERS_PROBE_JS = [
 ].join('')
 
 /**
+ * Stdout marker naming what the probe found, printed before the compile so the answer is in the
+ * captured output of any failure that follows. `none` means no matching local headers.
+ */
+export const LOCAL_NODE_HEADERS_MARKER_PREFIX = 'ORCA-NODE-HEADERS:'
+
+/**
  * POSIX-sh prefix (`...; `) that exports node-gyp's `nodedir` for the rest of the command line
  * when the host's Node ships matching headers. Prepend to any command that may compile node-pty:
  * `npm install`, `npm rebuild`, and the cloexec patch (its `npm rebuild` inherits the env).
@@ -47,6 +53,25 @@ export function exportLocalNodeHeadersPrefix(nodePath: string): string {
     `${NODEDIR_SHELL_VAR}=$(${probe}); ` +
     `if [ -n "$${NODEDIR_SHELL_VAR}" ]; then ` +
     `export npm_config_nodedir="$${NODEDIR_SHELL_VAR}" npm_package_config_node_gyp_nodedir="$${NODEDIR_SHELL_VAR}"; ` +
-    `fi; `
+    `fi; ` +
+    `echo "${LOCAL_NODE_HEADERS_MARKER_PREFIX}\${${NODEDIR_SHELL_VAR}:-none}"; `
   )
+}
+
+/**
+ * The headers dir the prefix exported, `null` when it found none, or `undefined` when the
+ * marker is absent (output truncated, or the command never reached the prefix).
+ */
+export function localNodeHeadersFromOutput(output: string): string | null | undefined {
+  // Why not line-anchored: a failed exec's message prepends `Command "..." failed (exit N): ` to
+  // the first output line, and the marker is that line.
+  for (const line of output.split(/\r?\n/)) {
+    const at = line.indexOf(LOCAL_NODE_HEADERS_MARKER_PREFIX)
+    if (at === -1) {
+      continue
+    }
+    const dir = line.slice(at + LOCAL_NODE_HEADERS_MARKER_PREFIX.length).trim()
+    return dir === 'none' || dir === '' ? null : dir
+  }
+  return undefined
 }
