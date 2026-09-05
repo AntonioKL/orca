@@ -109,10 +109,22 @@ export function summarizeSubagentGroup(
   }
 }
 
+/** A childless group draws nothing: `NativeChatSubagentRun` renders null for one,
+ *  so no caller may count it as renderable. The block schema admits `agents: []`
+ *  though no producer writes it, and a row that passes a renderable check while
+ *  drawing nothing still costs the transcript a gap slot. */
+export function isRenderableSubagentGroup(block: NativeChatSubagentGroupBlock): boolean {
+  return block.agents.length > 0
+}
+
+/** The spawn groups in `blocks` that will actually draw a row. */
 export function subagentGroupBlocks(
   blocks: readonly NativeChatBlock[]
 ): NativeChatSubagentGroupBlock[] {
-  return blocks.filter(isSubagentGroupBlock)
+  return blocks.filter(
+    (block): block is NativeChatSubagentGroupBlock =>
+      isSubagentGroupBlock(block) && isRenderableSubagentGroup(block)
+  )
 }
 
 /** Plain-text stand-in for the roster, frozen into the journal at write time for

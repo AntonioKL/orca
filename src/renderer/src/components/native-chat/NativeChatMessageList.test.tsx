@@ -520,3 +520,79 @@ describe('NativeChatMessageList spawn-group roster', () => {
     )
   })
 })
+
+// The block schema admits `agents: []`, so a childless spawn group is a shape the
+// wire allows even though no producer writes one. It draws nothing, so the row
+// must not be mounted on its account: "counts as renderable" and "actually draws"
+// have to answer the same. A row that passes the first and fails the second is an
+// invisible div that still consumes one `gap-5` slot of the transcript.
+describe('NativeChatMessageList childless spawn group', () => {
+  const NO_AGENTS: NativeChatSubagentEntry[] = []
+
+  function rosterSession(blocks: NativeChatMessage['blocks'], at: number): NativeChatLiveSession {
+    return {
+      ...session,
+      status: 'ready',
+      messages: [
+        {
+          id: 'user-fanout',
+          role: 'user',
+          blocks: [{ type: 'text', text: 'Fan this out' }],
+          timestamp: at,
+          source: 'transcript'
+        },
+        { id: 'roster-1', role: 'system', blocks, timestamp: at + 1, source: 'transcript' }
+      ]
+    }
+  }
+
+  /** Every slot the transcript column lays out — one per row that mounted. */
+  function emptySlots(container: HTMLElement): Element[] {
+    const column = container.querySelector('.max-w-4xl')
+    expect(column).not.toBeNull()
+    return Array.from(column!.children).filter((slot) => slot.textContent === '')
+  }
+
+  it('mounts no row for a bare spawn group with no children', () => {
+    const startedAt = Date.now() - 3000
+    const { container } = render(
+      <NativeChatMessageList
+        session={rosterSession(
+          [{ type: 'subagent-group', groupId: 'thread-1:turn-1', agents: NO_AGENTS }],
+          startedAt
+        )}
+        isWorking={false}
+        workingStartedAt={startedAt}
+        expandSignal={false}
+        fontScale={1}
+      />
+    )
+
+    expect(screen.getByText('Fan this out')).toBeInTheDocument()
+    expect(emptySlots(container)).toEqual([])
+  })
+
+  it('falls back to the plain-text twin when the block it stands in for cannot draw', () => {
+    const startedAt = Date.now() - 3000
+    const { container } = render(
+      <NativeChatMessageList
+        session={rosterSession(
+          [
+            { type: 'text', text: subagentGroupFallbackText(NO_AGENTS) },
+            { type: 'subagent-group', groupId: 'thread-1:turn-1', agents: NO_AGENTS }
+          ],
+          startedAt
+        )}
+        isWorking={false}
+        workingStartedAt={startedAt}
+        expandSignal={false}
+        fontScale={1}
+      />
+    )
+
+    // The twin is dropped only because the block draws the roster instead. This
+    // one cannot, so suppressing it too would leave the row with nothing at all.
+    expect(screen.getByText(subagentGroupFallbackText(NO_AGENTS))).toBeInTheDocument()
+    expect(emptySlots(container)).toEqual([])
+  })
+})

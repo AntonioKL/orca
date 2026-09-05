@@ -1,11 +1,11 @@
 // The Codex subagent roster: one journal row per spawn group, revised in place.
 //
-// There is no snapshot to read. `agentsStates` is always empty and children get
-// no `thread/started`, so the roster is accumulated purely from
-// `subAgentActivity` items — each of which arrives TWICE (`item/started` and
-// `item/completed`). Every transition here is therefore idempotent, and a
-// terminal state latches: duplicate and out-of-order delivery must not resurrect
-// a settled child.
+// There is no snapshot to read. `agentsStates` is empty on the MultiAgentV2 path
+// that emits these items, and children get no `thread/started`, so the roster is
+// accumulated purely from `subAgentActivity` items — each of which arrives TWICE
+// (`item/started` and `item/completed`). Every transition here is therefore
+// idempotent, and a terminal state latches: duplicate and out-of-order delivery
+// must not resurrect a settled child.
 //
 // KNOWN LIMITATION: `groups` is process-local and is never seeded from the
 // journal. After a group is evicted, or a reconnect reuses a `threadId:turnId`,
@@ -81,9 +81,10 @@ export type CodexSubagentRosterDeps = {
 
 export class CodexSubagentRoster {
   private readonly groups = new Map<string, RosterGroup>()
-  /** Latest reported total per thread, retained UNCONDITIONALLY: a usage frame
-   *  can arrive before the child's first activity item, and filtering at receipt
-   *  would lose it permanently. Children are selected at write time. */
+  /** Latest reported total per thread, kept regardless of roster membership: a
+   *  usage frame can arrive before the child's first activity item, and filtering
+   *  at receipt would lose it permanently. Children are selected at write time;
+   *  the map itself is LRU-capped in `handleTokenUsage`. */
   private readonly tokensByThread = new Map<string, number>()
   private readonly now: () => number
 
@@ -205,9 +206,10 @@ export class CodexSubagentRoster {
       group.entries.set(id, { ...entry, state: 'unverifiable', settledAt: this.now() })
       changed = true
     }
-    // A null `lastSerialized` means the previous write was refused part-way. The
-    // sweep is the LAST event a group ever gets, so without this the final
-    // revision of a settled roster would stay queued and never be published.
+    // A null `lastSerialized` means the previous write was refused part-way, so
+    // the settled roster's last revision is queued but never published. Nothing
+    // is guaranteed to write this group again, so retry here even when the sweep
+    // itself changed nothing.
     return changed || group.lastSerialized === null ? this.write(group) : ADMITTED
   }
 

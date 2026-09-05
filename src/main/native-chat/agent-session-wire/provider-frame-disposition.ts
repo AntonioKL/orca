@@ -198,9 +198,11 @@ const CODEX_ITEM_CLASSIFICATIONS: Record<string, ProviderFrameClassification> = 
   // The `thread/compacted` notification is already chrome; its item form is the
   // same event and must not read as a mysterious opcode row.
   contextCompaction: 'status-chrome',
-  // Subagent lifecycle renders as the spawn-group roster row. Leaving it
-  // substantive prints a gray `codex · item:<type>` row beside it for every
-  // event — and every one of them arrives twice.
+  // Subagent lifecycle renders as the spawn-group roster row, so its raw items
+  // must not print a gray `codex · item:<type>` row beside it. The live
+  // notification path intercepts them before this catalog is reached;
+  // `restoreThread` replays them straight through `items.handle`, which is where
+  // the classification earns its keep.
   //
   // `collabAgentToolCall` is deliberately NOT suppressed with it. Only the
   // MultiAgentV2 path emits `subAgentActivity`; a V1 turn emits collab tool

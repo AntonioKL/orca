@@ -8,6 +8,7 @@ import {
   type NativeChatBlock,
   type NativeChatSubagentGroupBlock
 } from '../../../../shared/native-chat-types'
+import { isRenderableSubagentGroup } from '../../../../shared/native-chat-subagent-summary'
 import { diffFromText, diffFromToolCall, type DiffLine } from './native-chat-diff'
 import { NativeChatDiffCard } from './NativeChatDiffCard'
 import { pairToolBlocks } from './native-chat-tool-fold'
@@ -213,8 +214,10 @@ export function NativeChatToolRun({
   // Childless groups are dropped so `subagentRows.length` stays an honest test of
   // "something will draw": the roster-only branch below returns a margin-bearing
   // wrapper on the strength of it, and a group with no children renders null.
+  // Same predicate `subagentGroupBlocks` applies, so this row and the caller
+  // deciding the row is worth mounting cannot disagree about what draws.
   const subagentRows = subagentGroups
-    .filter((group) => group.agents.length > 0)
+    .filter(isRenderableSubagentGroup)
     .map((group) => (
       <NativeChatSubagentRun
         key={group.groupId}
