@@ -283,11 +283,16 @@ describe('orchestration fleet projection', () => {
     const result = projectOrchestrationFleet({
       workers: [durable],
       statuses: [
-        status('new', 100, {
-          paneKey: 'new-tab:new-leaf',
-          terminalHandle: 'term-worker',
-          orchestration: { taskId: 'task-dispatch-1', dispatchId: 'dispatch-1' }
-        })
+        status(
+          'new',
+          100,
+          {
+            paneKey: 'new-tab:new-leaf',
+            terminalHandle: 'term-worker',
+            orchestration: { taskId: 'task-dispatch-1', dispatchId: 'dispatch-1' }
+          },
+          'pty:inc-2'
+        )
       ],
       now: 100
     })
@@ -300,11 +305,16 @@ describe('orchestration fleet projection', () => {
       projectOrchestrationFleet({
         workers: [durable],
         statuses: [
-          status('new', 100, {
-            paneKey: 'new-tab:new-leaf',
-            terminalHandle: 'term-other',
-            orchestration: { taskId: 'task-dispatch-1', dispatchId: 'dispatch-1' }
-          })
+          status(
+            'new',
+            100,
+            {
+              paneKey: 'new-tab:new-leaf',
+              terminalHandle: 'term-other',
+              orchestration: { taskId: 'task-dispatch-1', dispatchId: 'dispatch-1' }
+            },
+            'pty:inc-2'
+          )
         ],
         now: 100
       }).workers[0]?.liveness.verdict
@@ -331,11 +341,16 @@ describe('orchestration fleet projection', () => {
         })
       ],
       statuses: [
-        status('session-only', 100, {
-          providerSessionOnly: true,
-          orchestration: { taskId: 'task-session-only', dispatchId: 'session-only' },
-          providerSession: { key: 'session_id', id: 'session-1' }
-        })
+        status(
+          'session-only',
+          100,
+          {
+            providerSessionOnly: true,
+            orchestration: { taskId: 'task-session-only', dispatchId: 'session-only' },
+            providerSession: { key: 'session_id', id: 'session-1' }
+          },
+          'pty:inc-1'
+        )
       ],
       now: 100
     })

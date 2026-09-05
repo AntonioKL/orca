@@ -1,6 +1,7 @@
 import {
   fleetWorkerIdentity,
   type FleetAgentStatusEvidence,
+  type FleetEvidenceBinding,
   type FleetWorkerIdentity
 } from './orchestration-fleet-agent-status-evidence'
 import type { FleetDurableWorker } from './orchestration-fleet-projection'
@@ -120,6 +121,9 @@ function statusIdentityMatchesWorker(
   if (remoteTargetId && evidence.activity.connectionId !== remoteTargetId) {
     return false
   }
+  if (!incarnationMatchesWorker(worker, binding)) {
+    return false
+  }
   const paneMatches = identity.kind !== 'pane_and_terminal' || binding.paneKey === identity.paneKey
   if (binding.kind === 'worker') {
     // A row that names this dispatch on this handle may be a reminted pane; the durable
@@ -134,6 +138,19 @@ function statusIdentityMatchesWorker(
     ) &&
     uniqueOwner(index.handleOwners, identity.terminalHandle)
   )
+}
+
+/** The durable resource names the incarnation the worker was dispatched onto. A hook row carries
+ *  no incarnation of its own, so the pane's incarnation at mint time is what says which process
+ *  the evidence describes; a row minted against a different one is evidence about that process.
+ *  A worker with no materialized resource has no incarnation authority to contradict, and
+ *  fencing it out on absence would report a running unsupervised worker as missing. */
+function incarnationMatchesWorker(
+  worker: FleetDurableWorker,
+  binding: Exclude<FleetEvidenceBinding, { kind: 'unresolved' }>
+): boolean {
+  const durable = worker.resource?.processIncarnation
+  return !durable || durable === binding.processIncarnation
 }
 
 function uniqueOwner(ownersByKey: Map<string, Set<string>>, key: string | null): boolean {

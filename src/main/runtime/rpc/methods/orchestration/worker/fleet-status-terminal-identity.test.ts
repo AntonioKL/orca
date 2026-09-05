@@ -162,4 +162,64 @@ describe('local fleet liveness from a hook row that carries only a pane key', ()
       reason: 'missing_status'
     })
   })
+
+  // A hook row carries no incarnation of its own, so a row replayed after a runtime restart
+  // is indistinguishable from a current one by pane and handle alone. The pane's incarnation
+  // at mint time is what says which process the evidence is about.
+  it('refuses a replayed row once the pane runs a different incarnation', () => {
+    const page = projectFleetWorkerPage(
+      createRuntime({ handleForPane: TERMINAL_HANDLE, incarnationForHandle: 'pty-fleet:inc-2' }),
+      createDb(),
+      DISPATCH_ID
+    )
+
+    expect(page?.workers[0]?.liveness).toMatchObject({
+      verdict: 'unverifiable',
+      reason: 'missing_status'
+    })
+  })
+
+  it('refuses a replayed row before the restarted runtime has rebound the incarnation', () => {
+    const page = projectFleetWorkerPage(
+      createRuntime({ handleForPane: TERMINAL_HANDLE, incarnationForHandle: null }),
+      createDb(),
+      DISPATCH_ID
+    )
+
+    expect(page?.workers[0]?.liveness).toMatchObject({
+      verdict: 'unverifiable',
+      reason: 'missing_status'
+    })
+  })
+
+  // The positive control the fail-closed tightening owes: once the rebind lands on the
+  // incarnation the durable resource named, the same pane reads live again.
+  it('reads live again once the rebind restores the durable incarnation', () => {
+    const page = projectFleetWorkerPage(
+      createRuntime({ handleForPane: TERMINAL_HANDLE, incarnationForHandle: PROCESS_INCARNATION }),
+      createDb(),
+      DISPATCH_ID
+    )
+
+    expect(page?.workers[0]?.liveness).toMatchObject({ verdict: 'live', source: 'agent_status' })
+  })
+
+  // HEAD accepted a reminted pane on `Boolean(resource.processIncarnation)` — presence, not
+  // equality — so a dispatch-labelled row from the previous incarnation bound to the new worker.
+  it('refuses a reminted pane whose dispatch matches but whose incarnation does not', () => {
+    const page = projectFleetWorkerPage(
+      createRuntime({
+        handleForPane: TERMINAL_HANDLE,
+        orchestration: { dispatchId: DISPATCH_ID } as AgentStatusOrchestrationContext,
+        incarnationForHandle: 'pty-fleet:inc-2'
+      }),
+      createDb(),
+      DISPATCH_ID
+    )
+
+    expect(page?.workers[0]?.liveness).toMatchObject({
+      verdict: 'unverifiable',
+      reason: 'missing_status'
+    })
+  })
 })
