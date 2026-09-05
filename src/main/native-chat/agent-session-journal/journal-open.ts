@@ -26,7 +26,7 @@ import { pendingJournalRepairSequence } from './journal-repair-marker'
 import { parseJournalRow, type JournalRow } from './journal-row-schema'
 
 /** Every epoch row is sequence 1, and no compaction moves that floor. */
-const FIRST_JOURNAL_SEQUENCE = 1
+export const FIRST_JOURNAL_SEQUENCE = 1
 
 export type JournalLoad = {
   state: JournalReducerState

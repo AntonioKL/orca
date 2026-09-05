@@ -1,5 +1,12 @@
 import { mkdir } from 'node:fs/promises'
-import type { JournalLoad } from './journal-open'
+import type { JournalReplacementItem } from './journal-epoch-replacement'
+import {
+  findJournalFileFormatRemnant,
+  journalFileFormatRemnantDisclosure,
+  journalFileFormatRestoredDisclosure,
+  readJournalFileFormatRemnantItems
+} from './journal-file-format-remnant'
+import { FIRST_JOURNAL_SEQUENCE, type JournalLoad } from './journal-open'
 import { journalRepairDisclosure, type JournalRepairDisclosure } from './journal-repair-disclosure'
 
 export async function ensureJournalDir(journalDir: string): Promise<void> {
@@ -32,6 +39,9 @@ export async function openJournalStoreState(input: {
     body: JournalRepairDisclosure['body'],
     fence: number
   ) => Promise<unknown>
+  /** Rolls a fresh epoch holding the restored timeline, in one transaction. */
+  replaceEpoch: (items: readonly JournalReplacementItem[], fence: number) => Promise<unknown>
+  sessionId: string
   highestFence: () => number
   malformedRows: () => number
   setMalformedRows: (count: number) => void
@@ -40,6 +50,7 @@ export async function openJournalStoreState(input: {
   const loaded = input.loaded !== undefined ? input.loaded : input.replay()
   if (!loaded) {
     input.start()
+    await restoreFileFormatRemnant(input)
     return
   }
   input.adopt(loaded)
@@ -58,5 +69,48 @@ export async function openJournalStoreState(input: {
   if (input.malformedRows() > 0 && !input.readOnly()) {
     const disclosure = journalRepairDisclosure({ malformedRows: input.malformedRows() })
     await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
+    return
   }
+  // A journal already re-founded empty beside its own unreadable remnant — one
+  // this build opened before it disclosed anything — still owes the
+  // explanation. Bounded to an epoch holding nothing but its anchor, so a
+  // session the user has since written into is never appended to.
+  if (loaded.state.lastSequence <= FIRST_JOURNAL_SEQUENCE) {
+    await restoreFileFormatRemnant(input)
+  }
+}
+
+type FileFormatRemnantHandling = {
+  journalDir: string
+  sessionId: string
+  appendDisclosure: (
+    identity: JournalRepairDisclosure['identity'],
+    body: JournalRepairDisclosure['body'],
+    fence: number
+  ) => Promise<unknown>
+  replaceEpoch: (items: readonly JournalReplacementItem[], fence: number) => Promise<unknown>
+  highestFence: () => number
+  readOnly: () => boolean
+}
+
+/** Replays the pre-SQLite `log.jsonl` into this journal, and says what happened
+ *  either way. The restore lands first so the disclosure describes a settled
+ *  outcome, and both share one identity so the row is replaced, never doubled. */
+async function restoreFileFormatRemnant(input: FileFormatRemnantHandling): Promise<void> {
+  if (input.readOnly()) {
+    return
+  }
+  const remnant = findJournalFileFormatRemnant(input.journalDir)
+  if (!remnant) {
+    return
+  }
+  const restored = await readJournalFileFormatRemnantItems(remnant, input.sessionId)
+  if (restored.length > 0) {
+    await input.replaceEpoch(restored, input.highestFence())
+    const disclosure = journalFileFormatRestoredDisclosure({ restored: restored.length })
+    await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
+    return
+  }
+  const disclosure = journalFileFormatRemnantDisclosure(remnant)
+  await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
 }
