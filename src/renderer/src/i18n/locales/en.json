@@ -16958,7 +16958,14 @@
         "ranCommandsOneToolSummary": "Ran {{commandCount}} commands and used {{toolCount}} tool",
         "ranCommandsManyToolsSummary": "Ran {{commandCount}} commands and used {{toolCount}} tools",
         "usedOneSummary": "Used 1 tool",
-        "usedManySummary": "Used {{toolCount}} tools"
+        "usedManySummary": "Used {{toolCount}} tools",
+        "editedFile": "Edited file",
+        "addedFile": "Added file",
+        "deletedFile": "Deleted file",
+        "renamedFile": "Renamed file",
+        "editedFiles": "Edited {{value0}} files",
+        "copyDiff": "Copy diff",
+        "diffTruncated": "Diff truncated"
       },
       "providerFrame": {
         "byteLength": "{{value0}} bytes"

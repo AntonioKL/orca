@@ -8,6 +8,13 @@ import {
   type NativeChatBlock
 } from '../../../../shared/native-chat-types'
 import { diffFromText, diffFromToolCall, type DiffLine } from './native-chat-diff'
+import { NativeChatDiffCard } from './NativeChatDiffCard'
+import { pairToolBlocks } from './native-chat-tool-fold'
+import {
+  editFilesFromToolPair,
+  isEditToolName
+} from '../../../../shared/native-chat-edit-normalize'
+import type { NativeChatEditFile } from '../../../../shared/native-chat-edit-model'
 import {
   countToolCalls,
   createToolInputDisplay,
@@ -189,6 +196,29 @@ export function NativeChatToolRun({
   // The turn caret opens the activity group, while each child tool remains
   // collapsed. The global expand toolbar still opens child details together.
   const expandToolLines = expandOverride === undefined ? open : false
+  // An edit renders as one card, so its result block is folded into the call.
+  const editCards = new Map<NativeChatBlock, { files: NativeChatEditFile[]; key: string }>()
+  const consumedResults = new Set<NativeChatBlock>()
+  for (const [index, pair] of pairToolBlocks(blocks).entries()) {
+    const call = pair.call
+    if (!call || !isEditToolName(call.name)) {
+      continue
+    }
+    const files = editFilesFromToolPair({
+      name: call.name,
+      input: call.input,
+      ...(pair.result
+        ? { result: { output: pair.result.output, editPatch: pair.result.editPatch } }
+        : {})
+    })
+    if (!files || files.length === 0) {
+      continue
+    }
+    editCards.set(call, { files, key: `${call.name}:${index}` })
+    if (pair.result) {
+      consumedResults.add(pair.result)
+    }
+  }
   const ActiveToolIcon =
     latestActiveCall && COMMAND_TOOL_NAMES.has(normalizedToolName(latestActiveCall.name))
       ? SquareTerminal
@@ -264,6 +294,23 @@ export function NativeChatToolRun({
           {(() => {
             const seen = new Map<string, number>()
             return blocks.map((block) => {
+              const edit = editCards.get(block)
+              if (edit) {
+                return (
+                  <div key={`edit:${edit.key}`}>
+                    {edit.files.map((file, fileIndex) => (
+                      <NativeChatDiffCard
+                        key={`${edit.key}:${fileIndex}`}
+                        file={file}
+                        initiallyExpanded={expandToolLines}
+                      />
+                    ))}
+                  </div>
+                )
+              }
+              if (consumedResults.has(block)) {
+                return null
+              }
               const signature =
                 block.type === 'tool-call'
                   ? `${block.type}:${block.name}:${JSON.stringify(block.input)}`

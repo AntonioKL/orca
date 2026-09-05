@@ -46,8 +46,9 @@ describe('NativeChatToolRun', () => {
 
     const { container } = render(<NativeChatToolRun blocks={blocks} expandSignal />)
 
-    expect(screen.getByText('+after')).toBeInTheDocument()
-    expect(screen.getByText('-before')).toBeInTheDocument()
+    expect(screen.getByText('after')).toBeInTheDocument()
+    expect(screen.getByText('before')).toBeInTheDocument()
+    expect(screen.getByText('Edited file')).toBeInTheDocument()
     expect(container.querySelector('pre')).toBeNull()
   })
 
@@ -78,14 +79,9 @@ describe('NativeChatToolRun', () => {
       <NativeChatToolRun blocks={projected?.blocks ?? []} expandSignal />
     )
 
-    expect(screen.getByText('+after')).toHaveClass(
-      'bg-emerald-500/10',
-      'text-[var(--git-decoration-added)]'
-    )
-    expect(screen.getByText('-before')).toHaveClass(
-      'bg-rose-500/10',
-      'text-[var(--git-decoration-deleted)]'
-    )
+    // Row grounds come from the diff tokens, not a hardcoded palette value.
+    expect(screen.getByText('after').closest('div')).toHaveClass('bg-[var(--diff-added-ground)]')
+    expect(screen.getByText('before').closest('div')).toHaveClass('bg-[var(--diff-removed-ground)]')
     expect(container).not.toHaveTextContent('"changes"')
     expect(container.querySelector('pre')).toBeNull()
   })
