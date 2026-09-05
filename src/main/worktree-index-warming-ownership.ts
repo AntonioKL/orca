@@ -8,6 +8,7 @@ function markerPath(preparedPath: string): string {
 /** The pending marker precedes spawn; an interrupted PID write remains unverifiable. */
 export class WorktreeIndexWarmingOwnership {
   private pidWrite: Promise<void> = Promise.resolve()
+  private pid: number | undefined
   constructor(private readonly preparedPath: string) {}
 
   arm(): Promise<void> {
@@ -15,12 +16,18 @@ export class WorktreeIndexWarmingOwnership {
   }
 
   recordPid(pid: number): void {
+    this.pid = pid
     this.pidWrite = writeFile(markerPath(this.preparedPath), `${pid}\n`).catch(() => {})
   }
 
-  async release(): Promise<void> {
+  // Git hooks can outlive the root; retain ownership until the whole group has exited.
+  async release(): Promise<boolean> {
     await this.pidWrite
+    if (this.pid !== undefined && !hasExitedPosixProcessGroup(this.pid)) {
+      return false
+    }
     await rm(markerPath(this.preparedPath), { force: true })
+    return true
   }
 }
 

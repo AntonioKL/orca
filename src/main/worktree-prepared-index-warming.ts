@@ -81,13 +81,20 @@ export function createPreparedIndexWarming(
           if (terminationUnverifiable) {
             return false
           }
+          let released: boolean
           try {
-            await ownership.release()
-            return true
+            released = await ownership.release()
           } catch {
             disablePreparedIndexWarming()
             return false
           }
+          if (!released) {
+            disablePreparedIndexWarming()
+            console.warn(
+              `[worktree-create] index warming process group live or unverifiable after Git exit; retaining ${preparedPath} and disabling warming`
+            )
+          }
+          return released
         })()
       }, INDEX_TIMESTAMP_AGE_MS)
       timer.unref()

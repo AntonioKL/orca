@@ -24,10 +24,39 @@ it('retains the pre-spawn window and clears ownership only after PID persistence
   await owner.arm()
   expect(await canReclaimIndexWarming(prepared)).toBe(false)
   owner.recordPid(12345)
-  await owner.release()
+  vi.spyOn(process, 'kill').mockImplementation(() => {
+    throw Object.assign(new Error('probe'), { code: 'ESRCH' })
+  })
+  expect(await owner.release()).toBe(true)
   await expect(readFile(`${prepared}.index-warming`)).rejects.toMatchObject({ code: 'ENOENT' })
   expect(await canReclaimIndexWarming(prepared)).toBe(true)
 })
+it('releases a never-spawned owner without probing a process group', async () => {
+  const owner = new WorktreeIndexWarmingOwnership(prepared)
+  await owner.arm()
+  const kill = vi.spyOn(process, 'kill')
+  expect(await owner.release()).toBe(true)
+  expect(kill).not.toHaveBeenCalled()
+  await expect(readFile(`${prepared}.index-warming`)).rejects.toMatchObject({ code: 'ENOENT' })
+})
+it.each(['EPERM', undefined])(
+  'retains the marker after root exit while the group is live or unverifiable (%s)',
+  async (code) => {
+    const owner = new WorktreeIndexWarmingOwnership(prepared)
+    await owner.arm()
+    owner.recordPid(12345)
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+      if (code) {
+        throw Object.assign(new Error('probe'), { code })
+      }
+      return true
+    })
+    expect(await owner.release()).toBe(false)
+    expect(kill).toHaveBeenCalledExactlyOnceWith(-12345, 0)
+    expect(await readFile(`${prepared}.index-warming`, 'utf8')).toBe('12345\n')
+    expect(await canReclaimIndexWarming(prepared)).toBe(false)
+  }
+)
 it('does not overwrite another ownership record', async () => {
   await writeFile(`${prepared}.index-warming`, '12345\n')
   await expect(new WorktreeIndexWarmingOwnership(prepared).arm()).rejects.toMatchObject({

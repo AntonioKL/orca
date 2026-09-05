@@ -25,7 +25,7 @@ vi.mock('./worktree-index-warming-ownership', () => ({
   WorktreeIndexWarmingOwnership: class {
     arm = vi.fn().mockResolvedValue(undefined)
     recordPid = vi.fn()
-    release = vi.fn().mockResolvedValue(undefined)
+    release = vi.fn().mockResolvedValue(true)
   },
   canReclaimIndexWarming: vi.fn().mockResolvedValue(true),
   removeIndexWarmingOwnership: vi.fn().mockResolvedValue(undefined)
