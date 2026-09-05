@@ -23,6 +23,7 @@ import { useDiffViewerLargeDiffLifecycle } from './useDiffViewerLargeDiffLifecyc
 import { getDiffViewerLargeDiffSaveAction } from './diff-viewer-large-diff-save-action'
 import type { DiffViewerProps } from './diff-viewer-props'
 import { buildDiffViewerEditorOptions } from './diff-viewer-editor-options'
+import { resolveDiffRenderSideBySide } from './diff-added-file-inline-mode'
 import { useDiffEditorRegistration } from './diff-navigation-context'
 import { preserveDiffViewStateAcrossModelSwaps } from './diff-model-swap-view-state'
 
@@ -358,18 +359,28 @@ export default function DiffViewer({
     }
   }, [modelKey])
 
+  // Why: a created file renders inline whatever the toolbar says, so the
+  // gutter policy has to follow the effective mode, not the raw setting.
+  const effectiveSideBySide = resolveDiffRenderSideBySide(sideBySide, {
+    originalContent,
+    modifiedContent
+  })
+
   useEffect(() => {
     const diffEditor = diffEditorRef.current
     if (!diffEditor) {
       return
     }
     lineNumberOptionsSubRef.current?.dispose()
-    lineNumberOptionsSubRef.current = applyDiffEditorLineNumberOptions(diffEditor, sideBySide)
+    lineNumberOptionsSubRef.current = applyDiffEditorLineNumberOptions(
+      diffEditor,
+      effectiveSideBySide
+    )
     return () => {
       lineNumberOptionsSubRef.current?.dispose()
       lineNumberOptionsSubRef.current = null
     }
-  }, [sideBySide])
+  }, [effectiveSideBySide])
 
   const diffEditorOptions = buildDiffViewerEditorOptions({
     editable: editable ?? false,

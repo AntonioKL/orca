@@ -141,7 +141,7 @@ export function DiffSectionBody({
             modifiedContent={section.diffResult.modifiedContent}
             filePath={section.path}
             mimeType={section.diffResult.mimeType}
-            sideBySide={sideBySide}
+            sideBySide={resolveDiffRenderSideBySide(sideBySide, section.diffResult)}
             layout={useIntrinsicImageHeight ? 'intrinsic' : 'fill'}
           />
         ) : (

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { resolveDiffRenderSideBySide, shouldForceInlineDiff } from './diff-added-file-inline-mode'
+import { buildDiffEditorLineNumberOptions } from './diff-editor-line-number-options'
 
 describe('shouldForceInlineDiff', () => {
   it('treats a created file as inline-only', () => {
@@ -38,5 +39,31 @@ describe('resolveDiffRenderSideBySide', () => {
     expect(
       resolveDiffRenderSideBySide(false, { originalContent: 'a\n', modifiedContent: 'b\n' })
     ).toBe(false)
+  })
+})
+
+describe('created-file inline mode at its call sites', () => {
+  const addedImage = { originalContent: '', modifiedContent: 'data:image/png;base64,AAAA' }
+
+  // Why: ImageDiffViewer picks grid-cols-2 straight off this flag, so an added
+  // image resolved from the raw setting draws an empty Original pane.
+  it('collapses an added image preview to one column', () => {
+    expect(resolveDiffRenderSideBySide(true, addedImage)).toBe(false)
+  })
+
+  // Why: the gutter policy reads the effective mode, not the toolbar. Fed the
+  // raw setting, a created file keeps a duplicate original gutter inline.
+  it('turns the original gutter off for a created file', () => {
+    const created = { originalContent: '', modifiedContent: 'new\n' }
+
+    expect(buildDiffEditorLineNumberOptions(resolveDiffRenderSideBySide(true, created))).toEqual({
+      original: 'off',
+      modified: 'on'
+    })
+    expect(
+      buildDiffEditorLineNumberOptions(
+        resolveDiffRenderSideBySide(true, { originalContent: 'a\n', modifiedContent: 'b\n' })
+      )
+    ).toEqual({ original: 'on', modified: 'on' })
   })
 })
