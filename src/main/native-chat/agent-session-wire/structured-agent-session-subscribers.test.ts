@@ -137,7 +137,11 @@ describe('AgentSessionSubscribers', () => {
     })
     const cursor = journal.cursor()
 
-    subscribers.backgroundTasks(SESSION, { state: 'monitoring' }, 2)
+    const backgroundTasks = {
+      state: 'monitoring' as const,
+      tasks: [{ id: 'task-1', kind: 'command' as const, description: 'run the build' }]
+    }
+    subscribers.backgroundTasks(SESSION, backgroundTasks, 2)
 
     expect(journal.cursor()).toEqual(cursor)
     expect(events.at(-1)).toEqual({
@@ -145,7 +149,7 @@ describe('AgentSessionSubscribers', () => {
       sessionId: SESSION,
       batch: { cursor, items: [], removedItemIds: [], submissions: [] },
       fence: 2,
-      backgroundTasks: { state: 'monitoring' }
+      backgroundTasks
     })
 
     await journal.appendItem(

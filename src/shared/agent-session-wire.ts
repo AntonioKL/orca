@@ -49,7 +49,17 @@ export type AgentSessionHandoffRequest = {
 
 export type AgentSessionHandoffResult = { status: AgentSessionHandoffStatus }
 
-export type AgentSessionBackgroundTaskState = { state: 'monitoring' }
+export type AgentSessionBackgroundTask = {
+  id: string
+  kind: 'agent' | 'workflow' | 'command' | 'monitor' | 'unknown'
+  description?: string
+}
+
+export type AgentSessionBackgroundTaskState = {
+  state: 'monitoring'
+  /** Optional so mixed-version clients can consume state-only hosts. */
+  tasks?: AgentSessionBackgroundTask[]
+}
 
 /** Backward paging is the client's normal read; 40 matches the page size the
  *  mobile list renders without a visible fill-in. */

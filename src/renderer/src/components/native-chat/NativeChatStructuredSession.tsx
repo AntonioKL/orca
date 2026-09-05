@@ -276,6 +276,7 @@ export function NativeChatStructuredSession(
       ) : null}
       {controller.isMonitoringBackgroundTasks ? (
         <NativeChatBackgroundTasksStatus
+          tasks={controller.backgroundTasks}
           stopping={stoppingBackgroundTasks}
           onStop={() => {
             setStoppingBackgroundTasks(true)

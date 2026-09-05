@@ -1,14 +1,19 @@
-import type { AgentSessionBackgroundTaskState } from '../../shared/agent-session-wire'
+import type {
+  AgentSessionBackgroundTask,
+  AgentSessionBackgroundTaskState
+} from '../../shared/agent-session-wire'
 
 const MAX_TRACKED_TASKS = 256
 const MAX_TASK_ID_LENGTH = 512
+const MAX_TASK_DESCRIPTION_LENGTH = 512
 const TERMINAL_TASK_STATES = new Set(['completed', 'failed', 'killed', 'stopped'])
 
-export type ClaudeBackgroundTaskKind = 'agent' | 'workflow' | 'command' | 'monitor' | 'unknown'
+export type ClaudeBackgroundTaskKind = AgentSessionBackgroundTask['kind']
 
 type TrackedTask = {
   backgrounded: boolean
   kind: ClaudeBackgroundTaskKind
+  description?: string
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -20,6 +25,14 @@ function taskId(message: Record<string, unknown>): string | null {
   return typeof value === 'string' && value.length > 0 && value.length <= MAX_TASK_ID_LENGTH
     ? value
     : null
+}
+
+function taskDescription(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+  const trimmed = value.trim().replace(/\s+/g, ' ')
+  return trimmed.length > 0 ? trimmed.slice(0, MAX_TASK_DESCRIPTION_LENGTH) : undefined
 }
 
 export function classifyClaudeBackgroundTaskKind(taskType: unknown): ClaudeBackgroundTaskKind {
@@ -43,9 +56,16 @@ export class ClaudeBackgroundTaskTracker {
   private aggregateRosterObserved = false
   private foregroundTurnActive = false
   private monitoring = false
+  private publishedTasksFingerprint = ''
 
   get state(): AgentSessionBackgroundTaskState | null {
-    return this.monitoring ? { state: 'monitoring' } : null
+    if (!this.monitoring) {
+      return null
+    }
+    return {
+      state: 'monitoring',
+      tasks: this.backgroundTaskDetails()
+    }
   }
 
   get stoppableTaskIds(): string[] {
@@ -100,8 +120,16 @@ export class ClaudeBackgroundTaskTracker {
         this.finish(id)
         return
       }
-      if (patch.is_backgrounded === true && (!this.aggregateRosterObserved || this.tasks.has(id))) {
-        this.upsert(id, { backgrounded: true, kind: this.tasks.get(id)?.kind ?? 'unknown' })
+      const existing = this.tasks.get(id)
+      if (
+        (patch.is_backgrounded === true || taskDescription(patch.description)) &&
+        (!this.aggregateRosterObserved || existing)
+      ) {
+        this.upsert(id, {
+          backgrounded: patch.is_backgrounded === true || existing?.backgrounded === true,
+          kind: existing?.kind ?? 'unknown',
+          description: taskDescription(patch.description) ?? existing?.description
+        })
       }
       return
     }
@@ -118,7 +146,8 @@ export class ClaudeBackgroundTaskTracker {
     const kind = classifyClaudeBackgroundTaskKind(message.task_type)
     this.upsert(id, {
       backgrounded: message.is_backgrounded === true || kind === 'workflow' || kind === 'monitor',
-      kind
+      kind,
+      description: taskDescription(message.description)
     })
   }
 
@@ -143,7 +172,8 @@ export class ClaudeBackgroundTaskTracker {
       }
       this.tasks.set(id, {
         backgrounded: true,
-        kind: classifyClaudeBackgroundTaskKind(task.task_type)
+        kind: classifyClaudeBackgroundTaskKind(task.task_type),
+        description: taskDescription(task.description)
       })
     }
   }
@@ -153,7 +183,8 @@ export class ClaudeBackgroundTaskTracker {
     if (existing) {
       this.tasks.set(id, {
         backgrounded: existing.backgrounded || task.backgrounded,
-        kind: existing.kind === 'unknown' ? task.kind : existing.kind
+        kind: existing.kind === 'unknown' ? task.kind : existing.kind,
+        description: task.description ?? existing.description
       })
       return
     }
@@ -186,19 +217,29 @@ export class ClaudeBackgroundTaskTracker {
   }
 
   private refreshMonitoring(): boolean {
-    let next = false
-    if (!this.foregroundTurnActive) {
-      for (const task of this.tasks.values()) {
-        if (task.backgrounded) {
-          next = true
-          break
-        }
-      }
-    }
-    if (next === this.monitoring) {
+    const details = this.foregroundTurnActive ? [] : this.backgroundTaskDetails()
+    const next = details.length > 0
+    const fingerprint = next ? JSON.stringify(details) : ''
+    if (next === this.monitoring && fingerprint === this.publishedTasksFingerprint) {
       return false
     }
     this.monitoring = next
+    this.publishedTasksFingerprint = fingerprint
     return true
+  }
+
+  private backgroundTaskDetails(): AgentSessionBackgroundTask[] {
+    const details: AgentSessionBackgroundTask[] = []
+    for (const [id, task] of this.tasks) {
+      if (!task.backgrounded) {
+        continue
+      }
+      details.push({
+        id,
+        kind: task.kind,
+        ...(task.description ? { description: task.description } : {})
+      })
+    }
+    return details
   }
 }

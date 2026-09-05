@@ -244,6 +244,7 @@ export function useStructuredAgentSession(args: {
     retry: outboxController.retry,
     isWorking: turnId !== null,
     isMonitoringBackgroundTasks,
+    backgroundTasks: state.backgroundTasks?.tasks ?? [],
     turnId,
     cancel: (turnId: string) => mutate('agentSession.cancel', 'agentSession.cancel', { turnId }),
     stopBackgroundTasks: () =>

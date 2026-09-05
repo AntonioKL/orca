@@ -24,12 +24,22 @@ describe('structured agent session event coalescer', () => {
     const events: AgentSessionSubscribeEvent[] = []
     const coalescer = createStructuredAgentSessionEventCoalescer((event) => events.push(event))
 
-    coalescer.push(batch(1, { state: 'monitoring' }))
+    coalescer.push(
+      batch(1, {
+        state: 'monitoring',
+        tasks: [{ id: 'task-1', kind: 'command', description: 'run the build' }]
+      })
+    )
     coalescer.push(batch(2))
     coalescer.flush()
 
     expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({ backgroundTasks: { state: 'monitoring' } })
+    expect(events[0]).toMatchObject({
+      backgroundTasks: {
+        state: 'monitoring',
+        tasks: [{ id: 'task-1', kind: 'command', description: 'run the build' }]
+      }
+    })
   })
 
   it('keeps an explicit terminal state as the newest coalesced value', () => {

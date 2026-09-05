@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import React, { forwardRef, useImperativeHandle } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentJournalRenderItem } from '../../../../shared/agent-session-journal-types'
+import type { AgentSessionBackgroundTask } from '../../../../shared/agent-session-wire'
 import { decodeAgentSessionQuestionAnswers } from '../../../../shared/agent-session-question-answer'
 import type { NativeChatQuestionCardProps } from './NativeChatQuestionCard'
 
@@ -28,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   pasteFromClipboard: vi.fn(),
   submissions: [] as unknown[],
   monitoringBackgroundTasks: false,
+  backgroundTasks: [] as AgentSessionBackgroundTask[],
   stopBackgroundTasks: vi.fn()
 }))
 
@@ -73,6 +75,7 @@ vi.mock('./use-structured-agent-session', async () => {
         retry: outbox.retry,
         isWorking: false,
         isMonitoringBackgroundTasks: mocks.monitoringBackgroundTasks,
+        backgroundTasks: mocks.backgroundTasks,
         turnId: null,
         cancel: vi.fn(),
         stopBackgroundTasks: mocks.stopBackgroundTasks,
@@ -164,6 +167,7 @@ describe('NativeChatStructuredSession', () => {
     mocks.submissions = []
     mocks.monitoringBackgroundTasks = false
     mocks.stopBackgroundTasks.mockReset()
+    mocks.backgroundTasks = []
   })
 
   it('routes app-menu paste into the structured composer', () => {
@@ -221,6 +225,10 @@ describe('NativeChatStructuredSession', () => {
 
   it('places background monitoring above the usable composer and stops without an active turn', async () => {
     mocks.monitoringBackgroundTasks = true
+    mocks.backgroundTasks = [
+      { id: 'task-command', kind: 'command', description: 'sleep 180' },
+      { id: 'task-agent', kind: 'agent' }
+    ]
     mocks.stopBackgroundTasks.mockResolvedValue({ cancelled: true })
 
     render(
@@ -230,7 +238,6 @@ describe('NativeChatStructuredSession', () => {
         sessionId="session-background"
         target={{ kind: 'local' }}
         agent="claude"
-        allowFileUriLinks={false}
       />
     )
 
@@ -243,6 +250,15 @@ describe('NativeChatStructuredSession', () => {
     }
     expect(status.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(mocks.composerProps?.isWorking).toBe(false)
+    expect(screen.queryByRole('list', { name: 'Running background tasks' })).toBeNull()
+
+    const disclosure = screen.getByRole('button', { name: 'Monitoring background tasks' })
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(disclosure)
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('list', { name: 'Running background tasks' })).toBeTruthy()
+    expect(screen.getByText('sleep 180')).toBeTruthy()
+    expect(screen.getByText('Background agent')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     await waitFor(() => expect(mocks.stopBackgroundTasks).toHaveBeenCalledOnce())

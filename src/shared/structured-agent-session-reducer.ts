@@ -44,6 +44,30 @@ export const EMPTY_STRUCTURED_AGENT_SESSION: StructuredAgentSessionState = {
 
 const MAX_RETAINED_SUBMISSIONS = 256
 
+function backgroundTaskStatesEqual(
+  left: AgentSessionBackgroundTaskState | null | undefined,
+  right: AgentSessionBackgroundTaskState | null | undefined
+): boolean {
+  if (left === right) {
+    return true
+  }
+  if (!left || !right || left.state !== right.state) {
+    return false
+  }
+  if (left.tasks === right.tasks) {
+    return true
+  }
+  if (!left.tasks || !right.tasks || left.tasks.length !== right.tasks.length) {
+    return false
+  }
+  return left.tasks.every(
+    (task, index) =>
+      task.id === right.tasks?.[index]?.id &&
+      task.kind === right.tasks[index]?.kind &&
+      task.description === right.tasks[index]?.description
+  )
+}
+
 function replacePage(
   page: AgentSessionHistoryPage,
   fence: number,
@@ -123,7 +147,7 @@ export function reduceStructuredAgentSession(
     ) {
       const backgroundTasksChanged =
         action.page.backgroundTasks !== undefined &&
-        action.page.backgroundTasks?.state !== state.backgroundTasks?.state
+        !backgroundTaskStatesEqual(action.page.backgroundTasks, state.backgroundTasks)
       if (
         pageCursor?.sequence === state.cursor.sequence &&
         ((action.page.fence !== undefined && action.page.fence !== state.fence) ||
@@ -195,7 +219,7 @@ export function reduceStructuredAgentSession(
     journalUnchanged &&
     (event.fence === undefined || event.fence === state.fence) &&
     (event.handoff === undefined || event.handoff === state.handoff) &&
-    backgroundTasks?.state === state.backgroundTasks?.state &&
+    backgroundTaskStatesEqual(backgroundTasks, state.backgroundTasks) &&
     state.status === 'ready' &&
     state.error === undefined
   ) {

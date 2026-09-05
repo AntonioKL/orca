@@ -312,6 +312,46 @@ describe('structured agent session reducer', () => {
     expect(duplicate).toBe(monitoring)
   })
 
+  it('applies background task roster changes without a journal update', () => {
+    const monitoring = reduceStructuredAgentSession(EMPTY_STRUCTURED_AGENT_SESSION, {
+      type: 'event',
+      event: {
+        type: 'snapshot',
+        sessionId: 'session-a',
+        fence: 1,
+        page: hydrationPage([item('message', 1)]),
+        backgroundTasks: {
+          state: 'monitoring',
+          tasks: [{ id: 'task-1', kind: 'command', description: 'first command' }]
+        }
+      }
+    })
+    const changed = reduceStructuredAgentSession(monitoring, {
+      type: 'event',
+      event: {
+        type: 'batch',
+        sessionId: 'session-a',
+        batch: {
+          cursor: monitoring.cursor!,
+          items: [],
+          removedItemIds: [],
+          submissions: []
+        },
+        fence: 1,
+        backgroundTasks: {
+          state: 'monitoring',
+          tasks: [{ id: 'task-1', kind: 'agent', description: 'review the change' }]
+        }
+      }
+    })
+
+    expect(changed).not.toBe(monitoring)
+    expect(changed.backgroundTasks?.tasks).toEqual([
+      { id: 'task-1', kind: 'agent', description: 'review the change' }
+    ])
+    expect(changed.items).toBe(monitoring.items)
+  })
+
   it('clears additive background state when a replacement snapshot omits the field', () => {
     const monitoring = reduceStructuredAgentSession(EMPTY_STRUCTURED_AGENT_SESSION, {
       type: 'event',
