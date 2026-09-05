@@ -1,16 +1,20 @@
-import type { AgentStatusIpcPayload } from './agent-status-ipc-payload'
+import {
+  fleetWorkerIdentity,
+  type FleetAgentStatusEvidence,
+  type FleetWorkerIdentity
+} from './orchestration-fleet-agent-status-evidence'
 import type { FleetDurableWorker } from './orchestration-fleet-projection'
 
 export type FleetStatusIndex = {
-  byDispatchId: Map<string, AgentStatusIpcPayload>
-  byPaneKey: Map<string, AgentStatusIpcPayload>
-  byTerminalHandle: Map<string, AgentStatusIpcPayload>
+  byDispatchId: Map<string, FleetAgentStatusEvidence>
+  byPaneKey: Map<string, FleetAgentStatusEvidence>
+  byTerminalHandle: Map<string, FleetAgentStatusEvidence>
   paneOwners: Map<string, Set<string>>
   handleOwners: Map<string, Set<string>>
 }
 
 export function createFleetStatusIndex(
-  statuses: readonly AgentStatusIpcPayload[],
+  statuses: readonly FleetAgentStatusEvidence[],
   workers: readonly FleetDurableWorker[]
 ): FleetStatusIndex {
   const index: FleetStatusIndex = {
@@ -25,25 +29,32 @@ export function createFleetStatusIndex(
   const terminalHandles = new Set<string>()
   for (const worker of workers) {
     dispatchIds.add(worker.dispatchId)
-    if (worker.paneKey) {
-      paneKeys.add(worker.paneKey)
-      addOwner(index.paneOwners, worker.paneKey, worker.dispatchId)
+    const identity = fleetWorkerIdentity(worker)
+    if (identity.kind === 'unidentifiable') {
+      continue
     }
-    if (worker.agentTerminalHandle) {
-      terminalHandles.add(worker.agentTerminalHandle)
-      addOwner(index.handleOwners, worker.agentTerminalHandle, worker.dispatchId)
+    if (identity.kind === 'pane_and_terminal') {
+      paneKeys.add(identity.paneKey)
+      addOwner(index.paneOwners, identity.paneKey, worker.dispatchId)
     }
+    terminalHandles.add(identity.terminalHandle)
+    addOwner(index.handleOwners, identity.terminalHandle, worker.dispatchId)
   }
-  for (const status of statuses) {
-    const dispatchId = status.orchestration?.dispatchId
-    if (dispatchId && dispatchIds.has(dispatchId)) {
-      keepFreshest(index.byDispatchId, dispatchId, status)
+  for (const evidence of statuses) {
+    const binding = evidence.binding
+    // An unresolved row identifies nothing; indexing it under the pane it was observed on is
+    // exactly the false bind this union exists to prevent.
+    if (binding.kind === 'unresolved') {
+      continue
     }
-    if (paneKeys.has(status.paneKey)) {
-      keepFreshest(index.byPaneKey, status.paneKey, status)
+    if (binding.kind === 'worker' && dispatchIds.has(binding.dispatchId)) {
+      keepFreshest(index.byDispatchId, binding.dispatchId, evidence)
     }
-    if (status.terminalHandle && terminalHandles.has(status.terminalHandle)) {
-      keepFreshest(index.byTerminalHandle, status.terminalHandle, status)
+    if (paneKeys.has(binding.paneKey)) {
+      keepFreshest(index.byPaneKey, binding.paneKey, evidence)
+    }
+    if (terminalHandles.has(binding.terminalHandle)) {
+      keepFreshest(index.byTerminalHandle, binding.terminalHandle, evidence)
     }
   }
   return index
@@ -55,61 +66,73 @@ function addOwner(ownersByKey: Map<string, Set<string>>, key: string, dispatchId
   ownersByKey.set(key, owners)
 }
 
+/** Delivery order, deliberately: replays restamp `deliveredAt`, and the newest delivery is the
+ *  row the pane's producer last asserted. The observation clock decides staleness, never order. */
 function keepFreshest(
-  statusesByKey: Map<string, AgentStatusIpcPayload>,
+  statusesByKey: Map<string, FleetAgentStatusEvidence>,
   key: string,
-  status: AgentStatusIpcPayload
+  evidence: FleetAgentStatusEvidence
 ): void {
   const current = statusesByKey.get(key)
-  if (!current || current.receivedAt < status.receivedAt) {
-    statusesByKey.set(key, status)
+  if (!current || current.deliveredAt < evidence.deliveredAt) {
+    statusesByKey.set(key, evidence)
   }
 }
 
 export function statusForFleetWorker(
   worker: FleetDurableWorker,
   index: FleetStatusIndex
-): AgentStatusIpcPayload | undefined {
+): FleetAgentStatusEvidence | undefined {
+  const identity = fleetWorkerIdentity(worker)
+  if (identity.kind === 'unidentifiable') {
+    return undefined
+  }
   const byDispatch = index.byDispatchId.get(worker.dispatchId)
-  if (byDispatch && statusIdentityMatchesWorker(worker, byDispatch, index)) {
+  if (byDispatch && statusIdentityMatchesWorker(worker, identity, byDispatch, index)) {
     return byDispatch
   }
   const candidates = [
-    worker.paneKey ? index.byPaneKey.get(worker.paneKey) : undefined,
-    worker.agentTerminalHandle ? index.byTerminalHandle.get(worker.agentTerminalHandle) : undefined
-  ].filter((status): status is AgentStatusIpcPayload =>
-    Boolean(status && statusIdentityMatchesWorker(worker, status, index))
+    identity.kind === 'pane_and_terminal' ? index.byPaneKey.get(identity.paneKey) : undefined,
+    index.byTerminalHandle.get(identity.terminalHandle)
+  ].filter((evidence): evidence is FleetAgentStatusEvidence =>
+    Boolean(evidence && statusIdentityMatchesWorker(worker, identity, evidence, index))
   )
-  return candidates.sort((left, right) => right.receivedAt - left.receivedAt)[0]
+  return candidates.sort((left, right) => right.deliveredAt - left.deliveredAt)[0]
 }
 
 function statusIdentityMatchesWorker(
   worker: FleetDurableWorker,
-  status: AgentStatusIpcPayload,
+  identity: FleetWorkerIdentity,
+  evidence: FleetAgentStatusEvidence,
   index: FleetStatusIndex
 ): boolean {
-  const resource = worker.resource
-  const explicitDispatch = status.orchestration?.dispatchId
-  if (explicitDispatch && explicitDispatch !== worker.dispatchId) {
+  const binding = evidence.binding
+  if (binding.kind === 'unresolved' || identity.kind === 'unidentifiable') {
     return false
   }
-  const paneMatches = !worker.paneKey || status.paneKey === worker.paneKey
-  const handleMatches =
-    !worker.agentTerminalHandle || status.terminalHandle === worker.agentTerminalHandle
-  const remoteTargetId = remoteTargetFromHostScope(resource?.hostScope)
-  if (remoteTargetId && status.connectionId !== remoteTargetId) {
+  if (binding.kind === 'worker' && binding.dispatchId !== worker.dispatchId) {
     return false
   }
-  if (explicitDispatch) {
-    return (
-      (paneMatches && handleMatches) || (handleMatches && Boolean(resource?.processIncarnation))
-    )
+  if (binding.terminalHandle !== identity.terminalHandle) {
+    return false
+  }
+  const remoteTargetId = remoteTargetForWorker(worker)
+  if (remoteTargetId && evidence.activity.connectionId !== remoteTargetId) {
+    return false
+  }
+  const paneMatches = identity.kind !== 'pane_and_terminal' || binding.paneKey === identity.paneKey
+  if (binding.kind === 'worker') {
+    // A row that names this dispatch on this handle may be a reminted pane; the durable
+    // resource's incarnation is what makes the handle authoritative across the remint.
+    return paneMatches || Boolean(worker.resource?.processIncarnation)
   }
   return (
     paneMatches &&
-    handleMatches &&
-    uniqueOwner(index.paneOwners, worker.paneKey) &&
-    uniqueOwner(index.handleOwners, worker.agentTerminalHandle)
+    uniqueOwner(
+      index.paneOwners,
+      identity.kind === 'pane_and_terminal' ? identity.paneKey : null
+    ) &&
+    uniqueOwner(index.handleOwners, identity.terminalHandle)
   )
 }
 
@@ -117,7 +140,8 @@ function uniqueOwner(ownersByKey: Map<string, Set<string>>, key: string | null):
   return key ? ownersByKey.get(key)?.size === 1 : true
 }
 
-function remoteTargetFromHostScope(hostScope: string | null | undefined): string | null {
+function remoteTargetForWorker(worker: FleetDurableWorker): string | null {
+  const hostScope = worker.resource?.hostScope
   if (!hostScope) {
     return null
   }

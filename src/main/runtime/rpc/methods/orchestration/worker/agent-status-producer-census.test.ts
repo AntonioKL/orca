@@ -152,6 +152,7 @@ const PRODUCER_TOKENS =
 
 const PANE_KEY = 'tab-census:leaf-census'
 const TERMINAL_HANDLE = 'term_census'
+const PROCESS_INCARNATION = 'pty-census:inc-1'
 const DISPATCH_ID = 'dispatch-census'
 const WORKTREE_ID = 'wt-census'
 
@@ -182,6 +183,11 @@ function censusRuntime(): OrcaRuntimeService {
     paneKey === PANE_KEY ? TERMINAL_HANDLE : undefined
   )
   vi.spyOn(runtime, 'getAgentStatusOrchestrationContextForPaneKey').mockReturnValue(undefined)
+  // The incarnation is the third fact the real terminal registry owns for a bound pane; the
+  // census seeds no resource row, so no durable incarnation contradicts it.
+  vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockImplementation((handle) =>
+    handle === TERMINAL_HANDLE ? PROCESS_INCARNATION : null
+  )
   return runtime
 }
 

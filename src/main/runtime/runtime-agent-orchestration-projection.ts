@@ -2,7 +2,7 @@ import {
   AGENT_STATUS_STALE_AFTER_MS,
   type AgentStatusOrchestrationContext
 } from '../../shared/agent-status-types'
-import type { AgentStatusIpcPayload } from '../../shared/agent-status-ipc-payload'
+import type { FleetAgentStatusEvidence } from '../../shared/orchestration-fleet-agent-status-evidence'
 import { buildOrchestrationTaskDisplayMetadata } from '../../shared/orchestration-task-display'
 import { parsePaneKey } from '../../shared/stable-pane-id'
 import type { OrchestrationCompatibilityTerminalAuthority } from './runtime-terminal-contracts'
@@ -25,7 +25,7 @@ type RuntimeAgentOrchestrationDependencies = {
   getHandleForPaneKey(paneKey: string): string | null
   getPaneKey(handle: string): string | null
   getDispatchAuthority(handle: string): OrchestrationCompatibilityTerminalAuthority | null
-  getAgentStatusSnapshot(): readonly AgentStatusIpcPayload[]
+  getAgentStatusSnapshot(): readonly FleetAgentStatusEvidence[]
 }
 
 export class RuntimeAgentOrchestrationProjection {
@@ -37,8 +37,8 @@ export class RuntimeAgentOrchestrationProjection {
       return undefined
     }
     const contexts: Record<string, AgentStatusOrchestrationContext> = {}
-    const statusesByPaneKey = new Map(
-      this.deps.getAgentStatusSnapshot().map((status) => [status.paneKey, status])
+    const evidenceByPaneKey = new Map(
+      this.deps.getAgentStatusSnapshot().map((evidence) => [evidence.activity.paneKey, evidence])
     )
     // Defer attention to one batched query below; per-pane facts would refetch on every 16ms publish.
     const batchAttention = typeof db.getWorkerAttentionFactsForDispatches === 'function'
@@ -50,7 +50,7 @@ export class RuntimeAgentOrchestrationProjection {
       const handle = this.deps.issueLeafHandle(leaf)
       queriedHandles.add(handle)
       const paneKey = this.deps.makePaneKey(leaf)
-      const context = this.getForHandle(handle, db, statusesByPaneKey.get(paneKey), batchAttention)
+      const context = this.getForHandle(handle, db, evidenceByPaneKey.get(paneKey), batchAttention)
       if (context) {
         contexts[paneKey] = context
       }
@@ -67,7 +67,7 @@ export class RuntimeAgentOrchestrationProjection {
       const context = this.getForHandle(
         handle,
         db,
-        statusesByPaneKey.get(pty.paneKey),
+        evidenceByPaneKey.get(pty.paneKey),
         batchAttention
       )
       if (context) {
@@ -92,7 +92,7 @@ export class RuntimeAgentOrchestrationProjection {
             attention: projectWorkerAttentionContext({
               facts,
               isRoot: facts.isRoot,
-              status: statusesByPaneKey.get(paneKey),
+              evidence: evidenceByPaneKey.get(paneKey),
               now
             })
           }
@@ -105,7 +105,7 @@ export class RuntimeAgentOrchestrationProjection {
   getForHandle(
     handle: string,
     db = this.deps.getDb(),
-    status?: AgentStatusIpcPayload,
+    evidence?: FleetAgentStatusEvidence,
     deferAttention = false
   ): AgentStatusOrchestrationContext | undefined {
     const dispatch = db?.getActiveDispatchForTerminal?.(handle) ?? this.getRecent(handle, db)
@@ -183,7 +183,7 @@ export class RuntimeAgentOrchestrationProjection {
     const parentPaneKey = parentHandle ? this.deps.getPaneKey(parentHandle) : undefined
     const attention =
       !deferAttention && db && typeof db.getWorkerAttentionFacts === 'function'
-        ? buildWorkerAttentionContext({ db, dispatch, task, status })
+        ? buildWorkerAttentionContext({ db, dispatch, task, evidence })
         : undefined
     return {
       taskId: dispatch.task_id,

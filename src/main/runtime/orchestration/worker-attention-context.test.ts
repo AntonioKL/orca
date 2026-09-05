@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AGENT_STATUS_STALE_AFTER_MS } from '../../../shared/agent-status-types'
 import type { AgentStatusIpcPayload } from '../../../shared/agent-status-ipc-payload'
+import { mintFleetAgentStatusEvidence } from '../../../shared/orchestration-fleet-agent-status-evidence'
 import type { WorkerAttentionFacts } from './db/worker-terminal/worker-terminal-attention-query'
 import { projectWorkerAttentionContext } from './worker-attention-context'
 
@@ -21,15 +22,23 @@ function facts(overrides: Partial<WorkerAttentionFacts> = {}): WorkerAttentionFa
   }
 }
 
-function status(overrides: Partial<AgentStatusIpcPayload> = {}): AgentStatusIpcPayload {
-  return {
-    paneKey: 'tab-1:leaf-1',
-    connectionId: null,
-    state: 'working',
-    receivedAt: NOW - 1,
-    stateStartedAt: NOW - 1,
-    ...overrides
-  } as AgentStatusIpcPayload
+function status(overrides: Partial<AgentStatusIpcPayload> = {}) {
+  return mintFleetAgentStatusEvidence(
+    {
+      paneKey: 'tab-1:leaf-1',
+      connectionId: null,
+      state: 'working',
+      receivedAt: NOW - 1,
+      stateStartedAt: NOW - 1,
+      ...overrides
+    } as AgentStatusIpcPayload,
+    {
+      kind: 'pane',
+      terminalHandle: 'term-1',
+      paneKey: 'tab-1:leaf-1',
+      processIncarnation: 'pty-1:inc-1'
+    }
+  )
 }
 
 describe('worker attention liveness', () => {
@@ -38,7 +47,7 @@ describe('worker attention liveness', () => {
       facts: facts(),
       isRoot: false,
       // A relay reconnect restamps receivedAt; the underlying evidence is an hour old.
-      status: status({ evidenceObservedAt: NOW - AGENT_STATUS_STALE_AFTER_MS - 60_000 }),
+      evidence: status({ evidenceObservedAt: NOW - AGENT_STATUS_STALE_AFTER_MS - 60_000 }),
       now: NOW
     })
 
@@ -50,7 +59,7 @@ describe('worker attention liveness', () => {
     const attention = projectWorkerAttentionContext({
       facts: facts({ hostScope: '{"kind":"ssh","targetId":"host-1"}' }),
       isRoot: false,
-      status: status(),
+      evidence: status(),
       now: NOW
     })
 
@@ -62,7 +71,7 @@ describe('worker attention liveness', () => {
     const attention = projectWorkerAttentionContext({
       facts: facts({ hostScope: '{"kind":"local","hostId":"local"}' }),
       isRoot: false,
-      status: status(),
+      evidence: status(),
       now: NOW
     })
 
@@ -78,7 +87,7 @@ describe('worker attention liveness', () => {
         releaseState: 'released'
       }),
       isRoot: false,
-      status: status({ evidenceObservedAt: NOW - AGENT_STATUS_STALE_AFTER_MS - 60_000 }),
+      evidence: status({ evidenceObservedAt: NOW - AGENT_STATUS_STALE_AFTER_MS - 60_000 }),
       now: NOW
     })
 
@@ -93,7 +102,7 @@ describe('worker attention liveness', () => {
         hostScope: '{"kind":"local","hostId":"local"}'
       }),
       isRoot: false,
-      status: status({ evidenceObservedAt: NOW - AGENT_STATUS_STALE_AFTER_MS - 60_000 }),
+      evidence: status({ evidenceObservedAt: NOW - AGENT_STATUS_STALE_AFTER_MS - 60_000 }),
       now: NOW
     })
 
@@ -104,7 +113,7 @@ describe('worker attention liveness', () => {
     const attention = projectWorkerAttentionContext({
       facts: facts({ workerState: 'stopped', outcome: 'in_progress' }),
       isRoot: false,
-      status: undefined,
+      evidence: undefined,
       now: NOW
     })
 

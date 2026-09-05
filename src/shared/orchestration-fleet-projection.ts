@@ -1,4 +1,4 @@
-import type { AgentStatusIpcPayload } from './agent-status-ipc-payload'
+import type { FleetAgentStatusEvidence } from './orchestration-fleet-agent-status-evidence'
 import { createFleetStatusIndex, statusForFleetWorker } from './orchestration-fleet-status-index'
 import {
   projectOrchestrationFleetAttention,
@@ -142,7 +142,7 @@ export function refreshOrchestrationFleetLivenessAttention(worker: Orchestration
 
 export function projectOrchestrationFleet(args: {
   workers: readonly FleetDurableWorker[]
-  statuses: readonly AgentStatusIpcPayload[]
+  statuses: readonly FleetAgentStatusEvidence[]
   now?: number
   cursor?: string
   limit?: number

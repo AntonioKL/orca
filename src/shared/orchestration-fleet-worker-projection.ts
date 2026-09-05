@@ -1,5 +1,5 @@
 import { AGENT_STATUS_STALE_AFTER_MS } from './agent-status-types'
-import type { AgentStatusIpcPayload } from './agent-status-ipc-payload'
+import type { FleetAgentStatusEvidence } from './orchestration-fleet-agent-status-evidence'
 import { projectOrchestrationFleetAttention } from './orchestration-fleet-attention'
 import type {
   FleetDurableWorker,
@@ -36,15 +36,9 @@ function hasCertifiedExit(worker: FleetLivenessSubject): boolean {
   )
 }
 
-/** `receivedAt` is the DELIVERY clock: a relay reconnect replays a cached row and restamps it,
- *  so measuring staleness against it makes an hour-old agent read live. */
-function agentStatusFleetObservedAt(status: AgentStatusIpcPayload): number {
-  return status.evidenceObservedAt ?? status.receivedAt
-}
-
 export function projectLiveness(
   worker: FleetLivenessSubject,
-  status: AgentStatusIpcPayload | undefined,
+  evidence: FleetAgentStatusEvidence | undefined,
   now: number
 ): FleetLiveness {
   // A federated release is an execution-host confirmation that the terminal
@@ -63,21 +57,25 @@ export function projectLiveness(
   if (hasCertifiedExit(worker)) {
     return { verdict: 'exited', source: 'execution_host' }
   }
-  if (!status) {
+  if (!evidence) {
     return { verdict: 'unverifiable', reason: 'missing_status' }
   }
-  const observedAt = agentStatusFleetObservedAt(status)
-  if (status.restoredUnconfirmed) {
+  // The clock is an arm, not a fallback: a host with no observation clock reports `delivery`
+  // explicitly, so a producer that simply forgot to stamp one cannot look like an old host.
+  const observedAt = evidence.clock.at
+  const activity = evidence.activity
+  if (activity.restoredUnconfirmed) {
     return { verdict: 'unverifiable', reason: 'restored_unconfirmed', observedAt }
   }
-  if (status.providerSessionOnly) {
+  if (activity.providerSessionOnly) {
     return { verdict: 'unverifiable', reason: 'missing_status', observedAt }
   }
   if (observedAt - now > FLEET_STATUS_FUTURE_TOLERANCE_MS) {
     return { verdict: 'unverifiable', reason: 'future_status', observedAt }
   }
-  const remoteHost = projectHost(status, worker.resource?.hostScope).kind === 'remote'
-  if (remoteHost && !status.connectionId) {
+  const remoteHost =
+    projectHost(activity.connectionId, worker.resource?.hostScope).kind === 'remote'
+  if (remoteHost && !activity.connectionId) {
     return { verdict: 'unverifiable', reason: 'missing_status', observedAt }
   }
   if (now - observedAt > AGENT_STATUS_STALE_AFTER_MS) {
@@ -171,11 +169,11 @@ export function projectFleetNextAction(
 }
 
 function projectHost(
-  status: AgentStatusIpcPayload | undefined,
+  connectionId: string | null,
   hostScope: string | null | undefined
 ): OrchestrationFleetWorker['host'] {
-  if (status?.connectionId) {
-    return { kind: 'remote', id: status.connectionId }
+  if (connectionId) {
+    return { kind: 'remote', id: connectionId }
   }
   if (!hostScope) {
     // A missing host scope is the legacy/default representation for local and
@@ -211,12 +209,14 @@ function projectHost(
 
 export function projectOrchestrationFleetWorker(
   worker: FleetDurableWorker,
-  status: AgentStatusIpcPayload | undefined,
+  evidence: FleetAgentStatusEvidence | undefined,
   now: number
 ): OrchestrationFleetWorker {
-  const liveness = projectLiveness(worker, status, now)
+  const liveness = projectLiveness(worker, evidence, now)
   const fresh = liveness.verdict === 'live'
-  const workspaceId = status?.worktreeId ?? worker.worktreeId ?? worker.resource?.worktreeId ?? null
+  const activity = evidence?.activity
+  const workspaceId =
+    activity?.worktreeId ?? worker.worktreeId ?? worker.resource?.worktreeId ?? null
   const outcome =
     worker.outcome ??
     (worker.workerState === 'succeeded'
@@ -231,27 +231,27 @@ export function projectOrchestrationFleetWorker(
     runId: worker.runId,
     role: 'worker',
     parent: worker.parentTaskId ? { taskId: worker.parentTaskId } : null,
-    provider: status?.agentType ? { id: status.agentType, model: status.model ?? null } : null,
-    host: projectHost(status, worker.resource?.hostScope),
+    provider: activity?.agentType ? { id: activity.agentType, model: activity.model } : null,
+    host: projectHost(activity?.connectionId ?? null, worker.resource?.hostScope),
     workspace: workspaceId ? { id: workspaceId, kind: 'folder_or_worktree' } : null,
     stage: {
       worker: worker.workerState,
       dispatch: worker.dispatchStatus,
       detail: worker.workerStage,
-      activity: fresh && status ? status.state : 'unknown'
+      activity: fresh && activity ? activity.state : 'unknown'
     },
     outcome,
     liveness,
     evidence: {
       durable: true,
-      liveStatus: !status
+      liveStatus: !evidence
         ? 'unavailable'
-        : status.restoredUnconfirmed
+        : evidence.activity.restoredUnconfirmed
           ? 'redacted_restore'
           : fresh
             ? 'fresh'
             : 'stale',
-      lastObservedAt: status ? agentStatusFleetObservedAt(status) : null
+      lastObservedAt: evidence ? evidence.clock.at : null
     },
     resource: projectResource(worker),
     nextAction: projectFleetNextAction(worker, liveness),

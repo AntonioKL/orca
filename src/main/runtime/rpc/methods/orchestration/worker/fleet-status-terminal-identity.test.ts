@@ -10,6 +10,7 @@ import { projectFleetWorkerPage } from './worker-observation'
 const PANE_KEY = 'tab-fleet:leaf-fleet'
 const TERMINAL_HANDLE = 'term_fleet'
 const DISPATCH_ID = 'disp-fleet'
+const PROCESS_INCARNATION = 'pty-fleet:inc-1'
 /** `projectFleetWorkerPage` stamps `Date.now()` itself, so the fixture must ride the wall clock. */
 const observedAt = (): number => Date.now() - 1_000
 
@@ -29,13 +30,16 @@ function hookRowAsPublished(): ReturnType<typeof toAgentStatusIpcPayload> {
 function createRuntime(args: {
   handleForPane?: string
   orchestration?: AgentStatusOrchestrationContext
+  incarnationForHandle?: string | null
 }): OrcaRuntimeService {
   const host = {
     getAgentStatusSnapshotFn: () => [hookRowAsPublished()],
     getAgentStatusTerminalHandleForPaneKey: (paneKey: string) =>
       paneKey === PANE_KEY ? args.handleForPane : undefined,
     getAgentStatusOrchestrationContextForPaneKey: (paneKey: string) =>
-      paneKey === PANE_KEY ? args.orchestration : undefined
+      paneKey === PANE_KEY ? args.orchestration : undefined,
+    getTerminalProcessIncarnation: () =>
+      args.incarnationForHandle === undefined ? PROCESS_INCARNATION : args.incarnationForHandle
   }
   return {
     // Drive the shipping accessor, not a copy of it: the identity loss was in this method.
@@ -69,7 +73,7 @@ function createDb(): OrchestrationDb {
           owner_dispatch_id: DISPATCH_ID,
           worktree_id: 'wt-fleet',
           pane_key: PANE_KEY,
-          process_incarnation: 'pty-fleet:inc-1',
+          process_incarnation: PROCESS_INCARNATION,
           endpoint_id: null,
           endpoint_incarnation: null,
           host_scope: JSON.stringify({ kind: 'local', hostId: 'local' }),

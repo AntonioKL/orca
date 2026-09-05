@@ -1,4 +1,4 @@
-import type { AgentStatusIpcPayload } from '../../../shared/agent-status-ipc-payload'
+import type { FleetAgentStatusEvidence } from '../../../shared/orchestration-fleet-agent-status-evidence'
 import { projectOrchestrationFleetAttention } from '../../../shared/orchestration-fleet-attention'
 import { projectLiveness } from '../../../shared/orchestration-fleet-worker-projection'
 import type { OrchestrationDb } from './db'
@@ -21,7 +21,7 @@ export function buildWorkerAttentionContext(args: {
   db: OrchestrationDb
   dispatch: DispatchContextRow
   task: TaskRow | undefined
-  status: AgentStatusIpcPayload | undefined
+  evidence: FleetAgentStatusEvidence | undefined
   now?: number
 }) {
   const now = args.now ?? Date.now()
@@ -29,7 +29,7 @@ export function buildWorkerAttentionContext(args: {
   return projectWorkerAttentionContext({
     facts,
     isRoot: facts.isRoot,
-    status: args.status,
+    evidence: args.evidence,
     now
   })
 }
@@ -37,7 +37,7 @@ export function buildWorkerAttentionContext(args: {
 export function projectWorkerAttentionContext(args: {
   facts: WorkerAttentionFacts
   isRoot: boolean
-  status: AgentStatusIpcPayload | undefined
+  evidence: FleetAgentStatusEvidence | undefined
   now: number
 }) {
   return projectOrchestrationFleetAttention({
@@ -59,7 +59,7 @@ export function projectWorkerAttentionContext(args: {
             ? null
             : { hostScope: args.facts.hostScope, releaseState: args.facts.releaseState }
       },
-      args.status,
+      args.evidence,
       args.now
     )
   })

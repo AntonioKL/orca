@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentStatusIpcPayload } from './agent-status-ipc-payload'
+import { mintFleetAgentStatusEvidence } from './orchestration-fleet-agent-status-evidence'
 import {
   ORCHESTRATION_FLEET_PAGE_MAX,
   projectOrchestrationFleet,
@@ -26,12 +27,16 @@ function worker(id: string, overrides: Partial<FleetDurableWorker> = {}): FleetD
   }
 }
 
+/** The identity the runtime resolves for the pane. Hand-built here because these cases are
+ *  about the projection, not about identity resolution — `fleet-status-terminal-identity` and
+ *  the producer census drive the real minter against a real runtime. */
 function status(
   id: string,
   receivedAt: number,
-  overrides: Partial<AgentStatusIpcPayload> = {}
-): AgentStatusIpcPayload {
-  return {
+  overrides: Partial<AgentStatusIpcPayload> = {},
+  processIncarnation = `pty-${id}:inc-1`
+) {
+  const payload = {
     paneKey: `tab-${id}:leaf-${id}`,
     terminalHandle: `term-${id}`,
     worktreeId: `workspace-${id}`,
@@ -43,7 +48,14 @@ function status(
     receivedAt,
     stateStartedAt: receivedAt,
     ...overrides
-  }
+  } as AgentStatusIpcPayload
+  const dispatchId = payload.orchestration?.dispatchId
+  return mintFleetAgentStatusEvidence(payload, {
+    ...(dispatchId ? { kind: 'worker' as const, dispatchId } : { kind: 'pane' as const }),
+    terminalHandle: payload.terminalHandle ?? `term-${id}`,
+    paneKey: payload.paneKey,
+    processIncarnation
+  })
 }
 
 describe('orchestration fleet projection', () => {
