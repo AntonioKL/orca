@@ -144,6 +144,9 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
       runtime.onPtyData(ptyId, '\x1b]0;Claude done\x07', 101)
     },
     remountStatuslessCodex: (ptyId: string) => {
+      // Production can publish the writable renderer graph before main receives
+      // the provider-owned reattach identity for that PTY.
+      syncGraph(ptyId)
       runtime.registerPty(ptyId, TEST_WORKTREE_ID, null, {
         tabId: TAB_ID,
         leafId: LEAF_ID,
@@ -153,7 +156,6 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
           launchAgent: 'codex'
         }
       })
-      syncGraph(ptyId)
       runtime.onPtyData(
         ptyId,
         [
@@ -357,9 +359,9 @@ describe('mail addressed to a listed slept pane', () => {
       await Promise.resolve()
       await Promise.resolve()
 
-      const graphDelivery = vi.spyOn(runtime, 'deliverPendingMessagesForHandle')
+      const reattachDelivery = vi.spyOn(runtime, 'deliverPendingMessagesForHandle')
       remountStatuslessCodex('pty-codex-woken')
-      expect(graphDelivery).toHaveBeenCalledWith(handle)
+      expect(reattachDelivery).toHaveBeenCalledWith(handle)
       await vi.advanceTimersByTimeAsync(2_000)
       const runtimeState = runtime as unknown as {
         leaves: Map<
