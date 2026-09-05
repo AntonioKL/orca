@@ -12,6 +12,7 @@ import { preparationPathKey, selectPreparationForCreate } from './worktree-creat
 import {
   _resetPreparationPoolForTests,
   findPreparation,
+  holdPreparation,
   hasPendingPreparations,
   listPreparations,
   startPreparation,
@@ -71,11 +72,11 @@ function canonicalBaseRef(
   )
 }
 
-export async function prepareWorktreeCreateForRepo(
+async function getOrStartPreparationForRepo(
   store: Store,
   repo: Repo,
   baseBranch: string
-): Promise<void> {
+): Promise<PreparationEntry | undefined> {
   if (repo.connectionId || isFolderRepo(repo)) {
     return
   }
@@ -96,16 +97,50 @@ export async function prepareWorktreeCreateForRepo(
     options.wslDistro ?? ''
   )
   if (existing) {
-    return existing.ready
+    return existing
   }
 
-  return startPreparation({
+  void startPreparation({
     repoPath: repo.path,
     workspaceRoot,
     baseBranch,
     canonicalBase,
     options
   })
+  return findPreparation(
+    preparationPathKey(repo.path),
+    preparationPathKey(workspaceRoot),
+    canonicalBase,
+    options.wslDistro ?? ''
+  )
+}
+
+export async function prepareWorktreeCreateForRepo(
+  store: Store,
+  repo: Repo,
+  baseBranch: string
+): Promise<void> {
+  const entry = await getOrStartPreparationForRepo(store, repo, baseBranch)
+  await entry?.ready
+}
+
+export async function retainWorktreeCreateForRepo(
+  store: Store,
+  repo: Repo,
+  baseBranch: string
+): Promise<() => void> {
+  const entry = await getOrStartPreparationForRepo(store, repo, baseBranch)
+  if (!entry) {
+    return () => {}
+  }
+  const release = holdPreparation(entry)
+  try {
+    await entry.ready
+    return release
+  } catch (error) {
+    release()
+    throw error
+  }
 }
 
 type ClaimedPreparation =

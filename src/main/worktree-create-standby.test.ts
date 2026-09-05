@@ -30,7 +30,8 @@ beforeEach(() => {
 describe('checkout-only standby', () => {
   it.each([
     { ...repo, kind: 'folder' as const },
-    { ...repo, connectionId: 'ssh' }
+    { ...repo, connectionId: 'ssh' },
+    { ...repo, executionHostId: 'runtime:other' as const }
   ])('does no local work for an ineligible repo', async (target) => {
     await prepareWorktreeCreateStandby(store, target)
     expect(mocks.options).not.toHaveBeenCalled()

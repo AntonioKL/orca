@@ -27,6 +27,7 @@ const WORKTREE_HANDLER_CHANNELS = [
   'worktrees:adoptProvisionedRoot',
   'worktrees:prefetchCreateBase',
   'worktrees:prepareCreateCheckout',
+  'worktrees:setCreateStandby',
   'worktrees:resolvePrBase',
   'worktrees:resolveMrBase',
   'worktrees:remove',

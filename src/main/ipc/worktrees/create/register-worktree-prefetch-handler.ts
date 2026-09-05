@@ -1,12 +1,66 @@
-import { ipcMain } from 'electron'
-import { prepareWorktreeCreateStandby } from '../../../worktree-create-standby'
+import { ipcMain, type WebContents } from 'electron'
+import { createWorktreeStandbyOwner } from '../../../worktree-create-standby-owner'
+import {
+  prepareWorktreeCreateStandby,
+  retainWorktreeCreateStandby
+} from '../../../worktree-create-standby'
 import { prefetchWorktreeCreateBase } from '../../../worktree-create-base-prefetch'
 import { prepareWorktreeCreateForRepo } from '../../../worktree-create-preparation'
 import { getWorktreeCreatePrefetchGitOptions } from '../../../project-runtime-git-options'
 import type { WorktreeIpcContext } from '../worktree-ipc-context'
 
-export function registerWorktreePrefetchHandler(context: WorktreeIpcContext): void {
+export function registerWorktreePrefetchHandler(context: WorktreeIpcContext): () => void {
   const { store, runtime } = context
+  const owners = new Map<
+    WebContents,
+    { controller: ReturnType<typeof createWorktreeStandbyOwner>; dispose: () => void }
+  >()
+  ipcMain.handle(
+    'worktrees:setCreateStandby',
+    async (event, args: { repoId: string | null; baseBranch?: string }) => {
+      const sender = event.sender
+      if (sender.isDestroyed()) {
+        return
+      }
+      let owner = owners.get(sender)
+      if (!owner) {
+        if (!args.repoId) {
+          return
+        }
+        const controller = createWorktreeStandbyOwner()
+        const dispose = () => {
+          controller.close()
+          owners.delete(sender)
+          sender.removeListener('destroyed', dispose)
+          sender.removeListener('render-process-gone', dispose)
+          sender.removeListener('did-start-navigation', onNavigation)
+        }
+        const onNavigation = (
+          _event: Electron.Event,
+          _url: string,
+          isInPlace: boolean,
+          isMainFrame: boolean
+        ): void => {
+          if (isMainFrame && !isInPlace) {
+            dispose()
+          }
+        }
+        owner = { controller, dispose }
+        owners.set(sender, owner)
+        sender.once('destroyed', dispose)
+        sender.once('render-process-gone', dispose)
+        sender.on('did-start-navigation', onNavigation)
+      }
+      await owner.controller.set(
+        args.repoId
+          ? async () => {
+              const repo = store.getRepo(args.repoId!)
+              return repo ? retainWorktreeCreateStandby(store, repo, args.baseBranch) : () => {}
+            }
+          : undefined
+      )
+    }
+  )
 
   ipcMain.handle(
     'worktrees:prepareCreateCheckout',
@@ -44,4 +98,9 @@ export function registerWorktreePrefetchHandler(context: WorktreeIpcContext): vo
       }
     }
   )
+  return () => {
+    for (const owner of owners.values()) {
+      owner.dispose()
+    }
+  }
 }

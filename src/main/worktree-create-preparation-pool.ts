@@ -144,6 +144,29 @@ export function takePreparation(entry: PreparationEntry): void {
   clearTimeout(entry.expiration)
 }
 
+const preparationHolds = new WeakMap<PreparationEntry, number>()
+
+export function holdPreparation(entry: PreparationEntry): () => void {
+  if (preparations.get(entry.key) !== entry) {
+    return () => {}
+  }
+  clearTimeout(entry.expiration)
+  preparationHolds.set(entry, (preparationHolds.get(entry) ?? 0) + 1)
+  let released = false
+  return () => {
+    if (released) {
+      return
+    }
+    released = true
+    const remaining = (preparationHolds.get(entry) ?? 1) - 1
+    preparationHolds.set(entry, remaining)
+    if (remaining === 0 && preparations.get(entry.key) === entry) {
+      entry.expiration = setTimeout(() => expireEntry(entry), WORKTREE_CREATE_PREPARATION_TTL_MS)
+      entry.expiration.unref()
+    }
+  }
+}
+
 export function startPreparation({
   repoPath,
   workspaceRoot,

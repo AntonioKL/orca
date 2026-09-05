@@ -26,6 +26,7 @@ registerDetectedWorktreeScanInvalidation()
 
 // Why not module scope like the invalidation above: this needs `mainWindow`/`store`, which only
 // exist once a window is attached, and must track the current ones across re-registration.
+let disposeWorktreeStandbys: (() => void) | undefined
 let disposeSparseCheckoutCacheInvalidation: (() => void) | undefined
 
 const WORKTREE_HANDLER_CHANNELS = [
@@ -40,6 +41,7 @@ const WORKTREE_HANDLER_CHANNELS = [
   'worktrees:adoptProvisionedRoot',
   'worktrees:prefetchCreateBase',
   'worktrees:prepareCreateCheckout',
+  'worktrees:setCreateStandby',
   'worktrees:resolvePrBase',
   'worktrees:resolveMrBase',
   'worktrees:remove',
@@ -87,7 +89,8 @@ export function registerWorktreeHandlers(
   registerWorktreeCatalogHandlers(context)
   registerHostCatalogHandlers(context)
   registerDetectedWorktreeHandlers(context)
-  registerWorktreePrefetchHandler(context)
+  disposeWorktreeStandbys?.()
+  disposeWorktreeStandbys = registerWorktreePrefetchHandler(context)
   registerWorktreeCreateHandlers(context)
   registerReviewBaseHandlers(context)
   registerWorktreeRemovalHandlers(context)
