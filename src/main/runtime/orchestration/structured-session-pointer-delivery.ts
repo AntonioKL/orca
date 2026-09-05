@@ -4,10 +4,10 @@
  *
  * A structured session has no PTY the pointer can be typed into, so the nudge
  * travels as a session turn instead of as bytes. Everything here is pure: the
- * caller supplies the refusal, the attachment fact and the journal, and gets
- * back a decision it can act on. Orchestration's database stays the source of
- * truth — no decision here ever consumes mail, it only says whether the nudge
- * may be attempted now.
+ * caller supplies the refusal and the session's gate facts, and gets back a
+ * decision it can act on. Orchestration's database stays the source of truth —
+ * no decision here ever consumes mail, it only says whether the nudge may be
+ * attempted now.
  */
 
 import type { AgentJournalRenderItem } from '../../../shared/agent-session-journal-types'
@@ -47,32 +47,34 @@ export function isSettledNativeOwner(refusal: AgentSessionPtyWriteRefusal): bool
   )
 }
 
-function containsTurnLifecycle(items: readonly AgentJournalRenderItem[]): boolean {
-  return items.some((item) => item.body?.kind === 'status' && Boolean(item.body.turnLifecycle))
+/**
+ * What the delivery gate needs to know about a session, read once per attempt.
+ *
+ * Deliberately two booleans rather than the journal: the caller reads the FULL reduced timeline
+ * (see `readGateFacts`), so nothing downstream can be tempted to re-derive them from a page.
+ */
+export type StructuredSessionGateFacts = {
+  turnRunning: boolean
+  /** A pending approval or question only a human can clear. */
+  awaitingHuman: boolean
 }
 
 /**
- * Whether the session is between turns.
+ * Projects the gate facts off a session's live items.
  *
- * Reuses the projection the chat view already reads, so the delivery gate and
- * the visible "working" state can never disagree. A settled turn is tombstoned
- * rather than rewritten to `completed`, so a healthy finished turn leaves
- * nothing for the backward scan to find.
- *
- * `pageMayHaveMore` guards the one way a tail page lies: a running turn's
- * lifecycle item can be pushed off the end by a burst of tool-call items, and a
- * page carrying no lifecycle item at all is then indistinguishable from an idle
- * session. That reads as busy, because delivering mid-turn is the failure this
- * gate exists to prevent.
+ * Reuses the projection the chat view already reads, so the delivery gate and the visible
+ * "working" state can never disagree. Both must be answered from the fully reduced timeline: a
+ * settled turn is TOMBSTONED rather than rewritten to `completed`, so on a bounded tail page an
+ * idle session and a running turn whose lifecycle item was pushed off the end look identical —
+ * and idle-with-history is the normal steady state of a working agent.
  */
-export function structuredSessionIsBetweenTurns(
-  items: readonly AgentJournalRenderItem[],
-  pageMayHaveMore = false
-): boolean {
-  if (activeStructuredAgentSessionTurnId(items) !== null) {
-    return false
+export function structuredSessionGateFacts(
+  items: readonly AgentJournalRenderItem[]
+): StructuredSessionGateFacts {
+  return {
+    turnRunning: activeStructuredAgentSessionTurnId(items) !== null,
+    awaitingHuman: projectStructuredAgentSessionStatus(items) === 'attention'
   }
-  return !pageMayHaveMore || containsTurnLifecycle(items)
 }
 
 /**
@@ -87,10 +89,8 @@ export function structuredSessionIsBetweenTurns(
  */
 export function decideStructuredPointerDelivery(input: {
   refusal: AgentSessionPtyWriteRefusal
-  sessionAttached: boolean
-  journalItems: readonly AgentJournalRenderItem[]
-  /** True when the history page was filled, so older items may be unread. */
-  journalPageMayHaveMore?: boolean
+  /** Null when the session is not attached to this host. */
+  session: StructuredSessionGateFacts | null
 }): StructuredPointerDecision {
   if (!isSettledNativeOwner(input.refusal)) {
     return { deliver: false, retain: 'owner-not-settled-native' }
@@ -106,19 +106,17 @@ export function decideStructuredPointerDelivery(input: {
  * identical, which is why the adopted-TUI path above delegates here rather than duplicating it.
  */
 export function decideStructuredSessionPointerDelivery(input: {
-  sessionAttached: boolean
-  journalItems: readonly AgentJournalRenderItem[]
-  journalPageMayHaveMore?: boolean
+  session: StructuredSessionGateFacts | null
 }): StructuredPointerDecision {
-  if (!input.sessionAttached) {
+  if (!input.session) {
     return { deliver: false, retain: 'session-not-attached' }
   }
-  // A pending approval or question has no running turn, so the between-turns test alone reads it
-  // as idle. Sending there queues a nudge behind a prompt only a human can clear.
-  if (projectStructuredAgentSessionStatus(input.journalItems) === 'attention') {
+  // Checked before the turn gate: a pending prompt has no running turn, so the turn test alone
+  // reads it as idle, and sending there queues a nudge behind something only a human can clear.
+  if (input.session.awaitingHuman) {
     return { deliver: false, retain: 'awaiting-human' }
   }
-  if (!structuredSessionIsBetweenTurns(input.journalItems, input.journalPageMayHaveMore)) {
+  if (input.session.turnRunning) {
     return { deliver: false, retain: 'turn-unsettled' }
   }
   return { deliver: true }
@@ -142,13 +140,17 @@ export function retainReasonForDispatch(
 }
 
 /**
- * Whether a retained pointer should be retried on its own, or only when the
- * session's next turn settles.
+ * Whether a retained pointer should be parked for the session's next journal edge, or is cheap
+ * enough to re-attempt on any later trigger.
  *
- * `unknown` may mean the nudge is already sitting in the provider's input
- * queue, so an immediate retry can stack duplicate nudges that each become a
- * turn later. Those wait for a settle edge; the rest are cheap to re-attempt.
+ * `unknown` may mean the nudge is already sitting in the provider's input queue, so an immediate
+ * retry can stack duplicate nudges that each become a turn later. `session-not-attached` parks for
+ * the opposite reason: nothing else will ever notice the re-attach, and the dispatch preamble
+ * tells workers not to poll, so an unparked pointer leaves the worker idle on unread mail.
+ *
+ * Phrased as an exclusion so a reason added later parks by default: parking only adds a retry
+ * edge, while forgetting to park is how mail goes unnoticed.
  */
-export function retainWaitsForTurnSettle(reason: StructuredPointerRetainReason): boolean {
-  return reason === 'turn-unsettled' || reason === 'dispatch-unknown' || reason === 'awaiting-human'
+export function retainWaitsForJournalEdge(reason: StructuredPointerRetainReason): boolean {
+  return reason !== 'dispatch-rejected' && reason !== 'owner-not-settled-native'
 }

@@ -98,7 +98,9 @@ export class OrcaRuntimeWithAdoptTerminalOrphansFromInventory extends OrcaRuntim
       const snapshots = targetWorktreeId
         ? [this.getMobileSessionTabsForWorktree(targetWorktreeId)]
         : await this.listAllMobileSessionTabs()
-      for (const snapshot of snapshots) {
+      // Skipped for an identity claim for the same reason as the ready path below: the active tab
+      // is where the user last looked, which says nothing about which terminal the CALLER is.
+      for (const snapshot of options.requireUnambiguous ? [] : snapshots) {
         const activeTerminal = snapshot.tabs.find(
           (tab) =>
             tab.type === 'terminal' &&

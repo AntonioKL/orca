@@ -31,6 +31,7 @@ import { projectStructuredItemsToNativeChat } from '../../../../shared/structure
 import {
   observeStructuredWorker,
   resolveStructuredWorkerIdentity,
+  structuredWorkerAgent,
   type StructuredWorkerObservation
 } from '../../structured-worker-authority'
 import type { StructuredWorkerIdentity } from '../../structured-worker-identity'
@@ -106,7 +107,7 @@ export function readStructuredWorkerOutput(args: {
     identity,
     dispatchId: args.dispatchId,
     workerState: args.workerState,
-    agent: identity.agent ?? 'claude',
+    agent: structuredWorkerAgent(identity),
     ...(args.cursor === undefined ? {} : { cursor: args.cursor }),
     ...(args.limit === undefined ? {} : { limit: args.limit })
   })

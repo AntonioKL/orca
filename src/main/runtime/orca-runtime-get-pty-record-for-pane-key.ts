@@ -150,7 +150,7 @@ export class OrcaRuntimeWithGetPtyRecordForPaneKey extends OrcaRuntimeWithPruneM
 
   /** The structured idle edge: any journal movement is a chance to redrive parked mail. */
   notifyStructuredSessionJournalActivity(sessionId: string): void {
-    this.orchestrationStructuredMailboxPointerDelivery.onTurnSettled(sessionId)
+    this.orchestrationStructuredMailboxPointerDelivery.onJournalActivity(sessionId)
   }
 
   /** Settlement drops anything parked for the session; nothing will ever redrive it again. */

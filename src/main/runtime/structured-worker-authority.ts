@@ -59,6 +59,21 @@ export function resolveStructuredWorkerAuthority(
   return record && structuredWorkerRecordIsCurrent(record) ? { identity, record } : null
 }
 
+/**
+ * Which provider this worker actually talks to.
+ *
+ * The registry carries it only for a session THIS process started; a rehydrated entry has null,
+ * because the durable worker-terminal row does not record a provider. The durable agent-session
+ * record does, and it is the only source that survives a restart — defaulting instead would
+ * relabel every restarted Codex worker as Claude, permanently, because the startup release
+ * reconciler stamps the frozen journal archive with whatever it is told here.
+ */
+export function structuredWorkerAgent(identity: StructuredWorkerIdentity): 'claude' | 'codex' {
+  return (
+    identity.agent ?? readStructuredAgentSessionRecord(identity.sessionId)?.provider ?? 'claude'
+  )
+}
+
 export type StructuredWorkerObservation = {
   status: 'live' | 'unverifiable' | 'exited'
   reason?: string

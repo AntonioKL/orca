@@ -5,6 +5,7 @@ import {
   OrchestrationStructuredMailboxPointerDelivery,
   type StructuredMailboxPointerHost
 } from './structured-mailbox-pointer-delivery'
+import { structuredSessionGateFacts } from './structured-session-pointer-delivery'
 import type { StructuredWorkerIdentity } from '../structured-worker-identity'
 
 const IDENTITY: StructuredWorkerIdentity = {
@@ -35,6 +36,25 @@ function runningJournal(): AgentJournalRenderItem[] {
       body: { kind: 'status', text: 'working', turnLifecycle: { state: 'running', turnId: 't1' } }
     } as unknown as AgentJournalRenderItem
   ]
+}
+
+/** What a worker's journal looks like once it has finished a substantial turn: history, and no
+ *  turnLifecycle row anywhere, because settlement tombstones it. */
+function settledLongJournal(): AgentJournalRenderItem[] {
+  return Array.from(
+    { length: 120 },
+    (_unused, index) =>
+      ({
+        itemId: `tool-${index}`,
+        observedAt: index,
+        body: { kind: 'tool-call', name: 'Bash', input: {}, state: 'completed' }
+      }) as unknown as AgentJournalRenderItem
+  )
+}
+
+/** A prompt raised at the very start of a long turn, far outside any bounded tail window. */
+function staleAttentionJournal(): AgentJournalRenderItem[] {
+  return [...attentionJournal(), ...settledLongJournal()]
 }
 
 function attentionJournal(): AgentJournalRenderItem[] {
@@ -87,7 +107,7 @@ function harness(options: {
           }
         : null,
     host: {
-      readJournalTail: () => (journal === null ? null : { items: journal, hasOlder: false }),
+      readGateFacts: () => (journal === null ? null : structuredSessionGateFacts(journal)),
       currentFence: () => 4,
       send
     }
@@ -146,11 +166,42 @@ describe('structured mailbox pointer delivery', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
+  it('delivers to a worker whose finished turn left a long history and no lifecycle row', async () => {
+    // The steady state after a worker's first substantial turn. Gating on a bounded tail page read
+    // this as permanently busy, so every later nudge parked forever and the worker went unnudged.
+    const { delivery, send, markAsDelivered } = harness({ journal: settledLongJournal() })
+    delivery.deliverForHandle('dispatch:d1')
+    await flush()
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(markAsDelivered).toHaveBeenCalledWith(['m1'])
+  })
+
+  it('retains mail for a prompt that scrolled out of the tail window', async () => {
+    const { delivery, send } = harness({ journal: staleAttentionJournal() })
+    delivery.deliverForHandle('dispatch:d1')
+    await flush()
+    expect(send).not.toHaveBeenCalled()
+  })
+
   it('retains mail when the session is not attached', async () => {
     const { delivery, send } = harness({ journal: null })
     delivery.deliverForHandle('dispatch:d1')
     await flush()
     expect(send).not.toHaveBeenCalled()
+  })
+
+  it('redrives a detached session when the journal replays on re-attach', async () => {
+    // A transient detach parks nothing to be woken unless `session-not-attached` waits for the
+    // journal edge, and the dispatch preamble tells the worker not to poll.
+    const { delivery, send, setJournal, markAsDelivered } = harness({ journal: null })
+    delivery.deliverForHandle('dispatch:d1')
+    await flush()
+    expect(send).not.toHaveBeenCalled()
+    setJournal(idleJournal())
+    delivery.onJournalActivity('session-1')
+    await flush()
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(markAsDelivered).toHaveBeenCalledWith(['m1'])
   })
 
   it('retries a parked pointer when the journal moves', async () => {
@@ -159,7 +210,7 @@ describe('structured mailbox pointer delivery', () => {
     await flush()
     expect(send).not.toHaveBeenCalled()
     setJournal(idleJournal())
-    delivery.onTurnSettled('session-1')
+    delivery.onJournalActivity('session-1')
     await flush()
     expect(send).toHaveBeenCalledTimes(1)
     expect(markAsDelivered).toHaveBeenCalledWith(['m1'])

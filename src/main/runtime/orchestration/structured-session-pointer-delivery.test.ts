@@ -5,9 +5,9 @@ import {
   decideStructuredPointerDelivery,
   isSettledNativeOwner,
   retainReasonForDispatch,
-  retainWaitsForTurnSettle,
+  retainWaitsForJournalEdge,
   structuredDispatchDelivered,
-  structuredSessionIsBetweenTurns
+  structuredSessionGateFacts
 } from './structured-session-pointer-delivery'
 
 function refusal(
@@ -34,6 +34,29 @@ function statusItem(
   } as unknown as AgentJournalRenderItem
 }
 
+/** A turn's worth of ordinary transcript: no lifecycle row, which is what a settled turn leaves. */
+function transcript(count: number): AgentJournalRenderItem[] {
+  return Array.from(
+    { length: count },
+    (_unused, index) =>
+      ({
+        itemId: `tool-${index}`,
+        revision: 1,
+        body: { kind: 'tool-call', name: 'Bash', input: {}, state: 'completed' }
+      }) as unknown as AgentJournalRenderItem
+  )
+}
+
+function pendingApproval(): AgentJournalRenderItem {
+  return {
+    itemId: 'approval-1',
+    revision: 1,
+    body: { kind: 'approval', title: 'run it?', resolution: { state: 'pending' } }
+  } as unknown as AgentJournalRenderItem
+}
+
+const IDLE = { turnRunning: false, awaitingHuman: false }
+
 describe('structured pointer owner admission', () => {
   it('accepts only a settled native owner', () => {
     expect(isSettledNativeOwner(refusal())).toBe(true)
@@ -52,71 +75,83 @@ describe('structured pointer owner admission', () => {
   })
 })
 
-describe('structured session turn gate', () => {
-  it('treats an empty journal as between turns', () => {
-    expect(structuredSessionIsBetweenTurns([])).toBe(true)
+describe('structured session gate facts', () => {
+  it('reads an empty journal as idle', () => {
+    expect(structuredSessionGateFacts([])).toEqual(IDLE)
   })
 
-  it('treats a running turn as unsettled', () => {
+  it('reads a running turn as busy', () => {
     expect(
-      structuredSessionIsBetweenTurns([statusItem({ turnId: 'turn-1', state: 'running' })])
-    ).toBe(false)
+      structuredSessionGateFacts([statusItem({ turnId: 'turn-1', state: 'running' })])
+    ).toEqual({ turnRunning: true, awaitingHuman: false })
   })
 
-  it('treats a tombstoned turn as settled, since settlement removes the running row', () => {
+  it('reads a tombstoned turn as idle, since settlement removes the running row', () => {
     // A healthy completed turn leaves no turnLifecycle row behind at all.
-    expect(structuredSessionIsBetweenTurns([statusItem(undefined)])).toBe(true)
+    expect(structuredSessionGateFacts([statusItem(undefined)])).toEqual(IDLE)
   })
 
-  it('reads a full page carrying no lifecycle item as busy, because the running item may be paged out', () => {
-    expect(structuredSessionIsBetweenTurns([statusItem(undefined)], true)).toBe(false)
+  it('reads a worker that has finished a long turn as idle, however much history it has', () => {
+    // The steady state of a working agent: plenty of items, no lifecycle row anywhere. Answering
+    // this from a bounded tail page cannot distinguish it from a running turn whose lifecycle row
+    // was pushed off the end, which is why the facts come off the fully reduced timeline.
+    expect(structuredSessionGateFacts(transcript(120))).toEqual(IDLE)
   })
 
-  it('trusts a full page that still carries a lifecycle item', () => {
+  it('sees a pending approval that scrolled out of any tail window', () => {
+    expect(structuredSessionGateFacts([pendingApproval(), ...transcript(120)])).toEqual({
+      turnRunning: false,
+      awaitingHuman: true
+    })
+  })
+
+  it('reports a prompt raised mid-turn as both busy and awaiting a human', () => {
     expect(
-      structuredSessionIsBetweenTurns([statusItem({ turnId: 'turn-1', state: 'running' })], true)
-    ).toBe(false)
-    expect(structuredSessionIsBetweenTurns([], false)).toBe(true)
+      structuredSessionGateFacts([
+        statusItem({ turnId: 'turn-1', state: 'running' }),
+        pendingApproval()
+      ])
+    ).toEqual({ turnRunning: true, awaitingHuman: true })
   })
 })
 
 describe('decideStructuredPointerDelivery', () => {
   it('delivers to a settled, attached, idle session', () => {
-    expect(
-      decideStructuredPointerDelivery({
-        refusal: refusal(),
-        sessionAttached: true,
-        journalItems: []
-      })
-    ).toEqual({ deliver: true })
+    expect(decideStructuredPointerDelivery({ refusal: refusal(), session: IDLE })).toEqual({
+      deliver: true
+    })
   })
 
   it('retains when the session is not attached on this host', () => {
-    expect(
-      decideStructuredPointerDelivery({
-        refusal: refusal(),
-        sessionAttached: false,
-        journalItems: []
-      })
-    ).toEqual({ deliver: false, retain: 'session-not-attached' })
+    expect(decideStructuredPointerDelivery({ refusal: refusal(), session: null })).toEqual({
+      deliver: false,
+      retain: 'session-not-attached'
+    })
   })
 
   it('retains mid-turn rather than delegating the race to the provider', () => {
     expect(
       decideStructuredPointerDelivery({
         refusal: refusal(),
-        sessionAttached: true,
-        journalItems: [statusItem({ turnId: 'turn-1', state: 'running' })]
+        session: { turnRunning: true, awaitingHuman: false }
       })
     ).toEqual({ deliver: false, retain: 'turn-unsettled' })
+  })
+
+  it('names the human prompt ahead of the turn, so the retain reason is the actionable one', () => {
+    expect(
+      decideStructuredPointerDelivery({
+        refusal: refusal(),
+        session: { turnRunning: true, awaitingHuman: true }
+      })
+    ).toEqual({ deliver: false, retain: 'awaiting-human' })
   })
 
   it('retains when the owner is not a settled native session', () => {
     expect(
       decideStructuredPointerDelivery({
         refusal: refusal({ handoffStage: 'preparing' }),
-        sessionAttached: true,
-        journalItems: []
+        session: IDLE
       })
     ).toEqual({ deliver: false, retain: 'owner-not-settled-native' })
   })
@@ -139,14 +174,18 @@ describe('dispatch outcome classification', () => {
 })
 
 describe('retry pacing', () => {
-  it('waits for a settle edge when the nudge may already be queued', () => {
-    expect(retainWaitsForTurnSettle('dispatch-unknown')).toBe(true)
-    expect(retainWaitsForTurnSettle('turn-unsettled')).toBe(true)
+  it('parks a nudge that may already be queued until the journal moves again', () => {
+    expect(retainWaitsForJournalEdge('dispatch-unknown')).toBe(true)
+    expect(retainWaitsForJournalEdge('turn-unsettled')).toBe(true)
+    expect(retainWaitsForJournalEdge('awaiting-human')).toBe(true)
   })
 
-  it('allows a plain retry for reasons that wrote nothing', () => {
-    expect(retainWaitsForTurnSettle('dispatch-rejected')).toBe(false)
-    expect(retainWaitsForTurnSettle('session-not-attached')).toBe(false)
-    expect(retainWaitsForTurnSettle('owner-not-settled-native')).toBe(false)
+  it('parks a detached session, because the re-attach edge is the only thing that will notice', () => {
+    expect(retainWaitsForJournalEdge('session-not-attached')).toBe(true)
+  })
+
+  it('allows a plain retry for reasons no journal edge can clear', () => {
+    expect(retainWaitsForJournalEdge('dispatch-rejected')).toBe(false)
+    expect(retainWaitsForJournalEdge('owner-not-settled-native')).toBe(false)
   })
 })

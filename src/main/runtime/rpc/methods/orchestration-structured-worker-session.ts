@@ -110,6 +110,9 @@ export async function createStructuredWorkerSession(args: {
         sessionId,
         clientOperationId: mintAgentSessionOperationId(Date.now()),
         expectedRuntimeFence: null,
+        // Empty on purpose: `prepare` overwrites this with the host's own attach fingerprint, and
+        // the create-intent conflict check it would otherwise feed guards the RPC boundary against
+        // a replayed operation id — there is no such boundary on this in-process call.
         payloadFingerprint: ''
       },
       worktree: `id:${args.worktreeId}`,

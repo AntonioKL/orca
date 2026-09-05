@@ -1,10 +1,9 @@
 import { isCursorAgentTitle } from '../../../shared/agent-detection'
-import { ORCHESTRATION_DELIVERY_BATCH_LIMIT, type OrchestrationDb } from './db'
+import type { OrchestrationDb } from './db'
 import { formatMessagePointer } from './formatter'
 import type { OrchestrationMailboxDeliveryTarget } from './mailbox-delivery-target'
 import {
-  hasUnfilteredOrchestrationWaiter,
-  messageTypeHasOrchestrationWaiter,
+  selectOrchestrationPointerBatch,
   shouldReleaseOrchestrationPointer,
   type OrchestrationMessageWaiter
 } from './mailbox-pointer-eligibility'
@@ -83,27 +82,12 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
       return
     }
 
-    const waiters = this.deps.getMessageWaiters(mailboxHandle)
-    if (hasUnfilteredOrchestrationWaiter(waiters)) {
-      return
-    }
-    const excludedTypes = new Set(options.reservedTypes)
-    for (const waiter of waiters ?? []) {
-      for (const type of waiter.typeFilter ?? []) {
-        excludedTypes.add(type)
-      }
-    }
-    const unread = db
-      .getUndeliveredUnreadMessages(mailboxHandle, undefined, {
-        excludeTypes: [...excludedTypes],
-        limit: ORCHESTRATION_DELIVERY_BATCH_LIMIT
-      })
-      .filter(
-        (message) =>
-          !options.reservedTypes?.has(message.type) &&
-          !messageTypeHasOrchestrationWaiter(waiters, message.type)
-      )
-      .slice(0, ORCHESTRATION_DELIVERY_BATCH_LIMIT)
+    const unread = selectOrchestrationPointerBatch({
+      db,
+      mailboxHandle,
+      waiters: this.deps.getMessageWaiters(mailboxHandle),
+      reservedTypes: options.reservedTypes
+    })
     if (unread.length === 0 || !leaf.writable || !leaf.ptyId) {
       return
     }

@@ -3,23 +3,19 @@
  *
  * The PTY lane types the nudge into a live pane and reads the idle edge off the terminal title.
  * Neither exists here, so this is a sibling of `OrchestrationMailboxPointerDelivery` rather than a
- * branch inside it: the eligibility rules (outstanding run delivery, waiters, reserved types,
- * batch limit, watermark) are the same, and everything below them is different — the nudge is a
- * session turn, the idle edge is the journal, and only an `accepted` dispatch may consume mail.
+ * branch inside it: batch selection is literally shared (`selectOrchestrationPointerBatch`), and
+ * everything below it is different — the nudge is a session turn, the idle edge is the journal,
+ * and only an `accepted` dispatch may consume mail.
  *
  * Coordinators are deliberately out of scope: `run:` mail routes through a coordinator handle, and
  * a coordinator blocks in `check --wait`, where a waiter preempts pointer delivery anyway.
  */
 
-import type {
-  AgentJournalMessageItem,
-  AgentJournalRenderItem
-} from '../../../shared/agent-session-journal-types'
-import { ORCHESTRATION_DELIVERY_BATCH_LIMIT, type OrchestrationDb } from './db'
+import type { AgentJournalMessageItem } from '../../../shared/agent-session-journal-types'
+import type { OrchestrationDb } from './db'
 import { formatMessagePointer } from './formatter'
 import {
-  hasUnfilteredOrchestrationWaiter,
-  messageTypeHasOrchestrationWaiter,
+  selectOrchestrationPointerBatch,
   type OrchestrationMessageWaiter
 } from './mailbox-pointer-eligibility'
 import { resolveStructuredPointerOperation } from './structured-pointer-operation-id'
@@ -27,14 +23,13 @@ import {
   decideStructuredPointerDelivery,
   decideStructuredSessionPointerDelivery,
   retainReasonForDispatch,
-  retainWaitsForTurnSettle,
+  retainWaitsForJournalEdge,
   structuredDispatchDelivered,
   type StructuredDispatchState,
-  type StructuredPointerRetainReason
+  type StructuredPointerRetainReason,
+  type StructuredSessionGateFacts
 } from './structured-session-pointer-delivery'
 import type { AgentSessionPtyWriteRefusal } from '../../../shared/agent-session-pty-write-admission'
-
-const HISTORY_GATE_LIMIT = 40
 
 export type StructuredPointerTarget = {
   sessionId: string
@@ -48,11 +43,8 @@ export type StructuredPointerSendOutcome =
   | { kind: 'unattached' }
 
 export type StructuredMailboxPointerHost = {
-  /** Tail of the journal used as the idle gate; `null` when the session is not attached. */
-  readJournalTail: (
-    sessionId: string,
-    limit: number
-  ) => { items: readonly AgentJournalRenderItem[]; hasOlder: boolean } | null
+  /** The idle gate, read off the session's full reduced timeline; `null` when it is not attached. */
+  readGateFacts: (sessionId: string) => StructuredSessionGateFacts | null
   send: (input: {
     sessionId: string
     dispatchId: string
@@ -88,8 +80,8 @@ export class OrchestrationStructuredMailboxPointerDelivery<
   TWaiter extends OrchestrationMessageWaiter
 > {
   private readonly inFlight = new Set<string>()
-  /** Mailboxes whose retry must wait for the session's next turn to settle. */
-  private readonly parkedUntilTurnSettle = new Map<string, ReadonlySet<string> | undefined>()
+  /** Mailboxes whose retry must wait for the session's next journal edge. */
+  private readonly parkedUntilJournalEdge = new Map<string, ReadonlySet<string> | undefined>()
 
   constructor(private readonly deps: StructuredPointerDeliveryDependencies<TWaiter>) {}
 
@@ -104,14 +96,15 @@ export class OrchestrationStructuredMailboxPointerDelivery<
     return true
   }
 
-  /** A turn settled on this session; anything parked on that edge may be retried. */
-  onTurnSettled(sessionId: string): void {
-    for (const [mailboxHandle, reservedTypes] of Array.from(this.parkedUntilTurnSettle)) {
+  /** The session's journal moved — a turn settled, or a re-attach replayed it; retry what is
+   *  parked on that edge. */
+  onJournalActivity(sessionId: string): void {
+    for (const [mailboxHandle, reservedTypes] of Array.from(this.parkedUntilJournalEdge)) {
       const target = this.deps.resolveStructuredTarget(mailboxHandle)
       if (target?.sessionId !== sessionId) {
         continue
       }
-      this.parkedUntilTurnSettle.delete(mailboxHandle)
+      this.parkedUntilJournalEdge.delete(mailboxHandle)
       void this.deliver(mailboxHandle, target, reservedTypes).catch(() => undefined)
     }
   }
@@ -123,10 +116,10 @@ export class OrchestrationStructuredMailboxPointerDelivery<
    * forgotten, so those can never be matched by session id again and would otherwise be immortal.
    */
   forgetSession(sessionId: string): void {
-    for (const [mailboxHandle] of Array.from(this.parkedUntilTurnSettle)) {
+    for (const [mailboxHandle] of Array.from(this.parkedUntilJournalEdge)) {
       const target = this.deps.resolveStructuredTarget(mailboxHandle)
       if (!target || target.sessionId === sessionId) {
-        this.parkedUntilTurnSettle.delete(mailboxHandle)
+        this.parkedUntilJournalEdge.delete(mailboxHandle)
       }
     }
   }
@@ -144,27 +137,12 @@ export class OrchestrationStructuredMailboxPointerDelivery<
     if (runId && db.hasOutstandingRunDelivery?.(runId)) {
       return
     }
-    const waiters = this.deps.getMessageWaiters(mailboxHandle)
-    if (hasUnfilteredOrchestrationWaiter(waiters)) {
-      return
-    }
-    const excludedTypes = new Set(reservedTypes)
-    for (const waiter of waiters ?? []) {
-      for (const type of waiter.typeFilter ?? []) {
-        excludedTypes.add(type)
-      }
-    }
-    const unread = db
-      .getUndeliveredUnreadMessages(mailboxHandle, undefined, {
-        excludeTypes: [...excludedTypes],
-        limit: ORCHESTRATION_DELIVERY_BATCH_LIMIT
-      })
-      .filter(
-        (message) =>
-          !reservedTypes?.has(message.type) &&
-          !messageTypeHasOrchestrationWaiter(waiters, message.type)
-      )
-      .slice(0, ORCHESTRATION_DELIVERY_BATCH_LIMIT)
+    const unread = selectOrchestrationPointerBatch({
+      db,
+      mailboxHandle,
+      waiters: this.deps.getMessageWaiters(mailboxHandle),
+      reservedTypes
+    })
     if (unread.length === 0) {
       return
     }
@@ -184,18 +162,12 @@ export class OrchestrationStructuredMailboxPointerDelivery<
     reservedTypes: ReadonlySet<string> | undefined
   ): Promise<void> {
     const sessionId = target.sessionId
-    const tail = this.deps.host.readJournalTail(sessionId, HISTORY_GATE_LIMIT)
-    const gateInput = {
-      sessionAttached: tail !== null,
-      journalItems: tail?.items ?? [],
-      // A page that filled is a page that may have hidden a running turn's lifecycle item.
-      journalPageMayHaveMore: tail?.hasOlder === true
-    }
+    const session = this.deps.host.readGateFacts(sessionId)
     // Re-checked at send time, not just at resolve time: an adopted session's owner can change
     // between the two, and redirecting into a lease that is handing back to a TUI races it.
     const decision = target.refusal
-      ? decideStructuredPointerDelivery({ ...gateInput, refusal: target.refusal })
-      : decideStructuredSessionPointerDelivery(gateInput)
+      ? decideStructuredPointerDelivery({ session, refusal: target.refusal })
+      : decideStructuredSessionPointerDelivery({ session })
     if (!decision.deliver) {
       this.retain(mailboxHandle, sessionId, decision.retain, reservedTypes)
       return
@@ -252,8 +224,8 @@ export class OrchestrationStructuredMailboxPointerDelivery<
     reservedTypes: ReadonlySet<string> | undefined
   ): void {
     this.deps.onRetain?.({ mailboxHandle, sessionId, reason })
-    if (retainWaitsForTurnSettle(reason)) {
-      this.parkedUntilTurnSettle.set(mailboxHandle, reservedTypes)
+    if (retainWaitsForJournalEdge(reason)) {
+      this.parkedUntilJournalEdge.set(mailboxHandle, reservedTypes)
     }
   }
 }

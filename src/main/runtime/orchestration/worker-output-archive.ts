@@ -8,6 +8,7 @@ import {
 import { readWorkerTranscript } from './worker-transcript-read'
 import { captureStructuredWorkerArchive } from '../rpc/methods/orchestration-structured-worker-lifecycle'
 import type { WorkerStructuredJournalArchive } from './structured-worker-journal-archive'
+import { structuredWorkerAgent } from '../structured-worker-authority'
 import type { StructuredWorkerIdentity } from '../structured-worker-identity'
 import type { WorkerTerminalArchiveKind } from './worker-terminal-ownership'
 
@@ -68,7 +69,7 @@ export async function captureWorkerOutputArchive(args: {
   if (args.structuredWorker) {
     const content = captureStructuredWorkerArchive(
       args.structuredWorker,
-      args.structuredWorker.agent ?? 'claude'
+      structuredWorkerAgent(args.structuredWorker)
     )
     return {
       kind: 'structured_journal',

@@ -1,6 +1,7 @@
 // Structured agent-session host: where the lease, journal, and provider adapter meet.
 // Mutations share one durable admission path and serialize per session.
 
+import type { AgentJournalSnapshot } from '../../../shared/agent-session-journal-types'
 import type { AgentSessionExecutionLocation } from '../../../shared/agent-session-record'
 import type {
   AgentSessionAttachResult,
@@ -51,7 +52,10 @@ import {
   type StructuredAgentSessionMutationContext
 } from './structured-agent-session-host-mutations'
 import { StructuredAgentSessionReadableRestorer } from './structured-agent-session-readable-restorer'
-import { tearDownStructuredAgentSessionHost } from './structured-agent-session-host-teardown'
+import {
+  structuredAgentSessionHostTeardownPhases,
+  tearDownStructuredAgentSessionHost
+} from './structured-agent-session-host-teardown'
 import type {
   StructuredAgentSessionCaller,
   StructuredAgentSessionHostDeps,
@@ -59,10 +63,7 @@ import type {
 } from './structured-agent-session-host-types'
 import { StructuredAgentSessionEventRecovery } from './structured-agent-session-event-recovery'
 import { StructuredAgentSessionBackgroundTaskChannel } from './structured-agent-session-background-task-channel'
-import { withTimeout } from '../../../shared/promise-timeout-fallback'
 export type { StructuredAgentSessionHostDeps } from './structured-agent-session-host-types'
-/** Quit must not wait indefinitely on an in-flight handoff; see the drain phase below. */
-const HANDOFF_DRAIN_TIMEOUT_MS = 5_000
 
 export class StructuredAgentSessionHost {
   private readonly sessions = new Map<string, StructuredAgentSessionHostSession>()
@@ -259,22 +260,12 @@ export class StructuredAgentSessionHost {
 
   async flushAllStreamedEvents(): Promise<void> {
     await tearDownStructuredAgentSessionHost({
-      phases: [
-        { name: 'dispose-holds', run: () => this.holds.dispose() },
-        { name: 'stop-lease-renewal', run: () => this.runtimeState.stopLeaseRenewal() },
-        { name: 'stop-tui-catchup', run: () => this.handoffs.stopTuiHistoryCatchup() },
-        // Before the session map is dropped: a handoff flow left running writes rows into a
-        // journal this teardown is about to close, and publishes against a session it removed.
-        // Why bounded: this phase is on the app-quit path, and a flow wedged in `launchTui` would
-        // otherwise hold the quit open forever. Giving up merely restores the old orphaning, which
-        // the publish guard above already makes survivable.
-        {
-          name: 'drain-handoffs',
-          run: () => withTimeout(this.handoffs.drain(), HANDOFF_DRAIN_TIMEOUT_MS, undefined)
-        },
-        { name: 'drain-attaches', run: () => this.tasks.drainAttaches() },
-        { name: 'flush-event-sinks', run: () => this.runtimeState.flushAllEventSinks() }
-      ],
+      phases: structuredAgentSessionHostTeardownPhases({
+        holds: this.holds,
+        runtimeState: this.runtimeState,
+        handoffs: this.handoffs,
+        tasks: this.tasks
+      }),
       sessions: this.sessions
     })
   }
@@ -332,6 +323,11 @@ export class StructuredAgentSessionHost {
 
   history = (request: AgentSessionHistoryRequest): AgentSessionHistoryResult =>
     this.backgroundTasks.history(request)
+
+  /** The fully reduced timeline, for readers that cannot tolerate a page's ambiguity — a settled
+   *  turn is tombstoned, so an item's ABSENCE from a bounded page proves nothing. */
+  journalSnapshot = (sessionId: string): AgentJournalSnapshot =>
+    this.requireSession(sessionId).journal.snapshot()
 
   subscribe = (input: AgentSessionSubscribeInput): (() => void) =>
     this.backgroundTasks.subscribe(input)
