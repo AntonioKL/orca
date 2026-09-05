@@ -210,7 +210,13 @@ export class OrcaRuntimeWithStopRequestedPtyIds extends OrcaRuntimeWithRuntimeId
       this.deliverPendingMessagesForHandle(mailboxHandle, reservedTypes),
     requestSleepingRecipientWake: (mailboxHandle) =>
       this.requestSleepingRecipientWake(mailboxHandle),
-    submitStatuslessCodexPointer: async (handle, expectedPtyId, prompt, beforeWrite) => {
+    submitStatuslessCodexPointer: async (
+      handle,
+      expectedPtyId,
+      prompt,
+      beforeWrite,
+      afterWrite
+    ) => {
       const generation = this.getPtyLifecycleGeneration(expectedPtyId)
       const pastePayload = buildAgentPromptPasteBytes(prompt)
       await this.serializeAgentPromptSubmission(expectedPtyId, generation, async () => {
@@ -227,6 +233,7 @@ export class OrcaRuntimeWithStopRequestedPtyIds extends OrcaRuntimeWithRuntimeId
             }
             await beforeWrite(ptyId)
           },
+          afterWrite,
           suffixFailureError: 'orchestration_pointer_target_changed'
         })
       })

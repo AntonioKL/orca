@@ -209,12 +209,13 @@ describe('statusless Codex mailbox pointer delivery', () => {
     }
   )
 
-  it('keeps mail undelivered when structured submission observes no turn effect', async () => {
+  it('does not retry after prompt bytes are accepted but no turn effect is observed', async () => {
     const finished = deferred<void>()
     const submitStatuslessCodexPointer = vi.fn(
-      async (_handle: string, ptyId: string, _prompt: string, beforeWrite) => {
+      async (_handle: string, ptyId: string, _prompt: string, beforeWrite, afterWrite) => {
         try {
           await beforeWrite(ptyId)
+          await afterWrite(ptyId)
           await beforeWrite(ptyId)
           throw new Error('agent_prompt_stalled')
         } finally {
@@ -229,6 +230,7 @@ describe('statusless Codex mailbox pointer delivery', () => {
     harness.delivery.deliverForHandle(MAILBOX)
     await finished.promise
     await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(10_000)
 
     expect(submitStatuslessCodexPointer).toHaveBeenCalledTimes(1)
     expect(harness.db.getUnreadMessages(MAILBOX)[0]?.delivered_at).toBeNull()

@@ -52,6 +52,7 @@ export class OrcaRuntimeWithWriteTerminalAgentPrompt extends OrcaRuntimeWithReso
       if (!this.ptyController?.write(ptyId, pastePayload)) {
         throw new Error('terminal_not_writable')
       }
+      await options.afterWrite?.(ptyId)
     } catch (error) {
       renderGate?.dispose()
       throw error
@@ -89,6 +90,7 @@ export class OrcaRuntimeWithWriteTerminalAgentPrompt extends OrcaRuntimeWithReso
     if (!this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT)) {
       throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
     }
+    await options.afterWrite?.(ptyId)
     await verifyAgentPromptSubmission({
       baseline,
       readActivity: () => this.getAgentPromptActivity(handle, ptyId, waitTextCache),

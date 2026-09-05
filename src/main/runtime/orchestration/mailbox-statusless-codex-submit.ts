@@ -16,7 +16,8 @@ export type SubmitStatuslessCodexPointer = (
   terminalHandle: string,
   ptyId: string,
   prompt: string,
-  beforeWrite: (ptyId: string) => void | Promise<void>
+  beforeWrite: (ptyId: string) => void | Promise<void>,
+  afterWrite: (ptyId: string) => void | Promise<void>
 ) => Promise<void>
 
 type StatuslessCodexSubmitDependencies<TWaiter extends OrchestrationMessageWaiter> = {
@@ -64,6 +65,7 @@ export function submitStatuslessCodexMailboxPointer<TWaiter extends Orchestratio
   let clearAndRedrive = false
   let releaseWithoutRedrive = false
   let deferredUntilOutput = false
+  let promptWriteAccepted = false
   let finalizeReservation = true
   void Promise.resolve()
     .then(() =>
@@ -75,6 +77,9 @@ export function submitStatuslessCodexMailboxPointer<TWaiter extends Orchestratio
           if (writePtyId !== ptyId || targetState(deps, input, ptyId, flight) !== 'current') {
             throw new Error('orchestration_pointer_target_changed')
           }
+        },
+        () => {
+          promptWriteAccepted = true
         }
       )
     )
@@ -105,6 +110,7 @@ export function submitStatuslessCodexMailboxPointer<TWaiter extends Orchestratio
       releaseWithoutRedrive = state === 'released'
       deferredUntilOutput =
         state === 'current' &&
+        !promptWriteAccepted &&
         deps.deferRedriveUntilPtyOutput(ptyId, input.mailboxHandle, input.newestSequence)
     })
     .finally(() => {
