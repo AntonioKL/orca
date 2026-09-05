@@ -941,3 +941,5 @@ Owner: "sure, feel free to drive these." Sequence chosen: Roll 1 first (highest 
 | c23 `canary-apply` (run 33950075843) | Dispatched 06:32:13Z at main `b0c67eaf88` (ancestor gate SHA, identical trusted code). On success it seals the authority for batch 3 (c24,c25,c26). |
 | c23 canary (run 33950075843) | **Succeeded** 06:32–06:46Z, activate → gen 136, batch authority sealed. No `container die` during boot. 16 of 23 serving cells on new images; 6 on `5aedbca5` (c24–c26 US, c27–c29 Asia). |
 | Monitor dry-run #36 | Dispatched 06:46Z at gen 136, run 33950746574 (`58553bfe1c`). On green the chain dispatches batch 3 (c24,c25,c26) under canary authority 33950075843. |
+| Monitor dry-run #36 result | **Green** 07:02:49Z at gen 136, `58553bfe1c`. |
+| Batch 3 (run 33951468008) | Dispatched 07:03Z: c24,c25,c26, canary authority 33950075843 (c23). |
