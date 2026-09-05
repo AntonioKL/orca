@@ -54,7 +54,9 @@ describe('ClaudeBackgroundTaskTracker', () => {
         is_backgrounded: false
       })
     )
-    tracker.observe(system('task_progress', { task_id: 'task-1', description: 'still working' }))
+    expect(
+      tracker.observe(system('task_progress', { task_id: 'task-1', description: 'still working' }))
+    ).toBe(false)
     tracker.observe(result())
     expect(tracker.state).toBeNull()
 

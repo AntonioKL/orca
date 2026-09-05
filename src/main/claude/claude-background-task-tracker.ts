@@ -85,7 +85,11 @@ export class ClaudeBackgroundTaskTracker {
     if (message.type === 'result') {
       this.foregroundTurnActive = false
     } else if (message.type === 'system') {
-      this.observeSystemFrame(message)
+      if (!this.observeSystemFrame(message) && !startsTurn) {
+        return false
+      }
+    } else if (!startsTurn) {
+      return false
     }
     return this.refreshMonitoring()
   }
@@ -98,27 +102,27 @@ export class ClaudeBackgroundTaskTracker {
     return this.refreshMonitoring()
   }
 
-  private observeSystemFrame(message: Record<string, unknown>): void {
+  private observeSystemFrame(message: Record<string, unknown>): boolean {
     if (message.subtype === 'background_tasks_changed') {
       this.replaceAggregateRoster(message.tasks)
-      return
+      return true
     }
     const id = taskId(message)
     if (!id) {
-      return
+      return false
     }
     if (message.subtype === 'task_notification') {
       this.finish(id)
-      return
+      return true
     }
     if (message.subtype === 'task_updated') {
       const patch = record(message.patch)
       if (!patch) {
-        return
+        return false
       }
       if (TERMINAL_TASK_STATES.has(String(patch.status))) {
         this.finish(id)
-        return
+        return true
       }
       const existing = this.tasks.get(id)
       if (
@@ -130,18 +134,19 @@ export class ClaudeBackgroundTaskTracker {
           kind: existing?.kind ?? 'unknown',
           description: taskDescription(patch.description) ?? existing?.description
         })
+        return true
       }
-      return
+      return false
     }
     if (message.subtype !== 'task_started' || this.terminalTaskIds.has(id)) {
-      return
+      return false
     }
     if (message.ambient === true || message.skip_transcript === true) {
       this.finish(id)
-      return
+      return true
     }
     if (this.aggregateRosterObserved && !this.tasks.has(id)) {
-      return
+      return false
     }
     const kind = classifyClaudeBackgroundTaskKind(message.task_type)
     this.upsert(id, {
@@ -149,6 +154,7 @@ export class ClaudeBackgroundTaskTracker {
       kind,
       description: taskDescription(message.description)
     })
+    return true
   }
 
   private replaceAggregateRoster(value: unknown): void {
