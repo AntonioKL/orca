@@ -8,6 +8,7 @@ import type { IDisposable } from '@xterm/xterm'
 
 type UseTerminalWindowWakeRecoveryArgs = {
   isVisible: boolean
+  isChatViewMode: boolean
   managerRef: React.RefObject<PaneManager | null>
   isActiveRef: React.RefObject<boolean>
   isVisibleRef: React.RefObject<boolean>
@@ -22,6 +23,7 @@ const DPR_RECOVERY_RETRY_FRAMES = 16
 
 export function useTerminalWindowWakeRecovery({
   isVisible,
+  isChatViewMode,
   managerRef,
   isActiveRef,
   isVisibleRef,
@@ -85,6 +87,7 @@ export function useTerminalWindowWakeRecovery({
       recoverVisibleTerminalWindowWake({
         manager,
         isActive: isActiveRef.current,
+        isChatViewMode,
         clearGlyphAtlases
       })
       if (typeof requestAnimationFrame !== 'function') {
@@ -103,6 +106,7 @@ export function useTerminalWindowWakeRecovery({
         recoverVisibleTerminalWindowWake({
           manager: settledManager,
           isActive: isActiveRef.current,
+          isChatViewMode,
           clearGlyphAtlases: clearGlyphAtlasesOnSettle
         })
         reassertPanePtySizes()
@@ -199,5 +203,5 @@ export function useTerminalWindowWakeRecovery({
       }
       unsubscribeSystemResumed?.()
     }
-  }, [isActiveRef, isVisible, isVisibleRef, managerRef, panePtyBindingsRef])
+  }, [isActiveRef, isChatViewMode, isVisible, isVisibleRef, managerRef, panePtyBindingsRef])
 }

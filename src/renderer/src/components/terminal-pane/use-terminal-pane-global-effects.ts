@@ -33,6 +33,7 @@ type UseTerminalPaneGlobalEffectsArgs = {
   cwd?: string
   isActive: boolean
   isVisible: boolean
+  isChatViewMode?: boolean
   isWorktreeActive?: boolean
   isSyncFitEnabled: boolean
   paneCount: number
@@ -66,6 +67,7 @@ export function useTerminalPaneGlobalEffects({
   cwd,
   isActive,
   isVisible,
+  isChatViewMode = false,
   isWorktreeActive = isVisible,
   isSyncFitEnabled,
   paneCount,
@@ -121,6 +123,7 @@ export function useTerminalPaneGlobalEffects({
   })
   useTerminalWindowWakeRecovery({
     isVisible: rendererVisible,
+    isChatViewMode,
     managerRef,
     isActiveRef,
     isVisibleRef,
@@ -156,6 +159,7 @@ export function useTerminalPaneGlobalEffects({
       resumeTerminalVisibility({
         manager,
         isActive,
+        isChatViewMode,
         wasVisible,
         shouldUseLightTabResume,
         captureViewportPositions,
@@ -183,7 +187,7 @@ export function useTerminalPaneGlobalEffects({
     wasVisibleRef.current = false
     wasWorktreeActiveRef.current = isWorktreeActive
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, isWorktreeActive, rendererVisible])
+  }, [isActive, isChatViewMode, isWorktreeActive, rendererVisible])
 
   useEffect(() => {
     const ptyId = isActive && isVisible && isWorktreeActive ? activeLeafPtyId : null

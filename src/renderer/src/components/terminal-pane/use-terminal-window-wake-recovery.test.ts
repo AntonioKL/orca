@@ -61,10 +61,11 @@ describe('useTerminalWindowWakeRecovery', () => {
     delete (window as unknown as { api?: unknown }).api
   })
 
-  function renderWakeRecoveryHook(isVisible = true) {
+  function renderWakeRecoveryHook(isVisible = true, isChatViewMode = false) {
     return renderHook(() =>
       useTerminalWindowWakeRecovery({
         isVisible,
+        isChatViewMode,
         managerRef: { current: manager },
         isActiveRef: { current: true },
         isVisibleRef: { current: true }
@@ -83,6 +84,7 @@ describe('useTerminalWindowWakeRecovery', () => {
     expect(recoverVisibleTerminalWindowWakeMock).toHaveBeenNthCalledWith(1, {
       manager,
       isActive: true,
+      isChatViewMode: false,
       clearGlyphAtlases: false
     })
 
@@ -93,6 +95,7 @@ describe('useTerminalWindowWakeRecovery', () => {
     expect(recoverVisibleTerminalWindowWakeMock).toHaveBeenNthCalledWith(2, {
       manager,
       isActive: true,
+      isChatViewMode: false,
       clearGlyphAtlases: true
     })
   })
@@ -109,6 +112,20 @@ describe('useTerminalWindowWakeRecovery', () => {
     expect(recoverVisibleTerminalWindowWakeMock).toHaveBeenLastCalledWith({
       manager,
       isActive: true,
+      isChatViewMode: false,
+      clearGlyphAtlases: false
+    })
+  })
+
+  it('routes chat coverage into wake recovery', () => {
+    renderWakeRecoveryHook(true, true)
+
+    window.dispatchEvent(new Event('focus'))
+
+    expect(recoverVisibleTerminalWindowWakeMock).toHaveBeenLastCalledWith({
+      manager,
+      isActive: true,
+      isChatViewMode: true,
       clearGlyphAtlases: false
     })
   })
@@ -136,6 +153,7 @@ describe('useTerminalWindowWakeRecovery', () => {
     renderHook(() =>
       useTerminalWindowWakeRecovery({
         isVisible: true,
+        isChatViewMode: false,
         managerRef: { current: manager },
         isActiveRef: { current: true },
         isVisibleRef: { current: true },
@@ -163,6 +181,7 @@ describe('useTerminalWindowWakeRecovery', () => {
     renderHook(() =>
       useTerminalWindowWakeRecovery({
         isVisible: true,
+        isChatViewMode: false,
         managerRef: { current: manager },
         isActiveRef: { current: true },
         isVisibleRef: { current: true },
@@ -209,6 +228,7 @@ describe('useTerminalWindowWakeRecovery', () => {
     const { unmount } = renderHook(() =>
       useTerminalWindowWakeRecovery({
         isVisible: true,
+        isChatViewMode: false,
         managerRef: { current: resizeManager },
         isActiveRef: { current: true },
         isVisibleRef: { current: true }
@@ -238,6 +258,7 @@ describe('useTerminalWindowWakeRecovery', () => {
     renderHook(() =>
       useTerminalWindowWakeRecovery({
         isVisible: true,
+        isChatViewMode: false,
         managerRef,
         isActiveRef: { current: true },
         isVisibleRef: { current: true }
@@ -265,6 +286,7 @@ describe('useTerminalWindowWakeRecovery', () => {
     renderHook(() =>
       useTerminalWindowWakeRecovery({
         isVisible: true,
+        isChatViewMode: false,
         managerRef: { current: { getPanes: () => [pane] } as unknown as PaneManager },
         isActiveRef: { current: true },
         isVisibleRef: { current: true }
@@ -295,6 +317,7 @@ describe('useTerminalWindowWakeRecovery', () => {
     renderHook(() =>
       useTerminalWindowWakeRecovery({
         isVisible: true,
+        isChatViewMode: false,
         managerRef: { current: { getPanes: () => [pane] } as unknown as PaneManager },
         isActiveRef: { current: true },
         isVisibleRef: { current: true }

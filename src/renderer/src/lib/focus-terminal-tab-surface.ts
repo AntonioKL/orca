@@ -70,6 +70,10 @@ export function focusTerminalTabSurface(
         return
       }
       const escapedTabId = cssAttributeString(tabId)
+      const tabElement = document.querySelector(`[data-terminal-tab-id="${escapedTabId}"]`)
+      if (tabElement?.getAttribute('data-terminal-chat-view') === 'true') {
+        return
+      }
       const scopedSelector = leafId
         ? `[data-terminal-tab-id="${escapedTabId}"] [data-leaf-id="${cssAttributeString(leafId)}"] .xterm-helper-textarea`
         : `[data-terminal-tab-id="${escapedTabId}"] .xterm-helper-textarea`

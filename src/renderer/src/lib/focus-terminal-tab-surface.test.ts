@@ -100,6 +100,27 @@ describe('focusTerminalTabSurface', () => {
     expect(textarea.focus).not.toHaveBeenCalled()
   })
 
+  it('does not focus xterm while chat covers the terminal tab', () => {
+    flushAnimationFrames()
+    const textarea = { focus: vi.fn() }
+    vi.stubGlobal('document', {
+      querySelector: vi.fn((selector: string) => {
+        if (selector === '[data-terminal-tab-id="tab-1"]') {
+          return {
+            getAttribute: (name: string) => (name === 'data-terminal-chat-view' ? 'true' : null)
+          }
+        }
+        return selector === '[data-terminal-tab-id="tab-1"] .xterm-helper-textarea'
+          ? textarea
+          : null
+      })
+    })
+
+    focusTerminalTabSurface('tab-1')
+
+    expect(textarea.focus).not.toHaveBeenCalled()
+  })
+
   it('falls back to the single tab helper when an old leaf id was reminted', () => {
     flushAnimationFrames()
     const textarea = { focus: vi.fn() }
