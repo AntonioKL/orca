@@ -125,11 +125,18 @@ function trimSpacedPathTrailingProse(
   // prose like "failed to start app.py" must not be swallowed.
   let selected: string | null = null
   const extensionPrefixPattern = /\.[A-Za-z0-9_+-]+(?::\d+)?(?::\d+)?(?=\s+|$)/g
+  const pathStartPattern = /(?:^|\s)(?:~[\\/]|[\\/]|\.{1,2}[\\/]|[A-Za-z]:[\\/])/g
+  let pathStartCount = 0
+  let nextPathStart = pathStartPattern.exec(range.text)
   let match: RegExpExecArray | null
   while ((match = extensionPrefixPattern.exec(range.text)) !== null) {
     const end = match.index + match[0].length
     const text = range.text.slice(0, end)
-    if (countPathStarts(text) > 1) {
+    while (nextPathStart && nextPathStart.index + nextPathStart[0].length <= end) {
+      pathStartCount += 1
+      nextPathStart = pathStartPattern.exec(range.text)
+    }
+    if (pathStartCount > 1) {
       continue
     }
     if (
@@ -148,15 +155,6 @@ function trimSpacedPathTrailingProse(
     startIndex: range.startIndex,
     endIndex: range.startIndex + selected.length
   }
-}
-
-function countPathStarts(text: string): number {
-  let count = 0
-  for (const match of text.matchAll(/(?:^|\s)(?:~[\\/]|[\\/]|\.{1,2}[\\/]|[A-Za-z]:[\\/])/g)) {
-    void match
-    count += 1
-  }
-  return count
 }
 
 function trimTrailingWhitespace(
