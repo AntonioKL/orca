@@ -174,10 +174,13 @@ const NODE_HEADERS_TARBALL_RE = /node-v[0-9.]+-headers\.tar\.gz/i
  * depends on what the local-headers export found first, so the formatter takes that answer.
  */
 export function isNodeHeadersDownloadFailure(message: string): boolean {
+  // Why `configure error` is required: node-gyp's fetch client logs `attempt N failed with <code>`
+  // on retries it then recovers from, so a network token alone also matches a build that got its
+  // headers and died later for an unrelated reason. Only the configure step downloads headers.
   return (
-    message.toLowerCase().includes('gyp') &&
+    /gyp ERR! configure error/i.test(message) &&
     NODE_HEADERS_TARBALL_RE.test(message) &&
-    /\b(ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|fetch failed|FetchError)\b/i.test(
+    /\b(ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|EAI_AGAIN|ECONNRESET)\b/.test(
       message
     )
   )
@@ -213,11 +216,11 @@ export function formatNodeHeadersDownloadError(
       ]
     : [
         'The remote host could not download the Node.js headers needed to compile node-pty, and ' +
-          `its Node install does not ship them locally. ${NODE_HEADERS_CONTEXT}`,
+          `its Node install has no local headers matching its own version. ${NODE_HEADERS_CONTEXT}`,
         '',
         'Fix one of the following on the remote host, then reconnect:',
         '  - Install Node.js from an official build or a version manager (nvm, fnm, volta, n), ' +
-          'which include the headers; or',
+          'which ship headers for exactly the Node they run; or',
         '  - Allow outbound HTTPS to nodejs.org, or point npm at a mirror: ' +
           'npm config set disturl https://<mirror>/dist'
       ]

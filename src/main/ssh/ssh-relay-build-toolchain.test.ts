@@ -140,7 +140,7 @@ describe('isNodeHeadersDownloadFailure', () => {
     expect(isNodeHeadersDownloadFailure(HEADERS_REFUSED)).toBe(true)
     expect(
       isNodeHeadersDownloadFailure(
-        'gyp http fetch GET https://nodejs.org/download/release/v20.19.0/node-v20.19.0-headers.tar.gz attempt 1 failed with ENOTFOUND'
+        'gyp http fetch GET https://nodejs.org/download/release/v20.19.0/node-v20.19.0-headers.tar.gz attempt 1 failed with ENOTFOUND\ngyp ERR! configure error'
       )
     ).toBe(true)
   })
@@ -159,13 +159,27 @@ describe('isNodeHeadersDownloadFailure', () => {
         'gyp info using node-v24.12.0-headers.tar.gz\ngyp ERR! build error make failed with exit code: 2'
       )
     ).toBe(false)
+    // A retried attempt that recovered, then a compile failure: not a download failure.
+    expect(
+      isNodeHeadersDownloadFailure(
+        'gyp http fetch GET https://nodejs.org/download/release/v24.12.0/node-v24.12.0-headers.tar.gz attempt 1 failed with ECONNRESET\n' +
+          'gyp http 200 https://nodejs.org/download/release/v24.12.0/node-v24.12.0-headers.tar.gz\n' +
+          'gyp ERR! build error\ngyp ERR! stack Error: `make` failed with exit code: 2'
+      )
+    ).toBe(false)
+    // A mirror answering non-2xx is a FetchError without a network code: a different remedy.
+    expect(
+      isNodeHeadersDownloadFailure(
+        'gyp ERR! configure error\ngyp ERR! stack FetchError: 404 Not Found https://mirror/dist/v24.12.0/node-v24.12.0-headers.tar.gz'
+      )
+    ).toBe(false)
   })
 })
 
 describe('formatNodeHeadersDownloadError', () => {
   it('names both host remedies when the host ships no headers', () => {
     const msg = formatNodeHeadersDownloadError(HEADERS_REFUSED, null)
-    expect(msg).toContain('does not ship them locally')
+    expect(msg).toContain('no local headers matching its own version')
     expect(msg).toContain('<prefix>/include/node')
     expect(msg).toContain('nvm, fnm, volta, n')
     expect(msg).toContain('disturl')
@@ -176,7 +190,7 @@ describe('formatNodeHeadersDownloadError', () => {
     const msg = formatNodeHeadersDownloadError(HEADERS_REFUSED, '/usr/local')
     expect(msg).toContain('/usr/local/include/node')
     expect(msg).toContain('Orca defect')
-    expect(msg).not.toContain('does not ship them locally')
+    expect(msg).not.toContain('no local headers matching its own version')
     expect(msg).not.toContain('nvm, fnm, volta, n')
     expect(msg).toContain('ECONNREFUSED')
   })

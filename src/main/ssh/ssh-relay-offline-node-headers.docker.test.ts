@@ -11,6 +11,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -45,7 +46,7 @@ function dockerExec(fixture: TargetFixture, command: string): string {
   return run('docker', ['exec', fixture.containerName, 'bash', '-lc', command], 60_000)
 }
 
-function startTarget(): TargetFixture {
+async function startTarget(): Promise<TargetFixture> {
   const image = `orca-review-offline-headers:${NODE_IMAGE.replace(/[^A-Za-z0-9_.-]/g, '-')}`
   run(
     'docker',
@@ -85,7 +86,33 @@ function startTarget(): TargetFixture {
     120_000
   )
   const port = Number(run('docker', ['port', containerName, '22/tcp']).split(':').at(-1))
+  // `docker run -d` returns before sshd binds; connect() against a closed port is a flake.
+  await waitForSshBanner(port)
   return { containerName, identityFile, port, tempDir }
+}
+
+/** Resolves once sshd answers with its banner on the mapped port, or throws after the deadline. */
+async function waitForSshBanner(port: number, deadlineMs = 60_000): Promise<void> {
+  const deadline = Date.now() + deadlineMs
+  for (;;) {
+    const gotBanner = await new Promise<boolean>((resolve) => {
+      const socket = connect({ host: TARGET_HOST, port })
+      const done = (value: boolean): void => {
+        socket.destroy()
+        resolve(value)
+      }
+      socket.setTimeout(2_000, () => done(false))
+      socket.once('data', (chunk) => done(chunk.toString('utf8').startsWith('SSH-')))
+      socket.once('error', () => done(false))
+    })
+    if (gotBanner) {
+      return
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`sshd on port ${port} did not answer within ${deadlineMs / 1000}s`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
 }
 
 function stopTarget(fixture: TargetFixture | null): void {
@@ -115,8 +142,8 @@ describe.skipIf(!RUN_REVIEW_ORACLE)(
   () => {
     let fixture: TargetFixture | null = null
 
-    beforeAll(() => {
-      fixture = startTarget()
+    beforeAll(async () => {
+      fixture = await startTarget()
     }, 900_000)
 
     afterAll(() => {

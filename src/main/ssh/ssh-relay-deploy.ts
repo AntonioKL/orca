@@ -1265,8 +1265,15 @@ async function installNativeDeps(
         throw err
       }
       signal?.throwIfAborted()
+      // Same diagnosis as the install catch: this fallback is non-fatal, so the log is the only
+      // place the offline-headers cause can reach anyone.
+      const rebuildMsg = (err as Error).message
       console.warn(
-        `[ssh-relay][NATIVE-DEPS-REBUILD-FAIL] npm rebuild native deps failed at ${remoteDir} (${platform}): ${(err as Error).message}`
+        `[ssh-relay][NATIVE-DEPS-REBUILD-FAIL] npm rebuild native deps failed at ${remoteDir} (${platform}): ${
+          platform.startsWith('linux') && isNodeHeadersDownloadFailure(rebuildMsg)
+            ? formatNodeHeadersDownloadError(rebuildMsg, localNodeHeadersFromOutput(rebuildMsg))
+            : rebuildMsg
+        }`
       )
     }
     signal?.throwIfAborted()

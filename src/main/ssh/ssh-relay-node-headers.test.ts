@@ -98,6 +98,26 @@ describe.skipIf(!POSIX)('exportLocalNodeHeadersPrefix', () => {
     expect(nodedir).toBe(dirname(dirname(process.execPath)))
   })
 
+  it('clears an inherited nodedir when the probe finds no matching headers', () => {
+    // A remote profile's stale nodedir must not survive past the version check.
+    const root = mkdtempSync(join(tmpdir(), 'orca-node-headers-'))
+    roots.push(root)
+    const copied = join(root, 'bin', 'node')
+    mkdirSync(dirname(copied), { recursive: true })
+    spawnSync('cp', [process.execPath, copied])
+    const script = `${exportLocalNodeHeadersPrefix(copied)}printf '%s|%s' "$npm_config_nodedir" "$npm_package_config_node_gyp_nodedir"`
+    const result = spawnSync('/bin/sh', ['-c', script], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        npm_config_nodedir: '/usr/stale-headers',
+        npm_package_config_node_gyp_nodedir: '/usr/stale-headers'
+      }
+    })
+    expect(result.status).toBe(0)
+    expect(result.stdout.split('\n').at(-1)).toBe('|')
+  })
+
   it('does not fail the command line when node itself cannot run', () => {
     const script = `${exportLocalNodeHeadersPrefix('/nonexistent/node')}echo "after:$npm_config_nodedir"`
     const result = spawnSync('/bin/sh', ['-c', script], { encoding: 'utf8' })

@@ -49,8 +49,11 @@ export const LOCAL_NODE_HEADERS_MARKER_PREFIX = 'ORCA-NODE-HEADERS:'
  */
 export function exportLocalNodeHeadersPrefix(nodePath: string): string {
   const probe = `${shellEscape(nodePath)} -e ${shellEscape(LOCAL_NODE_HEADERS_PROBE_JS)} 2>/dev/null`
+  // Why the unset: a remote profile can already carry a nodedir (a stale distro header dir, an old
+  // ~/.npmrc). Left alone it would bypass the version check above and build a wrong-ABI binding.
   return (
     `${NODEDIR_SHELL_VAR}=$(${probe}); ` +
+    `unset npm_config_nodedir npm_package_config_node_gyp_nodedir; ` +
     `if [ -n "$${NODEDIR_SHELL_VAR}" ]; then ` +
     `export npm_config_nodedir="$${NODEDIR_SHELL_VAR}" npm_package_config_node_gyp_nodedir="$${NODEDIR_SHELL_VAR}"; ` +
     `fi; ` +
