@@ -52,7 +52,7 @@ describe('structured pointer schema migration', () => {
         mailbox_handle: 'dispatch:d1',
         session_id: 's1',
         operation_id: '1757030400000-0123456789abcdef0123456789abcdef',
-        body_fingerprint: 'fp',
+        batch_fingerprint: 'fp',
         minted_at_ms: 1_757_030_400_000
       })
       expect(db.getStructuredPointerOperation('dispatch:d1')?.operation_id).toBe(

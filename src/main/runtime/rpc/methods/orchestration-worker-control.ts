@@ -197,6 +197,12 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
         db,
         dispatchId: params.dispatch,
         workerState: worker?.state ?? 'unsupervised',
+        // Reused, never re-derived: being able to read the journal proves the host is installed,
+        // not that the provider child is alive.
+        liveness:
+          observation.status === 'live' || observation.status === 'exited'
+            ? observation.status
+            : 'unverifiable',
         source: params.source,
         cursor: params.cursor,
         limit: params.limit

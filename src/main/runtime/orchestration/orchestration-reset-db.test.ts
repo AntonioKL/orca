@@ -57,7 +57,7 @@ describe('OrchestrationDb reset scopes', () => {
       mailbox_handle: `dispatch:${started.dispatch.id}`,
       session_id: 'session_1',
       operation_id: '1700000000000-00112233445566778899aabbccddeeff',
-      body_fingerprint: 'fingerprint_1',
+      batch_fingerprint: 'fingerprint_1',
       minted_at_ms: 1_700_000_000_000
     })
     return { run, task, started, message, localQuestion }

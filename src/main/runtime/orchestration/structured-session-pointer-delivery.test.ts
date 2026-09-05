@@ -184,8 +184,11 @@ describe('retry pacing', () => {
     expect(retainWaitsForJournalEdge('session-not-attached')).toBe(true)
   })
 
-  it('allows a plain retry for reasons no journal edge can clear', () => {
-    expect(retainWaitsForJournalEdge('dispatch-rejected')).toBe(false)
+  it('parks a rejected dispatch, because nothing else retries and no mail was consumed', () => {
+    expect(retainWaitsForJournalEdge('dispatch-rejected')).toBe(true)
+  })
+
+  it('allows a plain retry only for an owner the resolver would not have named', () => {
     expect(retainWaitsForJournalEdge('owner-not-settled-native')).toBe(false)
   })
 })

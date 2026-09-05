@@ -13,6 +13,7 @@ import {
   resolveStructuredWorkerForDispatch,
   stopStructuredWorker
 } from './orchestration-structured-worker-lifecycle'
+import { isStructuredWorkerHandle } from '../../structured-worker-identity'
 
 const WorkerDispatchParams = z.object({ dispatch: requiredString('Missing --dispatch') })
 
@@ -125,6 +126,14 @@ export const ORCHESTRATION_WORKER_STOP_METHODS: RpcMethod[] = [
           'unknown'
         )
       }
+      if (isStructuredWorkerHandle(handle)) {
+        // The same install release performs, for the same reason: after a restart nothing has
+        // installed the structured host, and both the observation below and the close read it.
+        // Without this a restarted worker answers `unknown` forever and can never be stopped.
+        await runtime.ensureStructuredAgentSessionHost().catch((error: unknown) => {
+          console.warn('[orchestration] structured host install failed before stop', handle, error)
+        })
+      }
       const observation = await inspectWorkerTerminal(runtime, db, params.dispatch)
       // Why `unverifiable` still proceeds: losing contact is a reason to report
       // the outcome honestly, never a reason to stop trying to stop the worker.
@@ -157,11 +166,13 @@ export const ORCHESTRATION_WORKER_STOP_METHODS: RpcMethod[] = [
       if (structured) {
         const stop = await stopStructuredWorker(structured, params.dispatch, runtime)
         if (!stop.stopped) {
-          // Close is retried by the host; only a proven exit may settle the dispatch.
+          // Close is retried by the host; only a proven exit may settle the dispatch. And when no
+          // close was issued at all — no host in this runtime generation — the receipt says so
+          // rather than crediting this runtime with a terminal it never touched.
           return unknownReceipt(
             params.dispatch,
             db.markWorkerStopUnknown(params.dispatch, stop.reason ?? 'The close was not proven.'),
-            'closed_agent_terminal'
+            stop.closeAttempted ? 'closed_agent_terminal' : 'none'
           )
         }
         const stopped = db.settleWorkerStop(params.dispatch)

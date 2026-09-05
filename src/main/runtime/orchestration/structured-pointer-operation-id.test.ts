@@ -35,6 +35,7 @@ describe('structured pointer operation id', () => {
       mailboxHandle: 'dispatch:d1',
       sessionId: 's1',
       body: body('2 messages'),
+      messageIds: ['m1', 'm2'],
       now: 1_000
     })
     const second = resolveStructuredPointerOperation({
@@ -42,6 +43,7 @@ describe('structured pointer operation id', () => {
       mailboxHandle: 'dispatch:d1',
       sessionId: 's1',
       body: body('2 messages'),
+      messageIds: ['m1', 'm2'],
       now: 2_000
     })
     expect(second.operationId).toBe(first.operationId)
@@ -55,6 +57,7 @@ describe('structured pointer operation id', () => {
       mailboxHandle: 'dispatch:d1',
       sessionId: 's1',
       body: body('2 messages'),
+      messageIds: ['m1', 'm2'],
       now: 1_000
     })
     const grown = resolveStructuredPointerOperation({
@@ -62,6 +65,7 @@ describe('structured pointer operation id', () => {
       mailboxHandle: 'dispatch:d1',
       sessionId: 's1',
       body: body('3 messages'),
+      messageIds: ['m1', 'm2', 'm3'],
       now: 1_500
     })
     expect(grown.operationId).not.toBe(first.operationId)
@@ -74,6 +78,7 @@ describe('structured pointer operation id', () => {
       mailboxHandle: 'dispatch:d1',
       sessionId: 's1',
       body: body('2 messages'),
+      messageIds: ['m1', 'm2'],
       now: 1_000
     })
     const aged = resolveStructuredPointerOperation({
@@ -81,9 +86,57 @@ describe('structured pointer operation id', () => {
       mailboxHandle: 'dispatch:d1',
       sessionId: 's1',
       body: body('2 messages'),
+      messageIds: ['m1', 'm2'],
       now: 1_000 + AGENT_SESSION_MAX_NEW_OPERATION_AGE_MS
     })
     expect(aged.operationId).not.toBe(first.operationId)
+  })
+
+  it('re-mints for a different batch of the same size', () => {
+    // The pointer body names only how many messages are waiting, so two unrelated same-size
+    // batches share a payload fingerprint. Reusing the live id across them makes the host replay
+    // its ledger answer — `accepted`, with no turn sent — and the lane then marks the NEW mail
+    // delivered. The worker is never told, and the mail is gone.
+    const db = fakeDb()
+    const first = resolveStructuredPointerOperation({
+      db,
+      mailboxHandle: 'dispatch:d1',
+      sessionId: 's1',
+      body: body('2 messages'),
+      messageIds: ['m1', 'm2'],
+      now: 1_000
+    })
+    const different = resolveStructuredPointerOperation({
+      db,
+      mailboxHandle: 'dispatch:d1',
+      sessionId: 's1',
+      body: body('2 messages'),
+      messageIds: ['m3', 'm4'],
+      now: 1_100
+    })
+    expect(different.operationId).not.toBe(first.operationId)
+    expect(different.payloadFingerprint).toBe(first.payloadFingerprint)
+  })
+
+  it('re-mints when a retained batch is reordered or partly consumed', () => {
+    const db = fakeDb()
+    const first = resolveStructuredPointerOperation({
+      db,
+      mailboxHandle: 'dispatch:d1',
+      sessionId: 's1',
+      body: body('2 messages'),
+      messageIds: ['m1', 'm2'],
+      now: 1_000
+    })
+    const shifted = resolveStructuredPointerOperation({
+      db,
+      mailboxHandle: 'dispatch:d1',
+      sessionId: 's1',
+      body: body('2 messages'),
+      messageIds: ['m2', 'm3'],
+      now: 1_100
+    })
+    expect(shifted.operationId).not.toBe(first.operationId)
   })
 
   it('re-mints when the mailbox moves to a different session', () => {
@@ -93,6 +146,7 @@ describe('structured pointer operation id', () => {
       mailboxHandle: 'dispatch:d1',
       sessionId: 's1',
       body: body('2 messages'),
+      messageIds: ['m1', 'm2'],
       now: 1_000
     })
     const moved = resolveStructuredPointerOperation({
@@ -100,6 +154,7 @@ describe('structured pointer operation id', () => {
       mailboxHandle: 'dispatch:d1',
       sessionId: 's2',
       body: body('2 messages'),
+      messageIds: ['m1', 'm2'],
       now: 1_100
     })
     expect(moved.operationId).not.toBe(first.operationId)

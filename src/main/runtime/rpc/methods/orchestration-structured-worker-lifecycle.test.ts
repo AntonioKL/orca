@@ -114,10 +114,13 @@ describe('structured worker stop', () => {
 
   it('settles only when the session is proven gone after the close', async () => {
     installHost({})
-    await expect(stopStructuredWorker(IDENTITY, 'd1')).resolves.toEqual({ stopped: true })
+    await expect(stopStructuredWorker(IDENTITY, 'd1')).resolves.toEqual({
+      stopped: true,
+      closeAttempted: true
+    })
   })
 
-  it('retains when the close throws', async () => {
+  it('retains when the close throws, and admits the close was issued', async () => {
     installHost({
       close: async () => {
         throw new Error('close is queued for retry')
@@ -125,6 +128,7 @@ describe('structured worker stop', () => {
     })
     const result = await stopStructuredWorker(IDENTITY, 'd1')
     expect(result.stopped).toBe(false)
+    expect(result.closeAttempted).toBe(true)
     expect(result.reason).toContain('retry')
   })
 
@@ -134,9 +138,12 @@ describe('structured worker stop', () => {
     expect(result.stopped).toBe(false)
   })
 
-  it('retains when the host is not installed', async () => {
+  it('retains when the host is not installed, and claims no close', async () => {
+    // `closed_agent_terminal` on a runtime that never reached a host is the receipt claiming an
+    // action it did not take.
     const result = await stopStructuredWorker(IDENTITY, 'd1')
     expect(result.stopped).toBe(false)
+    expect(result.closeAttempted).toBe(false)
   })
 })
 
@@ -151,6 +158,7 @@ describe('structured worker output', () => {
       identity: IDENTITY,
       dispatchId: 'd1',
       workerState: 'ready',
+      liveness: 'live',
       agent: 'claude'
     })
     expect(live.source).toBe('transcript')
@@ -196,8 +204,91 @@ describe('structured worker output', () => {
         identity: IDENTITY,
         dispatchId: 'd1',
         workerState: 'ready',
+        liveness: 'live',
         agent: 'claude'
       })
     ).toThrow(/not attached/)
+  })
+
+  it('reports an unverifiable worker as unknown, never as running', () => {
+    // The `could not look, therefore it is alive` inversion. After a restart the runtime observes
+    // `unverifiable` — no attached provider child in this generation — while the journal is still
+    // readable, and a coordinator reading `running` waits on a worker that may already be gone.
+    installHost({})
+    const read = readStructuredWorkerJournal({
+      identity: IDENTITY,
+      dispatchId: 'd1',
+      workerState: 'ready',
+      liveness: 'unverifiable',
+      agent: 'claude'
+    })
+    expect(read.status.terminal).toBe('unknown')
+    expect(read.status.liveness).toBe('unverifiable')
+  })
+
+  it('carries each proven verdict through unchanged', () => {
+    installHost({})
+    const live = readStructuredWorkerJournal({
+      identity: IDENTITY,
+      dispatchId: 'd1',
+      workerState: 'ready',
+      liveness: 'live',
+      agent: 'claude'
+    })
+    expect(live.status).toMatchObject({ terminal: 'running', liveness: 'live' })
+    const exited = readStructuredWorkerJournal({
+      identity: IDENTITY,
+      dispatchId: 'd1',
+      workerState: 'succeeded',
+      liveness: 'exited',
+      agent: 'claude'
+    })
+    expect(exited.status).toMatchObject({ terminal: 'exited', liveness: 'exited' })
+  })
+
+  it('states that a released archive is exited', () => {
+    installHost({})
+    const archive = captureStructuredWorkerArchive(IDENTITY, 'claude')
+    const archived = readArchivedStructuredJournal({
+      dispatchId: 'd1',
+      workerState: 'succeeded',
+      resourceId: 'res_1',
+      createdAt: '2026-09-05 00:00:00',
+      archive
+    })
+    expect(archived.status).toMatchObject({ terminal: 'exited', liveness: 'exited' })
+  })
+
+  it('refuses a cursor once the tail window has slid past it', () => {
+    // The cursor is an index into the bounded tail, and `sourceIdentity` was constant for the
+    // worker's life, so a coordinator paging a growing journal resumed at the newest items and
+    // skipped the middle without a word.
+    installHost({ items: ITEMS })
+    const first = readStructuredWorkerJournal({
+      identity: IDENTITY,
+      dispatchId: 'd1',
+      workerState: 'ready',
+      liveness: 'live',
+      agent: 'claude'
+    })
+    installHost({
+      items: [
+        {
+          itemId: 'i2',
+          observedAt: 2,
+          body: { kind: 'message', role: 'assistant', blocks: [{ type: 'text', text: 'later' }] }
+        } as unknown as AgentJournalRenderItem
+      ]
+    })
+    expect(() =>
+      readStructuredWorkerJournal({
+        identity: IDENTITY,
+        dispatchId: 'd1',
+        workerState: 'ready',
+        liveness: 'live',
+        agent: 'claude',
+        cursor: first.cursor
+      })
+    ).toThrow(/source changed/i)
   })
 })

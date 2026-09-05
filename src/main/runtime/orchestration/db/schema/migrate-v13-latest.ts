@@ -189,7 +189,7 @@ export function applySchemaMigrationsV13ToLatest(this: OrchestrationDb, current:
           mailbox_handle    TEXT PRIMARY KEY,
           session_id        TEXT NOT NULL,
           operation_id      TEXT NOT NULL,
-          body_fingerprint  TEXT NOT NULL,
+          batch_fingerprint  TEXT NOT NULL,
           minted_at_ms      INTEGER NOT NULL
         );
       `)

@@ -203,7 +203,7 @@ async function completeWorkerTerminalReleaseOnce(
         return {
           dispatchId,
           state: 'release_unknown',
-          processAction: 'closed_agent_terminal',
+          processAction: stop.closeAttempted ? 'closed_agent_terminal' : 'none',
           archive: { source: archiveSource, status: archiveStatus },
           lastError: unknown.release_error ?? stop.reason,
           recovery: `Inspect with: orca orchestration worker-show --dispatch ${dispatchId} --json — then repeat worker-release with the same --retry-request.`

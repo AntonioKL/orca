@@ -133,10 +133,11 @@ export class OrchestrationStructuredMailboxPointerDelivery<
     if (!db || this.inFlight.has(mailboxHandle)) {
       return
     }
-    const runId = db.getDispatchContextById?.(target.dispatchId)?.run_id
-    if (runId && db.hasOutstandingRunDelivery?.(runId)) {
-      return
-    }
+    // No `hasOutstandingRunDelivery` gate, unlike the PTY lane: there it guards a COORDINATOR's
+    // own `run:` mailbox against re-notifying a batch already handed to that coordinator. This
+    // lane only ever resolves `dispatch:` mailboxes, and a delivery row exists only for a
+    // `run:` address, so the run's outstanding delivery belongs to the coordinator that is
+    // replying — gating on it suppresses exactly the nudges a coordinator sends its workers.
     const unread = selectOrchestrationPointerBatch({
       db,
       mailboxHandle,
@@ -186,11 +187,13 @@ export class OrchestrationStructuredMailboxPointerDelivery<
       role: 'user',
       blocks: [{ type: 'text', text: formatMessagePointer(unread.length, mailboxHandle).trim() }]
     }
+    const staged = unread.map((message) => message.id)
     const operation = resolveStructuredPointerOperation({
       db,
       mailboxHandle,
       sessionId,
-      body
+      body,
+      messageIds: staged
     })
     const outcome = await this.deps.host.send({
       sessionId,
@@ -213,7 +216,6 @@ export class OrchestrationStructuredMailboxPointerDelivery<
       )
       return
     }
-    const staged = unread.map((message) => message.id)
     db.markAsDelivered(staged)
     // The nudge landed as its own turn, so the next settle edge is the natural retry point for
     // anything that arrives while it runs.

@@ -53,6 +53,13 @@ export function resolveStructuredWorkerForDispatch(
   return handle ? resolveStructuredWorkerIdentity(handle, db) : null
 }
 
+export type StructuredWorkerStopOutcome = {
+  stopped: boolean
+  /** Whether a close was actually issued; the receipt's `processAction` may claim nothing more. */
+  closeAttempted: boolean
+  reason?: string
+}
+
 /**
  * Stopping a structured worker.
  *
@@ -67,11 +74,13 @@ export async function stopStructuredWorker(
     OrcaRuntimeService,
     'forgetStructuredSessionMail' | 'retireStructuredAgentSessionTabFromSnapshot'
   >
-): Promise<{ stopped: boolean; reason?: string }> {
+): Promise<StructuredWorkerStopOutcome> {
   const host = getStructuredAgentSessionHost()
   if (!host) {
+    // Nothing was reached, so nothing was acted on; the receipt must not claim a close.
     return {
       stopped: false,
+      closeAttempted: false,
       reason: 'The structured agent-session host is not installed; no session was closed.'
     }
   }
@@ -79,17 +88,25 @@ export async function stopStructuredWorker(
     await host.setSessionTabVisibility?.(identity.sessionId, false)
     await host.close(identity.sessionId)
   } catch (error) {
-    return { stopped: false, reason: error instanceof Error ? error.message : String(error) }
+    return {
+      stopped: false,
+      closeAttempted: true,
+      reason: error instanceof Error ? error.message : String(error)
+    }
   }
   releaseStructuredWorkerSession(dispatchId, runtime)
   const after = observeStructuredWorker(identity)
   if (after.status === 'live') {
-    return { stopped: false, reason: 'The structured session is still attached after close.' }
+    return {
+      stopped: false,
+      closeAttempted: true,
+      reason: 'The structured session is still attached after close.'
+    }
   }
   // Only past the proof, and structurally unable to throw: the worker's chat tab is retired from
   // the live snapshot, which `setSessionTabVisibility(false)` above does not do.
   retireSettledStructuredWorkerTab(identity.sessionId, runtime)
-  return { stopped: true }
+  return { stopped: true, closeAttempted: true }
 }
 
 /** The structured half of `worker-read`, or null when a PTY worker owns the dispatch. */
@@ -97,6 +114,8 @@ export function readStructuredWorkerOutput(args: {
   db: OrchestrationDb
   dispatchId: string
   workerState: string
+  /** What the caller's observation actually proved; never inferred from being able to read. */
+  liveness: StructuredWorkerObservation['status']
   source?: 'auto' | 'transcript' | 'terminal'
   cursor?: string | number
   limit?: number
@@ -115,6 +134,7 @@ export function readStructuredWorkerOutput(args: {
     identity,
     dispatchId: args.dispatchId,
     workerState: args.workerState,
+    liveness: args.liveness,
     agent: structuredWorkerAgent(identity),
     ...(args.cursor === undefined ? {} : { cursor: args.cursor }),
     ...(args.limit === undefined ? {} : { limit: args.limit })
@@ -126,6 +146,7 @@ export function readStructuredWorkerJournal(args: {
   identity: StructuredWorkerIdentity
   dispatchId: string
   workerState: string
+  liveness: StructuredWorkerObservation['status']
   agent: AgentType
   cursor?: string | number
   limit?: number
@@ -138,10 +159,15 @@ export function readStructuredWorkerJournal(args: {
       `The structured session for Dispatch ${args.dispatchId} is not attached; its journal cannot be read.`
     )
   }
+  // The oldest item on the page anchors the identity, because the cursor position is an index
+  // into THIS tail window. Once the journal outgrows the window it slides, and a stale index
+  // silently resumes past the items it skipped; changing the identity turns that into the
+  // `source_changed` the contract already defines.
   const sourceIdentity = createWorkerOutputSourceIdentity([
     'structured-journal',
     args.identity.processIncarnation,
-    args.identity.paneKey
+    args.identity.paneKey,
+    page.items[0]?.itemId ?? ''
   ])
   const cursor = decodeWorkerOutputCursor(args.cursor, args.dispatchId)
   if (cursor && (cursor.source !== 'transcript' || cursor.sourceIdentity !== sourceIdentity)) {
@@ -164,7 +190,8 @@ export function readStructuredWorkerJournal(args: {
     sourceIdentity,
     start: cursor?.position ?? 0,
     limit: args.limit,
-    archived: false
+    archived: false,
+    liveness: args.liveness
   })
 }
 
@@ -221,7 +248,9 @@ export function readArchivedStructuredJournal(args: {
     sourceIdentity,
     start: cursor?.position ?? 0,
     limit: args.limit,
-    archived: true
+    archived: true,
+    // The session was closed at release; the archive is the proof it is gone.
+    liveness: 'exited'
   })
 }
 
@@ -236,6 +265,7 @@ function pageMessages(input: {
   start: number
   limit: number | undefined
   archived: boolean
+  liveness: StructuredWorkerObservation['status']
 }): OrchestrationWorkerReadTranscriptResult {
   const start = Math.min(input.start, input.messages.length)
   const end = Math.min(start + clampWorkerTranscriptLimit(input.limit), input.messages.length)
@@ -259,7 +289,11 @@ function pageMessages(input: {
     cursor: nextCursor,
     status: {
       worker: input.workerState,
-      terminal: input.archived ? 'exited' : 'running'
+      // `unverifiable` must never render as `running`: losing sight of the structured host is not
+      // evidence its child is alive, and the PTY sibling maps the same verdict to `unknown`.
+      terminal:
+        input.liveness === 'exited' ? 'exited' : input.liveness === 'live' ? 'running' : 'unknown',
+      liveness: input.liveness
     },
     fallbackReason: null,
     warnings: input.warnings,

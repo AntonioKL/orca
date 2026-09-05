@@ -130,7 +130,10 @@ describe('structured worker stop retires the chat tab', () => {
     const { runtime, emit } = await runtimeShowingStructuredTab()
     expect(await structuredTabIds(runtime)).toEqual([`agent-session:${SESSION}`])
 
-    await expect(stopStructuredWorker(identity, 'd1', runtime)).resolves.toEqual({ stopped: true })
+    await expect(stopStructuredWorker(identity, 'd1', runtime)).resolves.toEqual({
+      stopped: true,
+      closeAttempted: true
+    })
 
     expect(await structuredTabIds(runtime)).toEqual([])
     const published = await runtime.listMobileSessionTabs(`id:${WORKTREE}`)
@@ -161,14 +164,20 @@ describe('structured worker stop retires the chat tab', () => {
       })
     } as unknown as OrcaRuntimeService
 
-    await expect(stopStructuredWorker(identity, 'd1', runtime)).resolves.toEqual({ stopped: true })
+    await expect(stopStructuredWorker(identity, 'd1', runtime)).resolves.toEqual({
+      stopped: true,
+      closeAttempted: true
+    })
     expect(runtime.retireStructuredAgentSessionTabFromSnapshot).toHaveBeenCalledWith(SESSION)
   })
 
   it('settles a runtime that has no tab surface at all', async () => {
     installHost()
     const identity = registerIdentity()
-    await expect(stopStructuredWorker(identity, 'd1')).resolves.toEqual({ stopped: true })
+    await expect(stopStructuredWorker(identity, 'd1')).resolves.toEqual({
+      stopped: true,
+      closeAttempted: true
+    })
   })
 })
 

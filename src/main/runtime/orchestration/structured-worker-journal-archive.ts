@@ -10,10 +10,10 @@
 import type { AgentType, NativeChatMessage } from '../../../shared/native-chat-types'
 import { projectStructuredItemsToNativeChat } from '../../../shared/structured-agent-session-projection'
 import type { AgentJournalRenderItem } from '../../../shared/agent-session-journal-types'
-import { boundWorkerTranscriptMessages } from './worker-transcript-payload'
+import { boundWorkerTranscriptTail } from './worker-transcript-payload'
 
 // Same durable bound the terminal archive uses; a session journal can grow without limit.
-const STRUCTURED_ARCHIVE_MAX_CHARS = 262_144
+const STRUCTURED_ARCHIVE_MAX_BYTES = 262_144
 
 export type WorkerStructuredJournalArchive = {
   version: 1
@@ -31,43 +31,24 @@ export function buildStructuredJournalArchive(input: {
   hasOlder: boolean
 }): WorkerStructuredJournalArchive {
   const projected = projectStructuredItemsToNativeChat(input.items)
+  // One newest-first pass, never the forward wire bound first: that one keeps the HEAD, so a long
+  // worker's archive ended at its early exploration and dropped the answer it was released for —
+  // under a warning that said the OLDEST messages had gone.
   // Redacts dispatch capabilities and clips oversized blocks, exactly as the transcript path does.
-  const bounded = boundWorkerTranscriptMessages(projected)
-  const capped = capArchiveMessages(bounded.messages)
+  const bounded = boundWorkerTranscriptTail(projected, STRUCTURED_ARCHIVE_MAX_BYTES)
   const warnings = [...bounded.warnings]
   if (input.hasOlder) {
     warnings.push('Older journal items were omitted from the bounded archive.')
   }
-  if (capped.truncated) {
+  if (bounded.limited) {
     warnings.push('The oldest archived journal messages were dropped to fit the size bound.')
   }
   return {
     version: 1,
     agent: input.agent,
     processIncarnation: input.processIncarnation,
-    messages: capped.messages,
-    limited: bounded.limited || input.hasOlder || capped.truncated,
+    messages: bounded.messages,
+    limited: bounded.limited || input.hasOlder,
     warnings
   }
-}
-
-/** Newest-first accumulation, reversed once: the tail is the evidence that matters. */
-export function capArchiveMessages(messages: readonly NativeChatMessage[]): {
-  messages: NativeChatMessage[]
-  truncated: boolean
-} {
-  const keptReversed: NativeChatMessage[] = []
-  let budget = STRUCTURED_ARCHIVE_MAX_CHARS
-  let truncated = false
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const cost = JSON.stringify(messages[index]).length
-    if (cost > budget) {
-      truncated = true
-      break
-    }
-    keptReversed.push(messages[index]!)
-    budget -= cost
-  }
-  keptReversed.reverse()
-  return { messages: keptReversed, truncated }
 }

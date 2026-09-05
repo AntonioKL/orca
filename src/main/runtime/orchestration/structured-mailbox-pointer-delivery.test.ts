@@ -76,6 +76,8 @@ function harness(options: {
   journal: AgentJournalRenderItem[] | null
   dispatchState?: 'accepted' | 'rejected' | 'unknown'
   refusal?: AgentSessionPtyWriteRefusal
+  /** The coordinator of this worker's Run is mid-batch: it checked and has not acked yet. */
+  outstandingRunDelivery?: boolean
 }) {
   let journal = options.journal
   const markAsDelivered = vi.fn()
@@ -87,7 +89,7 @@ function harness(options: {
   const stored = new Map<string, unknown>()
   const db = {
     getDispatchContextById: () => ({ run_id: 'run_1' }),
-    hasOutstandingRunDelivery: () => false,
+    hasOutstandingRunDelivery: () => options.outstandingRunDelivery ?? false,
     getUndeliveredUnreadMessages: () => [{ id: 'm1', type: 'status', sequence: 3 }],
     markAsDelivered,
     getStructuredPointerOperation: (key: string) => stored.get(key),
@@ -214,6 +216,37 @@ describe('structured mailbox pointer delivery', () => {
     await flush()
     expect(send).toHaveBeenCalledTimes(1)
     expect(markAsDelivered).toHaveBeenCalledWith(['m1'])
+  })
+
+  it('nudges the worker while its coordinator holds an unacked Run delivery', async () => {
+    // The exact window in which a coordinator replies to its workers: it checked, is acting on the
+    // batch, and has not acked yet. A delivery row exists only for a `run:` address, so this one
+    // belongs to the coordinator — gating the WORKER's dispatch mailbox on it dropped the nudge
+    // with nothing parked, and the worker sat idle on durable mail it was never told about.
+    const { delivery, send, markAsDelivered } = harness({
+      journal: idleJournal(),
+      outstandingRunDelivery: true
+    })
+    delivery.deliverForHandle('dispatch:d1')
+    await flush()
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(markAsDelivered).toHaveBeenCalledWith(['m1'])
+  })
+
+  it('retries a rejected nudge on the next journal edge', async () => {
+    // A rejection consumes no mail and nothing else redrives this mailbox, so leaving it unparked
+    // stranded the worker until unrelated mail happened to arrive.
+    const { delivery, send, markAsDelivered } = harness({
+      journal: idleJournal(),
+      dispatchState: 'rejected'
+    })
+    delivery.deliverForHandle('dispatch:d1')
+    await flush()
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(markAsDelivered).not.toHaveBeenCalled()
+    delivery.onJournalActivity('session-1')
+    await flush()
+    expect(send).toHaveBeenCalledTimes(2)
   })
 
   it('reuses one operation id for the same batch and re-mints when it grows', async () => {

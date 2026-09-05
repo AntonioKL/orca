@@ -5,7 +5,7 @@ export type StructuredPointerOperationRow = {
   mailbox_handle: string
   session_id: string
   operation_id: string
-  body_fingerprint: string
+  batch_fingerprint: string
   minted_at_ms: number
 }
 
@@ -25,17 +25,17 @@ export function putStructuredPointerOperation(
   this.db
     .prepare(
       `INSERT INTO structured_pointer_operations
-         (mailbox_handle, session_id, operation_id, body_fingerprint, minted_at_ms)
+         (mailbox_handle, session_id, operation_id, batch_fingerprint, minted_at_ms)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(mailbox_handle) DO UPDATE SET
          session_id = excluded.session_id, operation_id = excluded.operation_id,
-         body_fingerprint = excluded.body_fingerprint, minted_at_ms = excluded.minted_at_ms`
+         batch_fingerprint = excluded.batch_fingerprint, minted_at_ms = excluded.minted_at_ms`
     )
     .run(
       row.mailbox_handle,
       row.session_id,
       row.operation_id,
-      row.body_fingerprint,
+      row.batch_fingerprint,
       row.minted_at_ms
     )
 }

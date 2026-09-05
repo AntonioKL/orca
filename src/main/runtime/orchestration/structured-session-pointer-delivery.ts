@@ -147,10 +147,14 @@ export function retainReasonForDispatch(
  * retry can stack duplicate nudges that each become a turn later. `session-not-attached` parks for
  * the opposite reason: nothing else will ever notice the re-attach, and the dispatch preamble
  * tells workers not to poll, so an unparked pointer leaves the worker idle on unread mail.
+ * `dispatch-rejected` parks for that same reason: a rejection consumes no mail and is usually a
+ * stale fence or a lease that has since moved, both of which the next journal edge re-reads.
  *
- * Phrased as an exclusion so a reason added later parks by default: parking only adds a retry
- * edge, while forgetting to park is how mail goes unnoticed.
+ * Only `owner-not-settled-native` is excluded, and it is unreachable in practice: the resolver
+ * refuses to name an unsettled owner, so the pointer falls through to the PTY lane before it can
+ * be retained here. Phrased as an exclusion so a reason added later parks by default — parking
+ * only adds a retry edge, while forgetting to park is how mail goes unnoticed.
  */
 export function retainWaitsForJournalEdge(reason: StructuredPointerRetainReason): boolean {
-  return reason !== 'dispatch-rejected' && reason !== 'owner-not-settled-native'
+  return reason !== 'owner-not-settled-native'
 }
