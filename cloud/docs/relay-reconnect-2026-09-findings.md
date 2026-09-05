@@ -935,3 +935,5 @@ Owner: "sure, feel free to drive these." Sequence chosen: Roll 1 first (highest 
 | Merged 05:19Z | stablyai/orca #18798 (freshness bar 330 s + two-sample tolerance). Next gate runs at a commit containing it. |
 | Batch 2 cell 1 (c19) | **Succeeded** 05:19–05:32Z. c20 started. |
 | Batch 2 cell 2 (c20) | **Succeeded** 05:32–05:43Z. c21 started. |
+| Batch 2 cell 3 (c21) | **Succeeded** 05:43–05:59Z. c22 started. |
+| Batch 2 complete (run 33946819345) | **All four succeeded** 05:17–06:12Z: c19, c20, c21, c22 on `519f4914`, selector **gen 134**. Fleet at 1 090 controls, 23 cells, refresh 401s at baseline (1–4 per 3 min). One `container die` at 06:08:45 was **c22's new container** exiting during boot (exit 1, 2 s runtime; started 06:08:43, restarted 06:08:46 and serving since), the same proxy-sidecar boot race seen on c13 and c16. No serving-cell crash. **Census: 15 of 23 serving cells on new images** (c7 `85bf6799`; c8–c10, c13–c16, c19–c22 `519f4914`), 7 on `5aedbca5`: c23–c26 (US), c27–c29 (Asia). Next: gate at gen 134 → canary c23 → batch c24,c25,c26; then canary c27 → batch c28,c29. |
