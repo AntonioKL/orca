@@ -7,15 +7,23 @@
  * changes, plus a trailing mark on failure. A row that swapped glyphs when it
  * finished would read as changing identity.
  */
+import { EDIT_TOOL_NAMES } from './native-chat-diff'
+import { isCommandToolName } from './native-chat-tool-activity'
+
 export type NativeChatToolCategory =
   | 'read'
   | 'search'
   | 'listFiles'
+  /** A shell command that ran unclassified — Codex's own word for one. */
   | 'unknown'
   | 'fileChange'
   | 'webSearch'
   | 'mcpToolCall'
   | 'subAgentActivity'
+  | 'todoList'
+  /** A tool this vocabulary doesn't model. Distinct from `unknown`: claiming a
+   *  terminal for it would assert a shell ran when nothing says one did. */
+  | 'other'
 
 /** lucide glyph ids. Spelled the same by `lucide-react` and `lucide-react-native`,
  *  so desktop and mobile can resolve one name to their own component. */
@@ -28,9 +36,10 @@ export type NativeChatToolIconName =
   | 'globe'
   | 'plug'
   | 'bot'
+  | 'list-checks'
+  | 'wrench'
 
-/** Category to glyph. All eight are named now, though only the classified shell
- *  categories reach a row today; MCP and web-search rows land separately. */
+/** Category to glyph. */
 export const NATIVE_CHAT_TOOL_ICON_NAMES: Record<NativeChatToolCategory, NativeChatToolIconName> = {
   read: 'eye',
   search: 'search',
@@ -39,34 +48,60 @@ export const NATIVE_CHAT_TOOL_ICON_NAMES: Record<NativeChatToolCategory, NativeC
   fileChange: 'pencil',
   webSearch: 'globe',
   mcpToolCall: 'plug',
-  subAgentActivity: 'bot'
+  subAgentActivity: 'bot',
+  todoList: 'list-checks',
+  other: 'wrench'
 }
 
 /**
- * Row word to category. Keyed by the word a lane actually renders, not by the
- * protocol type, because that word is all a row model carries. `mcpToolCall` and
- * `subAgentActivity` are absent by design — those rows are named after the tool
- * or the agent, so their renderer passes the category itself.
+ * Row word to category, keyed by the word a lane actually renders rather than by
+ * the protocol type, because that word is all a row model carries. The edit
+ * family and the command tools come from their own shared sets below, so this
+ * table holds only what neither of those already names.
  * A `Map`, not an object: an object index answers `__proto__` with a truthy value.
  */
 const CATEGORY_BY_ROW_WORD = new Map<string, NativeChatToolCategory>([
+  // Codex's classified shell rows.
   ['read', 'read'],
   ['search', 'search'],
   ['list', 'listFiles'],
-  ['shell', 'unknown'],
-  ['edit', 'fileChange'],
+  // Claude's tool names, which its lane renders verbatim.
+  ['grep', 'search'],
+  ['glob', 'search'],
+  ['task', 'subAgentActivity'],
+  ['webfetch', 'webSearch'],
+  ['todowrite', 'todoList'],
   ['web search', 'webSearch'],
   ['websearch', 'webSearch']
 ])
 
+/** The edit family, lowercased for row-word matching. Deliberately not
+ *  `isEditToolName`: that predicate answers "could this input wrap a patch",
+ *  which is true of command tools too, and a shell row is not an edit. */
+const EDIT_ROW_WORDS = new Set([...EDIT_TOOL_NAMES].map((name) => name.toLowerCase()))
+
+/** MCP tools arrive as `mcp__<server>__<tool>` and the row is named after the
+ *  tool, so only the prefix identifies one. */
+const MCP_TOOL_PREFIX = 'mcp__'
+
 /** The category a row word names, or null when the lane emitted something this
  *  vocabulary doesn't model yet. */
 export function nativeChatToolCategory(rowWord: string): NativeChatToolCategory | null {
-  return CATEGORY_BY_ROW_WORD.get(rowWord.trim().toLowerCase()) ?? null
+  const word = rowWord.trim().toLowerCase()
+  if (word.startsWith(MCP_TOOL_PREFIX)) {
+    return 'mcpToolCall'
+  }
+  // Before the edit family: a command tool runs whatever it is handed, so a
+  // patch in its input is not evidence the row is an edit.
+  if (isCommandToolName(word)) {
+    return 'unknown'
+  }
+  return CATEGORY_BY_ROW_WORD.get(word) ?? (EDIT_ROW_WORDS.has(word) ? 'fileChange' : null)
 }
 
-/** The glyph for a row word. Never empty: an unmodelled word gets the terminal
- *  glyph so rows stay left-aligned when a lane ships a type we don't name. */
+/** The glyph for a row word. Never empty, so rows stay left-aligned: a word
+ *  outside the vocabulary takes the generic tool glyph, and only a row that
+ *  really ran a command claims the terminal. */
 export function nativeChatToolIconName(rowWord: string): NativeChatToolIconName {
-  return NATIVE_CHAT_TOOL_ICON_NAMES[nativeChatToolCategory(rowWord) ?? 'unknown']
+  return NATIVE_CHAT_TOOL_ICON_NAMES[nativeChatToolCategory(rowWord) ?? 'other']
 }

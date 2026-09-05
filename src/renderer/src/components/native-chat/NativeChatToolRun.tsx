@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronRight, SquareTerminal, Wrench } from 'lucide-react'
+import { Check, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
-import {
-  NATIVE_CHAT_TOOL_ICON_NAMES,
-  nativeChatToolCategory
-} from '../../../../shared/native-chat-tool-icon'
 import {
   isToolCallBlock,
   isToolResultBlock,
@@ -27,12 +23,11 @@ import {
 } from './native-chat-tool-summary'
 import {
   describeActiveToolCall,
-  isCommandToolName,
   NATIVE_CHAT_TOOL_ACTIVITY_COPY,
   selectActiveToolCall
 } from '../../../../shared/native-chat-tool-activity'
 import { NativeChatDiffView } from './NativeChatDiffView'
-import { NATIVE_CHAT_TOOL_GLYPHS, NativeChatToolIcon } from './NativeChatToolIcon'
+import { NativeChatToolIcon } from './NativeChatToolIcon'
 
 function activeToolLabel(call: Extract<NativeChatBlock, { type: 'tool-call' }>): string {
   const { key, toolName, preview } = describeActiveToolCall(call)
@@ -65,8 +60,9 @@ function ToolLine({
   let body: { output: string; isError?: boolean } | null = null
   let detail: string | null = null
   let inputHasDetail = false
+  const isCall = isToolCallBlock(block)
 
-  if (isToolCallBlock(block)) {
+  if (isCall) {
     name = block.name
     const inputDisplay = createToolInputDisplay(block.input)
     preview = inputDisplay.label
@@ -95,8 +91,14 @@ function ToolLine({
         )}
         aria-expanded={hasDetail ? expanded : undefined}
       >
-        {/* Decorative category glyph; the word beside it is the row's name. */}
-        <NativeChatToolIcon rowWord={name} className="text-muted-foreground" />
+        {isCall ? (
+          /* Decorative category glyph; the word beside it is the row's name. */
+          <NativeChatToolIcon rowWord={name} className="text-muted-foreground" />
+        ) : (
+          /* A result's word is translated copy, not a tool name, so there is no
+             category to read from it. The empty slot keeps rows aligned. */
+          <span aria-hidden className="size-4 shrink-0" />
+        )}
         <code className="shrink-0 font-mono text-xs font-semibold text-foreground/90 transition-colors group-hover:text-foreground">
           {name}
         </code>
@@ -227,16 +229,8 @@ export function NativeChatToolRun({
   // The header is named by the run's latest tool in both states, so its glyph is
   // chosen once and does not change when that tool settles. State rides on the
   // trailing mark instead — a leading glyph that flipped to a check would read as
-  // the row changing identity. `isCommandToolName` and the block filter replace
-  // the locals main deleted for its shared tool-activity helpers.
+  // the row changing identity.
   const headerCall = latestActiveCall ?? blocks.findLast(isToolCallBlock) ?? null
-  const headerCategory = headerCall ? nativeChatToolCategory(headerCall.name) : null
-  const uncategorizedHeaderIcon =
-    headerCall && isCommandToolName(headerCall.name) ? SquareTerminal : Wrench
-  const HeaderToolIcon =
-    headerCategory === null
-      ? uncategorizedHeaderIcon
-      : NATIVE_CHAT_TOOL_GLYPHS[NATIVE_CHAT_TOOL_ICON_NAMES[headerCategory]]
   const fallbackLabel =
     callCount === 1
       ? translate('components.native-chat.tool.countOne', NATIVE_CHAT_TOOL_ACTIVITY_COPY.countOne)
@@ -268,9 +262,7 @@ export function NativeChatToolRun({
           aria-expanded={open}
           aria-live="polite"
         >
-          <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-            <HeaderToolIcon aria-hidden className="size-3.5" />
-          </span>
+          <NativeChatToolIcon rowWord={latestActiveCall.name} className="text-muted-foreground" />
           <span className="min-w-0 flex-1 animate-pulse truncate text-foreground/85 motion-reduce:animate-none">
             {activeToolLabel(latestActiveCall)}
           </span>
@@ -283,10 +275,8 @@ export function NativeChatToolRun({
           className="group flex min-h-6 w-full items-center gap-1.5 py-0.5 text-left"
           aria-expanded={open}
         >
-          {structuredActivityUi ? (
-            <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-              <HeaderToolIcon aria-hidden className="size-3.5" />
-            </span>
+          {structuredActivityUi && headerCall ? (
+            <NativeChatToolIcon rowWord={headerCall.name} className="text-muted-foreground" />
           ) : null}
           <span className="shrink-0 font-mono text-[11px] font-bold text-muted-foreground transition-colors group-hover:text-foreground/80">
             {callCount}×

@@ -406,22 +406,62 @@ describe('NativeChatToolRun', () => {
     }
   })
 
-  it('falls back to the terminal glyph rather than an empty slot for an unmodelled row', () => {
+  it('falls back to the generic tool glyph, not the terminal, for an unmodelled row', () => {
     const blocks: NativeChatBlock[] = [
-      { type: 'tool-call', name: 'apply_patch', input: { command: 'apply' }, state: 'completed' }
+      {
+        type: 'tool-call',
+        name: 'AskUserQuestion',
+        input: { prompt: 'which?' },
+        state: 'completed'
+      }
     ]
 
     const { container } = render(<NativeChatToolRun blocks={blocks} expandSignal />)
 
-    expect(container.querySelector('.lucide-square-terminal')).toBeInTheDocument()
+    // A terminal here would assert a shell ran when nothing says one did.
+    expect(container.querySelector('.lucide-square-terminal')).toBeNull()
+    expect(container.querySelector('.lucide-wrench')).toBeInTheDocument()
   })
 
-  it('gives the bare list row a `.` argument instead of a lone word', () => {
+  it('agrees between the header and the row it names for an unmodelled tool', () => {
+    const blocks: NativeChatBlock[] = [
+      {
+        type: 'tool-call',
+        name: 'AskUserQuestion',
+        input: { prompt: 'which?' },
+        state: 'completed'
+      }
+    ]
+
+    const { container } = render(<NativeChatToolRun blocks={blocks} expandSignal />)
+
+    // Header and row read the same function, so one run cannot show two glyphs.
+    expect(leadingGlyphs(container)).toEqual(['lucide-wrench', 'lucide-wrench'])
+  })
+
+  it('leaves a result row without a category glyph, its word being translated copy', () => {
+    const blocks: NativeChatBlock[] = [
+      { type: 'tool-call', name: 'read', input: { path: 'notes.txt' }, state: 'completed' },
+      { type: 'tool-result', output: 'first line' }
+    ]
+
+    render(<NativeChatToolRun blocks={blocks} expandSignal />)
+
+    const resultRow = screen.getByText('Result').closest('button')
+    // Keying a category off 'Result' would resolve a different glyph per locale.
+    expect(
+      [...(resultRow?.querySelectorAll('svg') ?? [])].map(
+        (svg) => svg.getAttribute('class')?.match(/lucide-[a-z0-9-]+/)?.[0]
+      )
+    ).toEqual(['lucide-chevron-right'])
+  })
+
+  it('labels a bare list row by the command it ran rather than an invented path', () => {
     const blocks: NativeChatBlock[] = [
       {
         type: 'tool-call',
         name: 'list',
-        input: { command: 'ls', cwd: '/repo', path: '.' },
+        input: { command: 'ls', cwd: '/repo' },
         state: 'completed'
       }
     ]
@@ -429,6 +469,6 @@ describe('NativeChatToolRun', () => {
     const { container } = render(<NativeChatToolRun blocks={blocks} expandSignal />)
 
     expect(container.querySelector('.lucide-folder')).toBeInTheDocument()
-    expect(screen.getByTitle('.')).toHaveTextContent('.')
+    expect(screen.getByTitle('ls')).toHaveTextContent('ls')
   })
 })
