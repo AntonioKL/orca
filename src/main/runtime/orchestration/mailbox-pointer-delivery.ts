@@ -75,7 +75,7 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
         }
         return
       }
-      if (leaf.lastAgentStatus !== null || leaf.lastAgentStatusObservedLive) {
+      if (leaf.lastAgentStatus !== null) {
         return
       }
       const mailboxHandle = this.deps.mailboxOwner.resolve(leaf, handle)

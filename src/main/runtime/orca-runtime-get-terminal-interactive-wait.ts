@@ -165,11 +165,9 @@ export class OrcaRuntimeWithGetTerminalInteractiveWait extends OrcaRuntimeWithAd
         !leaf.connected ||
         !leaf.writable ||
         leaf.lastAgentStatus !== null ||
-        leaf.lastAgentStatusObservedLive ||
         !pty?.connected ||
         pty.launchAgent !== 'codex' ||
-        pty.lastAgentStatus !== null ||
-        pty.lastAgentStatusObservedLive
+        pty.lastAgentStatus !== null
       ) {
         return null
       }

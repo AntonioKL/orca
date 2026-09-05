@@ -70,7 +70,7 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
   write: ReturnType<typeof vi.fn>
   confirmForegroundProcess: ReturnType<typeof vi.fn>
   remountWithPty: (ptyId: string) => void
-  remountStatuslessCodex: (ptyId: string) => void
+  remountStatuslessCodex: (ptyId: string, graphBeforeRegistration: boolean) => void
   setForegroundProcess: (process: string | null) => void
   setConfirmedForegroundProcess: (process: string | null | undefined) => void
   setForegroundConfirmationSupported: (supported: boolean) => void
@@ -173,10 +173,12 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
       runtime.onPtyData(ptyId, '\x1b]0;Claude working\x07', 100)
       runtime.onPtyData(ptyId, '\x1b]0;Claude done\x07', 101)
     },
-    remountStatuslessCodex: (ptyId: string) => {
-      // Production can publish the writable renderer graph before main receives
-      // the provider-owned reattach identity for that PTY.
-      syncGraph(ptyId)
+    remountStatuslessCodex: (ptyId: string, graphBeforeRegistration: boolean) => {
+      // Reattach registration and renderer graph publication race independently.
+      if (graphBeforeRegistration) {
+        syncGraph(ptyId)
+      }
+      runtime.onPtyData(ptyId, '\x1b]0;\u280b fixture\x07', 99)
       runtime.registerPty(ptyId, TEST_WORKTREE_ID, null, {
         tabId: TAB_ID,
         leafId: LEAF_ID,
@@ -191,10 +193,14 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
         [
           ' >_ OpenAI Codex (v0.132.0)\n',
           ' model:       gpt-5.5 high   /model to change\n',
-          ' directory:   ~/orca/workspaces/orca/impl-agent-sleep-wake\n'
+          ' directory:   ~/orca/workspaces/orca/impl-agent-sleep-wake\n',
+          '\x1b]0;fixture\x07'
         ].join(''),
         100
       )
+      if (!graphBeforeRegistration) {
+        syncGraph(ptyId)
+      }
     }
   }
 }
@@ -374,21 +380,28 @@ describe('mail addressed to a listed slept pane', () => {
 
   it.each([
     {
-      caseName: 'with fresh local foreground confirmation',
+      caseName: 'after graph publication with fresh local foreground confirmation',
       foregroundProcess: 'zsh',
       confirmedForegroundProcess:
         '/opt/homebrew/lib/node_modules/@openai/codex/vendor/aarch64-apple-darwin/bin/codex',
-      foregroundConfirmationSupported: true
+      foregroundConfirmationSupported: true,
+      graphBeforeRegistration: true
     },
     {
-      caseName: 'through an SSH provider without foreground confirmation',
+      caseName: 'before graph publication through an SSH provider without foreground confirmation',
       foregroundProcess: 'codex',
       confirmedForegroundProcess: null,
-      foregroundConfirmationSupported: false
+      foregroundConfirmationSupported: false,
+      graphBeforeRegistration: false
     }
   ])(
-    'delivers after a statusless Codex reattach $caseName',
-    async ({ foregroundProcess, confirmedForegroundProcess, foregroundConfirmationSupported }) => {
+    'delivers after a statusless Codex reattach clears its working spinner $caseName',
+    async ({
+      foregroundProcess,
+      confirmedForegroundProcess,
+      foregroundConfirmationSupported,
+      graphBeforeRegistration
+    }) => {
       vi.useFakeTimers()
       try {
         const {
@@ -432,7 +445,7 @@ describe('mail addressed to a listed slept pane', () => {
           }
           return true
         })
-        remountStatuslessCodex('pty-codex-woken')
+        remountStatuslessCodex('pty-codex-woken', graphBeforeRegistration)
         expect(reattachDelivery).toHaveBeenCalledWith(handle)
         const runtimeState = runtime as unknown as {
           leaves: Map<
@@ -448,11 +461,11 @@ describe('mail addressed to a listed slept pane', () => {
           [...runtimeState.leaves.values()].find((leaf) => leaf.leafId === LEAF_ID)
         ).toMatchObject({
           lastAgentStatus: null,
-          lastAgentStatusObservedLive: false
+          lastAgentStatusObservedLive: true
         })
         expect(runtimeState.ptysById.get('pty-codex-woken')).toMatchObject({
           lastAgentStatus: null,
-          lastAgentStatusObservedLive: false
+          lastAgentStatusObservedLive: true
         })
         await vi.advanceTimersByTimeAsync(12_000)
         await vi.waitFor(() =>
@@ -507,7 +520,7 @@ describe('mail addressed to a listed slept pane', () => {
         }
         return true
       })
-      remountStatuslessCodex('pty-codex-woken')
+      remountStatuslessCodex('pty-codex-woken', true)
       await vi.advanceTimersByTimeAsync(12_000)
 
       expect(write).toHaveBeenCalledWith(
@@ -558,7 +571,7 @@ describe('mail addressed to a listed slept pane', () => {
         }
         return true
       })
-      remountStatuslessCodex('pty-codex-woken')
+      remountStatuslessCodex('pty-codex-woken', true)
       await vi.advanceTimersByTimeAsync(2_000)
       await vi.waitFor(() => expect(confirmForegroundProcess).toHaveBeenCalledTimes(1))
       runtime.onPtyData('pty-codex-woken', 'restored output\n', 101)

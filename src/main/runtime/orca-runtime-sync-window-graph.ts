@@ -322,8 +322,7 @@ export class OrcaRuntimeWithSyncWindowGraph extends OrcaRuntimeWithAttachWindow 
         becameWritable &&
         leaf.ptyId &&
         this.ptysById.get(leaf.ptyId)?.launchAgent === 'codex' &&
-        leaf.lastAgentStatus === null &&
-        !leaf.lastAgentStatusObservedLive
+        leaf.lastAgentStatus === null
       ) {
         // Why: Codex reattach has no status edge, so the writable transition starts its bounded idle proof.
         const handle = this.handleByLeafKey.get(leafKey)

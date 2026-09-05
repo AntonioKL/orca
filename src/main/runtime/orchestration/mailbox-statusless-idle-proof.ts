@@ -9,9 +9,10 @@ export function isStatuslessIdleProofCurrent(
   if (!isStatuslessIdleProofProcessCurrent(leaf, proof, getTerminalProcessIncarnation)) {
     return false
   }
-  return leaf.lastAgentStatusObservedLive
-    ? leaf.lastAgentStatus === 'idle'
-    : leaf.lastAgentStatus === null
+  return (
+    leaf.lastAgentStatus === null ||
+    (leaf.lastAgentStatusObservedLive && leaf.lastAgentStatus === 'idle')
+  )
 }
 
 export function isStatuslessIdleProofProcessCurrent(

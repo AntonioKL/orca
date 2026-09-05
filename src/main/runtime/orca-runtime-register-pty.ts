@@ -138,12 +138,7 @@ export class OrcaRuntimeWithRegisterPty extends OrcaRuntimeWithInvalidateAllHand
     ) {
       const leafKey = this.getLeafKey(binding.tabId, binding.leafId)
       const leaf = this.leaves.get(leafKey)
-      if (
-        leaf?.ptyId === ptyId &&
-        leaf.writable &&
-        leaf.lastAgentStatus === null &&
-        !leaf.lastAgentStatusObservedLive
-      ) {
+      if (leaf?.ptyId === ptyId && leaf.writable && leaf.lastAgentStatus === null) {
         // Why: graph publication can precede provider-owned reattach identity, so registration must redrive that ordering.
         this.deliverPendingMessagesForHandle(this.issueHandle(leaf))
       }
