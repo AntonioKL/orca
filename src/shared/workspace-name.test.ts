@@ -97,6 +97,44 @@ describe('getLinkedWorkItemWorkspaceName', () => {
     ).toEqual({ displayName: '#165 Site header breaks', seedName: '165-site-header-breaks' })
   })
 
+  it('strips inline and bare-bang references before leading with the number', () => {
+    expect(
+      getLinkedWorkItemWorkspaceName({
+        type: 'mr',
+        provider: 'gitlab',
+        number: 42,
+        title: '!42: Tighten the relay timeout'
+      })?.displayName
+    ).toBe('!42 Tighten the relay timeout')
+    expect(
+      getLinkedWorkItemWorkspaceName({
+        type: 'issue',
+        provider: 'github',
+        number: 42,
+        title: 'Fix #42 checkout regression'
+      })?.displayName
+    ).toBe('#42 Fix checkout regression')
+  })
+
+  it('leaves Jira and Linear items unprefixed when their identifier is missing', () => {
+    expect(
+      getLinkedWorkItemWorkspaceName({
+        type: 'issue',
+        provider: 'jira',
+        number: 165,
+        title: 'Site header breaks on small screens'
+      })?.displayName
+    ).toBe('Site header breaks on small screens')
+    expect(
+      getLinkedWorkItemWorkspaceName({
+        type: 'issue',
+        provider: 'linear',
+        number: 165,
+        title: 'Site header breaks on small screens'
+      })?.displayName
+    ).toBe('Site header breaks on small screens')
+  })
+
   it('falls back to the identity label when there is no number to lead with', () => {
     expect(
       getLinkedWorkItemWorkspaceName({
