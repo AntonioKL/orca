@@ -39,6 +39,7 @@ Three buckets. "Merged" means the code is on `main` and nothing in production ha
 6. Paging channel for auth alerts (5.2): needs the destination from you.
 
 **Open code follow-ups (no gate, nobody assigned)**
+- Monitor summary Markdown does not render `tolerated: true` continuity events (added by #18798); the state artifact has them, the checkpoint table does not.
 - Relay container boot races the `cloud-sql-proxy` sidecar: c13's fresh container exited twice (`applyPostgresSchema` connection timeout, 2 s each) before the proxy was listening. Make schema apply wait for the proxy or order the containers.
 - `cloud-deploy-relay-production-capacity-job.yml` (~line 416) has the same wave-0 single-shot preflight carve-out that #18778 removes from the same-cap job; its single-evidence path never retries freshness-only failures.
 - `cloud/package.json` `test` names every dev-script test file explicitly; an unregistered `*.test.mjs` is silently never run in CI (found by #18769). Needs a glob or a ratchet that fails on an unlisted test file.
