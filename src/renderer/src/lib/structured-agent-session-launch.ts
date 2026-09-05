@@ -160,19 +160,45 @@ function trackLaunchFailureToast(state: StructuredLaunchState): void {
     if (error instanceof StructuredAgentSessionLaunchCancelledError) {
       return
     }
+    const agentLabel = structuredAgentLabel(state.intent.agent)
     if (
       error instanceof StructuredAgentSessionCreateRefusalError &&
       (await state.callers.refusalSettlement.promise.catch(() => false))
     ) {
+      // Why: the fallback worked, so nothing failed — but silently swapping the requested chat for
+      // a terminal is indistinguishable from a bug. Say what happened, at message severity.
+      toast.message(
+        translate(
+          'components.native-chat.structuredSessionFellBackToTerminal',
+          'Opened a {{value0}} terminal instead',
+          { value0: agentLabel }
+        ),
+        {
+          description: translate(
+            'components.native-chat.structuredSessionFellBackToTerminalDescription',
+            "Structured chat isn't available for this workspace."
+          )
+        }
+      )
       return
     }
+    // Why: the raw error carries errnos and absolute paths; it belongs in the log, not the toast.
+    console.warn('[native-chat] structured launch failed', error)
     toast.error(
       translate(
         'components.native-chat.structuredSessionLaunchFailed',
         'Could not open {{value0}} chat',
-        { value0: structuredAgentLabel(state.intent.agent) }
+        {
+          value0: agentLabel
+        }
       ),
-      { description: error instanceof Error ? error.message : String(error) }
+      {
+        description: translate(
+          'components.native-chat.structuredSessionLaunchFailedDescription',
+          'Orca could not open a structured {{value0}} chat. See the logs for details.',
+          { value0: agentLabel }
+        )
+      }
     )
   })
 }

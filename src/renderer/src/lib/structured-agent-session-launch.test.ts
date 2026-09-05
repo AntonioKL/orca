@@ -347,6 +347,49 @@ describe('startStructuredAgentLaunch', () => {
     expect(toast.error).not.toHaveBeenCalled()
   })
 
+  it('tells the user a terminal opened instead when a definitive refusal falls back', async () => {
+    const worktreeId = 'wt-refused-fallback-toast'
+    const intent = launchIntent(worktreeId)
+    const fallback = vi.fn()
+    mocks.createIntent.mockReturnValueOnce(intent)
+    mocks.launch.mockRejectedValue(new StructuredAgentSessionCreateRefusalError('refused'))
+
+    const launch = startStructuredAgentLaunch(worktreeId, 'codex')
+    void launch.claimDefinitiveRefusalFallback(fallback)
+    await expect(launch.launchResult).rejects.toBeInstanceOf(
+      StructuredAgentSessionCreateRefusalError
+    )
+    await flushLaunchSettlement()
+
+    // Why: the fallback worked, so this is not an error — but a silent swap is indistinguishable
+    // from the bug where the wrong surface opens.
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.message).toHaveBeenCalledWith(
+      'Opened a Codex terminal instead',
+      expect.objectContaining({
+        description: "Structured chat isn't available for this workspace."
+      })
+    )
+  })
+
+  it('keeps the raw error out of the failure toast', async () => {
+    const worktreeId = 'wt-no-raw-error-in-toast'
+    const intent = launchIntent(worktreeId)
+    mocks.createIntent.mockReturnValueOnce(intent)
+    mocks.launch.mockRejectedValue(
+      new Error("EEXIST: file already exists, mkdir '/tmp/o97b/agent-sessions'")
+    )
+    vi.mocked(refreshLocalStructuredSessionTabs).mockResolvedValue([])
+
+    startStructuredAgentLaunch(worktreeId, 'codex')
+    await flushLaunchSettlement()
+
+    expect(toast.error).toHaveBeenCalledOnce()
+    const description = String(vi.mocked(toast.error).mock.calls[0]?.[1]?.description ?? '')
+    expect(description).not.toContain('EEXIST')
+    expect(description).not.toContain('/tmp/')
+  })
+
   it('retries an absent unknown outcome with the exact same intent', async () => {
     const worktreeId = 'wt-same-envelope-retry'
     const intent = launchIntent(worktreeId)

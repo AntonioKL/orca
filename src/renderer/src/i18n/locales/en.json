@@ -17059,7 +17059,10 @@
         "retryProof": "Retry proof",
         "retry": "Retry",
         "details": "Details"
-      }
+      },
+      "structuredSessionFellBackToTerminal": "Opened a {{value0}} terminal instead",
+      "structuredSessionFellBackToTerminalDescription": "Structured chat isn't available for this workspace.",
+      "structuredSessionLaunchFailedDescription": "Orca could not open a structured {{value0}} chat. See the logs for details."
     },
     "tab": {
       "bar": {
