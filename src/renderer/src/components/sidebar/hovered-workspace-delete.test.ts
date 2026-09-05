@@ -106,6 +106,33 @@ describe('hovered workspace delete', () => {
     })
   })
 
+  // Why: activation resolves the host (undefined -> 'local'), but a
+  // pre-host-qualification row still carries no hostId, so the composed
+  // 'local|<id>' identity never matched its '|<id>' one and delete no-opped.
+  it('falls back to a legacy workspace whose row predates host qualification', () => {
+    const legacy = worktree({ id: 'repo::/legacy', path: '/legacy' })
+    const legacyState = state([legacy])
+    legacyState.activeWorkspaceExecutionHostId = 'local'
+
+    expect(getActiveWorkspaceIdentity(legacyState)).toEqual({
+      workspaceId: 'repo::/legacy',
+      hostIdentity: 'local|repo::/legacy'
+    })
+    expect(resolveWorkspaceDeleteTarget(legacyState, hoveredDocument())).toEqual({
+      kind: 'worktree',
+      worktree: legacy
+    })
+  })
+
+  it("never lets the legacy fallback reach another host's row", () => {
+    const remote = worktree({ id: 'repo::/shared', path: '/shared', hostId: 'ssh:build' })
+    const remoteState = state([remote])
+    remoteState.activeWorktreeId = 'repo::/shared'
+    remoteState.activeWorkspaceExecutionHostId = 'local'
+
+    expect(resolveWorkspaceDeleteTarget(remoteState, hoveredDocument())).toBeNull()
+  })
+
   it('applies the same guards to the active workspace as to a hovered one', () => {
     const primary = worktree({ hostId: 'local', isMainWorktree: true })
     expect(resolveWorkspaceDeleteTarget(state([primary]), hoveredDocument())).toBeNull()

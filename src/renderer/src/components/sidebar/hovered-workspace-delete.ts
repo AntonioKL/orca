@@ -9,7 +9,7 @@ import {
 } from '../../../../shared/worktree/host-qualified-identity'
 import type { Worktree } from '../../../../shared/worktree/types'
 import { parseWorkspaceKey } from '../../../../shared/workspace-scope'
-import type { ExecutionHostId } from '../../../../shared/execution-host'
+import { LOCAL_EXECUTION_HOST_ID, type ExecutionHostId } from '../../../../shared/execution-host'
 import { runWorktreeDelete } from './delete-worktree-flow'
 import { getDeleteStateForWorktreeHost } from './worktree-delete-state-host-match'
 
@@ -107,11 +107,16 @@ export function resolveWorkspaceDeleteTarget(
       workspaceKey: hovered.workspaceId
     }
   }
-  const worktree = getAllWorktreesFromState(state).find(
-    (candidate) =>
-      candidate.id === hovered.workspaceId &&
-      getWorktreeHostIdentity(candidate) === hovered.hostIdentity
+  const candidates = getAllWorktreesFromState(state).filter(
+    (candidate) => candidate.id === hovered.workspaceId
   )
+  const worktree =
+    candidates.find((candidate) => getWorktreeHostIdentity(candidate) === hovered.hostIdentity) ??
+    // Why: pre-host-qualification rows carry no hostId, so their `|<id>` identity
+    // never matches the `local|<id>` a click resolves — the exact no-op this fixes.
+    (getExecutionHostIdFromWorktreeHostIdentity(hovered.hostIdentity) === LOCAL_EXECUTION_HOST_ID
+      ? candidates.find((candidate) => candidate.hostId === undefined)
+      : undefined)
   return worktree &&
     !worktree.isMainWorktree &&
     !getDeleteStateForWorktreeHost(worktree, state.deleteStateByWorktreeId)?.isDeleting
