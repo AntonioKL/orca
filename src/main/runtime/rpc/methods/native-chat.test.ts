@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { NativeChatMessage } from '../../../../shared/native-chat-types'
+import type {
+  NativeChatMessage,
+  NativeChatSubagentEntry
+} from '../../../../shared/native-chat-types'
 import type { RpcContext } from '../core'
 
 // Stub the bounded tail reader so the handler returns a deterministic transcript with
@@ -192,7 +195,7 @@ describe('nativeChat.readSession clientKind truncation gating', () => {
   })
 
   it('bounds a subagent roster before it reaches mobile', async () => {
-    const agents = Array.from({ length: 100 }, (_, index) => ({
+    const agents: NativeChatSubagentEntry[] = Array.from({ length: 100 }, (_, index) => ({
       id: `task-${index}`,
       label: 'l'.repeat(600),
       state: 'working'
