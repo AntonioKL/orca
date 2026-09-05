@@ -260,16 +260,20 @@ export function journalFileFormatRestoredDisclosure(input: {
 }
 
 export function journalFileFormatRemnantDisclosure(
-  remnant: JournalFileFormatRemnant
+  remnant: JournalFileFormatRemnant,
+  retainsRestoredState = false
 ): JournalFileFormatRemnantDisclosure {
   return {
     identity: JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_IDENTITY,
     body: {
       kind: 'status',
-      text:
-        `This chat's history was saved in an older format that this version could not read, ` +
-        `so the session starts empty. The original transcript is still on disk at ` +
-        `${remnant.transcriptPath}`
+      text: retainsRestoredState
+        ? `This version could not read this chat's changed older-format transcript, so the ` +
+          `previously restored history was kept. The changed transcript is still on disk at ` +
+          `${remnant.transcriptPath}`
+        : `This chat's history was saved in an older format that this version could not read, ` +
+          `so the session starts empty. The original transcript is still on disk at ` +
+          `${remnant.transcriptPath}`
     }
   }
 }

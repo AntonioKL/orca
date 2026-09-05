@@ -93,7 +93,7 @@ export async function openJournalStoreState(input: {
       : null
   const retainsRestoredState = importRecord?.retainsRestoredState ?? false
   const hasNativeDivergence = Boolean(
-    importRecord?.retainsRestoredState &&
+    importRecord &&
     (importRecord.journalCursor.epoch !== loaded.state.epoch ||
       importRecord.journalCursor.sequence !== loaded.state.lastSequence)
   )
@@ -177,7 +177,7 @@ async function discloseFileFormatRemnantFailure(
   remnant: JournalFileFormatRemnant,
   retainsRestoredState: boolean
 ): Promise<void> {
-  const disclosure = journalFileFormatRemnantDisclosure(remnant)
+  const disclosure = journalFileFormatRemnantDisclosure(remnant, retainsRestoredState)
   await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
   input.recordImportAttempt(remnant.sourceFingerprint, retainsRestoredState, input.currentCursor())
 }

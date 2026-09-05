@@ -245,6 +245,50 @@ describe('all-or-nothing migration', () => {
     }
   })
 
+  it('keeps lifecycle-only native state when a failed source is later repaired', async () => {
+    const tombstonedIdentity = { provider: 'orca' as const, clientMessageId: 'native-hidden' }
+    await writeFile(join(root, 'log.jsonl'), `${JSON.stringify(epoch())}\nnot-json\n`, 'utf8')
+    const failed = await open()
+    const settled = await failed.appendLifecycleBatch({
+      settlementId: 'native-settlement',
+      fence: 0,
+      mutations: [{ kind: 'tombstone', identity: tombstonedIdentity }]
+    })
+    await failed.close()
+    await writeRows([epoch(), item(2, 'legacy:codex:session-1:repaired', 'repaired')])
+
+    const conflicted = await open()
+    expect(conflicted.epoch).toBe(settled.epoch)
+    expect(conflicted.snapshot().items.map((entry) => entry.body)).not.toContainEqual(
+      expect.objectContaining({ blocks: [{ type: 'text', text: 'repaired' }] })
+    )
+    expect(conflicted.snapshot().items.map((entry) => entry.body)).toContainEqual(
+      expect.objectContaining({ kind: 'status', text: expect.stringContaining('Both histories') })
+    )
+    const beforeDuplicate = conflicted.cursor()
+    expect(
+      await conflicted.appendLifecycleBatch({
+        settlementId: 'native-settlement',
+        fence: 0,
+        mutations: [
+          {
+            kind: 'item',
+            identity: tombstonedIdentity,
+            body: { kind: 'status', text: 'must not appear' }
+          }
+        ]
+      })
+    ).toEqual(beforeDuplicate)
+    await conflicted.appendItem(
+      tombstonedIdentity,
+      { kind: 'status', text: 'still tombstoned' },
+      { fence: 0 }
+    )
+    expect(conflicted.snapshot().items.map((entry) => entry.body)).not.toContainEqual(
+      expect.objectContaining({ text: 'still tombstoned' })
+    )
+  })
+
   it('does not rerecord an unchanged non-replayable remnant on every open', async () => {
     await writeFile(join(root, 'log.jsonl'), `${JSON.stringify(epoch())}\nnot-json\n`, 'utf8')
     const first = await open()
@@ -376,6 +420,15 @@ describe('all-or-nothing migration', () => {
         kind: 'message',
         blocks: [{ type: 'text', text: 'first' }]
       })
+    )
+    expect(unreadable.snapshot().items.map((entry) => entry.body)).toContainEqual(
+      expect.objectContaining({
+        kind: 'status',
+        text: expect.stringContaining('the previously restored history was kept')
+      })
+    )
+    expect(unreadable.snapshot().items.map((entry) => entry.body)).not.toContainEqual(
+      expect.objectContaining({ kind: 'status', text: expect.stringContaining('starts empty') })
     )
     await unreadable.close()
     await writeRows([
