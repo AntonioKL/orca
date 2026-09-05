@@ -88,6 +88,18 @@ export function matchSearchNavigate(
   return e.shiftKey ? 'previous' : 'next'
 }
 
+/**
+ * Runs one Cmd+G / Ctrl+G jump between matches.
+ *
+ * Options come from `buildTerminalSearchOptions` so this path carries the same
+ * decorations the find bar does; without them the addon moves the selection but
+ * stops repainting highlights and reporting the position.
+ *
+ * @param pane The pane whose addon performs the search.
+ * @param direction Which way to walk the matches.
+ * @param searchState The active query and its case/regex flags.
+ * @returns Whether the addon found a match.
+ */
 export function runTerminalSearchNavigation(
   pane: Pick<ManagedPane, 'searchAddon'>,
   direction: SearchNavigationDirection,

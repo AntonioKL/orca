@@ -20,6 +20,19 @@ function defaultLinkTooltipText(uri: string, openLinkHint: string): string {
   return `${uri} (${openLinkHint})`
 }
 
+/**
+ * Builds one terminal pane's DOM and its xterm instance, with the addons, link
+ * tooltip, drag handle, and pointer wiring the pane needs.
+ *
+ * @param id The pane's runtime id, passed back to the pointer callbacks.
+ * @param leafId The pane's stable id in the split layout.
+ * @param options Pane manager options, including terminal appearance.
+ * @param dragState Shared reorder state this pane's drag handle mutates.
+ * @param dragCallbacks Reorder callbacks invoked while dragging this pane.
+ * @param onPointerDown Invoked on pointer down; focus is decided by the caller.
+ * @param onMouseEnter Invoked on hover, for link tooltips.
+ * @returns The pane record the manager tracks.
+ */
 export function createPaneDOM(
   id: number,
   leafId: TerminalLeafId,

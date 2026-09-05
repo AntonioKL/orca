@@ -16,6 +16,12 @@ type ResultsListener = (event: { resultIndex: number; resultCount: number }) => 
 
 const emitResults = new WeakMap<SearchAddon, ResultsListener>()
 
+/**
+ * Builds a stub addon whose `onDidChangeResults` listener is reachable through
+ * `emitResults`, so a test can fire a result event the way xterm would.
+ *
+ * @returns A stub standing in for the pane's addon.
+ */
 function createSearchAddon(): SearchAddon {
   let listener: ResultsListener | undefined
   const addon = {
@@ -31,6 +37,12 @@ function createSearchAddon(): SearchAddon {
   return addon
 }
 
+/**
+ * Renders an open find bar against one addon.
+ *
+ * @param searchAddon The addon the bar should search.
+ * @returns The testing-library render result.
+ */
 function renderSearch(searchAddon: SearchAddon): ReturnType<typeof render> {
   return render(
     <TerminalSearch

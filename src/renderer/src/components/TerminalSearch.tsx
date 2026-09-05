@@ -20,9 +20,16 @@ type TerminalSearchProps = {
 
 type MatchCount = { addon: SearchAddon; query: string | null; index: number; count: number }
 
-// The addon reports index -1 when the selected match is not among the tracked
-// results — past `highlightLimit`, or before a match is selected — so a position
-// is unknowable there and only the (capped) total can be shown.
+/**
+ * Renders the find bar's match counter.
+ *
+ * The addon reports index -1 when the selected match is not among the tracked
+ * results — past `highlightLimit`, or before a match is selected — so a position
+ * is unknowable there and only the (capped) total can be shown.
+ *
+ * @param matches The position and total last reported by `onDidChangeResults`.
+ * @returns `3/47`, `0/0`, a bare total, or `1000+` once the total is truncated.
+ */
 function formatMatchCount(matches: { index: number; count: number }): string {
   if (matches.count === 0) {
     return '0/0'
@@ -35,6 +42,11 @@ function formatMatchCount(matches: { index: number; count: number }): string {
   return `${matches.index + 1}/${matches.count}`
 }
 
+/**
+ * Drops every trace of the current search from a pane's addon.
+ *
+ * @param searchAddon The pane's addon, or null when no pane is attached.
+ */
 function clearTerminalSearch(searchAddon: SearchAddon | null): void {
   if (!searchAddon) {
     return
@@ -44,6 +56,17 @@ function clearTerminalSearch(searchAddon: SearchAddon | null): void {
   searchAddon.findNext('')
 }
 
+/**
+ * The terminal find bar: query input, case/regex toggles, match navigation, and
+ * a counter spanning the whole scrollback.
+ *
+ * @param props.isOpen Whether the bar is showing; closing clears the search.
+ * @param props.onClose Invoked on Escape and on the close button.
+ * @param props.searchAddon The focused pane's addon; changes on a pane switch.
+ * @param props.searchStateRef Written on every change so the Cmd+G / Ctrl+G
+ * handler can navigate without this state being lifted to the parent.
+ * @returns The find bar, or null while closed.
+ */
 export default function TerminalSearch({
   isOpen,
   onClose,

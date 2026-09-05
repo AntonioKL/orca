@@ -9,6 +9,12 @@ import {
   runTerminalSearchNavigation
 } from './keyboard-handlers'
 
+/**
+ * Builds the subset of a keyboard event the shortcut matchers read.
+ *
+ * @param overrides Fields to change; the rest default to an unmodified `g`.
+ * @returns A stand-in keyboard event.
+ */
 function makeKeyEvent(
   overrides: Partial<{
     key: string
