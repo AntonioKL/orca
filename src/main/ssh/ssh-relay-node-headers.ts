@@ -12,9 +12,10 @@
  * warns that arbitrary `npm_config_<key>` is deprecated, but node-gyp 10 (bundled with Node 20)
  * reads only `npm_config_<key>`. Both together cover every Node the relay runs on.
  *
- * Why the version check: node-gyp trusts `nodedir` blindly. A distro `/usr/include/node` left by
- * an older headers package would compile a binding for the wrong ABI, which loads and crashes
- * instead of failing at install. A mismatch leaves the variables unset, which is today's path.
+ * Why the version check: node-gyp trusts `nodedir` blindly, so a distro `/usr/include/node` left
+ * by an older headers package would be compiled against as-is. Whether that binding then misbehaves
+ * is not established (one measured run loaded a node-20-header build under node 24); refusing is
+ * the conservative default. A mismatch leaves the variables unset, which is today's path.
  */
 import { shellEscape } from './ssh-connection-utils'
 
@@ -50,8 +51,8 @@ export const LOCAL_NODE_HEADERS_MARKER_PREFIX = 'ORCA-NODE-HEADERS:'
 export function exportLocalNodeHeadersPrefix(nodePath: string): string {
   const probe = `${shellEscape(nodePath)} -e ${shellEscape(LOCAL_NODE_HEADERS_PROBE_JS)} 2>/dev/null`
   // Why the unset: a remote profile can already export a nodedir (a stale distro header dir), in
-  // either case npm accepts. Left alone it would bypass the version check above and build a
-  // wrong-ABI binding. Deliberately env only: a `nodedir=` in ~/.npmrc is not reachable from here
+  // either case npm accepts. Left alone it would bypass the version check above and compile
+  // against those headers. Deliberately env only: a `nodedir=` in ~/.npmrc is not reachable from here
   // -- npm ignores an empty env override, and a CLI `--nodedir=` would also override the good
   // export -- so an npmrc setting stays the operator's, as it was before this prefix existed.
   return (
