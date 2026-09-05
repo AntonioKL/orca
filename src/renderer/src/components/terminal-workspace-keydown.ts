@@ -189,7 +189,10 @@ export function handleTerminalWorkspaceKeyDown(
     // unmovable tab fall through would type the chord into the terminal.
     event.preventDefault()
     notifyTerminalCapture(paneColumnMove[0])
-    moveActiveTabToNewPaneColumn(paneColumnMove[1], activeWorktreeId)
+    moveActiveTabToNewPaneColumn(
+      paneColumnMove[1],
+      floatingWorkspaceFocused ? FLOATING_TERMINAL_WORKTREE_ID : activeWorktreeId
+    )
     return
   }
   if (!event.repeat && matchShortcut('tab.close')) {
