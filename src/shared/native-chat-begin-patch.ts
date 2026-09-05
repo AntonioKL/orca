@@ -8,15 +8,12 @@ const MOVE_HEADER = /^\*\*\* Move to: (.+)$/
 /** Envelope structure that carries no file content of its own. */
 const CONTROL_LINE = /^\*\*\* (?:End of File|Environment ID:)/
 
-/** The envelope reaches a tool call as one of its argument values, either whole
- *  or as an element of the argument vector the agent runs. Recover its text. */
+/** The envelope reaches a command tool as one of its patch or command
+ *  arguments, either whole or as one word of the argument vector it runs.
+ *  Recover its text. Callers must gate this on the tool being one that runs a
+ *  patch: a file's own contents may quote an envelope. */
 export function unwrapBeginPatch(input: unknown): string | null {
-  const source =
-    typeof input === 'string'
-      ? input
-      : typeof input === 'object' && input !== null
-        ? envelopeArgument(input as Record<string, unknown>)
-        : null
+  const source = envelopeSource(input)
   if (!source) {
     return null
   }
@@ -34,10 +31,43 @@ export function unwrapBeginPatch(input: unknown): string | null {
   return source.slice(start, end + END.length)
 }
 
-/** Any argument value may hold the envelope, including one word of an argument
- *  vector, so look at the values rather than guessing at key names. */
+/** The arguments that carry a patch or the command line that applies one. Only
+ *  these are searched: any other value is data the tool operates on, and a file
+ *  whose own contents quote an envelope would otherwise be read as a patch
+ *  against some other file entirely. */
+const ENVELOPE_ARGUMENTS = ['input', 'command', 'patch', 'arguments', 'script'] as const
+
+/** The call payload may itself be a string holding JSON. Decoding it here, in
+ *  the one consumer that needs its structure, keeps every other reader of the
+ *  call input seeing exactly what the provider sent. */
+function envelopeSource(input: unknown): string | null {
+  if (typeof input === 'string') {
+    const record = jsonRecord(input)
+    return record ? envelopeArgument(record) : input
+  }
+  return typeof input === 'object' && input !== null
+    ? envelopeArgument(input as Record<string, unknown>)
+    : null
+}
+
+function jsonRecord(value: string): Record<string, unknown> | null {
+  if (!value.trimStart().startsWith('{')) {
+    return null
+  }
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
+
+/** A command tool's argument is a vector, so the envelope sits one level in. */
 function envelopeArgument(record: Record<string, unknown>): string | null {
-  for (const value of Object.values(record)) {
+  for (const key of ENVELOPE_ARGUMENTS) {
+    const value = record[key]
     if (typeof value === 'string' && value.includes(BEGIN)) {
       return value
     }
@@ -104,21 +134,19 @@ export function editFilesFromBeginPatch(envelope: string): NativeChatEditFile[] 
         })
       ]
     }
-    // The first chunk of an update may carry no hunk header at all, and a file
-    // whose body cannot be read as a hunk would otherwise vanish from a
-    // multi-file envelope with nothing to say it was dropped.
+    // The first chunk of an update may carry no hunk header at all, and a
+    // section may carry no body either. The envelope named the file, so it is
+    // reported with whatever rows it has rather than dropped from a multi-file
+    // envelope with nothing to say it went missing.
     const parsed = editLinesFromUnifiedPatch(body, { implicitFirstHunk: true })
-    if (!parsed) {
-      return []
-    }
     return [
       finalizeEditFile({
         path: moved ?? section.path,
         oldPath: moved ? section.path : null,
         changeKind: moved ? 'renamed' : 'edited',
-        lines: parsed.lines,
-        lineNumbersKnown: parsed.lineNumbersKnown,
-        truncated: parsed.truncated
+        lines: parsed?.lines ?? [],
+        lineNumbersKnown: parsed?.lineNumbersKnown ?? false,
+        truncated: parsed?.truncated ?? false
       })
     ]
   })

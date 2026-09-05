@@ -6,7 +6,11 @@ import {
   type NativeChatEditFile,
   type NativeChatEditLine
 } from './native-chat-edit-model'
-import { editLinesFromUnifiedPatch, editLinesFromWholeFile } from './native-chat-unified-patch'
+import {
+  editLinesFromUnifiedPatch,
+  editLinesFromWholeFile,
+  unifiedPatchSections
+} from './native-chat-unified-patch'
 import type { NativeChatEditPatch } from './native-chat-types'
 
 // `NotebookEdit` is deliberately absent: its input carries only the new cell
@@ -66,7 +70,10 @@ function linesFromEditPatch(patch: NativeChatEditPatch): NativeChatEditLine[] {
 }
 
 /** A whole-content write looks identical whether it created the file or
- *  overwrote one, so only positive evidence may claim a creation. */
+ *  overwrote one, so only positive evidence may claim a creation. With no
+ *  evidence either way this errs toward the weaker claim: calling a creation an
+ *  edit is imprecise, while calling an overwrite a creation is false and paints
+ *  an existing file as wholly new. */
 const CREATED_FILE_RESULT = /^\s*File created successfully/
 
 function wholeContentChangeKind(
@@ -210,9 +217,14 @@ export function editFilesFromToolPair(pair: {
   state?: 'running' | 'completed' | 'failed'
   result?: { output?: string; isError?: boolean; editPatch?: NativeChatEditPatch }
 }): NativeChatEditFile[] | null {
-  // A card states the edit as made. An edit that failed or has not landed yet
-  // must keep the generic tool view, which shows the provider's own error.
+  // A card states the edit as made, so it takes evidence that it landed: the
+  // provider reporting the call complete, or a result that is not an error.
+  // Anything else — failed, still running, or a turn that stopped before the
+  // call was answered — keeps the generic tool view and its error body.
   if (pair.state === 'failed' || pair.state === 'running' || pair.result?.isError === true) {
+    return null
+  }
+  if (pair.state !== 'completed' && pair.result === undefined) {
     return null
   }
   const input = record(pair.input)
@@ -229,9 +241,12 @@ export function editFilesFromToolPair(pair: {
     ]
   }
 
-  const envelope = unwrapBeginPatch(pair.input)
-  if (envelope) {
-    const files = editFilesFromBeginPatch(envelope)
+  // Only a tool that runs a patch may be searched for an envelope: a file's own
+  // contents can quote one, and scanning a write's payload rendered a card for
+  // the quoted file while the file actually written never appeared.
+  if (PATCH_ENVELOPE_TOOLS.has(pair.name)) {
+    const envelope = unwrapBeginPatch(pair.input)
+    const files = envelope ? editFilesFromBeginPatch(envelope) : []
     if (files.length > 0) {
       return files
     }
@@ -259,18 +274,31 @@ export function editFilesFromToolPair(pair: {
   if (!patchText) {
     return null
   }
-  const parsed = editLinesFromUnifiedPatch(patchText)
-  if (!parsed) {
-    return null
-  }
-  return [
-    finalizeEditFile({
-      path: text(input?.path) ?? text(input?.file_path) ?? 'file',
-      oldPath: null,
-      changeKind: 'edited',
-      lines: parsed.lines,
-      lineNumbersKnown: parsed.lineNumbersKnown,
-      truncated: parsed.truncated
-    })
-  ]
+  // One card per file the patch touches: run together, the later files' rows
+  // and gutter numbers sit under the first file's name.
+  const split = unifiedPatchSections(patchText)
+  const callerPath = text(input?.path) ?? text(input?.file_path)
+  // For a single-file patch the call names the file it is reporting on, which
+  // is the provider's own path. A multi-file patch has no one path, so each
+  // section is named by its own header.
+  const named = (section: { path: string | null }): string =>
+    (split.sections.length === 1 ? (callerPath ?? section.path) : (section.path ?? callerPath)) ??
+    'file'
+  const files = split.sections.flatMap((section) => {
+    const parsed = editLinesFromUnifiedPatch(section.body)
+    if (!parsed && section.path === null) {
+      return []
+    }
+    return [
+      finalizeEditFile({
+        path: named(section),
+        oldPath: section.oldPath,
+        changeKind: section.changeKind,
+        lines: parsed?.lines ?? [],
+        lineNumbersKnown: parsed?.lineNumbersKnown ?? false,
+        truncated: split.truncated || (parsed?.truncated ?? false)
+      })
+    ]
+  })
+  return files.length > 0 ? files : null
 }

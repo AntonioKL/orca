@@ -7,6 +7,13 @@ import { unwrapBeginPatch } from './native-chat-begin-patch'
 const gutter = (files: ReturnType<typeof editFilesFromToolPair>): (number | null)[] =>
   (files ?? []).flatMap((file) => file.lines.map((line) => unifiedLineNumber(line)))
 
+/** A card takes evidence the edit landed, so these cases report the call as
+ *  complete. Cases about the lifecycle itself pass their own state. */
+const settledFiles = (
+  pair: Parameters<typeof editFilesFromToolPair>[0]
+): ReturnType<typeof editFilesFromToolPair> =>
+  editFilesFromToolPair({ state: 'completed', ...pair })
+
 describe('editLinesFromUnifiedPatch', () => {
   it('numbers deletes from the old side and adds from the new side', () => {
     const parsed = editLinesFromUnifiedPatch('@@ -12,3 +12,3 @@\n ctx\n-was\n+now\n tail')
@@ -115,13 +122,13 @@ describe('unwrapBeginPatch', () => {
   it('declines an envelope with no closing marker rather than swallowing the command line', () => {
     const command = 'bash -c "*** Begin Patch\n*** Update File: a.ts\n@@\n-x\n+y" && echo ok'
     expect(unwrapBeginPatch(command)).toBeNull()
-    expect(editFilesFromToolPair({ name: 'shell', input: command })).toBeNull()
+    expect(settledFiles({ name: 'shell', input: command })).toBeNull()
   })
 })
 
 describe('editFilesFromToolPair', () => {
   it('renders an apply_patch run through a command tool, which produced no diff', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'exec',
       input: {
         command: [
@@ -141,7 +148,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('numbers an added file from 1', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'exec',
       input: '*** Begin Patch\n*** Add File: new.ts\n+one\n+two\n*** End Patch'
     })
@@ -151,7 +158,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('keeps a file whose update body carries no hunk header', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'apply_patch',
       input: {
         input:
@@ -164,7 +171,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('does not render envelope control lines as file content', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'apply_patch',
       input: {
         input:
@@ -175,7 +182,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('reports a delete that names the file and carries no body', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'apply_patch',
       input: { input: '*** Begin Patch\n*** Delete File: gone.ts\n*** End Patch' }
     })
@@ -186,7 +193,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('reads a CRLF envelope, whose markers otherwise match nothing', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'apply_patch',
       input: {
         input:
@@ -199,7 +206,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('marks the break between resolved hunks that sit far apart', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'Edit',
       input: { file_path: '/repo/a.ts' },
       result: {
@@ -220,7 +227,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('reads a move header as a rename', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'exec',
       input:
         '*** Begin Patch\n*** Update File: old.ts\n*** Move to: new.ts\n@@\n-a\n+b\n*** End Patch'
@@ -231,7 +238,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('interleaves a Claude snippet pair without claiming line positions', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'Edit',
       input: {
         file_path: '/repo/a.ts',
@@ -244,7 +251,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('prefers the resolved hunks on the result over the snippet pair', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'Edit',
       input: { file_path: '/repo/a.ts', old_string: 'was', new_string: 'now' },
       result: {
@@ -267,7 +274,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('treats a Write the provider reported as a creation as an added file', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'Write',
       input: { file_path: '/repo/new.ts', content: 'one\ntwo\n' },
       result: { output: 'File created successfully at: /repo/new.ts' }
@@ -277,14 +284,14 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('does not claim a creation for a Write over an existing file', () => {
-    const overwrite = editFilesFromToolPair({
+    const overwrite = settledFiles({
       name: 'Write',
       input: { file_path: '/repo/a.ts', content: 'one\ntwo\n' },
       result: { output: 'The file /repo/a.ts has been updated.' }
     })
     expect(overwrite?.[0]?.changeKind).toBe('edited')
     // With no result at all there is no evidence of a creation either.
-    const unreported = editFilesFromToolPair({
+    const unreported = settledFiles({
       name: 'Write',
       input: { file_path: '/repo/a.ts', content: 'one\n' }
     })
@@ -292,7 +299,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('reads a MultiEdit, whose snippet pairs sit in edits[]', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'MultiEdit',
       input: {
         file_path: '/repo/a.ts',
@@ -321,7 +328,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('drops the gutter numbers whenever they locate a snippet rather than the file', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'Edit',
       input: { file_path: '/repo/a.ts', old_string: 'keep\nwas', new_string: 'keep\nnow' }
     })
@@ -335,14 +342,14 @@ describe('editFilesFromToolPair', () => {
   it('renders no card for an edit the provider rejected or has not landed', () => {
     const failedInput = { file_path: '/repo/a.ts', old_string: 'missing', new_string: 'now' }
     expect(
-      editFilesFromToolPair({
+      settledFiles({
         name: 'Edit',
         input: failedInput,
         result: { output: 'String to replace not found in file.', isError: true }
       })
     ).toBeNull()
     expect(
-      editFilesFromToolPair({
+      settledFiles({
         name: 'apply_patch',
         input: {
           changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: '@@ -1 +1 @@\n-a\n+b' }]
@@ -350,20 +357,20 @@ describe('editFilesFromToolPair', () => {
         state: 'failed'
       })
     ).toBeNull()
-    expect(editFilesFromToolPair({ name: 'Edit', input: failedInput, state: 'running' })).toBeNull()
+    expect(settledFiles({ name: 'Edit', input: failedInput, state: 'running' })).toBeNull()
   })
 
   it('does not read a command tool result as a file edit', () => {
     const patch = 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-was\n+now'
     expect(
-      editFilesFromToolPair({
+      settledFiles({
         name: 'exec',
         input: { command: 'git diff' },
         result: { output: patch }
       })
     ).toBeNull()
     // The structured journal's `Diff` item carries its patch only on the result.
-    const diffed = editFilesFromToolPair({
+    const diffed = settledFiles({
       name: 'Diff',
       input: { path: '/repo/a.ts' },
       result: { output: patch }
@@ -373,7 +380,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('reports truncation when the content runs past the character cap', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'Write',
       input: { file_path: '/repo/a.ts', content: `${'x'.repeat(MAX_EDIT_CHARS)}\nlast\n` }
     })
@@ -383,7 +390,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('reads Codex structured changes, stripping the move marker from the body', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'apply_patch',
       input: {
         changes: [
@@ -401,7 +408,7 @@ describe('editFilesFromToolPair', () => {
   })
 
   it('reads a Codex add change, which arrives as raw content with no hunk header', () => {
-    const files = editFilesFromToolPair({
+    const files = settledFiles({
       name: 'apply_patch',
       input: { changes: [{ path: 'new.ts', kind: { type: 'add' }, diff: 'one\ntwo' }] }
     })
@@ -409,8 +416,67 @@ describe('editFilesFromToolPair', () => {
     expect(files?.[0]?.added).toBe(2)
   })
 
+  it('renders the file a write actually wrote, not one its content quotes', () => {
+    const files = settledFiles({
+      name: 'Write',
+      input: {
+        file_path: 'docs/patch-format.md',
+        content:
+          'Example:\n\n*** Begin Patch\n*** Update File: src/victim.ts\n@@\n-a\n+b\n*** End Patch\n'
+      },
+      result: { output: 'File created successfully at: docs/patch-format.md' }
+    })
+    expect(files?.map((file) => file.path)).toEqual(['docs/patch-format.md'])
+    expect(files?.[0]?.lines.some((line) => line.text.includes('Begin Patch'))).toBe(true)
+  })
+
+  it('finds an envelope in a command payload that arrived as JSON text', () => {
+    const envelope = '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-was\n+now\n*** End Patch'
+    const files = settledFiles({
+      name: 'shell',
+      input: JSON.stringify({ command: ['bash', '-lc', envelope], workdir: '/repo' })
+    })
+    expect(files?.[0]?.path).toBe('src/a.ts')
+    expect(files?.[0]?.added).toBe(1)
+  })
+
+  it('renders no card for a call the turn never answered', () => {
+    const input = { file_path: '/repo/a.ts', old_string: 'was', new_string: 'now' }
+    // No lifecycle and no result: nothing says the edit was applied.
+    expect(editFilesFromToolPair({ name: 'Edit', input })).toBeNull()
+    expect(editFilesFromToolPair({ name: 'Edit', input, state: 'completed' })).toHaveLength(1)
+    expect(editFilesFromToolPair({ name: 'Edit', input, result: { output: 'ok' } })).toHaveLength(1)
+  })
+
+  it('splits a multi-file patch into one card per file', () => {
+    const files = settledFiles({
+      name: 'Diff',
+      input: { path: '/repo/one.ts' },
+      result: {
+        output:
+          'diff --git a/one.ts b/one.ts\n--- a/one.ts\n+++ b/one.ts\n@@ -1,1 +1,1 @@\n-first\n+FIRST\n' +
+          'diff --git a/two.ts b/two.ts\n--- a/two.ts\n+++ b/two.ts\n@@ -10,1 +10,1 @@\n-second\n+SECOND'
+      }
+    })
+    expect(files?.map((file) => file.path)).toEqual(['one.ts', 'two.ts'])
+    expect(files?.[0]?.lines.map((line) => line.text)).toEqual(['first', 'FIRST'])
+    expect(gutter(files?.slice(1))).toEqual([10, 10])
+  })
+
+  it('keeps a file whose envelope section carries no body at all', () => {
+    const files = settledFiles({
+      name: 'apply_patch',
+      input: {
+        input:
+          '*** Begin Patch\n*** Update File: first.ts\n@@\n-a\n+b\n*** Update File: second.ts\n*** Update File: third.ts\n@@\n-c\n+d\n*** End Patch'
+      }
+    })
+    expect(files?.map((file) => file.path)).toEqual(['first.ts', 'second.ts', 'third.ts'])
+    expect(files?.[1]?.lines).toEqual([])
+  })
+
   it('returns null for a tool that did not edit a file', () => {
-    expect(editFilesFromToolPair({ name: 'Bash', input: { command: 'ls' } })).toBeNull()
+    expect(settledFiles({ name: 'Bash', input: { command: 'ls' } })).toBeNull()
     expect(isEditToolName('Bash')).toBe(false)
     expect(isEditToolName('Edit')).toBe(true)
   })

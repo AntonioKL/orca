@@ -105,6 +105,131 @@ export function editLinesFromUnifiedPatch(
   return { lines, lineNumbersKnown: ranged, truncated: source.truncated }
 }
 
+const GIT_DIFF_HEADER = 'diff --git '
+
+export type UnifiedPatchSection = {
+  /** Null when the patch text named no file, leaving it to the caller. */
+  path: string | null
+  oldPath: string | null
+  changeKind: 'added' | 'deleted' | 'edited' | 'renamed'
+  body: string
+}
+
+type Section = {
+  rows: string[]
+  oldPath: string | null
+  newPath: string | null
+  named: boolean
+  /** A `--- `/`+++ ` pair already named this section, so the next one is a new file. */
+  hasHeaderPair: boolean
+}
+
+/** Splits patch text into one section per file it touches. Without this a
+ *  multi-file patch renders as a single card under the first file's name, with
+ *  the later files' rows and gutter numbers beneath it. */
+export function unifiedPatchSections(text: string): {
+  sections: UnifiedPatchSection[]
+  truncated: boolean
+} {
+  const source = splitEditContent(text)
+  const rows = source.lines
+  const sections: Section[] = []
+  let current: Section | null = null
+  let inHunk = false
+
+  const open = (): Section => {
+    const section: Section = {
+      rows: [],
+      oldPath: null,
+      newPath: null,
+      named: false,
+      hasHeaderPair: false
+    }
+    sections.push(section)
+    current = section
+    return section
+  }
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const raw = rows[index] ?? ''
+    if (raw.startsWith(GIT_DIFF_HEADER)) {
+      const paths = gitHeaderPaths(raw)
+      const section = open()
+      section.oldPath = paths.oldPath
+      section.newPath = paths.newPath
+      section.named = true
+      inHunk = false
+      continue
+    }
+    // The same rule the parser uses: a header pair is structure only outside a
+    // hunk, where `--- ` would otherwise be a removed line beginning with `--`.
+    if (!inHunk && isFileHeaderPair(rows, index)) {
+      // The pair names the section a `diff --git` just opened; a second pair in
+      // the same section is the next file of a patch written without them.
+      const section = current && !current.hasHeaderPair ? current : open()
+      section.oldPath = sourceHeaderPath(rows[index] ?? '')
+      section.newPath = sourceHeaderPath(rows[index + 1] ?? '')
+      section.named = true
+      section.hasHeaderPair = true
+      index += 1
+      continue
+    }
+    if (raw.startsWith('@@')) {
+      inHunk = true
+    } else if (FILE_SECTION.test(raw)) {
+      inHunk = false
+    }
+    ;(current ?? open()).rows.push(raw)
+  }
+
+  return {
+    sections: sections.map((section) => ({
+      path: section.newPath ?? section.oldPath,
+      oldPath:
+        section.oldPath && section.newPath && section.oldPath !== section.newPath
+          ? section.oldPath
+          : null,
+      changeKind: sectionChangeKind(section),
+      body: section.rows.join('\n')
+    })),
+    truncated: source.truncated
+  }
+}
+
+function sectionChangeKind(section: Section): UnifiedPatchSection['changeKind'] {
+  if (!section.named) {
+    return 'edited'
+  }
+  if (section.newPath === null) {
+    return 'deleted'
+  }
+  if (section.oldPath === null) {
+    return 'added'
+  }
+  return section.oldPath === section.newPath ? 'edited' : 'renamed'
+}
+
+/** `--- a/<path>` / `+++ b/<path>`, where the absent side is `/dev/null` and a
+ *  trailing tab introduces the timestamp some producers append. */
+function sourceHeaderPath(line: string): string | null {
+  const value = (line.slice(4).split('\t')[0] ?? '').trim()
+  return value === '' || value === '/dev/null' ? null : value.replace(/^[ab]\//, '')
+}
+
+function gitHeaderPaths(line: string): { oldPath: string | null; newPath: string | null } {
+  const rest = line.slice(GIT_DIFF_HEADER.length)
+  // Both halves carry the same path unless the file moved, so the second one
+  // starts at the last ` b/` rather than at the first space.
+  const split = rest.lastIndexOf(' b/')
+  if (split === -1) {
+    return { oldPath: null, newPath: null }
+  }
+  return {
+    oldPath: rest.slice(0, split).replace(/^a\//, ''),
+    newPath: rest.slice(split + 1).replace(/^b\//, '')
+  }
+}
+
 /** Rows for a whole-file add or delete, which legitimately number from 1. */
 export function editLinesFromWholeFile(
   content: string,

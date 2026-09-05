@@ -166,23 +166,15 @@ type EditCardModel = {
 
 const NO_EDIT_CARDS: EditCardModel = { editCards: new Map(), consumedResults: new Set() }
 
-/** An edit renders as one card, so its result block is folded into the call. A
- *  call still in flight keeps the generic tool view rather than a card that
- *  states the edit as made; a failed one is filtered out by the model itself, so
- *  its result stays visible as the provider's error. */
-function buildEditCards(
-  blocks: NativeChatBlock[],
-  activeTurnIsWorking: boolean | undefined
-): EditCardModel {
+/** An edit renders as one card, so its result block is folded into the call. The
+ *  model decides which calls have landed; a call that has not keeps the generic
+ *  tool view, its result still visible as the provider's own error. */
+function buildEditCards(blocks: NativeChatBlock[]): EditCardModel {
   const editCards: EditCardModel['editCards'] = new Map()
   const consumedResults: EditCardModel['consumedResults'] = new Set()
   for (const [index, pair] of pairToolBlocks(blocks).entries()) {
     const call = pair.call
     if (!call || !isEditToolName(call.name)) {
-      continue
-    }
-    // No lifecycle and no result yet, on a turn still working: not landed.
-    if (call.state == null && activeTurnIsWorking === true && pair.result === undefined) {
       continue
     }
     const files = editFilesFromToolPair({
@@ -251,8 +243,8 @@ export function NativeChatToolRun({
   // Diffing every edit is the run's most expensive work, so a collapsed run —
   // which renders none of it — never pays for it.
   const { editCards, consumedResults } = useMemo(
-    () => (open ? buildEditCards(blocks, activeTurnIsWorking) : NO_EDIT_CARDS),
-    [open, blocks, activeTurnIsWorking]
+    () => (open ? buildEditCards(blocks) : NO_EDIT_CARDS),
+    [open, blocks]
   )
   const ActiveToolIcon =
     latestActiveCall && COMMAND_TOOL_NAMES.has(normalizedToolName(latestActiveCall.name))

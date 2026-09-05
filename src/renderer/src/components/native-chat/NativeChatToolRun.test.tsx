@@ -32,6 +32,9 @@ describe('NativeChatToolRun', () => {
       {
         type: 'tool-call',
         name: 'apply_patch',
+        // The patch lives on the call in this lane, so the provider's own
+        // completion is what says the edit landed.
+        state: 'completed',
         input: {
           changes: [
             {
