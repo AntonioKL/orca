@@ -32,7 +32,7 @@ describe('session tab structured restore gating', () => {
   })
 
   // Why: an old build has no capability to advertise, and skipping the restore left it with
-  // nothing to project after a desktop restart — neither the chat nor the prompt to update.
+  // nothing to project after a desktop restart — neither the chat nor its fallback row.
   it('restores structured tabs for a mobile client that advertises no capability', async () => {
     const runtime = {
       getRuntimeId: () => 'test-runtime',

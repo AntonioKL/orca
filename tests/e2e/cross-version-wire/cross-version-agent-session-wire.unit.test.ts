@@ -2,14 +2,13 @@
 // way the terminal wire harness is: current code against a real published release.
 //
 // Three skews matter here, and none can be checked from one build alone — an old
-// client must not be handed a session it cannot DRIVE, a new client must find an
-// old host's missing surface cleanly, and a client's cursor must survive the host
-// process that minted it.
+// client must not receive a journal-backed RPC surface it cannot read, a new client
+// must find an old host's missing surface cleanly, and a client's cursor must survive
+// the host process that minted it.
 //
-// "Cannot drive" is narrower than it used to be: the session-tabs projection now keeps the
-// row for an uncapable mobile client and retitles it as an update prompt, so the chat is not
-// simply absent on the phone. Every `agentSession.*` method stays refused, which is what the
-// tests below pin; the row-level behaviour is pinned in
+// The session-tabs projection may keep a metadata-only row for an incapable mobile client so the
+// chat is not simply absent on the phone. Every `agentSession.*` method and destructive close stays
+// refused, which is what the tests below pin; the row-level behaviour is pinned in
 // src/main/runtime/rpc/methods/session-tab-agent-status-projection.test.ts.
 
 import { mkdtemp, rm } from 'node:fs/promises'

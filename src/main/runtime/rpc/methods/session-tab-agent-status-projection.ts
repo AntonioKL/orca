@@ -16,29 +16,39 @@ type SessionTabsPayload = RuntimeMobileSessionTabsResult | RuntimeMobileSessionT
 
 /** Capped at 128px / one line in every shipped mobile build, so ~15-18 characters render. */
 export const STRUCTURED_CHAT_UPDATE_REQUIRED_TAB_TITLE = 'Update to view'
+export const CLAUDE_STRUCTURED_CHAT_DESKTOP_ONLY_TAB_TITLE = 'Open on desktop'
 
-/** Which structured tabs a mobile client should be shown as an update prompt instead of the real
- *  chat, or null when this client is not owed one. Keyed on the capability for THAT agent: a build
- *  that cannot render the chat gets a row telling it to update, because a later build can. */
-function resolveMobileUpdatePromptScope(args: {
-  clientKind: 'mobile' | 'runtime' | undefined
+function clientCanRenderStructuredAgentSessionTab(
+  tab: RuntimeMobileSessionAgentTab,
   clientCapabilities: readonly RuntimeCapability[] | undefined
-  structuredNativeChatEnabled?: boolean
-}): ((tab: RuntimeMobileSessionAgentTab) => boolean) | null {
-  if (args.clientKind !== 'mobile') {
+): boolean {
+  if (!clientCapabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)) {
+    return false
+  }
+  return (
+    tab.agent === 'codex' ||
+    clientCapabilities.includes(CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
+  )
+}
+
+function resolveMobileStructuredChatFallbackTitle(
+  tab: RuntimeMobileSessionAgentTab,
+  args: {
+    clientKind: 'mobile' | 'runtime' | undefined
+    clientCapabilities: readonly RuntimeCapability[] | undefined
+    structuredNativeChatEnabled?: boolean
+  }
+): string | null {
+  if (
+    args.clientKind !== 'mobile' ||
+    args.structuredNativeChatEnabled !== true ||
+    clientCanRenderStructuredAgentSessionTab(tab, args.clientCapabilities)
+  ) {
     return null
   }
-  // Why: with the experiment off there is no chat to reach after updating, so the prompt would lie.
-  if (args.structuredNativeChatEnabled !== true) {
-    return null
-  }
-  if (!args.clientCapabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)) {
-    return () => true
-  }
-  if (!args.clientCapabilities.includes(CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)) {
-    return (tab) => tab.agent !== 'codex'
-  }
-  return null
+  return tab.agent === 'claude'
+    ? CLAUDE_STRUCTURED_CHAT_DESKTOP_ONLY_TAB_TITLE
+    : STRUCTURED_CHAT_UPDATE_REQUIRED_TAB_TITLE
 }
 
 export function projectSessionTabAgentStatus<TPayload extends SessionTabsPayload>(
@@ -52,16 +62,15 @@ export function projectSessionTabAgentStatus<TPayload extends SessionTabsPayload
     clientCapabilities,
     structuredNativeChatEnabled
   })
-  const updatePromptScope = resolveMobileUpdatePromptScope({
-    clientKind,
-    clientCapabilities,
-    structuredNativeChatEnabled
-  })
   let projected: TPayload
-  if (updatePromptScope) {
+  if (clientKind === 'mobile' && structuredNativeChatEnabled === true) {
     // Why: deleting the row left the user hunting for a chat the desktop says exists; the row
     // survives with a title naming the fix. Nothing is removed, so no group/layout repair applies.
-    projected = promptAgentSessionTabsToUpdate(payload, updatePromptScope)
+    projected = projectUnsupportedAgentSessionTabTitles(payload, {
+      clientKind,
+      clientCapabilities,
+      structuredNativeChatEnabled
+    })
   } else {
     projected = structuredVisible ? payload : projectAgentSessionTabsOut(payload, () => true)
     // Why: a paired client renders only codex structured tabs unless it says otherwise
@@ -95,19 +104,45 @@ export function projectSessionTabAgentStatus<TPayload extends SessionTabsPayload
   return changed ? ({ ...projected, tabs } as TPayload) : projected
 }
 
-function promptAgentSessionTabsToUpdate<TPayload extends SessionTabsPayload>(
+function projectUnsupportedAgentSessionTabTitles<TPayload extends SessionTabsPayload>(
   payload: TPayload,
-  shouldPrompt: (tab: RuntimeMobileSessionAgentTab) => boolean
+  args: {
+    clientKind: 'mobile'
+    clientCapabilities: readonly RuntimeCapability[] | undefined
+    structuredNativeChatEnabled: true
+  }
 ): TPayload {
   let changed = false
   const tabs = payload.tabs.map((tab) => {
-    if (tab.type !== 'agent-session' || !shouldPrompt(tab)) {
+    if (tab.type !== 'agent-session') {
+      return tab
+    }
+    const title = resolveMobileStructuredChatFallbackTitle(tab, args)
+    if (title === null) {
       return tab
     }
     changed = true
-    return { ...tab, title: STRUCTURED_CHAT_UPDATE_REQUIRED_TAB_TITLE }
+    return { ...tab, title }
   })
   return changed ? ({ ...payload, tabs } as TPayload) : payload
+}
+
+export function assertAgentSessionTabDestructiveMutationSupported(
+  payload: SessionTabsPayload,
+  tabId: string,
+  clientKind: 'mobile' | 'runtime' | undefined,
+  clientCapabilities: readonly RuntimeCapability[] | undefined
+): void {
+  if (clientKind === undefined) {
+    return
+  }
+  const tab = payload.tabs.find((candidate) => candidate.id === tabId)
+  if (
+    tab?.type === 'agent-session' &&
+    !clientCanRenderStructuredAgentSessionTab(tab, clientCapabilities)
+  ) {
+    throw new Error('structured_agent_session_unsupported')
+  }
 }
 
 function projectAgentSessionTabsOut<TPayload extends SessionTabsPayload>(

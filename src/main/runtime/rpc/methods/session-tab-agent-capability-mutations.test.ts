@@ -50,6 +50,8 @@ const METHODS = [
   }
 ] as const
 
+const DESTRUCTIVE_METHOD_NAMES = new Set(['session.tabs.close', 'session.tabs.closeLifecycle'])
+
 describe('session tab structured capability mutations', () => {
   for (const method of METHODS) {
     it(`rejects ${method.name} when the structured row is hidden`, async () => {
@@ -89,7 +91,9 @@ describe('session tab structured capability mutations', () => {
   }
 
   for (const method of METHODS) {
-    it(`allows ${method.name} on a row an old mobile client was prompted to update`, async () => {
+    const expectedToAllowPromptedRow = !DESTRUCTIVE_METHOD_NAMES.has(method.name)
+
+    it(`${expectedToAllowPromptedRow ? 'allows' : 'rejects'} ${method.name} on a row an old mobile client was prompted to update`, async () => {
       const { calls, dispatch } = createFixture([], {
         clientKind: 'mobile',
         structuredNativeChatEnabled: true
@@ -97,11 +101,13 @@ describe('session tab structured capability mutations', () => {
 
       const response = await dispatch(method.name, method.params('codex-session'))
 
-      expect(response.ok).toBe(true)
-      expect(calls[method.runtimeMethod as keyof typeof calls]).toHaveBeenCalled()
+      expect(response.ok).toBe(expectedToAllowPromptedRow)
+      expect(calls[method.runtimeMethod as keyof typeof calls]).toHaveBeenCalledTimes(
+        expectedToAllowPromptedRow ? 1 : 0
+      )
     })
 
-    it(`allows ${method.name} on a prompted Claude row for a mobile client without the Claude capability`, async () => {
+    it(`${expectedToAllowPromptedRow ? 'allows' : 'rejects'} ${method.name} on a prompted Claude row for a mobile client without the Claude capability`, async () => {
       const { calls, dispatch } = createFixture([STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY], {
         clientKind: 'mobile',
         structuredNativeChatEnabled: true
@@ -109,8 +115,10 @@ describe('session tab structured capability mutations', () => {
 
       const response = await dispatch(method.name, method.params('claude-session'))
 
-      expect(response.ok).toBe(true)
-      expect(calls[method.runtimeMethod as keyof typeof calls]).toHaveBeenCalled()
+      expect(response.ok).toBe(expectedToAllowPromptedRow)
+      expect(calls[method.runtimeMethod as keyof typeof calls]).toHaveBeenCalledTimes(
+        expectedToAllowPromptedRow ? 1 : 0
+      )
     })
   }
 
