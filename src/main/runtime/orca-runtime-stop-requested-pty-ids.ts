@@ -201,7 +201,9 @@ export class OrcaRuntimeWithStopRequestedPtyIds extends OrcaRuntimeWithRuntimeId
     getMessageWaiters: (mailboxHandle) => this.messageWaiters.get(mailboxHandle),
     getTabTitle: (tabId) => this.tabs.get(tabId)?.title,
     getTerminalHandleForLeafKey: (leafKey) => this.handleByLeafKey.get(leafKey),
+    getTerminalProcessIncarnation: (handle) => this.getTerminalProcessIncarnation(handle),
     isLeafPtyProvenAbsent: (ptyId) => this.isLeafPtyProvenAbsent(ptyId),
+    proveStatuslessCodexIdle: (handle, ptyId) => this.proveStatuslessCodexIdle(handle, ptyId),
     redriveMailbox: (mailboxHandle, reservedTypes) =>
       this.deliverPendingMessagesForHandle(mailboxHandle, reservedTypes),
     requestSleepingRecipientWake: (mailboxHandle) =>

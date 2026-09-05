@@ -4,9 +4,14 @@ import {
   type OrchestrationMessageWaiter
 } from './mailbox-pointer-eligibility'
 import type { OrchestrationMailboxLeaf, OrchestrationMailboxOwner } from './mailbox-owner'
+import {
+  isStatuslessIdleProofCurrent,
+  isStatuslessIdleProofProcessCurrent
+} from './mailbox-statusless-idle-proof'
 import type {
   OrchestrationMailboxDeliveryFlight,
-  OrchestrationMailboxPointerState
+  OrchestrationMailboxPointerState,
+  OrchestrationStatuslessIdleProof
 } from './mailbox-pointer-state'
 
 type PointerSubmitDependencies<TWaiter extends OrchestrationMessageWaiter> = {
@@ -15,6 +20,7 @@ type PointerSubmitDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   getDb: () => OrchestrationDb | null
   getLeaf: (leafKey: string) => OrchestrationMailboxLeaf | undefined
   getLeafKey: (tabId: string, leafId: string) => string
+  getTerminalProcessIncarnation: (terminalHandle: string) => string | null
   getMessageWaiters: (mailboxHandle: string) => ReadonlySet<TWaiter> | undefined
   isLeafPtyProvenAbsent: (ptyId: string) => Promise<boolean>
   requestSleepingRecipientWake?: (mailboxHandle: string) => void
@@ -32,6 +38,7 @@ export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationM
     newestSequence: number
     ptyId: string
     flight: OrchestrationMailboxDeliveryFlight
+    statuslessIdleProof?: OrchestrationStatuslessIdleProof
   }
 ): void {
   let clearAndRedrive = false
@@ -58,10 +65,15 @@ export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationM
       } else if (deps.mailboxOwner.resolve(currentLeaf) !== input.mailboxHandle) {
         clearAndRedrive = true
       } else if (
-        currentLeaf.lastAgentStatusObservedLive &&
-        // Once staged, working is queue-safe; idle-only strands Orca-owned text in the composer.
-        (currentLeaf.lastAgentStatus === 'idle' || currentLeaf.lastAgentStatus === 'working')
+        input.statuslessIdleProof &&
+        !isStatuslessIdleProofProcessCurrent(
+          currentLeaf,
+          input.statuslessIdleProof,
+          deps.getTerminalProcessIncarnation
+        )
       ) {
+        clearAndRedrive = true
+      } else if (canSubmitPointer(deps, currentLeaf, input.statuslessIdleProof)) {
         if (
           shouldReleaseOrchestrationPointer(
             deps.getDb(),
@@ -93,4 +105,19 @@ export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationM
         deps.redrive(input.mailboxHandle, clearAndRedrive)
       }
     })
+}
+
+function canSubmitPointer<TWaiter extends OrchestrationMessageWaiter>(
+  deps: PointerSubmitDependencies<TWaiter>,
+  leaf: OrchestrationMailboxLeaf,
+  proof: OrchestrationStatuslessIdleProof | undefined
+): boolean {
+  if (!proof) {
+    // Once staged, working is queue-safe; idle-only strands Orca-owned text in the composer.
+    return (
+      leaf.lastAgentStatusObservedLive &&
+      (leaf.lastAgentStatus === 'idle' || leaf.lastAgentStatus === 'working')
+    )
+  }
+  return isStatuslessIdleProofCurrent(leaf, proof, deps.getTerminalProcessIncarnation)
 }

@@ -6,9 +6,11 @@ import {
   type OrchestrationMessageWaiter
 } from './mailbox-pointer-eligibility'
 import type { OrchestrationMailboxLeaf, OrchestrationMailboxOwner } from './mailbox-owner'
+import { isStatuslessIdleProofCurrent } from './mailbox-statusless-idle-proof'
 import type {
   OrchestrationMailboxDeliveryFlight,
-  OrchestrationMailboxPointerState
+  OrchestrationMailboxPointerState,
+  OrchestrationStatuslessIdleProof
 } from './mailbox-pointer-state'
 import { submitOrchestrationMailboxPointer } from './mailbox-pointer-submit'
 
@@ -23,6 +25,7 @@ type PointerStageDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   getLeafKey: (tabId: string, leafId: string) => string
   getMessageWaiters: (mailboxHandle: string) => ReadonlySet<TWaiter> | undefined
   getTabTitle: (tabId: string) => string | null | undefined
+  getTerminalProcessIncarnation: (terminalHandle: string) => string | null
   isLeafPtyProvenAbsent: (ptyId: string) => Promise<boolean>
   requestSleepingRecipientWake?: (mailboxHandle: string) => void
   writePty: (ptyId: string, data: string) => boolean | Promise<boolean>
@@ -35,6 +38,7 @@ type PointerStageInput = {
   mailboxHandle: string
   unread: readonly { id: string; type: string; sequence: number }[]
   newestSequence: number
+  statuslessIdleProof?: OrchestrationStatuslessIdleProof
 }
 
 /** Write the pointer text into the recipient's composer, then arm its submit. */
@@ -43,7 +47,15 @@ export function stageOrchestrationMailboxPointer<TWaiter extends OrchestrationMe
   input: PointerStageInput
 ): void {
   const ptyId = input.leaf.ptyId
-  if (!ptyId) {
+  if (
+    !ptyId ||
+    (input.statuslessIdleProof &&
+      !isStatuslessIdleProofCurrent(
+        input.leaf,
+        input.statuslessIdleProof,
+        deps.getTerminalProcessIncarnation
+      ))
+  ) {
     return
   }
   const flight = deps.state.beginFlight(ptyId)
@@ -74,6 +86,18 @@ function finishPointerWrite<TWaiter extends OrchestrationMessageWaiter>(
   let delayedSettle = false
   try {
     if (!accepted || !deps.state.isCurrentFlight(ptyId, flight)) {
+      return
+    }
+    const currentLeaf = deps.getLeaf(deps.getLeafKey(leaf.tabId, leaf.leafId))
+    if (
+      input.statuslessIdleProof &&
+      (!currentLeaf ||
+        !isStatuslessIdleProofCurrent(
+          currentLeaf,
+          input.statuslessIdleProof,
+          deps.getTerminalProcessIncarnation
+        ))
+    ) {
       return
     }
     const db = deps.getDb()
@@ -111,7 +135,8 @@ function finishPointerWrite<TWaiter extends OrchestrationMessageWaiter>(
           messages: unread,
           newestSequence,
           ptyId,
-          flight
+          flight,
+          statuslessIdleProof: input.statuslessIdleProof
         }),
       POINTER_SUBMIT_DELAY_MS
     )

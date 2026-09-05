@@ -61,6 +61,7 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
   tabMountSends: unknown[][]
   write: ReturnType<typeof vi.fn>
   remountWithPty: (ptyId: string) => void
+  remountStatuslessCodex: (ptyId: string) => void
   setRendererAvailable: (available: boolean) => void
 }> {
   const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(sleptSession(record))
@@ -141,6 +142,27 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
       syncGraph(ptyId)
       runtime.onPtyData(ptyId, '\x1b]0;Claude working\x07', 100)
       runtime.onPtyData(ptyId, '\x1b]0;Claude done\x07', 101)
+    },
+    remountStatuslessCodex: (ptyId: string) => {
+      runtime.registerPty(ptyId, TEST_WORKTREE_ID, null, {
+        tabId: TAB_ID,
+        leafId: LEAF_ID,
+        incarnationId: 'codex-reattach-incarnation',
+        providerReattachLaunchIdentity: {
+          incarnationId: 'codex-reattach-incarnation',
+          launchAgent: 'codex'
+        }
+      })
+      syncGraph(ptyId)
+      runtime.onPtyData(
+        ptyId,
+        [
+          ' >_ OpenAI Codex (v0.132.0)\n',
+          ' model:       gpt-5.5 high   /model to change\n',
+          ' directory:   ~/orca/workspaces/orca/impl-agent-sleep-wake\n'
+        ].join(''),
+        100
+      )
     }
   }
 }
@@ -316,5 +338,60 @@ describe('mail addressed to a listed slept pane', () => {
     )
     expect(message.delivered_at).toEqual(expect.any(String))
     db.close()
+  })
+
+  it('delivers queued run mail after a statusless Codex provider reattach', async () => {
+    vi.useFakeTimers()
+    try {
+      const { runtime, db, handle, write, remountStatuslessCodex } = await sleptPaneRuntime(
+        sleepingRecord({ agent: 'codex' })
+      )
+      db.setRun({ id: 'run_test', coordinator_handle: handle, coordinator_pane_key: PANE_KEY })
+      const message = db.insertMessage({
+        from: 'term_worker',
+        to: 'run:run_test',
+        subject: 'worker done',
+        type: 'worker_done'
+      })
+      runtime.notifyMessageArrived('run:run_test', 'worker_done')
+      await Promise.resolve()
+      await Promise.resolve()
+
+      remountStatuslessCodex('pty-codex-woken')
+      const runtimeState = runtime as unknown as {
+        leaves: Map<
+          string,
+          { leafId: string; lastAgentStatus: string | null; lastAgentStatusObservedLive: boolean }
+        >
+        ptysById: Map<
+          string,
+          { lastAgentStatus: string | null; lastAgentStatusObservedLive: boolean }
+        >
+      }
+      expect(
+        [...runtimeState.leaves.values()].find((leaf) => leaf.leafId === LEAF_ID)
+      ).toMatchObject({
+        lastAgentStatus: null,
+        lastAgentStatusObservedLive: false
+      })
+      expect(runtimeState.ptysById.get('pty-codex-woken')).toMatchObject({
+        lastAgentStatus: null,
+        lastAgentStatusObservedLive: false
+      })
+      runtime.deliverPendingMessagesForHandle('run:run_test')
+      await vi.waitFor(() =>
+        expect(write).toHaveBeenCalledWith(
+          'pty-codex-woken',
+          expect.stringContaining('You have 1 orchestration message')
+        )
+      )
+      await vi.advanceTimersByTimeAsync(500)
+
+      expect(write).toHaveBeenCalledWith('pty-codex-woken', '\r')
+      expect(message.delivered_at).toEqual(expect.any(String))
+      db.close()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
