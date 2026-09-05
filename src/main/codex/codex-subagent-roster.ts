@@ -8,11 +8,15 @@
 // must not resurrect a settled child.
 //
 // KNOWN LIMITATION: `groups` is process-local and is never seeded from the
-// journal, and `threadId:outside-turn` is the one group id that outlives the
-// process — `thread/resume` is verified to return the same thread, while every
-// real turn id is freshly minted. So a thread that banked N out-of-turn children
-// and died (swept correctly) rebuilds that row from the next activity item
-// alone, rewriting N children down to one. Seeding from the journal is the fix.
+// journal, while the row's identity is keyed on the group id alone. So once a
+// group leaves the map its row stays, and the next activity item rebuilds that
+// row from one child — rewriting N down to one. Two ways in: eviction past
+// MAX_CODEX_SUBAGENT_GROUPS, which drops the oldest-inserted group in-process
+// even while it is live, and skips the sweep so its children never latch
+// `unverifiable`; and a restart on `threadId:outside-turn`, the one group id
+// that outlives the process — `thread/resume` is verified to return the same
+// thread, and a real turn id is assumed freshly minted per turn. Seeding from
+// the journal is the fix.
 
 import type {
   AgentJournalItemBody,
