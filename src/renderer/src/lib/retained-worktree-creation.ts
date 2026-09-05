@@ -49,6 +49,7 @@ export function createRetainedWorktreeCreation(
   let requestKey: string | null = null
   let ownerKey: string | null = null
   let creation: Promise<CreateWorktreeResult> | null = null
+  let completed: CreateWorktreeResult | null = null
 
   return {
     start(request: WorktreeCreationRequest, executionIdentity: string): boolean {
@@ -60,7 +61,12 @@ export function createRetainedWorktreeCreation(
       freezeRequest(snapshot)
       ownerKey = executionIdentity
       started = true
-      creation = Promise.resolve().then(() => create(snapshot))
+      creation = Promise.resolve()
+        .then(() => create(snapshot))
+        .then((result) => {
+          completed = result
+          return result
+        })
       // An abandoned composer has no submit awaiting a failed ordinary creation.
       void creation.catch(() => undefined)
       return true
@@ -68,7 +74,7 @@ export function createRetainedWorktreeCreation(
     take(
       request: WorktreeCreationRequest,
       executionIdentity: string
-    ): Promise<CreateWorktreeResult> | null {
+    ): CreateWorktreeResult | Promise<CreateWorktreeResult> | null {
       if (retired || taken || !creation) {
         return null
       }
@@ -77,7 +83,7 @@ export function createRetainedWorktreeCreation(
         return null
       }
       taken = true
-      return creation
+      return completed ?? creation
     },
     retire(): void {
       // Ordinary workspace persistence owns all work once creation starts.

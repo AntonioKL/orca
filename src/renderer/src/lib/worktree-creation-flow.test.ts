@@ -1,10 +1,8 @@
+import { makeRequest, makePendingCreation } from './worktree-creation-request.test-fixture'
 import { executeWorktreeCreation } from './worktree-creation-flow-execute'
 import type { CreateWorktreeResult } from '../../../shared/worktree/create-types'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type {
-  PendingWorktreeCreation,
-  WorktreeCreationRequest
-} from '@/lib/pending-worktree-creation'
+import type { PendingWorktreeCreation } from '@/lib/pending-worktree-creation'
 
 const { prepareEphemeralVmWorkspaceTargetMock } = vi.hoisted(() => ({
   prepareEphemeralVmWorkspaceTargetMock: vi.fn()
@@ -111,33 +109,6 @@ beforeEach(() => {
   store.unifiedTabsByWorktree = {}
   vi.mocked(ensureWorktreeHasInitialTerminal).mockReturnValue('tab-1')
 })
-
-function makeRequest(overrides: Partial<WorktreeCreationRequest> = {}): WorktreeCreationRequest {
-  return {
-    repoId: 'repo-1',
-    name: 'feature',
-    setupDecision: 'inherit',
-    agent: null,
-    pendingFirstAgentMessageRename: false,
-    note: '',
-    startupPlan: null,
-    quickPrompt: '',
-    quickTelemetry: null,
-    ...overrides
-  }
-}
-
-function makePendingCreation(request: WorktreeCreationRequest): PendingWorktreeCreation {
-  return {
-    creationId: 'creation-1',
-    phase: 'preparing',
-    status: 'creating',
-    startedAt: 1,
-    indeterminate: false,
-    loaderVisible: true,
-    request
-  }
-}
 
 async function flushAsyncWorktreeCreation(): Promise<void> {
   await Promise.resolve()
@@ -514,6 +485,29 @@ describe('staged background worktree creation', () => {
     expect(store.setActiveView).not.toHaveBeenCalled()
     expect(store.setSidebarOpen).not.toHaveBeenCalled()
   })
+
+  it.each([false, true])(
+    'activates a completed workspace synchronously (keep composer: %s)',
+    (keepComposer) => {
+      const retained = {
+        worktree: { id: 'wt-ready', repoId: 'repo-1', path: '/workspace/ready' },
+        startupTerminal: { tabId: 'ready-tab', spawned: true }
+      } as CreateWorktreeResult
+
+      runBackgroundWorktreeCreation(
+        makeRequest({ startup: { command: '' }, suppressTerminalFocusOnCompletion: keepComposer }),
+        retained
+      )
+
+      expect(activateAndRevealWorktree).toHaveBeenCalledWith('wt-ready', {
+        sidebarRevealBehavior: 'auto',
+        backendStartupTerminalSpawned: true
+      })
+      expect(store.createWorktree).not.toHaveBeenCalled()
+      expect(store.pendingWorktreeCreations['creation-1']).toBeUndefined()
+      expect(queueWorkspaceActivationTerminalFocus).toHaveBeenCalledTimes(keepComposer ? 0 : 1)
+    }
+  )
 
   it('adopts a retained terminal without recreating it or stealing focus', async () => {
     store.activeView = 'tasks'

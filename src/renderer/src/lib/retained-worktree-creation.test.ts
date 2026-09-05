@@ -44,14 +44,15 @@ describe('retained composer worktree creation', () => {
   })
 
   it('adopts an already completed create despite object property insertion order', async () => {
-    const controller = createRetainedWorktreeCreation(async () => result)
+    const create = vi.fn(async () => result)
+    const controller = createRetainedWorktreeCreation(create)
     const original = request()
     controller.start(original, 'host')
-    await Promise.resolve()
+    await vi.waitFor(() => expect(create).toHaveResolvedWith(result))
     const reordered = Object.fromEntries(
       Object.entries(original).toReversed()
     ) as WorktreeCreationRequest
-    expect(await controller.take(reordered, 'host')).toBe(result)
+    expect(controller.take(reordered, 'host')).toBe(result)
   })
 
   it('isolates and freezes the execution snapshot from subsequent composer edits', async () => {

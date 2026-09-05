@@ -49,7 +49,7 @@ function revealPendingCreation(
  */
 export function runBackgroundWorktreeCreation(
   request: WorktreeCreationRequest,
-  retainedCreation?: Promise<CreateWorktreeResult>
+  retainedCreation?: CreateWorktreeResult | Promise<CreateWorktreeResult>
 ): string {
   const store = useAppStore.getState()
   const existingCreationId = findPendingLinkedWorkItemCreationId(

@@ -44,16 +44,22 @@ async function preflightAgentTrust(
 export async function executeWorktreeCreation(
   creationId: string,
   request: WorktreeCreationRequest,
-  retainedCreation?: Promise<CreateWorktreeResult>
+  retainedCreation?: CreateWorktreeResult | Promise<CreateWorktreeResult>
 ): Promise<void> {
-  const preparedRequest = await prepareRequestForCreate(creationId, request)
+  const preparedRequest =
+    request.ephemeralVmRecipe && !request.ephemeralVmRuntimeId
+      ? await prepareRequestForCreate(creationId, request)
+      : request
   if (!preparedRequest) {
     return
   }
 
   let result: CreateWorktreeResult
   try {
-    result = await (retainedCreation ?? createRequestedWorktree(creationId, preparedRequest))
+    result =
+      retainedCreation && 'worktree' in retainedCreation
+        ? retainedCreation
+        : await (retainedCreation ?? createRequestedWorktree(creationId, preparedRequest))
   } catch (error) {
     // Why: a missing entry means the user cancelled mid-flight — abandon
     // silently rather than surfacing an error for work they already dismissed.
@@ -88,7 +94,9 @@ export async function executeWorktreeCreation(
     }
     return
   }
-  await attachEphemeralVmRuntimeToWorkspace(preparedRequest, worktree.id)
+  if (preparedRequest.ephemeralVmRuntimeId) {
+    await attachEphemeralVmRuntimeToWorkspace(preparedRequest, worktree.id)
+  }
 
   const backendSpawned = result.startupTerminal?.spawned === true
   if (preparedRequest.startupPlan && !backendSpawned && !preparedRequest.startupPlan.launchToken) {
@@ -103,7 +111,7 @@ export async function executeWorktreeCreation(
   )
   const startupOpt = structuredLaunch ? undefined : fallbackStartupOpt
 
-  if (worktree.path && !structuredLaunch) {
+  if (preparedRequest.agent && worktree.path && !structuredLaunch) {
     const repoConnectionId =
       useAppStore.getState().repos.find((repo) => repo.id === worktree.repoId)?.connectionId ?? null
     await preflightAgentTrust(preparedRequest, worktree.path, repoConnectionId)
