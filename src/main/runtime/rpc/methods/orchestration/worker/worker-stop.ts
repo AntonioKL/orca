@@ -127,6 +127,16 @@ export const ORCHESTRATION_WORKER_STOP_METHODS: RpcMethod[] = [
           )
         }
         const observation = await inspectWorkerTerminal(runtime, db, params.dispatch)
+        // The host exit can settle this stop while terminal inspection is awaiting inventory.
+        if (db.getWorkerDispatch(params.dispatch)?.state === 'stopped') {
+          runtime.notifyMessageArrived(`dispatch:${params.dispatch}`, 'status')
+          return {
+            dispatchId: params.dispatch,
+            state: 'stopped',
+            alreadySettled: false,
+            processAction: 'none'
+          }
+        }
         // Why `unverifiable` still proceeds: losing contact is a reason to report
         // the outcome honestly, never a reason to stop trying to stop the worker.
         if (

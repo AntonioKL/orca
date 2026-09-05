@@ -58,6 +58,20 @@ describe('a worker whose process exits while its own stop is in flight', () => {
     expect(receipt.state).toBe('stopped')
   })
 
+  it('accepts an exit observed while inspecting the process before close', async () => {
+    const { dispatchId } = await h.startWorker()
+    vi.mocked(h.runtime.showTerminal).mockImplementation(async (handle) => {
+      fireExit(handle)
+      return { handle, connected: false } as never
+    })
+    vi.spyOn(h.runtime, 'getTerminalLivenessVerdict').mockReturnValue({ status: 'exited' })
+
+    await expect(
+      h.call('orchestration.workerStop', { dispatch: dispatchId })
+    ).resolves.toMatchObject({ state: 'stopped', processAction: 'none' })
+    expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
+  })
+
   it('leaves an exit with no stop in flight failing the dispatch', async () => {
     const { dispatchId } = await h.startWorker()
     fireExit('term_worker')
