@@ -1,5 +1,9 @@
 import { rmSync } from 'node:fs'
-import { writeRefused, type WriteSettlement } from '../../shared/pty-write-settlement'
+import {
+  WRITE_ACCEPTED,
+  writeRefused,
+  type WriteSettlement
+} from '../../shared/pty-write-settlement'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -8,6 +12,7 @@ import {
   createRuntime,
   driveToLiveIdle,
   insertDirectRunMessage,
+  isMailboxPointer,
   pointerCount,
   temporaryDirectories
 } from './orchestration-mailbox-notification-test-harness'
@@ -61,7 +66,11 @@ describe('orchestration mailbox transport settlement', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(pointerCount(observedWrite)).toBe(0)
-    expect(db.getMessageById(message.id)?.delivered_at).toBeNull()
+    // Proven refusal releases the reservation outright; ambiguity never may.
+    expect(db.getMessageById(message.id)).toMatchObject({
+      delivered_at: null,
+      pointer_enter_pending: 0
+    })
 
     const restarted = createRuntime(db)
     await driveToLiveIdle(restarted.runtime)
@@ -85,9 +94,14 @@ describe('orchestration mailbox transport settlement', () => {
       onData: () => {},
       onClose: () => {}
     })
+    const observed: WriteSettlement[] = []
     first.runtime.setPtyController({
       write: vi.fn(() => true),
-      writeWithSettlement: (ptyId, data) => writeToSshPtyWithSettlement(mux, ptyId, data),
+      writeWithSettlement: (ptyId, data) =>
+        writeToSshPtyWithSettlement(mux, ptyId, data).then((settlement) => {
+          observed.push(settlement)
+          return settlement
+        }),
       kill: vi.fn(),
       getForegroundProcess: async () => null
     })
@@ -99,6 +113,44 @@ describe('orchestration mailbox transport settlement', () => {
     await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
+    expect(observed).toEqual([
+      { outcome: 'unverifiable', reason: 'transport_settlement_lost', bytesHandedToTransport: true }
+    ])
+    expect(db.getMessageById(message.id)?.pointer_enter_pending).toBe(
+      MAILBOX_POINTER_WRITE_ATTEMPTED
+    )
+
+    const restarted = createRuntime(db)
+    await driveToLiveIdle(restarted.runtime)
+    expect(pointerCount(restarted.write)).toBe(0)
+    expect(db.getMessageById(message.id)?.read).toBe(0)
+    db.close()
+  })
+
+  it('preserves the reservation when a settled write throws after handing off bytes', async () => {
+    vi.useFakeTimers()
+    const db = createDatabase('orca-mailbox-throwing-settlement-')
+    const first = createRuntime(db)
+    const observedWrite = vi.fn((_ptyId: string, _data: string) => true)
+    first.runtime.setPtyController({
+      write: observedWrite,
+      writeWithSettlement: (ptyId: string, data: string) => {
+        observedWrite(ptyId, data)
+        if (isMailboxPointer(data)) {
+          throw new Error('relay socket destroyed mid-write')
+        }
+        return WRITE_ACCEPTED
+      },
+      kill: vi.fn(),
+      getForegroundProcess: async () => null
+    })
+    const run = createBoundRun(db, 'Throwing SSH pointer')
+    const message = insertDirectRunMessage(db, run.id, 'Keep one pointer through a throw')
+
+    await driveToLiveIdle(first.runtime)
+    await Promise.resolve()
+    expect(pointerCount(observedWrite)).toBe(1)
+    // A throw after the bytes may have left is unverifiable, so the claim must survive.
     expect(db.getMessageById(message.id)?.pointer_enter_pending).toBe(
       MAILBOX_POINTER_WRITE_ATTEMPTED
     )

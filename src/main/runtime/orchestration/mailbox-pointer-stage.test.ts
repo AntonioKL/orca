@@ -3,7 +3,11 @@ import { OrchestrationDb } from './db'
 import { OrchestrationMailboxPointerDelivery } from './mailbox-pointer-delivery'
 import { OrchestrationMailboxPointerState } from './mailbox-pointer-state'
 import { stageOrchestrationMailboxPointer } from './mailbox-pointer-stage'
-import { WRITE_ACCEPTED, type WriteSettlement } from '../../../shared/pty-write-settlement'
+import {
+  WRITE_ACCEPTED,
+  writeRefused,
+  type WriteSettlement
+} from '../../../shared/pty-write-settlement'
 
 const LEAF = {
   tabId: 'tab-1',
@@ -113,6 +117,32 @@ describe('mailbox pointer staging watermark', () => {
     } as never)
 
     expect(state.hasActiveWatermark('run:run-1')).toBe(true)
+    db.close()
+  })
+
+  it('drains a delivery parked behind the watermark when the write is refused', () => {
+    const db = new OrchestrationDb(':memory:')
+    const message = db.insertMessage({ from: 'a', to: 'run:run-1', subject: 's' })
+    const state = new OrchestrationMailboxPointerState()
+    const args = stageArgs(db, state)
+    const redrive = vi.fn()
+    stageOrchestrationMailboxPointer({
+      ...args,
+      redrive,
+      deps: {
+        ...args.deps,
+        writePty: () => {
+          // A concurrent delivery arrives while this flight owns the watermark.
+          state.parkRedelivery('run:run-1')
+          return writeRefused('provider_refused_write')
+        }
+      },
+      messages: [{ id: message.id, type: 'status', sequence: 1 }]
+    } as never)
+
+    expect(redrive).toHaveBeenCalledWith('run:run-1')
+    expect(state.hasActiveWatermark('run:run-1')).toBe(false)
+    expect(db.getMessageById(message.id)?.pointer_enter_pending).toBe(0)
     db.close()
   })
 

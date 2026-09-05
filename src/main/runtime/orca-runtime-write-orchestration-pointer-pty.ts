@@ -1,12 +1,7 @@
 // @ts-nocheck -- mechanically split from OrcaRuntimeService; behavior is covered by AST equivalence and characterization tests.
 import { OrcaRuntimeWithRefreshFloatingWorkspacePtyLiveness } from './orca-runtime-refresh-floating-workspace-pty-liveness'
-import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
-import {
-  WRITE_ACCEPTED,
-  writeRefused,
-  writeUnverifiable,
-  type WriteSettlement
-} from '../../shared/pty-write-settlement'
+import { writeOrchestrationPointerWithSettlement } from './orchestration/mailbox-pointer-pty-write'
+import type { WriteSettlement } from '../../shared/pty-write-settlement'
 import type { RuntimeLeafRecord } from './runtime-terminal-state-records'
 import type { ExecutionHostId } from '../../shared/execution-host'
 import { getPtyExecutionHost } from '../../shared/terminal-execution-host'
@@ -30,60 +25,12 @@ export class OrcaRuntimeWithWriteOrchestrationPointerPty extends OrcaRuntimeWith
     ptyId: string,
     data: string
   ): WriteSettlement | Promise<WriteSettlement> {
-    const gated = this.admitOrchestrationPointerWrite(ptyId, data)
-    if (gated) {
-      return gated
-    }
-    const controller = this.ptyController
-    if (!controller?.writeWithSettlement) {
-      return writeRefused('provider_cannot_settle')
-    }
-    try {
-      return controller.writeWithSettlement(ptyId, data)
-    } catch {
-      // A synchronous throw cannot prove the transport took nothing.
-      return writeUnverifiable('provider_threw_after_handoff', true)
-    }
-  }
-
-  /** Settles the write itself when the lease gate decides it; null means proceed. */
-  private admitOrchestrationPointerWrite(ptyId: string, data: string): WriteSettlement | null {
-    try {
-      if (data === '\r') {
-        const admitted = this.orchestrationPointerAdmissionByPtyId.get(ptyId)
-        this.orchestrationPointerAdmissionByPtyId.delete(ptyId)
-        if (admitted) {
-          // Throws when the lease moved under the in-flight pointer, withholding the submit.
-          agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
-          return null
-        }
-        // A denied bound lease must not receive a raw Enter, even when it did not follow a
-        // pointer write. Keep unbound legacy terminals on the existing controller path.
-        const admission = agentSessionPtyWriteGate.admit(ptyId)
-        return !admission.admitted && agentSessionPtyWriteGate.boundSessionId(ptyId) !== null
-          ? writeRefused('write_gate_denied')
-          : null
-      }
-      const admission = agentSessionPtyWriteGate.admit(ptyId)
-      if (!admission.admitted) {
-        this.orchestrationPointerAdmissionByPtyId.delete(ptyId)
-        if (agentSessionPtyWriteGate.boundSessionId(ptyId) !== null) {
-          return writeRefused('write_gate_denied')
-        }
-        // Preserve the controller's own refusal reporting for internal deliveries.
-        return this.ptyController?.write(ptyId, data)
-          ? WRITE_ACCEPTED
-          : writeRefused('provider_refused_write')
-      }
-      this.orchestrationPointerAdmissionByPtyId.set(ptyId, {
-        sessionId: admission.sessionId,
-        runtimeFence: admission.runtimeFence
-      })
-      return null
-    } catch {
-      // Every throw here happens before any byte reaches a provider.
-      return writeRefused('write_gate_denied')
-    }
+    return writeOrchestrationPointerWithSettlement({
+      ptyId,
+      data,
+      admissionByPtyId: this.orchestrationPointerAdmissionByPtyId,
+      controller: this.ptyController
+    })
   }
 
   // A parked leaf has left the renderer graph but its PTY is still addressable, so the pointer
