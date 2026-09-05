@@ -356,7 +356,7 @@ describe('useTerminalPaneGlobalEffects', () => {
       isChatViewMode: true
     })
 
-    expect(pane.container.querySelector).toHaveBeenCalledWith('[data-native-chat-root]')
+    expect(pane.container.querySelector).toHaveBeenCalledWith('.native-chat-pane-shell')
     if (covered) {
       expect(mocks.focusActivePane).not.toHaveBeenCalled()
     } else {

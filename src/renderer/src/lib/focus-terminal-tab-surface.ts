@@ -105,7 +105,9 @@ export function focusTerminalTabSurface(
         }
         return
       }
-      const fallback = document.querySelector('.xterm-helper-textarea') as HTMLElement | null
+      const fallback = document.querySelector(
+        `${UNCOVERED_TERMINAL_LEAF_SELECTOR} .xterm-helper-textarea`
+      ) as HTMLElement | null
       if (fallback) {
         focusTerminalHelper(fallback, options)
       }
