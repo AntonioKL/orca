@@ -1,4 +1,6 @@
 import { rmSync } from 'node:fs'
+import { stubWriteSettlement } from '../providers/settled-pty-write-stub'
+import type { WriteSettlement } from '../../shared/pty-write-settlement'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -57,17 +59,17 @@ describe('orchestration mailbox cold-park idle continuation', () => {
     const harness = createRuntime(db)
     const run = createBoundRun(db, 'Delayed pointer idle Run')
     insertDirectRunMessage(db, run.id, 'Resume Enter after delayed pointer settlement')
-    let settlePointerWrite: ((accepted: boolean) => void) | undefined
+    let settlePointerWrite: ((settlement: WriteSettlement) => void) | undefined
     const recordWrite = harness.write as unknown as (ptyId: string, data: string) => boolean
     harness.runtime.setPtyController({
       write: recordWrite,
       writeWithSettlement: vi.fn((ptyId: string, data: string) => {
         recordWrite(ptyId, data)
         return isMailboxPointer(data)
-          ? new Promise<boolean>((resolve) => {
+          ? new Promise<WriteSettlement>((resolve) => {
               settlePointerWrite = resolve
             })
-          : Promise.resolve(true)
+          : Promise.resolve(stubWriteSettlement(true))
       }),
       kill: vi.fn(),
       getForegroundProcess: async () => null
@@ -82,7 +84,7 @@ describe('orchestration mailbox cold-park idle continuation', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(0)
 
-    settlePointerWrite?.(true)
+    settlePointerWrite?.(stubWriteSettlement(true))
     await vi.advanceTimersByTimeAsync(0)
 
     expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(1)
@@ -97,7 +99,7 @@ describe('orchestration mailbox cold-park idle continuation', () => {
     const harness = createRuntime(db)
     const run = createBoundRun(db, 'Delayed pointer check Run')
     insertDirectRunMessage(db, run.id, 'Claim before pointer settlement')
-    let settleFirstPointerWrite: ((accepted: boolean) => void) | undefined
+    let settleFirstPointerWrite: ((settlement: WriteSettlement) => void) | undefined
     let pointerWrites = 0
     const recordWrite = harness.write as unknown as (ptyId: string, data: string) => boolean
     harness.runtime.setPtyController({
@@ -105,9 +107,9 @@ describe('orchestration mailbox cold-park idle continuation', () => {
       writeWithSettlement: vi.fn((ptyId: string, data: string) => {
         recordWrite(ptyId, data)
         if (!isMailboxPointer(data) || ++pointerWrites > 1) {
-          return Promise.resolve(true)
+          return Promise.resolve(stubWriteSettlement(true))
         }
-        return new Promise<boolean>((resolve) => {
+        return new Promise<WriteSettlement>((resolve) => {
           settleFirstPointerWrite = resolve
         })
       }),
@@ -121,7 +123,7 @@ describe('orchestration mailbox cold-park idle continuation', () => {
     expect(checked).toMatchObject({ runId: run.id, count: 1 })
     expect(settleFirstPointerWrite).toBeDefined()
 
-    settleFirstPointerWrite?.(true)
+    settleFirstPointerWrite?.(stubWriteSettlement(true))
     await vi.advanceTimersByTimeAsync(0)
     expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(0)
     await checkBoundMailbox(harness.runtime, { ack: checked.deliveryId! })

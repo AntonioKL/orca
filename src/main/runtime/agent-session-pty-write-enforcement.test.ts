@@ -1,3 +1,4 @@
+import { settledWriteStub } from '../providers/settled-pty-write-stub'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from './orca-runtime'
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
@@ -63,6 +64,7 @@ async function makeRuntime(options: { onWrite?: (ptyId: string, data: string) =>
   runtime.setPtyController({
     spawn: vi.fn(async () => ({ id: 'never' })),
     write,
+    writeWithSettlement: settledWriteStub(write),
     kill: () => true,
     getForegroundProcess: async () => null,
     listProcesses: vi.fn(async () => []),

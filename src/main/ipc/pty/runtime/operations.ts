@@ -9,6 +9,11 @@ import { inspectPtyProviderProcess } from '../../../providers/pty-process-inspec
 import type { PtyRuntimeControllerDeps } from './controller-deps'
 import { agentSessionPtyWriteGate } from '../../../runtime/agent-session-pty-write-gate'
 import { reportAgentSessionWriteRefusal } from '../agent-session-write-refusal-report'
+import {
+  writeRefused,
+  writeUnverifiable,
+  type WriteSettlement
+} from '../../../../shared/pty-write-settlement'
 
 export function writePtyFromRuntimeController(
   deps: PtyRuntimeControllerDeps,
@@ -20,25 +25,40 @@ export function writePtyFromRuntimeController(
   ptyId: string,
   data: string,
   options: { waitForSettlement: true }
-): boolean | Promise<boolean>
+): WriteSettlement | Promise<WriteSettlement>
 export function writePtyFromRuntimeController(
   deps: PtyRuntimeControllerDeps,
   ptyId: string,
   data: string,
   options?: { waitForSettlement: true }
-): boolean | Promise<boolean> {
+): boolean | WriteSettlement | Promise<WriteSettlement> {
   // Why: the backstop for every runtime write path — query replies, followups, deliveries —
   // so a caller that forgets the typed gate still cannot reach a provider.
   const admission = agentSessionPtyWriteGate.admit(ptyId)
   if (!admission.admitted) {
     reportAgentSessionWriteRefusal(deps.mainWindow, ptyId, admission.refusal)
-    return false
+    return options?.waitForSettlement ? writeRefused('write_gate_denied') : false
+  }
+  let provider: IPtyProvider
+  try {
+    provider = getProviderForPty(ptyId)
+  } catch {
+    return options?.waitForSettlement ? writeRefused('provider_unavailable') : false
+  }
+  if (options?.waitForSettlement) {
+    // A provider that cannot settle says so before any effect; synthesizing acceptance
+    // from the fire-and-forget write is what cleared durable mailbox reservations.
+    if (!provider.writeWithSettlement) {
+      return writeRefused('provider_cannot_settle')
+    }
+    try {
+      return provider.writeWithSettlement(ptyId, data)
+    } catch {
+      // A synchronous throw cannot prove the transport took nothing.
+      return writeUnverifiable('provider_threw_after_handoff', true)
+    }
   }
   try {
-    const provider = getProviderForPty(ptyId)
-    if (options?.waitForSettlement && provider.writeWithSettlement) {
-      return provider.writeWithSettlement(ptyId, data)
-    }
     return provider.write(ptyId, data) !== false
   } catch {
     return false

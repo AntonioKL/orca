@@ -3,6 +3,7 @@ import { OrchestrationDb } from './db'
 import { OrchestrationMailboxPointerDelivery } from './mailbox-pointer-delivery'
 import { OrchestrationMailboxPointerState } from './mailbox-pointer-state'
 import { stageOrchestrationMailboxPointer } from './mailbox-pointer-stage'
+import { WRITE_ACCEPTED, type WriteSettlement } from '../../../shared/pty-write-settlement'
 
 const LEAF = {
   tabId: 'tab-1',
@@ -14,7 +15,7 @@ const LEAF = {
   lastOscTitle: null
 }
 
-function pointerDeps(db: OrchestrationDb, writePty: () => boolean) {
+function pointerDeps(db: OrchestrationDb, writePty: () => WriteSettlement) {
   return {
     mailboxOwner: { resolve: () => 'run:run-1' },
     deliveryTarget: { resolveTerminalHandle: () => 'term-1', deferForAbsenceProbe: () => false },
@@ -39,7 +40,7 @@ function pointerDeps(db: OrchestrationDb, writePty: () => boolean) {
 
 function stageArgs(db: OrchestrationDb, state: OrchestrationMailboxPointerState) {
   return {
-    deps: pointerDeps(db, () => true),
+    deps: pointerDeps(db, () => WRITE_ACCEPTED),
     state,
     leaf: LEAF,
     mailboxHandle: 'run:run-1',
@@ -107,7 +108,7 @@ describe('mailbox pointer staging watermark', () => {
     const args = stageArgs(db, state)
     stageOrchestrationMailboxPointer({
       ...args,
-      deps: { ...args.deps, writePty: () => true },
+      deps: { ...args.deps, writePty: () => WRITE_ACCEPTED },
       messages: [{ id: message.id, type: 'status', sequence: 1 }]
     } as never)
 
@@ -130,7 +131,7 @@ describe('mailbox pointer staging watermark', () => {
       }
     }) as OrchestrationDb
 
-    const writePty = vi.fn(() => true)
+    const writePty = vi.fn(() => WRITE_ACCEPTED)
     const delivery = new OrchestrationMailboxPointerDelivery<never>({
       ...pointerDeps(contended, writePty),
       redriveMailbox: (handle: string) => delivery.deliver(LEAF, { mailboxHandle: handle })

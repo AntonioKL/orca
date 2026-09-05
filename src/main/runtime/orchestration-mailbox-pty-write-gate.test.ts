@@ -1,3 +1,4 @@
+import { writeRefused, type WriteSettlement } from '../../shared/pty-write-settlement'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -24,10 +25,17 @@ vi.mock('electron', () => ({
   webContents: { fromId: vi.fn(() => null) }
 }))
 
-function writePointer(runtime: unknown, ptyId: string, data: string): boolean | Promise<boolean> {
+function writePointer(
+  runtime: unknown,
+  ptyId: string,
+  data: string
+): WriteSettlement | Promise<WriteSettlement> {
   return (
     runtime as {
-      writeOrchestrationPointerPty: (ptyId: string, data: string) => boolean | Promise<boolean>
+      writeOrchestrationPointerPty: (
+        ptyId: string,
+        data: string
+      ) => WriteSettlement | Promise<WriteSettlement>
     }
   ).writeOrchestrationPointerPty.call(runtime, ptyId, data)
 }
@@ -56,8 +64,12 @@ describe('orchestration mailbox PTY write gate', () => {
     await driveToLiveIdle(harness.runtime)
 
     expect(pointerCount(harness.write)).toBe(0)
-    expect(await writePointer(harness.runtime, PTY_ID, 'orchestration check')).toBe(false)
-    expect(await writePointer(harness.runtime, PTY_ID, '\r')).toBe(false)
+    expect(await writePointer(harness.runtime, PTY_ID, 'orchestration check')).toEqual(
+      writeRefused('write_gate_denied')
+    )
+    expect(await writePointer(harness.runtime, PTY_ID, '\r')).toEqual(
+      writeRefused('write_gate_denied')
+    )
     expect(harness.write).not.toHaveBeenCalled()
     db.close()
   })

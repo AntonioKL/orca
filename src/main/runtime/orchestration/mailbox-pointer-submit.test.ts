@@ -8,6 +8,8 @@ import { OrchestrationDb } from './db'
 import { resumePendingOrchestrationMailboxPointer } from './mailbox-pointer-resume'
 import { OrchestrationMailboxPointerState } from './mailbox-pointer-state'
 import { submitOrchestrationMailboxPointer } from './mailbox-pointer-submit'
+import { settledWriteStub, stubWriteSettlement } from '../../providers/settled-pty-write-stub'
+import type { WriteSettlement } from '../../../shared/pty-write-settlement'
 
 describe('orchestration mailbox pointer submit', () => {
   it('does not settle a replacement reservation after an old Enter write resolves', async () => {
@@ -35,8 +37,10 @@ describe('orchestration mailbox pointer submit', () => {
     state.setWatermark('run:run-1', 1, ptyId, 'tab-1:leaf-1')
     expect(db.stageMailboxPointerEnter([message.id], oldReservation)).toBe(true)
     expect(db.markMailboxPointerWriteAttempted([message.id], oldReservation)).toBe(true)
-    let resolveWrite!: (accepted: boolean) => void
-    const writePty = vi.fn(() => new Promise<boolean>((resolve) => (resolveWrite = resolve)))
+    let resolveWrite!: (settlement: WriteSettlement) => void
+    const writePty = vi.fn(
+      () => new Promise<WriteSettlement>((resolve) => (resolveWrite = resolve))
+    )
     const settle = vi.fn()
 
     submitOrchestrationMailboxPointer(
@@ -68,7 +72,7 @@ describe('orchestration mailbox pointer submit', () => {
     db.releaseMailboxPointerEnter([message.id], oldReservation, [MAILBOX_POINTER_ENTER_ATTEMPTED])
     expect(db.stageMailboxPointerEnter([message.id], replacementReservation)).toBe(true)
     expect(db.markMailboxPointerWriteAttempted([message.id], replacementReservation)).toBe(true)
-    resolveWrite(true)
+    resolveWrite(stubWriteSettlement(true))
 
     await vi.waitFor(() => expect(settle).toHaveBeenCalledOnce())
     expect(db.getMessageById(message.id)).toMatchObject({
@@ -117,7 +121,7 @@ describe('orchestration mailbox pointer submit', () => {
     const state = new OrchestrationMailboxPointerState()
     const flight = state.beginFlight(ptyId)
     state.setWatermark(mailboxHandle, 1, ptyId, 'tab-1:leaf-1')
-    const writePty = vi.fn(async () => true)
+    const writePty = vi.fn(settledWriteStub())
     const markMailboxPointerEnterAttempted = vi.fn(() => true)
     const resolveMailbox = vi.fn(() => mailboxHandle)
     const settle = vi.fn(() => {
@@ -196,7 +200,7 @@ describe('orchestration mailbox pointer submit', () => {
     const flight = state.beginFlight(ptyId)
     state.setWatermark(mailboxHandle, 1, ptyId, 'tab-1:leaf-1')
     const releaseMailboxPointerEnter = vi.fn()
-    const writePty = vi.fn(async () => true)
+    const writePty = vi.fn(settledWriteStub())
     const settle = vi.fn(() => state.settleFlight(ptyId, flight))
     const redrive = vi.fn()
     const markMailboxPointerEnterAttempted = vi.fn(() => true)
@@ -335,7 +339,7 @@ describe('orchestration mailbox pointer submit', () => {
     const flight = state.beginFlight(ptyId)
     state.setWatermark(mailboxHandle, 1, ptyId, 'tab-1:leaf-1')
     const releaseMailboxPointerEnter = vi.fn()
-    const writePty = vi.fn(async () => true)
+    const writePty = vi.fn(settledWriteStub())
     const settle = vi.fn(() => state.settleFlight(ptyId, flight))
 
     submitOrchestrationMailboxPointer(
@@ -407,7 +411,7 @@ describe('orchestration mailbox pointer submit', () => {
         resolveSubmitTarget: () => null,
         getMessageWaiters: () => undefined,
         isLeafPtyProvenAbsent: async () => false,
-        writePty: vi.fn(async () => true),
+        writePty: vi.fn(settledWriteStub()),
         settle,
         redrive
       },
@@ -448,7 +452,7 @@ describe('orchestration mailbox pointer submit', () => {
     }
     const settleMailboxPointerEnter = vi.fn()
     const releaseMailboxPointerEnter = vi.fn()
-    const writePty = vi.fn(async () => true)
+    const writePty = vi.fn(settledWriteStub())
 
     const resumed = resumePendingOrchestrationMailboxPointer({
       deps: {

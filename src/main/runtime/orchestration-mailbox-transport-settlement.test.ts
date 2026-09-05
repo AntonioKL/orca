@@ -1,4 +1,5 @@
 import { rmSync } from 'node:fs'
+import { writeRefused, type WriteSettlement } from '../../shared/pty-write-settlement'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -34,12 +35,12 @@ describe('orchestration mailbox transport settlement', () => {
     const db = createDatabase('orca-mailbox-transport-settlement-')
     const first = createRuntime(db)
     const observedWrite = vi.fn((_ptyId: string, _data: string) => true)
-    let settleWrite: ((accepted: boolean) => void) | undefined
+    let settleWrite: ((settlement: WriteSettlement) => void) | undefined
     first.runtime.setPtyController({
       write: observedWrite,
       writeWithSettlement: vi.fn(
         () =>
-          new Promise<boolean>((resolve) => {
+          new Promise<WriteSettlement>((resolve) => {
             settleWrite = resolve
           })
       ),
@@ -56,7 +57,7 @@ describe('orchestration mailbox transport settlement', () => {
       pointer_enter_pending: MAILBOX_POINTER_WRITE_ATTEMPTED
     })
 
-    settleWrite?.(false)
+    settleWrite?.(writeRefused('provider_refused_write'))
     await Promise.resolve()
     await Promise.resolve()
     expect(pointerCount(observedWrite)).toBe(0)

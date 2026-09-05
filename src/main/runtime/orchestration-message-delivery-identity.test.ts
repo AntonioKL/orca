@@ -1,3 +1,4 @@
+import { settledWriteStub } from '../providers/settled-pty-write-stub'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -70,7 +71,12 @@ function createRuntime(
   })
   const write = vi.fn(() => true)
   runtime.setOrchestrationDb(db)
-  runtime.setPtyController({ write, kill: vi.fn(), getForegroundProcess: async () => null })
+  runtime.setPtyController({
+    write,
+    writeWithSettlement: settledWriteStub(write),
+    kill: vi.fn(),
+    getForegroundProcess: async () => null
+  })
   runtime.registerPty(PTY_ID, WORKTREE_ID, null, {
     tabId: TAB_ID,
     leafId: LEAF_ID,

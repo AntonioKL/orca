@@ -1,3 +1,4 @@
+import { settledWriteStub } from '../providers/settled-pty-write-stub'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -811,6 +812,7 @@ describe('orchestration notification mailbox consistency', () => {
     })
     first.runtime.setPtyController({
       write,
+      writeWithSettlement: settledWriteStub(write),
       kill: vi.fn(),
       getForegroundProcess: async () => null
     })

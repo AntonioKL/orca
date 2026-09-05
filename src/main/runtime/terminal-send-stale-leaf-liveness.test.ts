@@ -1,3 +1,4 @@
+import { settledWriteStub } from '../providers/settled-pty-write-stub'
 import { describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from './orca-runtime'
 import { getDefaultWorkspaceSession } from '../../shared/constants'
@@ -51,6 +52,7 @@ async function makeRuntimeWithLeafHandle(options: {
   runtime.setPtyController({
     spawn: vi.fn(async () => ({ id: 'never' })),
     write,
+    writeWithSettlement: settledWriteStub(write),
     kill: () => true,
     getForegroundProcess: async () => null,
     listProcesses: vi.fn(async () => []),

@@ -1,5 +1,6 @@
 import { DaemonPtySessionSpawn } from './daemon-pty-session-spawn'
 import { PtyWriteUnavailableError } from '../providers/pty-write-unavailable-error'
+import { writeRefused, type WriteSettlement } from '../../shared/pty-write-settlement'
 
 export abstract class DaemonPtySessionInput extends DaemonPtySessionSpawn {
   write(id: string, data: string): boolean {
@@ -7,16 +8,27 @@ export abstract class DaemonPtySessionInput extends DaemonPtySessionSpawn {
     return this.finishWrite(id, this.client.notify('write', { sessionId: id, data }), recoverable)
   }
 
-  async writeWithSettlement(id: string, data: string): Promise<boolean> {
-    const recoverable = this.prepareWrite(id)
-    let delivered: boolean
+  /**
+   * Returns the settlement instead of throwing: the recovery side effects that
+   * `finishWrite` performs still run, but an ambiguous notify must not reach the caller
+   * as a rejection it would read as a proven refusal.
+   */
+  async writeWithSettlement(id: string, data: string): Promise<WriteSettlement> {
+    let recoverable: boolean
     try {
-      delivered = await this.client.notifyWithSettlement('write', { sessionId: id, data })
+      recoverable = this.prepareWrite(id)
     } catch (error) {
-      this.finishWrite(id, false, recoverable)
+      if (error instanceof PtyWriteUnavailableError) {
+        // prepareWrite already armed recovery and wrote nothing, so this is proven refusal.
+        return writeRefused('endpoint_awaiting_recovery')
+      }
       throw error
     }
-    return this.finishWrite(id, delivered, recoverable)
+    const settlement = await this.client.notifyWithSettlement('write', { sessionId: id, data })
+    if (settlement.outcome !== 'accepted' && recoverable) {
+      this.armWriteRecovery(id)
+    }
+    return settlement
   }
 
   protected prepareWrite(id: string): boolean {
@@ -40,11 +52,15 @@ export abstract class DaemonPtySessionInput extends DaemonPtySessionSpawn {
 
   protected finishWrite(id: string, delivered: boolean, recoverable: boolean): boolean {
     if (!delivered && recoverable) {
-      this.sessionsAwaitingDaemonRecovery.add(id)
-      this.reconnectAfterWriteFailure()
+      this.armWriteRecovery(id)
       throw new PtyWriteUnavailableError(`Daemon PTY "${id}" is awaiting recovery`)
     }
     return delivered
+  }
+
+  protected armWriteRecovery(id: string): void {
+    this.sessionsAwaitingDaemonRecovery.add(id)
+    this.reconnectAfterWriteFailure()
   }
 
   resize(id: string, cols: number, rows: number): void {

@@ -1,3 +1,4 @@
+import { settledWriteStub } from '../providers/settled-pty-write-stub'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -40,14 +41,16 @@ describe('orchestration mailbox crash recovery', () => {
     const run = createBoundRun(firstDb, 'Enter crash Run')
     const message = insertDirectRunMessage(firstDb, run.id, 'Visible before Enter crash')
     const recordWrite = first.write as unknown as (id: string, payload: string) => unknown
+    const write = vi.fn((ptyId: string, data: string) => {
+      recordWrite(ptyId, data)
+      if (data === '\r') {
+        firstDb.close()
+      }
+      return true
+    })
     first.runtime.setPtyController({
-      write: vi.fn((ptyId: string, data: string) => {
-        recordWrite(ptyId, data)
-        if (data === '\r') {
-          firstDb.close()
-        }
-        return true
-      }),
+      write,
+      writeWithSettlement: settledWriteStub(write),
       kill: vi.fn(),
       getForegroundProcess: async () => null
     })

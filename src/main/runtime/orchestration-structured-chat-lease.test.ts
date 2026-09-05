@@ -1,3 +1,4 @@
+import { settledWriteStub } from '../providers/settled-pty-write-stub'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -89,13 +90,15 @@ describe('orchestration while Structured Chat owns an agent session', () => {
       repoId: 'repo-structured-chat'
     } as never)
     writes = vi.fn<(ptyId: string, data: string) => void>()
+    const admittedWrite = (ptyId: string, data: string): boolean => {
+      agentSessionPtyWriteGate.assertAdmitted(ptyId)
+      writes(ptyId, data)
+      return true
+    }
     runtime.setPtyController({
       spawn: vi.fn(async () => ({ id: 'unused' })),
-      write: (ptyId: string, data: string) => {
-        agentSessionPtyWriteGate.assertAdmitted(ptyId)
-        writes(ptyId, data)
-        return true
-      },
+      write: admittedWrite,
+      writeWithSettlement: settledWriteStub(admittedWrite),
       kill: vi.fn(() => true),
       getForegroundProcess: vi.fn(async () => 'codex'),
       listProcesses: vi.fn(async () => []),

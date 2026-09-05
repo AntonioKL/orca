@@ -15,6 +15,7 @@ import type {
 } from './mailbox-pointer-state'
 import { submitOrchestrationMailboxPointer } from './mailbox-pointer-submit'
 import type { OrchestrationMailboxPointerSubmitTarget } from './mailbox-pointer-submit'
+import { isSettledWrite, type WriteSettlement } from '../../../shared/pty-write-settlement'
 
 type StagePointerArgs<TWaiter extends OrchestrationMessageWaiter> = {
   deps: PointerDeliveryDependencies<TWaiter>
@@ -76,8 +77,14 @@ export function stageOrchestrationMailboxPointer<TWaiter extends OrchestrationMe
   }
   // The watermark parks concurrent deliveries, so it must never outlive the DB reservation.
   args.state.setWatermark(args.mailboxHandle, args.newestSequence, ptyId, args.leafKey)
-  const finishPointerWrite = (accepted: boolean): void =>
-    finishPointerWriteAndStageEnter(args, ptyId, flight, expectedTarget, accepted)
+  // Only `refused` proves no bytes left, so only `refused` may release the reservation.
+  const settlePointerWrite = (settlement: WriteSettlement): void => {
+    if (settlement.outcome === 'unverifiable') {
+      preserveAmbiguousWrite()
+      return
+    }
+    finishPointerWriteAndStageEnter(args, ptyId, flight, expectedTarget, settlement)
+  }
   const preserveAmbiguousWrite = (): void => {
     if (!args.state.isCurrentFlight(ptyId, flight)) {
       return
@@ -94,11 +101,11 @@ export function stageOrchestrationMailboxPointer<TWaiter extends OrchestrationMe
         args.deps.getCliCommand(expectedTarget.terminalHandle)
       )
     )
-    if (typeof writeResult === 'boolean') {
-      finishPointerWrite(writeResult)
+    if (isSettledWrite(writeResult)) {
+      settlePointerWrite(writeResult)
       return
     }
-    void writeResult.then(finishPointerWrite, preserveAmbiguousWrite).catch(() => undefined)
+    void writeResult.then(settlePointerWrite, preserveAmbiguousWrite).catch(() => undefined)
   } catch {
     preserveAmbiguousWrite()
   }
@@ -109,7 +116,7 @@ function finishPointerWriteAndStageEnter<TWaiter extends OrchestrationMessageWai
   ptyId: string,
   flight: OrchestrationMailboxDeliveryFlight,
   expectedTarget: OrchestrationMailboxPointerSubmitTarget,
-  accepted: boolean
+  settlement: Extract<WriteSettlement, { outcome: 'accepted' | 'refused' }>
 ): void {
   let delayedSettle = false
   try {
@@ -117,9 +124,12 @@ function finishPointerWriteAndStageEnter<TWaiter extends OrchestrationMessageWai
       return
     }
     const db = args.deps.getDb()
-    if (!accepted) {
+    if (settlement.outcome === 'refused') {
       db?.markAsUndelivered(flight.stagedMessageIds)
-      args.state.clearWatermark(args.mailboxHandle, args.newestSequence, ptyId)
+      if (args.state.clearWatermark(args.mailboxHandle, args.newestSequence, ptyId)) {
+        // A delivery parked behind this watermark has to drain now that it is gone.
+        args.redrive(args.mailboxHandle)
+      }
       return
     }
     if (

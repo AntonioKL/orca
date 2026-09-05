@@ -12,6 +12,7 @@ import type {
   OrchestrationMailboxDeliveryFlight,
   OrchestrationMailboxPointerState
 } from './mailbox-pointer-state'
+import type { WriteSettlement } from '../../../shared/pty-write-settlement'
 
 type PointerSubmitDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   mailboxOwner: OrchestrationMailboxOwner
@@ -23,7 +24,7 @@ type PointerSubmitDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   ) => OrchestrationMailboxPointerSubmitTarget | null
   getMessageWaiters: (mailboxHandle: string) => ReadonlySet<TWaiter> | undefined
   isLeafPtyProvenAbsent: (ptyId: string) => Promise<boolean>
-  writePty: (ptyId: string, data: string) => boolean | Promise<boolean>
+  writePty: (ptyId: string, data: string) => WriteSettlement | Promise<WriteSettlement>
   settle: (ptyId: string, flight: OrchestrationMailboxDeliveryFlight) => void
   redrive: (mailboxHandle: string, force?: boolean) => void
 }
@@ -105,7 +106,8 @@ export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationM
             return
           }
           expectedPhase = MAILBOX_POINTER_ENTER_ATTEMPTED
-          submitted = await deps.writePty(input.ptyId, '\r')
+          const enterSettlement = await deps.writePty(input.ptyId, '\r')
+          submitted = enterSettlement.outcome === 'accepted'
           if (!deps.state.isCurrentFlight(input.ptyId, input.flight)) {
             finalizeReservation = false
             return

@@ -1,3 +1,4 @@
+import { settledWriteStub } from '../providers/settled-pty-write-stub'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -95,6 +96,7 @@ export function createRuntime(
   runtime.setOrchestrationDb(db)
   runtime.setPtyController({
     write,
+    writeWithSettlement: settledWriteStub(write),
     kill: vi.fn(),
     getForegroundProcess: async () => null
   })
