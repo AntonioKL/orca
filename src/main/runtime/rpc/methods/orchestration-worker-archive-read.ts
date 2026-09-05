@@ -56,6 +56,7 @@ export async function readArchivedWorkerOutput(args: {
       workerState: args.workerState,
       resourceId: args.resource.id,
       createdAt: archive.created_at,
+      releaseState: args.resource.release_state,
       archive: JSON.parse(archive.content) as WorkerStructuredJournalArchive,
       ...(args.cursor === undefined ? {} : { cursor: args.cursor }),
       ...(args.limit === undefined ? {} : { limit: args.limit })

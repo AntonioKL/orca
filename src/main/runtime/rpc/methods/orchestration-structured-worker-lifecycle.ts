@@ -36,6 +36,7 @@ import {
 } from '../../structured-worker-authority'
 import { retireSettledStructuredWorkerTab } from '../../structured-agent-session-tab-retirement'
 import type { StructuredWorkerIdentity } from '../../structured-worker-identity'
+import type { WorkerTerminalReleaseState } from '../../orchestration/worker-terminal-ownership'
 import { releaseStructuredWorkerSession } from './orchestration-structured-worker-session'
 
 export { observeStructuredWorker, type StructuredWorkerObservation }
@@ -221,6 +222,8 @@ export function readArchivedStructuredJournal(args: {
   workerState: string
   resourceId: string
   createdAt: string
+  /** Only a SETTLED release proves the session is gone; `releasing` and `unknown` never do. */
+  releaseState: WorkerTerminalReleaseState
   archive: WorkerStructuredJournalArchive
   cursor?: string | number
   limit?: number
@@ -249,8 +252,11 @@ export function readArchivedStructuredJournal(args: {
     start: cursor?.position ?? 0,
     limit: args.limit,
     archived: true,
-    // The session was closed at release; the archive is the proof it is gone.
-    liveness: 'exited'
+    // The archive is frozen BEFORE the close, so it proves nothing about the child. Only a
+    // settled release row proves the close landed; `releasing` and `unknown` are the states
+    // that exist to say it did not, and answering `exited` from one of them is the death
+    // certificate `docs/reference/ssh-execution-boundary.md` forbids.
+    liveness: args.releaseState === 'released' ? 'exited' : 'unverifiable'
   })
 }
 

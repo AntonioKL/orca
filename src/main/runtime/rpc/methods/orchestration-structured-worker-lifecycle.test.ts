@@ -18,6 +18,7 @@ const {
   readStructuredWorkerJournal,
   stopStructuredWorker
 } = await import('./orchestration-structured-worker-lifecycle')
+const { readArchivedWorkerOutput } = await import('./orchestration-worker-archive-read')
 
 const IDENTITY: StructuredWorkerIdentity = {
   handle: 'structworker_1',
@@ -169,6 +170,7 @@ describe('structured worker output', () => {
       workerState: 'succeeded',
       resourceId: 'res_1',
       createdAt: '2026-09-05 00:00:00',
+      releaseState: 'released',
       archive
     })
     expect(archived.source).toBe('transcript')
@@ -246,7 +248,7 @@ describe('structured worker output', () => {
     expect(exited.status).toMatchObject({ terminal: 'exited', liveness: 'exited' })
   })
 
-  it('states that a released archive is exited', () => {
+  it('states that a settled release is exited', () => {
     installHost({})
     const archive = captureStructuredWorkerArchive(IDENTITY, 'claude')
     const archived = readArchivedStructuredJournal({
@@ -254,9 +256,65 @@ describe('structured worker output', () => {
       workerState: 'succeeded',
       resourceId: 'res_1',
       createdAt: '2026-09-05 00:00:00',
+      releaseState: 'released',
       archive
     })
     expect(archived.status).toMatchObject({ terminal: 'exited', liveness: 'exited' })
+  })
+
+  it('never calls an unproven release exited', () => {
+    // The archive is frozen BEFORE the close. `release_unknown` is the state that records a close
+    // that did NOT land, and a coordinator reading `exited` there starts a replacement worker over
+    // the same worktree while the original provider child may still be attached.
+    installHost({})
+    const archive = captureStructuredWorkerArchive(IDENTITY, 'claude')
+    for (const releaseState of ['unknown', 'releasing'] as const) {
+      const archived = readArchivedStructuredJournal({
+        dispatchId: 'd1',
+        workerState: 'stop_unknown',
+        resourceId: 'res_1',
+        createdAt: '2026-09-05 00:00:00',
+        releaseState,
+        archive
+      })
+      expect(archived.status).toMatchObject({ terminal: 'unknown', liveness: 'unverifiable' })
+    }
+  })
+
+  it('carries the resource release state through the archived read', async () => {
+    // The wiring, not just the mapping: `worker-read` reaches the archive through
+    // `readArchivedWorkerOutput`, and the resource row it already holds is the only thing that
+    // knows whether the close landed.
+    installHost({})
+    const archive = captureStructuredWorkerArchive(IDENTITY, 'claude')
+    const db = {
+      getWorkerTerminalArchive: () => ({
+        dispatch_id: 'd1',
+        resource_id: 'res_1',
+        kind: 'structured_journal',
+        content: JSON.stringify(archive),
+        created_at: '2026-09-05 00:00:00'
+      })
+    }
+    const read = async (releaseState: string) =>
+      readArchivedWorkerOutput({
+        db: db as never,
+        dispatchId: 'd1',
+        workerState: 'stop_unknown',
+        resource: {
+          id: 'res_1',
+          terminal_handle: IDENTITY.handle,
+          release_state: releaseState
+        } as never
+      })
+    expect((await read('unknown')).status).toMatchObject({
+      terminal: 'unknown',
+      liveness: 'unverifiable'
+    })
+    expect((await read('released')).status).toMatchObject({
+      terminal: 'exited',
+      liveness: 'exited'
+    })
   })
 
   it('refuses a cursor once the tail window has slid past it', () => {
