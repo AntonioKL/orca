@@ -225,6 +225,56 @@ function fileChangeItem(item: CodexThreadItem): CodexJournalItem {
   }
 }
 
+/** MCP tool names are namespaced as often as not (`mcp__server__tool`,
+ *  `server/tool`, `ns.tool`) and must reach the row byte-identical; only a bare
+ *  word is title-cased. */
+function mcpToolDisplayName(name: string): string {
+  if (/[:./]|__/.test(name)) {
+    return name
+  }
+  const words = name.split(/[\s_-]+/).filter((word) => word.length > 0)
+  return words.length === 0
+    ? name
+    : words.map((word) => word[0]!.toUpperCase() + word.slice(1)).join(' ')
+}
+
+function mcpToolCallItem(item: CodexThreadItem): CodexJournalItem {
+  const failure = readString(readRecord(item.error), 'message')
+  const text = failure ?? readTextContent(readRecord(item.result), 'content')
+  const bounded = text === null ? null : boundInlineText(text, DEFAULT_JOURNAL_PAYLOAD_LIMITS)
+  const tool = readString(item, 'tool')
+  return {
+    body: {
+      kind: 'tool-call',
+      name: tool === null ? 'mcp' : mcpToolDisplayName(tool),
+      input: boundToolInput(
+        { server: item.server ?? null, tool, arguments: item.arguments ?? null },
+        DEFAULT_JOURNAL_PAYLOAD_LIMITS
+      ),
+      state: failure === null ? commandState(item) : 'failed',
+      ...(bounded === null ? {} : { output: bounded.bounded })
+    },
+    handled: true
+  }
+}
+
+/** `webSearch` carries no status: Codex starts it with an empty query and a null
+ *  action, then completes it with both, so `action` is the completion signal. */
+function webSearchItem(item: CodexThreadItem): CodexJournalItem {
+  return {
+    body: {
+      kind: 'tool-call',
+      name: 'web_search',
+      input: boundToolInput(
+        { query: readString(item, 'query'), action: item.action ?? null },
+        DEFAULT_JOURNAL_PAYLOAD_LIMITS
+      ),
+      state: item.action === null || item.action === undefined ? 'running' : 'completed'
+    },
+    handled: true
+  }
+}
+
 /**
  * Journal body for a Codex item, or null for one with nothing to render.
  *
@@ -247,6 +297,12 @@ export function codexJournalItem(item: CodexThreadItem): CodexJournalItem {
   }
   if (item.type === 'fileChange') {
     return fileChangeItem(item)
+  }
+  if (item.type === 'mcpToolCall') {
+    return mcpToolCallItem(item)
+  }
+  if (item.type === 'webSearch') {
+    return webSearchItem(item)
   }
   if (item.type === 'reasoning' || item.type === 'plan') {
     const text =

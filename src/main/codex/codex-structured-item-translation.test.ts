@@ -298,10 +298,106 @@ describe('codex item bodies', () => {
     })
     expect(codexItemBody({ type: 'reasoning', id: 'r' })).toBeNull()
     expect(codexItemBody({ type: 'agentMessage', id: 'm', text: '' })).toBeNull()
-    expect(codexItemBody({ type: 'webSearch', id: 'w' })).toMatchObject({
+    expect(codexItemBody({ type: 'somethingCodexAddedLater', id: 'x' })).toMatchObject({
       kind: 'status',
-      text: 'codex · item:webSearch',
-      providerFrame: { provider: 'codex', kind: 'item:webSearch' }
+      text: 'codex · item:somethingCodexAddedLater',
+      providerFrame: { provider: 'codex', kind: 'item:somethingCodexAddedLater' }
+    })
+  })
+
+  it('gives an mcp tool call a typed body with its result as output', () => {
+    expect(
+      codexItemBody({
+        type: 'mcpToolCall',
+        id: 'mcp-1',
+        server: 'weather',
+        tool: 'get_forecast',
+        status: 'completed',
+        arguments: { city: 'Oslo' },
+        result: { content: [{ type: 'text', text: '12C' }] }
+      })
+    ).toEqual({
+      kind: 'tool-call',
+      name: 'Get Forecast',
+      input: { server: 'weather', tool: 'get_forecast', arguments: { city: 'Oslo' } },
+      state: 'completed',
+      output: { head: '12C', byteLength: 3, truncated: false, digest: expect.any(String) }
+    })
+  })
+
+  it('keeps a namespaced mcp tool name byte-identical', () => {
+    for (const tool of ['mcp__server__tool', 'server/tool', 'ns.tool', 'urn:tool']) {
+      expect(
+        codexItemBody({ type: 'mcpToolCall', id: 'm', tool, status: 'inProgress' }),
+        tool
+      ).toMatchObject({ kind: 'tool-call', name: tool, state: 'running' })
+    }
+  })
+
+  it('reports an mcp error as a failed call carrying the server message', () => {
+    expect(
+      codexItemBody({
+        type: 'mcpToolCall',
+        id: 'mcp-2',
+        server: 's',
+        tool: 'ping',
+        status: 'completed',
+        error: { message: 'server unreachable' }
+      })
+    ).toMatchObject({
+      kind: 'tool-call',
+      name: 'Ping',
+      state: 'failed',
+      output: { head: 'server unreachable', truncated: false }
+    })
+  })
+
+  it('models a web search as a tool call that runs until codex sends the action', () => {
+    // The start frame Codex actually emits: empty query, no action.
+    expect(codexItemBody({ type: 'webSearch', id: 'w', query: '', action: null })).toEqual({
+      kind: 'tool-call',
+      name: 'web_search',
+      input: { query: null, action: null },
+      state: 'running'
+    })
+    expect(
+      codexItemBody({
+        type: 'webSearch',
+        id: 'w',
+        query: 'orca release notes',
+        action: { type: 'search', query: 'orca release notes', queries: null },
+        results: null
+      })
+    ).toEqual({
+      kind: 'tool-call',
+      name: 'web_search',
+      input: {
+        query: 'orca release notes',
+        action: { type: 'search', query: 'orca release notes', queries: null }
+      },
+      state: 'completed'
+    })
+  })
+
+  it('leaves subagent items on the generic row until a real renderer exists', () => {
+    expect(
+      codexJournalItem({
+        type: 'subAgentActivity',
+        id: 'a-1',
+        kind: 'started',
+        agentThreadId: 'thread-child',
+        agentPath: '/root/list_directory'
+      })
+    ).toMatchObject({
+      handled: false,
+      body: { kind: 'status', providerFrame: { kind: 'item:subAgentActivity' } }
+    })
+  })
+
+  it('drops the sleep item, which codex itself renders as nothing', () => {
+    expect(codexJournalItem({ type: 'sleep', id: 's-1', durationMs: 20_000 })).toEqual({
+      body: null,
+      handled: true
     })
   })
 
