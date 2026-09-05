@@ -15,6 +15,7 @@ import {
 } from './orchestration/cli-command'
 import { getAppEnvironment } from '../../shared/app-environment'
 import type { AgentStatusIpcPayload } from '../../shared/agent-status-ipc-payload'
+import { enrichAgentStatusIpcPayload } from '../ipc/agent-status-ipc-boundary'
 
 export class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntimeWithVerifyOrchestrationCompatibilityCaller {
   /** Every pane key this PTY could be addressed by, including restored receipts. */
@@ -195,7 +196,12 @@ export class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntim
 
   /** Push-fed hook rows for local read-only fleet projection; callers must redact payload text. */
   getOrchestrationFleetAgentStatusSnapshot(): readonly AgentStatusIpcPayload[] {
-    return this.getAgentStatusSnapshotFn?.() ?? []
+    // Why: hook rows carry only a pane key, but the fleet matcher compares terminal handle and
+    // dispatch id. Without the same enrichment the renderer boundary applies, every local worker
+    // fails identity and projects `missing_status` while it is demonstrably running.
+    return (this.getAgentStatusSnapshotFn?.() ?? []).map((entry) =>
+      enrichAgentStatusIpcPayload(entry, this)
+    )
   }
 
   getTerminalOrchestrationCliCommand(handle: string): OrchestrationCliCommand {
