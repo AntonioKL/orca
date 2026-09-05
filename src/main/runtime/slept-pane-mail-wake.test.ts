@@ -357,7 +357,10 @@ describe('mail addressed to a listed slept pane', () => {
       await Promise.resolve()
       await Promise.resolve()
 
+      const graphDelivery = vi.spyOn(runtime, 'deliverPendingMessagesForHandle')
       remountStatuslessCodex('pty-codex-woken')
+      expect(graphDelivery).toHaveBeenCalledWith(handle)
+      await vi.advanceTimersByTimeAsync(2_000)
       const runtimeState = runtime as unknown as {
         leaves: Map<
           string,
@@ -378,7 +381,6 @@ describe('mail addressed to a listed slept pane', () => {
         lastAgentStatus: null,
         lastAgentStatusObservedLive: false
       })
-      runtime.deliverPendingMessagesForHandle('run:run_test')
       await vi.waitFor(() =>
         expect(write).toHaveBeenCalledWith(
           'pty-codex-woken',

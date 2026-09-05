@@ -303,19 +303,33 @@ export class OrcaRuntimeWithSyncWindowGraph extends OrcaRuntimeWithAttachWindow 
     }
     for (const leaf of this.leaves.values()) {
       this.adoptPreAllocatedHandle(leaf)
-      const previousLeaf = previousLeaves.get(this.getLeafKey(leaf.tabId, leaf.leafId))
+      const leafKey = this.getLeafKey(leaf.tabId, leaf.leafId)
+      const previousLeaf = previousLeaves.get(leafKey)
+      const becameWritable =
+        leaf.writable &&
+        (!graphWasReady || previousLeaf?.ptyId !== leaf.ptyId || !previousLeaf.writable)
       if (
         this._orchestrationDb &&
         leaf.lastAgentStatus === 'idle' &&
         leaf.lastAgentStatusObservedLive &&
-        leaf.writable &&
-        (!graphWasReady ||
-          previousLeaf?.ptyId !== leaf.ptyId ||
-          !previousLeaf.writable ||
-          previousLeaf.lastAgentStatus !== 'idle' ||
-          !previousLeaf.lastAgentStatusObservedLive)
+        (becameWritable ||
+          previousLeaf?.lastAgentStatus !== 'idle' ||
+          !previousLeaf?.lastAgentStatusObservedLive)
       ) {
         this.deliverPendingMessagesForLeaf(leaf)
+      } else if (
+        this._orchestrationDb &&
+        becameWritable &&
+        leaf.ptyId &&
+        this.ptysById.get(leaf.ptyId)?.launchAgent === 'codex' &&
+        leaf.lastAgentStatus === null &&
+        !leaf.lastAgentStatusObservedLive
+      ) {
+        // Why: Codex reattach has no status edge, so the writable transition starts its bounded idle proof.
+        const handle = this.handleByLeafKey.get(leafKey)
+        if (handle) {
+          this.deliverPendingMessagesForHandle(handle)
+        }
       }
     }
 
