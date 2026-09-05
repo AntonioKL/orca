@@ -94,12 +94,14 @@ export function isCodexRootAgentActivity(activity: CodexSubagentActivity): boole
   return segments.length === 1 && segments[0] === CODEX_ROOT_AGENT_SEGMENT
 }
 
-/** Row label: the agent path's trailing segment. A segment with nothing visible
- *  in it survives the empty-segment filter but would draw a nameless row, so it
- *  reads as no label and the caller's placeholder takes over. */
+/** Row label: the agent path's trailing segment, trimmed. A segment with nothing
+ *  visible in it survives the empty-segment filter but would draw a nameless row,
+ *  so it reads as no label and the caller's placeholder takes over. Trimmed
+ *  because the caller keys its collision ordinals on this string: ` read ` and
+ *  `read` render identically and must therefore collide. */
 export function codexSubagentLabel(activity: CodexSubagentActivity): string | null {
-  const trailing = codexSubagentPathSegments(activity.agentPath).at(-1)
-  return trailing !== undefined && trailing.trim().length > 0 ? trailing : null
+  const trailing = codexSubagentPathSegments(activity.agentPath).at(-1)?.trim()
+  return trailing !== undefined && trailing.length > 0 ? trailing : null
 }
 
 export type CodexThreadTokenTotal = { threadId: string; totalTokens: number }

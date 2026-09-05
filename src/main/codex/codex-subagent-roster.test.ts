@@ -186,6 +186,23 @@ describe('CodexSubagentRoster', () => {
     expect(agents()).toMatchObject([{ id: 'child-1', label: 'subagent' }])
   })
 
+  // The collision ordinal keys on the label, so two segments that render
+  // identically must collide rather than both draw as `read`.
+  it('collides labels that differ only in surrounding whitespace', () => {
+    const { roster, agents } = createHarness()
+
+    deliver(
+      roster,
+      activity({ kind: 'started', agentThreadId: 'child-1', agentPath: '/root/read' })
+    )
+    deliver(
+      roster,
+      activity({ kind: 'started', agentThreadId: 'child-2', agentPath: '/root/ read ' })
+    )
+
+    expect(agents().map((agent) => agent.label)).toEqual(['read', 'read 2'])
+  })
+
   it('ignores the root node so a turn is not its own subagent', () => {
     const { roster, appended } = createHarness()
 

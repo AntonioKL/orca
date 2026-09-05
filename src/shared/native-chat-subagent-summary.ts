@@ -161,10 +161,12 @@ export function subagentGroupFallbackText(agents: readonly NativeChatSubagentEnt
  *  sentence recomputed here — and a byte compare would then print the roster
  *  twice.
  *
- *  The `— N working` clause is LEGACY: journals written before the twin dropped
- *  its live count still hold it, and those rows replay forever. Dropping it from
- *  the pattern would print every one of them twice. Keep in sync with
- *  `subagentGroupFallbackText`, and keep the legacy branch. */
+ *  The `— N working` clause is LEGACY. The twin carried a live count only while
+ *  this feature was unreleased, so the rows holding one are dev journals of this
+ *  branch rather than anything shipped — but those replay forever too, and each
+ *  would print twice without this branch. It costs no false-positive surface the
+ *  bare shape does not already carry, so it stays until such journals no longer
+ *  matter. Keep in sync with `subagentGroupFallbackText`. */
 const SUBAGENT_GROUP_FALLBACK_PATTERN =
   /^(?:Kicked off \d+ subagents?(?: — \d+ working)?|Ran \d+ subagents?)(?: \(\d+ [a-z][a-z-]*\))?$/
 
