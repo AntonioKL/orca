@@ -2,8 +2,8 @@ import { execFile as execFileCb } from 'node:child_process'
 import { promisify } from 'node:util'
 import { readLinuxProcessStartTimes } from './linux-process-start-times'
 import { withEvidenceBudget } from './process-table-evidence-budget'
-import { PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS } from './process-table-snapshot-timing'
 import {
+  PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS,
   PS_ARGS,
   PS_MAX_BUFFER_BYTES,
   ProcessTableCaptureError,
@@ -12,13 +12,12 @@ import {
   type ProcessTableRow
 } from './process-table-snapshot'
 
-export { PS_ARGS, PS_MAX_BUFFER_BYTES }
 export { parseLinuxProcStatStartTime } from './linux-process-start-times'
 export {
   PROCESS_TABLE_EVIDENCE_BUDGET_MS,
   withEvidenceBudget
 } from './process-table-evidence-budget'
-export { PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS } from './process-table-snapshot-timing'
+export { PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS, PS_ARGS, PS_MAX_BUFFER_BYTES }
 
 const execFile = promisify(execFileCb)
 
