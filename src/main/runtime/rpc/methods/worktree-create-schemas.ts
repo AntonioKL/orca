@@ -9,6 +9,7 @@ import {
   OptionalBoolean,
   OptionalFiniteNumber,
   OptionalString,
+  OptionalPlainString,
   TriStateLinkedIssue
 } from '../schemas'
 import {
@@ -102,7 +103,8 @@ export const WorktreeCreate = z
     // Why: some clients (e.g. desktop) pass a pre-built launch command so the
     // first terminal pane launches the selected agent instead of an idle shell.
     // Clients that can't quote for the host shell send `startupAgent` instead.
-    startupCommand: OptionalString,
+    startupCommand: OptionalPlainString,
+    startupActivate: z.boolean().optional(),
     startupEnv: z.record(z.string(), z.string()).optional(),
     startupLaunchConfig: sleepingAgentLaunchConfigSchema,
     startupCommandDelivery: z.enum(['fast', 'shell-ready']).optional(),

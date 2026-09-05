@@ -66,16 +66,20 @@ export function buildManagedWorktreeCreateArgs(
     setupDecision: params.setupDecision,
     createdWithAgent: params.createdWithAgent ?? params.startupAgent,
     ...provenance,
-    startup: params.startupCommand
-      ? {
-          command: params.startupCommand,
-          ...(params.startupEnv ? { env: params.startupEnv } : {}),
-          ...(params.startupLaunchConfig ? { launchConfig: params.startupLaunchConfig } : {}),
-          ...(params.startupCommandDelivery
-            ? { startupCommandDelivery: params.startupCommandDelivery }
-            : {})
-        }
-      : undefined,
+    // Older clients used an empty command to mean no startup.
+    startup:
+      params.startupCommand ||
+      (params.startupCommand === '' && params.startupActivate !== undefined)
+        ? {
+            command: params.startupCommand,
+            ...(params.startupActivate !== undefined ? { activate: params.startupActivate } : {}),
+            ...(params.startupEnv ? { env: params.startupEnv } : {}),
+            ...(params.startupLaunchConfig ? { launchConfig: params.startupLaunchConfig } : {}),
+            ...(params.startupCommandDelivery
+              ? { startupCommandDelivery: params.startupCommandDelivery }
+              : {})
+          }
+        : undefined,
     ...(params.startupAgent ? { startupAgent: params.startupAgent } : {}),
     ...(params.startupPrompt !== undefined ? { startupPrompt: params.startupPrompt } : {}),
     startupDraft: params.startupDraft,

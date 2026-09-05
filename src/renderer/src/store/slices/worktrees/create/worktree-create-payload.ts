@@ -129,7 +129,8 @@ export function buildRuntimeWorktreeCreateParams(
           ...(startup.startupCommandDelivery
             ? { startupCommandDelivery: startup.startupCommandDelivery }
             : {}),
-          activate: true
+          activate: startup.activate !== false,
+          ...(startup.activate !== undefined ? { startupActivate: startup.activate } : {})
         }
       : {})
   }
