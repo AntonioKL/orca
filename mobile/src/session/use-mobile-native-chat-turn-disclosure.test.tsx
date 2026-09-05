@@ -99,8 +99,18 @@ describe('useMobileNativeChatTurnDisclosure', () => {
         .findByType('result')
         .props.disclosure.resolveRow(0, refreshed[0])
 
-      expect(first.onToggleTurn).toBeTypeOf('function')
-      expect(second.onToggleTurn).toBe(first.onToggleTurn)
+      // The row carries the key; the handler itself lives on the hook and stays
+      // stable for the scope, so a re-render never disturbs a row's memo.
+      expect(first.turnKey).toBe('u1')
+      expect(second.turnKey).toBe('u1')
+      const firstHandler = renderer!.root.findByType('result').props.disclosure.onToggleTurn
+      expect(firstHandler).toBeTypeOf('function')
+      act(() => {
+        renderer?.update(
+          createElement(Harness, { messages: [...refreshed], enabled: true, isWorking: false })
+        )
+      })
+      expect(renderer!.root.findByType('result').props.disclosure.onToggleTurn).toBe(firstHandler)
     } finally {
       vi.useRealTimers()
     }
@@ -124,10 +134,9 @@ describe('useMobileNativeChatTurnDisclosure', () => {
         act(() => {
           renderer?.update(createElement(Harness, { messages, enabled: true, isWorking: false }))
         })
-        const row = renderer!.root
-          .findByType('result')
-          .props.disclosure.resolveRow(index, messages[index])
-        act(() => row.onToggleTurn())
+        const disclosureNow = renderer!.root.findByType('result').props.disclosure
+        const row = disclosureNow.resolveRow(index, messages[index])
+        act(() => disclosureNow.onToggleTurn(row.turnKey))
       }
 
       const disclosure = renderer!.root.findByType('result').props.disclosure

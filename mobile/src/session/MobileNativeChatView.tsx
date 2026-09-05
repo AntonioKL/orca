@@ -275,6 +275,7 @@ export function MobileNativeChatView({
         onScrollToMessage={onScrollToMessage}
         onOpenFile={onOpenFile}
         structuredActivityUi={structuredActivityUi}
+        onToggleTurn={turns.onToggleTurn}
         {...turns.resolveRow(index, item)}
       />
     ),

@@ -105,6 +105,7 @@ function MobileNativeChatMessageImpl({
   onOpenFile,
   turnStatus,
   turnExpanded,
+  turnKey,
   onToggleTurn,
   activeTurnIsWorking,
   structuredActivityUi = false
@@ -122,7 +123,10 @@ function MobileNativeChatMessageImpl({
   turnStatus?: NativeChatTurnStatus | null
   /** Whether the turn caret has disclosed this turn's activity. */
   turnExpanded?: boolean
-  onToggleTurn?: () => void
+  /** Set only when this row's turn has settled and can disclose its activity. */
+  turnKey?: string
+  /** Stable across renders; the row supplies its own key when tapped. */
+  onToggleTurn?: (turnKey: string) => void
   /** Session-level working state for this message's turn; gates the live tool row. */
   activeTurnIsWorking?: boolean
   /** Structured lane only: live tool progress plus the turn-status disclosure. */
@@ -230,7 +234,7 @@ function MobileNativeChatMessageImpl({
           thinking={turnStatus.thinking}
           workedSeconds={turnStatus.workedSeconds}
           expanded={turnExpanded ?? false}
-          onToggleExpanded={turnStatus.workedSeconds != null ? onToggleTurn : undefined}
+          onToggleExpanded={turnKey && onToggleTurn ? () => onToggleTurn(turnKey) : undefined}
         />
       ) : null}
     </>

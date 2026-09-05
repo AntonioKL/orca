@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import {
   MOBILE_UNANCHORED_TURN_KEY,
@@ -13,7 +13,8 @@ const MAX_EXPANDED_TURNS = 128
 export type MobileNativeChatTurnRow = {
   turnStatus: NativeChatTurnStatus | null
   turnExpanded: boolean
-  onToggleTurn?: () => void
+  /** Set only on a settled turn — the one row that has activity to disclose. */
+  turnKey?: string
   activeTurnIsWorking: boolean
 }
 
@@ -35,6 +36,7 @@ export function useMobileNativeChatTurnDisclosure({
   active: NativeChatTurnStatus | null
   /** True when the live turn has no user message to hang its status row under. */
   activeTurnIsUnanchored: boolean
+  onToggleTurn: (turnKey: string) => void
   resolveRow: (index: number, message: NativeChatMessage) => MobileNativeChatTurnRow
 } {
   const turnStatuses = useMobileNativeChatTurnStatus({
@@ -67,55 +69,20 @@ export function useMobileNativeChatTurnDisclosure({
     },
     [scopeKey]
   )
-  // Why: a fresh closure per row per render defeats the message row's memo, and a
-  // streaming turn re-renders the list ~20x/s. One stable handler per turn instead.
-  const toggleHandlers = useRef<{
-    scopeKey: string
-    byTurn: Map<string, () => void>
-  }>({ scopeKey, byTurn: new Map() })
-  const toggleHandlerFor = useCallback(
-    (turnKey: string): (() => void) => {
-      if (toggleHandlers.current.scopeKey !== scopeKey) {
-        toggleHandlers.current = { scopeKey, byTurn: new Map() }
-      }
-      const existing = toggleHandlers.current.byTurn.get(turnKey)
-      if (existing) {
-        return existing
-      }
-      const handler = (): void => toggleExpandedTurn(turnKey)
-      toggleHandlers.current.byTurn.set(turnKey, handler)
-      return handler
-    },
-    [scopeKey, toggleExpandedTurn]
-  )
-
   // Resolve each row's turn boundary once — a findLast per row is quadratic on a
   // long transcript.
   const turnKeys = useMemo(() => {
-    if (toggleHandlers.current.scopeKey !== scopeKey) {
-      toggleHandlers.current = { scopeKey, byTurn: new Map() }
-    }
     if (!enabled) {
-      toggleHandlers.current.byTurn.clear()
       return EMPTY_TURN_KEYS
     }
     let turnKey: string | undefined
-    const keys = messages.map((message) => {
+    return messages.map((message) => {
       if (message.role === 'user') {
         turnKey = message.id
       }
       return turnKey
     })
-    // Drop handlers for turns that left the transcript so a long session does not
-    // retain a closure per turn forever.
-    const live = new Set(keys.filter((key): key is string => key !== undefined))
-    for (const key of toggleHandlers.current.byTurn.keys()) {
-      if (!live.has(key)) {
-        toggleHandlers.current.byTurn.delete(key)
-      }
-    }
-    return keys
-  }, [enabled, messages, scopeKey])
+  }, [enabled, messages])
 
   const { active, activeTurnKey, completedByTurn } = turnStatuses
   const resolveRow = useCallback(
@@ -132,10 +99,11 @@ export function useMobileNativeChatTurnDisclosure({
       return {
         turnStatus,
         turnExpanded: turnKey ? expandedTurnIds.has(turnKey) : false,
-        // Only a settled turn has anything to disclose; leaving the handler off
-        // every other row keeps their props identity-stable.
-        onToggleTurn:
-          turnKey && turnStatus?.workedSeconds != null ? toggleHandlerFor(turnKey) : undefined,
+        // Why: the key travels and the row calls one stable handler with it. A
+        // closure per row would be a new identity every render of a streaming
+        // transcript, defeating the row's memo; caching one per turn would mean
+        // writing a ref during render, which react-freeze can discard.
+        turnKey: turnKey && turnStatus?.workedSeconds != null ? turnKey : undefined,
         // With no user boundary at all, the session's working state stays authoritative.
         activeTurnIsWorking:
           enabled &&
@@ -144,20 +112,13 @@ export function useMobileNativeChatTurnDisclosure({
             (turnKey === undefined && activeTurnKey === MOBILE_UNANCHORED_TURN_KEY))
       }
     },
-    [
-      turnKeys,
-      enabled,
-      activeTurnKey,
-      active,
-      completedByTurn,
-      expandedTurnIds,
-      toggleHandlerFor,
-      isWorking
-    ]
+    [turnKeys, enabled, activeTurnKey, active, completedByTurn, expandedTurnIds, isWorking]
   )
 
   return {
     active,
+    /** Stable for a given chat scope, so it never disturbs a row's memo. */
+    onToggleTurn: toggleExpandedTurn,
     activeTurnIsUnanchored:
       enabled && active != null && activeTurnKey === MOBILE_UNANCHORED_TURN_KEY,
     resolveRow
