@@ -191,6 +191,31 @@ describe('nativeChat.readSession clientKind truncation gating', () => {
     expect(block.text).toBe(text)
   })
 
+  it('bounds a subagent roster before it reaches mobile', async () => {
+    const agents = Array.from({ length: 100 }, (_, index) => ({
+      id: `task-${index}`,
+      label: 'l'.repeat(600),
+      state: 'working'
+    }))
+    cachedResult.value = {
+      messages: [
+        {
+          ...makeMessage(''),
+          blocks: [{ type: 'subagent-group', groupId: 'g', agents }]
+        }
+      ]
+    }
+    const result = await readSessionHandler()(
+      { agent: 'claude', sessionId: 's' },
+      ctxWith('mobile')
+    )
+    const block = (result as { messages: NativeChatMessage[] }).messages[0].blocks[0] as {
+      agents: { label: string }[]
+    }
+    expect(block.agents).toHaveLength(64)
+    expect(block.agents[0].label).toBe(`${'l'.repeat(512)}\n… (truncated)`)
+  })
+
   it('clips a pathological text block at the safety ceiling for mobile clients', async () => {
     const text = 'y'.repeat(70_000)
     cachedResult.value = { messages: [makeTextMessage(text)] }

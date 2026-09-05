@@ -6,6 +6,7 @@ export const MAX_WORKER_TRANSCRIPT_MESSAGE_LIMIT = 50
 const MAX_WORKER_TRANSCRIPT_BLOCKS = 6
 const MAX_WORKER_TRANSCRIPT_BLOCK_CHARS = 1_200
 const MAX_WORKER_TRANSCRIPT_INPUT_ITEMS = 20
+const MAX_WORKER_TRANSCRIPT_SUBAGENTS = 20
 const MAX_WORKER_TRANSCRIPT_INPUT_NODES = 100
 const MAX_WORKER_TRANSCRIPT_RESPONSE_BYTES = 512 * 1024
 const TRUNCATION_MARKER = '\n… (truncated)'
@@ -94,6 +95,16 @@ function boundBlock(block: NativeChatBlock, warnings: Set<string>): NativeChatBl
       ...block,
       name: clipMetadata(block.name, warnings),
       input: boundToolInput(block.input, budget, 0, warnings)
+    }
+  }
+  if (block.type === 'subagent-group') {
+    const agents = block.agents.slice(0, MAX_WORKER_TRANSCRIPT_SUBAGENTS)
+    if (agents.length < block.agents.length) {
+      warnings.add('Some subagent roster entries were omitted from transcript output.')
+    }
+    return {
+      ...block,
+      agents: agents.map((agent) => ({ ...agent, label: clipMetadata(agent.label, warnings) }))
     }
   }
   if (block.path || (block.url && isLocalFileLocator(block.url))) {

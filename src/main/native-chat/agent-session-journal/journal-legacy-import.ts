@@ -47,6 +47,8 @@ export type LegacyImportOptions = ResolveSessionFileOptions & {
 }
 
 const MAX_LEGACY_IMPORT_SOURCE_BYTES = 16 * 1024 * 1024
+/** A roster is a status list; an imported one is as untrusted as any other block. */
+const MAX_LEGACY_IMPORT_SUBAGENTS = 64
 
 export type LegacyImportResult =
   | {
@@ -267,6 +269,14 @@ function boundBlock(block: NativeChatBlock, limits: JournalPayloadLimits): Nativ
   }
   if (block.type === 'tool-call') {
     return { ...block, input: boundToolInput(block.input, limits) }
+  }
+  if (block.type === 'subagent-group') {
+    return {
+      ...block,
+      agents: block.agents
+        .slice(0, MAX_LEGACY_IMPORT_SUBAGENTS)
+        .map((agent) => ({ ...agent, label: boundInlineText(agent.label, limits).text }))
+    }
   }
   return block
 }

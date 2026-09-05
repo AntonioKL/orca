@@ -31,6 +31,36 @@ describe('worker transcript wire bounds', () => {
     expect(result.warnings).toContain('Local image paths were omitted from transcript output.')
   })
 
+  it('bounds a subagent roster instead of passing it through whole', () => {
+    const result = boundWorkerTranscriptMessages([
+      {
+        id: 'message-1',
+        role: 'assistant',
+        timestamp: null,
+        source: 'transcript',
+        blocks: [
+          {
+            type: 'subagent-group',
+            groupId: 'g',
+            agents: Array.from({ length: 40 }, (_, index) => ({
+              id: `task-${index}`,
+              label: 'l'.repeat(900),
+              state: 'working'
+            }))
+          }
+        ]
+      }
+    ])
+
+    const block = result.messages[0]?.blocks[0]
+    expect(block?.type).toBe('subagent-group')
+    expect(block?.type === 'subagent-group' && block.agents).toHaveLength(20)
+    expect(block?.type === 'subagent-group' && block.agents[0]?.label).toHaveLength(512)
+    expect(result.warnings).toContain(
+      'Some subagent roster entries were omitted from transcript output.'
+    )
+  })
+
   it('keeps fallback identifiers stable without exposing the transcript path', () => {
     const transcriptPath = 'C:\\Users\\worker\\.codex\\session.jsonl'
     const message = {
