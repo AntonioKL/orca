@@ -22,6 +22,10 @@ import {
 import type { AgentSessionAttachParams } from '../../../native-chat/agent-session-wire/structured-agent-session-attach'
 import { STRUCTURED_AGENT_SESSION_HOLD_METHODS } from './structured-agent-session-hold'
 import {
+  bindStructuredAgentSessionStream,
+  STRUCTURED_AGENT_SESSION_STATUS_METHODS
+} from './structured-agent-session-status-stream'
+import {
   AttachParams,
   CancelParams,
   CreateParams,
@@ -223,33 +227,12 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
       // Retain-only: reading history must never be what starts a provider process. Current clients
       // explicitly hold every open surface before subscribing.
       const streamHolder = `subscription:${subscriptionId}`
-      let closed = false
       let dispose = (): void => {}
-      let releaseTransportSubscription = (): void => {}
-      const onTransportAbort = (): void => releaseTransportSubscription()
-      const cleanup = () => {
-        closed = true
-        ctx.signal?.removeEventListener('abort', onTransportAbort)
+      const stream = bindStructuredAgentSessionStream(ctx, subscriptionId, () => {
         dispose()
         host.release(params.sessionId, streamHolder)
-      }
-      let registration: { releaseIfCurrent: () => void }
-      if (typeof ctx.runtime.registerOwnedSubscriptionCleanup === 'function') {
-        registration = ctx.runtime.registerOwnedSubscriptionCleanup(
-          subscriptionId,
-          cleanup,
-          ctx.connectionId
-        )
-      } else {
-        ctx.runtime.registerSubscriptionCleanup(subscriptionId, cleanup, ctx.connectionId)
-        registration = { releaseIfCurrent: () => ctx.runtime.cleanupSubscription(subscriptionId) }
-      }
-      releaseTransportSubscription = registration.releaseIfCurrent
-      ctx.signal?.addEventListener('abort', onTransportAbort, { once: true })
-      if (ctx.signal?.aborted) {
-        onTransportAbort()
-      }
-      if (closed) {
+      })
+      if (stream.isClosed()) {
         return
       }
       // The host emits the opening snapshot (or the missed batch) synchronously
@@ -260,7 +243,7 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
         emit,
         ...(params.cursor ? { cursor: params.cursor } : {})
       })
-      if (closed) {
+      if (stream.isClosed()) {
         dispose()
       } else {
         // Fire-and-forget, but never unhandled: a resume that refuses leaves the stream holding a
@@ -289,5 +272,6 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
       return { unsubscribed: true }
     }
   }),
-  ...STRUCTURED_AGENT_SESSION_HOLD_METHODS
+  ...STRUCTURED_AGENT_SESSION_HOLD_METHODS,
+  ...STRUCTURED_AGENT_SESSION_STATUS_METHODS
 ]

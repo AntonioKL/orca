@@ -102,6 +102,12 @@ const STRUCTURED_CALLS: {
   // A subscription that opens with nothing to say answers with no reply at all,
   // so reaching the host is the only signal that the gate opened.
   { method: 'agentSession.subscribe', hostMethod: 'subscribe' },
+  // The status feed opens with a snapshot of every session, so its first reply is the contract.
+  {
+    method: 'agentSession.subscribeStatus',
+    hostMethod: 'subscribeStatus',
+    result: { type: 'snapshot', sessions: [] }
+  },
   // Teardown runs through the runtime's subscription registry rather than the
   // host, so its reply is the only signal that the gate opened.
   { method: 'agentSession.unsubscribe', hostMethod: null, result: { unsubscribed: true } }
@@ -315,6 +321,10 @@ function structuredHostStub(): Record<string, ReturnType<typeof vi.fn>> {
     readOptions: vi.fn(async () => ({ models: [], current: { model: 'gpt-live' } })),
     history: vi.fn(() => ({ ok: true, page: { items: [] } })),
     subscribe: vi.fn(() => () => undefined),
+    subscribeStatus: vi.fn((subscriber: { emit: (event: unknown) => void }) => {
+      subscriber.emit({ type: 'snapshot', sessions: [] })
+      return () => undefined
+    }),
     unsubscribe: vi.fn()
   }
 }

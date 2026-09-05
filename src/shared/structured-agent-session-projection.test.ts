@@ -6,6 +6,7 @@ import {
   hasPersistedStructuredAgentSessionTurn,
   projectStructuredItemToNativeChat,
   projectStructuredAgentSessionStatus,
+  projectStructuredAgentSessionStatusSummary,
   structuredAgentSessionPaneKey
 } from './structured-agent-session-projection'
 
@@ -42,6 +43,40 @@ describe('structured agent session status projection', () => {
     expect(projectStructuredAgentSessionStatus([running, prompt])).toBe('attention')
     expect(activeStructuredAgentSessionTurnId([running, completed])).toBeNull()
     expect(projectStructuredAgentSessionStatus([running, completed])).toBe('idle')
+  })
+
+  it('summarizes status with the newest user prompt, and null before any persisted turn', () => {
+    const running = item('running', 3, {
+      kind: 'status',
+      text: 'Working',
+      turnLifecycle: { turnId: 'turn-1', state: 'running' }
+    })
+    const first = item('first', 1, {
+      kind: 'message',
+      role: 'user',
+      blocks: [{ type: 'text', text: 'first' }]
+    })
+    const second = item('second', 2, {
+      kind: 'message',
+      role: 'user',
+      blocks: [
+        { type: 'text', text: 'second' },
+        { type: 'text', text: 'line' }
+      ]
+    })
+
+    expect(projectStructuredAgentSessionStatusSummary([running])).toEqual({
+      status: null,
+      latestPrompt: ''
+    })
+    expect(projectStructuredAgentSessionStatusSummary([first, second, running])).toEqual({
+      status: 'working',
+      latestPrompt: 'second\nline'
+    })
+    expect(projectStructuredAgentSessionStatusSummary([first, second])).toEqual({
+      status: 'idle',
+      latestPrompt: 'second\nline'
+    })
   })
 
   it('creates a deterministic pane identity for status stores', () => {

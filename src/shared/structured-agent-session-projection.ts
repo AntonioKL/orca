@@ -146,6 +146,32 @@ export function projectStructuredAgentSessionStatus(
   return activeStructuredAgentSessionTurnId(items) ? 'working' : 'idle'
 }
 
+/** The newest user prompt, as the sidebar quotes it. */
+export function latestStructuredAgentSessionPrompt(
+  items: readonly AgentJournalRenderItem[]
+): string {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const body = items[index]?.body
+    if (body?.kind === 'message' && body.role === 'user') {
+      return body.blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n')
+    }
+  }
+  return ''
+}
+
+/** One projection shared by host and client: null status means "no turn yet", not idle. */
+export function projectStructuredAgentSessionStatusSummary(
+  items: readonly AgentJournalRenderItem[]
+): { status: StructuredAgentSessionProjectedStatus | null; latestPrompt: string } {
+  if (!hasPersistedStructuredAgentSessionTurn(items)) {
+    return { status: null, latestPrompt: '' }
+  }
+  return {
+    status: projectStructuredAgentSessionStatus(items),
+    latestPrompt: latestStructuredAgentSessionPrompt(items)
+  }
+}
+
 export function structuredAgentSessionPaneKey(tabId: string, sessionId: string): string {
   const bytes = sha256(new TextEncoder().encode(sessionId))
   const hex = Array.from(bytes.slice(0, 16), (byte) => byte.toString(16).padStart(2, '0')).join('')

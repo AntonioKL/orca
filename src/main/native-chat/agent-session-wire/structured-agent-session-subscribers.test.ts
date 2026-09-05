@@ -70,6 +70,39 @@ describe('AgentSessionSubscribers', () => {
     ])
   })
 
+  it('reports every content publication to the journal hook, subscribed or not', async () => {
+    const journal = await journals.open({
+      identity: {
+        sessionId: SESSION,
+        workspaceId: 'workspace-1',
+        hostId: 'local',
+        agent: 'codex',
+        providerHandle: { kind: 'codex', threadId: 'thread-1' }
+      },
+      journalDir: join(root, 'hook-journal')
+    })
+    const published: string[] = []
+    const subscribers = new AgentSessionSubscribers({
+      onJournalPublished: (sessionId, published_journal) => {
+        expect(published_journal).toBe(journal)
+        published.push(sessionId)
+      }
+    })
+
+    subscribers.publish(SESSION, journal)
+    subscribers.reset(SESSION, journal, 'epoch_changed', 1)
+    subscribers.snapshot(SESSION, journal, 1)
+    subscribers.handoff(SESSION, 1, {
+      owner: 'native',
+      direction: null,
+      phase: 'idle',
+      stage: null,
+      operationId: null
+    })
+
+    expect(published).toEqual([SESSION, SESSION, SESSION])
+  })
+
   it('publishes handoff-only changes without serializing a transcript snapshot', async () => {
     const journal = await journals.open({
       identity: {

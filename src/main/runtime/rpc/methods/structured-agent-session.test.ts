@@ -122,6 +122,10 @@ function hostStub(): StructuredAgentSessionHost {
     })),
     history: vi.fn(() => ({ ok: true, page: { items: [] } })),
     subscribe: vi.fn(() => () => undefined),
+    subscribeStatus: vi.fn((subscriber: { emit: (event: unknown) => void }) => {
+      subscriber.emit({ type: 'snapshot', sessions: [] })
+      return () => undefined
+    }),
     unsubscribe: vi.fn()
   }
   return hostCalls as unknown as StructuredAgentSessionHost
@@ -240,7 +244,7 @@ describe('capability gating', () => {
     }
     // Bump deliberately: the whole agentSession.* surface is behind the structured capability,
     // so an additive method is invisible to old clients and needs no protocol bump.
-    expect(STRUCTURED_AGENT_SESSION_METHODS).toHaveLength(17)
+    expect(STRUCTURED_AGENT_SESSION_METHODS).toHaveLength(18)
   })
 
   it('hides the surface from a declared client that did not advertise it', async () => {
@@ -568,5 +572,19 @@ describe('parameter validation', () => {
       STRUCTURED_CLIENT
     )
     expect(response).toMatchObject({ ok: true })
+  })
+})
+
+describe('agentSession.subscribeStatus', () => {
+  it('is invisible to a client without the structured capability', async () => {
+    const reply = await call('agentSession.subscribeStatus', null, { clientKind: 'runtime' })
+    expect(reply.ok).toBe(false)
+    expect(hostCalls.subscribeStatus).not.toHaveBeenCalled()
+  })
+
+  it('opens the host status feed with the snapshot as its first reply', async () => {
+    const reply = await call('agentSession.subscribeStatus', null, STRUCTURED_CLIENT)
+    expect(reply).toMatchObject({ ok: true, result: { type: 'snapshot', sessions: [] } })
+    expect(hostCalls.subscribeStatus).toHaveBeenCalledOnce()
   })
 })
