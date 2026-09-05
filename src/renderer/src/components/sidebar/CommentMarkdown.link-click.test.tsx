@@ -386,6 +386,58 @@ describe('CommentMarkdown link click handler', () => {
     })
   })
 
+  it('requires path shape before a spaced line suffix can make a link', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content='Keep `aspect 16:9` and "John 3:16" as references.'
+          onLinkClick={vi.fn()}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    expect(container.querySelectorAll('a')).toHaveLength(0)
+    expect(container.querySelector('code')?.textContent).toBe('aspect 16:9')
+    expect(container.textContent).toContain('"John 3:16"')
+  })
+
+  it('preserves line suffixes on valid spaced path shapes', () => {
+    const content =
+      'Open "My Folder/notes:12", `My Notes.md:7`, and "C:\\My Folder\\notes.txt:12:3".'
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content={content}
+          onLinkClick={vi.fn()}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    const anchors = Array.from(container.querySelectorAll<HTMLAnchorElement>('a'))
+    expect(anchors.map((anchor) => anchor.textContent)).toEqual([
+      'My Folder/notes:12',
+      'My Notes.md:7',
+      String.raw`C:\My Folder\notes.txt:12:3`
+    ])
+    expect(anchors.map((anchor) => routeNativeChatHref(anchor.getAttribute('href')))).toEqual([
+      { kind: 'file', pathText: 'My Folder/notes:12', line: null },
+      { kind: 'file', pathText: 'My Notes.md:7', line: null },
+      { kind: 'file', pathText: String.raw`C:\My Folder\notes.txt:12:3`, line: null }
+    ])
+  })
+
   it('links complete Unicode paths and extensions that begin with a digit', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
