@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { agentJournalItemKey } from '../../shared/agent-session-journal-item-key'
+import { createToolInputDisplay } from '../../shared/native-chat-tool-summary'
 import {
   codexItemBody,
   codexItemIdentity,
@@ -216,12 +217,9 @@ describe('codex item bodies', () => {
     ).toEqual({
       kind: 'tool-call',
       name: 'read',
-      input: {
-        command: "sed -n '1,200p' notes.txt",
-        cwd: '/repo',
-        path: '/repo/notes.txt',
-        name: 'notes.txt'
-      },
+      // `name` is the target's basename, which `path` already carries and no
+      // label ever reads, so it stays out of the bounded journal payload.
+      input: { command: "sed -n '1,200p' notes.txt", cwd: '/repo', path: '/repo/notes.txt' },
       state: 'completed'
     })
   })
@@ -265,23 +263,91 @@ describe('codex item bodies', () => {
     })
   })
 
-  it('names a classified listFiles command `list` and stands `.` in for a null path', () => {
+  it('names a classified listFiles command `list` and invents no target for a null path', () => {
+    const body = codexItemBody({
+      type: 'commandExecution',
+      id: 'item-list',
+      command: 'ls',
+      cwd: '/repo',
+      status: 'completed',
+      exitCode: 0,
+      commandActions: [{ type: 'listFiles', command: 'ls', path: null }]
+    })
+
+    expect(body).toEqual({
+      kind: 'tool-call',
+      name: 'list',
+      input: { command: 'ls', cwd: '/repo' },
+      state: 'completed'
+    })
+    // A stand-in `.` reaches mobile as a tappable "open file" link onto a
+    // directory, which can only fail. The raw command is the honest label.
+    const display = createToolInputDisplay(body?.kind === 'tool-call' ? body.input : null)
+    expect(display.filePath).toBeNull()
+    expect(display.label).toBe('ls')
+  })
+
+  it('keeps the shell row when one command did two different classified things', () => {
+    // `cat a.txt && ls src` classifies as a read and a listing; naming the row
+    // after either drops the other.
     expect(
       codexItemBody({
         type: 'commandExecution',
-        id: 'item-list',
-        command: 'ls',
+        id: 'item-mixed',
+        command: 'cat a.txt && ls src',
         cwd: '/repo',
         status: 'completed',
         exitCode: 0,
-        commandActions: [{ type: 'listFiles', command: 'ls', path: null }]
+        commandActions: [
+          { type: 'read', command: 'cat a.txt', name: 'a.txt', path: 'a.txt' },
+          { type: 'listFiles', command: 'ls src', path: 'src' }
+        ]
       })
     ).toEqual({
       kind: 'tool-call',
-      name: 'list',
-      input: { command: 'ls', cwd: '/repo', path: '.' },
+      name: 'shell',
+      input: { command: 'cat a.txt && ls src', cwd: '/repo' },
       state: 'completed'
     })
+  })
+
+  it('keeps one class run twice, naming no target when the two disagree', () => {
+    expect(
+      codexItemBody({
+        type: 'commandExecution',
+        id: 'item-two-reads',
+        command: 'cat a.ts && cat b.ts',
+        cwd: '/repo',
+        status: 'completed',
+        exitCode: 0,
+        commandActions: [
+          { type: 'read', command: 'cat a.ts', path: 'a.ts' },
+          { type: 'read', command: 'cat b.ts', path: 'b.ts' }
+        ]
+      })
+    ).toEqual({
+      kind: 'tool-call',
+      name: 'read',
+      input: { command: 'cat a.ts && cat b.ts', cwd: '/repo' },
+      state: 'completed'
+    })
+  })
+
+  it('keeps a target both entries of one class name', () => {
+    expect(
+      codexItemBody({
+        type: 'commandExecution',
+        id: 'item-same-read',
+        command: 'head a.ts && tail a.ts',
+        cwd: '/repo',
+        status: 'completed',
+        exitCode: 0,
+        commandActions: [
+          { type: 'read', command: 'head a.ts', path: 'a.ts' },
+          { type: 'read', command: 'tail a.ts', path: 'a.ts' }
+        ]
+      })
+    ).toMatchObject({ name: 'read', input: { path: 'a.ts' } })
   })
 
   it('keeps the listed directory when listFiles carries one', () => {
@@ -331,7 +397,7 @@ describe('codex item bodies', () => {
           { type: 'read', command: 'cat a.ts', name: 'a.ts', path: 'a.ts' }
         ]
       })
-    ).toMatchObject({ name: 'read', input: { path: 'a.ts', name: 'a.ts' } })
+    ).toMatchObject({ name: 'read', input: { path: 'a.ts' } })
   })
 
   it('falls back to the unclassified shell row for absent or malformed commandActions', () => {

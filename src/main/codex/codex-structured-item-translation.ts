@@ -178,27 +178,29 @@ export type CodexJournalItem = {
 /**
  * Codex's own classification of a shell call: the tool name to show, and the
  * fields worth lifting into `input` for the shared label helper (`path` as a
- * target, `query` as a search term, `name` as the read target's basename).
- * A `Map`, not an object — an object index answers `__proto__` with a truthy
- * non-string. Every other action type stays an unclassified `shell` row.
+ * target, `query` as a search term). A `Map`, not an object — an object index
+ * answers `__proto__` with a truthy non-string. Every other action type stays an
+ * unclassified `shell` row.
+ *
+ * Nothing is invented for a field Codex sends as null: a stand-in path is a
+ * claim about a target, and the label helper turns any path into a file link.
  */
 type CommandActionClass = {
   name: string
   keys: readonly string[]
-  /** Stand-in target when Codex classifies the command but sends no field for it. */
-  fallback?: Record<string, string>
 }
 
 const COMMAND_ACTION_CLASSES = new Map<string, CommandActionClass>([
-  ['read', { name: 'read', keys: ['path', 'name'] }],
+  ['read', { name: 'read', keys: ['path'] }],
   ['search', { name: 'search', keys: ['query', 'path'] }],
-  // A bare `ls` arrives with `path: null`; its target is the cwd, so say so
-  // rather than leaving the row as a word with no argument.
-  ['listFiles', { name: 'list', keys: ['path'], fallback: { path: '.' } }]
+  ['listFiles', { name: 'list', keys: ['path'] }]
 ])
 
-/** The first classified `commandActions` entry; null leaves the row exactly as
- *  a Codex that sends no classification renders it. */
+/** The one class every classified `commandActions` entry agrees on, with the
+ *  fields they all agree on; null leaves the row exactly as a Codex that sends no
+ *  classification renders it. `cat a.txt && ls src` classifies as two different
+ *  things, and naming that row after either would drop the other, so it stays a
+ *  `shell` row that shows the whole command. */
 function commandActionFacts(
   item: CodexThreadItem
 ): { name: string; fields: Record<string, string> } | null {
@@ -206,6 +208,7 @@ function commandActionFacts(
   if (!Array.isArray(actions)) {
     return null
   }
+  let matched: { name: string; fields: Record<string, string> } | null = null
   for (const action of actions) {
     const record = readRecord(action)
     const type = readString(record, 'type')
@@ -213,16 +216,28 @@ function commandActionFacts(
     if (classified === undefined) {
       continue
     }
-    const fields: Record<string, string> = { ...classified.fallback }
-    for (const key of classified.keys) {
-      const value = readString(record, key)
-      if (value !== null) {
-        fields[key] = value
+    if (matched === null) {
+      const fields: Record<string, string> = {}
+      for (const key of classified.keys) {
+        const value = readString(record, key)
+        if (value !== null) {
+          fields[key] = value
+        }
+      }
+      matched = { name: classified.name, fields }
+      continue
+    }
+    if (matched.name !== classified.name) {
+      return null
+    }
+    // The same class twice keeps the class, but only a target both entries name.
+    for (const [key, value] of Object.entries(matched.fields)) {
+      if (readString(record, key) !== value) {
+        delete matched.fields[key]
       }
     }
-    return { name: classified.name, fields }
   }
-  return null
+  return matched
 }
 
 function commandItem(item: CodexThreadItem): CodexJournalItem {
