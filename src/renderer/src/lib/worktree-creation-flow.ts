@@ -1,3 +1,4 @@
+import type { CreateWorktreeResult } from '../../../shared/worktree/create-types'
 import { useAppStore } from '@/store'
 import {
   findPendingLinkedWorkItemCreationId,
@@ -46,7 +47,10 @@ function revealPendingCreation(
  * immediately and the work outlives the now-closed modal. Progress and errors
  * surface on the pending creation's sidebar row and content panel.
  */
-export function runBackgroundWorktreeCreation(request: WorktreeCreationRequest): string {
+export function runBackgroundWorktreeCreation(
+  request: WorktreeCreationRequest,
+  retainedCreation?: Promise<CreateWorktreeResult>
+): string {
   const store = useAppStore.getState()
   const existingCreationId = findPendingLinkedWorkItemCreationId(
     store.pendingWorktreeCreations,
@@ -62,7 +66,7 @@ export function runBackgroundWorktreeCreation(request: WorktreeCreationRequest):
   // client over plain HTTP). createBrowserUuid falls back to getRandomValues.
   const creationId = createBrowserUuid()
   revealPendingCreation(creationId, request, getInitialWorktreeCreationPhase(request))
-  void executeWorktreeCreation(creationId, request)
+  void executeWorktreeCreation(creationId, request, retainedCreation)
   return creationId
 }
 

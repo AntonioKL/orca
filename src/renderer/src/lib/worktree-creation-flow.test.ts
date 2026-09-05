@@ -1,3 +1,5 @@
+import { executeWorktreeCreation } from './worktree-creation-flow-execute'
+import type { CreateWorktreeResult } from '../../../shared/worktree/create-types'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   PendingWorktreeCreation,
@@ -513,20 +515,20 @@ describe('staged background worktree creation', () => {
     expect(store.setSidebarOpen).not.toHaveBeenCalled()
   })
 
-  it('keeps a backend startup terminal in the background after the user leaves', async () => {
+  it('adopts a retained terminal without recreating it or stealing focus', async () => {
     store.activeView = 'tasks'
-    store.createWorktree.mockResolvedValueOnce({
+    const retained = Promise.resolve({
       worktree: {
         id: 'wt-1',
         repoId: 'repo-1'
       },
       startupTerminal: { tabId: 'agent-tab', spawned: true }
-    })
+    } as CreateWorktreeResult)
 
-    const request = makeRequest({ startup: { command: '' } })
-    continueBackgroundWorktreeCreation('creation-1', request, { revealCreationSurface: false })
+    void executeWorktreeCreation('creation-1', makeRequest({ startup: { command: '' } }), retained)
 
     await flushAsyncWorktreeCreation()
+    expect(store.createWorktree).not.toHaveBeenCalled()
     expect(activateAndRevealWorktree).not.toHaveBeenCalled()
     expect(ensureWorktreeHasInitialTerminal).toHaveBeenCalledWith(
       store,
