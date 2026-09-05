@@ -27,12 +27,7 @@ function harness() {
   const translator = createClaudeJournalTranslator({ sink, fallbackIdPrefix: 'test' })
   const groupRows = () =>
     items.filter((item) => orcaClientMessageId(item.identity) === GROUP_ITEM_ID)
-  /** The last roster row written for one turn, so a test can read a turn that is
-   *  no longer the live one. */
-  const rosterOf = (turnUuid: string): NativeChatSubagentEntry[] => {
-    const body = items.findLast(
-      (item) => orcaClientMessageId(item.identity) === `claude-subagents:claude-session:${turnUuid}`
-    )?.body
+  const agentsOf = (body: AgentJournalItemBody | undefined): NativeChatSubagentEntry[] => {
     if (!body || body.kind !== 'message') {
       return []
     }
@@ -41,21 +36,21 @@ function harness() {
     )
     return block ? block.agents : []
   }
-  const roster = (): NativeChatSubagentEntry[] => {
-    const body = groupRows().at(-1)?.body
-    if (!body || body.kind !== 'message') {
-      return []
-    }
-    const block = body.blocks.find(
-      (candidate): candidate is NativeChatSubagentGroupBlock => candidate.type === 'subagent-group'
+  /** The last roster row written for one group, so a test can read a group that
+   *  is no longer the live one. */
+  const rosterIn = (groupId: string): NativeChatSubagentEntry[] =>
+    agentsOf(
+      items.findLast((item) => orcaClientMessageId(item.identity) === `claude-subagents:${groupId}`)
+        ?.body
     )
-    return block ? block.agents : []
-  }
+  const rosterOf = (turnUuid: string): NativeChatSubagentEntry[] =>
+    rosterIn(`claude-session:${turnUuid}`)
+  const roster = (): NativeChatSubagentEntry[] => agentsOf(groupRows().at(-1)?.body)
   const fallbackRows = (): AgentJournalItemBody[] =>
     items
       .filter((item) => (orcaClientMessageId(item.identity) ?? '').startsWith('provider-frame:'))
       .map((item) => item.body)
-  return { translator, groupRows, roster, rosterOf, fallbackRows }
+  return { translator, groupRows, roster, rosterIn, rosterOf, fallbackRows }
 }
 
 function userTurn(uuid: string) {
@@ -225,5 +220,40 @@ describe('claude journal translation — subagents', () => {
     )
     expect(rosterOf('user-1')).toEqual([expect.objectContaining({ state: 'unverifiable' })])
     expect(rosterOf('user-2')).toEqual([expect.objectContaining({ state: 'working' })])
+  })
+
+  it('does not let an unrelated turn end settle a child announced outside a turn', () => {
+    const { translator, rosterIn } = harness()
+    // No turn is live yet, so this child has no turn key to belong to.
+    translator.handle(
+      systemFrame('task_started', {
+        task_id: 'task-early',
+        task_type: 'local_agent',
+        description: 'Before the turn'
+      })
+    )
+    translator.handle(userTurn('user-1'))
+    translator.handle(resultFrame())
+    expect(rosterIn('outside-turn')).toEqual([expect.objectContaining({ state: 'working' })])
+    // The outcome still lands, which a latched `unverifiable` would have lost.
+    translator.handle(
+      systemFrame('task_updated', { task_id: 'task-early', patch: { status: 'completed' } })
+    )
+    expect(rosterIn('outside-turn')).toEqual([expect.objectContaining({ state: 'completed' })])
+  })
+
+  it('settles a child left outside every turn when the session ends', () => {
+    const { translator, rosterIn } = harness()
+    translator.handle(
+      systemFrame('task_started', {
+        task_id: 'task-early',
+        task_type: 'local_agent',
+        description: 'Before the turn'
+      })
+    )
+    translator.handle(userTurn('user-1'))
+    translator.handle(resultFrame())
+    translator.handle({ type: 'ended', sessionId: 'orca-session', reason: 'closed' })
+    expect(rosterIn('outside-turn')).toEqual([expect.objectContaining({ state: 'unverifiable' })])
   })
 })

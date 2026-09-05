@@ -46,7 +46,9 @@ type RosterGroup = {
   /** Insertion order is the display order; the map holds the state. */
   entries: Map<string, TrackedEntry>
   /** High-water mark of claims per label, so a repeat gets an ordinal suffix.
-   *  It never decreases: re-issuing an ordinal would print two identical rows. */
+   *  It never decreases: re-issuing an ordinal would print two identical rows.
+   *  Growing it past the entry cap takes a stream that re-announces a rostered
+   *  agent as a shell task, which churns the row far harder than the map. */
   labelCounts: Map<string, number>
   /** Last body written, so an idempotent replay writes no new revision. */
   lastSerialized: string | null
@@ -166,13 +168,11 @@ export class ClaudeSubagentRoster {
    * explicitly told to outlive the turn and is left alone.
    */
   settleTurn(groupKey: string | null): void {
-    const ending = groupKey ?? OUTSIDE_TURN
-    this.sweep(this.groups.get(ending), false)
-    if (ending !== OUTSIDE_TURN) {
-      // Children Claude reported before any turn key existed sit here, and no
-      // turn will ever name this group, so every turn end sweeps it too.
-      this.sweep(this.groups.get(OUTSIDE_TURN), false)
-    }
+    // Only the group this key names. `OUTSIDE_TURN` belongs to no turn, so an
+    // unrelated turn ending is no evidence about a child announced outside it —
+    // and `unverifiable` latches, so sweeping it there would swallow the
+    // `completed` that still arrives. `settleSession` reaches what no turn does.
+    this.sweep(this.groups.get(groupKey ?? OUTSIDE_TURN), false)
   }
 
   /** The provider is gone. Nothing more will arrive for any child, backgrounded

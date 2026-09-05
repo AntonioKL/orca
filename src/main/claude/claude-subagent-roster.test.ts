@@ -296,6 +296,21 @@ describe('ClaudeSubagentRoster', () => {
       expect(items).toHaveLength(0)
     })
 
+    it('still rosters a subagent announced after a task the filter rejected', () => {
+      const { roster, roles } = harness()
+      roster.observeSystemFrame(
+        system('task_started', { task_id: 'task-bash', task_type: 'local_bash' })
+      )
+      // The gate closes the child-traffic fallback, never the announcement path.
+      roster.observeSystemFrame(
+        started({ task_id: 'task-1', tool_use_id: 'toolu_1', description: 'Explore' })
+      )
+      roster.observeChildActivity('toolu_1')
+      expect(roles()).toEqual([
+        expect.objectContaining({ id: 'task-1', label: 'Explore', state: 'working' })
+      ])
+    })
+
     it('leaves a grandchild parented inside the sidechain out of the roster', () => {
       const { roster, roles } = harness()
       roster.observeSystemFrame(
@@ -362,14 +377,36 @@ describe('ClaudeSubagentRoster', () => {
 })
 
 describe('ClaudeSubagentRoster — the turn that is ending', () => {
-  it('sweeps children rostered before any turn key existed', () => {
+  it('leaves a child announced outside any turn alone when an unrelated turn ends', () => {
     const { roster, rolesIn, setGroupKey } = harness(null)
     roster.observeSystemFrame(started({ task_id: 'task-early', description: 'Early' }))
     setGroupKey(TURN_1)
     roster.observeSystemFrame(started({ task_id: 'task-turn', description: 'In turn' }))
     roster.settleTurn(TURN_1)
-    expect(rolesIn('outside-turn')).toEqual([expect.objectContaining({ state: 'unverifiable' })])
+    expect(rolesIn('outside-turn')).toEqual([expect.objectContaining({ state: 'working' })])
     expect(rolesIn(TURN_1)).toEqual([expect.objectContaining({ state: 'unverifiable' })])
+    // `unverifiable` latches, so sweeping it above would have swallowed this.
+    roster.observeSystemFrame(
+      system('task_updated', { task_id: 'task-early', patch: { status: 'completed' } })
+    )
+    expect(rolesIn('outside-turn')).toEqual([expect.objectContaining({ state: 'completed' })])
+  })
+
+  it('sweeps the outside-turn group when a turn with no key of its own ends', () => {
+    const { roster, rolesIn } = harness(null)
+    roster.observeSystemFrame(started({ task_id: 'task-early', description: 'Early' }))
+    roster.settleTurn(null)
+    expect(rolesIn('outside-turn')).toEqual([expect.objectContaining({ state: 'unverifiable' })])
+  })
+
+  it('still settles an outside-turn child once the session itself ends', () => {
+    const { roster, rolesIn, setGroupKey } = harness(null)
+    roster.observeSystemFrame(started({ task_id: 'task-early', description: 'Early' }))
+    setGroupKey(TURN_1)
+    roster.observeSystemFrame(started({ task_id: 'task-turn', description: 'In turn' }))
+    roster.settleTurn(TURN_1)
+    roster.settleSession()
+    expect(rolesIn('outside-turn')).toEqual([expect.objectContaining({ state: 'unverifiable' })])
   })
 
   it('sweeps the turn that ended, not whichever turn is live now', () => {
