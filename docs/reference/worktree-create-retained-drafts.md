@@ -100,6 +100,8 @@ Preparation does not publish agent-start telemetry or mark Claude as running.
 Daemon reattachment includes optional deferred-startup state, so a new main process
 can distinguish an unreleased shell from an agent. Telemetry acknowledgement state
 is not durable across main-process crashes. Claude release rechecks account switches.
+New preparation requires daemon v38, which reports that state. Release remains
+compatible with v37 so an upgrade does not strand commands already held there.
 
 Two real Codex trials each created one workspace. With 2.62 seconds between opening
 and Create, selection took 156.9 ms and the prompt with a resolved model appeared
@@ -111,5 +113,9 @@ do not establish consistent near-instant agent or tool readiness.
 A canceled draft was found through workspace search and opened as a working shell.
 Running a harmless printf command rendered its output; a subsequent release of the
 original held command returned `retired`. No second workspace or agent was started.
+A separate v38 draft survived a normal app-process restart: workspace search opened
+the original terminal handle, its shell prompt and subsequent printf output rendered,
+and release using the original incarnation and operation returned `retired` after
+manual use. This does not prove forced-crash or remote-host recovery.
 Final readiness, crash/restart, supported-topology and adverse-path validation are
 still outstanding before publishing the combined ad hoc release.

@@ -1,3 +1,4 @@
+import { DEFERRED_STARTUP_DAEMON_PROTOCOL_VERSION } from './daemon-protocol-version'
 import type { DaemonClient } from './client'
 import type { StartupCommandReleaseResult } from '../../shared/deferred-startup-release'
 import type {
@@ -7,11 +8,11 @@ import type {
 
 export async function releaseDaemonStartupCommand(
   client: Pick<DaemonClient, 'request'>,
-  supported: boolean,
+  protocolVersion: number,
   connect: () => Promise<void>,
   payload: ReleaseStartupCommandRequest['payload']
 ): Promise<StartupCommandReleaseResult> {
-  if (!supported) {
+  if (protocolVersion < DEFERRED_STARTUP_DAEMON_PROTOCOL_VERSION) {
     return 'unavailable'
   }
   // Reconnect to the owner; never use create/respawn recovery for command release.

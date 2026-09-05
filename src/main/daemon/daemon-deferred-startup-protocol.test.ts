@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { rmSync } from 'node:fs'
 import { DaemonClient } from './client'
 import { DaemonPtyAdapter } from './daemon-pty-adapter'
-import { DEFERRED_STARTUP_DAEMON_PROTOCOL_VERSION } from './daemon-protocol-version'
+import { DEFERRED_STARTUP_STATE_DAEMON_PROTOCOL_VERSION } from './daemon-protocol-version'
 import {
   createMockSubprocess,
   startDaemonAdapterHarness,
@@ -36,7 +36,7 @@ describe('deferred startup daemon control protocol', () => {
     harness = undefined
   })
 
-  async function start(version = DEFERRED_STARTUP_DAEMON_PROTOCOL_VERSION) {
+  async function start(version = DEFERRED_STARTUP_STATE_DAEMON_PROTOCOL_VERSION) {
     subprocess = createMockSubprocess()
     spawn = vi.fn(() => subprocess)
     harness = await startDaemonAdapterHarness(spawn, version)
@@ -58,13 +58,14 @@ describe('deferred startup daemon control protocol', () => {
     return { ...result, incarnationId: result.incarnationId }
   }
 
-  async function rawClient() {
+  async function rawClient(protocolVersion?: number) {
     if (!harness) {
       throw new Error('Missing daemon')
     }
     const client = new DaemonClient({
       socketPath: harness.socketPath,
-      tokenPath: harness.tokenPath
+      tokenPath: harness.tokenPath,
+      protocolVersion
     })
     clients.push(client)
     await client.ensureConnected()
@@ -128,7 +129,7 @@ describe('deferred startup daemon control protocol', () => {
   )
 
   it('rejects old-owner preparation before any spawn or release request', async () => {
-    const { adapter } = await start(DEFERRED_STARTUP_DAEMON_PROTOCOL_VERSION - 1)
+    const { adapter } = await start(DEFERRED_STARTUP_STATE_DAEMON_PROTOCOL_VERSION - 1)
     expect(adapter.supportsDeferredStartupCommands()).toBe(false)
     await expect(prepare(adapter)).rejects.toThrow('does not support deferred')
     expect(await adapter.releaseStartupCommand(sessionId, 'old', operationId)).toBe('unavailable')
@@ -149,6 +150,26 @@ describe('deferred startup daemon control protocol', () => {
       'identity-mismatch'
     )
     expect(subprocess.write).not.toHaveBeenCalled()
+  })
+
+  it('still releases a retained v37 command while refusing new preparation on that owner', async () => {
+    const { adapter } = await start(37)
+    expect(adapter.supportsDeferredStartupCommands()).toBe(false)
+    const client = await rawClient(37)
+    const held = await client.request<{ incarnationId: string }>('createOrAttach', {
+      sessionId,
+      cols: 80,
+      rows: 24,
+      command,
+      deferredStartupOperationId: operationId,
+      shellReadySupported: false
+    })
+    expect(subprocess.write).not.toHaveBeenCalled()
+    expect(await adapter.releaseStartupCommand(sessionId, held.incarnationId, operationId)).toBe(
+      'accepted'
+    )
+    expect(subprocess.write).toHaveBeenCalledOnce()
+    expect(spawn).toHaveBeenCalledOnce()
   })
 
   it('retries an unacknowledged release on a new connection without repeating execution', async () => {

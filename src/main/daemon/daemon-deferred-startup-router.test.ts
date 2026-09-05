@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { rmSync } from 'node:fs'
 import { DaemonPtyRouter } from './daemon-pty-router'
-import { DEFERRED_STARTUP_DAEMON_PROTOCOL_VERSION } from './daemon-protocol-version'
+import { DEFERRED_STARTUP_STATE_DAEMON_PROTOCOL_VERSION } from './daemon-protocol-version'
 import {
   createMockSubprocess,
   startDaemonAdapterHarness,
   type DaemonAdapterHarness
 } from './daemon-pty-adapter-test-harness'
 
-const version = DEFERRED_STARTUP_DAEMON_PROTOCOL_VERSION
+const version = DEFERRED_STARTUP_STATE_DAEMON_PROTOCOL_VERSION
 const command = 'codex'
 const operationId = 'composer'
 

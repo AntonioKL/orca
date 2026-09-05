@@ -20,7 +20,7 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
   releaseStartupCommand(id: string, expectedIncarnationId: string, operationId: string) {
     return releaseDaemonStartupCommand(
       this.client,
-      this.supportsDeferredStartupCommands(),
+      this.protocolVersion,
       () => this.ensureConnected(),
       { sessionId: id, expectedIncarnationId, operationId }
     )

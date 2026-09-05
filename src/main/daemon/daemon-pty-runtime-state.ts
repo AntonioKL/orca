@@ -8,7 +8,7 @@ import type {
 import { CheckpointSessionQueue } from './daemon-checkpoint-session-queue'
 import {
   SNAPSHOT_SERIALIZER_FIDELITY_DAEMON_PROTOCOL_VERSION,
-  DEFERRED_STARTUP_DAEMON_PROTOCOL_VERSION
+  DEFERRED_STARTUP_STATE_DAEMON_PROTOCOL_VERSION
 } from './daemon-protocol-version'
 import type { DaemonEndpointIdentity } from './daemon-hello-protocol'
 import type { DaemonEvidenceSource, ExactDaemonIncarnation } from './daemon-incarnation-evidence'
@@ -292,7 +292,7 @@ export abstract class DaemonPtyRuntimeState {
   }
 
   supportsDeferredStartupCommands(): boolean {
-    return this.protocolVersion >= DEFERRED_STARTUP_DAEMON_PROTOCOL_VERSION
+    return this.protocolVersion >= DEFERRED_STARTUP_STATE_DAEMON_PROTOCOL_VERSION
   }
 
   providesAgentSessionOwnerListings(_ptyId: string): boolean {
