@@ -12,7 +12,10 @@ import {
   createManager
 } from './pty-connection-test-pane-fixtures'
 import { buildPaneConnectionDeps } from './pty-connection-test-deps'
-import { createInitialStoreState } from './pty-connection-test-store-fixtures'
+import {
+  createCompletedCodexRetainedAgent,
+  createInitialStoreState
+} from './pty-connection-test-store-fixtures'
 import type { StoreState } from './pty-connection-test-store-state'
 import type { MockTransport } from './pty-connection-test-pane-fixtures'
 import {
@@ -654,6 +657,14 @@ describe('connectPanePty', () => {
         agentCmdOverrides: {}
       },
       agentStatusByPaneKey: {},
+      retainedAgentsByPaneKey: {
+        [paneKey]: createCompletedCodexRetainedAgent({
+          paneKey,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          ptyId: 'lost-pty'
+        })
+      },
       sleepingAgentSessionsByPaneKey: {
         [paneKey]: {
           paneKey,
@@ -662,7 +673,7 @@ describe('connectPanePty', () => {
           agent: 'codex',
           providerSession: { key: 'session_id', id: 'codex-session-1' },
           prompt: 'finish the task',
-          state: 'working',
+          state: 'done',
           capturedAt: 1,
           updatedAt: 1
         }
@@ -682,6 +693,7 @@ describe('connectPanePty', () => {
 
     expect(deps.onShowSessionRestoredBanner).toHaveBeenCalledTimes(1)
     expect(deps.onShowSessionRestoredBanner).toHaveBeenCalledWith(1, 'resume-unavailable')
+    expect(mockStoreState.setAgentStatus).not.toHaveBeenCalled()
   })
 
   it('resumes from an unambiguous legacy sleeping record when cold-restoring a preserved pane', async () => {
