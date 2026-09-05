@@ -195,6 +195,152 @@ describe('codex item bodies', () => {
     })
   })
 
+  it('names a classified read command by its class and keeps the raw command', () => {
+    expect(
+      codexItemBody({
+        type: 'commandExecution',
+        id: 'item-read',
+        command: "sed -n '1,200p' notes.txt",
+        cwd: '/repo',
+        status: 'completed',
+        exitCode: 0,
+        commandActions: [
+          {
+            type: 'read',
+            command: "sed -n '1,200p' notes.txt",
+            name: 'notes.txt',
+            path: '/repo/notes.txt'
+          }
+        ]
+      })
+    ).toEqual({
+      kind: 'tool-call',
+      name: 'read',
+      input: {
+        command: "sed -n '1,200p' notes.txt",
+        cwd: '/repo',
+        path: '/repo/notes.txt',
+        name: 'notes.txt'
+      },
+      state: 'completed'
+    })
+  })
+
+  it('carries a classified search query so the row labels by term, not scan root', () => {
+    expect(
+      codexItemBody({
+        type: 'commandExecution',
+        id: 'item-search',
+        command: 'rg -n --no-heading beta .',
+        cwd: '/repo',
+        status: 'inProgress',
+        commandActions: [
+          { type: 'search', command: 'rg -n --no-heading beta .', query: 'beta', path: '.' }
+        ]
+      })
+    ).toEqual({
+      kind: 'tool-call',
+      name: 'search',
+      input: { command: 'rg -n --no-heading beta .', cwd: '/repo', query: 'beta', path: '.' },
+      state: 'running'
+    })
+  })
+
+  it('omits a null classified field rather than standing it in as a target', () => {
+    expect(
+      codexItemBody({
+        type: 'commandExecution',
+        id: 'item-search-bare',
+        command: 'rg beta',
+        cwd: '/repo',
+        status: 'completed',
+        exitCode: 0,
+        commandActions: [{ type: 'search', command: 'rg beta', query: null, path: null }]
+      })
+    ).toEqual({
+      kind: 'tool-call',
+      name: 'search',
+      input: { command: 'rg beta', cwd: '/repo' },
+      state: 'completed'
+    })
+  })
+
+  it('names a classified listFiles command `list`', () => {
+    expect(
+      codexItemBody({
+        type: 'commandExecution',
+        id: 'item-list',
+        command: 'ls',
+        cwd: '/repo',
+        status: 'completed',
+        exitCode: 0,
+        commandActions: [{ type: 'listFiles', command: 'ls', path: null }]
+      })
+    ).toEqual({
+      kind: 'tool-call',
+      name: 'list',
+      input: { command: 'ls', cwd: '/repo' },
+      state: 'completed'
+    })
+  })
+
+  it('skips unclassified actions to reach the first classified one', () => {
+    expect(
+      codexItemBody({
+        type: 'commandExecution',
+        id: 'item-piped',
+        command: 'true && cat a.ts',
+        cwd: '/repo',
+        status: 'completed',
+        exitCode: 0,
+        commandActions: [
+          { type: 'unknown', command: 'true' },
+          { type: 'read', command: 'cat a.ts', name: 'a.ts', path: 'a.ts' }
+        ]
+      })
+    ).toMatchObject({ name: 'read', input: { path: 'a.ts', name: 'a.ts' } })
+  })
+
+  it('falls back to the unclassified shell row for absent or malformed commandActions', () => {
+    const shellRow = {
+      kind: 'tool-call',
+      name: 'shell',
+      input: { command: 'ls', cwd: '/tmp' },
+      state: 'completed'
+    }
+    const base = {
+      type: 'commandExecution',
+      id: 'item-fallback',
+      command: 'ls',
+      cwd: '/tmp',
+      status: 'completed',
+      exitCode: 0
+    }
+
+    expect(codexItemBody(base)).toEqual(shellRow)
+    expect(codexItemBody({ ...base, commandActions: null })).toEqual(shellRow)
+    expect(codexItemBody({ ...base, commandActions: [] })).toEqual(shellRow)
+    expect(
+      codexItemBody({ ...base, commandActions: [{ type: 'unknown', command: 'ls' }] })
+    ).toEqual(shellRow)
+    expect(codexItemBody({ ...base, commandActions: 'read' })).toEqual(shellRow)
+    expect(codexItemBody({ ...base, commandActions: [null, 7, 'read', {}, { type: 5 }] })).toEqual(
+      shellRow
+    )
+    // The classification table is a Map because an object index answers
+    // `__proto__`/`constructor` with a truthy non-string tool name.
+    expect(
+      codexItemBody({ ...base, commandActions: [{ type: '__proto__', command: 'ls' }] })
+    ).toEqual(shellRow)
+    expect(
+      codexItemBody({ ...base, commandActions: [{ type: 'constructor', command: 'ls' }] })
+    ).toEqual(shellRow)
+    // The rollout-file shape is a different lane and never reaches app-server.
+    expect(
+      codexItemBody({ ...base, parsedCmd: [{ type: 'read', cmd: 'ls', path: 'a.ts' }] })
+    ).toEqual(shellRow)
+  })
+
   it('accepts snake-case command completion output and preserves blob evidence', () => {
     const output = 'x'.repeat(1_100_000)
     const translated = codexJournalItem({

@@ -5,8 +5,10 @@ const MAX_PREVIEW_STRING_INPUT = 160
 const MAX_PREVIEW_COLLECTION_ITEMS = 8
 const MAX_PREVIEW_DEPTH = 2
 const MAX_TOOL_RUN_SUMMARY_PARTS = 3
-const PRIMARY_ARG_KEYS = ['command', 'cmd', 'query', 'pattern', 'url', 'description'] as const
-const BRIEF_ARG_KEYS = ['command', 'cmd', 'query', 'pattern'] as const
+// Search term before command: a classified search row carries both, and the
+// term is what identifies it. No other tool input supplies the two together.
+const PRIMARY_ARG_KEYS = ['query', 'pattern', 'command', 'cmd', 'url', 'description'] as const
+const BRIEF_ARG_KEYS = ['query', 'pattern', 'command', 'cmd'] as const
 export const MAX_TOOL_DETAIL_LENGTH = 4000
 
 export type ToolInputDisplay = {

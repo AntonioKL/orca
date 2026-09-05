@@ -175,15 +175,58 @@ export type CodexJournalItem = {
   handled: boolean
 }
 
+/**
+ * Codex's own classification of a shell call: the tool name to show, and the
+ * fields worth lifting into `input` for the shared label helper (`path` as a
+ * target, `query` as a search term, `name` as the read target's basename).
+ * A `Map`, not an object — an object index answers `__proto__` with a truthy
+ * non-string. Every other action type stays an unclassified `shell` row.
+ */
+const COMMAND_ACTION_CLASSES = new Map([
+  ['read', { name: 'read', keys: ['path', 'name'] }],
+  ['search', { name: 'search', keys: ['query', 'path'] }],
+  ['listFiles', { name: 'list', keys: ['path'] }]
+])
+
+/** The first classified `commandActions` entry; null leaves the row exactly as
+ *  a Codex that sends no classification renders it. */
+function commandActionFacts(
+  item: CodexThreadItem
+): { name: string; fields: Record<string, string> } | null {
+  const actions = item.commandActions
+  if (!Array.isArray(actions)) {
+    return null
+  }
+  for (const action of actions) {
+    const record = readRecord(action)
+    const type = readString(record, 'type')
+    const classified = type === null ? undefined : COMMAND_ACTION_CLASSES.get(type)
+    if (classified === undefined) {
+      continue
+    }
+    const fields: Record<string, string> = {}
+    for (const key of classified.keys) {
+      const value = readString(record, key)
+      if (value !== null) {
+        fields[key] = value
+      }
+    }
+    return { name: classified.name, fields }
+  }
+  return null
+}
+
 function commandItem(item: CodexThreadItem): CodexJournalItem {
   const output = readFirstString(item, ['aggregatedOutput', 'aggregated_output'])
   const bounded = output === null ? null : boundInlineText(output, DEFAULT_JOURNAL_PAYLOAD_LIMITS)
+  const parsed = commandActionFacts(item)
   return {
     body: {
       kind: 'tool-call',
-      name: 'shell',
+      name: parsed?.name ?? 'shell',
+      // Raw command and cwd stay so the expanded view still shows what ran.
       input: boundToolInput(
-        { command: item.command ?? null, cwd: item.cwd ?? null },
+        { command: item.command ?? null, cwd: item.cwd ?? null, ...parsed?.fields },
         DEFAULT_JOURNAL_PAYLOAD_LIMITS
       ),
       state: commandState(item),
