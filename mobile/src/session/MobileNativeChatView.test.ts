@@ -243,4 +243,64 @@ describe('MobileNativeChatView', () => {
       vi.useRealTimers()
     }
   })
+
+  describe('structured turn status wiring', () => {
+    const userTurn = (id: string, text: string): NativeChatMessage => ({
+      id,
+      role: 'user',
+      blocks: [{ type: 'text', text }],
+      timestamp: 0,
+      source: 'transcript'
+    })
+
+    function rowProps(id: string): Record<string, unknown> {
+      return (renderedRow(id) as { props: Record<string, unknown> }).props
+    }
+
+    function workingIndicators(): ReactTestInstance[] {
+      return renderer!.root.findAll((node) => node.type === 'WorkingIndicator')
+    }
+
+    it('gives the live user turn a status row and drops the three-dot indicator', async () => {
+      const folded = [userTurn('u1', 'go')]
+      await render({ messages: folded, folded, structuredActivityUi: true, agentWorking: true })
+      const props = rowProps('u1')
+      expect(props.structuredActivityUi).toBe(true)
+      expect(props.turnStatus).toMatchObject({ thinking: true, workedSeconds: null })
+      expect(props.activeTurnIsWorking).toBe(true)
+      expect(workingIndicators()).toHaveLength(0)
+    })
+
+    it('keeps the bridge lane on the three-dot indicator with no turn status', async () => {
+      const folded = [userTurn('u1', 'go')]
+      await render({ messages: folded, folded, agentWorking: true })
+      const props = rowProps('u1')
+      expect(props.structuredActivityUi).toBe(false)
+      expect(props.turnStatus).toBeNull()
+      expect(props.activeTurnIsWorking).toBe(false)
+      expect(workingIndicators()).toHaveLength(1)
+    })
+
+    it('settles the finished turn to a tappable duration', async () => {
+      const folded = [userTurn('u1', 'go'), assistantTurn('a1', 'done')]
+      await render({ messages: folded, folded, structuredActivityUi: true, agentWorking: true })
+      expect(rowProps('u1').turnStatus).toMatchObject({ thinking: false, workedSeconds: null })
+      await update({ messages: folded, folded, structuredActivityUi: true, agentWorking: false })
+      const settled = rowProps('u1')
+      expect(settled.turnStatus).toMatchObject({ thinking: false })
+      expect((settled.turnStatus as { workedSeconds: number | null }).workedSeconds).toBeTypeOf(
+        'number'
+      )
+      expect(settled.onToggleTurn).toBeTypeOf('function')
+      expect(settled.activeTurnIsWorking).toBe(false)
+    })
+
+    it('hangs no status row on an assistant row', async () => {
+      const folded = [userTurn('u1', 'go'), assistantTurn('a1', 'done')]
+      await render({ messages: folded, folded, structuredActivityUi: true, agentWorking: true })
+      expect(rowProps('a1').turnStatus).toBeNull()
+      // The assistant row still belongs to the live turn, so its tool row stays visible.
+      expect(rowProps('a1').activeTurnIsWorking).toBe(true)
+    })
+  })
 })
