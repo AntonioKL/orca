@@ -54,7 +54,7 @@ export function splitEditContent(content: string): EditContentLines {
 }
 
 /** The break between two regions of a file. Carries no text and no position. */
-export function editGapLine(): NativeChatEditLine {
+function editGapLine(): NativeChatEditLine {
   return { kind: 'gap', text: '', oldLineNumber: null, newLineNumber: null }
 }
 

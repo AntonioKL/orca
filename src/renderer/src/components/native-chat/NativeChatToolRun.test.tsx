@@ -2,8 +2,8 @@
 
 import '@testing-library/jest-dom/vitest'
 
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentJournalRenderItem } from '../../../../shared/agent-session-journal-types'
 import type { NativeChatBlock } from '../../../../shared/native-chat-types'
 import { projectStructuredItemToNativeChat } from '../../../../shared/structured-agent-session-projection'
@@ -196,11 +196,40 @@ describe('NativeChatToolRun', () => {
       { type: 'tool-result', output: '@@ -1,3 +1,3 @@\n ctx\n-was\n+now\n… (48210 bytes)' }
     ]
 
-    // expandSignal false leaves every card's body closed.
+    // A defined expandOverride opens the run while leaving each card closed.
     render(<NativeChatToolRun blocks={blocks} expandSignal={false} expandOverride />)
 
     expect(screen.getByText('Diff truncated')).toBeInTheDocument()
     expect(screen.queryByText('was')).toBeNull()
+  })
+
+  it('copies the diff as signed rows, with the region breaks left out', () => {
+    const writeClipboardText = vi.fn()
+    Object.assign(window, { api: { ui: { writeClipboardText } } })
+    const blocks: NativeChatBlock[] = [
+      {
+        type: 'tool-call',
+        name: 'Edit',
+        input: { file_path: '/repo/a.ts' },
+        state: 'completed'
+      },
+      {
+        type: 'tool-result',
+        output: 'ok',
+        editPatch: {
+          filePath: '/repo/a.ts',
+          hunks: [
+            { oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, lines: [' ctx', '-was', '+now'] },
+            { oldStart: 90, oldLines: 1, newStart: 90, newLines: 1, lines: ['+tail'] }
+          ]
+        }
+      }
+    ]
+
+    render(<NativeChatToolRun blocks={blocks} expandSignal />)
+    fireEvent.click(screen.getByRole('button', { name: 'Copy diff' }))
+
+    expect(writeClipboardText).toHaveBeenCalledWith(' ctx\n-was\n+now\n+tail')
   })
 
   it('keeps a grouped active run to one stable row showing only the latest tool', () => {

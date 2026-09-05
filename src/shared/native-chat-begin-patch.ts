@@ -108,7 +108,6 @@ function envelopeArgument(
 /** Splits a `*** Begin Patch` envelope into one entry per file it touches. */
 export function editFilesFromBeginPatch(envelope: string): NativeChatEditFile[] {
   const sections: { kind: 'Add' | 'Update' | 'Delete'; path: string; body: string[] }[] = []
-  let movePath: string | null = null
   const moves = new Map<number, string>()
 
   // Split on both newline forms once, so every marker below can be matched
@@ -125,8 +124,7 @@ export function editFilesFromBeginPatch(envelope: string): NativeChatEditFile[] 
     }
     const move = MOVE_HEADER.exec(raw)
     if (move && sections.length > 0) {
-      movePath = move[1]!.trim()
-      moves.set(sections.length - 1, movePath)
+      moves.set(sections.length - 1, move[1]!.trim())
       continue
     }
     if (raw === BEGIN || raw === END || CONTROL_LINE.test(raw) || sections.length === 0) {

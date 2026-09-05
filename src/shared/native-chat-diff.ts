@@ -14,8 +14,11 @@ const DIFF_TRUNCATED_LINE: NativeChatDiffLine = {
 }
 
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/
-// Lines that open a new file section, so any hunk before them has ended.
-const FILE_SECTION_START =
+/** Lines that open a new file section, so any hunk before them has ended.
+ *  `--- `/`+++ ` are deliberately absent: inside a hunk they are content — a
+ *  removed `-- comment` is emitted as `--- comment` — so they go through
+ *  `isFileHeaderPair` instead. */
+export const FILE_SECTION_START =
   /^(?:diff |index |old mode |new mode |new file mode |deleted file mode |similarity index |dissimilarity index |rename |copy |Binary files )/
 // Markdown thematic break or YAML document separator, not a marker.
 const BARE_RULE = /^(?:-{3,}|\+{3,})$/

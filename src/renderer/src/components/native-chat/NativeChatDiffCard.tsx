@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ChevronRight, FilePlus2, FileMinus2, FilePen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
@@ -38,8 +38,8 @@ function baseName(path: string): string {
   return path.split(/[\\/]/).at(-1) || path
 }
 
-function patchText(file: NativeChatEditFile): string {
-  return file.lines
+function patchText(lines: readonly NativeChatEditLine[]): string {
+  return lines
     .filter((line) => line.kind !== 'gap')
     .map((line) => `${line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '}${line.text}`)
     .join('\n')
@@ -117,6 +117,9 @@ export function NativeChatDiffCard({
   initiallyExpanded?: boolean
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(initiallyExpanded)
+  // Joining every row to seed the copy button is the card's most expensive
+  // work, and a collapsed card renders none of those rows.
+  const copyText = useMemo(() => patchText(file.lines), [file.lines])
   const hasBody = file.lines.length > 0
   const widest = file.lineNumbersKnown
     ? file.lines.reduce((max, line) => Math.max(max, unifiedLineNumber(line) ?? 0), 0)
@@ -171,7 +174,7 @@ export function NativeChatDiffCard({
           </span>
         ) : null}
         <NativeChatCopyButton
-          text={patchText(file)}
+          text={copyText}
           label={translate('components.native-chat.tool.copyDiff', 'Copy diff')}
           className="ml-auto shrink-0"
         />

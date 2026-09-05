@@ -1,13 +1,7 @@
-import { isFileHeaderPair } from './native-chat-diff'
+import { FILE_SECTION_START, isFileHeaderPair } from './native-chat-diff'
 import { pushEditGap, splitEditContent, type NativeChatEditLine } from './native-chat-edit-model'
 
 const HUNK_RANGES = /^@@+ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/
-/** Structural lines that open a file section, so any hunk before them has ended.
- *  `--- `/`+++ ` are deliberately absent: inside a hunk they are content — a
- *  removed `-- comment` is emitted as `--- comment` — so they go through
- *  `isFileHeaderPair` instead. */
-const FILE_SECTION =
-  /^(?:diff |index |old mode |new mode |new file mode |deleted file mode |similarity index |dissimilarity index |rename |copy |Binary files )/
 
 export type UnifiedPatchLines = {
   lines: NativeChatEditLine[]
@@ -59,7 +53,7 @@ export function editLinesFromUnifiedPatch(
       index += 1
       continue
     }
-    if (FILE_SECTION.test(raw)) {
+    if (FILE_SECTION_START.test(raw)) {
       inHunk = false
       continue
     }
@@ -186,7 +180,7 @@ export function unifiedPatchSections(text: string): {
     }
     if (raw.startsWith('@@')) {
       inHunk = true
-    } else if (FILE_SECTION.test(raw)) {
+    } else if (FILE_SECTION_START.test(raw)) {
       inHunk = false
     }
     current ??= open()
