@@ -456,6 +456,29 @@ describe('NativeChatToolRun', () => {
     ).toEqual(['lucide-chevron-right'])
   })
 
+  it('heads a projected diff run with the file-change glyph, not the generic one', () => {
+    const projected = projectStructuredItemToNativeChat({
+      itemId: 'file-change',
+      revision: 1,
+      sequence: 1,
+      observedAt: 1,
+      body: {
+        kind: 'diff',
+        path: 'src/a.ts',
+        patch: { head: '@@ -1 +1 @@\n-was\n+now', truncated: false, byteLength: 24 }
+      }
+    })
+
+    const { container } = render(
+      <NativeChatToolRun blocks={projected?.blocks ?? []} expandSignal={false} expandOverride />
+    )
+
+    // The run renders an edited-file card, so a wrench above it reads as a tool
+    // this vocabulary does not model.
+    expect(container.querySelector('.lucide-pencil')).toBeInTheDocument()
+    expect(container.querySelector('.lucide-wrench')).toBeNull()
+  })
+
   it('labels a bare list row by the command it ran rather than an invented path', () => {
     const blocks: NativeChatBlock[] = [
       {

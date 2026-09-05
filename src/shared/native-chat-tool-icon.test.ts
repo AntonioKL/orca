@@ -67,6 +67,13 @@ describe('native chat tool icons', () => {
     }
   })
 
+  it('reads the projected `Diff` row as a file change, which is what it renders', () => {
+    // Every Codex fileChange item projects to a call named `Diff`, so a wrench
+    // here headed a run whose body is an edited-file card.
+    expect(nativeChatToolCategory('Diff')).toBe('fileChange')
+    expect(nativeChatToolIconName('Diff')).toBe('pencil')
+  })
+
   it('reads an MCP tool by its prefix, since the row is named after the tool', () => {
     expect(nativeChatToolCategory('mcp__linear__create_issue')).toBe('mcpToolCall')
     expect(nativeChatToolIconName('mcp__playwright__browser_click')).toBe('plug')

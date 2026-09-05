@@ -65,6 +65,9 @@ const CATEGORY_BY_ROW_WORD = new Map<string, NativeChatToolCategory>([
   ['read', 'read'],
   ['search', 'search'],
   ['list', 'listFiles'],
+  // Every Codex file change projects as a `Diff` call, and the edit set below
+  // names the tools that carry the edit in their input, not that projection.
+  ['diff', 'fileChange'],
   // Claude's tool names, which its lane renders verbatim.
   ['grep', 'search'],
   ['glob', 'search'],
