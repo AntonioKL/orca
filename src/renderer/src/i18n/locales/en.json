@@ -6,6 +6,14 @@
       "preparedAgentUnconfirmed": "Could not confirm the agent started. Your workspace is saved. Retry to check again."
     }
   },
+  "sidebar": {
+    "revealFiltered": {
+      "title": "Reveal hidden workspace?",
+      "description": "The active workspace is hidden in the sidebar. Revealing it will clear your sidebar filters.",
+      "confirm": "Clear filters and reveal",
+      "cancel": "Keep filters"
+    }
+  },
   "app": {
     "recoverableError": {
       "rootTitle": "Orca hit a renderer error.",
@@ -16985,6 +16993,17 @@
         "workedFor": "Worked for {{value0}}",
         "toggleDetails": "Toggle turn details"
       },
+      "backgroundTasks": {
+        "monitoring": "Monitoring background tasks",
+        "stop": "Stop",
+        "agent": "Background agent",
+        "workflow": "Background workflow",
+        "command": "Background command",
+        "monitor": "Background monitor",
+        "task": "Background task",
+        "runningList": "Running background tasks",
+        "detailsUnavailable": "Task details are unavailable for this session."
+      },
       "jumpToLatest": "Jump to latest",
       "toggle": {
         "showTerminal": "Show terminal",
@@ -17073,7 +17092,10 @@
         "retryProof": "Retry proof",
         "retry": "Retry",
         "details": "Details"
-      }
+      },
+      "structuredSessionFellBackToTerminal": "Structured chat isn't available",
+      "structuredSessionFellBackToTerminalDescription": "Orca tried to open a {{value0}} terminal instead.",
+      "structuredSessionLaunchFailedDescription": "Orca could not open a structured {{value0}} chat. See the logs for details."
     },
     "tab": {
       "bar": {
