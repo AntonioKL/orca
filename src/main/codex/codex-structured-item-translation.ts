@@ -177,8 +177,8 @@ export type CodexJournalItem = {
 
 /**
  * Codex's own classification of a shell call: the tool name to show, and the
- * fields worth lifting into `input` for the shared label helper (`path` as a
- * target, `query` as a search term). A `Map`, not an object — an object index
+ * fields worth lifting into `input` for the shared label helper (a file target,
+ * a search term, a scanned root). A `Map`, not an object — an object index
  * answers `__proto__` with a truthy non-string. Every other action type stays an
  * unclassified `shell` row.
  *
@@ -187,13 +187,16 @@ export type CodexJournalItem = {
  */
 type CommandActionClass = {
   name: string
-  keys: readonly string[]
+  /** Action field to the `input` key it lifts to. A scan root and a listed
+   *  directory lift to `directory`, never `path`: the label helper reads `path`
+   *  as a file target, which mobile turns into a tappable open-file link. */
+  keys: Readonly<Record<string, string>>
 }
 
 const COMMAND_ACTION_CLASSES = new Map<string, CommandActionClass>([
-  ['read', { name: 'read', keys: ['path'] }],
-  ['search', { name: 'search', keys: ['query', 'path'] }],
-  ['listFiles', { name: 'list', keys: ['path'] }]
+  ['read', { name: 'read', keys: { path: 'path' } }],
+  ['search', { name: 'search', keys: { query: 'query', path: 'directory' } }],
+  ['listFiles', { name: 'list', keys: { path: 'directory' } }]
 ])
 
 /** The one class every classified `commandActions` entry agrees on, with the
@@ -208,7 +211,7 @@ function commandActionFacts(
   if (!Array.isArray(actions)) {
     return null
   }
-  let matched: { name: string; fields: Record<string, string> } | null = null
+  let matched: { class: CommandActionClass; fields: Record<string, string> } | null = null
   for (const action of actions) {
     const record = readRecord(action)
     const type = readString(record, 'type')
@@ -218,26 +221,27 @@ function commandActionFacts(
     }
     if (matched === null) {
       const fields: Record<string, string> = {}
-      for (const key of classified.keys) {
-        const value = readString(record, key)
+      for (const [source, lifted] of Object.entries(classified.keys)) {
+        const value = readString(record, source)
         if (value !== null) {
-          fields[key] = value
+          fields[lifted] = value
         }
       }
-      matched = { name: classified.name, fields }
+      matched = { class: classified, fields }
       continue
     }
-    if (matched.name !== classified.name) {
+    if (matched.class.name !== classified.name) {
       return null
     }
     // The same class twice keeps the class, but only a target both entries name.
-    for (const [key, value] of Object.entries(matched.fields)) {
-      if (readString(record, key) !== value) {
-        delete matched.fields[key]
+    for (const [source, lifted] of Object.entries(matched.class.keys)) {
+      const kept = matched.fields[lifted]
+      if (kept !== undefined && readString(record, source) !== kept) {
+        delete matched.fields[lifted]
       }
     }
   }
-  return matched
+  return matched === null ? null : { name: matched.class.name, fields: matched.fields }
 }
 
 function commandItem(item: CodexThreadItem): CodexJournalItem {

@@ -7,8 +7,19 @@ const MAX_PREVIEW_DEPTH = 2
 const MAX_TOOL_RUN_SUMMARY_PARTS = 3
 // Search term before command: a classified search row carries both, and the
 // term is what identifies it. No other tool input supplies the two together.
-const PRIMARY_ARG_KEYS = ['query', 'pattern', 'command', 'cmd', 'url', 'description'] as const
-const BRIEF_ARG_KEYS = ['query', 'pattern', 'command', 'cmd'] as const
+// `directory` is a scan root or a listed folder — it labels a row but is
+// deliberately absent from the file-target keys below, because a folder reaches
+// mobile as a tappable open-file link that can only fail.
+const PRIMARY_ARG_KEYS = [
+  'query',
+  'pattern',
+  'directory',
+  'command',
+  'cmd',
+  'url',
+  'description'
+] as const
+const BRIEF_ARG_KEYS = ['query', 'pattern', 'directory', 'command', 'cmd'] as const
 export const MAX_TOOL_DETAIL_LENGTH = 4000
 
 export type ToolInputDisplay = {

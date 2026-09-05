@@ -148,6 +148,15 @@ describe('describeToolInput', () => {
     expect(toolFilePath(search)).toBeNull()
   })
 
+  it('labels by a listed directory without offering it as a file target', () => {
+    // A folder under `path` becomes a tappable open-file link on mobile.
+    const listing = { command: 'ls src', cwd: '/repo', directory: 'src' }
+
+    expect(describeToolInput(listing)).toBe('src')
+    expect(briefToolArg(listing)).toBe('src')
+    expect(toolFilePath(listing)).toBeNull()
+  })
+
   it('leaves a command-only input labelled by its command', () => {
     // Bash and Codex's unclassified shell rows carry no search key at all.
     expect(describeToolInput({ command: 'pnpm test', description: 'Run tests' })).toBe('pnpm test')

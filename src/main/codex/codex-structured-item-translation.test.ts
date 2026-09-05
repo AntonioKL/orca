@@ -239,7 +239,7 @@ describe('codex item bodies', () => {
     ).toEqual({
       kind: 'tool-call',
       name: 'search',
-      input: { command: 'rg -n --no-heading beta .', cwd: '/repo', query: 'beta', path: '.' },
+      input: { command: 'rg -n --no-heading beta .', cwd: '/repo', query: 'beta', directory: '.' },
       state: 'running'
     })
   })
@@ -350,18 +350,42 @@ describe('codex item bodies', () => {
     ).toMatchObject({ name: 'read', input: { path: 'a.ts' } })
   })
 
-  it('keeps the listed directory when listFiles carries one', () => {
+  it('keeps the listed directory as a label, never as a file target', () => {
+    const body = codexItemBody({
+      type: 'commandExecution',
+      id: 'item-list-path',
+      command: 'ls src',
+      cwd: '/repo',
+      status: 'completed',
+      exitCode: 0,
+      commandActions: [{ type: 'listFiles', command: 'ls src', path: 'src' }]
+    })
+
+    expect(body).toMatchObject({ name: 'list', input: { directory: 'src' } })
+    // Under `path` this reaches mobile as a tappable open-file link onto a
+    // directory — the same dead link a stand-in `.` would have produced.
+    const display = createToolInputDisplay(body?.kind === 'tool-call' ? body.input : null)
+    expect(display.filePath).toBeNull()
+    expect(display.label).toBe('src')
+  })
+
+  it('keeps a scan root off the file-target key even when the search has no term', () => {
+    const body = codexItemBody({
+      type: 'commandExecution',
+      id: 'item-search-root',
+      command: 'rg --files src',
+      cwd: '/repo',
+      status: 'completed',
+      exitCode: 0,
+      commandActions: [{ type: 'search', command: 'rg --files src', query: null, path: 'src' }]
+    })
+
+    expect(body).toMatchObject({ name: 'search', input: { directory: 'src' } })
+    // `path` is only excluded from the file target while a query is present, so
+    // a term-less search under it would link to the folder it scanned.
     expect(
-      codexItemBody({
-        type: 'commandExecution',
-        id: 'item-list-path',
-        command: 'ls src',
-        cwd: '/repo',
-        status: 'completed',
-        exitCode: 0,
-        commandActions: [{ type: 'listFiles', command: 'ls src', path: 'src' }]
-      })
-    ).toMatchObject({ name: 'list', input: { path: 'src' } })
+      createToolInputDisplay(body?.kind === 'tool-call' ? body.input : null).filePath
+    ).toBeNull()
   })
 
   it('leaves the other classes without a stand-in target', () => {
