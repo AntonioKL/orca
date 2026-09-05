@@ -279,8 +279,7 @@ export async function consumePreparedWorktreeCreate(
     const result = args.timing
       ? await args.timing.time('prepared_checkout_finalize', finalize)
       : await finalize()
-    // Consuming the only prepared checkout leaves the next create cold. Re-arm for a user who is
-    // creating in a burst; the TTL and the preparation limit still bound an unused replacement.
+    // Refill active standby owners and recent bursts only after finalization succeeds.
     completePreparationClaim(entry)
     rearmPreparation(entry, args.baseBranch, claim.canonicalBase)
     return { status: 'hit', retargeted: claim.retargeted, result }
