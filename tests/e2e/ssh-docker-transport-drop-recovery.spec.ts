@@ -354,6 +354,7 @@ test.describe('SSH transport drop recovery', () => {
       const generations: string[][] = []
 
       for (let generation = 1; generation <= 5; generation++) {
+        const previousPtyId = await waitForActivePanePtyId(orcaPage, 60_000)
         expect(
           killDockerSshRelayDaemon(target),
           'no relay process was found to kill'
@@ -365,8 +366,13 @@ test.describe('SSH transport drop recovery', () => {
           })
           .toBe('connected')
         await waitForActiveTerminalManager(orcaPage, 120_000)
-        // The pane must be usable again before the count is meaningful: recovery is what mints the
-        // successor lease that retires the generation before it.
+        // Transport status can still be connected while the pane retains its old binding.
+        await expect
+          .poll(() => waitForActivePanePtyId(orcaPage, 60_000).catch(() => previousPtyId), {
+            timeout: 120_000,
+            message: `pane kept its old PTY binding after relay kill ${generation}`
+          })
+          .not.toBe(previousPtyId)
         const ptyId = await waitForActivePanePtyId(orcaPage, 120_000)
         const marker = `LEASE_GEN_${generation}_${Date.now()}`
         await execInTerminal(orcaPage, ptyId, `printf '%s\\n' ${marker}`)
