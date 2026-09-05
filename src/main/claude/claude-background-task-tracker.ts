@@ -20,14 +20,17 @@ function record(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null
 }
 
-function taskId(message: Record<string, unknown>): string | null {
+/** The task's canonical, resume-stable id. Shared with the subagent roster so
+ *  both readers of this channel agree on what identifies a task. */
+export function claudeTaskId(message: Record<string, unknown>): string | null {
   const value = message.task_id
   return typeof value === 'string' && value.length > 0 && value.length <= MAX_TASK_ID_LENGTH
     ? value
     : null
 }
 
-function taskDescription(value: unknown): string | undefined {
+/** A task's human label, collapsed and bounded. */
+export function claudeTaskDescription(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined
   }
@@ -107,7 +110,7 @@ export class ClaudeBackgroundTaskTracker {
       this.replaceAggregateRoster(message.tasks)
       return true
     }
-    const id = taskId(message)
+    const id = claudeTaskId(message)
     if (!id) {
       return false
     }
@@ -126,13 +129,13 @@ export class ClaudeBackgroundTaskTracker {
       }
       const existing = this.tasks.get(id)
       if (
-        (patch.is_backgrounded === true || taskDescription(patch.description)) &&
+        (patch.is_backgrounded === true || claudeTaskDescription(patch.description)) &&
         (!this.aggregateRosterObserved || existing)
       ) {
         this.upsert(id, {
           backgrounded: patch.is_backgrounded === true || existing?.backgrounded === true,
           kind: existing?.kind ?? 'unknown',
-          description: taskDescription(patch.description) ?? existing?.description
+          description: claudeTaskDescription(patch.description) ?? existing?.description
         })
         return true
       }
@@ -152,7 +155,7 @@ export class ClaudeBackgroundTaskTracker {
     this.upsert(id, {
       backgrounded: message.is_backgrounded === true || kind === 'workflow' || kind === 'monitor',
       kind,
-      description: taskDescription(message.description)
+      description: claudeTaskDescription(message.description)
     })
     return true
   }
@@ -172,14 +175,14 @@ export class ClaudeBackgroundTaskTracker {
       if (!task || task.ambient === true) {
         continue
       }
-      const id = taskId(task)
+      const id = claudeTaskId(task)
       if (!id) {
         continue
       }
       this.tasks.set(id, {
         backgrounded: true,
         kind: classifyClaudeBackgroundTaskKind(task.task_type),
-        description: taskDescription(task.description)
+        description: claudeTaskDescription(task.description)
       })
     }
   }
