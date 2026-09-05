@@ -13,7 +13,6 @@ type ExecFileCaptureOptions = Omit<ExecFileOptions, 'timeout'> & {
   stdin?: string
   terminationBarrier?: boolean
   onChildTerminated?: () => void
-  onChildSpawned?: (pid: number) => void
   admissionTier?: GitAdmissionTier
   createTimeoutError?: () => Error
 }
@@ -40,7 +39,6 @@ export async function execFileCaptureToTermination(
     signal: options.signal,
     terminationBarrier: termination ?? true,
     onChildTerminated: options.onChildTerminated,
-    onChildSpawned: options.onChildSpawned,
     ...(options.stdin === undefined ? {} : { input: options.stdin })
   })
   recordSubprocessSpawn(command, args, performance.now() - spawnStartedAt)
@@ -75,7 +73,6 @@ export async function execFileCaptureToTermination(
     code: result.code,
     killed: result.timedOut || result.signal !== null || options.signal?.aborted === true,
     signal: result.signal,
-    ...(result.terminationUnverifiable ? { terminationUnverifiable: true } : {}),
     stdout,
     stderr
   })

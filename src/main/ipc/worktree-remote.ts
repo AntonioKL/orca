@@ -30,10 +30,7 @@ import type {
 import { getPRForBranch } from '../github/client'
 import { listWorktrees, addWorktree, addSparseWorktree } from '../git/worktree'
 import type { AddWorktreeOptions, AddWorktreeResult } from '../git/worktree'
-import {
-  consumePreparedWorktreeCreate,
-  recordUnpreparedWorktreeCreate
-} from '../worktree-create-preparation'
+import { consumePreparedWorktreeCreate } from '../worktree-create-preparation'
 import {
   getBranchConflictKind,
   resolveDefaultBaseRefViaExec,
@@ -2706,7 +2703,6 @@ export async function createLocalWorktree(
   const preparedWorktreeOptions = suggestLocalBaseRefUpdate
     ? addProjectGitOptions({ ...remoteTrackingBaseOption, suggestLocalBaseRefUpdate })
     : addProjectGitOptions(remoteTrackingBaseOption)
-  let unpreparedCreate = false
   let addResult: AddWorktreeResult
   try {
     addResult =
@@ -2730,7 +2726,6 @@ export async function createLocalWorktree(
           if (prepared.status === 'hit') {
             return prepared.result
           }
-          unpreparedCreate = true
         } else {
           timing.recordPreparedCheckout({
             status: 'miss',
@@ -3046,16 +3041,6 @@ export async function createLocalWorktree(
   )
 
   notifyWorktreesChanged(mainWindow, repo.id)
-  if (unpreparedCreate) {
-    void recordUnpreparedWorktreeCreate({
-      repoPath: repo.path,
-      workspaceRoot,
-      baseBranch,
-      options: localWorktreeGitOptions
-    }).catch(() => {
-      // Speculative preparation cannot fail an already-created workspace.
-    })
-  }
   return {
     worktree: {
       ...worktree,

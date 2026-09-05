@@ -1,11 +1,5 @@
 import {
-  canReclaimIndexWarming,
-  removeIndexWarmingOwnership
-} from './worktree-index-warming-ownership'
-import { disablePreparedIndexWarming } from './worktree-prepared-index-warming'
-import {
   isWorktreeCreatePreparation,
-  hasIndexWarmingProtection,
   parseWorktreePreparationOwnerPid,
   parseWorktreePreparationPathOwnerPid
 } from '../shared/worktree/create-preparation'
@@ -58,26 +52,12 @@ export async function cleanupStalePreparations(
         if (!lockOwnerPid || isProcessAlive(lockOwnerPid)) {
           continue
         }
-        if (
-          hasIndexWarmingProtection(worktree.lockReason) &&
-          !(await canReclaimIndexWarming(worktree.path, options.wslDistro))
-        ) {
-          disablePreparedIndexWarming()
-          continue
-        }
         // Preserve a branch-attached final path after a crash; only detached or
         // still-hidden preparations are safe to discard automatically.
         if (worktree.branch && pathOwnerPid === null) {
           await unlockPreparedWorktree(repoPath, worktree.path, options).catch(() => {})
         } else if (pathOwnerPid === lockOwnerPid) {
-          try {
-            await discardPreparedWorktree(repoPath, worktree.path, options)
-            if (hasIndexWarmingProtection(worktree.lockReason)) {
-              await removeIndexWarmingOwnership(worktree.path)
-            }
-          } catch {
-            // Keep ownership evidence when removal did not complete.
-          }
+          await discardPreparedWorktree(repoPath, worktree.path, options).catch(() => {})
         }
       }
     }

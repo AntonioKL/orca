@@ -250,12 +250,11 @@ describeBinaryCompatibility('real Git binary compatibility', () => {
   it('supports prepared worktree creation and finalization', async () => {
     await runGit(['worktree', 'add', '--detach', '--no-checkout', 'compat-prepared', 'HEAD'])
     await runGit(['-C', 'compat-prepared', 'reset', '--hard', 'HEAD'])
-    await runGit(['-C', 'compat-prepared', 'update-index', '--refresh'])
     await runGit([
       'worktree',
       'lock',
       '--reason',
-      'orca-create-preparation:v2:compat',
+      'orca-create-preparation:v1:compat',
       'compat-prepared'
     ])
     // Why: `-f -f` moves a locked preparation while preserving its lock reason (Git >=2.25).

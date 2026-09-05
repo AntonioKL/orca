@@ -1,29 +1,17 @@
 export const WORKTREE_CREATE_PREPARATION_DIRECTORY = '.orca-preparing'
 export const WORKTREE_CREATE_PREPARATION_LOCK_PREFIX = 'orca-create-preparation:v1:'
-const INDEX_WARMING_LOCK_PREFIX = 'orca-create-preparation:v2:'
 const WORKTREE_CREATE_PREPARATION_ID_PATTERN =
   /^(\d+)-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-export function createWorktreePreparationLockReason(
-  sessionId: string,
-  indexWarming = false
-): string {
-  const prefix = indexWarming ? INDEX_WARMING_LOCK_PREFIX : WORKTREE_CREATE_PREPARATION_LOCK_PREFIX
-  return `${prefix}${process.pid}:${sessionId}`
-}
-
-export function hasIndexWarmingProtection(lockReason?: string): boolean {
-  return lockReason?.startsWith(INDEX_WARMING_LOCK_PREFIX) === true
+export function createWorktreePreparationLockReason(sessionId: string): string {
+  return `${WORKTREE_CREATE_PREPARATION_LOCK_PREFIX}${process.pid}:${sessionId}`
 }
 
 export function parseWorktreePreparationOwnerPid(lockReason?: string): number | null {
-  const prefix = hasIndexWarmingProtection(lockReason)
-    ? INDEX_WARMING_LOCK_PREFIX
-    : WORKTREE_CREATE_PREPARATION_LOCK_PREFIX
-  if (!lockReason?.startsWith(prefix)) {
+  if (!lockReason?.startsWith(WORKTREE_CREATE_PREPARATION_LOCK_PREFIX)) {
     return null
   }
-  const pid = Number(lockReason.slice(prefix.length).split(':')[0])
+  const pid = Number(lockReason.slice(WORKTREE_CREATE_PREPARATION_LOCK_PREFIX.length).split(':')[0])
   return Number.isSafeInteger(pid) && pid > 0 ? pid : null
 }
 

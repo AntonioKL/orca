@@ -24,14 +24,6 @@ import {
 import { handlers, mainWindow, setupWorktreeHandlers, store } from './worktrees-test-harness'
 import type { WorktreeRuntimeStub } from './worktrees-test-runtime-stub'
 
-const { recordColdCreate } = vi.hoisted(() => ({
-  recordColdCreate: vi.fn().mockResolvedValue(undefined)
-}))
-vi.mock('../worktree-create-preparation', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  recordUnpreparedWorktreeCreate: recordColdCreate
-}))
-
 vi.mock('electron', async () =>
   (await import('./worktrees-test-module-mocks')).electronModuleMock()
 )
@@ -120,7 +112,6 @@ describe('registerWorktreeHandlers', () => {
   let runtimeStub: WorktreeRuntimeStub
 
   beforeEach(() => {
-    recordColdCreate.mockClear()
     runtimeStub = setupWorktreeHandlers()
   })
 
@@ -692,7 +683,6 @@ describe('registerWorktreeHandlers', () => {
   })
 
   it('spawns a startup terminal and setup terminal after local worktree registration', async () => {
-    recordColdCreate.mockImplementationOnce(() => new Promise<void>(() => {}))
     addWorktreeMock.mockResolvedValue({})
     stubStartupWorktreeListing()
     loadHooksMock.mockReturnValue({
@@ -783,10 +773,6 @@ describe('registerWorktreeHandlers', () => {
     )
     // Nothing warmed this repo, so the create must report the cold path rather than stay silent.
     expect(result.timing?.preparedCheckout).toEqual({ status: 'miss', reason: 'none_armed' })
-    expect(recordColdCreate).toHaveBeenCalledTimes(1)
-    expect(recordColdCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ repoPath: '/workspace/repo', baseBranch: 'origin/main' })
-    )
   })
 
   it('returns the wrapped setup command when startup spawned but setup creation failed', async () => {
@@ -833,14 +819,6 @@ describe('registerWorktreeHandlers', () => {
     expect(result.setup?.command).toContain('printf')
   })
 
-  it('does not count a failed Git add toward preparation', async () => {
-    addWorktreeMock.mockRejectedValueOnce(new Error('checkout failed'))
-    await expect(
-      handlers['worktrees:create'](null, { repoId: 'repo-1', name: 'failed-create' })
-    ).rejects.toThrow('checkout failed')
-    expect(recordColdCreate).not.toHaveBeenCalled()
-  })
-
   it('rejects ask-policy creates before mutating git state when setup decision is missing', async () => {
     getEffectiveHooksMock.mockReturnValue({
       scripts: {
@@ -857,7 +835,6 @@ describe('registerWorktreeHandlers', () => {
         name: 'improve-dashboard'
       })
     ).rejects.toThrow('Setup decision required for this repository')
-    expect(recordColdCreate).not.toHaveBeenCalled()
 
     expect(addWorktreeMock).not.toHaveBeenCalled()
     expect(store.setWorktreeMeta).not.toHaveBeenCalled()

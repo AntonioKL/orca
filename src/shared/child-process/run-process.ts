@@ -140,9 +140,6 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
         : forceTerminateProcessTree(child)
       ).catch(() => false)
 
-    const terminationUnverifiable = (): boolean =>
-      barrierStopping && !barrierTerminationVerified && !rootExitedBeforeBarrier
-
     const resolveFromClose = (code: number | null, signal: NodeJS.Signals | null): void =>
       settle(() =>
         resolve({
@@ -151,15 +148,13 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
           stdout: stdout.text(),
           stderr: stderr.text(),
           timedOut,
-          outputTruncated: stdout.truncated() || stderr.truncated(),
-          ...(terminationUnverifiable() ? { terminationUnverifiable: true } : {})
+          outputTruncated: stdout.truncated() || stderr.truncated()
         })
       )
 
     const settleBarrierOutcome = (): void => {
       const rootExit = deferredClose ?? deferredExit
       if (deferredError) {
-        Object.assign(deferredError, { terminationUnverifiable: terminationUnverifiable() })
         settle(() => reject(deferredError))
         return
       }
@@ -311,15 +306,6 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
       }
       resolveFromClose(code, signal)
     })
-
-    if (child.pid && spec.onChildSpawned) {
-      try {
-        spec.onChildSpawned(child.pid)
-      } catch (error) {
-        deferredError = error instanceof Error ? error : new Error(String(error))
-        stopAndSettle()
-      }
-    }
 
     // Why close rather than leave open: a child that reads stdin (a hook
     // draining its payload, a CLI probing for a TTY) otherwise blocks until the

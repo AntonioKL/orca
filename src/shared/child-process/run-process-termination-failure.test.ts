@@ -120,27 +120,6 @@ describe('runProcess termination failure', () => {
     await pending
   })
 
-  it('terminates the launched group if its PID observer throws', async () => {
-    const signal = vi.fn().mockResolvedValue(false)
-    const force = vi.fn().mockResolvedValue(true)
-    spawnMock.mockReturnValue(mockChild())
-    const onChildSpawned = vi.fn(() => {
-      throw new Error('observer failed')
-    })
-    const pending = runProcess({
-      program: 'git',
-      timeoutMs: null,
-      terminationBarrier: { signal, force },
-      onChildSpawned
-    })
-    const rejection = expect(pending).rejects.toThrow('observer failed')
-    expect(onChildSpawned).toHaveBeenCalledExactlyOnceWith(1234)
-    expect(signal).toHaveBeenCalledOnce()
-    await vi.advanceTimersByTimeAsync(2_000)
-    await rejection
-    expect(force).toHaveBeenCalledOnce()
-  })
-
   it('reports ordinary child close exactly once', async () => {
     const child = mockChild()
     const onChildTerminated = vi.fn()
@@ -185,7 +164,7 @@ describe('runProcess termination failure', () => {
 
     expect(settled).toBe(false)
     await vi.advanceTimersByTimeAsync(10_000)
-    await expect(pending).resolves.toMatchObject({ timedOut: true, terminationUnverifiable: true })
+    await expect(pending).resolves.toMatchObject({ timedOut: true })
   })
 
   // Windows takes the taskkill branch, which never consults forceTerminateProcessTree.
@@ -257,10 +236,7 @@ describe('runProcess termination failure', () => {
     const child = mockChild()
     spawnMock.mockReturnValue(child)
     const pending = runProcess({ program: 'git', timeoutMs: 10, terminationBarrier: true })
-    const rejection = expect(pending).rejects.toMatchObject({
-      message: 'kill failed',
-      terminationUnverifiable: true
-    })
+    const rejection = expect(pending).rejects.toThrow('kill failed')
     let settled = false
     void pending.catch(() => {
       settled = true
