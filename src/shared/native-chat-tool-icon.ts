@@ -9,6 +9,7 @@
  */
 import { EDIT_TOOL_NAMES } from './native-chat-diff'
 import { isCommandToolName } from './native-chat-tool-activity'
+import { toolInputCommand } from './native-chat-tool-summary'
 
 export type NativeChatToolCategory =
   | 'read'
@@ -114,21 +115,12 @@ export function nativeChatToolIconName(rowWord: string): NativeChatToolIconName 
   return NATIVE_CHAT_TOOL_ICON_NAMES[nativeChatToolCategory(rowWord) ?? 'other']
 }
 
-/** The categories a shell command produces: Codex's three classified classes,
- *  plus an unclassified one. Kept here rather than in a lane so the classified
- *  words and `shell` stay one answer. */
-const SHELL_ACTIVITY_CATEGORIES: ReadonlySet<NativeChatToolCategory> = new Set([
-  'read',
-  'search',
-  'listFiles',
-  'unknown'
-])
-
-/** Whether a row reads as terminal activity. For a lane with no per-category
- *  glyph (mobile), which only chooses between a terminal and a generic tool:
- *  keying that on the tool name alone would call Codex's classified `read` /
- *  `search` / `list` rows generic tools, though a shell command produced them. */
-export function isShellActivityToolRow(rowWord: string): boolean {
-  const category = nativeChatToolCategory(rowWord)
-  return category !== null && SHELL_ACTIVITY_CATEGORIES.has(category)
+/** Whether a call reads as terminal activity, for a lane with no per-category
+ *  glyph (mobile) that only chooses between a terminal and a generic tool.
+ *  The row word cannot decide it alone: Codex names a classified shell row
+ *  `read` / `search` / `list`, which lowercase to Claude's own `Read` / `Grep` /
+ *  `Glob`, and those ran no command. So the input breaks the tie — Codex keeps
+ *  the command it ran, while Claude's `Read` carries only a file path. */
+export function isShellActivityToolCall(call: { name: string; input?: unknown }): boolean {
+  return isCommandToolName(call.name) || toolInputCommand(call.input) !== null
 }

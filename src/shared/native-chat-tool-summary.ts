@@ -20,6 +20,9 @@ const PRIMARY_ARG_KEYS = [
   'description'
 ] as const
 const BRIEF_ARG_KEYS = ['query', 'pattern', 'directory', 'command', 'cmd'] as const
+// Only the keys that hold a shell command, so a search term or a listed folder
+// cannot stand in for one.
+const COMMAND_ARG_KEYS = ['command', 'cmd'] as const
 export const MAX_TOOL_DETAIL_LENGTH = 4000
 
 export type ToolInputDisplay = {
@@ -178,6 +181,18 @@ export function briefToolArg(input: unknown): string {
     }
   }
   return summarizeToolInput(normalized).slice(0, 28)
+}
+
+/** The shell command a call carries in its input, or null when it carries none.
+ *  Codex keeps the raw command on a classified `read`/`search`/`list` row, so
+ *  this is what tells one apart from a Claude tool of the same lowercased word. */
+export function toolInputCommand(input: unknown): string | null {
+  const normalized = normalizeToolInput(input)
+  return isToolInputRecord(normalized) ? firstPrimaryToolArg(normalized, COMMAND_ARG_KEYS) : null
+}
+
+function isToolInputRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 /** Codex delivers tool arguments as a JSON string. Parse those into the object

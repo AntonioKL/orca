@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  isShellActivityToolRow,
+  isShellActivityToolCall,
   NATIVE_CHAT_TOOL_ICON_NAMES,
   nativeChatToolCategory,
   nativeChatToolIconName,
@@ -110,46 +110,81 @@ describe('native chat tool icons', () => {
     for (const name of ['shell', 'bash', 'run_terminal_cmd', 'exec', 'local_shell']) {
       expect(nativeChatToolCategory(name)).toBe('unknown')
       expect(nativeChatToolIconName(name)).toBe('square-terminal')
-      expect(isShellActivityToolRow(name)).toBe(true)
     }
   })
 
-  it('reads a classified shell row as terminal activity, not as a named tool', () => {
-    // A lane with only a terminal and a generic glyph (mobile) asks this instead
-    // of `isCommandToolName`, which answers false for the words Codex publishes
-    // for a command that really ran.
-    for (const word of ['read', 'search', 'list', 'shell', 'bash', 'run_terminal_cmd']) {
-      expect(isShellActivityToolRow(word)).toBe(true)
-    }
-    // Claude's own filesystem tools share those categories, so they read as
-    // terminal activity on that lane too — it has no closer glyph for them.
-    for (const word of ['Read', 'Grep', 'Glob']) {
-      expect(isShellActivityToolRow(word)).toBe(true)
-    }
-    for (const word of ['Edit', 'Diff', 'Task', 'WebFetch', 'TodoWrite', 'AskUserQuestion', '']) {
-      expect(isShellActivityToolRow(word)).toBe(false)
-    }
-  })
+  describe('terminal activity for a two-glyph lane', () => {
+    // Mobile has only a terminal and a wrench, so it asks this instead of
+    // `nativeChatToolIconName`. The row word alone cannot answer it: Codex's
+    // classified `read` and Claude's `Read` are the same word lowercased.
 
-  it('answers terminal activity for exactly the shell categories, and no others', () => {
-    // A `Record` of the whole vocabulary, so a category added later cannot join
-    // or leave the terminal set without this listing changing.
-    const rowWordByCategory: Record<NativeChatToolCategory, string> = {
-      read: 'read',
-      search: 'search',
-      listFiles: 'list',
-      unknown: 'shell',
-      fileChange: 'Edit',
-      webSearch: 'WebFetch',
-      mcpToolCall: 'mcp__linear__create_issue',
-      subAgentActivity: 'Task',
-      todoList: 'TodoWrite',
-      other: 'AskUserQuestion'
-    }
+    it('reads a classified Codex row as terminal activity, by the command it kept', () => {
+      for (const [name, fields] of [
+        ['read', { path: 'src/app.ts' }],
+        ['search', { query: 'todo', directory: 'src' }],
+        ['list', { directory: 'src' }]
+      ] as const) {
+        expect(
+          isShellActivityToolCall({
+            name,
+            input: { command: 'rg todo src', cwd: '/repo', ...fields }
+          })
+        ).toBe(true)
+      }
+    })
 
-    expect(
-      ALL_CATEGORIES.filter((category) => isShellActivityToolRow(rowWordByCategory[category]))
-    ).toEqual(['read', 'search', 'listFiles', 'unknown'])
+    it('reads an unclassified shell row as terminal activity, by its name', () => {
+      for (const name of ['shell', 'bash', 'Bash', 'run_terminal_cmd']) {
+        expect(isShellActivityToolCall({ name, input: null })).toBe(true)
+      }
+    })
+
+    it('reads a rollout-transcript shell call as terminal activity', () => {
+      // `exec` and `local_shell` are not command tool names, so only the argv
+      // command in their input says a shell ran.
+      expect(
+        isShellActivityToolCall({ name: 'exec', input: '{"command":["bash","-lc","ls"]}' })
+      ).toBe(true)
+      expect(
+        isShellActivityToolCall({ name: 'local_shell', input: { command: ['bash', '-lc', 'ls'] } })
+      ).toBe(true)
+    })
+
+    it('leaves a Claude filesystem tool a generic tool, since no command ran', () => {
+      expect(
+        isShellActivityToolCall({ name: 'Read', input: { file_path: '/repo/src/app.ts' } })
+      ).toBe(false)
+      expect(
+        isShellActivityToolCall({ name: 'Grep', input: { pattern: 'todo', path: 'src' } })
+      ).toBe(false)
+      expect(isShellActivityToolCall({ name: 'Glob', input: { pattern: '**/*.ts' } })).toBe(false)
+    })
+
+    it('leaves an unmodelled tool a generic tool', () => {
+      expect(
+        isShellActivityToolCall({ name: 'AskUserQuestion', input: { question: 'which?' } })
+      ).toBe(false)
+      for (const name of ['Edit', 'Diff', 'Task', 'WebFetch', 'TodoWrite', '']) {
+        expect(isShellActivityToolCall({ name, input: { file_path: 'a.ts' } })).toBe(false)
+      }
+    })
+
+    it('answers false for an input that carries no command, whatever its shape', () => {
+      for (const input of [
+        null,
+        undefined,
+        'ls -la',
+        42,
+        ['bash', '-lc', 'ls'],
+        {},
+        { cwd: '/r' }
+      ]) {
+        expect(isShellActivityToolCall({ name: 'read', input })).toBe(false)
+      }
+      // A present-but-blank command is not a command that ran.
+      expect(isShellActivityToolCall({ name: 'read', input: { command: '   ' } })).toBe(false)
+      expect(isShellActivityToolCall({ name: 'read', input: { command: null } })).toBe(false)
+    })
   })
 
   it('does not answer a prototype key with a glyph', () => {
