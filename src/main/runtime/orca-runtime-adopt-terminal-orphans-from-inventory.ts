@@ -151,11 +151,13 @@ export class OrcaRuntimeWithAdoptTerminalOrphansFromInventory extends OrcaRuntim
 
     // Fallback: any leaf in the target worktree.
     //
-    // `requireUnambiguous` callers are asking "which terminal AM I", and an arbitrary
-    // iteration-order pick answers that with someone else's pane: a bare `check` then reads and
-    // consumes a sibling's dispatch mailbox, and a bare `worker_done` can settle a sibling's
-    // context-only dispatch, which has no capability token to reject on. Refusing is the only
-    // safe answer when more than one leaf could be meant.
+    // `requireUnambiguous` callers are asking "which terminal AM I" — today the implicit `--from`
+    // sender — and an arbitrary iteration-order pick answers that with someone else's pane: a bare
+    // `send --type worker_done` then settles a SIBLING's context-only dispatch, a tier that has no
+    // capability token to reject on, and every message it sends is attributed to that sibling.
+    // Refusing is the only safe answer when more than one leaf could be meant. (`check` resolves
+    // through the `--terminal` scope, which still guesses; a structured worker is covered instead
+    // by the `ORCA_TERMINAL_HANDLE` its child is spawned with.)
     const candidates: RuntimeLeafRecord[] = []
     for (const leaf of this.leaves.values()) {
       if (targetWorktreeId && leaf.worktreeId !== targetWorktreeId) {

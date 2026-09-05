@@ -114,6 +114,60 @@ describe('structured worker session hold', () => {
     expect(structuredWorkerIdentities.getBySessionId(closed[0]!)).toBeNull()
   })
 
+  it('discards the session when the create settled UNKNOWN after attach', async () => {
+    installHost()
+    const closed: string[] = []
+    ;(hostRef.current as { close: (id: string) => Promise<void> }).close = async (id) => {
+      closed.push(id)
+    }
+    // `commit` answers this after `attach` SUCCEEDED and only the tab publish failed, so the
+    // provider child is live. Reading it as "refused, nothing created" strands that child with no
+    // hold and no binding, and nothing else in the runtime ever retires it.
+    createSpy.mockImplementation(async () => ({
+      ok: false,
+      refusal: {
+        code: 'agent_session_operation_unknown',
+        message: 'The chat may have been created, but its tab could not be confirmed.'
+      }
+    }))
+    await expect(
+      createStructuredWorkerSession({
+        runtime: { ensureStructuredAgentSessionHost: async () => {} } as never,
+        worktreeId: 'wt_1',
+        agent: 'claude',
+        dispatchId: 'd_unknown',
+        onJournalActivity: () => {}
+      })
+    ).rejects.toThrow(/was refused/)
+    expect(closed).toHaveLength(1)
+    expect(structuredWorkerIdentities.getBySessionId(closed[0]!)).toBeNull()
+  })
+
+  it('does not close anything when the create refusal proves nothing was created', async () => {
+    installHost()
+    const closed: string[] = []
+    ;(hostRef.current as { close: (id: string) => Promise<void> }).close = async (id) => {
+      closed.push(id)
+    }
+    createSpy.mockImplementation(async () => ({
+      ok: false,
+      refusal: {
+        code: 'structured_agent_session_unsupported',
+        message: 'Orca cannot open a structured agent chat for this workspace.'
+      }
+    }))
+    await expect(
+      createStructuredWorkerSession({
+        runtime: { ensureStructuredAgentSessionHost: async () => {} } as never,
+        worktreeId: 'wt_1',
+        agent: 'claude',
+        dispatchId: 'd_definitive',
+        onJournalActivity: () => {}
+      })
+    ).rejects.toThrow(/was refused/)
+    expect(closed).toEqual([])
+  })
+
   it('registers a random handle bound to the created session', async () => {
     installHost()
     const created = await createStructuredWorkerSession({

@@ -12,6 +12,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { isDefinitiveAgentSessionCreateRefusal } from '../../../../shared/agent-session-definitive-refusal'
 import type { AgentJournalMessageItem } from '../../../../shared/agent-session-journal-types'
 import type { StructuredAgentSessionHost } from '../../../native-chat/agent-session-wire/structured-agent-session-host'
 import { getStructuredAgentSessionHost } from '../../../native-chat/agent-session-wire/structured-agent-session-registry'
@@ -148,11 +149,26 @@ export async function createStructuredWorkerSession(args: {
     // A start that fails after the session exists would otherwise strand a live provider child and
     // a published background tab that no dispatch owns.
     structuredWorkerIdentities.forget(identity.handle)
-    if (created?.ok) {
+    if (structuredCreateMayHaveCommitted(created)) {
       await discardCreatedSession(sessionId)
     }
     throw error
   }
+}
+
+/**
+ * Whether a create may have attached a session, which is the question cleanup has to ask.
+ *
+ * `ok` is not the test. `commit` answers `agent_session_operation_unknown` when `attach` SUCCEEDED
+ * and only the tab publish failed, and a throw out of the commit half is past `attach` too — the
+ * pre-commit half never throws, it refuses. Both leave a live provider child that took no hold and
+ * has no binding, so nothing else in the runtime will ever retire it. Only a DEFINITIVE refusal
+ * proves there is nothing to discard; everything else gets the best-effort close.
+ */
+function structuredCreateMayHaveCommitted(
+  created: Awaited<ReturnType<typeof createStructuredAgentSessionForWorktree>> | undefined
+): boolean {
+  return !created || created.ok || !isDefinitiveAgentSessionCreateRefusal(created.refusal.code)
 }
 
 /** Best-effort teardown of a session created by a worker start that then failed. */

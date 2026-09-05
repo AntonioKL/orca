@@ -108,8 +108,8 @@ describe('implicit sender resolution refuses to guess', () => {
   })
 
   it('refuses rather than picking the first of several', async () => {
-    // An arbitrary pick lets a bare `check` consume a sibling's mailbox and a bare `worker_done`
-    // settle a sibling's context-only dispatch, which has no capability token to reject on.
+    // An arbitrary pick lets a bare `send --type worker_done` settle a SIBLING's context-only
+    // dispatch, a tier that has no capability token to reject on.
     await expect(
       resolveActiveTerminal.call(senderStub(['leaf_a', 'leaf_b']), 'id:wt_1', {
         requireUnambiguous: true
@@ -118,16 +118,22 @@ describe('implicit sender resolution refuses to guess', () => {
   })
 
   it('refuses the same arbitrary pick before the terminal graph is ready', async () => {
+    // The snapshot carries a focused terminal on purpose: without it the refusal below would come
+    // from the ambiguous `listTerminals` fallback alone and would still hold with the pre-ready
+    // focus guess left in, proving nothing about it.
     const preReady = {
       graphStatus: 'starting',
       resolveWorktreeSelector: async () => ({ id: 'wt_1' }),
-      getMobileSessionTabsForWorktree: () => ({ tabs: [] }),
+      getMobileSessionTabsForWorktree: () => ({
+        tabs: [{ type: 'terminal', isActive: true, status: 'ready', terminal: 'term_focused' }]
+      }),
       listTerminals: async () => ({ terminals: [{ handle: 'term_a' }, { handle: 'term_b' }] })
     }
     await expect(
       resolveActiveTerminal.call(preReady, 'id:wt_1', { requireUnambiguous: true })
     ).rejects.toThrow('no_active_terminal')
-    await expect(resolveActiveTerminal.call(preReady, 'id:wt_1')).resolves.toBe('term_a')
+    // The same stub still answers the focus guess for a caller that is not claiming an identity.
+    await expect(resolveActiveTerminal.call(preReady, 'id:wt_1')).resolves.toBe('term_focused')
   })
 
   it('still picks arbitrarily for callers that are not claiming an identity', async () => {
