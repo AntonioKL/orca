@@ -73,6 +73,35 @@ describe('formatWorkerRead', () => {
     expect(output).toBe(`[assistant] [subagents] ${subagentGroupFallbackText(ROSTER)}`)
   })
 
+  // A roster from a newer build holds a state this build does not know, which
+  // `summarizeSubagentGroup` reads as `unverifiable`. Recomputing the sentence
+  // to compare it against the frozen twin therefore produced a DIFFERENT string,
+  // and the CLI printed the roster twice: the twin's own wording plus a
+  // `[subagents]` line contradicting it.
+  it('prints the roster once when the twin names a state this build cannot reproduce', () => {
+    const frozenTwin = 'Ran 2 subagents (1 cancelled)'
+    const output = formatWorkerRead(
+      transcriptRead(
+        [
+          { type: 'text', text: frozenTwin },
+          {
+            type: 'subagent-group',
+            groupId: 'thread:turn-1',
+            agents: [
+              { id: 'child-1', label: 'read', state: 'completed' },
+              { id: 'child-2', label: 'edit', state: 'cancelled' }
+            ] as unknown as NativeChatSubagentEntry[]
+          }
+        ],
+        'system'
+      )
+    )
+
+    expect(output).toBe(`[system] ${frozenTwin}`)
+    expect(output).not.toContain('[subagents]')
+    expect(output).not.toContain('unverifiable')
+  })
+
   // The journal admits block types this build does not know, and `client.call`
   // casts the RPC result rather than validating it — so a newer remote host's
   // block reaches this formatter as-is. Reading fields off it threw a TypeError

@@ -473,6 +473,43 @@ describe('NativeChatMessageList spawn-group roster', () => {
     expect(screen.queryByText('Ran 2 subagents (1 failed)')).toBeNull()
   })
 
+  // The block is provider-agnostic — the Claude lane feeds it too — so a lane
+  // that folds a roster into a message carrying real prose is a live shape. The
+  // filter used to drop EVERY text block once a roster was present, so that
+  // prose vanished on desktop while mobile, which reads the raw blocks, kept it.
+  it('keeps prose beside a roster block and drops only the twin', () => {
+    const startedAt = Date.now() - 3000
+    const twin = subagentGroupFallbackText(ROSTER)
+    render(
+      <NativeChatMessageList
+        session={{
+          ...rosterSession(ROSTER, startedAt),
+          messages: [
+            {
+              id: 'roster-with-prose',
+              role: 'assistant',
+              blocks: [
+                { type: 'text', text: 'Handing the audit to two children.' },
+                { type: 'text', text: twin },
+                { type: 'subagent-group', groupId: 'thread-1:turn-1', agents: ROSTER }
+              ],
+              timestamp: startedAt + 3,
+              source: 'transcript'
+            }
+          ]
+        }}
+        isWorking={false}
+        workingStartedAt={startedAt}
+        expandSignal={false}
+        fontScale={1}
+      />
+    )
+
+    expect(screen.getByText('Handing the audit to two children.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Ran 2 subagents/ })).toBeInTheDocument()
+    expect(screen.queryByText(twin)).toBeNull()
+  })
+
   // The reordering that kept the roster visible must not have let TOOL activity
   // out from behind the same disclosure: a failed child command reading as live
   // on a finished turn is what put that guard there.

@@ -138,3 +138,15 @@ export function subagentGroupFallbackText(agents: readonly NativeChatSubagentEnt
     ? `Kicked off ${total} ${noun} — ${working} working${adverse}`
     : `Ran ${total} ${noun}${adverse}`
 }
+
+/** Whether `text` is a roster block's frozen twin rather than ordinary prose.
+ *  Shape-matched, not recomputed: a roster written by a newer build can hold a
+ *  state this build normalizes to `unverifiable`, so its twin never equals the
+ *  sentence recomputed here — and a byte compare would then print the roster
+ *  twice. Keep in sync with `subagentGroupFallbackText`. */
+const SUBAGENT_GROUP_FALLBACK_PATTERN =
+  /^(?:Kicked off \d+ subagents? — \d+ working|Ran \d+ subagents?)(?: \(\d+ [a-z][a-z-]*\))?$/
+
+export function isSubagentGroupFallbackText(text: string): boolean {
+  return SUBAGENT_GROUP_FALLBACK_PATTERN.test(text)
+}

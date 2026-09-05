@@ -8,9 +8,11 @@
 // must not resurrect a settled child.
 //
 // KNOWN LIMITATION: `groups` is process-local and is never seeded from the
-// journal. After a group is evicted, or a reconnect reuses a `threadId:turnId`,
-// the next activity item rebuilds the row from scratch — an N-child roster can
-// be rewritten down to one child. Seeding from the journal is the real fix.
+// journal, and `threadId:outside-turn` is the one group id that outlives the
+// process — `thread/resume` is verified to return the same thread, while every
+// real turn id is freshly minted. So a thread that banked N out-of-turn children
+// and died (swept correctly) rebuilds that row from the next activity item
+// alone, rewriting N children down to one. Seeding from the journal is the fix.
 
 import type {
   AgentJournalItemBody,

@@ -17085,6 +17085,26 @@
         "retryProof": "Retry proof",
         "retry": "Retry",
         "details": "Details"
+      },
+      "subagents": {
+        "state": {
+          "completed": "completed",
+          "working": "working",
+          "idle": "idle",
+          "failed": "failed",
+          "stopped": "stopped",
+          "unverifiable": "unverifiable",
+          "workingCount": "{{value0}} working",
+          "idleCount": "{{value0}} idle",
+          "failedCount": "{{value0}} failed",
+          "stoppedCount": "{{value0}} stopped",
+          "unverifiableCount": "{{value0}} unverifiable"
+        },
+        "startedOne": "Kicked off 1 subagent",
+        "startedN": "Kicked off {{value0}} subagents",
+        "ranOne": "Ran 1 subagent",
+        "ranN": "Ran {{value0}} subagents",
+        "tokens": "{{value0}} tokens"
       }
     },
     "tab": {

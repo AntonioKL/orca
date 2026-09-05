@@ -1,4 +1,7 @@
-import { subagentGroupFallbackText } from '../../../shared/native-chat-subagent-summary'
+import {
+  isSubagentGroupFallbackText,
+  subagentGroupFallbackText
+} from '../../../shared/native-chat-subagent-summary'
 import type { NativeChatMessage } from '../../../shared/native-chat-types'
 import type { RuntimeTerminalRead } from '../../../shared/runtime-types'
 import type { OrchestrationWorkerReadResult } from '../../../shared/orchestration-worker-output'
@@ -22,8 +25,8 @@ function formatWorkerTranscriptMessage(message: NativeChatMessage): string {
   // sentence, for clients that cannot draw the block. This CLI is one, so it
   // prints the twin and drops the block — the mirror of the renderer, which
   // draws the block and drops the twin. Either way the sentence prints once.
-  const twinTexts = new Set(
-    message.blocks.flatMap((block) => (block.type === 'text' ? [block.text] : []))
+  const hasTwin = message.blocks.some(
+    (block) => block.type === 'text' && isSubagentGroupFallbackText(block.text)
   )
   const blocks = message.blocks.flatMap((block): string[] => {
     if (block.type === 'text') {
@@ -39,11 +42,13 @@ function formatWorkerTranscriptMessage(message: NativeChatMessage): string {
       return [block.url ? `[image] ${block.url}` : `[image omitted]`]
     }
     if (block.type === 'subagent-group') {
-      // Stand in for the block only when its twin is not already being printed:
-      // the wire admits a roster that arrived without one, and dropping that
-      // unconditionally would lose the sentence altogether.
-      const sentence = subagentGroupFallbackText(block.agents)
-      return twinTexts.has(sentence) ? [] : [`[subagents] ${sentence}`]
+      // Stand in for the block only when no twin is being printed: the wire
+      // admits a roster that arrived without one, and dropping that
+      // unconditionally would lose the sentence altogether. Presence, not a
+      // byte compare against a recomputed sentence — a roster from a newer
+      // build holds a state this build reads as `unverifiable`, so recomputing
+      // yields a different sentence and both would print.
+      return hasTwin ? [] : [`[subagents] ${subagentGroupFallbackText(block.agents)}`]
     }
     // The journal deliberately admits block types this build does not know, and
     // a newer remote host can send one over the wire. Degrade to a marker rather
