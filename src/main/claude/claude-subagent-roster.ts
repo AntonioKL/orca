@@ -16,6 +16,7 @@ import type { AgentJournalItemIdentity } from '../../shared/agent-session-journa
 import { isTerminalSubagentState } from '../../shared/native-chat-subagent-summary'
 import type { NativeChatSubagentEntry } from '../../shared/native-chat-types'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
+import { isBoundedClaudeTaskId } from './claude-background-task-tracker'
 import { claudeSubagentGroupBody, claudeSubagentGroupIdentity } from './claude-subagent-group-row'
 import { ClaudeSubagentIds } from './claude-subagent-id-aliases'
 import { readClaudeSubagentTaskFrame } from './claude-subagent-task-frames'
@@ -137,6 +138,12 @@ export class ClaudeSubagentRoster {
       // so an id it never declared cannot be a subagent — and a row invented for
       // one is unlabelled forever and can only ever end `unverifiable`. The
       // bounded exclusion set cannot cover an id that was never announced.
+      return
+    }
+    if (!isBoundedClaudeTaskId(canonical)) {
+      // `claudeTaskId` rejects an over-long announced id rather than truncating
+      // it; a provisional id becomes the same durable entry key, so it cannot
+      // enter under a looser rule.
       return
     }
     this.create(canonical, null, 'working', false)

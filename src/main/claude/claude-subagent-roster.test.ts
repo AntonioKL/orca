@@ -296,6 +296,16 @@ describe('ClaudeSubagentRoster', () => {
       expect(items).toHaveLength(0)
     })
 
+    it('rejects an over-long provisional id instead of storing it as an entry id', () => {
+      const { roster, items } = harness()
+      // The announced path drops an id past `claudeTaskId`'s bound; the
+      // provisional one writes the same durable entry id, so it must too.
+      roster.observeChildActivity(`toolu_${'x'.repeat(512)}`)
+      expect(items).toHaveLength(0)
+      roster.observeChildActivity(`toolu_${'x'.repeat(500)}`)
+      expect(items).toHaveLength(1)
+    })
+
     it('still rosters a subagent announced after a task the filter rejected', () => {
       const { roster, roles } = harness()
       roster.observeSystemFrame(
