@@ -273,9 +273,11 @@ function boundBlock(block: NativeChatBlock, limits: JournalPayloadLimits): Nativ
   if (block.type === 'subagent-group') {
     return {
       ...block,
-      agents: block.agents
-        .slice(0, MAX_LEGACY_IMPORT_SUBAGENTS)
-        .map((agent) => ({ ...agent, label: boundInlineText(agent.label, limits).text }))
+      agents: block.agents.slice(0, MAX_LEGACY_IMPORT_SUBAGENTS).map((agent) => ({
+        ...agent,
+        id: boundInlineText(agent.id, limits).text,
+        label: boundInlineText(agent.label, limits).text
+      }))
     }
   }
   return block

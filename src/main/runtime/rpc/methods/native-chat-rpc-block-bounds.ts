@@ -19,9 +19,10 @@ const MOBILE_BLOCK_CHAR_CAP = 4000
 // would freeze the phone.
 const MOBILE_TEXT_BLOCK_CHAR_CAP = 64_000
 // Why: a subagent roster is a compact status list, but nothing on the wire
-// bounds how many children a producer put in one, nor how long a label is.
+// bounds how many children a producer put in one, nor how long a child's id or
+// label is — an imported legacy transcript carries whatever the file held.
 const MOBILE_SUBAGENT_ENTRIES_CAP = 64
-const MOBILE_SUBAGENT_LABEL_CHAR_CAP = 512
+const MOBILE_SUBAGENT_TEXT_CHAR_CAP = 512
 const MOBILE_TOOL_INPUT_ITEMS_CAP = 20
 const MOBILE_TOOL_INPUT_NODE_CAP = 100
 const TRUNCATION_MARKER = '\n… (truncated)'
@@ -57,9 +58,11 @@ function sanitizeBlock(
   if (block.type === 'subagent-group') {
     return {
       ...block,
-      agents: block.agents
-        .slice(0, MOBILE_SUBAGENT_ENTRIES_CAP)
-        .map((agent) => ({ ...agent, label: clip(agent.label, MOBILE_SUBAGENT_LABEL_CHAR_CAP) }))
+      agents: block.agents.slice(0, MOBILE_SUBAGENT_ENTRIES_CAP).map((agent) => ({
+        ...agent,
+        id: clip(agent.id, MOBILE_SUBAGENT_TEXT_CHAR_CAP),
+        label: clip(agent.label, MOBILE_SUBAGENT_TEXT_CHAR_CAP)
+      }))
     }
   }
   return block

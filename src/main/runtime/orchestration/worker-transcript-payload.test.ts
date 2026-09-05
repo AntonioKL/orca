@@ -43,7 +43,7 @@ describe('worker transcript wire bounds', () => {
             type: 'subagent-group',
             groupId: 'g',
             agents: Array.from({ length: 40 }, (_, index) => ({
-              id: `task-${index}`,
+              id: `task-${index}-${'i'.repeat(900)}`,
               label: 'l'.repeat(900),
               state: 'working'
             }))
@@ -56,6 +56,7 @@ describe('worker transcript wire bounds', () => {
     expect(block?.type).toBe('subagent-group')
     expect(block?.type === 'subagent-group' && block.agents).toHaveLength(20)
     expect(block?.type === 'subagent-group' && block.agents[0]?.label).toHaveLength(512)
+    expect(block?.type === 'subagent-group' && block.agents[0]?.id).toHaveLength(512)
     expect(result.warnings).toContain(
       'Some subagent roster entries were omitted from transcript output.'
     )

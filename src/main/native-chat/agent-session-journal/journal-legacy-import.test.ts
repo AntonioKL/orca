@@ -432,6 +432,47 @@ describe('payload bounds on import', () => {
     expect(body.output.byteLength).toBe(64 * 1024)
     expect(body.output.head).toHaveLength(1_024)
   })
+
+  it('bounds an imported subagent roster by entry count, label and id', async () => {
+    // The import reads an untrusted file: nothing upstream bounded either string.
+    const oversized = 'z'.repeat(20 * 1024)
+    const journal = await open('claude', CLAUDE_SESSION)
+    await appendLegacyTranscriptMessages({
+      journal,
+      agent: 'claude',
+      sessionId: CLAUDE_SESSION,
+      fence: 1,
+      messages: [
+        {
+          id: 'legacy-roster',
+          role: 'assistant',
+          timestamp: null,
+          source: 'transcript',
+          blocks: [
+            {
+              type: 'subagent-group',
+              groupId: 'group-1',
+              agents: Array.from({ length: 80 }, (_, index) => ({
+                id: index === 0 ? oversized : `task-${index}`,
+                label: index === 0 ? oversized : `label-${index}`,
+                state: 'working' as const
+              }))
+            }
+          ]
+        }
+      ]
+    })
+
+    const body = journal.snapshot().items[0]?.body
+    const block = body?.kind === 'message' ? body.blocks[0] : undefined
+    if (block?.type !== 'subagent-group') {
+      throw new Error('expected a subagent-group block')
+    }
+    expect(block.agents).toHaveLength(64)
+    expect(block.agents[0]?.label.length).toBeLessThan(oversized.length)
+    expect(block.agents[0]?.id.length).toBeLessThan(oversized.length)
+    expect(block.agents[0]?.id.startsWith('z')).toBe(true)
+  })
 })
 
 describe('import failures', () => {

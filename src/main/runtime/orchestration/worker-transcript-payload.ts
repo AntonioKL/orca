@@ -104,7 +104,11 @@ function boundBlock(block: NativeChatBlock, warnings: Set<string>): NativeChatBl
     }
     return {
       ...block,
-      agents: agents.map((agent) => ({ ...agent, label: clipMetadata(agent.label, warnings) }))
+      agents: agents.map((agent) => ({
+        ...agent,
+        id: clipMetadata(agent.id, warnings),
+        label: clipMetadata(agent.label, warnings)
+      }))
     }
   }
   if (block.path || (block.url && isLocalFileLocator(block.url))) {

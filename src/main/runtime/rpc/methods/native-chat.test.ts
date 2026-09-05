@@ -196,7 +196,7 @@ describe('nativeChat.readSession clientKind truncation gating', () => {
 
   it('bounds a subagent roster before it reaches mobile', async () => {
     const agents: NativeChatSubagentEntry[] = Array.from({ length: 100 }, (_, index) => ({
-      id: `task-${index}`,
+      id: `task-${index}-${'i'.repeat(600)}`,
       label: 'l'.repeat(600),
       state: 'working'
     }))
@@ -213,10 +213,12 @@ describe('nativeChat.readSession clientKind truncation gating', () => {
       ctxWith('mobile')
     )
     const block = (result as { messages: NativeChatMessage[] }).messages[0].blocks[0] as {
-      agents: { label: string }[]
+      agents: { id: string; label: string }[]
     }
     expect(block.agents).toHaveLength(64)
     expect(block.agents[0].label).toBe(`${'l'.repeat(512)}\n… (truncated)`)
+    // The id is as untrusted as the label on an imported roster.
+    expect(block.agents[0].id).toBe(`${`task-0-${'i'.repeat(600)}`.slice(0, 512)}\n… (truncated)`)
   })
 
   it('clips a pathological text block at the safety ceiling for mobile clients', async () => {
