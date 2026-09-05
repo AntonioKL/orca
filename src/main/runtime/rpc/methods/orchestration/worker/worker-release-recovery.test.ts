@@ -168,6 +168,9 @@ describe('orchestration worker release recovery', () => {
     expect(runtime.closeTerminal).toHaveBeenCalledTimes(1)
 
     vi.mocked(runtime.showTerminal).mockRejectedValue(new Error('terminal_handle_stale'))
+    vi.mocked(runtime.getOrchestrationDispatchAuthority).mockReturnValue(null)
+    vi.mocked(runtime.getTerminalPaneKey).mockReturnValue(null)
+    vi.mocked(runtime.getTerminalProcessIncarnation).mockReturnValue(null)
     vi.spyOn(runtime, 'inspectTerminalProcessIncarnationLiveness').mockResolvedValue('exited')
 
     await expect(reconcileRequestedWorkerTerminalReleases(runtime)).resolves.toMatchObject({
@@ -197,6 +200,9 @@ describe('orchestration worker release recovery', () => {
     expect(db.getWorkerTerminalArchive(dispatchId)).toBeUndefined()
 
     vi.mocked(runtime.showTerminal).mockRejectedValue(new Error('terminal_handle_stale'))
+    vi.mocked(runtime.getOrchestrationDispatchAuthority).mockReturnValue(null)
+    vi.mocked(runtime.getTerminalPaneKey).mockReturnValue(null)
+    vi.mocked(runtime.getTerminalProcessIncarnation).mockReturnValue(null)
     vi.spyOn(runtime, 'inspectTerminalProcessIncarnationLiveness').mockResolvedValue('exited')
 
     await expect(reconcileRequestedWorkerTerminalReleases(runtime)).resolves.toMatchObject({
@@ -216,11 +222,28 @@ describe('orchestration worker release recovery', () => {
     setup()
     const { dispatchId } = await startSettledWorker()
     vi.spyOn(runtime, 'getTerminalLivenessVerdict').mockReturnValue({ status: 'exited' })
+    vi.mocked(runtime.getOrchestrationDispatchAuthority).mockRestore()
+    expect(runtime.getOrchestrationDispatchAuthority('term_worker')).toBeNull()
     vi.mocked(runtime.closeTerminal).mockRejectedValueOnce(new Error('Multiplexer disposed'))
 
     await expect(
       call('orchestration.workerRelease', { dispatch: dispatchId })
     ).resolves.toMatchObject({ state: 'released', processAction: 'closed_exited_terminal' })
+  })
+
+  it('does not substitute absent launch authority for a positive host exit verdict', async () => {
+    setup()
+    const { dispatchId } = await startSettledWorker()
+    vi.mocked(runtime.getOrchestrationDispatchAuthority).mockRestore()
+    vi.spyOn(runtime, 'getTerminalLivenessVerdict').mockReturnValue({
+      status: 'unverifiable',
+      reason: 'missing_liveness_verdict'
+    })
+
+    await expect(
+      call('orchestration.workerRelease', { dispatch: dispatchId })
+    ).resolves.toMatchObject({ state: 'retained', reason: 'identity_unproven' })
+    expect(runtime.closeTerminal).not.toHaveBeenCalled()
   })
 
   it('defers instead of settling unknown while inventory is incomplete', async () => {

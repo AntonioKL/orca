@@ -14,6 +14,7 @@ import { inspectWorkerTerminal } from './worker-observation'
 import { orchestrationTimestampToMs } from './worker-output'
 import { archiveSummary } from './worker-terminal-resource-presentation'
 import { classifyWorkerTerminalCloseError } from './worker-release-close-error'
+import { workerTerminalLeaseIsCurrent } from './worker-terminal-release-lease'
 
 export {
   archiveSummary,
@@ -109,16 +110,6 @@ async function completeWorkerTerminalReleaseOnce(
       archive: archiveSummary(retained)
     }
   }
-  if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, resource)) {
-    const retained = db.revertWorkerTerminalReleaseToRetained(resource.id, 'identity_unproven')
-    return {
-      dispatchId,
-      state: 'retained',
-      reason: 'identity_unproven',
-      processAction: 'none',
-      archive: archiveSummary(retained)
-    }
-  }
   if (observation.status === 'missing' || observation.status === 'unattached') {
     if (args.mode === 'recovery') {
       // A close can succeed before the process crashes, leaving `releasing` durable state while
@@ -172,6 +163,16 @@ async function completeWorkerTerminalReleaseOnce(
     }
   }
 
+  if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, resource)) {
+    const retained = db.revertWorkerTerminalReleaseToRetained(resource.id, 'identity_unproven')
+    return {
+      dispatchId,
+      state: 'retained',
+      reason: 'identity_unproven',
+      processAction: 'none',
+      archive: archiveSummary(retained)
+    }
+  }
   const archive = db.getWorkerTerminalArchive(dispatchId)
   let archiveSource = resource.archive_source as 'transcript' | 'terminal' | null
   let archiveStatus: WorkerTerminalArchiveStatus | null = resource.archive_status
@@ -274,27 +275,6 @@ async function completeWorkerTerminalReleaseOnce(
 
 export function releaseUnknownRecovery(dispatchId: string): string {
   return `Inspect with: orca orchestration worker-show --dispatch ${dispatchId} --json — then retry worker-release with a fresh request ID (omit --retry-request to let the CLI generate one). Reusing the prior request ID only replays this release_unknown receipt. Never substitute a broad terminal close.`
-}
-
-function workerTerminalLeaseIsCurrent(
-  runtime: OrcaRuntimeService,
-  db: OrchestrationDb,
-  dispatchId: string,
-  resource: WorkerTerminalResourceRow
-): boolean {
-  const worker = db.getWorkerDispatch(dispatchId)
-  const authority = runtime.getOrchestrationDispatchAuthority(resource.terminal_handle)
-  return Boolean(
-    worker?.agent_terminal_handle === resource.terminal_handle &&
-    authority &&
-    resource.host_scope === JSON.stringify(authority.hostScope) &&
-    db.isDispatchProcessCurrent({
-      dispatchId,
-      paneKey: runtime.getTerminalPaneKey(resource.terminal_handle),
-      processIncarnation: runtime.getTerminalProcessIncarnation(resource.terminal_handle)
-    }) &&
-    !db.workerTerminalResourceHasIdentityConflict(resource.id)
-  )
 }
 
 function retainedReason(resource: WorkerTerminalResourceRow): WorkerTerminalRetainedReason {
