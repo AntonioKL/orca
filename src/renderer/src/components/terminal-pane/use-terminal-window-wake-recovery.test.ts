@@ -61,12 +61,16 @@ describe('useTerminalWindowWakeRecovery', () => {
     delete (window as unknown as { api?: unknown }).api
   })
 
-  function renderWakeRecoveryHook(isVisible = true, isChatViewMode = false) {
+  function renderWakeRecoveryHook(
+    isVisible = true,
+    isChatViewMode = false,
+    wakeManager: PaneManager = manager
+  ) {
     return renderHook(() =>
       useTerminalWindowWakeRecovery({
         isVisible,
         isChatViewMode,
-        managerRef: { current: manager },
+        managerRef: { current: wakeManager },
         isActiveRef: { current: true },
         isVisibleRef: { current: true }
       })
@@ -117,15 +121,22 @@ describe('useTerminalWindowWakeRecovery', () => {
     })
   })
 
-  it('routes chat coverage into wake recovery', () => {
-    renderWakeRecoveryHook(true, true)
+  it.each([
+    ['covered chat leaf', true],
+    ['split terminal leaf', false]
+  ])('routes chat coverage into wake recovery only for the %s', (_label, covered) => {
+    const chatManager = {
+      getActivePane: () => ({ container: { querySelector: () => (covered ? {} : null) } }),
+      getPanes: () => []
+    } as unknown as PaneManager
+    renderWakeRecoveryHook(true, true, chatManager)
 
     window.dispatchEvent(new Event('focus'))
 
     expect(recoverVisibleTerminalWindowWakeMock).toHaveBeenLastCalledWith({
-      manager,
+      manager: chatManager,
       isActive: true,
-      isChatViewMode: true,
+      isChatViewMode: covered,
       clearGlyphAtlases: false
     })
   })

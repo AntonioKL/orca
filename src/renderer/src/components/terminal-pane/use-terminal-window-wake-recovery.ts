@@ -5,6 +5,7 @@ import { repairPaneWebglCanvasDpr } from '@/lib/pane-manager/terminal-canvas-dpr
 import { presentPaneViewport } from '@/lib/pane-manager/pane-webgl-renderer'
 import { recordTerminalFreezeBreadcrumb } from './terminal-freeze-breadcrumbs'
 import type { IDisposable } from '@xterm/xterm'
+import { activePaneIsCoveredByNativeChat } from './native-chat-covered-pane'
 
 type UseTerminalWindowWakeRecoveryArgs = {
   isVisible: boolean
@@ -87,7 +88,7 @@ export function useTerminalWindowWakeRecovery({
       recoverVisibleTerminalWindowWake({
         manager,
         isActive: isActiveRef.current,
-        isChatViewMode,
+        isChatViewMode: isChatViewMode && activePaneIsCoveredByNativeChat(manager),
         clearGlyphAtlases
       })
       if (typeof requestAnimationFrame !== 'function') {
@@ -106,7 +107,7 @@ export function useTerminalWindowWakeRecovery({
         recoverVisibleTerminalWindowWake({
           manager: settledManager,
           isActive: isActiveRef.current,
-          isChatViewMode,
+          isChatViewMode: isChatViewMode && activePaneIsCoveredByNativeChat(settledManager),
           clearGlyphAtlases: clearGlyphAtlasesOnSettle
         })
         reassertPanePtySizes()

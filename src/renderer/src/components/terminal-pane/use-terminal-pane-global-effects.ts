@@ -26,6 +26,7 @@ import {
   releaseRendererPtyVisibilityClaim,
   setRendererPtyVisibilityClaim
 } from './pty-renderer-delivery-claims'
+import { activePaneIsCoveredByNativeChat } from './native-chat-covered-pane'
 
 type UseTerminalPaneGlobalEffectsArgs = {
   tabId: string
@@ -159,7 +160,9 @@ export function useTerminalPaneGlobalEffects({
       resumeTerminalVisibility({
         manager,
         isActive,
-        isChatViewMode,
+        // Why: chat mode is tab-wide, but only the chat leaf's xterm is covered;
+        // a split terminal leaf that is active must still regain focus on reveal.
+        isChatViewMode: isChatViewMode && activePaneIsCoveredByNativeChat(manager),
         wasVisible,
         shouldUseLightTabResume,
         captureViewportPositions,
