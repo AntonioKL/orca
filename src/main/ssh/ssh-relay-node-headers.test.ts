@@ -1,0 +1,98 @@
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import process from 'node:process'
+import { afterEach, describe, expect, it } from 'vitest'
+import { exportLocalNodeHeadersPrefix } from './ssh-relay-node-headers'
+
+const POSIX = process.platform !== 'win32'
+
+/** Runs the prefix under /bin/sh exactly as the relay does, then prints what node-gyp would see. */
+function runPrefix(nodePath: string): { nodedir: string; pkgNodedir: string } {
+  const script = `${exportLocalNodeHeadersPrefix(nodePath)}printf '%s\\n%s\\n' "$npm_config_nodedir" "$npm_package_config_node_gyp_nodedir"`
+  const result = spawnSync('/bin/sh', ['-c', script], { encoding: 'utf8' })
+  expect(result.status).toBe(0)
+  const [nodedir = '', pkgNodedir = ''] = result.stdout.split('\n')
+  return { nodedir, pkgNodedir }
+}
+
+/** A fake `<prefix>/bin/node` whose `include/node/node_version.h` claims `version`. */
+function fakeNodePrefix(root: string, version: string): string {
+  const prefix = join(root, 'prefix')
+  mkdirSync(join(prefix, 'bin'), { recursive: true })
+  mkdirSync(join(prefix, 'include', 'node'), { recursive: true })
+  const [major, minor, patch] = version.split('.')
+  writeFileSync(
+    join(prefix, 'include', 'node', 'node_version.h'),
+    `#define NODE_MAJOR_VERSION ${major}\n#define NODE_MINOR_VERSION ${minor}\n#define NODE_PATCH_VERSION ${patch}\n`
+  )
+  // Why a symlink to the real binary: the probe reads process.execPath, which Node resolves
+  // through symlinks -- so this stands in for `/usr/bin/node -> /opt/node/bin/node` shims too.
+  symlinkSync(process.execPath, join(prefix, 'bin', 'node'))
+  return join(prefix, 'bin', 'node')
+}
+
+describe.skipIf(!POSIX)('exportLocalNodeHeadersPrefix', () => {
+  const roots: string[] = []
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('exports nodedir when the running Node ships headers for its own version', () => {
+    // The test runner's Node is an official build, so its prefix has include/node.
+    const prefix = dirname(dirname(process.execPath))
+    const { nodedir, pkgNodedir } = runPrefix(process.execPath)
+    expect(nodedir).toBe(prefix)
+    expect(pkgNodedir).toBe(prefix)
+  })
+
+  it('leaves nodedir unset when the shipped headers are for another Node version', () => {
+    // A symlinked node resolves execPath to the real binary, whose prefix is the real one; so
+    // to stage a mismatch the probe must run a node whose execPath lands in the fake prefix.
+    // A copy does that.
+    const root = mkdtempSync(join(tmpdir(), 'orca-node-headers-'))
+    roots.push(root)
+    const prefix = join(root, 'prefix')
+    mkdirSync(join(prefix, 'bin'), { recursive: true })
+    mkdirSync(join(prefix, 'include', 'node'), { recursive: true })
+    writeFileSync(
+      join(prefix, 'include', 'node', 'node_version.h'),
+      '#define NODE_MAJOR_VERSION 1\n#define NODE_MINOR_VERSION 0\n#define NODE_PATCH_VERSION 0\n'
+    )
+    const copied = join(prefix, 'bin', 'node')
+    spawnSync('cp', [process.execPath, copied])
+    const { nodedir, pkgNodedir } = runPrefix(copied)
+    expect(nodedir).toBe('')
+    expect(pkgNodedir).toBe('')
+  })
+
+  it('leaves nodedir unset when the prefix has no headers at all', () => {
+    const root = mkdtempSync(join(tmpdir(), 'orca-node-headers-'))
+    roots.push(root)
+    const copied = join(root, 'bin', 'node')
+    mkdirSync(dirname(copied), { recursive: true })
+    spawnSync('cp', [process.execPath, copied])
+    const { nodedir } = runPrefix(copied)
+    expect(nodedir).toBe('')
+  })
+
+  it('follows a symlinked node to the install that owns the headers', () => {
+    const root = mkdtempSync(join(tmpdir(), 'orca-node-headers-'))
+    roots.push(root)
+    const shim = fakeNodePrefix(root, '0.0.0')
+    // The shim's own fake headers are ignored: execPath resolves to the real binary, and the
+    // real prefix's headers are the ones that match.
+    const { nodedir } = runPrefix(shim)
+    expect(nodedir).toBe(dirname(dirname(process.execPath)))
+  })
+
+  it('does not fail the command line when node itself cannot run', () => {
+    const script = `${exportLocalNodeHeadersPrefix('/nonexistent/node')}echo "after:$npm_config_nodedir"`
+    const result = spawnSync('/bin/sh', ['-c', script], { encoding: 'utf8' })
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toBe('after:')
+  })
+})

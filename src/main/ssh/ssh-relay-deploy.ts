@@ -53,11 +53,14 @@ import {
 } from './ssh-relay-deploy-timing'
 import { createSshOperationAbortError, shellEscape } from './ssh-connection-utils'
 import { isWindowsRelayPlatform } from '../../shared/relay-artifacts'
+import { exportLocalNodeHeadersPrefix } from './ssh-relay-node-headers'
 import {
   probeBuildToolchain,
   formatMissingToolchainError,
   formatSkippedNodePtyWarning,
-  shouldProbeBuildToolchainAfterNativeDepsFailure
+  shouldProbeBuildToolchainAfterNativeDepsFailure,
+  formatNodeHeadersDownloadError,
+  isNodeHeadersDownloadFailure
 } from './ssh-relay-build-toolchain'
 import {
   commandWithNodePath,
@@ -1174,7 +1177,7 @@ async function installNativeDeps(
           hostPlatform,
           nodePath,
           remoteDir,
-          `${resetPrefix}npm install --ignore-scripts=false --omit=dev --no-audit --no-fund ${installArgs} 2>&1`
+          `${exportLocalNodeHeadersPrefix(nodePath)}${resetPrefix}npm install --ignore-scripts=false --omit=dev --no-audit --no-fund ${installArgs} 2>&1`
         )
     await execHostCommand(conn, hostPlatform, command, {
       timeoutMs: NATIVE_DEPS_COMMAND_TIMEOUT_MS,
@@ -1235,6 +1238,11 @@ async function installNativeDeps(
         )
         return
       }
+    }
+    // Why: the local-headers export already found nothing on this host, so what is left is a host
+    // that is both header-less and offline -- name it, or the log reads as a broken relay.
+    if (platform.startsWith('linux') && isNodeHeadersDownloadFailure(msg)) {
+      throw new Error(formatNodeHeadersDownloadError(msg), { cause: err })
     }
     throw err
   }
@@ -1347,7 +1355,7 @@ async function applyNodePtyMasterCloexecPatch(
       hostPlatform,
       nodePath,
       remoteDir,
-      `${shellEscape(nodePath)} ${shellEscape(NODE_PTY_MASTER_CLOEXEC_PATCH_FILENAME)} 2>&1`
+      `${exportLocalNodeHeadersPrefix(nodePath)}${shellEscape(nodePath)} ${shellEscape(NODE_PTY_MASTER_CLOEXEC_PATCH_FILENAME)} 2>&1`
     )
     const output = await execHostCommand(conn, hostPlatform, command, {
       timeoutMs: NATIVE_DEPS_COMMAND_TIMEOUT_MS,
@@ -1529,7 +1537,7 @@ async function rebuildNativeDeps(
         hostPlatform,
         nodePath,
         remoteDir,
-        `npm rebuild --ignore-scripts=false ${depNames.map(shellEscape).join(' ')} 2>&1`
+        `${exportLocalNodeHeadersPrefix(nodePath)}npm rebuild --ignore-scripts=false ${depNames.map(shellEscape).join(' ')} 2>&1`
       )
   await execHostCommand(conn, hostPlatform, command, {
     timeoutMs: NATIVE_DEPS_COMMAND_TIMEOUT_MS,

@@ -163,3 +163,40 @@ export function formatMissingToolchainError(
   ]
   return lines.join('\n')
 }
+
+const NODE_HEADERS_TARBALL_RE = /node-v[0-9.]+-headers\.tar\.gz/i
+
+/**
+ * Whether a native-deps failure is node-gyp failing to download Node headers from nodejs.org.
+ *
+ * Why it needs naming: the raw output is forty lines of `gyp http` and stack frames around one
+ * `ECONNREFUSED`, and it reads as a broken host or a broken Orca. It is neither -- the host's Node
+ * ships no headers at `<prefix>/include/node` (so the local-headers export found nothing) AND it
+ * cannot reach nodejs.org. Both are things the operator can fix; neither is visible from the log.
+ */
+export function isNodeHeadersDownloadFailure(message: string): boolean {
+  return (
+    message.toLowerCase().includes('gyp') &&
+    NODE_HEADERS_TARBALL_RE.test(message) &&
+    /\b(ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|fetch failed|FetchError)\b/i.test(
+      message
+    )
+  )
+}
+
+export function formatNodeHeadersDownloadError(underlyingError: string): string {
+  return [
+    'The remote host could not download the Node.js headers needed to compile node-pty, and its ' +
+      'Node install does not ship them locally. node-pty has no prebuilt binary for Linux, so it ' +
+      'must be compiled on the remote host, and node-gyp fetches the headers from nodejs.org ' +
+      'unless the Node install provides them at <prefix>/include/node.',
+    '',
+    'Fix one of the following on the remote host, then reconnect:',
+    '  - Install Node.js from an official build or a version manager (nvm, fnm, volta, n), ' +
+      'which include the headers; or',
+    '  - Allow outbound HTTPS to nodejs.org, or point npm at a mirror: ' +
+      'npm config set disturl https://<mirror>/dist',
+    '',
+    `Underlying install error: ${underlyingError}`
+  ].join('\n')
+}
