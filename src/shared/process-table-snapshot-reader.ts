@@ -130,6 +130,25 @@ type ProcessTableCapture = {
   strict: () => ProcessTableRow[]
 }
 
+async function captureProcessTable(args: readonly string[]): Promise<ProcessTableCapture> {
+  let stdout: string
+  try {
+    ;({ stdout } = await execFile('ps', [...args], {
+      encoding: 'utf-8',
+      timeout: PS_TIMEOUT_MS,
+      maxBuffer: PS_MAX_BUFFER_BYTES
+    }))
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+      throw new ProcessTableCaptureError('capture_truncated')
+    }
+    throw error
+  }
+  const baseCapture = createProcessTableCapture(assertWholeCapture(stdout))
+  const startTimesByPid = await readLinuxProcessStartTimes(baseCapture.lenient())
+  return createProcessTableCapture(stdout, startTimesByPid, process.platform === 'linux')
+}
+
 function applyProcessStartTimes(
   rows: ProcessTableRow[],
   startTimesByPid: ReadonlyMap<number, string> | undefined,
@@ -235,25 +254,7 @@ async function readLinuxProcessStartTimes(
 }
 
 const processTableReader = createProcessTableSnapshotReader<ProcessTableCapture>({
-  runPs: async () => {
-    let stdout: string
-    try {
-      ;({ stdout } = await execFile('ps', [...PS_ARGS], {
-        encoding: 'utf-8',
-        timeout: PS_TIMEOUT_MS,
-        maxBuffer: PS_MAX_BUFFER_BYTES
-      }))
-    } catch (error) {
-      // A ceiling hit is truncation, not absence: name it in the domain vocabulary.
-      if ((error as { code?: unknown } | null)?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
-        throw new ProcessTableCaptureError('capture_truncated')
-      }
-      throw error
-    }
-    const baseCapture = createProcessTableCapture(assertWholeCapture(stdout))
-    const startTimesByPid = await readLinuxProcessStartTimes(baseCapture.lenient())
-    return createProcessTableCapture(stdout, startTimesByPid, process.platform === 'linux')
-  },
+  runPs: () => captureProcessTable(PS_ARGS),
   now: () => Date.now()
 })
 
@@ -263,6 +264,31 @@ export async function getProcessTableSnapshot(): Promise<ProcessTableRow[]> {
 
 export async function getFreshProcessTableSnapshot(): Promise<ProcessTableRow[]> {
   return (await processTableReader.getFreshSnapshot()).lenient()
+}
+
+/** Fresh POSIX process evidence scoped to one PTY instead of the whole host. */
+export async function getFreshPtyProcessTableSnapshot(rootPid: number): Promise<ProcessTableRow[]> {
+  if (process.platform === 'win32') {
+    return getFreshProcessTableSnapshot()
+  }
+  const rootRows = (
+    await captureProcessTable(['-p', String(rootPid), '-o', PS_ARGS[1] ?? ''])
+  ).strict()
+  const root = rootRows.find((row) => row.pid === rootPid)
+  if (!root?.tty || root.tty === '?' || root.tty === '??' || root.tty === '-') {
+    return getFreshProcessTableSnapshot()
+  }
+  const ttyRows = (await captureProcessTable(['-t', root.tty, '-o', PS_ARGS[1] ?? ''])).strict()
+  const currentRoot = ttyRows.find((row) => row.pid === rootPid)
+  if (
+    !root.startTime ||
+    !currentRoot?.startTime ||
+    currentRoot.startTime !== root.startTime ||
+    currentRoot.tty !== root.tty
+  ) {
+    throw new ProcessTableCaptureError('pty_root_changed')
+  }
+  return ttyRows
 }
 
 export async function getStrictProcessTableSnapshot(): Promise<ProcessTableRow[]> {

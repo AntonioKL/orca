@@ -361,91 +361,108 @@ describe('mail addressed to a listed slept pane', () => {
     db.close()
   })
 
-  it('delivers after a statusless Codex reattach without fresh foreground confirmation', async () => {
-    vi.useFakeTimers()
-    try {
-      const {
-        runtime,
-        db,
-        handle,
-        write,
-        remountStatuslessCodex,
-        setForegroundProcess,
-        setConfirmedForegroundProcess,
-        setForegroundConfirmationSupported
-      } = await sleptPaneRuntime(sleepingRecord({ agent: 'codex' }))
-      db.setRun({ id: 'run_test', coordinator_handle: handle, coordinator_pane_key: PANE_KEY })
-      const message = db.insertMessage({
-        from: 'term_worker',
-        to: 'run:run_test',
-        subject: 'worker done',
-        type: 'worker_done'
-      })
-      runtime.notifyMessageArrived('run:run_test', 'worker_done')
-      await Promise.resolve()
-      await Promise.resolve()
+  it.each([
+    {
+      caseName: 'with fresh local foreground confirmation',
+      foregroundProcess: 'zsh',
+      confirmedForegroundProcess:
+        '/opt/homebrew/lib/node_modules/@openai/codex/vendor/aarch64-apple-darwin/bin/codex',
+      foregroundConfirmationSupported: true
+    },
+    {
+      caseName: 'through an SSH provider without foreground confirmation',
+      foregroundProcess: 'codex',
+      confirmedForegroundProcess: null,
+      foregroundConfirmationSupported: false
+    }
+  ])(
+    'delivers after a statusless Codex reattach $caseName',
+    async ({ foregroundProcess, confirmedForegroundProcess, foregroundConfirmationSupported }) => {
+      vi.useFakeTimers()
+      try {
+        const {
+          runtime,
+          db,
+          handle,
+          write,
+          remountStatuslessCodex,
+          setForegroundProcess,
+          setConfirmedForegroundProcess,
+          setForegroundConfirmationSupported
+        } = await sleptPaneRuntime(sleepingRecord({ agent: 'codex' }))
+        db.setRun({ id: 'run_test', coordinator_handle: handle, coordinator_pane_key: PANE_KEY })
+        const message = db.insertMessage({
+          from: 'term_worker',
+          to: 'run:run_test',
+          subject: 'worker done',
+          type: 'worker_done'
+        })
+        runtime.notifyMessageArrived('run:run_test', 'worker_done')
+        await Promise.resolve()
+        await Promise.resolve()
 
-      const reattachDelivery = vi.spyOn(runtime, 'deliverPendingMessagesForHandle')
-      const highLevelPrompt = vi
-        .spyOn(runtime, 'sendTerminalAgentPrompt')
-        .mockRejectedValue(new Error('statusless Codex has no hook tui-idle edge'))
-      const settledPromptReadiness = vi
-        .spyOn(runtime, 'isTerminalRunningSettledPromptAgent')
-        .mockResolvedValue(false)
-      setForegroundProcess('codex')
-      setConfirmedForegroundProcess(null)
-      setForegroundConfirmationSupported(false)
-      write.mockImplementation((ptyId: string, data: string) => {
-        if (data.startsWith(AGENT_PROMPT_BRACKETED_PASTE_START)) {
-          // The resumed TUI can emit a live but unclassified title after the
-          // original statusless-idle proof and before the submit write.
-          runtime.onPtyData(ptyId, '\x1b]0;workspace\x07\x1b[?25h', 101)
-        } else if (data === '\r') {
-          runtime.onPtyData(ptyId, '\x1b]0;Codex working\x07', 102)
+        const reattachDelivery = vi.spyOn(runtime, 'deliverPendingMessagesForHandle')
+        const highLevelPrompt = vi
+          .spyOn(runtime, 'sendTerminalAgentPrompt')
+          .mockRejectedValue(new Error('statusless Codex has no hook tui-idle edge'))
+        const settledPromptReadiness = vi
+          .spyOn(runtime, 'isTerminalRunningSettledPromptAgent')
+          .mockResolvedValue(false)
+        setForegroundProcess(foregroundProcess)
+        setConfirmedForegroundProcess(confirmedForegroundProcess)
+        setForegroundConfirmationSupported(foregroundConfirmationSupported)
+        write.mockImplementation((ptyId: string, data: string) => {
+          if (data.startsWith(AGENT_PROMPT_BRACKETED_PASTE_START)) {
+            // The resumed TUI can emit a live but unclassified title after the
+            // original statusless-idle proof and before the submit write.
+            runtime.onPtyData(ptyId, '\x1b]0;workspace\x07\x1b[?25h', 101)
+          } else if (data === '\r') {
+            runtime.onPtyData(ptyId, '\x1b]0;Codex working\x07', 102)
+          }
+          return true
+        })
+        remountStatuslessCodex('pty-codex-woken')
+        expect(reattachDelivery).toHaveBeenCalledWith(handle)
+        const runtimeState = runtime as unknown as {
+          leaves: Map<
+            string,
+            { leafId: string; lastAgentStatus: string | null; lastAgentStatusObservedLive: boolean }
+          >
+          ptysById: Map<
+            string,
+            { lastAgentStatus: string | null; lastAgentStatusObservedLive: boolean }
+          >
         }
-        return true
-      })
-      remountStatuslessCodex('pty-codex-woken')
-      expect(reattachDelivery).toHaveBeenCalledWith(handle)
-      const runtimeState = runtime as unknown as {
-        leaves: Map<
-          string,
-          { leafId: string; lastAgentStatus: string | null; lastAgentStatusObservedLive: boolean }
-        >
-        ptysById: Map<
-          string,
-          { lastAgentStatus: string | null; lastAgentStatusObservedLive: boolean }
-        >
-      }
-      expect(
-        [...runtimeState.leaves.values()].find((leaf) => leaf.leafId === LEAF_ID)
-      ).toMatchObject({
-        lastAgentStatus: null,
-        lastAgentStatusObservedLive: false
-      })
-      expect(runtimeState.ptysById.get('pty-codex-woken')).toMatchObject({
-        lastAgentStatus: null,
-        lastAgentStatusObservedLive: false
-      })
-      await vi.advanceTimersByTimeAsync(12_000)
-      await vi.waitFor(() =>
-        expect(write).toHaveBeenCalledWith(
-          'pty-codex-woken',
-          expect.stringContaining(
-            `${AGENT_PROMPT_BRACKETED_PASTE_START}\nYou have 1 orchestration message`
+        expect(
+          [...runtimeState.leaves.values()].find((leaf) => leaf.leafId === LEAF_ID)
+        ).toMatchObject({
+          lastAgentStatus: null,
+          lastAgentStatusObservedLive: false
+        })
+        expect(runtimeState.ptysById.get('pty-codex-woken')).toMatchObject({
+          lastAgentStatus: null,
+          lastAgentStatusObservedLive: false
+        })
+        await vi.advanceTimersByTimeAsync(12_000)
+        await vi.waitFor(() =>
+          expect(write).toHaveBeenCalledWith(
+            'pty-codex-woken',
+            expect.stringContaining(
+              `${AGENT_PROMPT_BRACKETED_PASTE_START}\nYou have 1 orchestration message`
+            )
           )
         )
-      )
 
-      expect(write).toHaveBeenCalledWith('pty-codex-woken', '\r')
-      expect(highLevelPrompt).not.toHaveBeenCalled()
-      expect(settledPromptReadiness).not.toHaveBeenCalled()
-      expect(message.delivered_at).toEqual(expect.any(String))
-      db.close()
-    } finally {
-      vi.useRealTimers()
+        expect(write).toHaveBeenCalledWith('pty-codex-woken', '\r')
+        expect(highLevelPrompt).not.toHaveBeenCalled()
+        expect(settledPromptReadiness).not.toHaveBeenCalled()
+        expect(message.delivered_at).toEqual(expect.any(String))
+        db.close()
+      } finally {
+        vi.useRealTimers()
+      }
     }
-  })
+  )
 
   it('does not submit a statusless Codex pointer after the child exits to a shell', async () => {
     vi.useFakeTimers()
