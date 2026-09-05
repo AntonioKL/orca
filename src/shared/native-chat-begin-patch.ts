@@ -43,8 +43,9 @@ export function unwrapBeginPatch(
  *  whose own contents quote an envelope would otherwise be read as a patch
  *  against some other file entirely. */
 const ENVELOPE_ARGUMENTS = ['input', 'command', 'patch', 'arguments', 'script'] as const
-/** What a command tool runs to apply an envelope, as opposed to quoting one. */
-const APPLY_COMMAND = 'apply_patch'
+/** What a command tool runs to apply an envelope, as opposed to quoting one.
+ *  Both spellings the runner accepts, since either one really applies it. */
+const APPLY_COMMAND = /apply_?patch/
 
 /** The call payload may itself be a string holding JSON. Decoding it here, in
  *  the one consumer that needs its structure, keeps every other reader of the
@@ -62,7 +63,7 @@ function envelopeSource(input: unknown, requireApplyCommand: boolean): string | 
 }
 
 function applied(value: string, requireApplyCommand: boolean): string | null {
-  return !requireApplyCommand || value.includes(APPLY_COMMAND) ? value : null
+  return !requireApplyCommand || APPLY_COMMAND.test(value) ? value : null
 }
 
 function jsonRecord(value: string): Record<string, unknown> | null {
@@ -93,7 +94,7 @@ function envelopeArgument(
         : Array.isArray(value)
           ? value.filter((entry): entry is string => typeof entry === 'string')
           : []
-    if (requireApplyCommand && !words.some((word) => word.includes(APPLY_COMMAND))) {
+    if (requireApplyCommand && !words.some((word) => APPLY_COMMAND.test(word))) {
       continue
     }
     const word = words.find((entry) => entry.includes(BEGIN))

@@ -163,6 +163,13 @@ export function NativeChatDiffCard({
           {baseName(file.path)}
         </span>
         <DiffLineCounts added={file.added} removed={file.removed} />
+        {file.truncated ? (
+          // Beside the counts rather than under the rows: a collapsed card, and
+          // one clipped down to no rows at all, would otherwise say nothing.
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {translate('components.native-chat.tool.diffTruncated', 'Diff truncated')}
+          </span>
+        ) : null}
         <NativeChatCopyButton
           text={patchText(file)}
           label={translate('components.native-chat.tool.copyDiff', 'Copy diff')}
@@ -186,11 +193,6 @@ export function NativeChatDiffCard({
               )
             })
           })()}
-          {file.truncated ? (
-            <div className="px-2 py-1 text-[11px] text-muted-foreground">
-              {translate('components.native-chat.tool.diffTruncated', 'Diff truncated')}
-            </div>
-          ) : null}
         </div>
       ) : null}
     </div>

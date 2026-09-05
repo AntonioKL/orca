@@ -174,8 +174,12 @@ function claudeEditFiles(
 
 /** A move is appended to the patch body as prose rather than a header field, on
  *  every lane that carries the body as text. Left in place it renders as a
- *  numbered line of the file it moved. */
-const MOVE_MARKER = /\n*Moved to: (.+)$/
+ *  numbered line of the file it moved.
+ *
+ *  Anchored to the start of the final line: unanchored, a row whose own content
+ *  mentions a move was cut in half and the file it names claimed as a rename
+ *  that never happened. */
+const MOVE_MARKER = /(?:^|\n)Moved to: (.+)$/
 
 function splitMoveMarker(patch: string): { body: string; movedTo: string | null } {
   const match = MOVE_MARKER.exec(patch)

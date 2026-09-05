@@ -525,6 +525,34 @@ describe('editFilesFromToolPair', () => {
     expect(files?.[0]?.lines.some((line) => line.text.includes('Moved to'))).toBe(false)
   })
 
+  it('does not read a row that merely mentions a move as one', () => {
+    const body = '@@ -1,2 +1,2 @@\n ctx\n+See Moved to: docs/archive/index.md'
+    const fromPatch = settledFiles({
+      name: 'Diff',
+      input: { path: 'docs/index.md' },
+      result: { output: body }
+    })
+    const fromChanges = settledFiles({
+      name: 'apply_patch',
+      input: { changes: [{ path: 'docs/index.md', kind: { type: 'update' }, diff: body }] }
+    })
+    for (const files of [fromPatch, fromChanges]) {
+      expect(files?.[0]?.changeKind).toBe('edited')
+      expect(files?.[0]?.oldPath).toBeNull()
+      expect(files?.[0]?.path).toBe('docs/index.md')
+      expect(files?.[0]?.lines.at(-1)?.text).toBe('See Moved to: docs/archive/index.md')
+    }
+  })
+
+  it('accepts either spelling of the command that applies an envelope', () => {
+    const envelope = '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-was\n+now\n*** End Patch'
+    const files = settledFiles({
+      name: 'shell',
+      input: { command: ['bash', '-lc', `applypatch <<'EOF'\n${envelope}\nEOF`] }
+    })
+    expect(files?.[0]?.path).toBe('src/a.ts')
+  })
+
   it('keeps the header destination for a rename the call names by its old path', () => {
     const files = settledFiles({
       name: 'Diff',

@@ -185,6 +185,24 @@ describe('NativeChatToolRun', () => {
     expect(screen.getByText('Deleted file').closest('button')).not.toHaveAttribute('aria-expanded')
   })
 
+  it('says a diff was clipped even while the card is collapsed', () => {
+    const blocks: NativeChatBlock[] = [
+      {
+        type: 'tool-call',
+        name: 'Diff',
+        input: { path: 'src/a.ts' },
+        state: 'completed'
+      },
+      { type: 'tool-result', output: '@@ -1,3 +1,3 @@\n ctx\n-was\n+now\n… (48210 bytes)' }
+    ]
+
+    // expandSignal false leaves every card's body closed.
+    render(<NativeChatToolRun blocks={blocks} expandSignal={false} expandOverride />)
+
+    expect(screen.getByText('Diff truncated')).toBeInTheDocument()
+    expect(screen.queryByText('was')).toBeNull()
+  })
+
   it('keeps a grouped active run to one stable row showing only the latest tool', () => {
     const blocks: NativeChatBlock[] = [
       { type: 'tool-call', name: 'shell', input: { command: 'date' }, state: 'completed' },
