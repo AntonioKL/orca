@@ -1,7 +1,4 @@
-import type {
-  AgentJournalItemBody,
-  AgentJournalItemIdentity
-} from '../../shared/agent-session-journal-types'
+import type { AgentJournalItemBody } from '../../shared/agent-session-journal-types'
 import type { NativeChatBlock } from '../../shared/native-chat-types'
 import {
   boundInlineText,
@@ -9,78 +6,23 @@ import {
   DEFAULT_JOURNAL_PAYLOAD_LIMITS
 } from '../native-chat/agent-session-journal/journal-payload-bounds'
 import { unhandledProviderFrameJournalItem } from '../native-chat/agent-session-wire/unhandled-provider-frame'
-import type { CodexTurnOrdinals } from './codex-turn-ordinals'
+import type { CodexThreadItem } from './codex-thread-item-identity'
+export {
+  codexItemIdentity,
+  isCodexMessageItemType,
+  readCodexThreadItem,
+  type CodexThreadItem
+} from './codex-thread-item-identity'
 export {
   CodexTurnOrdinals,
   MAX_CODEX_TURN_ORDINAL_BYTES,
   MAX_CODEX_TURN_ORDINAL_ENTRIES
 } from './codex-turn-ordinals'
 
-// Codex thread items → journal item bodies and durable identities.
-//
-// THE ORDINAL RULE, and why it is not "index within the turn". Codex renumbers
-// item ids positionally on resume (`item-1`…`item-N` across the whole thread),
-// and a resumed turn does NOT contain every item the live turn emitted —
-// reasoning and command execution are dropped from persisted history. Numbering
-// by live position would therefore shift every message after the first tool
-// call and hand the user a duplicate of the assistant's answer after a resume.
-//
-// So the ordinal counts MESSAGE items only, and the same projection is applied
-// to the live stream and to a resumed turn's item list. Any other item type —
-// including ones this build does not model — is skipped identically on both
-// sides, which is what makes the key survive a Codex release that adds one.
-
-/** Only these carry a durable `(threadId, turnId, ordinal)` identity. */
-const CODEX_MESSAGE_ITEM_TYPES = new Set(['userMessage', 'agentMessage'])
-
-export type CodexThreadItem = {
-  type: string
-  id: string
-  [key: string]: unknown
-}
-
-export function isCodexMessageItemType(type: string): boolean {
-  return CODEX_MESSAGE_ITEM_TYPES.has(type)
-}
-
-export function readCodexThreadItem(value: unknown): CodexThreadItem | null {
-  if (typeof value !== 'object' || value === null) {
-    return null
-  }
-  const record = value as Record<string, unknown>
-  return typeof record.type === 'string' && typeof record.id === 'string'
-    ? (record as CodexThreadItem)
-    : null
-}
+// Codex thread items → journal item bodies.
 
 function readRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
-}
-
-/**
- * Durable identity for a Codex item, or null for one that has none.
- *
- * Non-message items fall back to the `orca` namespace keyed by the Codex item
- * id. That id is unstable across resume, so those rows are live-session detail
- * that a recovered journal simply will not contain — which is correct: Codex
- * itself does not persist them either.
- */
-export function codexItemIdentity(input: {
-  threadId: string
-  turnId: string | null
-  item: CodexThreadItem
-  ordinals: CodexTurnOrdinals
-}): AgentJournalItemIdentity {
-  const { item, turnId } = input
-  if (turnId && isCodexMessageItemType(item.type)) {
-    return {
-      provider: 'codex',
-      threadId: input.threadId,
-      turnId,
-      ordinal: input.ordinals.ordinalFor(input.threadId, turnId, item.id)
-    }
-  }
-  return { provider: 'orca', clientMessageId: `codex-item:${input.threadId}:${item.id}` }
 }
 
 function readString(source: Record<string, unknown>, key: string): string | null {
@@ -237,11 +179,15 @@ function mcpToolCallName(item: CodexThreadItem): string {
 
 /** Row-label derivation only reads top-level keys, so the call's own arguments
  *  have to be the input itself. `arguments` is arbitrary JSON upstream: a
- *  non-object stays addressable under a key rather than being dropped, and an
- *  absent one becomes null, which labels as empty instead of `{}`. */
+ *  non-object stays addressable under a key rather than being dropped, while a
+ *  no-argument call — `{}` on the wire, the shape every argument-less MCP tool
+ *  sends — becomes null so the row reads as a bare `server/tool` instead of a
+ *  literal `{}`. */
 function mcpToolArguments(value: unknown): unknown {
-  const plain = typeof value === 'object' && value !== null && !Array.isArray(value)
-  return plain ? value : value === null || value === undefined ? null : { arguments: value }
+  if (typeof value !== 'object' || value === null) {
+    return value === null || value === undefined ? null : { arguments: value }
+  }
+  return Array.isArray(value) ? { arguments: value } : Object.keys(value).length > 0 ? value : null
 }
 
 function mcpToolCallItem(item: CodexThreadItem): CodexJournalItem {
@@ -260,9 +206,31 @@ function mcpToolCallItem(item: CodexThreadItem): CodexJournalItem {
   }
 }
 
+/** A row label is read off top-level keys only, so the action's own labelable
+ *  fields are hoisted beside the query while `action` stays whole for the
+ *  expanded detail. The action `type` lands on `description`, the lowest-ranked
+ *  label key, so it names only an action that carries nothing better. */
+function webSearchInput(item: CodexThreadItem): Record<string, unknown> | null {
+  const action = readRecord(item.action)
+  const fields: [string, unknown][] = [
+    ['url', readString(action, 'url')],
+    ['pattern', readString(action, 'pattern')],
+    ['description', readString(action, 'type')],
+    ['action', item.action ?? null]
+  ]
+  const query = readString(item, 'query') ?? readString(action, 'query')
+  const present = fields.filter(([, value]) => value !== null)
+  // A blank `query` is the run header's "this call has no brief argument"
+  // signal; drop the key and the header stands the row's raw JSON in for one.
+  return query === null && present.length === 0
+    ? null
+    : { query: query ?? '', ...Object.fromEntries(present) }
+}
+
 /** `webSearch` carries no status: Codex starts it with an empty query and a null
- *  action, then completes it with both, so `action` is the completion signal.
- *  The hits arrive on `results` and are the call's output. */
+ *  action, then sends the action, so `action` is the completion signal — a
+ *  completed item's own `query` is routinely still empty. The hits arrive on
+ *  `results` and are the call's output. */
 function webSearchItem(item: CodexThreadItem): CodexJournalItem {
   const hits = Array.isArray(item.results) && item.results.length > 0 ? item.results : null
   const bounded = hits && boundInlineText(JSON.stringify(hits), DEFAULT_JOURNAL_PAYLOAD_LIMITS)
@@ -270,10 +238,7 @@ function webSearchItem(item: CodexThreadItem): CodexJournalItem {
     body: {
       kind: 'tool-call',
       name: 'web_search',
-      input: boundToolInput(
-        { query: readString(item, 'query'), action: item.action ?? null },
-        DEFAULT_JOURNAL_PAYLOAD_LIMITS
-      ),
+      input: boundToolInput(webSearchInput(item), DEFAULT_JOURNAL_PAYLOAD_LIMITS),
       state: item.action === null || item.action === undefined ? 'running' : 'completed',
       ...(bounded === null ? {} : { output: bounded.bounded })
     },

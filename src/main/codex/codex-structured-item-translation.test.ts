@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { agentJournalItemKey } from '../../shared/agent-session-journal-item-key'
+import { briefToolArg, describeToolInput } from '../../shared/native-chat-tool-summary'
 import {
   codexItemBody,
   codexItemIdentity,
@@ -12,6 +13,13 @@ import {
   readCodexThreadItem,
   type CodexThreadItem
 } from './codex-structured-item-translation'
+
+/** The tool-call input a Codex item lands on, which is what the row label and
+ *  the collapsed run header are both derived from. */
+function toolCallInput(item: CodexThreadItem): unknown {
+  const body = codexItemBody(item)
+  return body !== null && body.kind === 'tool-call' ? body.input : null
+}
 
 const THREAD_ID = 'thread-abc'
 const TURN_ID = 'turn-1'
@@ -354,7 +362,7 @@ describe('codex item bodies', () => {
     ).toMatchObject({ name: 'mcp' })
   })
 
-  it('keeps non-object mcp arguments addressable and absent ones empty', () => {
+  it('keeps non-object mcp arguments addressable and empty ones off the label', () => {
     // `arguments` is arbitrary JSON upstream; a scalar or array must still reach
     // the row rather than being dropped or unwrapped into a bare value.
     expect(
@@ -363,16 +371,32 @@ describe('codex item bodies', () => {
     expect(
       codexItemBody({ type: 'mcpToolCall', id: 'm', tool: 't', arguments: [1, 2] })
     ).toMatchObject({ input: { arguments: [1, 2] } })
-    // Null, not `{}`: an empty object labels the row with a literal `{}`.
-    expect(codexItemBody({ type: 'mcpToolCall', id: 'm', tool: 't' })).toEqual({
+    // `arguments` is required on the wire, so `{}` — not an absent key — is what
+    // an argument-less MCP tool sends, and passing it through labels the row `{}`.
+    expect(codexItemBody({ type: 'mcpToolCall', id: 'm', tool: 't', arguments: {} })).toEqual({
       kind: 'tool-call',
       name: 't',
       input: null,
       state: 'running'
     })
+    expect(codexItemBody({ type: 'mcpToolCall', id: 'm', tool: 't' })).toMatchObject({
+      input: null
+    })
     expect(
       codexItemBody({ type: 'mcpToolCall', id: 'm', tool: 't', arguments: null })
     ).toMatchObject({ input: null })
+  })
+
+  it('renders an argument-less mcp call as a bare server/tool row', () => {
+    const input = toolCallInput({
+      type: 'mcpToolCall',
+      id: 'm',
+      server: 'srv',
+      tool: 'list_tools',
+      arguments: {}
+    })
+    expect(describeToolInput(input)).toBe('')
+    expect(briefToolArg(input)).toBe('')
   })
 
   it('reports an mcp error as a failed call carrying the server message', () => {
@@ -394,11 +418,12 @@ describe('codex item bodies', () => {
   })
 
   it('models a web search as a tool call that runs until codex sends the action', () => {
-    // The start frame Codex actually emits: empty query, no action.
+    // The start frame Codex actually emits: empty query, no action. Nothing is
+    // labelable yet, so the input is absent rather than a hull of null keys.
     expect(codexItemBody({ type: 'webSearch', id: 'w', query: '', action: null })).toEqual({
       kind: 'tool-call',
       name: 'web_search',
-      input: { query: null, action: null },
+      input: null,
       state: 'running'
     })
     expect(
@@ -414,6 +439,7 @@ describe('codex item bodies', () => {
       name: 'web_search',
       input: {
         query: 'orca release notes',
+        description: 'search',
         action: { type: 'search', query: 'orca release notes', queries: null }
       },
       state: 'completed'
@@ -448,6 +474,36 @@ describe('codex item bodies', () => {
         }),
         String(empty)
       ).not.toHaveProperty('output')
+    }
+  })
+
+  it('labels every web search shape without falling back to raw JSON', () => {
+    // Both the row label and the run header read top-level input keys only, so a
+    // shape whose detail sits inside `action` renders as the input's raw JSON.
+    const url = 'https://example.com/docs/page'
+    const shapes: [string, unknown, string, string][] = [
+      ['started', null, '', ''],
+      [
+        'search',
+        { type: 'search', query: 'a sample query', queries: null },
+        'a sample query',
+        'a sample query'
+      ],
+      ['openPage', { type: 'openPage', url }, url, ''],
+      [
+        'findInPage',
+        { type: 'findInPage', url, pattern: 'a needle' },
+        'a sample query',
+        'a sample query'
+      ],
+      ['other', { type: 'other' }, 'other', '']
+    ]
+    for (const [name, action, label, brief] of shapes) {
+      // Codex leaves the item's own `query` empty on most completed searches.
+      const query = name === 'search' || name === 'findInPage' ? 'a sample query' : ''
+      const input = toolCallInput({ type: 'webSearch', id: 'w', query, action })
+      expect(describeToolInput(input), name).toBe(label)
+      expect(briefToolArg(input), name).toBe(brief)
     }
   })
 
