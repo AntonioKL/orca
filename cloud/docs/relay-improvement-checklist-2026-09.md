@@ -39,6 +39,7 @@ Three buckets. "Merged" means the code is on `main` and nothing in production ha
 6. Paging channel for auth alerts (5.2): needs the destination from you.
 
 **Open code follow-ups (no gate, nobody assigned)**
+- `cloud/package.json` `test` names every dev-script test file explicitly; an unregistered `*.test.mjs` is silently never run in CI (found by #18769). Needs a glob or a ratchet that fails on an unlisted test file.
 - Same-cap job's verify step uses bare `curl --fail-with-body` against the just-rolled cell; one 503 at the LB warm-up edge failed c8 canary #2 (run 33935407461) after the transition verifier had already passed. Needs a bounded retry, same rule as #18723/#18740.
 - `verify-mutation` in `cloud-deploy-relay-production.yml`, the multi-target workflow, and the capacity workflow still binds to an exact commit; same exposure #18754 fixed for the same-cap and rehome paths.
 - The root oxlint config ignores `cloud/**`, so `check:code-quality:changed` never inspects relay-ops or the cloud dev scripts; typecheck + vitest is the only gate there.
