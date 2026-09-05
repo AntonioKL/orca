@@ -1,14 +1,20 @@
-import { MAX_EDIT_CHARS, type NativeChatEditLine } from './native-chat-edit-model'
+import { isFileHeaderPair } from './native-chat-diff'
+import { splitEditContent, type NativeChatEditLine } from './native-chat-edit-model'
 
 const HUNK_RANGES = /^@@+ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/
-/** Structural lines that open a file section, so any hunk before them has ended. */
+/** Structural lines that open a file section, so any hunk before them has ended.
+ *  `--- `/`+++ ` are deliberately absent: inside a hunk they are content — a
+ *  removed `-- comment` is emitted as `--- comment` — so they go through
+ *  `isFileHeaderPair` instead. */
 const FILE_SECTION =
-  /^(?:diff |index |old mode |new mode |new file mode |deleted file mode |similarity index |dissimilarity index |rename |copy |Binary files |--- |\+\+\+ |\\ No newline)/
+  /^(?:diff |index |old mode |new mode |new file mode |deleted file mode |similarity index |dissimilarity index |rename |copy |Binary files )/
 
 export type UnifiedPatchLines = {
   lines: NativeChatEditLine[]
   /** True only when every hunk carried real `@@` ranges. */
   lineNumbersKnown: boolean
+  /** The patch text was clipped before it became rows. */
+  truncated: boolean
 }
 
 /** Parses unified patch text, keeping the `@@` ranges as per-row line numbers.
@@ -16,7 +22,8 @@ export type UnifiedPatchLines = {
  *  ranges; those rows are emitted without numbers rather than numbered from 1,
  *  because a wrong number reads as authoritative. */
 export function editLinesFromUnifiedPatch(text: string): UnifiedPatchLines | null {
-  const source = text.length > MAX_EDIT_CHARS ? text.slice(0, MAX_EDIT_CHARS) : text
+  const source = splitEditContent(text)
+  const rows = source.lines
   const lines: NativeChatEditLine[] = []
   let oldNo: number | null = null
   let newNo: number | null = null
@@ -24,7 +31,8 @@ export function editLinesFromUnifiedPatch(text: string): UnifiedPatchLines | nul
   let ranged = true
   let inHunk = false
 
-  for (const raw of source.split('\n')) {
+  for (let index = 0; index < rows.length; index += 1) {
+    const raw = rows[index] ?? ''
     if (raw.startsWith('@@')) {
       const match = HUNK_RANGES.exec(raw)
       if (match) {
@@ -39,8 +47,20 @@ export function editLinesFromUnifiedPatch(text: string): UnifiedPatchLines | nul
       inHunk = true
       continue
     }
-    if (!inHunk || FILE_SECTION.test(raw)) {
-      inHunk = inHunk && !FILE_SECTION.test(raw)
+    // `\ No newline at end of file` sits mid-hunk, between the removed old last
+    // line and the added new one, so it ends nothing.
+    if (raw.startsWith('\\')) {
+      continue
+    }
+    if (!inHunk && isFileHeaderPair(rows, index)) {
+      index += 1
+      continue
+    }
+    if (FILE_SECTION.test(raw)) {
+      inHunk = false
+      continue
+    }
+    if (!inHunk) {
       continue
     }
     if (raw.startsWith('+')) {
@@ -76,24 +96,22 @@ export function editLinesFromUnifiedPatch(text: string): UnifiedPatchLines | nul
   if (!sawHunk || lines.length === 0) {
     return null
   }
-  // Trailing blank from a patch that ended with a newline reads as a phantom row.
-  if (lines.at(-1)?.kind === 'context' && lines.at(-1)?.text === '') {
-    lines.pop()
-  }
-  return { lines, lineNumbersKnown: ranged }
+  return { lines, lineNumbersKnown: ranged, truncated: source.truncated }
 }
 
 /** Rows for a whole-file add or delete, which legitimately number from 1. */
-export function editLinesFromWholeFile(content: string, kind: 'add' | 'del'): NativeChatEditLine[] {
-  const body = content.length > MAX_EDIT_CHARS ? content.slice(0, MAX_EDIT_CHARS) : content
-  const rows = body.split('\n')
-  if (rows.at(-1) === '') {
-    rows.pop()
+export function editLinesFromWholeFile(
+  content: string,
+  kind: 'add' | 'del'
+): { lines: NativeChatEditLine[]; truncated: boolean } {
+  const body = splitEditContent(content)
+  return {
+    lines: body.lines.map((text, index) => ({
+      kind,
+      text,
+      oldLineNumber: kind === 'del' ? index + 1 : null,
+      newLineNumber: kind === 'add' ? index + 1 : null
+    })),
+    truncated: body.truncated
   }
-  return rows.map((text, index) => ({
-    kind,
-    text,
-    oldLineNumber: kind === 'del' ? index + 1 : null,
-    newLineNumber: kind === 'add' ? index + 1 : null
-  }))
 }

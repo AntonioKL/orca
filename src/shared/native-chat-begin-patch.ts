@@ -23,7 +23,13 @@ export function unwrapBeginPatch(input: unknown): string | null {
     return null
   }
   const end = source.indexOf(END, start)
-  const region = source.slice(start, end === -1 ? undefined : end + END.length)
+  if (end === -1) {
+    // Without the closing marker there is nothing separating the patch body from
+    // whatever the command line continues with, and trailing shell syntax would
+    // render as file content the agent never wrote.
+    return null
+  }
+  const region = source.slice(start, end + END.length)
   // A region with no real newlines is still a single-line string literal.
   return region.includes('\n') ? region : decodeStringLiteral(region)
 }
@@ -85,13 +91,15 @@ export function editFilesFromBeginPatch(envelope: string): NativeChatEditFile[] 
       const stripped = section.body
         .map((line) => (line.startsWith(sign) ? line.slice(1) : line))
         .join('\n')
+      const whole = editLinesFromWholeFile(stripped, section.kind === 'Add' ? 'add' : 'del')
       return [
         finalizeEditFile({
           path: section.path,
           oldPath: null,
           changeKind: section.kind === 'Add' ? 'added' : 'deleted',
-          lines: editLinesFromWholeFile(stripped, section.kind === 'Add' ? 'add' : 'del'),
-          lineNumbersKnown: true
+          lines: whole.lines,
+          lineNumbersKnown: true,
+          truncated: whole.truncated
         })
       ]
     }
@@ -105,7 +113,8 @@ export function editFilesFromBeginPatch(envelope: string): NativeChatEditFile[] 
         oldPath: moved ? section.path : null,
         changeKind: moved ? 'renamed' : 'edited',
         lines: parsed.lines,
-        lineNumbersKnown: parsed.lineNumbersKnown
+        lineNumbersKnown: parsed.lineNumbersKnown,
+        truncated: parsed.truncated
       })
     ]
   })

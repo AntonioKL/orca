@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Check, ChevronRight, SquareTerminal, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
@@ -158,6 +158,58 @@ function ToolLine({
   )
 }
 
+type EditCardModel = {
+  editCards: Map<NativeChatBlock, { files: NativeChatEditFile[]; key: string }>
+  /** Result blocks the card already speaks for, so they render no second row. */
+  consumedResults: Set<NativeChatBlock>
+}
+
+const NO_EDIT_CARDS: EditCardModel = { editCards: new Map(), consumedResults: new Set() }
+
+/** An edit renders as one card, so its result block is folded into the call. A
+ *  call still in flight keeps the generic tool view rather than a card that
+ *  states the edit as made; a failed one is filtered out by the model itself, so
+ *  its result stays visible as the provider's error. */
+function buildEditCards(
+  blocks: NativeChatBlock[],
+  activeTurnIsWorking: boolean | undefined
+): EditCardModel {
+  const editCards: EditCardModel['editCards'] = new Map()
+  const consumedResults: EditCardModel['consumedResults'] = new Set()
+  for (const [index, pair] of pairToolBlocks(blocks).entries()) {
+    const call = pair.call
+    if (!call || !isEditToolName(call.name)) {
+      continue
+    }
+    // No lifecycle and no result yet, on a turn still working: not landed.
+    if (call.state == null && activeTurnIsWorking === true && pair.result === undefined) {
+      continue
+    }
+    const files = editFilesFromToolPair({
+      name: call.name,
+      input: call.input,
+      ...(call.state ? { state: call.state } : {}),
+      ...(pair.result
+        ? {
+            result: {
+              output: pair.result.output,
+              isError: pair.result.isError,
+              editPatch: pair.result.editPatch
+            }
+          }
+        : {})
+    })
+    if (!files || files.length === 0) {
+      continue
+    }
+    editCards.set(call, { files, key: `${call.name}:${index}` })
+    if (pair.result) {
+      consumedResults.add(pair.result)
+    }
+  }
+  return { editCards, consumedResults }
+}
+
 /** A run of a message's tool calls/results, collapsed to a one-line summary that
  *  expands to the individual inline tool lines. `expandSignal` lets the global
  *  toolbar toggle drive every run at once while still allowing per-run override. */
@@ -196,29 +248,12 @@ export function NativeChatToolRun({
   // The turn caret opens the activity group, while each child tool remains
   // collapsed. The global expand toolbar still opens child details together.
   const expandToolLines = expandOverride === undefined ? open : false
-  // An edit renders as one card, so its result block is folded into the call.
-  const editCards = new Map<NativeChatBlock, { files: NativeChatEditFile[]; key: string }>()
-  const consumedResults = new Set<NativeChatBlock>()
-  for (const [index, pair] of pairToolBlocks(blocks).entries()) {
-    const call = pair.call
-    if (!call || !isEditToolName(call.name)) {
-      continue
-    }
-    const files = editFilesFromToolPair({
-      name: call.name,
-      input: call.input,
-      ...(pair.result
-        ? { result: { output: pair.result.output, editPatch: pair.result.editPatch } }
-        : {})
-    })
-    if (!files || files.length === 0) {
-      continue
-    }
-    editCards.set(call, { files, key: `${call.name}:${index}` })
-    if (pair.result) {
-      consumedResults.add(pair.result)
-    }
-  }
+  // Diffing every edit is the run's most expensive work, so a collapsed run —
+  // which renders none of it — never pays for it.
+  const { editCards, consumedResults } = useMemo(
+    () => (open ? buildEditCards(blocks, activeTurnIsWorking) : NO_EDIT_CARDS),
+    [open, blocks, activeTurnIsWorking]
+  )
   const ActiveToolIcon =
     latestActiveCall && COMMAND_TOOL_NAMES.has(normalizedToolName(latestActiveCall.name))
       ? SquareTerminal

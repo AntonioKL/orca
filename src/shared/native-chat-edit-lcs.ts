@@ -10,12 +10,14 @@ import {
 export function editLinesFromContents(
   originalContent: string,
   modifiedContent: string
-): NativeChatEditLine[] {
+): { lines: NativeChatEditLine[]; truncated: boolean } {
   const original = splitEditContent(originalContent)
   const modified = splitEditContent(modifiedContent)
-  return original.length * modified.length <= MAX_EDIT_DIFF_CELLS
-    ? lcsLines(original, modified)
-    : prefixSuffixLines(original, modified)
+  const lines =
+    original.lines.length * modified.lines.length <= MAX_EDIT_DIFF_CELLS
+      ? lcsLines(original.lines, modified.lines)
+      : prefixSuffixLines(original.lines, modified.lines)
+  return { lines, truncated: original.truncated || modified.truncated }
 }
 
 function context(text: string, oldNo: number, newNo: number): NativeChatEditLine {

@@ -45,7 +45,6 @@ function patchText(file: NativeChatEditFile): string {
 }
 
 function DiffRow({ line, gutterWidth }: { line: NativeChatEditLine; gutterWidth: number }) {
-  const number = unifiedLineNumber(line)
   return (
     <div
       className={cn(
@@ -54,20 +53,22 @@ function DiffRow({ line, gutterWidth }: { line: NativeChatEditLine; gutterWidth:
         line.kind === 'del' && 'bg-[var(--diff-removed-ground)]'
       )}
     >
-      <span
-        // Why: the gutter carries its own ground so the number column stays
-        // legible against a tinted row instead of dissolving into it.
-        className={cn(
-          'shrink-0 select-none pr-1.5 text-right tabular-nums text-muted-foreground',
-          line.kind === 'add' && 'bg-[var(--diff-added-gutter)]',
-          line.kind === 'del' && 'bg-[var(--diff-removed-gutter)]',
-          line.kind === 'context' && 'bg-accent/40'
-        )}
-        style={{ width: `${gutterWidth}ch` }}
-        aria-hidden
-      >
-        {number ?? ''}
-      </span>
+      {gutterWidth > 0 ? (
+        <span
+          // Why: the gutter carries its own ground so the number column stays
+          // legible against a tinted row instead of dissolving into it.
+          className={cn(
+            'shrink-0 select-none pr-1.5 text-right tabular-nums text-muted-foreground',
+            line.kind === 'add' && 'bg-[var(--diff-added-gutter)]',
+            line.kind === 'del' && 'bg-[var(--diff-removed-gutter)]',
+            line.kind === 'context' && 'bg-accent/40'
+          )}
+          style={{ width: `${gutterWidth}ch` }}
+          aria-hidden
+        >
+          {unifiedLineNumber(line) ?? ''}
+        </span>
+      ) : null}
       <span
         className={cn(
           'w-3 shrink-0 select-none text-center',
@@ -137,10 +138,18 @@ export function NativeChatDiffCard({
           {baseName(file.path)}
         </span>
         <DiffLineCounts added={file.added} removed={file.removed} />
-        <NativeChatCopyButton text={patchText(file)} className="ml-auto shrink-0" />
+        <NativeChatCopyButton
+          text={patchText(file)}
+          label={translate('components.native-chat.tool.copyDiff', 'Copy diff')}
+          className="ml-auto shrink-0"
+        />
       </div>
       {expanded ? (
-        <div className="max-h-72 overflow-auto font-mono text-[11px] leading-relaxed scrollbar-sleek">
+        // Focusable so the rows can be scrolled from the keyboard.
+        <div
+          tabIndex={0}
+          className="max-h-72 overflow-auto font-mono text-[11px] leading-relaxed scrollbar-sleek focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        >
           {(() => {
             const seen = new Map<string, number>()
             return file.lines.map((line) => {
@@ -153,7 +162,7 @@ export function NativeChatDiffCard({
             })
           })()}
           {file.truncated ? (
-            <div className="px-2 py-1 text-[10px] text-muted-foreground">
+            <div className="px-2 py-1 text-[11px] text-muted-foreground">
               {translate('components.native-chat.tool.diffTruncated', 'Diff truncated')}
             </div>
           ) : null}

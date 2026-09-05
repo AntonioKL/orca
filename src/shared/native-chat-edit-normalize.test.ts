@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { editFilesFromToolPair, isEditToolName } from './native-chat-edit-normalize'
-import { unifiedLineNumber } from './native-chat-edit-model'
+import { MAX_EDIT_CHARS, unifiedLineNumber } from './native-chat-edit-model'
 import { editLinesFromUnifiedPatch } from './native-chat-unified-patch'
 import { unwrapBeginPatch } from './native-chat-begin-patch'
 
@@ -28,6 +28,47 @@ describe('editLinesFromUnifiedPatch', () => {
   it('returns null for text with no hunk header', () => {
     expect(editLinesFromUnifiedPatch('just prose\n- a bullet')).toBeNull()
   })
+
+  it('keeps the hunk open across a mid-hunk no-newline marker', () => {
+    const parsed = editLinesFromUnifiedPatch(
+      '@@ -1,2 +1,2 @@\n keep\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file'
+    )
+    expect(parsed?.lines.map((line) => [line.kind, line.text])).toEqual([
+      ['context', 'keep'],
+      ['del', 'old'],
+      ['add', 'new']
+    ])
+  })
+
+  it('reads a removed line that starts with `--` as content, not a file header', () => {
+    const parsed = editLinesFromUnifiedPatch('@@ -1,4 +1,3 @@\n keep\n--- comment\n-gone\n tail')
+    expect(parsed?.lines.map((line) => [line.kind, line.text])).toEqual([
+      ['context', 'keep'],
+      ['del', '-- comment'],
+      ['del', 'gone'],
+      ['context', 'tail']
+    ])
+  })
+
+  it('skips a real file header pair, which only appears outside a hunk', () => {
+    const parsed = editLinesFromUnifiedPatch(
+      'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,1 +1,1 @@\n-was\n+now'
+    )
+    expect(parsed?.lines.map((line) => [line.kind, line.text])).toEqual([
+      ['del', 'was'],
+      ['add', 'now']
+    ])
+  })
+
+  it('splits CRLF rows without leaving a carriage return or a phantom row', () => {
+    const parsed = editLinesFromUnifiedPatch('@@ -1,2 +1,2 @@\r\n ctx\r\n-was\r\n+now\r\n')
+    expect(parsed?.lines.map((line) => line.text)).toEqual(['ctx', 'was', 'now'])
+  })
+
+  it('reports truncation when the patch text runs past the character cap', () => {
+    const body = `@@ -1,1 +1,1 @@\n${'+x\n'.repeat(MAX_EDIT_CHARS)}`
+    expect(editLinesFromUnifiedPatch(body)?.truncated).toBe(true)
+  })
 })
 
 describe('unwrapBeginPatch', () => {
@@ -46,6 +87,12 @@ describe('unwrapBeginPatch', () => {
 
   it('ignores input with no envelope', () => {
     expect(unwrapBeginPatch('ls -la')).toBeNull()
+  })
+
+  it('declines an envelope with no closing marker rather than swallowing the command line', () => {
+    const command = 'bash -c "*** Begin Patch\n*** Update File: a.ts\n@@\n-x\n+y" && echo ok'
+    expect(unwrapBeginPatch(command)).toBeNull()
+    expect(editFilesFromToolPair({ name: 'shell', input: command })).toBeNull()
   })
 })
 
@@ -122,13 +169,113 @@ describe('editFilesFromToolPair', () => {
     expect(gutter(files)).toEqual([12, 13, 13, 14])
   })
 
-  it('treats a Write as an added file', () => {
+  it('treats a Write the provider reported as a creation as an added file', () => {
     const files = editFilesFromToolPair({
       name: 'Write',
-      input: { file_path: '/repo/new.ts', content: 'one\ntwo\n' }
+      input: { file_path: '/repo/new.ts', content: 'one\ntwo\n' },
+      result: { output: 'File created successfully at: /repo/new.ts' }
     })
     expect(files?.[0]?.changeKind).toBe('added')
     expect(gutter(files)).toEqual([1, 2])
+  })
+
+  it('does not claim a creation for a Write over an existing file', () => {
+    const overwrite = editFilesFromToolPair({
+      name: 'Write',
+      input: { file_path: '/repo/a.ts', content: 'one\ntwo\n' },
+      result: { output: 'The file /repo/a.ts has been updated.' }
+    })
+    expect(overwrite?.[0]?.changeKind).toBe('edited')
+    // With no result at all there is no evidence of a creation either.
+    const unreported = editFilesFromToolPair({
+      name: 'Write',
+      input: { file_path: '/repo/a.ts', content: 'one\n' }
+    })
+    expect(unreported?.[0]?.changeKind).toBe('edited')
+  })
+
+  it('reads a MultiEdit, whose snippet pairs sit in edits[]', () => {
+    const files = editFilesFromToolPair({
+      name: 'MultiEdit',
+      input: {
+        file_path: '/repo/a.ts',
+        edits: [
+          { old_string: 'was', new_string: 'now' },
+          { old_string: 'gone', new_string: 'kept' }
+        ]
+      }
+    })
+    expect(files).toHaveLength(1)
+    expect(files?.[0]?.path).toBe('/repo/a.ts')
+    expect(files?.[0]?.lines.map((line) => line.text)).toEqual(['was', 'now', 'gone', 'kept'])
+    expect(files?.[0]?.added).toBe(2)
+    expect(files?.[0]?.removed).toBe(2)
+  })
+
+  it('leaves NotebookEdit to the generic tool view', () => {
+    expect(isEditToolName('NotebookEdit')).toBe(false)
+  })
+
+  it('drops the gutter numbers whenever they locate a snippet rather than the file', () => {
+    const files = editFilesFromToolPair({
+      name: 'Edit',
+      input: { file_path: '/repo/a.ts', old_string: 'keep\nwas', new_string: 'keep\nnow' }
+    })
+    expect(files?.[0]?.lineNumbersKnown).toBe(false)
+    expect(gutter(files)).toEqual([null, null, null])
+    expect(
+      files?.[0]?.lines.every((line) => line.oldLineNumber === null && line.newLineNumber === null)
+    ).toBe(true)
+  })
+
+  it('renders no card for an edit the provider rejected or has not landed', () => {
+    const failedInput = { file_path: '/repo/a.ts', old_string: 'missing', new_string: 'now' }
+    expect(
+      editFilesFromToolPair({
+        name: 'Edit',
+        input: failedInput,
+        result: { output: 'String to replace not found in file.', isError: true }
+      })
+    ).toBeNull()
+    expect(
+      editFilesFromToolPair({
+        name: 'apply_patch',
+        input: {
+          changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: '@@ -1 +1 @@\n-a\n+b' }]
+        },
+        state: 'failed'
+      })
+    ).toBeNull()
+    expect(editFilesFromToolPair({ name: 'Edit', input: failedInput, state: 'running' })).toBeNull()
+  })
+
+  it('does not read a command tool result as a file edit', () => {
+    const patch = 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-was\n+now'
+    expect(
+      editFilesFromToolPair({
+        name: 'exec',
+        input: { command: 'git diff' },
+        result: { output: patch }
+      })
+    ).toBeNull()
+    // The structured journal's `Diff` item carries its patch only on the result.
+    const diffed = editFilesFromToolPair({
+      name: 'Diff',
+      input: { path: '/repo/a.ts' },
+      result: { output: patch }
+    })
+    expect(diffed?.[0]?.path).toBe('/repo/a.ts')
+    expect(diffed?.[0]?.added).toBe(1)
+  })
+
+  it('reports truncation when the content runs past the character cap', () => {
+    const files = editFilesFromToolPair({
+      name: 'Write',
+      input: { file_path: '/repo/a.ts', content: `${'x'.repeat(MAX_EDIT_CHARS)}\nlast\n` }
+    })
+    expect(files?.[0]?.truncated).toBe(true)
+    // The clipped body ends mid-line, so its one row is real and must survive.
+    expect(files?.[0]?.lines).toHaveLength(1)
   })
 
   it('reads Codex structured changes, stripping the move marker from the body', () => {

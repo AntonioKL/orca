@@ -30,15 +30,25 @@ export const MAX_EDIT_CHARS = 96_000
 /** The LCS table is quadratic; above this a linear prefix/suffix diff is used. */
 export const MAX_EDIT_DIFF_CELLS = 200_000
 
-export function splitEditContent(content: string): string[] {
+/** Rows of a source string, plus whether it was clipped before splitting. */
+export type EditContentLines = { lines: string[]; truncated: boolean }
+
+/** The one row splitter for every edit shape. Splits on both newline forms so a
+ *  CRLF file never carries a trailing `\r` into a row, where it would render as
+ *  a stray character, defeat the phantom-row guard, and reach the clipboard. */
+export function splitEditContent(content: string): EditContentLines {
   if (content.length === 0) {
-    return []
+    return { lines: [], truncated: false }
   }
-  const lines = content.slice(0, MAX_EDIT_CHARS).split(/\r?\n/)
-  if (content.endsWith('\n')) {
+  const truncated = content.length > MAX_EDIT_CHARS
+  const body = truncated ? content.slice(0, MAX_EDIT_CHARS) : content
+  const lines = body.split(/\r?\n/)
+  // Tested against the clipped body: on the un-clipped string this popped a
+  // real line whenever the slice fired.
+  if (body.endsWith('\n')) {
     lines.pop()
   }
-  return lines
+  return { lines, truncated }
 }
 
 /** Unified line numbering: a removed row is located on the old side, everything
@@ -48,10 +58,20 @@ export function unifiedLineNumber(line: NativeChatEditLine): number | null {
 }
 
 export function finalizeEditFile(
-  input: Omit<NativeChatEditFile, 'added' | 'removed' | 'truncated'>
+  input: Omit<NativeChatEditFile, 'added' | 'removed' | 'truncated'> & {
+    /** Set when the source text was clipped before it became rows. */
+    truncated?: boolean
+  }
 ): NativeChatEditFile {
-  const truncated = input.lines.length > MAX_EDIT_LINES
-  const lines = truncated ? input.lines.slice(0, MAX_EDIT_LINES) : input.lines
+  const overLineCap = input.lines.length > MAX_EDIT_LINES
+  const truncated = overLineCap || input.truncated === true
+  const capped = overLineCap ? input.lines.slice(0, MAX_EDIT_LINES) : input.lines
+  // Without resolved ranges the numbers locate a row inside a snippet; dropping
+  // them keeps a plausible-looking wrong position out of the gutter, the copy
+  // text, and the row keys.
+  const lines = input.lineNumbersKnown
+    ? capped
+    : capped.map((line) => ({ ...line, oldLineNumber: null, newLineNumber: null }))
   let added = 0
   let removed = 0
   for (const line of lines) {

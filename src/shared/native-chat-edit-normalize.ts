@@ -8,11 +8,20 @@ import {
 import { editLinesFromUnifiedPatch, editLinesFromWholeFile } from './native-chat-unified-patch'
 import type { NativeChatEditPatch } from './native-chat-types'
 
-const CLAUDE_EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'str_replace'])
-const PATCH_TOOLS = new Set(['apply_patch', 'exec', 'shell', 'Diff', 'local_shell'])
+// `NotebookEdit` is deliberately absent: its input carries only the new cell
+// source, so a card would render an unchanged cell as wholly added. It falls
+// through to the generic tool view instead.
+const CLAUDE_EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'str_replace'])
+/** Tools whose input may wrap a `*** Begin Patch` envelope — Codex sends
+ *  `apply_patch` as the source of a command tool. */
+const PATCH_ENVELOPE_TOOLS = new Set(['apply_patch', 'exec', 'shell', 'local_shell'])
+/** Tools whose whole payload is patch text. `Diff` reaches its patch only
+ *  through the result, because the structured journal projects a diff item as a
+ *  call carrying just the path. */
+const PATCH_TEXT_TOOLS = new Set(['apply_patch', 'Diff'])
 
 export function isEditToolName(name: string): boolean {
-  return CLAUDE_EDIT_TOOLS.has(name) || PATCH_TOOLS.has(name)
+  return CLAUDE_EDIT_TOOLS.has(name) || PATCH_ENVELOPE_TOOLS.has(name) || PATCH_TEXT_TOOLS.has(name)
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -52,33 +61,92 @@ function linesFromEditPatch(patch: NativeChatEditPatch): NativeChatEditLine[] {
   return lines
 }
 
-function claudeEditFiles(input: Record<string, unknown>): NativeChatEditFile[] | null {
-  const path = text(input.file_path) ?? text(input.path) ?? text(input.notebook_path)
+/** A whole-content write looks identical whether it created the file or
+ *  overwrote one, so only positive evidence may claim a creation. */
+const CREATED_FILE_RESULT = /^\s*File created successfully/
+
+function wholeContentChangeKind(
+  input: Record<string, unknown>,
+  output: string | undefined
+): 'added' | 'edited' {
+  if (text(input.command) === 'create') {
+    return 'added'
+  }
+  return output !== undefined && CREATED_FILE_RESULT.test(output) ? 'added' : 'edited'
+}
+
+/** `MultiEdit` carries its snippet pairs in `edits[]`, not at the top level. */
+function multiEditFiles(input: Record<string, unknown>, path: string): NativeChatEditFile[] | null {
+  if (!Array.isArray(input.edits)) {
+    return null
+  }
+  const lines: NativeChatEditLine[] = []
+  let truncated = false
+  for (const entry of input.edits) {
+    const edit = record(entry)
+    const oldString = text(edit?.old_string) ?? text(edit?.oldString)
+    const newString = text(edit?.new_string) ?? text(edit?.newString)
+    if (oldString === null && newString === null) {
+      continue
+    }
+    const diffed = editLinesFromContents(oldString ?? '', newString ?? '')
+    lines.push(...diffed.lines)
+    truncated ||= diffed.truncated
+  }
+  if (lines.length === 0) {
+    return null
+  }
+  return [
+    finalizeEditFile({
+      path,
+      oldPath: null,
+      changeKind: 'edited',
+      lines,
+      // A snippet pair cannot say where in the file it sits.
+      lineNumbersKnown: false,
+      truncated
+    })
+  ]
+}
+
+function claudeEditFiles(
+  name: string,
+  input: Record<string, unknown>,
+  output: string | undefined
+): NativeChatEditFile[] | null {
+  const path = text(input.file_path) ?? text(input.path) ?? 'file'
+  if (name === 'MultiEdit') {
+    return multiEditFiles(input, path)
+  }
   const oldString = text(input.old_string) ?? text(input.oldString)
   const newString = text(input.new_string) ?? text(input.newString)
   const content = text(input.content) ?? text(input.file_text)
   if (oldString === null && content !== null) {
+    const whole = editLinesFromWholeFile(content, 'add')
     return [
       finalizeEditFile({
-        path: path ?? 'file',
+        path,
         oldPath: null,
-        changeKind: 'added',
-        lines: editLinesFromWholeFile(content, 'add'),
-        lineNumbersKnown: true
+        changeKind: wholeContentChangeKind(input, output),
+        lines: whole.lines,
+        lineNumbersKnown: true,
+        truncated: whole.truncated
       })
     ]
   }
   if (oldString === null && newString === null) {
     return null
   }
+  const diffed = editLinesFromContents(oldString ?? '', newString ?? content ?? '')
   return [
     finalizeEditFile({
-      path: path ?? 'file',
+      path,
       oldPath: null,
       changeKind: 'edited',
-      lines: editLinesFromContents(oldString ?? '', newString ?? content ?? ''),
+      lines: diffed.lines,
       // A snippet pair cannot say where in the file it sits.
-      lineNumbersKnown: false
+      lineNumbersKnown: false,
+      truncated: diffed.truncated
     })
   ]
 }
@@ -96,13 +164,15 @@ function codexChangeFiles(changes: unknown[]): NativeChatEditFile[] {
     const movePath = text(kind?.move_path) ?? text(change.movePath)
     if (kindType === 'add' || kindType === 'delete') {
       // Add and delete arrive as raw file content, with no hunk header or signs.
+      const whole = editLinesFromWholeFile(diff, kindType === 'add' ? 'add' : 'del')
       return [
         finalizeEditFile({
           path,
           oldPath: null,
           changeKind: kindType === 'add' ? 'added' : 'deleted',
-          lines: editLinesFromWholeFile(diff, kindType === 'add' ? 'add' : 'del'),
-          lineNumbersKnown: true
+          lines: whole.lines,
+          lineNumbersKnown: true,
+          truncated: whole.truncated
         })
       ]
     }
@@ -118,7 +188,8 @@ function codexChangeFiles(changes: unknown[]): NativeChatEditFile[] {
         oldPath: movePath ? path : null,
         changeKind: movePath ? 'renamed' : 'edited',
         lines: parsed.lines,
-        lineNumbersKnown: parsed.lineNumbersKnown
+        lineNumbersKnown: parsed.lineNumbersKnown,
+        truncated: parsed.truncated
       })
     ]
   })
@@ -129,8 +200,15 @@ function codexChangeFiles(changes: unknown[]): NativeChatEditFile[] {
 export function editFilesFromToolPair(pair: {
   name: string
   input: unknown
-  result?: { output?: string; editPatch?: NativeChatEditPatch }
+  /** Provider lifecycle for the call, when the lane reports one. */
+  state?: 'running' | 'completed' | 'failed'
+  result?: { output?: string; isError?: boolean; editPatch?: NativeChatEditPatch }
 }): NativeChatEditFile[] | null {
+  // A card states the edit as made. An edit that failed or has not landed yet
+  // must keep the generic tool view, which shows the provider's own error.
+  if (pair.state === 'failed' || pair.state === 'running' || pair.result?.isError === true) {
+    return null
+  }
   const input = record(pair.input)
   const patch = pair.result?.editPatch
   if (patch && patch.hunks.length > 0) {
@@ -161,23 +239,32 @@ export function editFilesFromToolPair(pair: {
   }
 
   if (input && CLAUDE_EDIT_TOOLS.has(pair.name)) {
-    return claudeEditFiles(input)
+    return claudeEditFiles(pair.name, input, pair.result?.output)
   }
 
-  const patchText = text(input?.patch) ?? text(input?.diff) ?? pair.result?.output ?? null
-  if (patchText && PATCH_TOOLS.has(pair.name)) {
-    const parsed = editLinesFromUnifiedPatch(patchText)
-    if (parsed) {
-      return [
-        finalizeEditFile({
-          path: text(input?.path) ?? text(input?.file_path) ?? 'file',
-          oldPath: null,
-          changeKind: 'edited',
-          lines: parsed.lines,
-          lineNumbersKnown: parsed.lineNumbersKnown
-        })
-      ]
-    }
+  if (!PATCH_TEXT_TOOLS.has(pair.name)) {
+    return null
   }
-  return null
+  // The result fallback is scoped to `Diff`, whose call carries only a path.
+  // Reading any command tool's output as a patch reclassified `git diff` as a
+  // file edit and swallowed the command line with it.
+  const patchText =
+    text(input?.patch) ?? text(input?.diff) ?? (pair.name === 'Diff' ? pair.result?.output : null)
+  if (!patchText) {
+    return null
+  }
+  const parsed = editLinesFromUnifiedPatch(patchText)
+  if (!parsed) {
+    return null
+  }
+  return [
+    finalizeEditFile({
+      path: text(input?.path) ?? text(input?.file_path) ?? 'file',
+      oldPath: null,
+      changeKind: 'edited',
+      lines: parsed.lines,
+      lineNumbersKnown: parsed.lineNumbersKnown,
+      truncated: parsed.truncated
+    })
+  ]
 }

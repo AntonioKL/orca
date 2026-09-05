@@ -28,11 +28,17 @@ type DiffStructure = {
 }
 
 /**
- * Locates the `--- <old>` / `+++ <new>` file headers. A bare `---`/`+++` prefix
- * is not enough to spot one: a removed line whose content began with `--`
- * (SQL/Lua `-- comment`, C `--i`) is emitted as `---<content>`. Real headers
- * always come as an adjacent pair and never appear inside a hunk.
+ * True when the row at `index` opens a `--- <old>` / `+++ <new>` file header. A
+ * bare `---`/`+++` prefix is not enough to spot one: a removed line whose
+ * content began with `--` (SQL/Lua `-- comment`, C `--i`) is emitted as
+ * `---<content>`. Real headers always come as an adjacent pair and never appear
+ * inside a hunk, so callers must check this only outside one.
  */
+export function isFileHeaderPair(lines: readonly string[], index: number): boolean {
+  return (lines[index] ?? '').startsWith('--- ') && (lines[index + 1] ?? '').startsWith('+++ ')
+}
+
+/** Locates the file headers and rules that are structure rather than content. */
 function scanDiffStructure(lines: string[]): DiffStructure {
   const metaIndices = new Set<number>()
   let isStructuredDiff = false
@@ -57,7 +63,7 @@ function scanDiffStructure(lines: string[]): DiffStructure {
       metaIndices.add(index)
       continue
     }
-    if (line.startsWith('--- ') && (lines[index + 1] ?? '').startsWith('+++ ')) {
+    if (isFileHeaderPair(lines, index)) {
       metaIndices.add(index)
       metaIndices.add(index + 1)
       index += 1

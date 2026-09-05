@@ -16963,7 +16963,6 @@
         "addedFile": "Added file",
         "deletedFile": "Deleted file",
         "renamedFile": "Renamed file",
-        "editedFiles": "Edited {{value0}} files",
         "copyDiff": "Copy diff",
         "diffTruncated": "Diff truncated"
       },

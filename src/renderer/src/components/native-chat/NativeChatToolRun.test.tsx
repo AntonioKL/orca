@@ -86,6 +86,57 @@ describe('NativeChatToolRun', () => {
     expect(container.querySelector('pre')).toBeNull()
   })
 
+  it('keeps the provider error visible for an edit the agent could not apply', () => {
+    const blocks: NativeChatBlock[] = [
+      {
+        type: 'tool-call',
+        name: 'Edit',
+        input: { file_path: '/repo/a.ts', old_string: 'missing', new_string: 'now' }
+      },
+      { type: 'tool-result', output: 'String to replace not found in file.', isError: true }
+    ]
+
+    const { container } = render(<NativeChatToolRun blocks={blocks} expandSignal />)
+
+    expect(screen.queryByText('Edited file')).toBeNull()
+    const body = container.querySelector('pre')
+    expect(body).toHaveTextContent('String to replace not found in file.')
+    expect(body).toHaveClass('text-destructive')
+  })
+
+  it('leaves a `git diff` command as a command row rather than an edit card', () => {
+    const blocks: NativeChatBlock[] = [
+      { type: 'tool-call', name: 'exec', input: { command: 'git diff' }, state: 'completed' },
+      {
+        type: 'tool-result',
+        output: 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-was\n+now'
+      }
+    ]
+
+    const { container } = render(<NativeChatToolRun blocks={blocks} expandSignal />)
+
+    expect(screen.queryByText('Edited file')).toBeNull()
+    expect(container).toHaveTextContent('git diff')
+  })
+
+  it('shows no gutter number for a snippet edit, which cannot locate itself', () => {
+    const blocks: NativeChatBlock[] = [
+      {
+        type: 'tool-call',
+        name: 'Edit',
+        input: { file_path: '/repo/a.ts', old_string: 'was', new_string: 'now' },
+        state: 'completed'
+      },
+      { type: 'tool-result', output: 'ok' }
+    ]
+
+    render(<NativeChatToolRun blocks={blocks} expandSignal />)
+
+    // Exact, because a snippet-relative number would sit ahead of the marker.
+    expect(screen.getByText('now').closest('div')?.textContent).toBe('+now')
+    expect(screen.getByText('was').closest('div')?.textContent).toBe('-was')
+  })
+
   it('keeps a grouped active run to one stable row showing only the latest tool', () => {
     const blocks: NativeChatBlock[] = [
       { type: 'tool-call', name: 'shell', input: { command: 'date' }, state: 'completed' },
