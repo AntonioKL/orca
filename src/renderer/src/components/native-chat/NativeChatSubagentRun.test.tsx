@@ -6,7 +6,8 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import type {
   NativeChatSubagentEntry,
-  NativeChatSubagentGroupBlock
+  NativeChatSubagentGroupBlock,
+  NativeChatSubagentState
 } from '../../../../shared/native-chat-types'
 import { NativeChatSubagentRun, reconcileSubagentRoster } from './NativeChatSubagentRun'
 import { NativeChatToolRun } from './NativeChatToolRun'
@@ -34,7 +35,7 @@ describe('NativeChatSubagentRun', () => {
     expect(screen.getByRole('button')).toHaveTextContent('40.7k tokens')
   })
 
-  it('switches to Ran with a check once every child completed', () => {
+  it('switches to Ran once every child completed', () => {
     render(
       <NativeChatSubagentRun
         block={group([
@@ -74,6 +75,46 @@ describe('NativeChatSubagentRun', () => {
 
     expect(screen.getByRole('button')).toHaveTextContent('unverifiable')
     expect(screen.getByRole('button')).not.toHaveTextContent('working')
+  })
+
+  it('leads with the bot glyph, decorative beside the word that names the group', () => {
+    const { container } = render(
+      <NativeChatSubagentRun
+        block={group([{ id: 'a', label: 'read', state: 'working' }])}
+        activeTurnIsWorking
+      />
+    )
+
+    const glyph = container.querySelector('.lucide-bot')
+    expect(glyph).not.toBeNull()
+    expect(glyph).toHaveAttribute('aria-hidden', 'true')
+    // Never icon-only: the word is what carries the accessible name.
+    expect(screen.getByRole('button')).toHaveAccessibleName(/Kicked off 1 subagent/)
+  })
+
+  it('keeps the same glyph in every state, so a settling row never changes identity', () => {
+    const states: NativeChatSubagentState[] = [
+      'working',
+      'idle',
+      'completed',
+      'failed',
+      'stopped',
+      'unverifiable'
+    ]
+
+    for (const state of states) {
+      const { container } = render(
+        <NativeChatSubagentRun
+          block={group([{ id: 'a', label: 'read', state }])}
+          activeTurnIsWorking={state === 'working'}
+        />
+      )
+
+      expect(container.querySelectorAll('.lucide-bot')).toHaveLength(1)
+      expect(container.querySelector('.lucide-check')).toBeNull()
+      expect(container.querySelector('.lucide-users')).toBeNull()
+      cleanup()
+    }
   })
 
   it('leaves a live turn working — a settled roster is never asserted early', () => {

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Check, ChevronRight, Users } from 'lucide-react'
+import { Bot, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import { useNow } from '@/hooks/use-now'
@@ -113,6 +113,23 @@ const STATE_DOT_CLASS: Record<NativeChatSubagentState, string> = {
   unverifiable: 'bg-muted-foreground'
 }
 
+/**
+ * The group's identity glyph, fixed across every state — a settling row must not
+ * appear to change identity. State is carried by {@link StatusDot} and the tone
+ * of the words beside it.
+ *
+ * SWAP POINT: once the shared category-icon component lands (PR #18760), this
+ * whole component becomes that component asked for the `bot` category, which is
+ * the same glyph the individual `subAgentActivity` rows use.
+ */
+function SubagentGlyph(): React.JSX.Element {
+  return (
+    <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+      <Bot aria-hidden="true" className="size-3.5" />
+    </span>
+  )
+}
+
 function StatusDot({ state }: { state: NativeChatSubagentState }): React.JSX.Element {
   return (
     <span
@@ -186,14 +203,8 @@ export function NativeChatSubagentRun({
         aria-expanded={open}
         aria-live="polite"
       >
+        <SubagentGlyph />
         <StatusDot state={verdictState} />
-        <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground">
-          {verdictState === 'completed' ? (
-            <Check className="size-3.5" />
-          ) : (
-            <Users className="size-4" />
-          )}
-        </span>
         <span className={cn('min-w-0 flex-1 truncate', working && 'text-foreground/85')}>
           {headline}
         </span>
