@@ -13,6 +13,7 @@ import { LargeDiffFallback } from './LargeDiffFallback'
 import { LargeDiffLoadPrompt } from './LargeDiffLoadPrompt'
 import { buildDiffEditorWhitespaceOptions } from './diff-editor-whitespace-options'
 import { buildDiffEditorWordWrapOptions } from './diff-editor-word-wrap-options'
+import { resolveDiffRenderSideBySide } from './diff-added-file-inline-mode'
 import { monacoFindOptions } from './monaco-find-options'
 
 const ImageDiffViewer = lazy(() => import('./ImageDiffViewer'))
@@ -200,7 +201,7 @@ export function DiffSectionBody({
           options={{
             readOnly: !isEditable,
             originalEditable: false,
-            renderSideBySide: sideBySide,
+            renderSideBySide: resolveDiffRenderSideBySide(sideBySide, section),
             minimap: { enabled: false },
             scrollBeyondLastLine: false,
             fontSize: diffEditorFontSize,
