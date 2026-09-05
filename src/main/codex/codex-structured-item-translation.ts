@@ -225,32 +225,34 @@ function fileChangeItem(item: CodexThreadItem): CodexJournalItem {
   }
 }
 
-/** MCP tool names are namespaced as often as not (`mcp__server__tool`,
- *  `server/tool`, `ns.tool`) and must reach the row byte-identical; only a bare
- *  word is title-cased. */
-function mcpToolDisplayName(name: string): string {
-  if (/[:./]|__/.test(name)) {
-    return name
-  }
-  const words = name.split(/[\s_-]+/).filter((word) => word.length > 0)
-  return words.length === 0
-    ? name
-    : words.map((word) => word[0]!.toUpperCase() + word.slice(1)).join(' ')
+/** The tool name reaches the row verbatim — downstream dispatch (diff renderer,
+ *  question parsers, input previews) matches raw identifiers, so any casing
+ *  transform would silently miss them. `server/` qualifies it so two servers
+ *  exposing the same tool stay distinguishable and neither shadows a built-in. */
+function mcpToolCallName(item: CodexThreadItem): string {
+  const tool = readString(item, 'tool')
+  const server = readString(item, 'server')
+  return tool === null ? 'mcp' : server === null ? tool : `${server}/${tool}`
+}
+
+/** Row-label derivation only reads top-level keys, so the call's own arguments
+ *  have to be the input itself. `arguments` is arbitrary JSON upstream: a
+ *  non-object stays addressable under a key rather than being dropped, and an
+ *  absent one becomes null, which labels as empty instead of `{}`. */
+function mcpToolArguments(value: unknown): unknown {
+  const plain = typeof value === 'object' && value !== null && !Array.isArray(value)
+  return plain ? value : value === null || value === undefined ? null : { arguments: value }
 }
 
 function mcpToolCallItem(item: CodexThreadItem): CodexJournalItem {
   const failure = readString(readRecord(item.error), 'message')
   const text = failure ?? readTextContent(readRecord(item.result), 'content')
   const bounded = text === null ? null : boundInlineText(text, DEFAULT_JOURNAL_PAYLOAD_LIMITS)
-  const tool = readString(item, 'tool')
   return {
     body: {
       kind: 'tool-call',
-      name: tool === null ? 'mcp' : mcpToolDisplayName(tool),
-      input: boundToolInput(
-        { server: item.server ?? null, tool, arguments: item.arguments ?? null },
-        DEFAULT_JOURNAL_PAYLOAD_LIMITS
-      ),
+      name: mcpToolCallName(item),
+      input: boundToolInput(mcpToolArguments(item.arguments), DEFAULT_JOURNAL_PAYLOAD_LIMITS),
       state: failure === null ? commandState(item) : 'failed',
       ...(bounded === null ? {} : { output: bounded.bounded })
     },
@@ -259,8 +261,11 @@ function mcpToolCallItem(item: CodexThreadItem): CodexJournalItem {
 }
 
 /** `webSearch` carries no status: Codex starts it with an empty query and a null
- *  action, then completes it with both, so `action` is the completion signal. */
+ *  action, then completes it with both, so `action` is the completion signal.
+ *  The hits arrive on `results` and are the call's output. */
 function webSearchItem(item: CodexThreadItem): CodexJournalItem {
+  const hits = Array.isArray(item.results) && item.results.length > 0 ? item.results : null
+  const bounded = hits && boundInlineText(JSON.stringify(hits), DEFAULT_JOURNAL_PAYLOAD_LIMITS)
   return {
     body: {
       kind: 'tool-call',
@@ -269,7 +274,8 @@ function webSearchItem(item: CodexThreadItem): CodexJournalItem {
         { query: readString(item, 'query'), action: item.action ?? null },
         DEFAULT_JOURNAL_PAYLOAD_LIMITS
       ),
-      state: item.action === null || item.action === undefined ? 'running' : 'completed'
+      state: item.action === null || item.action === undefined ? 'running' : 'completed',
+      ...(bounded === null ? {} : { output: bounded.bounded })
     },
     handled: true
   }

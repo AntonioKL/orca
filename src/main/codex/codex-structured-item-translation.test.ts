@@ -305,7 +305,7 @@ describe('codex item bodies', () => {
     })
   })
 
-  it('gives an mcp tool call a typed body with its result as output', () => {
+  it('gives an mcp tool call a typed body with its own arguments as input', () => {
     expect(
       codexItemBody({
         type: 'mcpToolCall',
@@ -318,20 +318,61 @@ describe('codex item bodies', () => {
       })
     ).toEqual({
       kind: 'tool-call',
-      name: 'Get Forecast',
-      input: { server: 'weather', tool: 'get_forecast', arguments: { city: 'Oslo' } },
+      // Server-qualified, and the arguments stay top level so the row label can
+      // read `query`/`command`/`file_path` out of them.
+      name: 'weather/get_forecast',
+      input: { city: 'Oslo' },
       state: 'completed',
       output: { head: '12C', byteLength: 3, truncated: false, digest: expect.any(String) }
     })
   })
 
-  it('keeps a namespaced mcp tool name byte-identical', () => {
-    for (const tool of ['mcp__server__tool', 'server/tool', 'ns.tool', 'urn:tool']) {
+  it('passes an mcp tool name through with no casing transform', () => {
+    // Downstream dispatch is exact-match on raw identifiers, so every shape —
+    // bare snake_case included — has to survive byte-identical.
+    for (const tool of ['get_forecast', 'mcp__server__tool', 'ns.tool', 'urn:tool', 'listTools']) {
       expect(
         codexItemBody({ type: 'mcpToolCall', id: 'm', tool, status: 'inProgress' }),
         tool
       ).toMatchObject({ kind: 'tool-call', name: tool, state: 'running' })
+      expect(
+        codexItemBody({ type: 'mcpToolCall', id: 'm', server: 'srv', tool, status: 'inProgress' }),
+        tool
+      ).toMatchObject({ kind: 'tool-call', name: `srv/${tool}`, state: 'running' })
     }
+  })
+
+  it('falls back to the bare tool, then to `mcp`, when the item is under-specified', () => {
+    expect(
+      codexItemBody({ type: 'mcpToolCall', id: 'm', tool: 'get_forecast', status: 'inProgress' })
+    ).toMatchObject({ name: 'get_forecast' })
+    expect(
+      codexItemBody({ type: 'mcpToolCall', id: 'm', server: '', tool: 'ping', status: 'completed' })
+    ).toMatchObject({ name: 'ping' })
+    expect(
+      codexItemBody({ type: 'mcpToolCall', id: 'm', server: 'weather', status: 'completed' })
+    ).toMatchObject({ name: 'mcp' })
+  })
+
+  it('keeps non-object mcp arguments addressable and absent ones empty', () => {
+    // `arguments` is arbitrary JSON upstream; a scalar or array must still reach
+    // the row rather than being dropped or unwrapped into a bare value.
+    expect(
+      codexItemBody({ type: 'mcpToolCall', id: 'm', tool: 't', arguments: 'raw text' })
+    ).toMatchObject({ input: { arguments: 'raw text' } })
+    expect(
+      codexItemBody({ type: 'mcpToolCall', id: 'm', tool: 't', arguments: [1, 2] })
+    ).toMatchObject({ input: { arguments: [1, 2] } })
+    // Null, not `{}`: an empty object labels the row with a literal `{}`.
+    expect(codexItemBody({ type: 'mcpToolCall', id: 'm', tool: 't' })).toEqual({
+      kind: 'tool-call',
+      name: 't',
+      input: null,
+      state: 'running'
+    })
+    expect(
+      codexItemBody({ type: 'mcpToolCall', id: 'm', tool: 't', arguments: null })
+    ).toMatchObject({ input: null })
   })
 
   it('reports an mcp error as a failed call carrying the server message', () => {
@@ -346,7 +387,7 @@ describe('codex item bodies', () => {
       })
     ).toMatchObject({
       kind: 'tool-call',
-      name: 'Ping',
+      name: 's/ping',
       state: 'failed',
       output: { head: 'server unreachable', truncated: false }
     })
@@ -377,6 +418,37 @@ describe('codex item bodies', () => {
       },
       state: 'completed'
     })
+  })
+
+  it('carries the web search hits as the call output', () => {
+    const results = [{ title: 'Orca 1.0', url: 'https://example.com/notes' }]
+    expect(
+      codexItemBody({
+        type: 'webSearch',
+        id: 'w',
+        query: 'orca release notes',
+        action: { type: 'search', query: 'orca release notes', queries: null },
+        results
+      })
+    ).toMatchObject({
+      kind: 'tool-call',
+      name: 'web_search',
+      state: 'completed',
+      output: { head: JSON.stringify(results), truncated: false }
+    })
+    // Nothing to show is no output block at all, not an empty one.
+    for (const empty of [undefined, null, []]) {
+      expect(
+        codexItemBody({
+          type: 'webSearch',
+          id: 'w',
+          query: 'q',
+          action: { type: 'search' },
+          results: empty
+        }),
+        String(empty)
+      ).not.toHaveProperty('output')
+    }
   })
 
   it('leaves subagent items on the generic row until a real renderer exists', () => {
