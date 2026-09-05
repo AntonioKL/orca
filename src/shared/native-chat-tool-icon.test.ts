@@ -4,6 +4,8 @@ import {
   NATIVE_CHAT_TOOL_ICON_NAMES,
   nativeChatToolCategory,
   nativeChatToolIconName,
+  nativeChatToolRunCategory,
+  nativeChatToolRunIconName,
   type NativeChatToolCategory
 } from './native-chat-tool-icon'
 
@@ -184,6 +186,56 @@ describe('native chat tool icons', () => {
       // A present-but-blank command is not a command that ran.
       expect(isShellActivityToolCall({ name: 'read', input: { command: '   ' } })).toBe(false)
       expect(isShellActivityToolCall({ name: 'read', input: { command: null } })).toBe(false)
+    })
+  })
+
+  describe('the glyph over a whole run', () => {
+    // A run header stands over a summary of the run's first calls, so its glyph
+    // may only claim a category every call in the run shares.
+
+    it('keeps the category when every call in the run is of it', () => {
+      const run = [{ name: 'Read' }, { name: 'read' }, { name: '  Read  ' }]
+
+      expect(nativeChatToolRunCategory(run)).toBe('read')
+      expect(nativeChatToolRunIconName(run)).toBe('eye')
+    })
+
+    it('reads a run of differently-named shell calls as one shell run', () => {
+      // The categories agree even though the words do not, so the run is still
+      // one thing and keeps the terminal.
+      const run = [{ name: 'shell' }, { name: 'Bash' }, { name: 'local_shell' }]
+
+      expect(nativeChatToolRunCategory(run)).toBe('unknown')
+      expect(nativeChatToolRunIconName(run)).toBe('square-terminal')
+    })
+
+    it('falls back to the generic tool glyph when the run spans categories', () => {
+      const run = [{ name: 'shell' }, { name: 'Read' }]
+
+      expect(nativeChatToolRunCategory(run)).toBeNull()
+      // Either category here would describe only part of the run.
+      expect(nativeChatToolRunIconName(run)).toBe('wrench')
+      // Order does not make one call speak for the rest.
+      expect(nativeChatToolRunIconName([{ name: 'Read' }, { name: 'shell' }])).toBe('wrench')
+    })
+
+    it('takes a single call at its own category', () => {
+      expect(nativeChatToolRunCategory([{ name: 'Grep' }])).toBe('search')
+      expect(nativeChatToolRunIconName([{ name: 'Grep' }])).toBe('search')
+      expect(nativeChatToolRunIconName([{ name: 'apply_patch' }])).toBe('pencil')
+    })
+
+    it('reads a run of unmodelled tools as the generic category, not as spanning', () => {
+      const run = [{ name: 'AskUserQuestion' }, { name: 'SomeOtherTool' }]
+
+      expect(nativeChatToolRunCategory(run)).toBe('other')
+      expect(nativeChatToolRunIconName(run)).toBe('wrench')
+    })
+
+    it('has no glyph to give a run with no tool calls', () => {
+      expect(nativeChatToolRunCategory([])).toBeNull()
+      // Null, not a wrench: an empty header shows no glyph rather than a false one.
+      expect(nativeChatToolRunIconName([])).toBeNull()
     })
   })
 

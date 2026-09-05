@@ -484,6 +484,104 @@ describe('NativeChatToolRun', () => {
     expect(container.querySelector('.lucide-wrench')).toBeNull()
   })
 
+  describe('the settled header glyph over a whole run', () => {
+    // The header's text summarizes the run's first calls, so its glyph has to
+    // describe the same run rather than whichever call happened to finish last.
+    const call = (name: string, input: unknown): NativeChatBlock => ({
+      type: 'tool-call',
+      name,
+      input,
+      state: 'completed'
+    })
+
+    it('heads a run that is all reads with the read glyph', () => {
+      const blocks: NativeChatBlock[] = [
+        call('read', { command: "sed -n '1,50p' a.ts", path: 'a.ts' }),
+        call('read', { command: "sed -n '1,50p' b.ts", path: 'b.ts' })
+      ]
+
+      const { container } = render(
+        <NativeChatToolRun blocks={blocks} expandSignal activeTurnIsWorking={false} />
+      )
+
+      expect(leadingGlyphs(container)).toEqual(['lucide-eye', 'lucide-eye', 'lucide-eye'])
+    })
+
+    it('heads a run that is all shell with the terminal glyph, whatever each is named', () => {
+      const blocks: NativeChatBlock[] = [
+        call('shell', { command: 'npm test' }),
+        call('Bash', { command: 'git status' })
+      ]
+
+      const { container } = render(
+        <NativeChatToolRun blocks={blocks} expandSignal activeTurnIsWorking={false} />
+      )
+
+      expect(leadingGlyphs(container)).toEqual([
+        'lucide-square-terminal',
+        'lucide-square-terminal',
+        'lucide-square-terminal'
+      ])
+    })
+
+    it('heads a run spanning categories with the generic tool glyph', () => {
+      const blocks: NativeChatBlock[] = [
+        call('shell', { command: 'npm test' }),
+        call('read', { command: "sed -n '1,50p' a.ts", path: 'a.ts' })
+      ]
+
+      const { container } = render(
+        <NativeChatToolRun blocks={blocks} expandSignal activeTurnIsWorking={false} />
+      )
+
+      // An eye here — the last call's glyph — would claim a category the summary
+      // beside it does not describe.
+      expect(leadingGlyphs(container)).toEqual([
+        'lucide-wrench',
+        'lucide-square-terminal',
+        'lucide-eye'
+      ])
+    })
+
+    it('heads a single-call run with that call\u2019s own glyph', () => {
+      const { container } = render(
+        <NativeChatToolRun
+          blocks={[call('Grep', { pattern: 'todo' })]}
+          expandSignal
+          activeTurnIsWorking={false}
+        />
+      )
+
+      expect(leadingGlyphs(container)).toEqual(['lucide-search', 'lucide-search'])
+    })
+
+    it('leaves a run with no tool calls headed by no category glyph', () => {
+      const blocks: NativeChatBlock[] = [{ type: 'tool-result', output: 'first line' }]
+
+      const { container } = render(
+        <NativeChatToolRun blocks={blocks} expandSignal activeTurnIsWorking={false} />
+      )
+
+      // Only the trailing check and the chevron; a wrench here would claim a
+      // tool category for a run holding no tool call.
+      expect(leadingGlyphs(container)).toEqual(['lucide-check', 'lucide-chevron-right'])
+    })
+
+    it('keeps naming the active call while the run is still running', () => {
+      const blocks: NativeChatBlock[] = [
+        call('read', { command: "sed -n '1,50p' a.ts", path: 'a.ts' }),
+        { type: 'tool-call', name: 'shell', input: { command: 'npm test' }, state: 'running' }
+      ]
+
+      const { container } = render(
+        <NativeChatToolRun blocks={blocks} expandSignal activeTurnIsWorking />
+      )
+
+      // The running header names one call, so its glyph is that call's.
+      expect(leadingGlyphs(container)[0]).toBe('lucide-square-terminal')
+    })
+  })
+
   it('labels a bare list row by the command it ran rather than an invented path', () => {
     const blocks: NativeChatBlock[] = [
       {

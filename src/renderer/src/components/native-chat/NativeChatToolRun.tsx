@@ -26,8 +26,9 @@ import {
   NATIVE_CHAT_TOOL_ACTIVITY_COPY,
   selectActiveToolCall
 } from '../../../../shared/native-chat-tool-activity'
+import { nativeChatToolRunIconName } from '../../../../shared/native-chat-tool-icon'
 import { NativeChatDiffView } from './NativeChatDiffView'
-import { NativeChatToolIcon } from './NativeChatToolIcon'
+import { NativeChatToolIcon, NativeChatToolRunIcon } from './NativeChatToolIcon'
 
 function activeToolLabel(call: Extract<NativeChatBlock, { type: 'tool-call' }>): string {
   const { key, toolName, preview } = describeActiveToolCall(call)
@@ -226,12 +227,13 @@ export function NativeChatToolRun({
     () => (open ? buildEditCards(blocks) : NO_EDIT_CARDS),
     [open, blocks]
   )
-  // Only the settled header reads this; the live one names `latestActiveCall`.
-  // Those are the same call except under out-of-order completion, where the
-  // header re-names on settle to the run's last tool. The glyph is fixed for
-  // whichever tool the header names, so state rides on the trailing mark — a
-  // leading glyph that flipped to a check would read as a change of identity.
-  const settledHeaderCall = blocks.findLast(isToolCallBlock) ?? null
+  // Only the settled header reads this. It stands over `summary`, which speaks
+  // for the run's first calls rather than its last, so a glyph taken from one
+  // call would assert a category the text beside it doesn't describe. A run that
+  // spans categories therefore heads with the generic tool glyph. The glyph is
+  // fixed once settled, so state rides on the trailing mark — a leading glyph
+  // that flipped to a check would read as a change of identity.
+  const settledHeaderIcon = nativeChatToolRunIconName(blocks.filter(isToolCallBlock))
   const fallbackLabel =
     callCount === 1
       ? translate('components.native-chat.tool.countOne', NATIVE_CHAT_TOOL_ACTIVITY_COPY.countOne)
@@ -276,11 +278,8 @@ export function NativeChatToolRun({
           className="group flex min-h-6 w-full items-center gap-1.5 py-0.5 text-left"
           aria-expanded={open}
         >
-          {structuredActivityUi && settledHeaderCall ? (
-            <NativeChatToolIcon
-              rowWord={settledHeaderCall.name}
-              className="text-muted-foreground"
-            />
+          {structuredActivityUi && settledHeaderIcon ? (
+            <NativeChatToolRunIcon iconName={settledHeaderIcon} className="text-muted-foreground" />
           ) : null}
           <span className="shrink-0 font-mono text-[11px] font-bold text-muted-foreground transition-colors group-hover:text-foreground/80">
             {callCount}×

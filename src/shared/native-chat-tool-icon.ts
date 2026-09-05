@@ -115,6 +115,35 @@ export function nativeChatToolIconName(rowWord: string): NativeChatToolIconName 
   return NATIVE_CHAT_TOOL_ICON_NAMES[nativeChatToolCategory(rowWord) ?? 'other']
 }
 
+/** The one category every call in a run shares, or null when the run spans
+ *  categories or holds no calls. A run header names the whole run, not any one
+ *  call in it, so it may only claim a category true of all of them. */
+export function nativeChatToolRunCategory(
+  calls: readonly { name: string }[]
+): NativeChatToolCategory | null {
+  let shared: NativeChatToolCategory | null = null
+  for (const call of calls) {
+    const category = nativeChatToolCategory(call.name) ?? 'other'
+    if (shared !== null && shared !== category) {
+      return null
+    }
+    shared = category
+  }
+  return shared
+}
+
+/** The glyph for a run header: the shared category's glyph, the generic tool
+ *  glyph for a run that spans categories, and null when the run has no tool
+ *  call to describe and so heads with no glyph at all. */
+export function nativeChatToolRunIconName(
+  calls: readonly { name: string }[]
+): NativeChatToolIconName | null {
+  if (calls.length === 0) {
+    return null
+  }
+  return NATIVE_CHAT_TOOL_ICON_NAMES[nativeChatToolRunCategory(calls) ?? 'other']
+}
+
 /** Whether a call reads as terminal activity, for a lane with no per-category
  *  glyph (mobile) that only chooses between a terminal and a generic tool.
  *  The row word cannot decide it alone: Codex names a classified shell row
