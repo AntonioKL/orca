@@ -5,6 +5,7 @@ import {
   type FleetWorkerIdentity
 } from './orchestration-fleet-agent-status-evidence'
 import type { FleetDurableWorker } from './orchestration-fleet-projection'
+import { readWorkerTerminalHostScope } from './worker-terminal-host-scope'
 
 export type FleetStatusIndex = {
   byDispatchId: Map<string, FleetAgentStatusEvidence>
@@ -157,15 +158,8 @@ function uniqueOwner(ownersByKey: Map<string, Set<string>>, key: string | null):
   return key ? ownersByKey.get(key)?.size === 1 : true
 }
 
+/** Only a remote scope that names a target fences the connection the evidence must ride. */
 function remoteTargetForWorker(worker: FleetDurableWorker): string | null {
-  const hostScope = worker.resource?.hostScope
-  if (!hostScope) {
-    return null
-  }
-  try {
-    const parsed = JSON.parse(hostScope) as { kind?: unknown; targetId?: unknown }
-    return parsed.kind !== 'local' && typeof parsed.targetId === 'string' ? parsed.targetId : null
-  } catch {
-    return null
-  }
+  const read = readWorkerTerminalHostScope(worker.resource?.hostScope)
+  return read.kind === 'remote' ? read.targetId : null
 }

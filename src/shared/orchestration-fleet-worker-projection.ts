@@ -1,6 +1,7 @@
 import { AGENT_STATUS_STALE_AFTER_MS } from './agent-status-types'
 import type { FleetAgentStatusEvidence } from './orchestration-fleet-agent-status-evidence'
 import { projectOrchestrationFleetAttention } from './orchestration-fleet-attention'
+import { readWorkerTerminalHostScope } from './worker-terminal-host-scope'
 import type {
   FleetDurableWorker,
   FleetLiveness,
@@ -175,36 +176,20 @@ function projectHost(
   if (connectionId) {
     return { kind: 'remote', id: connectionId }
   }
-  if (!hostScope) {
+  const read = readWorkerTerminalHostScope(hostScope)
+  switch (read.kind) {
     // A missing host scope is the legacy/default representation for local and
     // folder-workspace authority; do not infer a remote host from resource
     // materialization alone.
-    return { kind: 'local', id: 'local' }
-  }
-  try {
-    const parsed = JSON.parse(hostScope) as {
-      kind?: unknown
-      hostId?: unknown
-      targetId?: unknown
-    }
-    if (parsed.kind === 'local' || (parsed.kind === 'wsl' && parsed.hostId === 'local')) {
-      return { kind: 'local', id: typeof parsed.hostId === 'string' ? parsed.hostId : 'local' }
-    }
-    if (typeof parsed.kind === 'string') {
-      const id =
-        typeof parsed.targetId === 'string'
-          ? parsed.targetId
-          : typeof parsed.hostId === 'string'
-            ? parsed.hostId
-            : parsed.kind
-      return { kind: 'remote', id }
-    }
-  } catch {
-    if (hostScope.startsWith('local:')) {
+    case 'absent':
       return { kind: 'local', id: 'local' }
-    }
+    case 'local':
+      return { kind: 'local', id: read.id }
+    case 'remote':
+      return { kind: 'remote', id: read.id }
+    case 'unreadable':
+      return { kind: 'remote', id: 'unknown' }
   }
-  return { kind: 'remote', id: 'unknown' }
 }
 
 export function projectOrchestrationFleetWorker(
