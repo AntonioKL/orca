@@ -180,16 +180,26 @@ export function startPreparation({
     createdAt: Date.now(),
     expiration,
     ready: (async () => {
-      await cleanupStalePreparations(preparationHostKey(repoPathKey, wslDistro), repoPath, options)
-      await mkdir(toHostFilesystemPath(preparationRoot), { recursive: true })
-      // Already canonical, so the add re-resolves nothing.
-      await prepareWorktreeCreateCheckout(
-        repoPath,
-        preparedPath,
-        canonicalBase,
-        lockReason,
-        options
-      )
+      try {
+        await mkdir(toHostFilesystemPath(preparationRoot), { recursive: true })
+        // Already canonical, so the add re-resolves nothing.
+        await prepareWorktreeCreateCheckout(
+          repoPath,
+          preparedPath,
+          canonicalBase,
+          lockReason,
+          options
+        )
+      } catch (error) {
+        // The ordinary-create fallback may need disk space reclaimed from crash leftovers.
+        await cleanupStalePreparations(
+          preparationHostKey(repoPathKey, wslDistro),
+          repoPath,
+          options
+        )
+        throw error
+      }
+      void cleanupStalePreparations(preparationHostKey(repoPathKey, wslDistro), repoPath, options)
     })()
   } satisfies PreparationEntry)
   preparations.set(key, entry)
@@ -205,12 +215,12 @@ export function startPreparation({
 export async function _resetPreparationPoolForTests(): Promise<void> {
   const entries = [...preparations.values()]
   preparations.clear()
-  resetStalePreparationCleanupForTests()
   await Promise.all(
     entries.map(async (entry) => {
       clearTimeout(entry.expiration)
       await discardEntry(entry)
     })
   )
+  await resetStalePreparationCleanupForTests()
   await resetPendingPreparationDiscardsForTests()
 }

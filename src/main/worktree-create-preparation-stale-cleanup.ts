@@ -34,8 +34,7 @@ export async function cleanupStalePreparations(
     return
   }
   const cleanup = (async () => {
-    // Not awaited: the create path awaits this cleanup, and one stranded discard costs an unlock plus
-    // a `worktree remove --force` bounded at 30s each. Reclaiming leaked scratch must not delay create.
+    // Stranded discards must not delay the independent scan for crash leftovers.
     void retryPendingPreparationDiscards(cleanupKey)
     const worktrees = await listWorktreeGraph(repoPath, {
       ...options,
@@ -79,6 +78,7 @@ export function hasPendingStalePreparationCleanup(): boolean {
   return staleCleanupInFlight.size > 0
 }
 
-export function resetStalePreparationCleanupForTests(): void {
+export async function resetStalePreparationCleanupForTests(): Promise<void> {
+  await Promise.allSettled(staleCleanupInFlight.values())
   staleCleanupInFlight.clear()
 }
