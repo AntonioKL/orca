@@ -1,6 +1,7 @@
 import { ipcRenderer } from 'electron'
 import type { TerminalPaneSplitSource } from '../../shared/feature-education-telemetry'
 import type { TerminalTabCreateReply } from '../../shared/terminal-reveal-identity'
+import type { TerminalTabMountIntent } from '../../shared/terminal-tab-mount-intent'
 import type {
   AgentProviderSessionMetadata,
   SleepingAgentLaunchConfig
@@ -84,11 +85,18 @@ export const uiTerminalAndSessionTabsApi = {
       tabId?: string
       ptyId?: string
       paneKey?: string
+      intent?: TerminalTabMountIntent
     }) => void
   ): (() => void) => {
     const listener = (
       _event: Electron.IpcRendererEvent,
-      data: { worktreeId: string; tabId?: string; ptyId?: string; paneKey?: string }
+      data: {
+        worktreeId: string
+        tabId?: string
+        ptyId?: string
+        paneKey?: string
+        intent?: TerminalTabMountIntent
+      }
     ) => callback(data)
     ipcRenderer.on('terminal:requestTabMount', listener)
     return () => ipcRenderer.removeListener('terminal:requestTabMount', listener)

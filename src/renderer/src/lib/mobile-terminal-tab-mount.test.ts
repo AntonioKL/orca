@@ -6,6 +6,8 @@ import {
 } from './mobile-terminal-tab-mount'
 import type { TerminalTabPtyOwnershipState } from './terminal-tab-for-pty-id'
 
+const LEAF_ID = '11111111-1111-4111-8111-111111111111'
+
 function state(tabCount = 1): TerminalTabPtyOwnershipState {
   return {
     tabsByWorktree: {
@@ -127,6 +129,58 @@ describe('resolveMobileTerminalTabMount', () => {
         { isTabMounted: () => false }
       )
     ).toEqual({ kind: 'mount', detail: { worktreeId: 'wt', tabIds: ['tab-0'] } })
+  })
+
+  it('scopes an inbound-message mount to its addressed split leaf', () => {
+    expect(
+      resolveMobileTerminalTabMount(
+        state(),
+        {
+          worktreeId: 'wt',
+          tabId: 'tab-0',
+          paneKey: `tab-0:${LEAF_ID}`,
+          intent: 'inbound-message'
+        },
+        { isTabMounted: () => false }
+      )
+    ).toEqual({
+      kind: 'mount',
+      detail: {
+        worktreeId: 'wt',
+        tabIds: ['tab-0'],
+        coldRestorePaneKeysByTabId: { 'tab-0': [`tab-0:${LEAF_ID}`] }
+      }
+    })
+  })
+
+  it('keeps client-subscribe mounts unscoped even when they carry pane identity', () => {
+    expect(
+      resolveMobileTerminalTabMount(
+        state(),
+        {
+          worktreeId: 'wt',
+          tabId: 'tab-0',
+          paneKey: `tab-0:${LEAF_ID}`,
+          intent: 'client-subscribe'
+        },
+        { isTabMounted: () => false }
+      )
+    ).toEqual({ kind: 'mount', detail: { worktreeId: 'wt', tabIds: ['tab-0'] } })
+  })
+
+  it('does not widen malformed inbound pane identity into an unscoped mount', () => {
+    expect(
+      resolveMobileTerminalTabMount(
+        state(),
+        {
+          worktreeId: 'wt',
+          tabId: 'tab-0',
+          paneKey: 'tab-0:not-a-stable-leaf',
+          intent: 'inbound-message'
+        },
+        { isTabMounted: () => false }
+      )
+    ).toBeNull()
   })
 
   it('returns null when the tab does not resolve at all', () => {

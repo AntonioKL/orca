@@ -14,6 +14,7 @@ import type {
   SleepingAgentLaunchConfig
 } from '../../shared/agent-session-resume'
 import type { TerminalPaneSplitSource } from '../../shared/feature-education-telemetry'
+import type { TerminalTabMountIntent } from '../../shared/terminal-tab-mount-intent'
 import type {
   RuntimeMobileSessionTabMove,
   RuntimeTerminalCreateRequestPayload,
@@ -173,6 +174,7 @@ export type UiCommandEventApi = {
       tabId?: string
       ptyId?: string
       paneKey?: string
+      intent?: TerminalTabMountIntent
     }) => void
   ) => () => void
   replyTerminalCreate: (reply: TerminalTabCreateReply) => void

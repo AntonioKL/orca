@@ -81,6 +81,9 @@ export type BackgroundMountTerminalWorktreeDetail = {
    *  which tabs they need. Omitted → whole-worktree mount (legacy dispatch
    *  sites); a real activation always lifts the restriction. */
   tabIds?: readonly string[]
+  /** Mail wake only: pane identities allowed to cold-restore within each
+   *  mounted split tab. Omitted keeps user-open and mobile mounts unscoped. */
+  coldRestorePaneKeysByTabId?: Readonly<Record<string, readonly string[]>>
 }
 
 export type WakeHibernatedAgentsWorktreeDetail = {

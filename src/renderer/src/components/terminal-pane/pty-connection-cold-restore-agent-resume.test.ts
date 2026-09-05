@@ -6,6 +6,7 @@ import { flushAsyncTicks } from './pty-connection-test-async'
 import { UUID_RE } from './pty-connection-test-constants'
 import {
   LEAF_1,
+  LEAF_2,
   createMockTransport,
   createPane,
   createManager
@@ -189,7 +190,8 @@ describe('connectPanePty', () => {
     const manager = createManager(1)
     const deps = createDeps({
       restoredLeafId: LEAF_1,
-      restoredPtyIdByLeafId: { [LEAF_1]: 'lost-pty' }
+      restoredPtyIdByLeafId: { [LEAF_1]: 'lost-pty' },
+      coldRestorePaneKeys: new Set([paneKey])
     })
 
     connectPanePty(pane as never, manager as never, deps as never)
@@ -400,6 +402,110 @@ describe('connectPanePty', () => {
     )
     // Why: consuming the record prevents a later worktree activation from launching a duplicate resume tab.
     expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledWith(paneKey)
+  })
+
+  it('leaves an unaddressed sleeping split sibling inert during a mail-scoped mount', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport(null)
+    transportFactoryQueue.push(transport)
+    const addressedPaneKey = makePaneKey('tab-1', LEAF_1)
+    const siblingPaneKey = makePaneKey('tab-1', LEAF_2)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: 'lost-sibling-pty' }]
+      },
+      agentStatusByPaneKey: {},
+      sleepingAgentSessionsByPaneKey: {
+        [siblingPaneKey]: {
+          paneKey: siblingPaneKey,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          agent: 'codex',
+          providerSession: { key: 'session_id', id: 'sibling-session' },
+          prompt: 'stay asleep',
+          state: 'working',
+          capturedAt: 1,
+          updatedAt: 1
+        }
+      }
+    } as StoreState
+
+    const binding = connectPanePty(
+      createPane(2) as never,
+      createManager(2) as never,
+      createDeps({
+        restoredLeafId: LEAF_2,
+        restoredPtyIdByLeafId: { [LEAF_2]: 'lost-sibling-pty' },
+        coldRestorePaneKeys: new Set([addressedPaneKey]),
+        isVisibleRef: { current: false }
+      }) as never
+    ) as unknown as {
+      wakeHibernatedAgentIfArmed: (claims?: Set<string>) => string | null
+    }
+    await flushAsyncTicks(20)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    expect(transport.connect).not.toHaveBeenCalled()
+    expect(transport.attach).not.toHaveBeenCalled()
+    expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+
+    const claims = new Set<string>()
+    expect(binding.wakeHibernatedAgentIfArmed(claims)).not.toBeNull()
+    await flushAsyncTicks(20)
+    expect(transport.connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.stringContaining("resume' 'sibling-session'"),
+        env: expect.objectContaining({ ORCA_PANE_KEY: siblingPaneKey })
+      })
+    )
+  })
+
+  it('resumes a scoped sibling when user reveal wins the deferred-attach race', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport(null)
+    transportFactoryQueue.push(transport)
+    const addressedPaneKey = makePaneKey('tab-1', LEAF_1)
+    const siblingPaneKey = makePaneKey('tab-1', LEAF_2)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: 'lost-sibling-pty' }]
+      },
+      agentStatusByPaneKey: {},
+      sleepingAgentSessionsByPaneKey: {
+        [siblingPaneKey]: {
+          paneKey: siblingPaneKey,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          agent: 'codex',
+          providerSession: { key: 'session_id', id: 'sibling-session' },
+          prompt: 'wake on reveal',
+          state: 'working',
+          capturedAt: 1,
+          updatedAt: 1
+        }
+      }
+    } as StoreState
+
+    connectPanePty(
+      createPane(2) as never,
+      createManager(2) as never,
+      createDeps({
+        restoredLeafId: LEAF_2,
+        restoredPtyIdByLeafId: { [LEAF_2]: 'lost-sibling-pty' },
+        coldRestorePaneKeys: new Set([addressedPaneKey]),
+        isVisibleRef: { current: true }
+      }) as never
+    )
+    await flushAsyncTicks(20)
+
+    expect(transport.connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.stringContaining("resume' 'sibling-session'"),
+        env: expect.objectContaining({ ORCA_PANE_KEY: siblingPaneKey })
+      })
+    )
   })
 
   it('resumes from a sleeping record after the same stable leaf moves to a reminted tab', async () => {

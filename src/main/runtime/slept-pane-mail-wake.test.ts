@@ -301,7 +301,8 @@ describe('mail addressed to a listed slept pane', () => {
     expect(tabMountSends[0]?.[1]).toMatchObject({
       worktreeId: TEST_WORKTREE_ID,
       tabId: TAB_ID,
-      paneKey: PANE_KEY
+      paneKey: PANE_KEY,
+      intent: 'inbound-message'
     })
     db.close()
   })

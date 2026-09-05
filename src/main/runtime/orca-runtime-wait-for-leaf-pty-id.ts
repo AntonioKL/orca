@@ -129,7 +129,8 @@ export class OrcaRuntimeWithWaitForLeafPtyId extends OrcaRuntimeWithRestoreLiveP
         worktreeId: args.worktreeId,
         ...(args.tabId ? { tabId: args.tabId } : {}),
         ...(args.ptyId ? { ptyId: args.ptyId } : {}),
-        ...(args.paneKey ? { paneKey: args.paneKey } : {})
+        ...(args.paneKey ? { paneKey: args.paneKey } : {}),
+        ...(args.intent ? { intent: args.intent } : {})
       })
       return true
     } catch {

@@ -248,7 +248,7 @@ export function registerTerminalPresentationIpcBridge(unsubs: (() => void)[]): v
 
   // Why: background-mount a mobile-subscribed tab's PTY without navigating the desktop (STA-1840).
   unsubs.push(
-    window.api.ui.onRequestTerminalTabMount(({ worktreeId, tabId, ptyId, paneKey }) => {
+    window.api.ui.onRequestTerminalTabMount(({ worktreeId, tabId, ptyId, paneKey, intent }) => {
       if (!worktreeId) {
         return
       }
@@ -258,7 +258,9 @@ export function registerTerminalPresentationIpcBridge(unsubs: (() => void)[]): v
         {
           worktreeId,
           ...(tabId ? { tabId } : {}),
-          ...(ptyId ? { ptyId } : {})
+          ...(ptyId ? { ptyId } : {}),
+          ...(paneKey ? { paneKey } : {}),
+          ...(intent ? { intent } : {})
         },
         {
           isTabMounted: (tabId, targetWorktreeId) =>
