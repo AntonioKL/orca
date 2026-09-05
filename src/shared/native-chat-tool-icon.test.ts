@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isShellActivityToolRow,
   NATIVE_CHAT_TOOL_ICON_NAMES,
   nativeChatToolCategory,
   nativeChatToolIconName,
@@ -106,6 +107,44 @@ describe('native chat tool icons', () => {
     for (const name of ['shell', 'bash', 'run_terminal_cmd']) {
       expect(nativeChatToolIconName(name)).toBe('square-terminal')
     }
+  })
+
+  it('reads a classified shell row as terminal activity, not as a named tool', () => {
+    // A lane with only a terminal and a generic glyph (mobile) asks this instead
+    // of `isCommandToolName`, which answers false for the words Codex publishes
+    // for a command that really ran.
+    for (const word of ['read', 'search', 'list', 'shell', 'bash', 'run_terminal_cmd']) {
+      expect(isShellActivityToolRow(word)).toBe(true)
+    }
+    // Claude's own filesystem tools share those categories, so they read as
+    // terminal activity on that lane too — it has no closer glyph for them.
+    for (const word of ['Read', 'Grep', 'Glob']) {
+      expect(isShellActivityToolRow(word)).toBe(true)
+    }
+    for (const word of ['Edit', 'Diff', 'Task', 'WebFetch', 'TodoWrite', 'AskUserQuestion', '']) {
+      expect(isShellActivityToolRow(word)).toBe(false)
+    }
+  })
+
+  it('answers terminal activity for exactly the shell categories, and no others', () => {
+    // A `Record` of the whole vocabulary, so a category added later cannot join
+    // or leave the terminal set without this listing changing.
+    const rowWordByCategory: Record<NativeChatToolCategory, string> = {
+      read: 'read',
+      search: 'search',
+      listFiles: 'list',
+      unknown: 'shell',
+      fileChange: 'Edit',
+      webSearch: 'WebFetch',
+      mcpToolCall: 'mcp__linear__create_issue',
+      subAgentActivity: 'Task',
+      todoList: 'TodoWrite',
+      other: 'AskUserQuestion'
+    }
+
+    expect(
+      ALL_CATEGORIES.filter((category) => isShellActivityToolRow(rowWordByCategory[category]))
+    ).toEqual(['read', 'search', 'listFiles', 'unknown'])
   })
 
   it('does not answer a prototype key with a glyph', () => {

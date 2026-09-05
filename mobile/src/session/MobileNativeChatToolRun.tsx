@@ -14,9 +14,9 @@ import {
   describeActiveToolCall,
   formatActiveToolLabel,
   formatToolCallCount,
-  isCommandToolName,
   selectActiveToolCall
 } from '../../../src/shared/native-chat-tool-activity'
+import { isShellActivityToolRow } from '../../../src/shared/native-chat-tool-icon'
 import type { NativeChatBlock } from '../../../src/shared/native-chat-types'
 import { colors } from '../theme/mobile-theme'
 import { styles } from './mobile-native-chat-message-styles'
@@ -195,7 +195,11 @@ export function ToolRun({
   }
   callCount ||= pairs.length
   const summary = summarizeToolRun(blocks)
-  const ActiveToolIcon = activeCall && isCommandToolName(activeCall.name) ? SquareTerminal : Wrench
+  // Read through the shared category vocabulary, not the tool name: Codex names
+  // a classified shell row `read`/`search`/`list`, and a wrench on one of those
+  // would call a command that ran a generic tool.
+  const ActiveToolIcon =
+    activeCall && isShellActivityToolRow(activeCall.name) ? SquareTerminal : Wrench
   return (
     <View style={styles.toolRun}>
       <View style={styles.toolRunHeader}>

@@ -108,3 +108,22 @@ export function nativeChatToolCategory(rowWord: string): NativeChatToolCategory 
 export function nativeChatToolIconName(rowWord: string): NativeChatToolIconName {
   return NATIVE_CHAT_TOOL_ICON_NAMES[nativeChatToolCategory(rowWord) ?? 'other']
 }
+
+/** The categories a shell command produces: Codex's three classified classes,
+ *  plus an unclassified one. Kept here rather than in a lane so the classified
+ *  words and `shell` stay one answer. */
+const SHELL_ACTIVITY_CATEGORIES: ReadonlySet<NativeChatToolCategory> = new Set([
+  'read',
+  'search',
+  'listFiles',
+  'unknown'
+])
+
+/** Whether a row reads as terminal activity. For a lane with no per-category
+ *  glyph (mobile), which only chooses between a terminal and a generic tool:
+ *  keying that on the tool name alone would call Codex's classified `read` /
+ *  `search` / `list` rows generic tools, though a shell command produced them. */
+export function isShellActivityToolRow(rowWord: string): boolean {
+  const category = nativeChatToolCategory(rowWord)
+  return category !== null && SHELL_ACTIVITY_CATEGORIES.has(category)
+}
