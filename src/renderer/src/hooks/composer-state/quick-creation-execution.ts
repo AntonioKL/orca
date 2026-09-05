@@ -255,7 +255,8 @@ export function useQuickCreationExecution(input: QuickCreationExecutionInput) {
         clearNewWorkspaceDraft()
       }
 
-      runBackgroundWorktreeCreation(request, retainedCreation.take(request, selectedRepo))
+      const retained = retainedCreation.take(request, selectedRepo)
+      runBackgroundWorktreeCreation(request, retained?.creation, retained)
 
       if (createMultiple) {
         retainedCreation.resetForNextCreate()

@@ -1,16 +1,24 @@
 import type { Repo } from '../../../../shared/repo-types'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createRetainedWorktreeCreation } from '@/lib/retained-worktree-creation'
 import { createRequestedWorktree } from '@/lib/create-requested-worktree'
 import { createBrowserUuid } from '@/lib/browser-uuid'
-import type { WorktreeCreationRequest } from '@/lib/pending-worktree-creation'
+import type {
+  WorktreeCreationPhase,
+  WorktreeCreationRequest
+} from '@/lib/pending-worktree-creation'
 
 export type ComposerPreparation = { isCancelled: () => boolean }
 
 function createComposerReservation() {
-  return createRetainedWorktreeCreation((request) =>
-    createRequestedWorktree(createBrowserUuid(), request, true)
-  )
+  const creationId = createBrowserUuid()
+  return {
+    creationId,
+    phase: undefined as WorktreeCreationPhase | undefined,
+    ...createRetainedWorktreeCreation((request) =>
+      createRequestedWorktree(creationId, request, true)
+    )
+  }
 }
 
 export function useRetainedComposerCreation(
@@ -22,6 +30,15 @@ export function useRetainedComposerCreation(
     started: false,
     creation: createComposerReservation()
   }))
+  useEffect(
+    () =>
+      window.api?.worktrees?.onCreateProgress?.((event) => {
+        if (event.creationId === state.creation.creationId) {
+          state.creation.phase = event.phase
+        }
+      }),
+    [state]
+  )
   return useMemo(
     () => ({
       begin(preparation?: ComposerPreparation): (() => boolean) | null {
@@ -42,9 +59,10 @@ export function useRetainedComposerCreation(
         state.creation = createComposerReservation()
       },
       take(request: WorktreeCreationRequest, repo: Repo) {
-        return (
-          state.creation.take(request, JSON.stringify({ executionIdentity, repo })) ?? undefined
-        )
+        const creation = state.creation.take(request, JSON.stringify({ executionIdentity, repo }))
+        return creation
+          ? { creation, creationId: state.creation.creationId, phase: state.creation.phase }
+          : undefined
       }
     }),
     [executionIdentity, isSubmissionCancelled, state]

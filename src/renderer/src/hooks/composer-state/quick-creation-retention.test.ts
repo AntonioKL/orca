@@ -4,7 +4,10 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Repo } from '../../../../shared/repo-types'
 import type { CreateWorktreeResult } from '../../../../shared/worktree/create-types'
-import type { WorktreeCreationRequest } from '@/lib/pending-worktree-creation'
+import type {
+  WorktreeCreationPhase,
+  WorktreeCreationRequest
+} from '@/lib/pending-worktree-creation'
 
 const boundaries = vi.hoisted(() => ({
   create:
@@ -17,7 +20,13 @@ const boundaries = vi.hoisted(() => ({
     >(),
   capabilities: vi.fn<() => Promise<string[]>>(),
   activate:
-    vi.fn<(request: WorktreeCreationRequest, creation?: Promise<CreateWorktreeResult>) => void>()
+    vi.fn<
+      (
+        request: WorktreeCreationRequest,
+        creation?: CreateWorktreeResult | Promise<CreateWorktreeResult>,
+        progress?: { creationId: string; phase?: string }
+      ) => void
+    >()
 }))
 vi.mock('@/lib/create-requested-worktree', () => ({ createRequestedWorktree: boundaries.create }))
 vi.mock('@/lib/worktree-creation-flow', () => ({
@@ -115,10 +124,21 @@ function deferred<T>() {
 describe('quick composer retained creation', () => {
   let root: Root | null
   let input: Input
+  let progress: (event: { creationId: string; phase: WorktreeCreationPhase }) => void
+  const unsubscribe = vi.fn()
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     boundaries.create.mockResolvedValue(result)
     boundaries.capabilities.mockResolvedValue(['worktree.background-startup.v1'])
+    vi.stubGlobal('api', {
+      worktrees: {
+        onCreateProgress: (listener: typeof progress) => {
+          progress = listener
+          return unsubscribe
+        }
+      }
+    })
     input = makeInput()
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -128,6 +148,7 @@ describe('quick composer retained creation', () => {
   afterEach(() => {
     act(() => root?.unmount())
     document.body.replaceChildren()
+    vi.unstubAllGlobals()
   })
 
   const execute = (preparation?: { isCancelled: () => boolean }, selectedRepo = repo) =>
@@ -167,12 +188,32 @@ describe('quick composer retained creation', () => {
     })
     expect(boundaries.create).toHaveBeenCalledTimes(1)
     expect(boundaries.activate).toHaveBeenCalledTimes(1)
+    expect(boundaries.activate.mock.calls[0][2]?.creationId).toBe(
+      boundaries.create.mock.calls[0][0]
+    )
     const joined = boundaries.activate.mock.calls[0][1]
     expect(joined).toBeInstanceOf(Promise)
     pending.resolve(result)
     expect(await joined).toBe(result)
     expect(input.clearNewWorkspaceDraft).toHaveBeenCalledTimes(1)
     expect(input.onCreated).toHaveBeenCalledTimes(1)
+  })
+
+  it('replays the latest matching phase and unsubscribes on unmount', async () => {
+    await act(async () => {
+      await execute({ isCancelled: () => false })
+    })
+    const creationId = boundaries.create.mock.calls[0][0]
+    progress({ creationId, phase: 'fetching' })
+    progress({ creationId, phase: 'creating' })
+    progress({ creationId: 'unrelated', phase: 'fetching' })
+    await act(async () => {
+      await execute()
+    })
+    expect(boundaries.activate.mock.calls[0][2]).toMatchObject({ creationId, phase: 'creating' })
+    act(() => root!.unmount())
+    root = null
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   it('uses ordinary Create when the host cannot promise background startup', async () => {
@@ -184,7 +225,7 @@ describe('quick composer retained creation', () => {
     await act(async () => {
       await execute()
     })
-    expect(boundaries.activate).toHaveBeenCalledWith(expect.any(Object), undefined)
+    expect(boundaries.activate).toHaveBeenCalledWith(expect.any(Object), undefined, undefined)
   })
 
   it('allows one new preparation after an explicit Create more submission', async () => {
@@ -202,6 +243,15 @@ describe('quick composer retained creation', () => {
     })
     expect(boundaries.create).toHaveBeenCalledTimes(2)
     expect(boundaries.create.mock.calls[1][1].name).toBe('next')
+    expect(boundaries.create.mock.calls[1][0]).not.toBe(boundaries.create.mock.calls[0][0])
+    progress({ creationId: boundaries.create.mock.calls[0][0], phase: 'creating' })
+    await act(async () => {
+      await execute()
+    })
+    expect(boundaries.activate.mock.calls[1][2]).toMatchObject({
+      creationId: boundaries.create.mock.calls[1][0],
+      phase: undefined
+    })
   })
 
   it('does not create if preparation is canceled while preflight is pending', async () => {
@@ -238,7 +288,7 @@ describe('quick composer retained creation', () => {
         await execute(undefined, selectedRepo)
       })
       expect(boundaries.create).toHaveBeenCalledTimes(1)
-      expect(boundaries.activate).toHaveBeenCalledWith(expect.any(Object), undefined)
+      expect(boundaries.activate).toHaveBeenCalledWith(expect.any(Object), undefined, undefined)
     }
   )
 

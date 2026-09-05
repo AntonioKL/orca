@@ -49,7 +49,8 @@ function revealPendingCreation(
  */
 export function runBackgroundWorktreeCreation(
   request: WorktreeCreationRequest,
-  retainedCreation?: CreateWorktreeResult | Promise<CreateWorktreeResult>
+  retainedCreation?: CreateWorktreeResult | Promise<CreateWorktreeResult>,
+  retainedProgress?: { creationId: string; phase?: WorktreeCreationPhase }
 ): string {
   const store = useAppStore.getState()
   const existingCreationId = findPendingLinkedWorkItemCreationId(
@@ -64,8 +65,12 @@ export function runBackgroundWorktreeCreation(
   }
   // Why: crypto.randomUUID is undefined in non-secure browser contexts (LAN web
   // client over plain HTTP). createBrowserUuid falls back to getRandomValues.
-  const creationId = createBrowserUuid()
-  revealPendingCreation(creationId, request, getInitialWorktreeCreationPhase(request))
+  const creationId = retainedProgress?.creationId ?? createBrowserUuid()
+  revealPendingCreation(
+    creationId,
+    request,
+    retainedProgress?.phase ?? getInitialWorktreeCreationPhase(request)
+  )
   void executeWorktreeCreation(creationId, request, retainedCreation)
   return creationId
 }
