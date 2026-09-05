@@ -44,6 +44,8 @@ export async function observeBrowserLoadingSurface(
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/held`
   const observations: Record<string, unknown>[] = []
+  // Freezing attachment for a screenshot must also freeze the missing-guest watchdog.
+  await page.clock.pauseAt(new Date())
   const attachGate = await page.evaluateHandle((heldUrl) => {
     const original = Element.prototype.setAttribute
     const pending: (() => void)[] = []
@@ -138,6 +140,7 @@ export async function observeBrowserLoadingSurface(
     await page.mouse.move(0, 0)
     await capture('pre-attach', 'theme')
     await attachGate.evaluate((release) => release())
+    await page.clock.resume()
     await expect.poll(() => requestCount).toBe(1)
     await capture('dark-held', 'theme', true)
     await page.evaluate(async () => {
@@ -280,6 +283,7 @@ export async function observeBrowserLoadingSurface(
     return observations
   } finally {
     await attachGate.evaluate((release) => release()).catch(() => {})
+    await page.clock.resume().catch(() => {})
     await attachGate.dispose()
     release?.()
     server.closeAllConnections()
