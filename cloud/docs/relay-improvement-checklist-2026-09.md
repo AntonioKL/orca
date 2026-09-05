@@ -122,8 +122,8 @@ independent. (2.2 deferred; if revived, do it after 2.1 so the new instance is p
 ### 1.2 Enable pruning
 - [x] `auth_token_pruner_image` = digest of `orca-cloud-auth-00031-tox` (`343a0915…`; it contains the entrypoint). orca-cloud #479 merged.
 - [x] `auth_token_pruner_enabled = true`, `auth_token_pruner_max_rows_per_run = 20000` for the first day (orca-cloud #479).
-- [ ] Targeted plan asserted 9 create / 0 change / 0 destroy (job, scheduler, 2 SAs, 5 IAM grants). Apply after the Roll 1 canary lands so the first hourly run does not overlap a drain.
-- [ ] Trigger one run by hand; read the summary event: `stopReason`, `deletedRows`, category counts.
+- [x] Targeted plan asserted 9 create / 0 change / 0 destroy. Applied 2026-09-05 02:06Z.
+- [x] Trigger one run by hand; read the summary event. 02:18Z: `time-budget`, 73 batches, 365k scanned, 1 040 deleted (1 021 revoked, 19 expired), no errors. Scan-bound.
 - [ ] Raise the budget to the default 200k after a clean day; watch Cloud SQL write MB/s and the checkpoint alert.
 - [ ] 1.5: log metric + policy on `stopReason != complete`.
 
