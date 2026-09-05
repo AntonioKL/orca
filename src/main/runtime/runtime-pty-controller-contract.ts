@@ -109,7 +109,7 @@ export type RuntimePtyController = {
   getForegroundProcess(ptyId: string): Promise<string | null>
   inspectProcess?(
     ptyId: string,
-    options?: { expectedIncarnationId?: PtyIncarnationId }
+    options?: { expectedIncarnationId?: PtyIncarnationId; scanChildProcesses?: boolean }
   ): Promise<PtyProcessInspection>
   confirmForegroundProcess?(ptyId: string): Promise<string | null>
   /** Distinguishes unsupported confirmation from a supported fresh read returning no agent. */
