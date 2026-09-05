@@ -89,5 +89,9 @@ export function localNodeHeadersFromOutput(output: string): string | null | unde
   return undefined
 }
 
-/** `Command "<anything, quotes included>" failed (exit N): ` -- see ssh-relay-exec-command.ts. */
+/**
+ * `Command "<anything, quotes included>" failed (exit N): ` -- see ssh-relay-exec-command.ts.
+ * Lazy `[\s\S]*?` is safe: it stops at the first `" failed (exit N): `, and no command this
+ * module builds contains that literal, so the match cannot end early inside the command.
+ */
 const EXEC_FAILURE_HEAD_RE = /^Command "[\s\S]*?" failed \(exit -?\d+\): /
