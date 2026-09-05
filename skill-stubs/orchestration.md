@@ -40,7 +40,10 @@ ORCA skills get orchestration
 
 That prints the compact, version-matched guide for the exact binary that will handle your
 next commands. It covers the normal local coordinator loop. For a conditional action gate
-such as remote placement, uncertain release recovery, or expanded DAG work, run
+such as remote placement, uncertain release recovery, or expanded DAG work, load only the
+reference that gate names with
+`ORCA skills get orchestration --reference references/<file>.md`
+(`--references` lists the names). If that binary rejects `--reference`, run
 `ORCA skills get orchestration --full` and read the named bundled reference before acting.
 
 Don't guess subcommands or flags from memory or from a cached copy of this stub. They

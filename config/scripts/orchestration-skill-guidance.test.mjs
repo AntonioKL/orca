@@ -269,10 +269,13 @@ describe('owned orchestration references', () => {
     // Why the table and not every mention: prose may cite a reference the gate table already routes.
     expect(tableRoutes.sort()).toEqual(shipped)
     expect(kernel).toContain('ORCA skills get orchestration --full')
-    // Why: `skills get` has no per-reference selector, so the kernel describes the whole
-    // bundle it returns instead of promising selective loading.
+    // Why: the selector is the cheap path, so the kernel must teach it first and keep
+    // `--full` only as the fallback for a CLI build that predates it.
     expect(squash(kernel)).toContain(
-      'It has no per-reference selector and returns this exact kernel and every reference from the same CLI build, so read only the named one'
+      'run `ORCA skills get orchestration --reference references/<file>.md`'
+    )
+    expect(squash(kernel)).toContain(
+      'If the CLI rejects `--reference`, run `ORCA skills get orchestration --full`'
     )
     expect(squash(kernel)).toContain('If an older CLI rejects `--full`')
   })

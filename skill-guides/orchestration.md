@@ -180,10 +180,12 @@ the coordinator turn until it returns none.
 ## Conditional references
 
 This compact guide is sufficient for the normal local loop. At an action gate
-below, run `ORCA skills get orchestration --full` once. It has no per-reference
-selector and returns this exact kernel and every reference from the same CLI
-build, so read only the named one. If an older CLI rejects `--full`, keep this
-kernel's safety floor, use that command's `--help`, and never guess newer flags.
+below, run `ORCA skills get orchestration --reference references/<file>.md` and
+read only that document; `--references` lists the names. If the CLI rejects
+`--reference`, run `ORCA skills get orchestration --full` once instead: it
+returns this exact kernel and every reference, so read only the named one. If an
+older CLI rejects `--full`, keep this kernel's safety floor, use that command's
+`--help`, and never guess newer flags.
 
 | Action gate                                                                                                   | Bundled reference                         |
 | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
