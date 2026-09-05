@@ -30,6 +30,8 @@ import { RuntimeMessageWaiters } from './runtime-message-waiters'
 import type { RuntimeSkillCommands } from './runtime-skill-command-surface'
 import { RuntimeTerminalStreamConsumers } from './runtime-terminal-stream-consumers'
 import type { RecentPtyOutputBuffer } from './recent-pty-output-buffer'
+import { buildAgentPromptPasteBytes } from '../../shared/agent-prompt-injection'
+import { recognizeAgentProcess } from '../../shared/agent-process-recognition'
 
 export class OrcaRuntimeWithStopRequestedPtyIds extends OrcaRuntimeWithRuntimeId {
   protected readonly stopRequestedPtyIds = new Set<string>()
@@ -209,19 +211,24 @@ export class OrcaRuntimeWithStopRequestedPtyIds extends OrcaRuntimeWithRuntimeId
     requestSleepingRecipientWake: (mailboxHandle) =>
       this.requestSleepingRecipientWake(mailboxHandle),
     submitStatuslessCodexPointer: async (handle, expectedPtyId, prompt, beforeWrite) => {
-      await this.sendTerminalAgentPrompt(handle, prompt, {
-        beforeWrite: async (ptyId) => {
-          await beforeWrite(ptyId)
-          if (
-            ptyId !== expectedPtyId ||
-            !(await this.isTerminalRunningSettledPromptAgent(handle)) ||
-            this.ptysById.get(ptyId)?.foregroundAgent !== 'codex'
-          ) {
-            throw new Error('orchestration_pointer_target_changed')
-          }
-          await beforeWrite(ptyId)
-        },
-        suffixFailureError: 'orchestration_pointer_target_changed'
+      const generation = this.getPtyLifecycleGeneration(expectedPtyId)
+      const pastePayload = buildAgentPromptPasteBytes(prompt)
+      await this.serializeAgentPromptSubmission(expectedPtyId, generation, async () => {
+        this.assertLiveTerminalHandleTargetsPty(handle, expectedPtyId)
+        this.assertAgentPromptGeneration(expectedPtyId, generation)
+        await this.writeTerminalAgentPrompt(handle, expectedPtyId, generation, pastePayload, {
+          beforeWrite: async (ptyId) => {
+            await beforeWrite(ptyId)
+            if (
+              ptyId !== expectedPtyId ||
+              !(await this.isStatuslessCodexPointerForegroundCurrent(ptyId))
+            ) {
+              throw new Error('orchestration_pointer_target_changed')
+            }
+            await beforeWrite(ptyId)
+          },
+          suffixFailureError: 'orchestration_pointer_target_changed'
+        })
       })
     },
     writePty: (ptyId, data) => this.writeOrchestrationPointerPty(ptyId, data)
@@ -259,4 +266,23 @@ export class OrcaRuntimeWithStopRequestedPtyIds extends OrcaRuntimeWithRuntimeId
   protected recentPtyOutputById = new Map<string, RecentPtyOutputBuffer>()
 
   protected setupCompletionTokenByPtyId = new Map<string, string>()
+
+  private async isStatuslessCodexPointerForegroundCurrent(ptyId: string): Promise<boolean> {
+    const controller = this.ptyController
+    if (!controller) {
+      return false
+    }
+    try {
+      const supportsConfirmation =
+        controller.confirmForegroundProcess !== undefined &&
+        (controller.supportsForegroundProcessConfirmation?.(ptyId) ?? true)
+      const process = supportsConfirmation
+        ? await controller.confirmForegroundProcess(ptyId)
+        : await controller.getForegroundProcess(ptyId)
+      const agent = recognizeAgentProcess(process)?.agent
+      return controller === this.ptyController && agent === 'codex'
+    } catch {
+      return false
+    }
+  }
 }

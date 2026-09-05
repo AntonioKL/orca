@@ -64,6 +64,8 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
   remountWithPty: (ptyId: string) => void
   remountStatuslessCodex: (ptyId: string) => void
   setForegroundProcess: (process: string | null) => void
+  setConfirmedForegroundProcess: (process: string | null | undefined) => void
+  setForegroundConfirmationSupported: (supported: boolean) => void
   setRendererAvailable: (available: boolean) => void
 }> {
   const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(sleptSession(record))
@@ -72,10 +74,15 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
   setInMemoryOrchestrationMessages(runtime, db)
   const write = vi.fn().mockReturnValue(true)
   let foregroundProcess: string | null = null
+  let confirmedForegroundProcess: string | null | undefined
+  let foregroundConfirmationSupported = true
   runtime.setPtyController({
     write,
     kill: vi.fn(),
-    getForegroundProcess: async () => foregroundProcess
+    getForegroundProcess: async () => foregroundProcess,
+    confirmForegroundProcess: async () =>
+      confirmedForegroundProcess === undefined ? foregroundProcess : confirmedForegroundProcess,
+    supportsForegroundProcessConfirmation: () => foregroundConfirmationSupported
   } as never)
   runtime.attachWindow(1)
   const syncGraph = (ptyId: string | null): void => {
@@ -138,6 +145,12 @@ async function sleptPaneRuntime(record: SleepingAgentSessionRecord): Promise<{
     write,
     setForegroundProcess: (process) => {
       foregroundProcess = process
+    },
+    setConfirmedForegroundProcess: (process) => {
+      confirmedForegroundProcess = process
+    },
+    setForegroundConfirmationSupported: (supported) => {
+      foregroundConfirmationSupported = supported
     },
     setRendererAvailable: (available) => {
       rendererAvailable = available
@@ -348,11 +361,19 @@ describe('mail addressed to a listed slept pane', () => {
     db.close()
   })
 
-  it('delivers queued run mail after a statusless Codex provider reattach', async () => {
+  it('delivers after a statusless Codex reattach without fresh foreground confirmation', async () => {
     vi.useFakeTimers()
     try {
-      const { runtime, db, handle, write, remountStatuslessCodex, setForegroundProcess } =
-        await sleptPaneRuntime(sleepingRecord({ agent: 'codex' }))
+      const {
+        runtime,
+        db,
+        handle,
+        write,
+        remountStatuslessCodex,
+        setForegroundProcess,
+        setConfirmedForegroundProcess,
+        setForegroundConfirmationSupported
+      } = await sleptPaneRuntime(sleepingRecord({ agent: 'codex' }))
       db.setRun({ id: 'run_test', coordinator_handle: handle, coordinator_pane_key: PANE_KEY })
       const message = db.insertMessage({
         from: 'term_worker',
@@ -365,7 +386,15 @@ describe('mail addressed to a listed slept pane', () => {
       await Promise.resolve()
 
       const reattachDelivery = vi.spyOn(runtime, 'deliverPendingMessagesForHandle')
+      const highLevelPrompt = vi
+        .spyOn(runtime, 'sendTerminalAgentPrompt')
+        .mockRejectedValue(new Error('statusless Codex has no hook tui-idle edge'))
+      const settledPromptReadiness = vi
+        .spyOn(runtime, 'isTerminalRunningSettledPromptAgent')
+        .mockResolvedValue(false)
       setForegroundProcess('codex')
+      setConfirmedForegroundProcess(null)
+      setForegroundConfirmationSupported(false)
       write.mockImplementation((ptyId: string, data: string) => {
         if (data.startsWith(AGENT_PROMPT_BRACKETED_PASTE_START)) {
           // The resumed TUI can emit a live but unclassified title after the
@@ -409,6 +438,8 @@ describe('mail addressed to a listed slept pane', () => {
       )
 
       expect(write).toHaveBeenCalledWith('pty-codex-woken', '\r')
+      expect(highLevelPrompt).not.toHaveBeenCalled()
+      expect(settledPromptReadiness).not.toHaveBeenCalled()
       expect(message.delivered_at).toEqual(expect.any(String))
       db.close()
     } finally {
@@ -419,8 +450,15 @@ describe('mail addressed to a listed slept pane', () => {
   it('does not submit a statusless Codex pointer after the child exits to a shell', async () => {
     vi.useFakeTimers()
     try {
-      const { runtime, db, handle, write, remountStatuslessCodex, setForegroundProcess } =
-        await sleptPaneRuntime(sleepingRecord({ agent: 'codex' }))
+      const {
+        runtime,
+        db,
+        handle,
+        write,
+        remountStatuslessCodex,
+        setForegroundProcess,
+        setConfirmedForegroundProcess
+      } = await sleptPaneRuntime(sleepingRecord({ agent: 'codex' }))
       db.setRun({ id: 'run_test', coordinator_handle: handle, coordinator_pane_key: PANE_KEY })
       const message = db.insertMessage({
         from: 'term_worker',
@@ -433,9 +471,10 @@ describe('mail addressed to a listed slept pane', () => {
       await Promise.resolve()
 
       setForegroundProcess('codex')
+      setConfirmedForegroundProcess('codex')
       write.mockImplementation((ptyId: string, data: string) => {
         if (data.startsWith(AGENT_PROMPT_BRACKETED_PASTE_START)) {
-          setForegroundProcess('zsh')
+          setConfirmedForegroundProcess('zsh')
           runtime.onPtyData(ptyId, '\x1b]0;workspace\x07\x1b[?25h', 101)
         }
         return true
