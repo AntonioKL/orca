@@ -146,8 +146,8 @@ export async function createStructuredWorkerSession(args: {
     })
     return { identity, host }
   } catch (error) {
-    // A start that fails after the session exists would otherwise strand a live provider child and
-    // a published background tab that no dispatch owns.
+    // A start that fails after the session exists would otherwise strand a live provider child
+    // that no dispatch owns and that nothing else in the runtime will ever retire.
     structuredWorkerIdentities.forget(identity.handle)
     if (structuredCreateMayHaveCommitted(created)) {
       await discardCreatedSession(sessionId)
@@ -171,7 +171,15 @@ function structuredCreateMayHaveCommitted(
   return !created || created.ok || !isDefinitiveAgentSessionCreateRefusal(created.refusal.code)
 }
 
-/** Best-effort teardown of a session created by a worker start that then failed. */
+/**
+ * Best-effort teardown of a session created by a worker start that then failed.
+ *
+ * Stops the provider child and drops the DURABLE tab reference, so nothing restores the chat after
+ * a restart. It does not prune the live tab snapshot — the same shape `agentSession.close` has,
+ * where the surface that opened the tab is what retires it — so the background tab this start
+ * published stays on screen for the rest of the session. Both calls are no-ops for a session that
+ * was never attached, which is why a non-definitive refusal can reach here unconditionally.
+ */
 async function discardCreatedSession(sessionId: string): Promise<void> {
   const host = getStructuredAgentSessionHost()
   if (!host) {

@@ -163,8 +163,12 @@ export class OrchestrationStructuredMailboxPointerDelivery<
   ): Promise<void> {
     const sessionId = target.sessionId
     const session = this.deps.host.readGateFacts(sessionId)
-    // Re-checked at send time, not just at resolve time: an adopted session's owner can change
-    // between the two, and redirecting into a lease that is handing back to a TUI races it.
+    // `target.refusal` is the snapshot the resolver already admitted, so this branch re-runs the
+    // owner test on frozen input and can only agree with it. What actually fences an owner that
+    // changed since resolution is `expectedRuntimeFence` below: a handoff bumps the lease fence,
+    // so the send is refused rather than landing in a lease on its way back to a TUI. The branch
+    // stays because the policy module is the one place that decides, and a later caller may pass
+    // an owner it did not pre-screen.
     const decision = target.refusal
       ? decideStructuredPointerDelivery({ session, refusal: target.refusal })
       : decideStructuredSessionPointerDelivery({ session })
