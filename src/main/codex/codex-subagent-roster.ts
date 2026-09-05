@@ -205,7 +205,10 @@ export class CodexSubagentRoster {
       group.entries.set(id, { ...entry, state: 'unverifiable', settledAt: this.now() })
       changed = true
     }
-    return changed ? this.write(group) : ADMITTED
+    // A null `lastSerialized` means the previous write was refused part-way. The
+    // sweep is the LAST event a group ever gets, so without this the final
+    // revision of a settled roster would stay queued and never be published.
+    return changed || group.lastSerialized === null ? this.write(group) : ADMITTED
   }
 
   private groupFor(threadId: string, turnId: string | null): RosterGroup {
@@ -268,9 +271,17 @@ export class CodexSubagentRoster {
       group.lastSerialized = null
       return admission
     }
-    return this.deps.sink.tryPublish
+    const published = this.deps.sink.tryPublish
       ? this.deps.sink.tryPublish()
       : (this.deps.sink.publish(), ADMITTED)
+    if (!published.accepted) {
+      // Symmetric with the append refusal above: the suppression state may only
+      // advance once the revision is both queued AND published. Left set, an
+      // identical replay short-circuits and the last revision of a settled
+      // roster stays queued but never reaches the renderer.
+      group.lastSerialized = null
+    }
+    return published
   }
 }
 

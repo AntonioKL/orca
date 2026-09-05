@@ -31,7 +31,13 @@ function formatWorkerTranscriptMessage(message: NativeChatMessage): string {
     if (block.type === 'image-ref') {
       return block.url ? `[image] ${block.url}` : `[image omitted]`
     }
-    return `[subagents] ${subagentGroupFallbackText(block.agents)}`
+    if (block.type === 'subagent-group') {
+      return `[subagents] ${subagentGroupFallbackText(block.agents)}`
+    }
+    // The journal deliberately admits block types this build does not know, and
+    // a newer remote host can send one over the wire. Degrade to a marker rather
+    // than reading fields off a shape that has none.
+    return '[unsupported block]'
   })
   return `[${message.role}] ${blocks.join('\n')}`.trimEnd()
 }

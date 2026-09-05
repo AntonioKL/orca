@@ -373,6 +373,110 @@ describe('CodexSubagentRoster', () => {
     expect(roster.handleTokenUsage({ threadId: 'child-1' })).toBeNull()
   })
 
+  // A refusal must never advance the duplicate-suppression state: an identical
+  // replay would short-circuit and the revision would never be retried. The
+  // append and the publish are the two ways to be refused, so both are covered.
+  it.each([{ refuse: 'append' as const }, { refuse: 'publish' as const }])(
+    'retries the same revision after the $refuse is refused',
+    ({ refuse }) => {
+      let refusing = true
+      const appended: Appended[] = []
+      const published: number[] = []
+      const refusal = { accepted: false, reason: 'backpressure' } as const
+      const roster = new CodexSubagentRoster({
+        sink: {
+          appendItem: () => {},
+          appendTombstone: () => {},
+          publish: () => {},
+          tryAppendItem: (identity, body) => {
+            if (refusing && refuse === 'append') {
+              return refusal
+            }
+            appended.push({ identity, body })
+            return { accepted: true }
+          },
+          tryPublish: () => {
+            if (refusing && refuse === 'publish') {
+              return refusal
+            }
+            published.push(1)
+            return { accepted: true }
+          }
+        },
+        primaryThreadId: () => THREAD,
+        activeTurn: () => TURN,
+        now: () => 1_000
+      })
+      const item = activity({ kind: 'started', agentThreadId: 'child-1', agentPath: '/root/read' })
+
+      expect(roster.handleItem({ threadId: THREAD, turnId: TURN, item })).toEqual(refusal)
+
+      // The wire redelivers the very same item; nothing about the roster changed,
+      // so only a cleared suppression state can get the revision out.
+      refusing = false
+      expect(roster.handleItem({ threadId: THREAD, turnId: TURN, item })).toEqual({
+        accepted: true
+      })
+      // The retry re-appends when the publish was the half that failed; the real
+      // queue coalesces those two by the group key into one journal write. What
+      // must not happen is the revision never being published at all.
+      expect(published).toHaveLength(1)
+      const body = appended.at(-1)?.body
+      expect(
+        body?.kind === 'message' ? body.blocks.filter(isSubagentGroupBlock) : []
+      ).toMatchObject([{ agents: [{ id: 'child-1', state: 'working' }] }])
+    }
+  )
+
+  // The sweep is the last event a group ever gets. A refusal there, left
+  // unretried, strands the settled roster's final revision — the exact "row
+  // stays stale forever" this row exists to prevent.
+  it('republishes the settled roster when the sweep publish was refused', () => {
+    let refusing = false
+    const appended: Appended[] = []
+    const published: number[] = []
+    const roster = new CodexSubagentRoster({
+      sink: {
+        appendItem: () => {},
+        appendTombstone: () => {},
+        publish: () => {},
+        tryAppendItem: (identity, body) => {
+          appended.push({ identity, body })
+          return { accepted: true }
+        },
+        tryPublish: () => {
+          if (refusing) {
+            return { accepted: false, reason: 'backpressure' }
+          }
+          published.push(1)
+          return { accepted: true }
+        }
+      },
+      primaryThreadId: () => THREAD,
+      activeTurn: () => TURN,
+      now: () => 1_000
+    })
+    roster.handleItem({
+      threadId: THREAD,
+      turnId: TURN,
+      item: activity({ kind: 'started', agentThreadId: 'child-1', agentPath: '/root/read' })
+    })
+    const publishedBeforeSweep = published.length
+
+    refusing = true
+    expect(roster.settleTurn(THREAD, TURN)).toEqual({ accepted: false, reason: 'backpressure' })
+
+    // The retry sweep flips no state — every child already latched — so only a
+    // cleared suppression state can carry the unverifiable roster out.
+    refusing = false
+    expect(roster.settleTurn(THREAD, TURN)).toEqual({ accepted: true })
+    expect(published.length).toBe(publishedBeforeSweep + 1)
+    const body = appended.at(-1)?.body
+    expect(body?.kind === 'message' ? body.blocks.filter(isSubagentGroupBlock) : []).toMatchObject([
+      { agents: [{ id: 'child-1', state: 'unverifiable' }] }
+    ])
+  })
+
   it('propagates sink backpressure instead of reporting the row as written', () => {
     const roster = new CodexSubagentRoster({
       sink: {

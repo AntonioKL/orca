@@ -191,6 +191,22 @@ describe('NativeChatSubagentRun', () => {
     expect(screen.getByRole('button')).toHaveTextContent('4s')
   })
 
+  it('shows no duration for a restored child whose run length was never recorded', () => {
+    render(
+      <NativeChatSubagentRun
+        block={group([{ id: 'a', label: 'read', state: 'working', startedAt: 1_000 }])}
+        activeTurnIsWorking={false}
+      />
+    )
+
+    const row = screen.getByRole('button')
+    expect(row).toHaveTextContent('unverifiable')
+    // The reconciler latches `unverifiable` without a terminal timestamp, so the
+    // clock would measure to `now` and report the time since the host died as
+    // how long the child ran — on a row that is not even counting.
+    expect(row.textContent).not.toContain('·')
+  })
+
   it('leaves a live turn working — a settled roster is never asserted early', () => {
     expect(
       reconcileSubagentRoster([{ id: 'a', label: 'read', state: 'working' }], true)

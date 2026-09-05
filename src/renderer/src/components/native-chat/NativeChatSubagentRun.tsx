@@ -209,6 +209,11 @@ export function NativeChatSubagentRun({
   const alertState = working ? summary.adverseState : null
   const alert =
     alertState === null ? null : subagentStateLabel(alertState, summary.adverseCount, summary.total)
+  // A roster restored from the journal after the host died holds children that
+  // latched `unverifiable` with no terminal timestamp. Their run length is
+  // unknown, and measuring it to `now` would report the time since the crash as
+  // how long they ran — on a row that is not even counting.
+  const clockStartedAt = working || summary.settledAt !== null ? summary.startedAt : null
 
   return (
     <div>
@@ -227,14 +232,14 @@ export function NativeChatSubagentRun({
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
           {verdict}
           {alert === null ? null : ` +${alert}`}
-          {summary.startedAt !== null ? (
+          {clockStartedAt !== null ? (
             // The row is a live region, and this clock reticks every second: left
             // exposed it announces a new duration every second and buries the
             // state changes worth hearing. Readable again once it stops moving.
             <span aria-hidden={working || undefined}>
               {' · '}
               <SubagentElapsed
-                startedAt={summary.startedAt}
+                startedAt={clockStartedAt}
                 settledAt={summary.settledAt}
                 counting={working}
               />
