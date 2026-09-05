@@ -152,6 +152,45 @@ describe('NativeChatSubagentRun', () => {
     }
   })
 
+  // The only aria-hidden span carrying text is the elapsed-clock wrapper: the
+  // glyph's Bot is an <svg> and the status dots render empty.
+  function hiddenTextSpans(container: HTMLElement): Element[] {
+    return [...container.querySelectorAll('span[aria-hidden="true"]')].filter(
+      (element) => (element.textContent ?? '').trim().length > 0
+    )
+  }
+
+  it('keeps the ticking clock out of the live region until it stops moving', () => {
+    const { container } = render(
+      <NativeChatSubagentRun
+        block={group([{ id: 'a', label: 'read', state: 'working', startedAt: 1_000 }])}
+        activeTurnIsWorking
+      />
+    )
+
+    const row = screen.getByRole('button')
+    expect(row).toHaveAttribute('aria-live', 'polite')
+    // A clock that reticks every second would announce a new duration every
+    // second and bury the state changes the live region exists to report.
+    expect(hiddenTextSpans(container)).toHaveLength(1)
+  })
+
+  it('reads the elapsed time out once it has stopped moving', () => {
+    const { container } = render(
+      <NativeChatSubagentRun
+        block={group([
+          { id: 'a', label: 'read', state: 'completed', startedAt: 1_000, settledAt: 5_000 }
+        ])}
+        activeTurnIsWorking={false}
+      />
+    )
+
+    // Settled: the duration is fixed, so hiding it would cost a reader real
+    // information for no announcement churn.
+    expect(hiddenTextSpans(container)).toHaveLength(0)
+    expect(screen.getByRole('button')).toHaveTextContent('4s')
+  })
+
   it('leaves a live turn working — a settled roster is never asserted early', () => {
     expect(
       reconcileSubagentRoster([{ id: 'a', label: 'read', state: 'working' }], true)

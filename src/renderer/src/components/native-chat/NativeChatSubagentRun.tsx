@@ -228,14 +228,17 @@ export function NativeChatSubagentRun({
           {verdict}
           {alert === null ? null : ` +${alert}`}
           {summary.startedAt !== null ? (
-            <>
+            // The row is a live region, and this clock reticks every second: left
+            // exposed it announces a new duration every second and buries the
+            // state changes worth hearing. Readable again once it stops moving.
+            <span aria-hidden={working || undefined}>
               {' · '}
               <SubagentElapsed
                 startedAt={summary.startedAt}
                 settledAt={summary.settledAt}
                 counting={working}
               />
-            </>
+            </span>
           ) : null}
           {summary.tokens !== null
             ? ` · ${translate('components.native-chat.subagents.tokens', '{{value0}} tokens', {
