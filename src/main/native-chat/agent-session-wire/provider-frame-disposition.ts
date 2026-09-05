@@ -198,11 +198,15 @@ const CODEX_ITEM_CLASSIFICATIONS: Record<string, ProviderFrameClassification> = 
   // The `thread/compacted` notification is already chrome; its item form is the
   // same event and must not read as a mysterious opcode row.
   contextCompaction: 'status-chrome',
-  // Subagent lifecycle renders as the spawn-group roster row. Leaving these
+  // Subagent lifecycle renders as the spawn-group roster row. Leaving it
   // substantive prints a gray `codex · item:<type>` row beside it for every
   // event — and every one of them arrives twice.
-  subAgentActivity: 'status-chrome',
-  collabAgentToolCall: 'status-chrome'
+  //
+  // `collabAgentToolCall` is deliberately NOT suppressed with it. Only the
+  // MultiAgentV2 path emits `subAgentActivity`; a V1 turn emits collab tool
+  // calls and nothing else, so suppressing them would leave a V1 fan-out
+  // showing nothing at all.
+  subAgentActivity: 'status-chrome'
 }
 
 function notificationKind(kind: string): string {

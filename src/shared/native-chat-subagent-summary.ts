@@ -1,9 +1,10 @@
 // One spawn group's roster → the numbers a single flat row needs.
 //
-// Shared because the desktop transcript and the mobile summary path must agree
-// on what "N working" means, and because the producer uses the same terminal
-// predicate the renderer does — a state that reads terminal here must latch
-// terminal there.
+// Shared because the producer and the desktop transcript must agree on what
+// "N working" means: the producer uses the same terminal predicate the renderer
+// does, so a state that reads terminal here latches terminal there. Mobile has
+// no roster renderer — it shows only the write-time-frozen fallback sentence,
+// which is why that sentence is built from this same summary.
 
 import {
   isSubagentGroupBlock,
@@ -28,6 +29,10 @@ const TERMINAL_SUBAGENT_STATES: ReadonlySet<string> = new Set([
  *  outcome wins, and `completed` only shows when nothing else is left. */
 const SETTLED_PRECEDENCE = ['failed', 'stopped', 'unverifiable', 'idle', 'completed'] as const
 
+/** Outcomes that must be visible immediately, not held back until the last
+ *  sibling stops working: a fan-out with a dead child is not a neutral row. */
+const ADVERSE_PRECEDENCE = ['failed', 'stopped', 'unverifiable'] as const
+
 /** A state this build does not know reads as `unverifiable`, never as working:
  *  a roster written by a newer build must not leave the row spinning forever. */
 export function normalizeSubagentState(state: string): NativeChatSubagentState {
@@ -48,6 +53,11 @@ export type NativeChatSubagentSummary = {
   settledState: NativeChatSubagentState | null
   /** How many children hold `settledState`. */
   settledCount: number
+  /** Worst adverse outcome already recorded, reported even while siblings still
+   *  work. Null when nothing has gone wrong. */
+  adverseState: NativeChatSubagentState | null
+  /** How many children hold `adverseState`. */
+  adverseCount: number
   /** Sum of the latest per-child totals. Null when no child reported one.
    *  Children's counters are disjoint from the parent's, so this never
    *  double-counts — and the parent's own usage is deliberately excluded. */
@@ -85,11 +95,14 @@ export function summarizeSubagentGroup(
   }
   const settledState =
     working > 0 ? null : (SETTLED_PRECEDENCE.find((state) => counts.has(state)) ?? null)
+  const adverseState = ADVERSE_PRECEDENCE.find((state) => counts.has(state)) ?? null
   return {
     total: agents.length,
     working,
     settledState,
     settledCount: settledState === null ? 0 : (counts.get(settledState) ?? 0),
+    adverseState,
+    adverseCount: adverseState === null ? 0 : (counts.get(adverseState) ?? 0),
     tokens,
     startedAt,
     settledAt: working > 0 ? null : settledAt
@@ -100,4 +113,16 @@ export function subagentGroupBlocks(
   blocks: readonly NativeChatBlock[]
 ): NativeChatSubagentGroupBlock[] {
   return blocks.filter(isSubagentGroupBlock)
+}
+
+/** Plain-text stand-in for the roster, frozen into the journal at write time for
+ *  clients without the block type. It carries the adverse count too: a reader
+ *  that only ever sees this sentence must not be told a failing fan-out is fine. */
+export function subagentGroupFallbackText(agents: readonly NativeChatSubagentEntry[]): string {
+  const { total, working, adverseState, adverseCount } = summarizeSubagentGroup(agents)
+  const noun = total === 1 ? 'subagent' : 'subagents'
+  const adverse = adverseState === null ? '' : ` (${adverseCount} ${adverseState})`
+  return working > 0
+    ? `Kicked off ${total} ${noun} — ${working} working${adverse}`
+    : `Ran ${total} ${noun}${adverse}`
 }

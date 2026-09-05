@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   isTerminalSubagentState,
   normalizeSubagentState,
+  subagentGroupFallbackText,
   summarizeSubagentGroup
 } from './native-chat-subagent-summary'
 import type { NativeChatSubagentEntry } from './native-chat-types'
@@ -82,10 +83,70 @@ describe('summarizeSubagentGroup', () => {
     })
   })
 
+  it('reports an adverse outcome before the group settles', () => {
+    const summary = summarizeSubagentGroup([
+      agent({ id: 'a', state: 'working' }),
+      agent({ id: 'b', state: 'working' }),
+      agent({ id: 'c', state: 'failed' })
+    ])
+
+    // The group verdict is still withheld, but the failure is not.
+    expect(summary).toMatchObject({
+      working: 2,
+      settledState: null,
+      adverseState: 'failed',
+      adverseCount: 1
+    })
+  })
+
+  it('ranks the adverse outcome worst-first and ignores benign settled states', () => {
+    expect(
+      summarizeSubagentGroup([
+        agent({ id: 'a', state: 'working' }),
+        agent({ id: 'b', state: 'stopped' }),
+        agent({ id: 'c', state: 'failed' })
+      ]).adverseState
+    ).toBe('failed')
+    expect(
+      summarizeSubagentGroup([
+        agent({ id: 'a', state: 'working' }),
+        agent({ id: 'b', state: 'idle' }),
+        agent({ id: 'c', state: 'completed' })
+      ]).adverseState
+    ).toBeNull()
+  })
+
   it('keeps working the only non-terminal state', () => {
     expect(isTerminalSubagentState('working')).toBe(false)
     for (const state of ['idle', 'completed', 'failed', 'stopped', 'unverifiable']) {
       expect(isTerminalSubagentState(state)).toBe(true)
     }
+  })
+})
+
+describe('subagentGroupFallbackText', () => {
+  it('names the failure a client without the block type would otherwise never see', () => {
+    expect(
+      subagentGroupFallbackText([
+        agent({ id: 'a', state: 'working' }),
+        agent({ id: 'b', state: 'working' }),
+        agent({ id: 'c', state: 'failed' })
+      ])
+    ).toBe('Kicked off 3 subagents — 2 working (1 failed)')
+    expect(
+      subagentGroupFallbackText([
+        agent({ id: 'a', state: 'completed' }),
+        agent({ id: 'b', state: 'stopped' })
+      ])
+    ).toBe('Ran 2 subagents (1 stopped)')
+  })
+
+  it('stays quiet when nothing has gone wrong', () => {
+    expect(subagentGroupFallbackText([agent({ id: 'a', state: 'working' })])).toBe(
+      'Kicked off 1 subagent — 1 working'
+    )
+    expect(subagentGroupFallbackText([agent({ id: 'a', state: 'completed' })])).toBe(
+      'Ran 1 subagent'
+    )
   })
 })

@@ -65,6 +65,41 @@ describe('NativeChatSubagentRun', () => {
     expect(screen.getByRole('button')).toHaveTextContent('2 failed')
   })
 
+  it('surfaces a failed child while its siblings still work', () => {
+    const { container } = render(
+      <NativeChatSubagentRun
+        block={group([
+          { id: 'a', label: 'read', state: 'working' },
+          { id: 'b', label: 'search', state: 'working' },
+          { id: 'c', label: 'list', state: 'working' },
+          { id: 'd', label: 'edit', state: 'failed' }
+        ])}
+        activeTurnIsWorking
+      />
+    )
+
+    const row = screen.getByRole('button')
+    expect(row).toHaveTextContent('3 working')
+    expect(row).toHaveTextContent('+1 failed')
+    // The dot carries the failure; the pulse still says the group is in flight.
+    expect(container.querySelector('.bg-destructive.animate-pulse')).not.toBeNull()
+  })
+
+  it('leaves the dot neutral when nothing has gone wrong', () => {
+    const { container } = render(
+      <NativeChatSubagentRun
+        block={group([
+          { id: 'a', label: 'read', state: 'working' },
+          { id: 'b', label: 'search', state: 'completed' }
+        ])}
+        activeTurnIsWorking
+      />
+    )
+
+    expect(screen.getByRole('button')).not.toHaveTextContent('failed')
+    expect(container.querySelector('.bg-destructive')).toBeNull()
+  })
+
   it('reconciles a roster persisted before a restart to unverifiable', () => {
     render(
       <NativeChatSubagentRun

@@ -125,23 +125,25 @@ describe('codex subagent item disposition', () => {
         agentPath: '/root/read'
       })
     ).toBe('status-chrome')
+  })
+
+  it("leaves collab tool calls substantive — they are a V1 turn's only subagent signal", () => {
+    // Only the MultiAgentV2 path emits `subAgentActivity`, so the roster row
+    // never exists on V1. Suppressing this too would render a V1 fan-out blank.
     expect(
       classifyProviderFrame('codex', 'item:collabAgentToolCall', {
         type: 'collabAgentToolCall',
         agentsStates: {}
       })
-    ).toBe('status-chrome')
+    ).not.toBe('status-chrome')
   })
 
-  it('journals no fallback row for either type', () => {
+  it('journals no fallback row for subagent activity', () => {
     expect(
       unhandledProviderFrameJournalItem('codex', 'item:subAgentActivity', {
         kind: 'completed',
         agentThreadId: 'child-1'
       })
-    ).toBeNull()
-    expect(
-      unhandledProviderFrameJournalItem('codex', 'item:collabAgentToolCall', { agentsStates: {} })
     ).toBeNull()
   })
 

@@ -6,7 +6,8 @@
 //   * `agentPath` is a tree path (`/root`, `/root/list_directory`); the trailing
 //     segment is a semantic task name and the only label available. There is no
 //     `thread/started` for a child, so nickname/role/depth do not exist.
-//   * `agentsStates` on `collabAgentToolCall` is ALWAYS `{}`. Nothing here reads it.
+//   * `agentsStates` on `collabAgentToolCall` is `{}` on the MultiAgentV2 path;
+//     the V1 path does populate it. Nothing here reads it on either path.
 //   * `thread/tokenUsage/updated` reports a per-thread RUNNING TOTAL, so the
 //     latest frame replaces the previous one — it is never accumulated.
 
@@ -70,18 +71,21 @@ export function codexSubagentPathSegments(agentPath: string | null): string[] {
   return agentPath === null ? [] : agentPath.split('/').filter((part) => part.length > 0)
 }
 
+/** The one agent path that is the parent turn itself. Matched literally, as
+ *  Codex does: `/morpheus` is also a single-segment path but IS a child. */
+const CODEX_ROOT_AGENT_PATH = '/root'
+
 /**
  * Whether an activity item describes the ROOT of the agent tree rather than a
- * spawned child. The root's path is a single segment (`/root`); every child
- * carries at least one segment beneath it. Counting the root would make the
- * parent turn report itself as its own subagent.
+ * spawned child. Counting the root would make the parent turn report itself as
+ * its own subagent.
  *
  * A path-less item cannot be placed in the tree at all, so it is treated as a
  * child: dropping it would lose a real spawn, while an extra row is visible and
  * self-correcting.
  */
 export function isCodexRootAgentActivity(activity: CodexSubagentActivity): boolean {
-  return codexSubagentPathSegments(activity.agentPath).length === 1
+  return activity.agentPath === CODEX_ROOT_AGENT_PATH
 }
 
 /** Row label: the agent path's trailing segment. */

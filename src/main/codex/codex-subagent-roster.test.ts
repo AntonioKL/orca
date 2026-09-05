@@ -78,7 +78,79 @@ function deliver(
   roster.handleItem({ threadId: THREAD, turnId, item })
 }
 
+/**
+ * A sink that coalesces the way the real queue does: by `coalescingKey` ALONE,
+ * with no op-kind check, and only draining when released. A fake that ignores
+ * the key cannot see an append being spliced out by its own publish.
+ */
+function createCoalescingHarness(): {
+  roster: CodexSubagentRoster
+  appended: Appended[]
+  drain: () => void
+} {
+  const appended: Appended[] = []
+  const queue: { key?: string; run: () => void }[] = []
+  let clock = 1_000
+  const submit = (key: string | undefined, run: () => void): void => {
+    const at = key === undefined ? -1 : queue.findIndex((queued) => queued.key === key)
+    if (at >= 0) {
+      queue.splice(at, 1)
+    }
+    queue.push(key === undefined ? { run } : { key, run })
+  }
+  const sink: StructuredAgentSessionEventSink = {
+    appendItem: () => {},
+    appendTombstone: () => {},
+    publish: () => {},
+    tryAppendItem: (identity, body, options) => {
+      submit(options?.coalescingKey, () => appended.push({ identity, body }))
+      return { accepted: true }
+    },
+    tryPublish: (options) => {
+      submit(options?.coalescingKey ?? 'publish', () => {})
+      return { accepted: true }
+    }
+  }
+  const roster = new CodexSubagentRoster({
+    sink,
+    primaryThreadId: () => THREAD,
+    activeTurn: () => TURN,
+    now: () => (clock += 1)
+  })
+  return {
+    roster,
+    appended,
+    drain: () => {
+      while (queue.length > 0) {
+        queue.shift()?.run()
+      }
+    }
+  }
+}
+
 describe('CodexSubagentRoster', () => {
+  it('does not let its own publish evict the still-queued roster append', () => {
+    const { roster, appended, drain } = createCoalescingHarness()
+
+    deliver(
+      roster,
+      activity({ kind: 'started', agentThreadId: 'child-1', agentPath: '/root/read' })
+    )
+    drain()
+
+    // Sharing the append's coalescing key with the publish spliced the append
+    // out of the queue, and `lastSerialized` then suppressed every retry.
+    expect(appended).toHaveLength(1)
+  })
+
+  it('counts a /morpheus agent as a child — only /root is the turn itself', () => {
+    const { roster, agents } = createHarness()
+
+    deliver(roster, activity({ kind: 'started', agentThreadId: 'child-m', agentPath: '/morpheus' }))
+
+    expect(agents()).toMatchObject([{ id: 'child-m', label: 'morpheus', state: 'working' }])
+  })
+
   it('ignores the root node so a turn is not its own subagent', () => {
     const { roster, appended } = createHarness()
 

@@ -96,6 +96,19 @@ function boundBlock(block: NativeChatBlock, warnings: Set<string>): NativeChatBl
       input: boundToolInput(block.input, budget, 0, warnings)
     }
   }
+  if (block.type === 'subagent-group') {
+    // Labels come from provider-supplied agent paths, so they get the same
+    // redaction and clipping every other piece of transcript metadata gets.
+    return {
+      ...block,
+      groupId: clipMetadata(block.groupId, warnings),
+      agents: block.agents.map((agent) => ({
+        ...agent,
+        id: clipMetadata(agent.id, warnings),
+        label: clipMetadata(agent.label, warnings)
+      }))
+    }
+  }
   if (block.path || (block.url && isLocalFileLocator(block.url))) {
     warnings.add('Local image paths were omitted from transcript output.')
     return {

@@ -6,12 +6,20 @@
 // `item/completed`). Every transition here is therefore idempotent, and a
 // terminal state latches: duplicate and out-of-order delivery must not resurrect
 // a settled child.
+//
+// KNOWN LIMITATION: `groups` is process-local and is never seeded from the
+// journal. After a group is evicted, or a reconnect reuses a `threadId:turnId`,
+// the next activity item rebuilds the row from scratch — an N-child roster can
+// be rewritten down to one child. Seeding from the journal is the real fix.
 
 import type {
   AgentJournalItemBody,
   AgentJournalItemIdentity
 } from '../../shared/agent-session-journal-types'
-import { isTerminalSubagentState } from '../../shared/native-chat-subagent-summary'
+import {
+  isTerminalSubagentState,
+  subagentGroupFallbackText
+} from '../../shared/native-chat-subagent-summary'
 import type { NativeChatSubagentEntry } from '../../shared/native-chat-types'
 import type {
   StructuredAgentSessionEventSink,
@@ -136,6 +144,9 @@ export class CodexSubagentRoster {
     }
     // A running total: the newest frame REPLACES the previous one. Summing
     // updates would multiply a single child's usage by its frame count.
+    // Re-insert so the eviction scan below sees recency: `set` on an existing
+    // key keeps its original position, which would age out an active thread.
+    this.tokensByThread.delete(usage.threadId)
     this.tokensByThread.set(usage.threadId, usage.totalTokens)
     while (this.tokensByThread.size > MAX_CODEX_TOKEN_USAGE_THREADS) {
       const oldest = this.tokensByThread.keys().next().value
@@ -245,6 +256,10 @@ export class CodexSubagentRoster {
       return ADMITTED
     }
     group.lastSerialized = serialized
+    // The append coalesces per group so a burst collapses to the latest roster.
+    // The publish must NOT reuse that key: the queue coalesces by key alone,
+    // with no op-kind check, so a publish carrying it would splice out the
+    // still-queued append and the row would never reach the journal.
     const options = { coalescingKey: `codex-subagents:${group.groupId}` }
     const admission = this.deps.sink.tryAppendItem
       ? this.deps.sink.tryAppendItem(group.identity, body, options)
@@ -254,8 +269,8 @@ export class CodexSubagentRoster {
       return admission
     }
     return this.deps.sink.tryPublish
-      ? this.deps.sink.tryPublish(options)
-      : (this.deps.sink.publish(options), ADMITTED)
+      ? this.deps.sink.tryPublish()
+      : (this.deps.sink.publish(), ADMITTED)
   }
 }
 
@@ -274,13 +289,4 @@ export function codexSubagentGroupBody(
       { type: 'subagent-group', groupId, agents: [...agents] }
     ]
   }
-}
-
-/** Plain-text stand-in for the roster, for clients without the block type. */
-export function subagentGroupFallbackText(agents: readonly NativeChatSubagentEntry[]): string {
-  const working = agents.filter((agent) => !isTerminalSubagentState(agent.state)).length
-  const noun = agents.length === 1 ? 'subagent' : 'subagents'
-  return working > 0
-    ? `Kicked off ${agents.length} ${noun} — ${working} working`
-    : `Ran ${agents.length} ${noun}`
 }

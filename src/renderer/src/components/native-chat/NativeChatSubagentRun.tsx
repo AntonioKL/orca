@@ -66,7 +66,7 @@ function subagentStateLabel(
         return translate('components.native-chat.subagents.state.failed', 'failed')
       case 'stopped':
         return translate('components.native-chat.subagents.state.stopped', 'stopped')
-      default:
+      case 'unverifiable':
         return translate('components.native-chat.subagents.state.unverifiable', 'unverifiable')
     }
   }
@@ -95,7 +95,7 @@ function subagentStateLabel(
           value0: count
         }
       )
-    default:
+    case 'unverifiable':
       return translate(
         'components.native-chat.subagents.state.unverifiableCount',
         '{{value0}} unverifiable',
@@ -105,7 +105,7 @@ function subagentStateLabel(
 }
 
 const STATE_DOT_CLASS: Record<NativeChatSubagentState, string> = {
-  working: 'bg-foreground/70 animate-pulse motion-reduce:animate-none',
+  working: 'bg-foreground/70',
   idle: 'bg-muted-foreground/40',
   completed: 'bg-muted-foreground/60',
   failed: 'bg-destructive',
@@ -130,11 +130,23 @@ function SubagentGlyph(): React.JSX.Element {
   )
 }
 
-function StatusDot({ state }: { state: NativeChatSubagentState }): React.JSX.Element {
+/** `pulsing` is separate from `state` so a group that is still working can show
+ *  a failed sibling's colour without losing its in-flight cue. */
+function StatusDot({
+  state,
+  pulsing = false
+}: {
+  state: NativeChatSubagentState
+  pulsing?: boolean
+}): React.JSX.Element {
   return (
     <span
       aria-hidden="true"
-      className={cn('size-1.5 shrink-0 rounded-full', STATE_DOT_CLASS[state])}
+      className={cn(
+        'size-1.5 shrink-0 rounded-full',
+        STATE_DOT_CLASS[state],
+        pulsing && 'animate-pulse motion-reduce:animate-none'
+      )}
     />
   )
 }
@@ -193,6 +205,10 @@ export function NativeChatSubagentRun({
   const verdict = working
     ? subagentStateLabel('working', summary.working, summary.total)
     : subagentStateLabel(verdictState, summary.settledCount, summary.total)
+  // A child that already failed must not wait for its siblings to be readable.
+  const alertState = working ? summary.adverseState : null
+  const alert =
+    alertState === null ? null : subagentStateLabel(alertState, summary.adverseCount, summary.total)
 
   return (
     <div>
@@ -204,12 +220,13 @@ export function NativeChatSubagentRun({
         aria-live="polite"
       >
         <SubagentGlyph />
-        <StatusDot state={verdictState} />
+        <StatusDot state={alertState ?? verdictState} pulsing={working} />
         <span className={cn('min-w-0 flex-1 truncate', working && 'text-foreground/85')}>
           {headline}
         </span>
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
           {verdict}
+          {alert === null ? null : ` +${alert}`}
           {summary.startedAt !== null ? (
             <>
               {' · '}
@@ -239,7 +256,7 @@ export function NativeChatSubagentRun({
             const state = normalizeSubagentState(agent.state)
             return (
               <li key={agent.id} className="flex items-center gap-1.5 py-0.5">
-                <StatusDot state={state} />
+                <StatusDot state={state} pulsing={state === 'working'} />
                 <code
                   className={cn(
                     'min-w-0 truncate font-mono text-[11px]',
