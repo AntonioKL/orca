@@ -211,6 +211,38 @@ describe('reduceNativeChatTurnTiming', () => {
     expect(swapped['pending-1']).toBeUndefined()
   })
 
+  it('keeps a settled turn visible when the echo is replaced after it finished', () => {
+    // The swap can land after the turn settles. Re-keying (rather than only
+    // carrying a start) is what keeps the "Worked for N" row from vanishing.
+    const settled: NativeChatTurnTimingByTurn = {
+      'pending-1': { startedAt: 1_000, workedSeconds: 12 }
+    }
+    const swapped = reduceNativeChatTurnTiming(settled, {
+      activeTurnKey: 'u9',
+      previousActiveTurnKey: 'pending-1',
+      validTurnKeys: new Set(['u9']),
+      isWorking: false,
+      now: 20_000
+    })
+    expect(swapped.u9).toEqual({ startedAt: 1_000, workedSeconds: 12 })
+    expect(swapped['pending-1']).toBeUndefined()
+  })
+
+  it('settles a re-keyed in-flight turn from its original start', () => {
+    const working = reduceNativeChatTurnTiming(
+      {},
+      { activeTurnKey: 'pending-1', validTurnKeys: new Set<string>(), isWorking: true, now: 1_000 }
+    )
+    const settled = reduceNativeChatTurnTiming(working, {
+      activeTurnKey: 'u9',
+      previousActiveTurnKey: 'pending-1',
+      validTurnKeys: new Set(['u9']),
+      isWorking: false,
+      now: 13_400
+    })
+    expect(settled.u9).toEqual({ startedAt: 1_000, workedSeconds: 12 })
+  })
+
   it('does not carry the start into a genuinely new turn', () => {
     // The previous turn is still in the transcript, so this is the user sending
     // again — that turn starts its own clock.

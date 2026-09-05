@@ -117,16 +117,18 @@ export function reduceNativeChatTurnTiming(
     now: number
   }
 ): NativeChatTurnTimingByTurn {
+  // The same turn under two ids: an optimistic echo the transcript has since
+  // replaced. Re-key its timing so neither the running clock nor an already
+  // settled duration is lost when the swap lands.
   const replacedTiming =
     previousActiveTurnKey !== undefined &&
     previousActiveTurnKey !== activeTurnKey &&
-    !validTurnKeys.has(previousActiveTurnKey)
+    !validTurnKeys.has(previousActiveTurnKey) &&
+    current[activeTurnKey] === undefined
       ? current[previousActiveTurnKey]
       : undefined
-  const carriedStartedAt =
-    replacedTiming?.workedSeconds == null ? replacedTiming?.startedAt : undefined
-  let retained = current
-  for (const turnKey of Object.keys(current)) {
+  let retained = replacedTiming ? { ...current, [activeTurnKey]: replacedTiming } : current
+  for (const turnKey of Object.keys(retained)) {
     if (turnKey !== activeTurnKey && !validTurnKeys.has(turnKey)) {
       if (retained === current) {
         retained = { ...current }
@@ -140,8 +142,7 @@ export function reduceNativeChatTurnTiming(
     // An in-flight turn keeps the start it already had; only a fresh turn (or an
     // authoritative host timestamp) restamps it.
     const startedAt =
-      workingStartedAt ??
-      (timing && timing.workedSeconds == null ? timing.startedAt : (carriedStartedAt ?? now))
+      workingStartedAt ?? (timing && timing.workedSeconds == null ? timing.startedAt : now)
     if (timing?.startedAt === startedAt && timing.workedSeconds == null) {
       return retained
     }
