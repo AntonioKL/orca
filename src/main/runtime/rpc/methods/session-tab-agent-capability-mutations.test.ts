@@ -88,6 +88,32 @@ describe('session tab structured capability mutations', () => {
     })
   }
 
+  for (const method of METHODS) {
+    it(`allows ${method.name} on a row an old mobile client was prompted to update`, async () => {
+      const { calls, dispatch } = createFixture([], {
+        clientKind: 'mobile',
+        structuredNativeChatEnabled: true
+      })
+
+      const response = await dispatch(method.name, method.params('codex-session'))
+
+      expect(response.ok).toBe(true)
+      expect(calls[method.runtimeMethod as keyof typeof calls]).toHaveBeenCalled()
+    })
+
+    it(`allows ${method.name} on a prompted Claude row for a mobile client without the Claude capability`, async () => {
+      const { calls, dispatch } = createFixture([STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY], {
+        clientKind: 'mobile',
+        structuredNativeChatEnabled: true
+      })
+
+      const response = await dispatch(method.name, method.params('claude-session'))
+
+      expect(response.ok).toBe(true)
+      expect(calls[method.runtimeMethod as keyof typeof calls]).toHaveBeenCalled()
+    })
+  }
+
   it.each(['session.tabs.close', 'session.tabs.closeLifecycle'] as const)(
     'allows capable mobile clients to close structured tabs when the experiment is enabled (%s)',
     async (method) => {
@@ -131,7 +157,10 @@ describe('session tab structured capability mutations', () => {
   )
 })
 
-function createFixture(capabilities: RuntimeCapability[]) {
+function createFixture(
+  capabilities: RuntimeCapability[],
+  options: { clientKind?: 'mobile' | 'runtime'; structuredNativeChatEnabled?: boolean } = {}
+) {
   const snapshot = agentSnapshot()
   const calls = {
     closeMobileSessionTab: vi.fn().mockResolvedValue({ closed: true }),
@@ -142,11 +171,14 @@ function createFixture(capabilities: RuntimeCapability[]) {
   const runtime = {
     getRuntimeId: () => 'test-runtime',
     listMobileSessionTabs: vi.fn().mockResolvedValue(snapshot),
+    getClientSettings: () => ({
+      experimentalStructuredNativeChat: options.structuredNativeChatEnabled === true
+    }),
     ...calls
   } as unknown as OrcaRuntimeService
   const dispatcher = new RpcDispatcher({ runtime, methods: SESSION_TAB_METHODS })
   const context: RpcDispatchStreamingOptions = {
-    clientKind: 'runtime',
+    clientKind: options.clientKind ?? 'runtime',
     pairedDeviceId: 'paired-client',
     clientCapabilities: capabilities
   }
