@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InMemoryOrchestrationMessages, deferred } from '../orca-runtime-test-fixtures.spec'
 import type { OrchestrationDb } from './db'
-import type { OrchestrationMailboxDeliveryTarget } from './mailbox-delivery-target'
+import { OrchestrationMailboxDeliveryTarget } from './mailbox-delivery-target'
 import type { OrchestrationMailboxLeaf, OrchestrationMailboxOwner } from './mailbox-owner'
 import { OrchestrationMailboxPointerDelivery } from './mailbox-pointer-delivery'
 import type { SubmitStatuslessCodexPointer } from './mailbox-statusless-codex-submit'
 
 const MAILBOX = 'run:run-1'
 const TERMINAL_HANDLE = 'term-1'
+const STALE_TERMINAL_HANDLE = 'term-slept'
+const PANE_KEY = 'tab-1:leaf-1'
 
 function statuslessLeaf(): OrchestrationMailboxLeaf {
   return {
@@ -25,6 +27,7 @@ function makeHarness(
   proveStatuslessCodexIdle: (terminalHandle: string, ptyId: string) => Promise<string | null>,
   options: {
     withMessage?: boolean
+    useRemintedRunTarget?: boolean
     submitStatuslessCodexPointer?: SubmitStatuslessCodexPointer
   } = {}
 ) {
@@ -34,17 +37,34 @@ function makeHarness(
   if (options.withMessage !== false) {
     db.insertMessage({ from: 'term-sender', to: MAILBOX, subject: 'wake work' })
   }
+  if (options.useRemintedRunTarget) {
+    db.setRun({
+      id: 'run-1',
+      coordinator_handle: STALE_TERMINAL_HANDLE,
+      coordinator_pane_key: PANE_KEY
+    })
+  }
   const writePty = vi.fn().mockReturnValue(true)
   let delivery: OrchestrationMailboxPointerDelivery<never>
   const redriveMailbox = vi.fn((mailboxHandle: string) => {
     delivery.deliverForHandle(mailboxHandle)
   })
+  const deliveryTarget = options.useRemintedRunTarget
+    ? new OrchestrationMailboxDeliveryTarget({
+        getDb: () => db as unknown as OrchestrationDb,
+        getTerminalHandleForPaneKey: (paneKey) => (paneKey === PANE_KEY ? TERMINAL_HANDLE : null),
+        hasTerminalHandle: (handle) => handle === TERMINAL_HANDLE,
+        canProbePtyLiveness: () => false,
+        controllerKnowsPtyIsLive: () => false,
+        isLeafPtyProvenAbsent: () => Promise.resolve(false)
+      })
+    : ({
+        resolveTerminalHandle: () => TERMINAL_HANDLE,
+        deferForAbsenceProbe: () => false
+      } as unknown as OrchestrationMailboxDeliveryTarget)
   delivery = new OrchestrationMailboxPointerDelivery({
     mailboxOwner: { resolve: () => MAILBOX } as unknown as OrchestrationMailboxOwner,
-    deliveryTarget: {
-      resolveTerminalHandle: () => TERMINAL_HANDLE,
-      deferForAbsenceProbe: () => false
-    } as unknown as OrchestrationMailboxDeliveryTarget,
+    deliveryTarget,
     getDb: () => db as unknown as OrchestrationDb,
     getLeaf: () => leaf,
     getLeafKey: (tabId, leafId) => `${tabId}:${leafId}`,
@@ -256,6 +276,25 @@ describe('statusless Codex mailbox pointer delivery', () => {
     await vi.waitFor(() => expect(submitStatuslessCodexPointer).toHaveBeenCalledTimes(2))
 
     expect(harness.redriveMailbox).toHaveBeenCalledTimes(1)
+    expect(harness.db.getUnreadMessages(MAILBOX)[0]?.delivered_at).toEqual(expect.any(String))
+  })
+
+  it('redrives a resumed run through its stable pane after the terminal handle remints', async () => {
+    const submitStatuslessCodexPointer = vi
+      .fn<SubmitStatuslessCodexPointer>()
+      .mockRejectedValueOnce(new Error('foreground_not_ready'))
+      .mockResolvedValueOnce()
+    const harness = makeHarness(() => Promise.resolve('pty-1:incarnation-1'), {
+      submitStatuslessCodexPointer,
+      useRemintedRunTarget: true
+    })
+
+    harness.delivery.deliverForHandle(TERMINAL_HANDLE)
+    await vi.waitFor(() => expect(submitStatuslessCodexPointer).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(submitStatuslessCodexPointer).toHaveBeenCalledTimes(2))
+
+    expect(harness.redriveMailbox).toHaveBeenCalledWith(MAILBOX, undefined)
     expect(harness.db.getUnreadMessages(MAILBOX)[0]?.delivered_at).toEqual(expect.any(String))
   })
 
