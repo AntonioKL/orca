@@ -119,6 +119,7 @@ async function spawnAndPublishSession(
     env: opts.env,
     envToDelete: opts.envToDelete,
     command: opts.command,
+    ...(opts.deferredStartupOperationId ? { deferStartupCommand: true } : {}),
     startupCommandDelivery: opts.startupCommandDelivery,
     ...(opts.launchAgent ? { launchAgent: opts.launchAgent } : {}),
     shellOverride: opts.shellOverride,
@@ -133,6 +134,12 @@ async function spawnAndPublishSession(
   const shellReadySupported =
     (opts.shellReadySupported ?? false) &&
     (subprocess.shellPath === undefined || shellPathSupportsPtyStartupBarrier(subprocess.shellPath))
+  const startupSubmission = opts.command
+    ? buildStartupCommandSubmission(opts.command, {
+        submit: process.platform === 'win32' ? '\r' : '\n',
+        bracketedPasteSafe: shellReadySupported
+      })
+    : undefined
   const session = new Session({
     sessionId: opts.sessionId,
     cols: size.cols,
@@ -146,6 +153,14 @@ async function spawnAndPublishSession(
       wslDistro
     }),
     shellReadySupported,
+    ...(opts.deferredStartupOperationId && startupSubmission
+      ? {
+          deferredStartup: {
+            operationId: opts.deferredStartupOperationId,
+            submission: startupSubmission
+          }
+        }
+      : {}),
     scrollback: resolveDaemonSessionScrollbackRows(),
     historySeedChunks: opts.historySeedChunks,
     ...(opts.startupIngress ? { startupIngress: opts.startupIngress } : {}),
@@ -174,13 +189,16 @@ async function spawnAndPublishSession(
   const token = session.attachClient(opts.streamClient)
 
   const startupCommandWritten =
-    Boolean(opts.command) && !subprocess.startupCommandDeliveredInShellArgs
+    Boolean(opts.command) &&
+    !opts.deferredStartupOperationId &&
+    !subprocess.startupCommandDeliveredInShellArgs
   // Why: without this, a missing command and a lost one log identically.
   // Length, never the text -- launches can carry credentials.
   try {
     deps.reportReadinessEvent?.('startup-command-delivery', {
       sessionId: opts.sessionId,
       written: startupCommandWritten,
+      ...(opts.deferredStartupOperationId ? { deferred: true } : {}),
       hasCommand: Boolean(opts.command),
       commandLength: opts.command?.length ?? 0,
       viaShellArgs: subprocess.startupCommandDeliveredInShellArgs === true,
@@ -189,15 +207,8 @@ async function spawnAndPublishSession(
   } catch {
     // Diagnostics must never turn a live PTY into a failed create.
   }
-  if (startupCommandWritten && opts.command) {
-    const submit = process.platform === 'win32' ? '\r' : '\n'
-    // Why: only Orca-wrapped shells advertise the paste-safe startup barrier.
-    session.write(
-      buildStartupCommandSubmission(opts.command, {
-        submit,
-        bracketedPasteSafe: shellReadySupported
-      })
-    )
+  if (startupCommandWritten && startupSubmission) {
+    session.write(startupSubmission)
   }
 
   return {

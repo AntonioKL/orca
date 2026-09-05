@@ -19,7 +19,10 @@ import { resolveTerminalHostSessionCwd } from './terminal-host-session-cwd'
 import { TerminalHostTombstones } from './terminal-host-tombstones'
 import { listLiveTerminalHostSessions } from './terminal-host-session-listing'
 import { createOrAttachTerminalSession } from './terminal-host-session-create'
-import { TerminalAttachCanceledError } from './daemon-errors'
+import {
+  assertTerminalHostCreateAllowed,
+  createTerminalHostStartupReleaser
+} from './terminal-host-startup-operations'
 import { rejectOnAbort } from './terminal-attach-cancellation'
 import { randomUUID } from 'node:crypto'
 import { pruneRetiredPtyIncarnations } from '../../shared/retired-pty-incarnations'
@@ -76,7 +79,7 @@ export class TerminalHost {
   }
 
   async createOrAttach(opts: InternalCreateOrAttachOptions): Promise<CreateOrAttachResult> {
-    this.assertCreateOrAttachAllowed(opts)
+    assertTerminalHostCreateAllowed(opts, this.creationFenced)
     for (
       let inFlight = this.pendingCreations.get(opts.sessionId);
       inFlight !== undefined;
@@ -86,9 +89,9 @@ export class TerminalHost {
       // minutes. Waiting unconditionally is what let one dead path strand every
       // later create and attach for the session, so a canceled caller leaves.
       await Promise.race([inFlight, rejectOnAbort(opts.cancelSignal, opts.sessionId)])
-      this.assertCreateOrAttachAllowed(opts)
+      assertTerminalHostCreateAllowed(opts, this.creationFenced)
     }
-    this.assertCreateOrAttachAllowed(opts)
+    assertTerminalHostCreateAllowed(opts, this.creationFenced)
 
     let settleCreation: () => void = () => {}
     this.pendingCreations.set(
@@ -107,13 +110,14 @@ export class TerminalHost {
             Boolean(this.sessions.get(owner.ptyId)?.isAlive)
           ),
         createOrAttach: async (options) => {
-          this.assertCreateOrAttachAllowed(options)
+          assertTerminalHostCreateAllowed(options, this.creationFenced)
           if (options.agentSessionGeneration && this.sessions.get(options.sessionId)?.isAlive) {
             throw new Error('agent_session_claim_unavailable')
           }
           return await createOrAttachTerminalSession(options, {
             sessions: this.sessions,
-            assertCreateAllowed: () => this.assertCreateOrAttachAllowed(options),
+            assertCreateAllowed: () =>
+              assertTerminalHostCreateAllowed(options, this.creationFenced),
             sessionTeardown: this.sessionTeardown,
             killedTombstones: this.killedTombstones,
             spawnSubprocess: this.spawnSubprocess,
@@ -146,18 +150,14 @@ export class TerminalHost {
     }
   }
 
-  private assertCreateOrAttachAllowed(opts: InternalCreateOrAttachOptions): void {
-    if (this.creationFenced) {
-      throw new Error('Terminal host is shutting down')
-    }
-    if (opts.isCanceled?.()) {
-      throw new TerminalAttachCanceledError(opts.sessionId)
-    }
-  }
-
   write(sessionId: string, data: string): void {
     this.getAliveSession(sessionId).write(data)
   }
+
+  readonly releaseStartupCommand = createTerminalHostStartupReleaser(
+    this.sessions,
+    () => this.creationFenced
+  )
 
   closeStartupQueryAuthority(sessionId: string): number {
     return this.getAliveSession(sessionId).closeStartupQueryAuthority()

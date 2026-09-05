@@ -3,6 +3,7 @@ import type { AgentSessionOwnerBinding } from '../../shared/agent-session-host-a
 import type { CreateOrAttachOptions, CreateOrAttachResult } from './terminal-host-create-contract'
 
 export type InternalCreateOrAttachOptions = CreateOrAttachOptions & {
+  deferredStartupOperationId?: string
   agentSessionGeneration?: string
   isCanceled?: () => boolean
   cancelSignal?: AbortSignal
@@ -38,6 +39,7 @@ export async function createOrAttachClaimedAgentSession(args: {
     ...args.options,
     sessionId: ensured.owner.ptyId,
     command: undefined,
+    deferredStartupOperationId: undefined,
     agentSessionEnsure: undefined,
     attachOnly: true
   })

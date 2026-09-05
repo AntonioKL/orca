@@ -46,7 +46,7 @@ export class SessionShellReadyBarrier {
   private promptReadinessProbe: ShellPromptReadinessProbe | null = null
   private readyTimer: ReturnType<typeof setTimeout> | null = null
   private releaseDeviceAttributesResponder: (() => void) | null = null
-  private preReadyStdinQueue: string[] = []
+  private preReadyStdinQueue: (string | (() => void))[] = []
   private readonly postReadyFlushGate: PostReadyFlushGate
 
   constructor(private readonly deps: SessionShellReadyBarrierDeps) {
@@ -100,7 +100,7 @@ export class SessionShellReadyBarrier {
   }
 
   /** Queues `data` when the gate is closed; false means the caller must write it through. */
-  tryEnqueue(data: string): boolean {
+  tryEnqueue(data: string | (() => void)): boolean {
     if (!this.isGatingWrites) {
       return false
     }
@@ -244,7 +244,11 @@ export class SessionShellReadyBarrier {
     const queued = this.preReadyStdinQueue
     this.preReadyStdinQueue = []
     for (const data of queued) {
-      this.deps.subprocess.write(data)
+      if (typeof data === 'string') {
+        this.deps.subprocess.write(data)
+      } else {
+        data()
+      }
     }
   }
 }

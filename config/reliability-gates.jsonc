@@ -11,6 +11,82 @@
   },
   "gates": [
     {
+      "id": "agent-session.deferred-composer-startup",
+      "title": "Composer command release belongs to one terminal incarnation",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "terminal-runtime",
+      "layer": "daemon-session-and-subprocess-contract",
+      "surfaces": ["retained composer shell", "deferred startup command", "shell readiness queue"],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["daemon", "local", "wsl", "ssh", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": ["daemon"],
+      "coverageNotes": "Actual Session and TerminalHost contracts run on macOS. Windows and WSL argv branches are mocked. No renderer or wire caller enables deferred startup yet; direct local, remote, and other native platform release paths remain unimplemented.",
+      "motivatingLinks": ["docs/reference/worktree-create-retained-drafts.md"],
+      "invariant": "Shell readiness cannot authorize deferred agent execution. Only the same operation and terminal incarnation may release once. Manual input retires an unreleased command; exit or termination prevents a queued command from reaching the subprocess. Ambiguous writes are never replayed.",
+      "oracle": "Record actual Session subprocess writes while emitting readiness, advancing its timeout, reattaching clients, injecting query replies and manual input, terminating, and throwing after writing bytes. Require no command before release, at most one after it, and no write from wrong identity or after teardown.",
+      "commands": [
+        "pnpm test src/main/daemon/session-deferred-startup.test.ts src/main/daemon/terminal-host-startup.test.ts src/main/daemon/session.test.ts src/main/daemon/terminal-host-agent-session.test.ts src/main/daemon/pty-subprocess-windows-shell-launch.test.ts src/main/daemon/pty-subprocess-wsl-launch.test.ts src/main/daemon/pty-subprocess-managed-agent-env.test.ts"
+      ],
+      "testFiles": [
+        "src/main/daemon/session-deferred-startup.test.ts",
+        "src/main/daemon/terminal-host-startup.test.ts",
+        "src/main/daemon/session.test.ts",
+        "src/main/daemon/terminal-host-agent-session.test.ts",
+        "src/main/daemon/pty-subprocess-windows-shell-launch.test.ts",
+        "src/main/daemon/pty-subprocess-wsl-launch.test.ts",
+        "src/main/daemon/pty-subprocess-managed-agent-env.test.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/main/daemon/session-deferred-startup.test.ts",
+          "assertions": [
+            "does not launch on the readiness timeout without Create",
+            "accepts Create before readiness and queues exactly one command through the existing gate"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-09-05",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm test src/main/daemon/session-deferred-startup.test.ts src/main/daemon/terminal-host-startup.test.ts src/main/daemon/session.test.ts src/main/daemon/terminal-host-agent-session.test.ts src/main/daemon/pty-subprocess-windows-shell-launch.test.ts src/main/daemon/pty-subprocess-wsl-launch.test.ts src/main/daemon/pty-subprocess-managed-agent-env.test.ts",
+          "result": "passed",
+          "durationSeconds": 0.546,
+          "summary": "145 tests passed across seven suites; Session integration tests exposed automatic CPR/DA replies retiring pending startup, fixed with the existing terminal reply parser."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 15,
+        "scope": "Focused owner and shell argv contracts"
+      },
+      "flakeHistory": {
+        "status": "unknown",
+        "evidence": "Local focused runs only; no CI soak history."
+      },
+      "redGreenEvidence": {
+        "status": "partial",
+        "evidence": "CPR/DA integration tests failed before reply exclusion and passed after it. No complete intentional-break matrix or real deferred composer journey yet."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "One bounded startup record per Session, no polling or subprocess added. Existing readiness queue carries one accepted callback. Input classification runs only while that Session has an unreleased command."
+      },
+      "promotionCriteria": [
+        "Implement capability-negotiated owner release and the rendered composer integration.",
+        "Verify live local, daemon, Windows/WSL and SSH release and crash recovery.",
+        "Meet manifest CI and soak policy."
+      ],
+      "knownGaps": [
+        "No wire capability or renderer caller; this is an internal prerequisite.",
+        "No live shell-profile or selected-agent readiness timing for deferred launch.",
+        "Direct local provider and SSH/remote release parity remain unimplemented."
+      ],
+      "demotionRule": "Keep experimental until topology, fault-injection and rendered proof exist; demote on premature or repeated launch, stale identity acceptance, or unexplained flakes."
+    },
+    {
       "id": "terminal-output.prestarted-shell-snapshot-adoption",
       "title": "Prestarted shell adoption paints covered output once",
       "maturity": "experimental",

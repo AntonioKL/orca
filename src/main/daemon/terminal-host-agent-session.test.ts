@@ -60,11 +60,12 @@ describe('TerminalHost agent-session claims', () => {
     await host.dispose()
   })
 
-  it('adopts one claimed provider session across different requested daemon ids', async () => {
+  it.each([false, true])('adopts claimed sessions with deferred=%s', async (deferred) => {
     const first = await host.createOrAttach({
       sessionId: 'session-claimed-first',
       cols: 80,
       rows: 24,
+      ...(deferred ? { command: 'codex', deferredStartupOperationId: 'operation' } : {}),
       streamClient: { onData: vi.fn(), onExit: vi.fn() },
       agentSessionEnsure: { claim, surface }
     })
@@ -72,6 +73,7 @@ describe('TerminalHost agent-session claims', () => {
       sessionId: 'session-claimed-retry',
       cols: 80,
       rows: 24,
+      ...(deferred ? { command: 'codex', deferredStartupOperationId: 'operation' } : {}),
       streamClient: { onData: vi.fn(), onExit: vi.fn() },
       agentSessionEnsure: {
         claim,
@@ -88,6 +90,13 @@ describe('TerminalHost agent-session claims', () => {
       owner: { ptyId: 'session-claimed-first', surface }
     })
     expect(spawnSubprocess).toHaveBeenCalledOnce()
+    expect(subprocess?.write).not.toHaveBeenCalled()
+    if (deferred) {
+      expect(
+        host.releaseStartupCommand('session-claimed-first', second.incarnationId, 'operation')
+      ).toBe('accepted')
+      expect(subprocess?.write).toHaveBeenCalledOnce()
+    }
   })
 
   it('cannot adopt a live session that predates provider-session claims', async () => {

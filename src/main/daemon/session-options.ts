@@ -2,6 +2,7 @@ import type { SubprocessHandle } from './session-subprocess-handle'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { PtyStartupIngressIntent } from '../../shared/pty-startup-ingress'
 import type { PtyOwnerBackend } from '../../shared/pty-owner-backend'
+import type { DeferredSessionStartup } from './session-deferred-startup'
 
 export type SessionOptions = {
   sessionId: string
@@ -12,6 +13,7 @@ export type SessionOptions = {
   subprocess: SubprocessHandle
   shellReadySupported: boolean
   shellReadyTimeoutMs?: number
+  deferredStartup?: DeferredSessionStartup
   /** Reports a readiness outcome worth diagnosing to the daemon's file log.
    *  Why not console: the detached daemon runs with stdio 'ignore'. */
   reportReadinessEvent?: (event: string, details: Record<string, unknown>) => void

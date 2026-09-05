@@ -12,6 +12,7 @@ export type TerminalHostOptions = {
     env?: Record<string, string>
     envToDelete?: string[]
     command?: string
+    deferStartupCommand?: boolean
     startupCommandDelivery?: StartupCommandDelivery
     launchAgent?: TuiAgent
     shellOverride?: string

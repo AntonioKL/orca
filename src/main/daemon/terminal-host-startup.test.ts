@@ -130,3 +130,107 @@ describe('TerminalHost startup command delivery logging', () => {
     expect(sub.write).toHaveBeenCalledWith(`codex${process.platform === 'win32' ? '\r' : '\n'}`)
   })
 })
+
+describe('TerminalHost deferred command ownership', () => {
+  const command = 'codex DEFERRED_STARTUP_MARKER'
+  const operationId = 'composer-reservation'
+  let sub: SubprocessHandle
+  let host: TerminalHost
+  let spawn: ReturnType<typeof vi.fn<() => SubprocessHandle>>
+
+  beforeEach(() => {
+    sub = mockSubprocess()
+    let onExit: ((code: number) => void) | undefined
+    sub.onExit = (callback) => {
+      onExit = callback
+    }
+    sub.forceKill = vi.fn(() => {
+      onExit?.(0)
+    })
+    spawn = vi.fn(() => sub)
+    host = new TerminalHost({ spawnSubprocess: spawn })
+  })
+
+  afterEach(async () => {
+    await host.dispose()
+  })
+
+  async function create() {
+    return host.createOrAttach({
+      sessionId: 'retained-shell',
+      cols: 80,
+      rows: 24,
+      command,
+      deferredStartupOperationId: operationId,
+      streamClient: { onData: vi.fn(), onExit: vi.fn() }
+    })
+  }
+
+  it('retains the original command for planning and holds all execution until release', async () => {
+    const created = await create()
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ command, deferStartupCommand: true })
+    )
+    expect(sub.write).not.toHaveBeenCalled()
+    expect(host.releaseStartupCommand('retained-shell', created.incarnationId, operationId)).toBe(
+      'accepted'
+    )
+    expect(sub.write).toHaveBeenCalledOnce()
+    expect(sub.write).toHaveBeenCalledWith(
+      `${command}${process.platform === 'win32' ? '\r' : '\n'}`
+    )
+    expect(host.releaseStartupCommand('retained-shell', created.incarnationId, operationId)).toBe(
+      'accepted'
+    )
+    expect(sub.write).toHaveBeenCalledOnce()
+  })
+
+  it('never spawns on unknown release and rejects another operation or incarnation', async () => {
+    expect(host.releaseStartupCommand('missing', 'old', operationId)).toBe('unavailable')
+    expect(spawn).not.toHaveBeenCalled()
+    const created = await create()
+    expect(host.releaseStartupCommand('retained-shell', 'old', operationId)).toBe(
+      'identity-mismatch'
+    )
+    expect(host.releaseStartupCommand('retained-shell', created.incarnationId, 'other')).toBe(
+      'identity-mismatch'
+    )
+    expect(sub.write).not.toHaveBeenCalled()
+  })
+
+  it('reattaches without releasing or replacing the original pending command', async () => {
+    const original = await create()
+    const attached = await create()
+    expect(attached.isNew).toBe(false)
+    expect(attached.incarnationId).toBe(original.incarnationId)
+    expect(spawn).toHaveBeenCalledOnce()
+    expect(sub.write).not.toHaveBeenCalled()
+    expect(host.releaseStartupCommand('retained-shell', attached.incarnationId, operationId)).toBe(
+      'accepted'
+    )
+    expect(sub.write).toHaveBeenCalledOnce()
+  })
+
+  it('retires an unused launch after manual input into the retained shell', async () => {
+    const created = await create()
+    host.write('retained-shell', 'vim\r')
+    expect(host.releaseStartupCommand('retained-shell', created.incarnationId, operationId)).toBe(
+      'retired'
+    )
+    expect(sub.write).toHaveBeenCalledExactlyOnceWith('vim\r')
+  })
+
+  it('rejects an empty operation identity before spawning', async () => {
+    await expect(
+      host.createOrAttach({
+        sessionId: 'invalid',
+        cols: 80,
+        rows: 24,
+        command,
+        deferredStartupOperationId: '',
+        streamClient: { onData: vi.fn(), onExit: vi.fn() }
+      })
+    ).rejects.toThrow('Deferred startup requires')
+    expect(spawn).not.toHaveBeenCalled()
+  })
+})

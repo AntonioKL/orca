@@ -2,7 +2,7 @@ import { isValidPtySize } from './daemon-pty-size'
 import type { SessionOutputPlane, AttachedClient } from './session-output-plane'
 import { createSessionOutputPipeline } from './session-output-pipeline'
 import { SessionProducerPause } from './session-producer-pause'
-import { SessionShellReadyBarrier } from './session-shell-ready-barrier'
+import type { SessionShellReadyBarrier } from './session-shell-ready-barrier'
 import type { TerminalShellRecoveryBarrier } from './terminal-shell-recovery-barrier'
 import {
   SessionTerminationController,
@@ -13,7 +13,9 @@ import type { JobTerminationOutcome } from '../windows/windows-pty-job'
 import type { SessionOptions } from './session-options'
 import type { TuiAgent } from '../../shared/tui-agent'
 import { randomUUID } from 'node:crypto'
-import { PtyStartupIngress } from '../../shared/pty-startup-ingress'
+import type { PtyStartupIngress } from '../../shared/pty-startup-ingress'
+import type { StartupCommandReleaseResult } from './session-deferred-startup'
+import { createSessionStartupInput, type SessionStartupInput } from './session-startup-input'
 
 import type {
   SessionState,
@@ -40,6 +42,7 @@ export class Session {
   private readonly termination: SessionTerminationController
   private readonly startupIngress: PtyStartupIngress
   private readonly recoveryBarrier: TerminalShellRecoveryBarrier
+  private readonly input: SessionStartupInput
 
   constructor(opts: SessionOptions) {
     this.sessionId = opts.sessionId
@@ -68,24 +71,17 @@ export class Session {
       releaseProducerPause: (pauseOpts) => this.producerPause.release(pauseOpts)
     })
 
-    this.shellReady = new SessionShellReadyBarrier({
-      sessionId: this.sessionId,
-      subprocess: this.subprocess,
-      responderParser: this.output.responderParser,
-      shellReadySupported: opts.shellReadySupported,
-      ...(opts.reportReadinessEvent ? { reportReadinessEvent: opts.reportReadinessEvent } : {}),
-      shellReadyTimeoutMs: opts.shellReadyTimeoutMs,
-      installDeviceAttributesFilter: () => this.output.installDeviceAttributesFilter(),
-      releaseDeviceAttributesFilter: () => this.output.releaseDeviceAttributesFilter(),
-      acceptStartupIngress: (data) => this.startupIngress.accept(data)
+    const startup = createSessionStartupInput({
+      opts,
+      output: this.output,
+      recoveryBarrier: this.recoveryBarrier,
+      isAlive: () => !this._disposed && this.isAlive,
+      isTerminating: () => this.isTerminating,
+      incarnationId: this.incarnationId
     })
-
-    this.startupIngress = new PtyStartupIngress({
-      ...(opts.startupIngress ? { intent: opts.startupIngress } : {}),
-      ...(opts.ownerBackend ? { ownerBackend: opts.ownerBackend } : {}),
-      write: (data) => this.subprocess.write(data),
-      onEmission: (emission) => this.recoveryBarrier.accept(emission)
-    })
+    this.shellReady = startup.shellReady
+    this.startupIngress = startup.startupIngress
+    this.input = startup.input
     this.shellReady.startPromptReadinessProbe()
     this.subprocess.onData((data) => {
       if (!this._disposed) {
@@ -140,23 +136,14 @@ export class Session {
   }
 
   write(data: string): void {
-    if (this._state === 'exited' || this._disposed) {
-      return
-    }
+    this.input.write(data)
+  }
 
-    // Daemon POSIX PTYs need the local provider's cooked-echo containment (#13137).
-    // DA1/CPR stay immediate unless an echo-risk reply is already held (#13892, #15559).
-    if (this.startupIngress.answerLiveQueryReply(data)) {
-      return
-    }
-
-    // Why: keep queuing during the post-ready flush-gate window ('ready' but not yet flushed); a
-    // direct write would race fresh input ahead of the buffered startup command.
-    if (this.shellReady.tryEnqueue(data)) {
-      return
-    }
-
-    this.subprocess.write(data)
+  releaseStartupCommand(
+    expectedIncarnationId: string,
+    operationId: string
+  ): StartupCommandReleaseResult {
+    return this.input.release(expectedIncarnationId, operationId)
   }
 
   resize(cols: number, rows: number): void {
@@ -201,6 +188,7 @@ export class Session {
   }
 
   signal(sig: string): void {
+    this.input.retire()
     this.termination.signal(sig)
   }
 
@@ -346,6 +334,7 @@ export class Session {
       return
     }
     this._disposed = true
+    this.input.retire()
     this.output.markDisposed()
     // Why: never leave a paused fd behind on teardown; the handle's dead-guard makes this a no-op once the child is reaped.
     this.producerPause.release({ resume: true })
@@ -355,6 +344,7 @@ export class Session {
   }
 
   private handleSubprocessExit(code: number, cause?: TerminalExitCause): void {
+    this.input.retire()
     this.termination.markPhysicalExit()
     if (this._disposed) {
       return
@@ -377,7 +367,7 @@ export class Session {
 
     this.termination.cancelForceKillFallback()
     this.shellReady.clearReadyTimer()
-    this.shellReady.clearFlushGate()
+    this.shellReady.clearPendingWrites()
 
     // Why: release the ptmx fd here or node-pty's _socket leaks the master fd until GC (docs/fix-pty-fd-leak.md).
     // Not via #teardownSubprocess: it flips `_disposed`, short-circuiting the later Session.dispose() reaper.
