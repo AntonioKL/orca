@@ -172,6 +172,11 @@ export class CodexSubagentRoster {
    * The parent turn ended. Any child still reported as working will never be
    * settled by an event — Codex sends nothing more for it — so it becomes
    * `unverifiable`: contact was lost, which is NOT evidence the child exited.
+   *
+   * Keyed on the RAW `turnId`, unlike `groupFor`, which remaps off-primary
+   * activity onto the primary's active turn. A child thread ending its own turn
+   * must not sweep the parent group and settle its still-working siblings, so
+   * that lookup missing is the intended no-op.
    */
   settleTurn(threadId: string, turnId: string | null): StructuredAgentSessionSinkAdmission {
     const ownerThreadId = this.deps.primaryThreadId() ?? threadId
