@@ -6,8 +6,8 @@
 //   * `agentPath` is a tree path (`/root`, `/root/list_directory`); the trailing
 //     segment is a semantic task name and the only label available. There is no
 //     `thread/started` for a child, so nickname/role/depth do not exist.
-//   * `agentsStates` on `collabAgentToolCall` is `{}` on the MultiAgentV2 path;
-//     the V1 path does populate it. Nothing here reads it on either path.
+//   * `agentsStates` on `collabAgentToolCall` arrived empty (`{}`) throughout the
+//     probe, so nothing here reads it — state comes from `kind` alone.
 //   * `thread/tokenUsage/updated` reports a per-thread RUNNING TOTAL, so the
 //     latest frame replaces the previous one — it is never accumulated.
 

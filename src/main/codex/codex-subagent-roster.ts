@@ -1,7 +1,7 @@
 // The Codex subagent roster: one journal row per spawn group, revised in place.
 //
-// There is no snapshot to read. `agentsStates` is empty on the MultiAgentV2 path
-// that emits these items, and children get no `thread/started`, so the roster is
+// There is no snapshot to read. `agentsStates` arrived empty in the live probe
+// and children get no `thread/started`, so the roster is
 // accumulated purely from `subAgentActivity` items — each of which arrives TWICE
 // (`item/started` and `item/completed`). Every transition here is therefore
 // idempotent, and a terminal state latches: duplicate and out-of-order delivery

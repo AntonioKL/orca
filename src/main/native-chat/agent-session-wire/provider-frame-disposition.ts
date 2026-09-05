@@ -204,10 +204,10 @@ const CODEX_ITEM_CLASSIFICATIONS: Record<string, ProviderFrameClassification> = 
   // `restoreThread` replays them straight through `items.handle`, which is where
   // the classification earns its keep.
   //
-  // `collabAgentToolCall` is deliberately NOT suppressed with it. Only the
-  // MultiAgentV2 path emits `subAgentActivity`; a V1 turn emits collab tool
-  // calls and nothing else, so suppressing them would leave a V1 fan-out
-  // showing nothing at all.
+  // `collabAgentToolCall` is deliberately NOT suppressed with it. Nothing
+  // guarantees a session reports subagent work as `subAgentActivity` at all; one
+  // that only ever emits the collab tool call gets no roster row, and suppressing
+  // that too would leave its fan-out showing nothing.
   subAgentActivity: 'status-chrome'
 }
 

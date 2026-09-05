@@ -127,9 +127,9 @@ describe('codex subagent item disposition', () => {
     ).toBe('status-chrome')
   })
 
-  it("leaves collab tool calls substantive — they are a V1 turn's only subagent signal", () => {
-    // Only the MultiAgentV2 path emits `subAgentActivity`, so the roster row
-    // never exists on V1. Suppressing this too would render a V1 fan-out blank.
+  it('leaves collab tool calls substantive — they may be the only subagent signal', () => {
+    // A session that reports no `subAgentActivity` gets no roster row, so
+    // suppressing this too would render its fan-out blank.
     expect(
       classifyProviderFrame('codex', 'item:collabAgentToolCall', {
         type: 'collabAgentToolCall',
