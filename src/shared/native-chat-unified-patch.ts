@@ -146,7 +146,6 @@ export function unifiedPatchSections(text: string): {
       hasHeaderPair: false
     }
     sections.push(section)
-    current = section
     return section
   }
 
@@ -154,10 +153,10 @@ export function unifiedPatchSections(text: string): {
     const raw = rows[index] ?? ''
     if (raw.startsWith(GIT_DIFF_HEADER)) {
       const paths = gitHeaderPaths(raw)
-      const section = open()
-      section.oldPath = paths.oldPath
-      section.newPath = paths.newPath
-      section.named = true
+      current = open()
+      current.oldPath = paths.oldPath
+      current.newPath = paths.newPath
+      current.named = true
       inHunk = false
       continue
     }
@@ -166,11 +165,13 @@ export function unifiedPatchSections(text: string): {
     if (!inHunk && isFileHeaderPair(rows, index)) {
       // The pair names the section a `diff --git` just opened; a second pair in
       // the same section is the next file of a patch written without them.
-      const section = current && !current.hasHeaderPair ? current : open()
-      section.oldPath = sourceHeaderPath(rows[index] ?? '')
-      section.newPath = sourceHeaderPath(rows[index + 1] ?? '')
-      section.named = true
-      section.hasHeaderPair = true
+      if (!current || current.hasHeaderPair) {
+        current = open()
+      }
+      current.oldPath = sourceHeaderPath(rows[index] ?? '')
+      current.newPath = sourceHeaderPath(rows[index + 1] ?? '')
+      current.named = true
+      current.hasHeaderPair = true
       index += 1
       continue
     }
@@ -179,7 +180,8 @@ export function unifiedPatchSections(text: string): {
     } else if (FILE_SECTION.test(raw)) {
       inHunk = false
     }
-    ;(current ?? open()).rows.push(raw)
+    current ??= open()
+    current.rows.push(raw)
   }
 
   return {

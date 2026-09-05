@@ -460,7 +460,7 @@ describe('editFilesFromToolPair', () => {
     })
     expect(files?.map((file) => file.path)).toEqual(['one.ts', 'two.ts'])
     expect(files?.[0]?.lines.map((line) => line.text)).toEqual(['first', 'FIRST'])
-    expect(gutter(files?.slice(1))).toEqual([10, 10])
+    expect(gutter(files?.slice(1) ?? null)).toEqual([10, 10])
   })
 
   it('keeps a file whose envelope section carries no body at all', () => {
