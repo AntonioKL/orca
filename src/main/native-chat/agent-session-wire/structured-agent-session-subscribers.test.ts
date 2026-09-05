@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AGENT_SESSION_JOURNAL_SCHEMA_VERSION } from '../../../shared/agent-session-journal-types'
 import type {
   AgentSessionHandoffStatus,
+  AgentSessionStatusEvent,
   AgentSessionSubscribeEvent
 } from '../../../shared/agent-session-wire'
 import {
@@ -16,7 +17,6 @@ import { journalDatabaseFile } from '../agent-session-journal/journal-paths'
 import { insertJournalRow } from '../agent-session-journal/journal-row-table'
 import type { JournalRow } from '../agent-session-journal/journal-row-schema'
 import { createTrackedJournalOpener } from '../agent-session-journal/journal-store-test-open'
-import type { AgentSessionStatusEvent } from '../../../shared/agent-session-wire'
 import { StructuredAgentSessionStatusFeed } from './structured-agent-session-status-feed'
 import { AgentSessionSubscribers } from './structured-agent-session-subscribers'
 
