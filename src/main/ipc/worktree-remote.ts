@@ -30,7 +30,10 @@ import type {
 import { getPRForBranch } from '../github/client'
 import { listWorktrees, addWorktree, addSparseWorktree } from '../git/worktree'
 import type { AddWorktreeOptions, AddWorktreeResult } from '../git/worktree'
-import { consumePreparedWorktreeCreate } from '../worktree-create-preparation'
+import {
+  consumePreparedWorktreeCreate,
+  recordUnpreparedWorktreeCreate
+} from '../worktree-create-preparation'
 import {
   getBranchConflictKind,
   resolveDefaultBaseRefViaExec,
@@ -408,7 +411,7 @@ async function spawnLocalStartupAndSetupTerminals(args: {
 
   let sequencedStartup = startup
   let wrappedSetupCommandStr: string | undefined
-  if (startup && setup?.waitForAgentStartup === true) {
+  if (startup.command.trim() && setup?.waitForAgentStartup === true) {
     const platform = getSetupRunnerCommandPlatformForLaunch(
       setup,
       process.platform === 'win32' ? 'windows' : 'posix'
@@ -490,6 +493,7 @@ async function spawnLocalStartupAndSetupTerminals(args: {
           direction: setupLaunchMode === 'split-horizontal' ? 'horizontal' : 'vertical',
           command: setupCommand,
           env: setup.envVars,
+          sourceSurfaceVisible: startupTerminal?.surface === 'visible',
           activate: false
         })
       } else {
@@ -2702,12 +2706,14 @@ export async function createLocalWorktree(
   const preparedWorktreeOptions = suggestLocalBaseRefUpdate
     ? addProjectGitOptions({ ...remoteTrackingBaseOption, suggestLocalBaseRefUpdate })
     : addProjectGitOptions(remoteTrackingBaseOption)
+  let unpreparedCreate = false
   let addResult: AddWorktreeResult
   try {
     addResult =
       (await timing.time('git_worktree_add', async () => {
         if (sparseDirectories.length === 0 && !checkoutExistingBranch) {
           const prepared = await consumePreparedWorktreeCreate({
+            timing,
             repoPath: repo.path,
             workspaceRoot,
             worktreePath,
@@ -2724,6 +2730,7 @@ export async function createLocalWorktree(
           if (prepared.status === 'hit') {
             return prepared.result
           }
+          unpreparedCreate = true
         } else {
           timing.recordPreparedCheckout({
             status: 'miss',
@@ -3039,6 +3046,16 @@ export async function createLocalWorktree(
   )
 
   notifyWorktreesChanged(mainWindow, repo.id)
+  if (unpreparedCreate) {
+    void recordUnpreparedWorktreeCreate({
+      repoPath: repo.path,
+      workspaceRoot,
+      baseBranch,
+      options: localWorktreeGitOptions
+    }).catch(() => {
+      // Speculative preparation cannot fail an already-created workspace.
+    })
+  }
   return {
     worktree: {
       ...worktree,

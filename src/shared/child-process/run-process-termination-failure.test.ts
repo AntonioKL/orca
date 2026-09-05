@@ -2,8 +2,14 @@ import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { forceTerminateProcessTreeMock, signalProcessTreeMock, spawnMock } = vi.hoisted(() => ({
+const {
+  forceTerminateProcessTreeMock,
+  signalProcessTreeMock,
+  hasExitedPosixProcessGroupMock,
+  spawnMock
+} = vi.hoisted(() => ({
   forceTerminateProcessTreeMock: vi.fn(),
+  hasExitedPosixProcessGroupMock: vi.fn(),
   signalProcessTreeMock: vi.fn(),
   spawnMock: vi.fn()
 }))
@@ -11,7 +17,8 @@ const { forceTerminateProcessTreeMock, signalProcessTreeMock, spawnMock } = vi.h
 vi.mock('node:child_process', () => ({ spawn: spawnMock, spawnSync: vi.fn() }))
 vi.mock('./process-tree-termination', () => ({
   forceTerminateProcessTree: forceTerminateProcessTreeMock,
-  signalProcessTree: signalProcessTreeMock
+  signalProcessTree: signalProcessTreeMock,
+  hasExitedPosixProcessGroup: hasExitedPosixProcessGroupMock
 }))
 
 import { runProcess } from './run-process'
@@ -29,6 +36,7 @@ function mockChild(): ChildProcess {
 describe('runProcess termination failure', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    hasExitedPosixProcessGroupMock.mockReturnValue(false)
     signalProcessTreeMock.mockResolvedValue(false)
     forceTerminateProcessTreeMock.mockResolvedValue(false)
   })
@@ -36,6 +44,101 @@ describe('runProcess termination failure', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'settles on close when the entire POSIX group has exited',
+    async () => {
+      const child = mockChild()
+      const controller = new AbortController()
+      const onChildTerminated = vi.fn()
+      spawnMock.mockReturnValue(child)
+      hasExitedPosixProcessGroupMock.mockReturnValue(true)
+      const pending = runProcess({
+        program: 'git',
+        timeoutMs: null,
+        signal: controller.signal,
+        terminationBarrier: true,
+        onChildTerminated
+      })
+      let settled = false
+      void pending.then(() => {
+        settled = true
+      })
+      controller.abort()
+      child.emit('exit', null, 'SIGTERM')
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      child.emit('close', null, 'SIGTERM')
+      await Promise.resolve()
+      expect(settled).toBe(true)
+      expect(onChildTerminated).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(forceTerminateProcessTreeMock).not.toHaveBeenCalled()
+      await expect(pending).resolves.toMatchObject({ signal: 'SIGTERM' })
+    }
+  )
+
+  it('retains the barrier after root close when group exit is not confirmed', async () => {
+    const child = mockChild()
+    spawnMock.mockReturnValue(child)
+    const pending = runProcess({ program: 'git', timeoutMs: 10, terminationBarrier: true })
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(10)
+    child.emit('close', null, 'SIGTERM')
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(12_000)
+    await pending
+  })
+
+  it('does not substitute a local group probe for a custom host barrier', async () => {
+    const child = mockChild()
+    spawnMock.mockReturnValue(child)
+    hasExitedPosixProcessGroupMock.mockReturnValue(true)
+    const pending = runProcess({
+      program: 'wsl.exe',
+      timeoutMs: 10,
+      terminationBarrier: {
+        signal: vi.fn().mockResolvedValue(false),
+        force: vi.fn().mockResolvedValue(false)
+      }
+    })
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(10)
+    child.emit('close', null, 'SIGTERM')
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(hasExitedPosixProcessGroupMock).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(12_000)
+    await pending
+  })
+
+  it('terminates the launched group if its PID observer throws', async () => {
+    const signal = vi.fn().mockResolvedValue(false)
+    const force = vi.fn().mockResolvedValue(true)
+    spawnMock.mockReturnValue(mockChild())
+    const onChildSpawned = vi.fn(() => {
+      throw new Error('observer failed')
+    })
+    const pending = runProcess({
+      program: 'git',
+      timeoutMs: null,
+      terminationBarrier: { signal, force },
+      onChildSpawned
+    })
+    const rejection = expect(pending).rejects.toThrow('observer failed')
+    expect(onChildSpawned).toHaveBeenCalledExactlyOnceWith(1234)
+    expect(signal).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(2_000)
+    await rejection
+    expect(force).toHaveBeenCalledOnce()
   })
 
   it('reports ordinary child close exactly once', async () => {
@@ -82,7 +185,7 @@ describe('runProcess termination failure', () => {
 
     expect(settled).toBe(false)
     await vi.advanceTimersByTimeAsync(10_000)
-    await expect(pending).resolves.toMatchObject({ timedOut: true })
+    await expect(pending).resolves.toMatchObject({ timedOut: true, terminationUnverifiable: true })
   })
 
   // Windows takes the taskkill branch, which never consults forceTerminateProcessTree.
@@ -154,7 +257,10 @@ describe('runProcess termination failure', () => {
     const child = mockChild()
     spawnMock.mockReturnValue(child)
     const pending = runProcess({ program: 'git', timeoutMs: 10, terminationBarrier: true })
-    const rejection = expect(pending).rejects.toThrow('kill failed')
+    const rejection = expect(pending).rejects.toMatchObject({
+      message: 'kill failed',
+      terminationUnverifiable: true
+    })
     let settled = false
     void pending.catch(() => {
       settled = true

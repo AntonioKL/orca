@@ -8,7 +8,11 @@ import type { PreparedCheckoutMissReason } from '../shared/worktree/create-types
 import type { AddWorktreeOptions, AddWorktreeResult } from './git/worktree'
 import { measureRetargetDivergence } from './git/worktree-base-divergence'
 import { resolveLocalWorktreeBaseRef } from './git/worktree-base-ref-probe'
-import { preparationPathKey, selectPreparationForCreate } from './worktree-create-preparation-claim'
+import {
+  preparationEntryKey,
+  preparationPathKey,
+  selectPreparationForCreate
+} from './worktree-create-preparation-claim'
 import {
   _resetPreparationPoolForTests,
   findPreparation,
@@ -16,7 +20,8 @@ import {
   listPreparations,
   startPreparation,
   takePreparation,
-  type PreparationEntry
+  type PreparationEntry,
+  type StartPreparationArgs
 } from './worktree-create-preparation-pool'
 import {
   discardPreparedWorktree,
@@ -28,10 +33,11 @@ import {
 } from './project-runtime-git-options'
 import { computeWorkspaceRootAsync, getWorktreePathSettings } from './ipc/worktree-logic'
 import {
-  recordPreparationConsume,
-  resetPreparationConsumeHistoryForTests
+  recordPreparationCreate,
+  resetPreparationCreateHistoryForTests
 } from './worktree-create-preparation-burst'
 import { toHostFilesystemPath } from './host-tree-removal'
+import type { WorktreeCreateTimingRecorder } from './worktree-create-timing'
 
 export {
   WORKTREE_CREATE_PREPARATION_LIMIT,
@@ -55,6 +61,7 @@ type ConsumePreparedWorktreeArgs = {
   baseBranch: string
   refreshLocalBaseRef?: boolean
   options?: AddWorktreeOptions
+  timing?: WorktreeCreateTimingRecorder
 }
 
 function canonicalBaseRef(
@@ -166,9 +173,17 @@ async function claimPreparedWorktree(
     }
   }
   const entry = selection.candidate
-  takePreparation(entry)
+  const warmingStopped = takePreparation(entry)
   try {
-    await entry.ready
+    const waitUntilClaimable = async () => {
+      await entry.ready
+      if (!(await warmingStopped)) {
+        throw new Error('prepared index warming termination unverifiable')
+      }
+    }
+    await (args.timing
+      ? args.timing.time('prepared_checkout_wait', waitUntilClaimable)
+      : waitUntilClaimable())
     return {
       status: 'claimed',
       entry,
@@ -180,34 +195,33 @@ async function claimPreparedWorktree(
   }
 }
 
-/** Replaces a just-consumed preparation, re-armed on the base the create actually used so the
- *  next one hits exactly — but only once the user has shown they are creating in a burst. A
- *  replacement costs a full checkout and ~5 minutes of disk until its TTL, so arming one after an
- *  isolated create spends that on nobody. Never awaited: create has already returned by the time
- *  the replacement checkout finishes. */
-function rearmPreparation(
-  entry: PreparationEntry,
-  baseBranch: string,
-  canonicalBase: string
-): void {
-  // Record first: a prefetch that re-armed this key while we finalized would otherwise swallow the
-  // consume, and the next create would look isolated when it is really the middle of a burst.
-  const continuesBurst = recordPreparationConsume(entry.key)
+/** Re-arm only for repeated creates; an unused full checkout still has the pool's cap and TTL. */
+function rearmPreparation(args: StartPreparationArgs): void {
+  const repoPathKey = preparationPathKey(args.repoPath)
+  const workspaceRootKey = preparationPathKey(args.workspaceRoot)
+  const wslDistro = args.options.wslDistro ?? ''
+  const key = preparationEntryKey(repoPathKey, workspaceRootKey, args.canonicalBase, wslDistro)
+  // Count the create even when a concurrent prefetch already supplied its replacement.
+  const continuesBurst = recordPreparationCreate(key)
   if (
     !continuesBurst ||
-    findPreparation(entry.repoPathKey, entry.workspaceRootKey, canonicalBase, entry.wslDistro)
+    findPreparation(repoPathKey, workspaceRootKey, args.canonicalBase, wslDistro)
   ) {
     return
   }
-  void startPreparation({
-    repoPath: entry.repoPath,
-    workspaceRoot: entry.workspaceRoot,
-    baseBranch,
-    canonicalBase,
-    options: entry.options
-  }).catch(() => {
-    // Why: a warm-up failure is recovered by the normal add on the next create.
+  void startPreparation(args).catch(() => {
+    // A warm-up failure is recovered by the normal add on the next create.
   })
+}
+
+/** Called in the background only after a successful cold create eligible for preparation. */
+export async function recordUnpreparedWorktreeCreate(
+  args: Omit<StartPreparationArgs, 'canonicalBase'>
+): Promise<void> {
+  // A completed request's cancellation and timeout must not govern its speculative replacement.
+  const options = args.options.wslDistro ? { wslDistro: args.options.wslDistro } : {}
+  const canonicalBase = await canonicalBaseRef(args.repoPath, args.baseBranch, options)
+  rearmPreparation({ ...args, canonicalBase, options })
 }
 
 export async function consumePreparedWorktreeCreate(
@@ -226,18 +240,28 @@ export async function consumePreparedWorktreeCreate(
     await mkdir(toHostFilesystemPath(parentDir), { recursive: true })
     // Finalize resolves the requested base itself and resets the prepared checkout onto that
     // commit, so a retargeted claim is handed over at the requested commit or not at all.
-    const result = await finalizePreparedWorktree(
-      args.repoPath,
-      entry.preparedPath,
-      args.worktreePath,
-      args.branch,
-      args.baseBranch,
-      args.refreshLocalBaseRef,
-      options
-    )
+    const finalize = () =>
+      finalizePreparedWorktree(
+        args.repoPath,
+        entry.preparedPath,
+        args.worktreePath,
+        args.branch,
+        args.baseBranch,
+        args.refreshLocalBaseRef,
+        options
+      )
+    const result = args.timing
+      ? await args.timing.time('prepared_checkout_finalize', finalize)
+      : await finalize()
     // Consuming the only prepared checkout leaves the next create cold. Re-arm for a user who is
     // creating in a burst; the TTL and the preparation limit still bound an unused replacement.
-    rearmPreparation(entry, args.baseBranch, claim.canonicalBase)
+    rearmPreparation({
+      repoPath: entry.repoPath,
+      workspaceRoot: entry.workspaceRoot,
+      baseBranch: args.baseBranch,
+      canonicalBase: claim.canonicalBase,
+      options: entry.options
+    })
     return { status: 'hit', retargeted: claim.retargeted, result }
   } catch (error) {
     await discardPreparedWorktree(args.repoPath, entry.preparedPath, options).catch(() => {})
@@ -250,6 +274,6 @@ export async function consumePreparedWorktreeCreate(
 }
 
 export async function _resetWorktreeCreatePreparationsForTests(): Promise<void> {
-  resetPreparationConsumeHistoryForTests()
+  resetPreparationCreateHistoryForTests()
   await _resetPreparationPoolForTests()
 }

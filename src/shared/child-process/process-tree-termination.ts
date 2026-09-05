@@ -178,6 +178,18 @@ function readPosixProcessGroupStates(processGroupId: number): Promise<string[] |
   })
 }
 
+/** Only ESRCH proves absence; permission errors retain the termination barrier. */
+export function hasExitedPosixProcessGroup(child: ChildProcess | number): boolean {
+  const pid = typeof child === 'number' ? child : child.pid
+  return (
+    process.platform !== 'win32' &&
+    !!pid &&
+    Number.isSafeInteger(pid) &&
+    pid > 0 &&
+    !processGroupExists(pid)
+  )
+}
+
 function processGroupExists(processGroupId: number): boolean {
   try {
     process.kill(-processGroupId, 0)

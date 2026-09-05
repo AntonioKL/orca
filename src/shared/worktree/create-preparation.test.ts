@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   createWorktreePreparationLockReason,
+  hasIndexWarmingProtection,
+  parseWorktreePreparationOwnerPid,
   isWorktreeCreatePreparation,
   parseWorktreePreparationPathOwnerPid,
   WORKTREE_CREATE_PREPARATION_DIRECTORY
@@ -54,4 +56,13 @@ describe('worktree create preparation classification', () => {
       })
     ).toBe(false)
   })
+})
+
+it('versioned warming ownership is recognized without being reclaimable by the old prefix', () => {
+  const reason = createWorktreePreparationLockReason('warm', true)
+  expect(reason.startsWith('orca-create-preparation:v1:')).toBe(false)
+  expect(hasIndexWarmingProtection(reason)).toBe(true)
+  expect(parseWorktreePreparationOwnerPid(reason)).toBe(process.pid)
+  expect(isWorktreeCreatePreparation({ path: '/prepared', lockReason: reason })).toBe(true)
+  expect(hasIndexWarmingProtection(createWorktreePreparationLockReason('ordinary'))).toBe(false)
 })

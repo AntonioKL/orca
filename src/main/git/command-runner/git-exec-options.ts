@@ -17,6 +17,8 @@ export type GitExecOptions = {
   preferWslDirectGit?: boolean
   useConfiguredSshCommandForNetwork?: boolean
   terminationBarrier?: boolean
+  /** Local termination-barrier launches only. */
+  onChildSpawned?: (pid: number) => void
   captureWslLoginShellOutput?: boolean
   /** Scheduler priority for this child; status is the safe default. */
   admissionTier?: GitAdmissionTier

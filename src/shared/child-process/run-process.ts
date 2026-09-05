@@ -2,11 +2,15 @@ import {
   spawn as nodeSpawn,
   spawnSync as nodeSpawnSync,
   type ChildProcess,
-  type ChildProcessWithoutNullStreams,
-  type SpawnOptions as NodeSpawnOptions
+  type ChildProcessWithoutNullStreams
 } from 'node:child_process'
-import { buildWindowsCmdShimCommandLine, isCmdInterpretedProgram } from './windows-command-line'
-import { forceTerminateProcessTree, signalProcessTree } from './process-tree-termination'
+import { resolveSpawn } from './process-spawn-resolution'
+export { resolveSpawn, type ResolvedSpawn } from './process-spawn-resolution'
+import {
+  forceTerminateProcessTree,
+  hasExitedPosixProcessGroup,
+  signalProcessTree
+} from './process-tree-termination'
 
 import { createOutputSink } from './bounded-output-sink'
 import { createChildTerminationReporter } from './child-termination-reporter'
@@ -39,54 +43,6 @@ const PROCESS_EXIT_GRACE_MS = 2_000
  * reports would otherwise leave the promise pending for the app's lifetime.
  */
 const BARRIER_UNVERIFIED_EXIT_GRACE_MS = 10_000
-
-export type ResolvedSpawn = {
-  file: string
-  args: readonly string[]
-  options: NodeSpawnOptions
-}
-
-/**
- * Translate a spec into the exact `child_process.spawn` call to make.
- *
- * Kept pure and exported so the Windows branch is testable from macOS/Linux:
- * the decisions below are the whole point of this module, and they must not be
- * observable only on the platform that breaks.
- */
-export function resolveSpawn(spec: ProcessSpec, platform: NodeJS.Platform): ResolvedSpawn {
-  const args = spec.args ?? []
-  const base: NodeSpawnOptions = {
-    cwd: spec.cwd,
-    env: spec.env,
-    stdio: spec.stdio ?? ['pipe', 'pipe', 'pipe'],
-    // Why unconditional: Orca's main process is GUI-subsystem and owns no
-    // console, so every console-subsystem child it starts gets a fresh visible
-    // conhost that takes foreground — keystrokes typed into an Orca terminal at
-    // that moment land in the black box instead.
-    windowsHide: true,
-    detached: spec.detached,
-    windowsVerbatimArguments: spec.windowsVerbatimArguments,
-    // Why never `shell: true`: it concatenates arguments without escaping (Node
-    // itself warns DEP0190) and it silently makes windowsHide a no-op.
-    shell: false,
-    ...(spec.terminationBarrier && platform !== 'win32' ? { detached: true } : {})
-  }
-
-  if (platform !== 'win32' || !isCmdInterpretedProgram(spec.program)) {
-    return { file: spec.program, args, options: base }
-  }
-
-  // Node refuses to spawn `.cmd`/`.bat` without a shell (EINVAL, the
-  // CVE-2024-27980 mitigation), so cmd.exe has to be the program. Building the
-  // line ourselves — rather than handing Node `shell: true` — is what keeps the
-  // arguments intact and the console hidden.
-  const comSpec = spec.env?.ComSpec ?? process.env.ComSpec ?? 'cmd.exe'
-  return {
-    file: comSpec,
-    args: [buildWindowsCmdShimCommandLine(spec.program, args)],
-    options: { ...base, windowsVerbatimArguments: true }
-  }
-}
 
 /**
  * Start a child process. Use for long-lived or streaming children.
@@ -184,6 +140,9 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
         : forceTerminateProcessTree(child)
       ).catch(() => false)
 
+    const terminationUnverifiable = (): boolean =>
+      barrierStopping && !barrierTerminationVerified && !rootExitedBeforeBarrier
+
     const resolveFromClose = (code: number | null, signal: NodeJS.Signals | null): void =>
       settle(() =>
         resolve({
@@ -192,13 +151,15 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
           stdout: stdout.text(),
           stderr: stderr.text(),
           timedOut,
-          outputTruncated: stdout.truncated() || stderr.truncated()
+          outputTruncated: stdout.truncated() || stderr.truncated(),
+          ...(terminationUnverifiable() ? { terminationUnverifiable: true } : {})
         })
       )
 
     const settleBarrierOutcome = (): void => {
       const rootExit = deferredClose ?? deferredExit
       if (deferredError) {
+        Object.assign(deferredError, { terminationUnverifiable: terminationUnverifiable() })
         settle(() => reject(deferredError))
         return
       }
@@ -340,12 +301,25 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
         rootExitedBeforeBarrier = true
       }
       if (barrierStopping) {
+        // The drained root and an absent local group need no forced-termination grace.
+        if (!settled && spec.terminationBarrier === true && hasExitedPosixProcessGroup(child)) {
+          barrierTerminationVerified = true
+        }
         deferredClose = { code, signal }
         resolveBarrierIfSafe()
         return
       }
       resolveFromClose(code, signal)
     })
+
+    if (child.pid && spec.onChildSpawned) {
+      try {
+        spec.onChildSpawned(child.pid)
+      } catch (error) {
+        deferredError = error instanceof Error ? error : new Error(String(error))
+        stopAndSettle()
+      }
+    }
 
     // Why close rather than leave open: a child that reads stdin (a hook
     // draining its payload, a CLI probing for a TTY) otherwise blocks until the

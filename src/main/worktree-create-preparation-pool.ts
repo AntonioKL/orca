@@ -1,3 +1,9 @@
+import {
+  createPreparedIndexWarming,
+  supportsPreparedIndexWarming,
+  resetPreparedIndexWarmingForTests,
+  type PreparedIndexWarming
+} from './worktree-prepared-index-warming'
 import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { posix, win32 } from 'node:path'
@@ -36,6 +42,7 @@ export type PreparationEntry = {
   preparedPath: string
   options: AddWorktreeOptions
   createdAt: number
+  indexWarming?: PreparedIndexWarming
   ready: Promise<void>
   expiration: NodeJS.Timeout
 }
@@ -67,7 +74,11 @@ function pathOps(path: string): Pick<typeof posix, 'dirname' | 'join'> {
 async function discardEntry(entry: PreparationEntry): Promise<void> {
   // A failed checkout self-discards, but that self-discard is best-effort too, so it can strand the
   // registration for the same reason the discard here can. Enrol either way.
+  const warmingStopped = entry.indexWarming?.stop()
   await entry.ready.catch(() => {})
+  if ((await warmingStopped) === false) {
+    return
+  }
   await discardPreparationWithRetry({
     hostKey: preparationHostKey(entry.repoPathKey, entry.wslDistro),
     repoPath: entry.repoPath,
@@ -139,9 +150,10 @@ export function findPreparation(
 
 /** Removes an entry from the pool so no other create can claim it. Callers must run this in the
  *  same synchronous turn as the selection that produced `entry`. */
-export function takePreparation(entry: PreparationEntry): void {
+export function takePreparation(entry: PreparationEntry): Promise<boolean> {
   preparations.delete(entry.key)
   clearTimeout(entry.expiration)
+  return entry.indexWarming?.stop() ?? Promise.resolve(true)
 }
 
 export function startPreparation({
@@ -157,12 +169,16 @@ export function startPreparation({
   const key = preparationEntryKey(repoPathKey, workspaceRootKey, canonicalBase, wslDistro)
   enforcePreparationLimit(repoPathKey, workspaceRootKey, wslDistro)
   const preparationId = `${process.pid}-${randomUUID()}`
-  const lockReason = createWorktreePreparationLockReason(preparationId)
+  const lockReason = createWorktreePreparationLockReason(
+    preparationId,
+    supportsPreparedIndexWarming(options.wslDistro)
+  )
   const preparationRoot = pathOps(workspaceRoot).join(
     workspaceRoot,
     WORKTREE_CREATE_PREPARATION_DIRECTORY
   )
   const preparedPath = pathOps(workspaceRoot).join(preparationRoot, preparationId)
+  const indexWarming = createPreparedIndexWarming(preparedPath, options.wslDistro)
   const entry = {} as PreparationEntry
   const expiration = setTimeout(() => expireEntry(entry), WORKTREE_CREATE_PREPARATION_TTL_MS)
   expiration.unref()
@@ -179,6 +195,7 @@ export function startPreparation({
     options,
     createdAt: Date.now(),
     expiration,
+    indexWarming,
     ready: (async () => {
       await cleanupStalePreparations(preparationHostKey(repoPathKey, wslDistro), repoPath, options)
       await mkdir(toHostFilesystemPath(preparationRoot), { recursive: true })
@@ -190,6 +207,7 @@ export function startPreparation({
         lockReason,
         options
       )
+      indexWarming.start()
     })()
   } satisfies PreparationEntry)
   preparations.set(key, entry)
@@ -213,4 +231,5 @@ export async function _resetPreparationPoolForTests(): Promise<void> {
     })
   )
   await resetPendingPreparationDiscardsForTests()
+  resetPreparedIndexWarmingForTests()
 }

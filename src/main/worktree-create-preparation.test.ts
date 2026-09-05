@@ -3,9 +3,11 @@ import type { Store } from './persistence'
 import type { Repo } from '../shared/repo-types'
 import { WORKTREE_CREATE_PREPARATION_DIRECTORY } from '../shared/worktree/create-preparation'
 import { resolveWorktreeAddBaseRef } from '../shared/worktree/base-ref'
+import { createWorktreeCreateTimingRecorder } from './worktree-create-timing'
 
 const mocks = vi.hoisted(() => ({
   mkdir: vi.fn(),
+  warmIndex: vi.fn(),
   listWorktreeGraph: vi.fn(),
   prepareCheckout: vi.fn(),
   finalize: vi.fn(),
@@ -18,6 +20,16 @@ const mocks = vi.hoisted(() => ({
   measureDivergence: vi.fn()
 }))
 
+vi.mock('./git/runner', () => ({ gitExecFileAsync: mocks.warmIndex }))
+vi.mock('./worktree-index-warming-ownership', () => ({
+  WorktreeIndexWarmingOwnership: class {
+    arm = vi.fn().mockResolvedValue(undefined)
+    recordPid = vi.fn()
+    release = vi.fn().mockResolvedValue(undefined)
+  },
+  canReclaimIndexWarming: vi.fn().mockResolvedValue(true),
+  removeIndexWarmingOwnership: vi.fn().mockResolvedValue(undefined)
+}))
 vi.mock('node:fs/promises', () => ({ mkdir: mocks.mkdir }))
 vi.mock('./git/worktree', () => ({ listWorktreeGraph: mocks.listWorktreeGraph }))
 vi.mock('./git/worktree-create-preparation', () => ({
@@ -49,6 +61,7 @@ import {
   _resetWorktreeCreatePreparationsForTests,
   consumePreparedWorktreeCreate,
   hasPendingWorktreeCreatePreparations,
+  recordUnpreparedWorktreeCreate,
   prepareWorktreeCreateForRepo
 } from './worktree-create-preparation'
 
@@ -66,6 +79,7 @@ const repo = { id: 'repo-1', path: '/repo' } as Repo
 const store = { getSettings: () => ({}) } as unknown as Store
 
 beforeEach(() => {
+  mocks.warmIndex.mockReset().mockResolvedValue({ stdout: '' })
   mocks.mkdir.mockReset().mockResolvedValue(undefined)
   mocks.listWorktreeGraph.mockReset().mockResolvedValue([])
   mocks.prepareCheckout.mockReset().mockResolvedValue(undefined)
@@ -153,6 +167,45 @@ describe('worktree create preparation registry', () => {
     ])
 
     expect(mocks.prepareCheckout).toHaveBeenCalledTimes(1)
+  })
+
+  it('separates an unfinished preparation wait from finalization on a hit', async () => {
+    let now = 0
+    let finishPreparation!: () => void
+    mocks.prepareCheckout.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishPreparation = resolve
+        })
+    )
+    const preparation = prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+    await vi.waitFor(() => expect(finishPreparation).toBeTypeOf('function'))
+    const timing = createWorktreeCreateTimingRecorder(() => now)
+    const time = vi.spyOn(timing, 'time')
+    mocks.finalize.mockImplementationOnce(async () => {
+      now += 25
+      return {}
+    })
+    const creation = consumePreparedWorktreeCreate({
+      repoPath: repo.path,
+      workspaceRoot: '/workspace',
+      worktreePath: '/workspace/final',
+      branch: 'feature',
+      baseBranch: 'origin/main',
+      timing
+    })
+    await vi.waitFor(() =>
+      expect(time).toHaveBeenCalledWith('prepared_checkout_wait', expect.any(Function))
+    )
+    expect(mocks.finalize).not.toHaveBeenCalled()
+    now = 3000
+    finishPreparation()
+    await preparation
+    await expect(creation).resolves.toMatchObject({ status: 'hit' })
+    expect(timing.finish().phases).toEqual([
+      { phase: 'prepared_checkout_wait', startedAtMs: 0, durationMs: 3000 },
+      { phase: 'prepared_checkout_finalize', startedAtMs: 3000, durationMs: 25 }
+    ])
   })
 
   it('does not claim a preparation after the selected base changes to another branch', async () => {
@@ -469,6 +522,54 @@ describe('worktree create preparation registry', () => {
     })
   }
 
+  const coldCreate = (options = {}) =>
+    recordUnpreparedWorktreeCreate({
+      repoPath: repo.path,
+      workspaceRoot: '/workspace',
+      baseBranch: 'origin/main',
+      options
+    })
+
+  it('warms the third create after two cold successes without prefetch', async () => {
+    await coldCreate()
+    expect(mocks.prepareCheckout).not.toHaveBeenCalled()
+    await coldCreate()
+    await flushBackgroundWork()
+    expect(mocks.prepareCheckout).toHaveBeenCalledTimes(1)
+    await consumeOnce('third')
+    expect(mocks.finalize).toHaveBeenCalledTimes(1)
+  })
+
+  it('counts a cold success toward a later prepared-create burst', async () => {
+    await coldCreate()
+    await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+    await consumeOnce('second')
+    await flushBackgroundWork()
+    expect(mocks.prepareCheckout).toHaveBeenCalledTimes(2)
+  })
+
+  it('records a retargeted create against the requested base', async () => {
+    await coldCreate()
+    await prepareWorktreeCreateForRepo(store, repo, 'main')
+    await consumeOnce('retargeted')
+    await flushBackgroundWork()
+    expect(mocks.prepareCheckout).toHaveBeenCalledTimes(2)
+    expect(mocks.prepareCheckout.mock.calls[1][2]).toBe('refs/remotes/origin/main')
+  })
+
+  it('reuses a concurrent prefetch and preserves WSL routing without request cancellation', async () => {
+    mocks.getWorktreeOptions.mockReturnValue({ wslDistro: 'Ubuntu' })
+    const controller = new AbortController()
+    controller.abort()
+    await coldCreate({ wslDistro: 'Ubuntu', signal: controller.signal, timeout: 1 })
+    await coldCreate()
+    expect(mocks.prepareCheckout).not.toHaveBeenCalled()
+    await coldCreate({ wslDistro: 'Ubuntu', signal: controller.signal, timeout: 1 })
+    await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+    expect(mocks.prepareCheckout).toHaveBeenCalledTimes(1)
+    expect(mocks.prepareCheckout.mock.calls[0][4]).toEqual({ wslDistro: 'Ubuntu' })
+  })
+
   it('does not re-arm after an isolated create', async () => {
     await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
     await consumeOnce('only')
@@ -745,3 +846,41 @@ describe('worktree create preparation registry', () => {
     await arming
   })
 })
+
+it.each([false, true])(
+  'waits for warming and rejects an unverifiable claim (%s)',
+  async (unverifiable) => {
+    const platform = process.platform
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' })
+    vi.useFakeTimers()
+    let rejectWarming!: (reason: unknown) => void
+    mocks.warmIndex.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectWarming = reject
+      })
+    )
+    try {
+      await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+      await vi.advanceTimersByTimeAsync(1_100)
+      const creation = consumePreparedWorktreeCreate({
+        repoPath: repo.path,
+        workspaceRoot: '/workspace',
+        worktreePath: '/workspace/final',
+        branch: 'feature',
+        baseBranch: 'origin/main'
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.warmIndex.mock.calls[0][1].signal.aborted).toBe(true)
+      expect(mocks.finalize).not.toHaveBeenCalled()
+      rejectWarming(unverifiable ? { terminationUnverifiable: true } : new Error('aborted'))
+      expect(await creation).toMatchObject({ status: unverifiable ? 'miss' : 'hit' })
+      expect(mocks.finalize).toHaveBeenCalledTimes(unverifiable ? 0 : 1)
+      expect(mocks.discard).not.toHaveBeenCalled()
+    } finally {
+      rejectWarming(new Error('cleanup'))
+      await _resetWorktreeCreatePreparationsForTests()
+      vi.useRealTimers()
+      Object.defineProperty(process, 'platform', { configurable: true, value: platform })
+    }
+  }
+)

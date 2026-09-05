@@ -118,6 +118,8 @@ export function buildQuickComposerStartup(input: QuickComposerStartupInput): Qui
             : {}),
           ...(telemetry ? { telemetry } : {})
         }
-      : undefined
+      : agent === null && !input.isRemote
+        ? { command: '' }
+        : undefined
   return { startupPlan, backendStartup, telemetry }
 }

@@ -64,6 +64,21 @@ Trace2 and verifies checked-out content and clean status. Windows, WSL, Linux, a
 SSH keep their existing checkout settings pending host measurements. The setting
 is never persisted to repository or user configuration.
 
+### Optional prepared-index warming
+
+Native macOS preparations may run one background `git update-index --refresh`
+after the checked-out files have aged past whole-second index timestamps. This
+command predates Git 2.25 and keeps Git's ordinary dirty-file checks; the prepared
+worktree real-binary contract exercises it before finalization. Warming is optional,
+not part of preparation readiness, and is canceled and settled before claiming or
+discarding its checkout. Before spawn, a sidecar marker protects recovery; it then
+records the native process-group id. A dead Orca owner is insufficient for cleanup
+while that group is live or unverifiable. Native Mac preparations use the `v2`
+lock-reason prefix so older Orca processes, which only recognize `v1`, do not
+reclaim those checkouts. Missing PID records or failed host probes retain the
+checkout and disable more warming in that process. Windows, WSL, Linux and SSH
+retain their existing paths.
+
 ## Why Not `simple-git`
 
 `simple-git` is a process wrapper around the installed Git binary. Its custom

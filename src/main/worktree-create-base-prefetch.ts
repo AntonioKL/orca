@@ -45,7 +45,8 @@ async function prefetchLocalWorktreeCreateBase(
   repo: Repo,
   baseBranch: string | undefined,
   runtime: WorktreeCreateBasePrefetchRuntime,
-  options: WorktreeCreateBaseGitOptions
+  options: WorktreeCreateBaseGitOptions,
+  onLocalBaseReady?: (baseBranch: string) => void
 ): Promise<string | undefined> {
   // Keep host-routed calls at their original arity so they stay on the runtime's default options.
   const optionArgs: [] | [WorktreeCreateBaseGitOptions] = options.wslDistro ? [options] : []
@@ -83,10 +84,16 @@ async function prefetchLocalWorktreeCreateBase(
     ...optionArgs
   )
   if (remoteTrackingBase) {
-    if (
-      (await runtime.hasRemoteTrackingRef(repo.path, remoteTrackingBase, ...optionArgs)) ||
-      !(await hasLocalWorktreeBaseRef(repo.path, resolvedBaseBranch, options))
-    ) {
+    const hadRemoteRef = await runtime.hasRemoteTrackingRef(
+      repo.path,
+      remoteTrackingBase,
+      ...optionArgs
+    )
+    if (hadRemoteRef || !(await hasLocalWorktreeBaseRef(repo.path, resolvedBaseBranch, options))) {
+      // Finalization re-resolves the fetched commit; materialize the existing tree while fetching.
+      if (hadRemoteRef) {
+        onLocalBaseReady?.(resolvedBaseBranch)
+      }
       await runtime.getOrStartRemoteTrackingBaseRefresh(
         repo.path,
         remoteTrackingBase,
@@ -114,6 +121,7 @@ export async function prefetchWorktreeCreateBase(args: {
   /** Routing for the project's Git host; required so a caller cannot silently
    *  warm up the wrong ref store — pass `{}` for host Git. */
   gitOptions: WorktreeCreateBaseGitOptions
+  prepareLocalCheckout?: (baseBranch: string) => Promise<void>
 }): Promise<string | undefined> {
   if (isFolderRepo(args.repo)) {
     return undefined
@@ -126,5 +134,25 @@ export async function prefetchWorktreeCreateBase(args: {
     await prefetchRemoteWorktreeCreateBase(provider, args.repo, { baseBranch: args.baseBranch })
     return undefined
   }
-  return prefetchLocalWorktreeCreateBase(args.repo, args.baseBranch, args.runtime, args.gitOptions)
+  let preparation: Promise<void> | undefined
+  const prepare = (baseBranch: string): void => {
+    preparation ??= Promise.resolve()
+      .then(() => args.prepareLocalCheckout?.(baseBranch))
+      .catch(() => {})
+  }
+  try {
+    const baseBranch = await prefetchLocalWorktreeCreateBase(
+      args.repo,
+      args.baseBranch,
+      args.runtime,
+      args.gitOptions,
+      args.prepareLocalCheckout ? prepare : undefined
+    )
+    if (baseBranch && args.prepareLocalCheckout) {
+      prepare(baseBranch)
+    }
+    return baseBranch
+  } finally {
+    await preparation
+  }
 }

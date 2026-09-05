@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useEffect } from 'react'
+import { loadTerminalComponent } from '@/lib/terminal-component-loader'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAppStore } from '@/store'
@@ -56,6 +57,10 @@ export default function NewWorkspaceComposerCard(
   props: NewWorkspaceComposerCardProps
 ): React.JSX.Element {
   useTranslation()
+  useEffect(() => {
+    // Load the first workspace's terminal UI while the user fills in the composer.
+    void loadTerminalComponent().catch(() => {})
+  }, [])
   const {
     contextualTourSource,
     containerClassName,

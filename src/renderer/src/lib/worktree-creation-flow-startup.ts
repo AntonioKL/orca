@@ -10,11 +10,16 @@ import type {
 // only seeds the first terminal when the backend did not already spawn it.
 export function buildWorktreeCreationStartupOpt(
   request: WorktreeCreationRequest,
-  backendSpawned: boolean
+  backendSpawned: boolean,
+  hasDefaultTabs = false
 ): WorktreeStartupPayload | undefined {
   const plan = request.startupPlan
-  if (!plan || backendSpawned) {
+  if (backendSpawned) {
     return undefined
+  }
+  if (!plan) {
+    // A newly created blank workspace is an explicit terminal request, including during SSH sync.
+    return request.agent === null && !hasDefaultTabs ? { command: '' } : undefined
   }
   return {
     command: plan.launchCommand,

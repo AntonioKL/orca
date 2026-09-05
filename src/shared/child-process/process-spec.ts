@@ -50,6 +50,8 @@ export type ProcessSpec = {
   terminationBarrier?: boolean | ProcessTerminationBarrier
   /** Called once when the child exits or tree termination is verified. */
   onChildTerminated?: () => void
+  /** Observes the spawned root PID; a POSIX barrier makes this its process group id. */
+  onChildSpawned?: (pid: number) => void
 }
 
 export type ProcessTerminationBarrier = {
@@ -67,6 +69,8 @@ export type ProcessResult = {
   timedOut: boolean
   /** True when stdout or stderr exceeded `maxOutputBytes` and was clipped. */
   outputTruncated?: boolean
+  /** A cancellation barrier exhausted its deadline without proving group termination. */
+  terminationUnverifiable?: boolean
 }
 
 export const DEFAULT_PROCESS_TIMEOUT_MS = 30_000
