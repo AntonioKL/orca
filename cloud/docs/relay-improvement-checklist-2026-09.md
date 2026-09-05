@@ -39,6 +39,10 @@ Three buckets. "Merged" means the code is on `main` and nothing in production ha
 6. Paging channel for auth alerts (5.2): needs the destination from you.
 
 **Open code follow-ups (no gate, nobody assigned)**
+- `verify-mutation` in `cloud-deploy-relay-production.yml`, the multi-target workflow, and the capacity workflow still binds to an exact commit; same exposure #18754 fixed for the same-cap and rehome paths.
+- The root oxlint config ignores `cloud/**`, so `check:code-quality:changed` never inspects relay-ops or the cloud dev scripts; typecheck + vitest is the only gate there.
+- Monitor bars that froze on non-health today: `directorInstancesMin: 5` with `latest-sum` (one-minute instance recycle), `endpointLatencyMs: 2000` on a US-runner probe to asia-east2, `cloudDataMaxAgeMs: 180000` vs Cloud Monitoring publish lag up to 255 s. Recalibrate with a week of data.
+- `parsed()` in `resource-inventory.ts` still returns null on a 200 with a malformed MIG body; a second path to `runtime_power_unknown`.
 - Deploy script strips `ORCA_CLOUD_REFRESH_TOKEN_TTL_DAYS` on every release (3.1 first item).
 - `assignOnce` placement lock still global (4.1 remainder).
 - Region preference (4.2), retries-bar recalibration after a week of Roll 2 data (4.4), pruner `stopReason` alert (1.5).
