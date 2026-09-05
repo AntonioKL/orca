@@ -196,17 +196,20 @@ export function NativeChatToolRun({
   // The turn caret opens the activity group, while each child tool remains
   // collapsed. The global expand toolbar still opens child details together.
   const expandToolLines = expandOverride === undefined ? open : false
-  const activeCategory = latestActiveCall ? nativeChatToolCategory(latestActiveCall.name) : null
-  const uncategorizedActiveIcon =
-    latestActiveCall && COMMAND_TOOL_NAMES.has(normalizedToolName(latestActiveCall.name))
+  // The header is named by the run's latest tool in both states, so its glyph is
+  // chosen once and does not change when that tool settles. State rides on the
+  // trailing mark instead — a leading glyph that flipped to a check would read as
+  // the row changing identity.
+  const headerCall = latestActiveCall ?? calls.at(-1)
+  const headerCategory = headerCall ? nativeChatToolCategory(headerCall.name) : null
+  const uncategorizedHeaderIcon =
+    headerCall && COMMAND_TOOL_NAMES.has(normalizedToolName(headerCall.name))
       ? SquareTerminal
       : Wrench
-  // A classified row keeps its category glyph while it runs, so the icon does not
-  // change when the row settles; anything else keeps the generic tool icon.
-  const ActiveToolIcon =
-    activeCategory === null
-      ? uncategorizedActiveIcon
-      : NATIVE_CHAT_TOOL_GLYPHS[NATIVE_CHAT_TOOL_ICON_NAMES[activeCategory]]
+  const HeaderToolIcon =
+    headerCategory === null
+      ? uncategorizedHeaderIcon
+      : NATIVE_CHAT_TOOL_GLYPHS[NATIVE_CHAT_TOOL_ICON_NAMES[headerCategory]]
   const fallbackLabel =
     callCount === 1
       ? translate('components.native-chat.tool.countOne', '1 tool call')
@@ -238,8 +241,8 @@ export function NativeChatToolRun({
           aria-expanded={open}
           aria-live="polite"
         >
-          <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground">
-            <ActiveToolIcon className="size-4" />
+          <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+            <HeaderToolIcon aria-hidden className="size-3.5" />
           </span>
           <span className="min-w-0 flex-1 animate-pulse truncate text-foreground/85 motion-reduce:animate-none">
             {activeToolLabel(latestActiveCall)}
@@ -254,8 +257,8 @@ export function NativeChatToolRun({
           aria-expanded={open}
         >
           {structuredActivityUi ? (
-            <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground">
-              <Check className="size-3.5" />
+            <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+              <HeaderToolIcon aria-hidden className="size-3.5" />
             </span>
           ) : null}
           <span className="shrink-0 font-mono text-[11px] font-bold text-muted-foreground transition-colors group-hover:text-foreground/80">
@@ -264,6 +267,10 @@ export function NativeChatToolRun({
           <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground transition-colors group-hover:text-foreground/80">
             {summary || fallbackLabel}
           </span>
+          {/* Completion reads as a trailing mark so the leading glyph can stay fixed. */}
+          {structuredActivityUi ? (
+            <Check aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+          ) : null}
           {/* Chevron is revealed on hover when collapsed and points down when open. */}
           <ChevronRight
             className={cn(

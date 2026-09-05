@@ -11,6 +11,18 @@ import { NativeChatToolRun } from './NativeChatToolRun'
 
 afterEach(cleanup)
 
+/** The first glyph of every row — the run header, then each tool line. Named by
+ *  lucide's own class, so an icon that swaps shows up as a different name. */
+function leadingGlyphs(container: HTMLElement): (string | null)[] {
+  return [...container.querySelectorAll('button')].map(
+    (button) =>
+      button
+        .querySelector('svg')
+        ?.getAttribute('class')
+        ?.match(/lucide-[a-z0-9-]+/)?.[0] ?? null
+  )
+}
+
 describe('NativeChatToolRun', () => {
   it('uses the shared clean label for a desktop tool row', () => {
     const blocks: NativeChatBlock[] = [
@@ -232,28 +244,24 @@ describe('NativeChatToolRun', () => {
     expect(screen.getByText('read')).toBeInTheDocument()
   })
 
-  it('keeps one glyph for a category while it runs and once it completes', () => {
-    const running: NativeChatBlock[] = [
-      { type: 'tool-call', name: 'search', input: { query: 'beta' }, state: 'running' }
+  it('holds one glyph for a category across running, completed, and failed', () => {
+    const searchCall = (state: 'running' | 'completed' | 'failed'): NativeChatBlock[] => [
+      { type: 'tool-call', name: 'search', input: { query: 'beta' }, state }
     ]
     const { container, rerender } = render(
-      <NativeChatToolRun blocks={running} expandSignal activeTurnIsWorking />
+      <NativeChatToolRun blocks={searchCall('running')} expandSignal activeTurnIsWorking />
     )
 
-    expect(container.querySelector('.lucide-search')).toBeInTheDocument()
-    expect(container.querySelector('.lucide-wrench')).toBeNull()
+    expect(leadingGlyphs(container)).toEqual(['lucide-search', 'lucide-search'])
 
-    rerender(
-      <NativeChatToolRun
-        blocks={[
-          { type: 'tool-call', name: 'search', input: { query: 'beta' }, state: 'completed' }
-        ]}
-        expandSignal
-        activeTurnIsWorking={false}
-      />
-    )
+    for (const settled of ['completed', 'failed'] as const) {
+      rerender(
+        <NativeChatToolRun blocks={searchCall(settled)} expandSignal activeTurnIsWorking={false} />
+      )
 
-    expect(container.querySelector('.lucide-search')).toBeInTheDocument()
+      // A leading check here would read as the row changing identity on settle.
+      expect(leadingGlyphs(container)).toEqual(['lucide-search', 'lucide-search'])
+    }
   })
 
   it('falls back to the terminal glyph rather than an empty slot for an unmodelled row', () => {
