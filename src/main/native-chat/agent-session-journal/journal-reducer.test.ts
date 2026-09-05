@@ -435,10 +435,11 @@ describe('re-adding a tombstoned row', () => {
     expect(renderJournalState(state).items.map((item) => item.body)).toEqual([text('second')])
   })
 
-  // The item builder outranks the tombstone; the tombstone builder can only stay
-  // correct because `upsertItem` clears the tombstone whenever a re-add wins.
-  // That invariant lives in the reducer, so pin it here: without it a second
-  // removal would build a revision that loses to the first tombstone.
+  // `upsertItem` clearing the tombstone on a re-add is a map-state invariant:
+  // `items` and `tombstones` stay disjoint, so a re-added row is never both
+  // present and removed. Revision ordering is now independent of it —
+  // `buildJournalTombstoneRow` takes `max(itemRevision, tombstoneRevision) + 1`
+  // — so what this pins is the map state itself, not the ranking.
   it('removes the row again after it was re-added', () => {
     const identity: AgentJournalItemIdentity = { provider: 'orca', clientMessageId: 'roster' }
     const itemId = agentJournalItemKey(identity)

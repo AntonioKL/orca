@@ -28,6 +28,7 @@ import {
   decodeOmpTranscriptLine
 } from '../transcript-line-decoders'
 import { decodeTranscriptStream } from '../transcript-stream-lines'
+import { boundSubagentEntryId } from '../subagent-entry-id-bounds'
 import { createLegacyIdentityTracker } from './journal-legacy-identity'
 import type { JournalReplacementItem } from './journal-epoch-replacement'
 import {
@@ -275,7 +276,9 @@ function boundBlock(block: NativeChatBlock, limits: JournalPayloadLimits): Nativ
       ...block,
       agents: block.agents.slice(0, MAX_LEGACY_IMPORT_SUBAGENTS).map((agent) => ({
         ...agent,
-        id: boundInlineText(agent.id, limits).text,
+        // The id is the roster key, so it is bounded with a digest rather than
+        // clipped to a prefix that two distinct children could share.
+        id: boundSubagentEntryId(agent.id),
         label: boundInlineText(agent.label, limits).text
       }))
     }

@@ -473,6 +473,45 @@ describe('payload bounds on import', () => {
     expect(block.agents[0]?.id.length).toBeLessThan(oversized.length)
     expect(block.agents[0]?.id.startsWith('z')).toBe(true)
   })
+
+  it('bounds a roster id in the shared format, keeping a shared prefix distinct', async () => {
+    // The id is the roster key: it takes the same bounded-id format the wires
+    // use, so a later wire bound is a no-op instead of a second, merging clip.
+    const head = 'y'.repeat(512)
+    const journal = await open('claude', CLAUDE_SESSION)
+    await appendLegacyTranscriptMessages({
+      journal,
+      agent: 'claude',
+      sessionId: CLAUDE_SESSION,
+      fence: 1,
+      messages: [
+        {
+          id: 'legacy-roster-collision',
+          role: 'assistant',
+          timestamp: null,
+          source: 'transcript',
+          blocks: [
+            {
+              type: 'subagent-group',
+              groupId: 'group-1',
+              agents: [
+                { id: `${head}-one`, label: 'Audit', state: 'working' as const },
+                { id: `${head}-two`, label: 'Audit', state: 'working' as const }
+              ]
+            }
+          ]
+        }
+      ]
+    })
+
+    const body = journal.snapshot().items[0]?.body
+    const block = body?.kind === 'message' ? body.blocks[0] : undefined
+    if (block?.type !== 'subagent-group') {
+      throw new Error('expected a subagent-group block')
+    }
+    expect(block.agents[0]?.id).not.toBe(block.agents[1]?.id)
+    expect(block.agents[0]?.id).toHaveLength(512)
+  })
 })
 
 describe('import failures', () => {

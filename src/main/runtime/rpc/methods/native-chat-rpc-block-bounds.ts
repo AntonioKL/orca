@@ -5,6 +5,7 @@
 // block variant needs its own arm: the fall-through hands the block over whole.
 
 import type { NativeChatBlock, NativeChatMessage } from '../../../../shared/native-chat-types'
+import { boundSubagentEntryId } from '../../../native-chat/subagent-entry-id-bounds'
 import type { RpcContext } from '../core'
 import { sanitizeNativeChatRpcImageBlock } from './native-chat-rpc-image-block'
 
@@ -22,6 +23,8 @@ const MOBILE_TEXT_BLOCK_CHAR_CAP = 64_000
 // bounds how many children a producer put in one, nor how long a child's id or
 // label is — an imported legacy transcript carries whatever the file held.
 const MOBILE_SUBAGENT_ENTRIES_CAP = 64
+// The label is display text and clips; the id is the roster KEY and must stay
+// unique, so it goes through the shared bounded-id format the other wires use.
 const MOBILE_SUBAGENT_TEXT_CHAR_CAP = 512
 const MOBILE_TOOL_INPUT_ITEMS_CAP = 20
 const MOBILE_TOOL_INPUT_NODE_CAP = 100
@@ -60,7 +63,7 @@ function sanitizeBlock(
       ...block,
       agents: block.agents.slice(0, MOBILE_SUBAGENT_ENTRIES_CAP).map((agent) => ({
         ...agent,
-        id: clip(agent.id, MOBILE_SUBAGENT_TEXT_CHAR_CAP),
+        id: boundSubagentEntryId(agent.id),
         label: clip(agent.label, MOBILE_SUBAGENT_TEXT_CHAR_CAP)
       }))
     }

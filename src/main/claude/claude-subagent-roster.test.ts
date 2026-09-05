@@ -283,6 +283,18 @@ describe('ClaudeSubagentRoster', () => {
       roster.observeSystemFrame(started({ task_id: 'task-3', description: 'Audit' }))
       expect(roles().map((agent) => agent.label)).toEqual(['Audit 2', 'Audit 3'])
     })
+
+    it('never generates a label a provider-supplied one already took', () => {
+      const { roster, roles } = harness()
+      roster.observeSystemFrame(started({ task_id: 'task-1', description: 'Audit' }))
+      roster.observeSystemFrame(started({ task_id: 'task-2', description: 'Audit' }))
+      // The provider's own name for the third child is the label the ordinal just
+      // generated for the second; a per-base counter would print it twice.
+      roster.observeSystemFrame(started({ task_id: 'task-3', description: 'Audit 2' }))
+      const labels = roles().map((agent) => agent.label)
+      expect(labels).toEqual(['Audit', 'Audit 2', 'Audit 2 2'])
+      expect(new Set(labels).size).toBe(labels.length)
+    })
   })
 
   describe('child traffic for an id the CLI never declared', () => {

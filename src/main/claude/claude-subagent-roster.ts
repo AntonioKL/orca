@@ -46,11 +46,11 @@ type RosterGroup = {
   identity: AgentJournalItemIdentity
   /** Insertion order is the display order; the map holds the state. */
   entries: Map<string, TrackedEntry>
-  /** High-water mark of claims per label, so a repeat gets an ordinal suffix.
-   *  It never decreases: re-issuing an ordinal would print two identical rows.
-   *  Growing it past the entry cap takes a stream that re-announces a rostered
-   *  agent as a shell task, which churns the row far harder than the map. */
-  labelCounts: Map<string, number>
+  /** Every RENDERED label this group has handed out. Nothing releases one:
+   *  re-issuing a label would print two identical rows. Growing it past the
+   *  entry cap takes a stream that re-announces a rostered agent as a shell
+   *  task, which churns the row far harder than the set. */
+  claimedLabels: Set<string>
   /** Last body written, so an idempotent replay writes no new revision. */
   lastSerialized: string | null
 }
@@ -338,7 +338,7 @@ export class ClaudeSubagentRoster {
       groupId,
       identity: claudeSubagentGroupIdentity(groupId),
       entries: new Map(),
-      labelCounts: new Map(),
+      claimedLabels: new Set(),
       lastSerialized: null
     }
     this.groups.set(groupId, group)
@@ -360,11 +360,16 @@ export class ClaudeSubagentRoster {
   }
 
   /** Two children can share a description; the ordinal keeps their rows apart
-   *  without inventing a name the provider never sent. */
+   *  without inventing a name the provider never sent. The probe is over the
+   *  labels actually rendered, not a per-base counter: a generated `Audit 2`
+   *  must not collide with a provider that names its own child `Audit 2`. */
   private claimLabel(group: RosterGroup, base: string): string {
-    const seen = group.labelCounts.get(base) ?? 0
-    group.labelCounts.set(base, seen + 1)
-    return seen === 0 ? base : `${base} ${seen + 1}`
+    let candidate = base
+    for (let ordinal = 2; group.claimedLabels.has(candidate); ordinal++) {
+      candidate = `${base} ${ordinal}`
+    }
+    group.claimedLabels.add(candidate)
+    return candidate
   }
 
   private write(group: RosterGroup): void {

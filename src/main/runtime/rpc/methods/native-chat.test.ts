@@ -91,6 +91,7 @@ vi.mock('../../../native-chat/transcript-watch', () => ({
   }
 }))
 
+import { boundSubagentEntryId } from '../../../native-chat/subagent-entry-id-bounds'
 import { NATIVE_CHAT_METHODS } from './native-chat'
 
 function makeMessage(text: string): NativeChatMessage {
@@ -217,8 +218,10 @@ describe('nativeChat.readSession clientKind truncation gating', () => {
     }
     expect(block.agents).toHaveLength(64)
     expect(block.agents[0].label).toBe(`${'l'.repeat(512)}\n… (truncated)`)
-    // The id is as untrusted as the label on an imported roster.
-    expect(block.agents[0].id).toBe(`${`task-0-${'i'.repeat(600)}`.slice(0, 512)}\n… (truncated)`)
+    // The id is as untrusted as the label on an imported roster, but it is the
+    // roster key: it is bounded with a digest, never clipped to a bare prefix.
+    expect(block.agents[0].id).toHaveLength(512)
+    expect(block.agents[0].id).toBe(boundSubagentEntryId(`task-0-${'i'.repeat(600)}`))
   })
 
   it('clips a pathological text block at the safety ceiling for mobile clients', async () => {
