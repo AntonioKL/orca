@@ -171,6 +171,17 @@ function workItemIdentity(item: WorkspaceIntentWorkItem): string {
   return `Issue ${item.number}`
 }
 
+// Why: Linear and Jira lead the name with their issue key, so number-keyed
+// providers lead with the number they are cited by — `#165`, or `!165` for a
+// GitLab merge request. getLinkedWorkItemTitleSubject already strips the number
+// out of the title, so this restores it in one predictable place.
+function numberPrefix(item: WorkspaceIntentWorkItem): string {
+  if (item.number <= 0) {
+    return ''
+  }
+  return `${item.type === 'mr' ? '!' : '#'}${item.number}`
+}
+
 export function getLinkedWorkItemWorkspaceName(
   item: WorkspaceIntentWorkItem
 ): WorkspaceIntentName | null {
@@ -181,7 +192,8 @@ export function getLinkedWorkItemWorkspaceName(
       .replace(new RegExp(`^${escapeRegex(identifier)}\\s*[:-]?\\s*`, 'i'), '')
       .trim()
   }
-  const displayName = [identifier, subject].filter(Boolean).join(' ') || workItemIdentity(item)
+  const prefix = identifier ?? numberPrefix(item)
+  const displayName = [prefix, subject].filter(Boolean).join(' ') || workItemIdentity(item)
   const seedName = slugifyForWorkspaceName(displayName)
   if (!seedName) {
     return null
