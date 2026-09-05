@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import type { SearchAddon } from '@xterm/addon-search'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import TerminalSearch from './TerminalSearch'
@@ -11,12 +11,23 @@ vi.mock('@/i18n/i18n', () => ({
 
 afterEach(cleanup)
 
+type ResultsListener = (event: { resultIndex: number; resultCount: number }) => void
+
+const emitResults = new WeakMap<SearchAddon, ResultsListener>()
+
 function createSearchAddon(): SearchAddon {
-  return {
+  let listener: ResultsListener | undefined
+  const addon = {
     findNext: vi.fn(() => true),
     findPrevious: vi.fn(() => true),
-    clearDecorations: vi.fn()
+    clearDecorations: vi.fn(),
+    onDidChangeResults: vi.fn((next: ResultsListener) => {
+      listener = next
+      return { dispose: vi.fn() }
+    })
   } as unknown as SearchAddon
+  emitResults.set(addon, (event) => listener?.(event))
+  return addon
 }
 
 function renderSearch(searchAddon: SearchAddon): ReturnType<typeof render> {
@@ -82,5 +93,38 @@ describe('TerminalSearch cleanup', () => {
 
     expect(addon.clearDecorations).toHaveBeenCalledTimes(1)
     expect(addon.findNext).toHaveBeenCalledWith('')
+  })
+})
+
+describe('TerminalSearch match count', () => {
+  it('reports matches found beyond the visible screen', async () => {
+    const addon = createSearchAddon()
+    const view = renderSearch(addon)
+
+    fireEvent.change(view.getByPlaceholderText('Search...'), { target: { value: 'needle' } })
+    await waitFor(() => expect(addon.findNext).toHaveBeenCalled())
+
+    act(() => emitResults.get(addon)?.({ resultIndex: 2, resultCount: 47 }))
+
+    await waitFor(() =>
+      expect(view.container.querySelector('[data-terminal-search-match-count]')?.textContent).toBe(
+        '3/47'
+      )
+    )
+  })
+
+  it('drops the count when the query is erased', async () => {
+    const addon = createSearchAddon()
+    const view = renderSearch(addon)
+
+    fireEvent.change(view.getByPlaceholderText('Search...'), { target: { value: 'needle' } })
+    await waitFor(() => expect(addon.findNext).toHaveBeenCalled())
+    act(() => emitResults.get(addon)?.({ resultIndex: 0, resultCount: 3 }))
+
+    fireEvent.change(view.getByPlaceholderText('Search...'), { target: { value: '' } })
+
+    await waitFor(() =>
+      expect(view.container.querySelector('[data-terminal-search-match-count]')).toBeNull()
+    )
   })
 })
