@@ -10,6 +10,7 @@ Slack, GitHub comments, or any other channel to reach a human during the run.
 
 === CLI COMMANDS ===
 
+\`\`\`sh
   # Report the terminal task outcome (REQUIRED exactly once).
   #
   # RULE: --body must be a 3-sentence executive summary (what you did,
@@ -61,6 +62,7 @@ Slack, GitHub comments, or any other channel to reach a human during the run.
   # start a new file and after a test run — and once more immediately before
   # you send worker_done, so a redirect lands before the task settles.
   orca orchestration check --terminal term_WORKER --json
+\`\`\`
 
 === AFTER YOU SEND worker_done ===
 
