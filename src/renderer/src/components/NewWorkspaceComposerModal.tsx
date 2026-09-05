@@ -185,11 +185,11 @@ function QuickTabBody({
   }, [])
 
   useEffect(() => {
-    if (!active || quickAgent !== null || createDisabled) {
+    if (!active || createDisabled) {
       return
     }
     let cancelled = false
-    void prepareQuickWorkspace(() => cancelled)
+    void prepareQuickWorkspace(quickAgent, () => cancelled)
     return () => {
       cancelled = true
     }

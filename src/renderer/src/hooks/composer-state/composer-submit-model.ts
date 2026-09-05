@@ -110,7 +110,7 @@ export type ComposerSubmitModel = {
   ) => QuickSubmitSource | null
   resetForNextCreate: () => void
   submit: () => Promise<void>
-  prepareQuickWorkspace: (isCancelled: () => boolean) => Promise<void>
+  prepareQuickWorkspace: (agent: TuiAgent | null, isCancelled: () => boolean) => Promise<void>
   submitQuick: (agent: TuiAgent | null) => Promise<void>
   submitFolderTarget: (requestedAgent: TuiAgent | null) => Promise<void>
 }

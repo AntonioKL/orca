@@ -114,9 +114,7 @@ export type Worktree = {
    *  grant newly-created worktrees a short grace window at the top of Recent,
    *  immune to ambient PTY-bump reordering in other worktrees. */
   createdAt?: number
-  /** Agent selected when Orca originally created the worktree. Used only to
-   *  seed a replacement terminal if the user later reopens the worktree after
-   *  closing every visible surface. */
+  /** Agent selected at creation; metadata alone never requests an agent launch. */
   createdWithAgent?: TuiAgent
   /** True while an auto-named workspace is waiting for the first agent message
    *  to drive the branch/title rename. */

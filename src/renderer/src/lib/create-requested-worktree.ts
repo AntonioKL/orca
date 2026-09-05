@@ -12,8 +12,11 @@ export function createRequestedWorktree(
 ): Promise<CreateWorktreeResult> {
   const provisionedRoot = getProvisionedRootCreateOptions(preparedRequest)
   const structuredLaunch = preparedRequest.agentLaunchRoute === 'structured-native-chat'
+  const deferAgentLaunch = background && preparedRequest.agent !== null
   const backendStartup =
-    provisionedRoot || structuredLaunch ? undefined : resolveBackendDraftStartup(preparedRequest)
+    provisionedRoot || structuredLaunch || deferAgentLaunch
+      ? undefined
+      : resolveBackendDraftStartup(preparedRequest)
   return useAppStore
     .getState()
     .createWorktree(
@@ -54,7 +57,8 @@ export function createRequestedWorktree(
           ? { linkedTaskSourceContext: preparedRequest.linkedTaskSourceContext }
           : {}),
         // Why: the remote host must own task-draft startup so its initial terminal is the agent, not an idle fallback shell.
-        ...(!structuredLaunch &&
+        ...(!deferAgentLaunch &&
+        !structuredLaunch &&
         !backendStartup &&
         preparedRequest.agent &&
         preparedRequest.launchDraftPrompt

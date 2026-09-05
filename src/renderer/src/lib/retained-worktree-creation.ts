@@ -3,12 +3,13 @@ import type { WorktreeCreationRequest } from './pending-worktree-creation'
 
 export function canRetainComposerWorktree(request: WorktreeCreationRequest): boolean {
   return (
-    request.agent === null &&
-    (request.startup === undefined || request.startup.command === '') &&
-    !request.startup?.launchAgent &&
-    !request.startup?.launchConfig &&
-    !request.startupPlan &&
-    !request.launchDraftPrompt &&
+    (request.agent !== null
+      ? Boolean(request.startupPlan)
+      : (request.startup === undefined || request.startup.command === '') &&
+        !request.startup?.launchAgent &&
+        !request.startup?.launchConfig &&
+        !request.startupPlan &&
+        !request.launchDraftPrompt) &&
     !request.issueCommand &&
     !request.ephemeralVmRecipe &&
     !request.ephemeralVmRuntimeId &&

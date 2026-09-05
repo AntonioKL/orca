@@ -81,9 +81,7 @@ export function useQuickCreationExecution(input: QuickCreationExecutionInput) {
       if (
         !isCancelled ||
         (preparation &&
-          (!selectedRepoIsGit ||
-            requestedAgent !== null ||
-            (ephemeralVmsEnabled && selectedEphemeralVmRecipeId)))
+          (!selectedRepoIsGit || (ephemeralVmsEnabled && selectedEphemeralVmRecipeId)))
       ) {
         return
       }

@@ -205,7 +205,7 @@ export function useQuickSubmitAction(input: QuickSubmitActionInput) {
   )
 
   const prepareQuickWorkspace = useCallback(
-    (isCancelled: () => boolean) => submitQuick(null, { isCancelled }),
+    (agent: TuiAgent | null, isCancelled: () => boolean) => submitQuick(agent, { isCancelled }),
     [submitQuick]
   )
   return { submitQuick, prepareQuickWorkspace }

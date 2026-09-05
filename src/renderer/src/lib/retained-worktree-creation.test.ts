@@ -26,6 +26,28 @@ const result = {
 } as CreateWorktreeResult
 
 describe('retained composer worktree creation', () => {
+  it('retains an agent checkout and preserves the exact launch plan for Create', async () => {
+    const checkout = { worktree: result.worktree }
+    const create = vi.fn(async () => checkout)
+    const controller = createRetainedWorktreeCreation(create)
+    const agentRequest = request({
+      agent: 'codex',
+      startup: { command: 'codex', launchAgent: 'codex' },
+      startupPlan: {
+        agent: 'codex',
+        launchCommand: 'codex',
+        expectedProcess: 'codex',
+        followupPrompt: null,
+        launchConfig: { agentArgs: '', agentEnv: {} }
+      },
+      launchDraftPrompt: 'Keep this unsent'
+    })
+    expect(controller.start(agentRequest, 'owner')).toBe(true)
+    expect(await controller.take(agentRequest, 'owner')).toBe(checkout)
+    expect(create).toHaveBeenCalledExactlyOnceWith(agentRequest)
+    expect(controller.take(agentRequest, 'owner')).toBeNull()
+  })
+
   it('retains a remote blank checkout whose terminal starts on activation', async () => {
     const create = vi.fn(async () => ({ worktree: result.worktree }))
     const controller = createRetainedWorktreeCreation(create)
