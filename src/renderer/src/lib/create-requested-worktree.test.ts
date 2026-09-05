@@ -10,7 +10,10 @@ vi.mock('@/lib/worktree-draft-startup-view-mode', () => ({
   resolveBackendDraftStartup: (request: { startup?: unknown }) => request.startup
 }))
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.stubGlobal('window', { location: { pathname: '/' }, api: { worktrees: {} } })
+})
 
 describe('durable composer creation launch boundary', () => {
   it.each(['command', 'draft'] as const)(
@@ -37,6 +40,98 @@ describe('durable composer creation launch boundary', () => {
       expect(request).toEqual(snapshot)
     }
   )
+
+  it('prepares the original agent command behind an owner capability without mutating the request', async () => {
+    const supportsDeferredStartup = vi.fn().mockResolvedValue(true)
+    vi.stubGlobal('window', {
+      location: { pathname: '/' },
+      api: { worktrees: { supportsDeferredStartup } }
+    })
+    const request = makeRequest({
+      agent: 'codex',
+      startupPlan: {
+        agent: 'codex',
+        launchCommand: 'codex --model fixture',
+        expectedProcess: 'codex',
+        followupPrompt: null,
+        env: { PROJECT: 'fixture' },
+        launchConfig: { agentArgs: '--model fixture', agentEnv: { PROJECT: 'fixture' } }
+      }
+    })
+    const snapshot = structuredClone(request)
+
+    await createRequestedWorktree('reservation', request, true)
+
+    expect(supportsDeferredStartup).toHaveBeenCalledWith('repo-1')
+    expect(createWorktree.mock.calls[0][16]).toMatchObject({
+      command: 'codex --model fixture',
+      launchAgent: 'codex',
+      env: { PROJECT: 'fixture' },
+      launchToken: 'reservation',
+      deferredStartupOperationId: 'reservation',
+      activate: false
+    })
+    expect(request).toEqual(snapshot)
+  })
+
+  it.each(['unsupported', 'disconnected'])(
+    'keeps checkout-only agent preparation when the owner is %s',
+    async (owner) => {
+      const supportsDeferredStartup = vi.fn()
+      if (owner === 'unsupported') {
+        supportsDeferredStartup.mockResolvedValue(false)
+      } else {
+        supportsDeferredStartup.mockRejectedValue(new Error('connection lost'))
+      }
+      vi.stubGlobal('window', {
+        location: { pathname: '/' },
+        api: { worktrees: { supportsDeferredStartup } }
+      })
+      await createRequestedWorktree(
+        'reservation',
+        makeRequest({
+          agent: 'codex',
+          startup: { command: 'codex', launchAgent: 'codex' },
+          launchDraftPrompt: 'Unsent task',
+          startupPlan: {
+            agent: 'codex',
+            launchCommand: 'codex',
+            expectedProcess: 'codex',
+            followupPrompt: null,
+            launchConfig: { agentArgs: '', agentEnv: {} }
+          }
+        }),
+        true
+      )
+      expect(createWorktree.mock.calls[0][16]).toBeUndefined()
+      expect(createWorktree.mock.calls[0][25]).not.toHaveProperty('startupDraft')
+    }
+  )
+
+  it('never asks a paired web client to prepare a local agent shell', async () => {
+    const supportsDeferredStartup = vi.fn(async () => true)
+    vi.stubGlobal('window', {
+      __ORCA_WEB_CLIENT__: true,
+      location: { pathname: '/' },
+      api: { worktrees: { supportsDeferredStartup } }
+    })
+    await createRequestedWorktree(
+      'reservation',
+      makeRequest({
+        agent: 'codex',
+        startupPlan: {
+          agent: 'codex',
+          launchCommand: 'codex',
+          expectedProcess: 'codex',
+          followupPrompt: null,
+          launchConfig: { agentArgs: '', agentEnv: {} }
+        }
+      }),
+      true
+    )
+    expect(supportsDeferredStartup).not.toHaveBeenCalled()
+    expect(createWorktree.mock.calls[0][16]).toBeUndefined()
+  })
 
   it('preserves ordinary backend agent launch', async () => {
     const startup = { command: 'codex', launchAgent: 'codex' as const }

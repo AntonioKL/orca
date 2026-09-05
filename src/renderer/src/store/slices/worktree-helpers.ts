@@ -222,6 +222,7 @@ export type WorktreeSlice = {
       request?: PendingWorktreeCreation['request']
       provisioningLog?: string
       structuredLaunchRecoveryWorktreeId?: string
+      deferredStartupRecovery?: CreateWorktreeResult
     }
   ) => void
   /** Drop a pending entry, clearing the active surface if it pointed at this

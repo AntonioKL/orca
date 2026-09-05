@@ -1,3 +1,4 @@
+import { commitRuntimeStartupEffects } from './spawn-startup-effects'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
 import { ptyOwnership, ptyIncarnationById, deletePtyOwnership } from '../provider/ownership-state'
 import { ptySizes } from '../delivery/visibility-state'
@@ -7,7 +8,6 @@ import {
   recordCodexPaneAccountForSpawn,
   codexReattachedHomeRouteField
 } from '../host-env/codex-home'
-import { markClaudePtySpawned } from '../../../claude-accounts/live-pty-gate'
 import { registerPty } from '../../../memory/pty-registry'
 import { rememberPaneKeyForPty } from '../pane/key-state'
 import {
@@ -16,13 +16,6 @@ import {
   rendererSerializerReadiness
 } from '../pane/serializer-state'
 import { seedTerminalRestoreRecordsFromSpawnResult } from '../pane/agent-session-owners'
-import { track } from '../../../telemetry/client'
-import { getCohortAtEmit } from '../../../telemetry/cohort-classifier'
-import {
-  agentKindSchema,
-  launchSourceSchema,
-  requestKindSchema
-} from '../../../../shared/telemetry-events'
 import { persistAdmittedStablePaneBinding } from '../pane/stable-owner'
 import { claimSshPaneLease } from '../pane/ssh-pane-lease-claim'
 import {
@@ -221,26 +214,7 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
   }
   // Why: runtime-controller creates (headless serve, CLI, splits) adopt surviving daemon sessions too; without this seed their records stay blank.
   seedTerminalRestoreRecordsFromSpawnResult(ctx.deps.runtime, ctx.result)
-  // Why: arms main's per-PTY Command Code output detector from the launch command (renderer startupCommand parity).
-  if (!ctx.stablePaneOwner) {
-    ctx.deps.runtime?.noteTerminalSpawnCommand?.(ctx.result.id, ctx.launchCommand ?? null)
-  }
-  if (ctx.isClaudeLaunch && !ctx.stablePaneOwner) {
-    markClaudePtySpawned(ctx.result.id)
-  }
-  if (args.telemetry && !ctx.stablePaneOwner) {
-    const agentKindParse = agentKindSchema.safeParse(args.telemetry.agent_kind)
-    const launchSourceParse = launchSourceSchema.safeParse(args.telemetry.launch_source)
-    const requestKindParse = requestKindSchema.safeParse(args.telemetry.request_kind)
-    if (agentKindParse.success && launchSourceParse.success && requestKindParse.success) {
-      track('agent_started', {
-        agent_kind: agentKindParse.data,
-        launch_source: launchSourceParse.data,
-        request_kind: requestKindParse.data,
-        ...getCohortAtEmit()
-      })
-    }
-  }
+  commitRuntimeStartupEffects(ctx)
   // Why: runtime-owned CLI PTYs bypass the renderer pty:spawn handler; record paneKey here too since hook titles and cache cleanup need this reverse lookup.
   const paneKey = rememberPaneKeyForPty(ctx.result.id, ctx.env?.ORCA_PANE_KEY)
   const pendingSerializer = paneKey ? pendingByPaneKey.get(paneKey) : undefined

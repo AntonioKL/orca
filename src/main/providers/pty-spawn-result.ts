@@ -2,10 +2,12 @@ import type { TerminalOscLinkRange } from '../../shared/terminal-osc-link-ranges
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { AgentSessionClaimedSpawnResult } from '../../shared/agent-session-host-authority'
 import type { PtyIncarnationId } from '../../shared/pty-incarnation'
+import type { DeferredStartupStatus } from '../../shared/deferred-startup-release'
 import type { PtySourceReceivingActivation } from '../../shared/pty-source-receiving-activation'
 import type { TerminalOwner } from '../../shared/terminal-owner'
 
 export type PtySpawnResult = {
+  deferredStartupStatus?: DeferredStartupStatus
   agentSessionEnsure?: AgentSessionClaimedSpawnResult
   /** App-facing PTY id. Remote providers must return globally routable ids,
    *  not relay-local handles, because renderer/runtime IPC routes by this key. */

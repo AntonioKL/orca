@@ -185,6 +185,7 @@ export type CreateWorktreeResult = {
   localBaseRefRefresh?: LocalBaseRefRefreshResult
   localBaseRefUpdateSuggestion?: LocalBaseRefUpdateSuggestion
   startupTerminal?: {
+    deferredStartup?: { operationId: string; incarnationId: string | null }
     spawned: boolean
     handle?: string
     tabId?: string

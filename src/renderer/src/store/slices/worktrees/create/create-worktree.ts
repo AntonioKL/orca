@@ -1,4 +1,5 @@
 import type { WorktreeSlice } from '../../worktree-helpers'
+import { isWebClientLocation } from '@/lib/web-client-location'
 import type { WorktreeSliceGet, WorktreeSliceSet } from '../listing/worktree-slice-types'
 import type { CreateWorktreeResult } from '../../../../../../shared/worktree/create-types'
 import {
@@ -44,6 +45,12 @@ async function runCreateAttempt(
   attempt: WorktreeCreateAttempt,
   target: RuntimeTarget
 ): Promise<CreateAttemptOutcome> {
+  if (
+    request.startup?.deferredStartupOperationId !== undefined &&
+    (target.kind !== 'local' || isWebClientLocation())
+  ) {
+    throw new Error('deferred_startup_unavailable')
+  }
   const provisionedRoot = request.options?.provisionedRoot
   const create = async (
     parentWorkspace: WorktreeCreateAttempt['parentWorkspace']

@@ -13,7 +13,15 @@ export type WorktreeSetupLaunch = {
   waitForAgentStartup?: boolean
 }
 
+export type WorktreeStartupReleaseArgs = {
+  worktreeId: string
+  ptyId: string
+  expectedIncarnationId: string
+  operationId: string
+}
+
 export type WorktreeStartupLaunch = {
+  deferredStartupOperationId?: string
   /** False prepares the terminal without selecting the workspace. */
   activate?: boolean
   command: string

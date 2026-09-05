@@ -2,6 +2,7 @@ import type { SessionOptions } from './session-options'
 import type { SessionOutputPlane } from './session-output-plane'
 import type { TerminalShellRecoveryBarrier } from './terminal-shell-recovery-barrier'
 import { PtyStartupIngress } from '../../shared/pty-startup-ingress'
+import type { DeferredStartupStatus } from '../../shared/deferred-startup-release'
 import { extractOnlyTerminalQueryReplies } from '../../shared/terminal-query-reply'
 import {
   SessionDeferredStartup,
@@ -28,6 +29,10 @@ export class SessionStartupInput {
   constructor({ deferredStartup, ...options }: SessionStartupInputOptions) {
     this.options = options
     this.deferred = deferredStartup ? new SessionDeferredStartup(deferredStartup) : undefined
+  }
+
+  get deferredStartupStatus(): DeferredStartupStatus | undefined {
+    return this.deferred?.status
   }
 
   write(data: string): void {

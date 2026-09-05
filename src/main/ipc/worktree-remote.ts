@@ -1,3 +1,4 @@
+import { supportsDeferredStartupFromRuntimeController } from './pty/runtime/deferred-startup'
 /* eslint-disable max-lines */
 // Why: worktree create helpers (local + remote) split out of worktrees.ts; the cohesive create flow runs this file just over the per-file line limit.
 
@@ -402,6 +403,13 @@ async function spawnLocalStartupAndSetupTerminals(args: {
     return { didSpawnSetup: false }
   }
 
+  if (
+    startup.deferredStartupOperationId !== undefined &&
+    !(await supportsDeferredStartupFromRuntimeController(null))
+  ) {
+    return { didSpawnSetup: false }
+  }
+
   let warning: string | undefined
   let startupTerminalHandle: string | null = null
   let startupTerminal: CreateWorktreeResult['startupTerminal']
@@ -445,6 +453,8 @@ async function spawnLocalStartupAndSetupTerminals(args: {
     }
     const terminal = await runtime.createTerminal(`id:${worktree.id}`, {
       command: sequencedStartup.command,
+      deferredStartupOperationId: sequencedStartup.deferredStartupOperationId,
+      launchToken: sequencedStartup.launchToken,
       ...(setup ? { claudeAgentTeamsSourceCommand: startup.command } : {}),
       env: sequencedStartup.env,
       ...(sequencedStartup.launchConfig ? { launchConfig: sequencedStartup.launchConfig } : {}),
@@ -462,7 +472,15 @@ async function spawnLocalStartupAndSetupTerminals(args: {
       tabId: terminal.tabId,
       paneKey: terminal.paneKey,
       ptyId: terminal.ptyId,
-      surface: terminal.surface
+      surface: terminal.surface,
+      ...(sequencedStartup.deferredStartupOperationId
+        ? {
+            deferredStartup: {
+              operationId: sequencedStartup.deferredStartupOperationId,
+              incarnationId: terminal.incarnationId ?? null
+            }
+          }
+        : {})
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -1849,6 +1867,9 @@ export async function createRemoteWorktree(
   store: Store,
   mainWindow: BrowserWindow
 ): Promise<CreateWorktreeResult> {
+  if (args.startup?.deferredStartupOperationId !== undefined) {
+    throw new Error('deferred_startup_unavailable')
+  }
   const timing = createWorktreeCreateTimingRecorder()
   const provider = requireSshGitProvider(repo.connectionId!)
   const fsProvider = getSshFilesystemProvider(repo.connectionId!)

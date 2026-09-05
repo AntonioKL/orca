@@ -22,17 +22,22 @@
       "providers": ["daemon", "local", "wsl", "ssh", "remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["daemon"],
-      "coverageNotes": "Actual Session and TerminalHost contracts run on macOS. Windows and WSL argv branches are mocked. Daemon v37 preparation and release run over authenticated control sockets; older daemon preparation and unsupported direct/SSH providers fail closed. Runtime background terminal creation now forwards deferral with fresh-owner admission; the multi-daemon router releases on the exact retained owner. An ad hoc native macOS zsh PTY check verified profile-before-release and one stand-in command execution. No composer caller enables this yet; real-agent readiness, rendered latency, and other provider release paths remain unverified.",
+      "coverageNotes": "Actual Session and TerminalHost contracts run on macOS. Windows and WSL argv branches are mocked. Daemon v37 preparation and release run over authenticated control sockets; older daemon preparation and unsupported direct/SSH providers fail closed. Runtime background terminal creation now forwards deferral with fresh-owner admission; the multi-daemon router releases on the exact retained owner. An ad hoc native macOS zsh PTY check verified profile-before-release and one stand-in command execution. Native local composer now prepares held agent shells. Rendered Codex trials measured 582 ms warmed and 1499 ms quick-click prompt/model availability, with MCP still initializing and test-only update checking disabled. A canceled draft remained usable as a shell and manual input retired its command. Other provider release paths and consistent full readiness remain unverified.",
       "motivatingLinks": ["docs/reference/worktree-create-retained-drafts.md"],
       "invariant": "Shell readiness cannot authorize deferred agent execution. Only the same operation and terminal incarnation may release once. Manual input retires an unreleased command; exit or termination prevents a queued command from reaching the subprocess. Ambiguous writes are never replayed.",
       "oracle": "Record actual Session subprocess writes while emitting readiness, advancing its timeout, reattaching clients, injecting query replies and manual input, terminating, and throwing after writing bytes. Require no command before release, at most one after it, and no write from wrong identity or after teardown.",
       "commands": [
+        "pnpm test src/renderer/src/lib/create-requested-worktree.test.ts src/renderer/src/lib/worktree-creation-deferred-startup.test.ts src/renderer/src/lib/worktree-creation-flow.test.ts src/main/ipc/worktrees-deferred-startup-create.test.ts src/main/ipc/worktrees/create/register-worktree-deferred-startup-handlers.test.ts",
         "pnpm test src/main/runtime/orca-runtime-deferred-startup-create.test.ts src/main/runtime/cli-terminal-create-host-session-binding.test.ts src/main/runtime/orca-runtime-terminal-cwd.test.ts src/main/ipc/pty/runtime/deferred-startup.test.ts src/main/daemon/daemon-deferred-startup-router.test.ts",
         "pnpm test src/main/daemon/daemon-deferred-startup-router.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/ipc/pty/runtime/deferred-startup.test.ts src/main/runtime/orca-runtime-deferred-startup-create.test.ts",
         "pnpm test src/main/daemon/daemon-deferred-startup-protocol.test.ts src/main/daemon/daemon-protocol-version.test.ts src/main/daemon/daemon-foreground-confirmation-protocol.test.ts src/main/daemon/daemon-pty-adapter-protocol-compatibility.test.ts src/main/providers/local-pty-provider-shell-readiness.test.ts src/main/providers/ssh-pty-deferred-startup.test.ts",
         "pnpm test src/main/daemon/session-deferred-startup.test.ts src/main/daemon/terminal-host-startup.test.ts src/main/daemon/session.test.ts src/main/daemon/terminal-host-agent-session.test.ts src/main/daemon/pty-subprocess-windows-shell-launch.test.ts src/main/daemon/pty-subprocess-wsl-launch.test.ts src/main/daemon/pty-subprocess-managed-agent-env.test.ts"
       ],
       "testFiles": [
+        "src/renderer/src/lib/create-requested-worktree.test.ts",
+        "src/renderer/src/lib/worktree-creation-deferred-startup.test.ts",
+        "src/main/ipc/worktrees-deferred-startup-create.test.ts",
+        "src/main/ipc/worktrees/create/register-worktree-deferred-startup-handlers.test.ts",
         "src/main/daemon/daemon-deferred-startup-router.test.ts",
         "src/main/ipc/pty/runtime/deferred-startup.test.ts",
         "src/main/runtime/orca-runtime-deferred-startup-create.test.ts",
@@ -56,6 +61,15 @@
         }
       ],
       "evidenceRuns": [
+        {
+          "date": "2026-09-05",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm test src/renderer/src/lib/create-requested-worktree.test.ts src/renderer/src/lib/worktree-creation-deferred-startup.test.ts src/renderer/src/lib/worktree-creation-flow.test.ts src/main/ipc/worktrees-deferred-startup-create.test.ts src/main/ipc/worktrees/create/register-worktree-deferred-startup-handlers.test.ts",
+          "result": "passed",
+          "durationSeconds": 2.03,
+          "summary": "58 tests across five suites passed. Covers capability fallback, exact receipt release and retry, cancellation, trust ordering, missing identity, and context delivery without relaunch. Rendered native Codex and cancellation evidence is recorded separately in the retained-drafts reference."
+        },
         {
           "date": "2026-09-05",
           "runner": "local",
@@ -94,20 +108,20 @@
       },
       "redGreenEvidence": {
         "status": "partial",
-        "evidence": "CPR/DA integration tests failed before reply exclusion and passed after it. No complete intentional-break matrix or real deferred composer journey yet."
+        "evidence": "CPR/DA integration tests failed before reply exclusion and passed after it. Rendered native composer Create and cancellation were exercised; no complete intentional-break matrix yet."
       },
       "performanceBudget": {
         "required": true,
         "evidence": "One bounded startup record per Session, no polling or subprocess added. Existing readiness queue carries one accepted callback. Input classification runs only while that Session has an unreleased command."
       },
       "promotionCriteria": [
-        "Implement capability-negotiated owner release and the rendered composer integration.",
+        "Complete supported-topology composer integration and consistent selected-agent readiness.",
         "Verify live local, daemon, Windows/WSL and SSH release and crash recovery.",
         "Meet manifest CI and soak policy."
       ],
       "knownGaps": [
-        "Daemon capability negotiation and release are implemented; no composer caller or remote release yet.",
-        "No live shell-profile or selected-agent readiness timing for deferred launch.",
+        "Native composer deferral is implemented; remote release and crash/restart proof remain outstanding.",
+        "Native prompt/model timings are single samples, not full tool readiness or a near-instant guarantee.",
         "Direct local provider and SSH/remote release parity remain unimplemented."
       ],
       "demotionRule": "Keep experimental until topology, fault-injection and rendered proof exist; demote on premature or repeated launch, stale identity acceptance, or unexplained flakes."

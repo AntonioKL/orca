@@ -2,6 +2,7 @@ import type { TuiAgent } from '../../../shared/tui-agent'
 import type { WorkspaceSource as WorkspaceCreateTelemetrySource } from '../../../shared/workspace-source'
 import type {
   CreateSparseCheckoutRequest,
+  CreateWorktreeResult,
   SetupDecision
 } from '../../../shared/worktree/create-types'
 import type { WorktreeStartupLaunch } from '../../../shared/worktree/launch-types'
@@ -137,6 +138,8 @@ export type PendingWorktreeCreation = {
   provisioningLog?: string
   /** Existing worktree whose uncertain structured launch must be reconciled instead of recreated. */
   structuredLaunchRecoveryWorktreeId?: string
+  /** Retry an uncertain release on the same retained workspace and terminal. */
+  deferredStartupRecovery?: CreateWorktreeResult
   request: WorktreeCreationRequest
 }
 

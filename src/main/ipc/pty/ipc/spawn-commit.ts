@@ -1,3 +1,4 @@
+import { ptyOwnership } from '../provider/ownership-state'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
 import { agentHookServer } from '../../../agent-hooks/server'
 import { markClaudePtySpawned } from '../../../claude-accounts/live-pty-gate'
@@ -28,6 +29,10 @@ import { reflowHeadlessTerminalToCommittedGrid } from '../delivery/attached-pty-
 
 export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawnResult> {
   const args = ctx.args
+  const startupDeferred =
+    (ctx.result.deferredStartupStatus !== undefined &&
+      ctx.result.deferredStartupStatus !== 'accepted') ||
+    ptyOwnership.hasDeferredStartup(ctx.result.id, ctx.result.incarnationId)
   const { rendererPreSignaled, rendererAlreadyRegistered, committedSize } =
     await persistPtyIpcSpawnCommit(ctx)
 
@@ -136,13 +141,13 @@ export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawn
   // seed but the list/read records still live main-side.
   seedTerminalRestoreRecordsFromSpawnResult(ctx.deps.runtime, ctx.result)
   // Why: arm main's per-PTY Command Code output detector from the launch command (startupCommand parity); banner detection covers PTYs without one.
-  if (!ctx.stablePaneOwner) {
+  if (!ctx.stablePaneOwner && !startupDeferred) {
     ctx.deps.runtime?.noteTerminalSpawnCommand?.(
       ctx.result.id,
       typeof ctx.launchCommand === 'string' ? ctx.launchCommand : null
     )
   }
-  if (ctx.isClaudeLaunch && !ctx.stablePaneOwner) {
+  if (ctx.isClaudeLaunch && !ctx.stablePaneOwner && !startupDeferred) {
     markClaudePtySpawned(ctx.result.id)
   }
   // Why: record the paneKey mapping so clearProviderPtyState can clear the agent-hooks server's per-paneKey caches on exit.
@@ -200,7 +205,7 @@ export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawn
     })
   }
   // Why: telemetry-plan.md§Agent launch semantics — fire agent_started only after spawn resolved; safeParse each field so a spoofed IPC payload can't poison the event (missing required field skips it).
-  if (args.telemetry && !ctx.stablePaneOwner) {
+  if (args.telemetry && !ctx.stablePaneOwner && !startupDeferred) {
     const agentKindParse = agentKindSchema.safeParse(args.telemetry.agent_kind)
     const launchSourceParse = launchSourceSchema.safeParse(args.telemetry.launch_source)
     const requestKindParse = requestKindSchema.safeParse(args.telemetry.request_kind)

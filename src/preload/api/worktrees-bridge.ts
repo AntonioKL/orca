@@ -41,6 +41,9 @@ export const worktreesApi = {
     return () => ipcRenderer.removeListener('createWorktree:progress', listener)
   },
 
+  supportsDeferredStartup: (repoId) =>
+    ipcRenderer.invoke('worktrees:supportsDeferredStartup', repoId),
+  releaseStartup: (args) => ipcRenderer.invoke('worktrees:releaseStartup', args),
   setCreateStandby: (args) => ipcRenderer.invoke('worktrees:setCreateStandby', args),
 
   prepareCreateCheckout: (args) => ipcRenderer.invoke('worktrees:prepareCreateCheckout', args),

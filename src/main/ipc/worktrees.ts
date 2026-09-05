@@ -1,3 +1,4 @@
+import { registerWorktreeDeferredStartupHandlers } from './worktrees/create/register-worktree-deferred-startup-handlers'
 import { ipcMain, type BrowserWindow } from 'electron'
 import type { Store } from '../persistence/loading-store/store'
 import type { OrcaRuntimeService, RuntimeWorktreeLifecycleEvent } from '../runtime/orca-runtime'
@@ -38,6 +39,8 @@ const WORKTREE_HANDLER_CHANNELS = [
   'worktrees:forgetRemovedForExecutionHost',
   'worktrees:cancelListDetected',
   'worktrees:create',
+  'worktrees:supportsDeferredStartup',
+  'worktrees:releaseStartup',
   'worktrees:adoptProvisionedRoot',
   'worktrees:prefetchCreateBase',
   'worktrees:prepareCreateCheckout',
@@ -92,6 +95,7 @@ export function registerWorktreeHandlers(
   disposeWorktreeStandbys?.()
   disposeWorktreeStandbys = registerWorktreePrefetchHandler(context)
   registerWorktreeCreateHandlers(context)
+  registerWorktreeDeferredStartupHandlers(context)
   registerReviewBaseHandlers(context)
   registerWorktreeRemovalHandlers(context)
   registerWorktreeForgetHandlers(context)

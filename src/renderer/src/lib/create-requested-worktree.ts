@@ -3,9 +3,10 @@ import { getProvisionedRootCreateOptions } from '@/lib/provisioned-root-create-o
 import { resolveBackendDraftStartup } from '@/lib/worktree-draft-startup-view-mode'
 import type { WorktreeCreationRequest } from '@/lib/pending-worktree-creation'
 import type { CreateWorktreeResult } from '../../../shared/worktree/create-types'
+import { prepareComposerStartup } from './composer-deferred-startup'
 
 /** Registers a durable workspace without revealing it or running renderer launch actions. */
-export function createRequestedWorktree(
+export async function createRequestedWorktree(
   creationId: string,
   preparedRequest: WorktreeCreationRequest,
   background = false
@@ -14,9 +15,11 @@ export function createRequestedWorktree(
   const structuredLaunch = preparedRequest.agentLaunchRoute === 'structured-native-chat'
   const deferAgentLaunch = background && preparedRequest.agent !== null
   const backendStartup =
-    provisionedRoot || structuredLaunch || deferAgentLaunch
+    provisionedRoot || structuredLaunch
       ? undefined
-      : resolveBackendDraftStartup(preparedRequest)
+      : deferAgentLaunch
+        ? await prepareComposerStartup(creationId, preparedRequest)
+        : resolveBackendDraftStartup(preparedRequest)
   return useAppStore
     .getState()
     .createWorktree(

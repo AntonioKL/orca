@@ -1,4 +1,11 @@
 {
+  "workspace": {
+    "create": {
+      "preparedTerminalUnverified": "Could not verify the prepared terminal. Your workspace is saved; open it to continue.",
+      "preparedTerminalChanged": "This terminal has changed. Your workspace is saved; open it to continue.",
+      "preparedAgentUnconfirmed": "Could not confirm the agent started. Your workspace is saved. Retry to check again."
+    }
+  },
   "app": {
     "recoverableError": {
       "rootTitle": "Orca hit a renderer error.",

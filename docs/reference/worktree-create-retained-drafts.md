@@ -12,9 +12,11 @@ on Create. Cancellation retains it in the normal workspace catalog.
 Automatic preparation currently requires the direct desktop API and the
 `worktree.background-startup.v1` capability. Runtime-environment and paired-web
 clients use ordinary Create until equivalent ownership/adoption is implemented.
-Agent launches, folder targets, VM recipes, unresolved PR/issue sources and missing
-hook approval are not automatically prepared yet. These remain implementation
-work, not exclusions from the near-instant creation objective.
+Native local agent drafts now prepare their shell when the daemon supports
+owner-fenced deferred startup. The original agent command is held until Create;
+unsupported providers retain checkout-only preparation. Folder targets, VM recipes,
+unresolved PR/issue sources and missing hook approval are not automatically prepared
+yet. These remain implementation work, not exclusions from the near-instant objective.
 
 The optional `startup.activate: false` field leaves selection unchanged. Older
 callers omit it and retain ordinary activation. Preparing clients must verify the
@@ -86,5 +88,28 @@ existing prepared checkout. These are single samples, not a performance guarante
 
 A generated-name canceled draft remained visible in the rendered sidebar after
 renderer reload. Application-process crash/restart, dirty/ignored profile output,
-and all remote topology cases still need verification. Warm-shell agent promotion
-is not yet implemented; terminal reattachment deliberately drops startup commands.
+and all remote topology cases still need verification.
+
+## Deferred agent-shell composer measurements (development build, macOS)
+
+The native local composer now prepares the original agent shell/environment and
+holds its command in the daemon until Create. Release requires the same workspace,
+PTY incarnation and operation; retry cannot create a replacement or type a fallback
+command into an uncertain terminal. Manual use retires the held command.
+Preparation does not publish agent-start telemetry or mark Claude as running.
+Daemon reattachment includes optional deferred-startup state, so a new main process
+can distinguish an unreleased shell from an agent. Telemetry acknowledgement state
+is not durable across main-process crashes. Claude release rechecks account switches.
+
+Two real Codex trials each created one workspace. With 2.62 seconds between opening
+and Create, selection took 156.9 ms and the prompt with a resolved model appeared
+after 582.1 ms. Clicking after 333.7 ms took 497.3 ms to selection and 1498.6 ms to
+the prompt/model. MCP servers were still initializing. The isolated test settings
+disabled Codex's update check; product defaults are unchanged. These single samples
+do not establish consistent near-instant agent or tool readiness.
+
+A canceled draft was found through workspace search and opened as a working shell.
+Running a harmless printf command rendered its output; a subsequent release of the
+original held command returned `retired`. No second workspace or agent was started.
+Final readiness, crash/restart, supported-topology and adverse-path validation are
+still outstanding before publishing the combined ad hoc release.

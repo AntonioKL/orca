@@ -2,8 +2,10 @@ import type { TuiAgent } from '../../shared/tui-agent'
 import type { ShellReadyState, TerminalSnapshot } from './types'
 import type { AgentSessionClaimedSpawnResult } from '../../shared/agent-session-host-authority'
 import type { PtyIncarnationId } from '../../shared/pty-incarnation'
+import type { DeferredStartupStatus } from '../../shared/deferred-startup-release'
 
 export type DaemonCreateOrAttachResult = {
+  deferredStartupStatus?: DeferredStartupStatus
   isNew: boolean
   snapshot: TerminalSnapshot | null
   pid: number | null
@@ -22,16 +24,31 @@ export type DaemonCreateOrAttachResult = {
   cwdReadableByDaemon?: boolean
 }
 
+export function getDaemonStartupResultMetadata(result: DaemonCreateOrAttachResult): {
+  incarnationId?: PtyIncarnationId
+  deferredStartupStatus?: DeferredStartupStatus
+} {
+  return {
+    ...(result.incarnationId ? { incarnationId: result.incarnationId } : {}),
+    ...(result.deferredStartupStatus ? { deferredStartupStatus: result.deferredStartupStatus } : {})
+  }
+}
+
 export function getDaemonSessionResultMetadata(session: {
   launchAgent: TuiAgent | null
   historySeeded: boolean | undefined
   wslDistro: string | null
+  deferredStartupStatus?: DeferredStartupStatus
 }): {
+  deferredStartupStatus?: DeferredStartupStatus
   launchAgent?: TuiAgent
   historySeeded?: boolean
   wslDistro: string | null
 } {
   return {
+    ...(session.deferredStartupStatus
+      ? { deferredStartupStatus: session.deferredStartupStatus }
+      : {}),
     ...(session.launchAgent ? { launchAgent: session.launchAgent } : {}),
     ...(session.historySeeded !== undefined ? { historySeeded: session.historySeeded } : {}),
     // Why: null authoritatively identifies a native session; omission is

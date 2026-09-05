@@ -1,4 +1,7 @@
-import type { StartupCommandReleaseResult } from '../../shared/deferred-startup-release'
+import type {
+  DeferredStartupStatus,
+  StartupCommandReleaseResult
+} from '../../shared/deferred-startup-release'
 export type { StartupCommandReleaseResult } from '../../shared/deferred-startup-release'
 
 export type DeferredSessionStartup = {
@@ -8,7 +11,7 @@ export type DeferredSessionStartup = {
 
 /** Keeps Create authorization separate from the shell readiness timeout. */
 export class SessionDeferredStartup {
-  private state: 'pending' | 'accepted' | 'unverifiable' | 'retired' = 'pending'
+  private state: DeferredStartupStatus = 'pending'
   private submission: string | null
   private readonly operationId: string
 
@@ -19,6 +22,10 @@ export class SessionDeferredStartup {
 
   get isPending(): boolean {
     return this.state === 'pending'
+  }
+
+  get status(): DeferredStartupStatus {
+    return this.state
   }
 
   retire(): void {

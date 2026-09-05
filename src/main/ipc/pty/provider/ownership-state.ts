@@ -1,7 +1,8 @@
+import { PtyOwnershipRegistry } from './pty-ownership-registry'
 import { isPtyIncarnationId } from '../../../../shared/pty-incarnation'
 
 // Why: post-spawn write/resize/kill calls carry only the PTY ID; map it to its connectionId so ops route to the right provider.
-export const ptyOwnership = new Map<string, string | null>()
+export const ptyOwnership = new PtyOwnershipRegistry()
 export const ptyIncarnationById = new Map<string, string>()
 
 export function isCurrentPtyExit(payload: { id: string; incarnationId?: string }): boolean {

@@ -14,6 +14,7 @@ export async function completeWorktreeCreation(args: {
   primaryTabId: string | null
   startupTerminalTabId?: string
   backendSpawned: boolean
+  deliverBackendStartup?: boolean
   focusOnCompletion: boolean
 }): Promise<void> {
   const { request } = args
@@ -28,10 +29,14 @@ export async function completeWorktreeCreation(args: {
       backendSpawned: args.backendSpawned
     })
   }
-  if (!args.structuredLaunchAccepted && request.startupPlan && !args.backendSpawned) {
+  if (
+    !args.structuredLaunchAccepted &&
+    request.startupPlan &&
+    (!args.backendSpawned || args.deliverBackendStartup)
+  ) {
     void ensureAgentStartupInTerminal({
       worktreeId: args.worktreeId,
-      primaryTabId: args.primaryTabId,
+      primaryTabId: args.deliverBackendStartup ? args.startupTerminalTabId : args.primaryTabId,
       startup: request.startupPlan
     })
   }

@@ -4,3 +4,4 @@ export type StartupCommandReleaseResult =
   | 'retired'
   | 'identity-mismatch'
   | 'unavailable'
+export type DeferredStartupStatus = 'pending' | 'accepted' | 'unverifiable' | 'retired'

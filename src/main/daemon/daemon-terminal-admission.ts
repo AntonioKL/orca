@@ -170,6 +170,9 @@ export class DaemonTerminalAdmission {
       pid: result.pid,
       shellState: result.shellState,
       incarnationId: result.incarnationId,
+      ...(result.deferredStartupStatus
+        ? { deferredStartupStatus: result.deferredStartupStatus }
+        : {}),
       ...(result.launchAgent ? { launchAgent: result.launchAgent } : {}),
       wslDistro: result.wslDistro,
       ...(result.historySeeded !== undefined ? { historySeeded: result.historySeeded } : {}),

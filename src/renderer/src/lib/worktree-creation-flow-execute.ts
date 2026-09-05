@@ -21,6 +21,7 @@ import { buildWorktreeCreationStartupOpt } from '@/lib/worktree-creation-flow-st
 import { launchStructuredWorktreeSession } from '@/lib/worktree-creation-structured-session'
 import { completeWorktreeCreation } from '@/lib/worktree-creation-completion'
 import { markStructuredWorktreeLaunchUnconfirmed } from '@/lib/worktree-creation-structured-recovery'
+import { releasePreparedWorktreeStartup } from './worktree-deferred-startup-release'
 
 // Why: activePendingCreationId can outlive the terminal route when the user
 // switches app views; only the terminal route renders the creation panel.
@@ -46,7 +47,7 @@ export async function executeWorktreeCreation(
   request: WorktreeCreationRequest,
   retainedCreation?: CreateWorktreeResult | Promise<CreateWorktreeResult>
 ): Promise<void> {
-  const preparedRequest =
+  let preparedRequest =
     request.ephemeralVmRecipe && !request.ephemeralVmRuntimeId
       ? await prepareRequestForCreate(creationId, request)
       : request
@@ -56,6 +57,8 @@ export async function executeWorktreeCreation(
 
   let result: CreateWorktreeResult
   try {
+    retainedCreation ??=
+      useAppStore.getState().pendingWorktreeCreations[creationId]?.deferredStartupRecovery
     result =
       retainedCreation && 'worktree' in retainedCreation
         ? retainedCreation
@@ -99,6 +102,15 @@ export async function executeWorktreeCreation(
   }
 
   const backendSpawned = result.startupTerminal?.spawned === true
+  if (preparedRequest.startupPlan && result.startupTerminal?.deferredStartup) {
+    preparedRequest = {
+      ...preparedRequest,
+      startupPlan: {
+        ...preparedRequest.startupPlan,
+        launchToken: result.startupTerminal.deferredStartup.operationId
+      }
+    }
+  }
   if (preparedRequest.startupPlan && !backendSpawned && !preparedRequest.startupPlan.launchToken) {
     // Why: delayed delivery must target the exact pane spawned from this queued
     // startup, so both halves of the handoff share one renderer-session token.
@@ -115,6 +127,13 @@ export async function executeWorktreeCreation(
     const repoConnectionId =
       useAppStore.getState().repos.find((repo) => repo.id === worktree.repoId)?.connectionId ?? null
     await preflightAgentTrust(preparedRequest, worktree.path, repoConnectionId)
+  }
+
+  if (
+    result.startupTerminal?.deferredStartup &&
+    !(await releasePreparedWorktreeStartup(creationId, result))
+  ) {
+    return
   }
 
   // `createWorktree` already inserted the real worktree row. Leaving for an app
@@ -197,6 +216,10 @@ export async function executeWorktreeCreation(
     primaryTabId,
     startupTerminalTabId: result.startupTerminal?.tabId,
     backendSpawned,
+    deliverBackendStartup: Boolean(
+      result.startupTerminal?.deferredStartup &&
+      (preparedRequest.startupPlan?.draftPrompt || preparedRequest.startupPlan?.followupPrompt)
+    ),
     focusOnCompletion: shouldActivateOnCompletion
   })
 }

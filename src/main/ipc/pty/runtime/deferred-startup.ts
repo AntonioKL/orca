@@ -3,6 +3,7 @@ import type { IPtyProvider } from '../../../providers/types'
 import { ptyIncarnationById, ptyOwnership } from '../provider/ownership-state'
 import { getProvider, getProviderForPty } from '../provider/registry'
 import type { RuntimePtySpawnArgs } from './spawn-state'
+import { isClaudeAuthSwitchInProgress } from '../../../claude-accounts/live-pty-gate'
 
 export function providerSupportsDeferredStartup(provider: IPtyProvider): boolean {
   return Boolean(provider.releaseStartupCommand && provider.supportsDeferredStartupCommands?.())
@@ -56,5 +57,17 @@ export async function releaseStartupFromRuntimeController(
   if (!provider.releaseStartupCommand) {
     return 'unavailable'
   }
-  return provider.releaseStartupCommand(ptyId, expectedIncarnationId, operationId)
+  const startup = ptyOwnership.getDeferredStartup(ptyId, expectedIncarnationId, operationId)
+  if (startup?.isClaudeLaunch && isClaudeAuthSwitchInProgress()) {
+    return 'unavailable'
+  }
+  const result = await provider.releaseStartupCommand(ptyId, expectedIncarnationId, operationId)
+  if (
+    startup &&
+    (result === 'accepted' || result === 'retired') &&
+    ptyIncarnationById.get(ptyId) === expectedIncarnationId
+  ) {
+    ptyOwnership.settleDeferredStartup(ptyId, startup, result === 'accepted')
+  }
+  return result
 }

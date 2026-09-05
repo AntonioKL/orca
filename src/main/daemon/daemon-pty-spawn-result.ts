@@ -1,3 +1,4 @@
+import { getDaemonStartupResultMetadata } from './daemon-create-or-attach-result'
 import { isAgentSessionClaimedSpawnResult } from '../../shared/agent-session-host-authority'
 import { parseTerminalKittyKeyboardFlags } from '../../shared/terminal-kitty-keyboard-flags'
 import { retireUnexpectedAttachOnlySpawn } from './daemon-attach-only-retirement'
@@ -80,8 +81,7 @@ export abstract class DaemonPtySpawnResult extends DaemonPtySpawnRequest {
     }
     const claimResult = (): Pick<PtySpawnResult, 'agentSessionEnsure'> | Record<string, never> =>
       result.agentSessionEnsure ? { agentSessionEnsure: result.agentSessionEnsure } : {}
-    const incarnationResult = (): Pick<PtySpawnResult, 'incarnationId'> | Record<string, never> =>
-      result.incarnationId ? { incarnationId: result.incarnationId } : {}
+    const incarnationResult = () => getDaemonStartupResultMetadata(result)
     let providerWslDistro = result.wslDistro === undefined ? wslDistro : result.wslDistro
     // Why: explicit null from a current daemon overrides the caller's WSL preference; undefined keeps compatibility with older daemons.
     wslDistro = providerWslDistro ?? undefined

@@ -102,6 +102,31 @@ describe('deferred startup daemon control protocol', () => {
     await vi.waitFor(() => expect(subprocess.write).toHaveBeenCalledOnce())
   })
 
+  it.each(['pending', 'retired'] as const)(
+    'reattaches with authoritative %s startup after client restart',
+    async (status) => {
+      const { adapter, socketPath, tokenPath } = await start()
+      const original = await prepare(adapter)
+      expect(original.deferredStartupStatus).toBe('pending')
+      subprocess._simulateData(ready)
+      if (status === 'retired') {
+        adapter.write(sessionId, 'echo manual\r')
+        await vi.waitFor(() => expect(subprocess.write).toHaveBeenCalledOnce())
+      }
+      adapter.dispose()
+      const reconnected = new DaemonPtyAdapter({ socketPath, tokenPath })
+      adapters.push(reconnected)
+      const result = await reconnected.spawn({ sessionId, cols: 80, rows: 24, command })
+      expect(result).toMatchObject({
+        isReattach: true,
+        incarnationId: original.incarnationId,
+        deferredStartupStatus: status
+      })
+      expect(spawn).toHaveBeenCalledOnce()
+      expect(subprocess.write).toHaveBeenCalledTimes(status === 'retired' ? 1 : 0)
+    }
+  )
+
   it('rejects old-owner preparation before any spawn or release request', async () => {
     const { adapter } = await start(DEFERRED_STARTUP_DAEMON_PROTOCOL_VERSION - 1)
     expect(adapter.supportsDeferredStartupCommands()).toBe(false)

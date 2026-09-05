@@ -15,6 +15,7 @@ import type { TuiAgent } from '../../shared/tui-agent'
 import { randomUUID } from 'node:crypto'
 import type { PtyStartupIngress } from '../../shared/pty-startup-ingress'
 import type { StartupCommandReleaseResult } from './session-deferred-startup'
+import type { DeferredStartupStatus } from '../../shared/deferred-startup-release'
 import { createSessionStartupInput, type SessionStartupInput } from './session-startup-input'
 
 import type {
@@ -137,6 +138,10 @@ export class Session {
 
   write(data: string): void {
     this.input.write(data)
+  }
+
+  get deferredStartupStatus(): DeferredStartupStatus | undefined {
+    return this.input.deferredStartupStatus
   }
 
   releaseStartupCommand(

@@ -1,3 +1,4 @@
+import { isNativeDeferredStartupRepo } from './register-worktree-deferred-startup-handlers'
 import { ipcMain, app } from 'electron'
 import type {
   CreateWorktreeArgs,
@@ -44,6 +45,13 @@ export function registerWorktreeCreateHandlers(context: WorktreeIpcContext): voi
         const repo = store.getRepo(args.repoId)
         if (!repo) {
           throw new Error(`Repo not found: ${args.repoId}`)
+        }
+
+        if (
+          args.startup?.deferredStartupOperationId !== undefined &&
+          !isNativeDeferredStartupRepo(repo)
+        ) {
+          throw new Error('deferred_startup_unavailable')
         }
 
         const sourceParse = workspaceSourceSchema.safeParse(args.telemetrySource)

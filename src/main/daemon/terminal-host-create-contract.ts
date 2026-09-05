@@ -1,4 +1,5 @@
 import type { StartupCommandDelivery } from '../../shared/codex-startup-delivery'
+import type { DeferredStartupStatus } from '../../shared/deferred-startup-release'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { ShellReadyState, TerminalSnapshot } from './types'
 import type { PtyStartupIngressIntent } from '../../shared/pty-startup-ingress'
@@ -44,6 +45,7 @@ export type CreateOrAttachOptions = {
 }
 
 export type CreateOrAttachResult = {
+  deferredStartupStatus?: DeferredStartupStatus
   isNew: boolean
   snapshot: TerminalSnapshot | null
   pid: number | null

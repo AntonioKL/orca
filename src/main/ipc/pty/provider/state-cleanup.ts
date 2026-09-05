@@ -53,6 +53,7 @@ export function clearProviderPtyState(
   piTitlebarExtensionService.clearPty(id)
   // Why: SSH exit/teardown paths bypass pty.ts's local onExit but still must release Claude account-switch guards.
   markClaudePtyExited(id)
+  ptyOwnership.clearDeferredStartup(id)
   ptySizes.delete(id)
   ptyIncarnationById.delete(id)
   lastInputAtByPty.delete(id)

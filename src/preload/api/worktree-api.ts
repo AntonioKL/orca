@@ -1,3 +1,5 @@
+import type { WorktreeStartupReleaseArgs } from '../../shared/worktree/launch-types'
+import type { StartupCommandReleaseResult } from '../../shared/deferred-startup-release'
 import type {
   ForgetRemovedWorktreesForExecutionHostArgs,
   ForgetRemovedWorktreesForExecutionHostResult,
@@ -42,6 +44,8 @@ import type {
 } from '../../shared/worktree/types'
 
 export type WorktreeApi = {
+  supportsDeferredStartup?: (repoId: string) => Promise<boolean>
+  releaseStartup?: (args: WorktreeStartupReleaseArgs) => Promise<StartupCommandReleaseResult>
   list: (args: { repoId: string }) => Promise<Worktree[]>
   /** Generated names already spent in this repo, including deleted workspaces. Name suggestions
    *  exclude these so a recreated workspace never lands on a prior occupant's path. Compacted: a
