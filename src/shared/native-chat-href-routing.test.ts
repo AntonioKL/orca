@@ -62,6 +62,20 @@ describe('routeNativeChatHref', () => {
     })
   })
 
+  it('bounds nested renderer file target decoding', () => {
+    let href = '/tmp/report.html'
+    for (let depth = 0; depth < 4; depth += 1) {
+      href = createNativeChatFileHref(` ${href}`)
+    }
+    expect(routeNativeChatHref(href)).toEqual({
+      kind: 'file',
+      pathText: '/tmp/report.html',
+      line: null
+    })
+
+    expect(routeNativeChatHref(createNativeChatFileHref(` ${href}`))).toEqual({ kind: 'none' })
+  })
+
   it('drops anchors, unknown schemes, malformed file URIs, and empty hrefs', () => {
     expect(routeNativeChatHref('#section')).toEqual({ kind: 'none' })
     expect(routeNativeChatHref(undefined)).toEqual({ kind: 'none' })

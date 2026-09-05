@@ -9,6 +9,7 @@ export type NativeChatHrefRoute =
 const WEB_SCHEME_PATTERN = /^(?:https?|mailto):/i
 const SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/
 export const NATIVE_CHAT_FILE_HREF_PREFIX = '#orca-native-chat-file='
+const MAX_NATIVE_CHAT_FILE_HREF_DECODES = 4
 
 export function createNativeChatFileHref(pathText: string): string {
   return `${NATIVE_CHAT_FILE_HREF_PREFIX}${encodeURIComponent(pathText)}`
@@ -62,13 +63,19 @@ function maybeDecodeHrefPath(value: string): string {
 }
 
 export function routeNativeChatHref(href: string | null | undefined): NativeChatHrefRoute {
-  const trimmed = href?.trim()
+  let trimmed = href?.trim()
   if (!trimmed) {
     return { kind: 'none' }
   }
-  const encodedFileHref = decodeNativeChatFileHref(trimmed)
-  if (encodedFileHref) {
-    return routeNativeChatHref(encodedFileHref)
+  for (let depth = 0; depth < MAX_NATIVE_CHAT_FILE_HREF_DECODES; depth += 1) {
+    const encodedFileHref = decodeNativeChatFileHref(trimmed)
+    if (!encodedFileHref) {
+      break
+    }
+    trimmed = encodedFileHref.trim()
+  }
+  if (!trimmed || trimmed.startsWith(NATIVE_CHAT_FILE_HREF_PREFIX)) {
+    return { kind: 'none' }
   }
   if (trimmed.startsWith('#')) {
     return { kind: 'none' }

@@ -2,6 +2,7 @@ import {
   createNativeChatFileHref,
   routeNativeChatHref
 } from '../../../../shared/native-chat-href-routing'
+import { parseFileLinkLocation } from '../../../../shared/file-link-location'
 import { extractTerminalFileLinks, type ParsedTerminalFileLink } from '@/lib/terminal-links'
 
 type MarkdownNode = {
@@ -27,9 +28,11 @@ function isLinkifiableFile(link: ParsedTerminalFileLink, requireSeparator: boole
   )
 }
 
-const SAFE_LEADING_BOUNDARY_PATTERN = /[\s([{'",;]/
-const SAFE_TRAILING_BOUNDARY_PATTERN = /[\s)\]}>'",;.:]/
-const SENTENCE_PATH_PUNCTUATION_PATTERN = /\.[\p{L}\p{N}][\p{L}\p{N}\p{M}_+-]*([!?—])/gu
+const SAFE_LEADING_BOUNDARY_PATTERN = /[\s([{'",;=]/
+const SAFE_TRAILING_BOUNDARY_PATTERN = /[\s)\]}>'",;.:。！？，、；：]/
+const SENTENCE_PATH_PUNCTUATION_PATTERN =
+  /\.[\p{L}\p{N}][\p{L}\p{N}\p{M}_+-]*([!?—。！？，、；：])/gu
+const QUOTED_TEXT_PATTERN = /"([^"\r\n]+)"|'([^"'\r\n]+)'/gu
 const MAX_DASHED_PROSE_WORD_LENGTH = 32
 
 function hasBoundedProseAfterDash(value: string, startIndex: number): boolean {
@@ -128,7 +131,7 @@ function splitTextSegment(value: string): MarkdownNode[] {
   return children
 }
 
-function splitTextNode(value: string): MarkdownNode[] {
+function splitUnquotedText(value: string): MarkdownNode[] {
   const children: MarkdownNode[] = []
   let cursor = 0
   for (const match of value.matchAll(SENTENCE_PATH_PUNCTUATION_PATTERN)) {
@@ -147,15 +150,58 @@ function splitTextNode(value: string): MarkdownNode[] {
   return children
 }
 
+function exactFileLink(value: string, allowSpacedRelative: boolean): ParsedTerminalFileLink | null {
+  const exactLink = extractTerminalFileLinks(value).find(
+    (link) => link.startIndex === 0 && link.endIndex === value.length
+  )
+  if (exactLink && isLinkifiableFile(exactLink, false)) {
+    return exactLink
+  }
+  if (!allowSpacedRelative || !/\s/.test(value)) {
+    return null
+  }
+  const parsed = parseFileLinkLocation(value)
+  if (!parsed) {
+    return null
+  }
+  const explicitLink = {
+    ...parsed,
+    startIndex: 0,
+    endIndex: value.length,
+    displayText: value
+  }
+  return isLinkifiableFile(explicitLink, false) ? explicitLink : null
+}
+
+function splitTextNode(value: string): MarkdownNode[] {
+  const children: MarkdownNode[] = []
+  let cursor = 0
+  for (const match of value.matchAll(QUOTED_TEXT_PATTERN)) {
+    const content = match[1] ?? match[2]
+    if (!content || !exactFileLink(content, true)) {
+      continue
+    }
+    const matchIndex = match.index ?? 0
+    const quote = match[0][0]
+    children.push(...splitUnquotedText(value.slice(cursor, matchIndex)))
+    children.push({ type: 'text', value: quote })
+    children.push(createFileLinkNode(content, { type: 'text', value: content }))
+    children.push({ type: 'text', value: quote })
+    cursor = matchIndex + match[0].length
+  }
+  if (cursor === 0) {
+    return splitUnquotedText(value)
+  }
+  children.push(...splitUnquotedText(value.slice(cursor)))
+  return children
+}
+
 function inlineCodeFileLink(node: MarkdownNode): MarkdownNode | null {
   const value = node.value?.trim()
   if (!value) {
     return null
   }
-  const exactLink = extractTerminalFileLinks(value).find(
-    (link) => link.startIndex === 0 && link.endIndex === value.length
-  )
-  return exactLink && isLinkifiableFile(exactLink, false) ? createFileLinkNode(value, node) : null
+  return exactFileLink(value, true) ? createFileLinkNode(value, node) : null
 }
 
 function transformFileLinks(node: MarkdownNode): void {

@@ -52,6 +52,72 @@ describe('CommentMarkdown link click handler', () => {
     expect(event.defaultPrevented).toBe(true)
   })
 
+  it('intercepts auxiliary clicks on generated native file links', () => {
+    const onLinkClick = vi.fn((event: React.MouseEvent<HTMLElement>) => {
+      event.preventDefault()
+    })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content="Open src/foo.ts"
+          onLinkClick={onLinkClick}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    const anchor = container.querySelector<HTMLAnchorElement>('a')
+    const event = new window.MouseEvent('auxclick', {
+      bubbles: true,
+      cancelable: true,
+      button: 1
+    })
+
+    act(() => {
+      anchor?.dispatchEvent(event)
+    })
+
+    expect(onLinkClick).toHaveBeenCalledWith(expect.any(Object), expect.stringMatching(/^#orca-/))
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('does not activate generated native file links on right-click', () => {
+    const onLinkClick = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content="Open src/foo.ts"
+          onLinkClick={onLinkClick}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    const anchor = container.querySelector<HTMLAnchorElement>('a')
+    const event = new window.MouseEvent('auxclick', {
+      bubbles: true,
+      cancelable: true,
+      button: 2
+    })
+
+    act(() => {
+      anchor?.dispatchEvent(event)
+    })
+
+    expect(onLinkClick).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(false)
+  })
+
   it('sanitizes file URI links unless the caller opts in', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
@@ -214,6 +280,7 @@ describe('CommentMarkdown link click handler', () => {
   it('leaves prose-shaped slash tokens and numeric versions unlinked', () => {
     const proseFalsePositives = ['and/or', 'TCP/IP', '24/7', 'N/A', 'km/h', 'A/B test']
     const inlineCodeFalsePositives = ['origin/main', 'v1.2.3', '1.0']
+    const quotedFalsePositives = ['"and/or"', '"A/B test"']
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
@@ -222,7 +289,7 @@ describe('CommentMarkdown link click handler', () => {
       root?.render(
         <CommentMarkdown
           variant="document"
-          content={`${proseFalsePositives.join(', ')}; ${inlineCodeFalsePositives.map((value) => `\`${value}\``).join(', ')}`}
+          content={`${proseFalsePositives.join(', ')}; ${inlineCodeFalsePositives.map((value) => `\`${value}\``).join(', ')}; ${quotedFalsePositives.join(', ')}`}
           onLinkClick={vi.fn()}
           linkifyFilePaths
         />
@@ -231,6 +298,9 @@ describe('CommentMarkdown link click handler', () => {
 
     expect(container.querySelectorAll('a')).toHaveLength(0)
     for (const value of proseFalsePositives) {
+      expect(container.textContent).toContain(value)
+    }
+    for (const value of quotedFalsePositives) {
       expect(container.textContent).toContain(value)
     }
     expect(Array.from(container.querySelectorAll('code')).map((code) => code.textContent)).toEqual(
@@ -257,6 +327,63 @@ describe('CommentMarkdown link click handler', () => {
     expect(Array.from(container.querySelectorAll('a')).map((anchor) => anchor.textContent)).toEqual(
       ['src/foo.ts', 'src/bar.ts', 'docs/My Folder/notes.md']
     )
+  })
+
+  it('links quoted spaced-first-segment paths around apostrophes', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content={"Don't skip \"Brennan's Folder/notes.md\"; open 'My Folder/guide.md'."}
+          onLinkClick={vi.fn()}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    const anchors = container.querySelectorAll<HTMLAnchorElement>('a')
+    expect(Array.from(anchors).map((anchor) => anchor.textContent)).toEqual([
+      "Brennan's Folder/notes.md",
+      'My Folder/guide.md'
+    ])
+    expect(container.textContent).toBe(
+      "Don't skip \"Brennan's Folder/notes.md\"; open 'My Folder/guide.md'."
+    )
+    expect(
+      Array.from(anchors).map((anchor) => routeNativeChatHref(anchor.getAttribute('href')))
+    ).toEqual([
+      { kind: 'file', pathText: "Brennan's Folder/notes.md", line: null },
+      { kind: 'file', pathText: 'My Folder/guide.md', line: null }
+    ])
+  })
+
+  it('links a spaced-first-segment relative path when inline code disambiguates it', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content="Open `My Folder/notes.md`."
+          onLinkClick={vi.fn()}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    const anchor = container.querySelector<HTMLAnchorElement>('a')
+    expect(anchor?.textContent).toBe('My Folder/notes.md')
+    expect(routeNativeChatHref(anchor?.getAttribute('href'))).toEqual({
+      kind: 'file',
+      pathText: 'My Folder/notes.md',
+      line: null
+    })
   })
 
   it('links complete Unicode paths and extensions that begin with a digit', () => {
@@ -318,6 +445,27 @@ describe('CommentMarkdown link click handler', () => {
 
     expect(Array.from(container.querySelectorAll('a')).map((anchor) => anchor.textContent)).toEqual(
       ['src/foo.ts', 'docs/guide.md', 'assets/report.pdf']
+    )
+  })
+
+  it('links paths after CLI assignment and before Unicode sentence punctuation', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <CommentMarkdown
+          variant="document"
+          content="Run --config=./config.yaml。然后打开 docs/指南.md！再看 docs/报告.pdf？"
+          onLinkClick={vi.fn()}
+          linkifyFilePaths
+        />
+      )
+    })
+
+    expect(Array.from(container.querySelectorAll('a')).map((anchor) => anchor.textContent)).toEqual(
+      ['./config.yaml', 'docs/指南.md', 'docs/报告.pdf']
     )
   })
 

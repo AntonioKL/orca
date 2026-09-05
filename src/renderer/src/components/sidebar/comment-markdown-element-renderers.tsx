@@ -43,6 +43,16 @@ function handleMarkdownAnchorClick(
   onLinkClick?.(event, href)
 }
 
+function handleMarkdownAnchorAuxClick(
+  event: React.MouseEvent<HTMLAnchorElement>,
+  href: string | undefined,
+  onLinkClick: CommentMarkdownLinkClickHandler | undefined
+): void {
+  if (event.button === 1) {
+    handleMarkdownAnchorClick(event, href, onLinkClick)
+  }
+}
+
 function handleMarkdownImageClick(
   event: React.MouseEvent<HTMLImageElement>,
   src: string | undefined,
@@ -70,6 +80,7 @@ export function createCompactCommentMarkdownComponents(
         rel="noreferrer"
         className="underline underline-offset-2 text-foreground/80 hover:text-foreground"
         onClick={(e) => handleMarkdownAnchorClick(e, href, onLinkClick)}
+        onAuxClick={(e) => handleMarkdownAnchorAuxClick(e, href, onLinkClick)}
       >
         {children}
       </a>
@@ -159,6 +170,7 @@ export function createCompactCommentMarkdownComponents(
             rel="noreferrer"
             className="underline underline-offset-2 text-foreground/80 hover:text-foreground"
             onClick={(e) => handleMarkdownAnchorClick(e, src, onLinkClick)}
+            onAuxClick={(e) => handleMarkdownAnchorAuxClick(e, src, onLinkClick)}
           >
             {alt || src}
           </a>
@@ -189,6 +201,7 @@ export function createCompactCommentMarkdownComponents(
           target="_blank"
           rel="noreferrer"
           onClick={(e) => handleMarkdownAnchorClick(e, src, onLinkClick)}
+          onAuxClick={(e) => handleMarkdownAnchorAuxClick(e, src, onLinkClick)}
         >
           {image}
         </a>
@@ -226,6 +239,7 @@ export function createDocumentCommentMarkdownComponents(
           rel="noreferrer"
           className="break-all text-primary underline underline-offset-2 hover:text-primary/80"
           onClick={(e) => handleMarkdownAnchorClick(e, href, onLinkClick)}
+          onAuxClick={(e) => handleMarkdownAnchorAuxClick(e, href, onLinkClick)}
         >
           {children}
         </a>
