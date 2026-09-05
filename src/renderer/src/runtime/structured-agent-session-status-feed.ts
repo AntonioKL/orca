@@ -153,7 +153,9 @@ function createOwner(target: RuntimeClientTarget): OwnedStatusFeed {
         // forever. A failed probe is not an answer, so that path still reconnects.
         if (supported) {
           subscribeToHost(candidate)
+          return
         }
+        console.warn('[structured-session-status] host too old for the status feed', environmentId)
       })
       .catch(() => scheduleReconnect(candidate))
   }
