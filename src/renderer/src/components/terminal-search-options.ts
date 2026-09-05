@@ -15,6 +15,11 @@ const TERMINAL_SEARCH_DECORATIONS = {
   activeMatchColorOverviewRuler: '#ff9900'
 } as const
 
+// Pinned rather than left to the addon's identical default so the match counter
+// knows where `resultCount` is truncated and can say `1000+` instead of a total
+// that reads as exact. Constructor-level: not part of per-find options.
+export const TERMINAL_SEARCH_HIGHLIGHT_LIMIT = 1000
+
 /**
  * Why every find must build its options here: the addon keys three behaviors off
  * `decorations` on the options of the *last* call. Without them `_selectResult`

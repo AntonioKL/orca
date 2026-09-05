@@ -6,13 +6,33 @@ import type { SearchState } from '@/components/terminal-pane/keyboard-handlers'
 import { translate } from '@/i18n/i18n'
 import { getFindRequestQuery } from '@/lib/find-query-bounds'
 import { safeFind } from './terminal-search-safe-find'
-import { buildTerminalSearchOptions } from './terminal-search-options'
+import {
+  TERMINAL_SEARCH_HIGHLIGHT_LIMIT,
+  buildTerminalSearchOptions
+} from './terminal-search-options'
 
 type TerminalSearchProps = {
   isOpen: boolean
   onClose: () => void
   searchAddon: SearchAddon | null
   searchStateRef: React.RefObject<SearchState>
+}
+
+type MatchCount = { addon: SearchAddon; query: string | null; index: number; count: number }
+
+// The addon reports index -1 when the selected match is not among the tracked
+// results — past `highlightLimit`, or before a match is selected — so a position
+// is unknowable there and only the (capped) total can be shown.
+function formatMatchCount(matches: { index: number; count: number }): string {
+  if (matches.count === 0) {
+    return '0/0'
+  }
+  if (matches.index < 0) {
+    return matches.count >= TERMINAL_SEARCH_HIGHLIGHT_LIMIT
+      ? `${matches.count}+`
+      : `${matches.count}`
+  }
+  return `${matches.index + 1}/${matches.count}`
 }
 
 function clearTerminalSearch(searchAddon: SearchAddon | null): void {
@@ -34,9 +54,13 @@ export default function TerminalSearch({
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [regex, setRegex] = useState(false)
   // Why surfaced: the count spans the whole scrollback, so it is the only signal
-  // that matches exist above the visible screen.
-  const [matches, setMatches] = useState<{ index: number; count: number } | null>(null)
+  // that matches exist above the visible screen. Tagged with the addon and query
+  // it was reported for, so a pane switch or an edited query invalidates it in
+  // render rather than through a state reset the user would see one frame late.
+  const [matches, setMatches] = useState<MatchCount | null>(null)
   const requestQuery = getFindRequestQuery(query)
+  const currentMatches =
+    matches && matches.addon === searchAddon && matches.query === requestQuery ? matches : null
 
   const searchOptions = useCallback(
     (incremental: boolean = false) =>
@@ -75,18 +99,23 @@ export default function TerminalSearch({
     [searchAddon]
   )
 
-  // Declared before the search effect so a pane switch is subscribed to the new
-  // addon before that effect issues its first find against it.
+  // Declared before the search effect so a pane switch or an edited query is
+  // subscribed before that effect issues its first find, and so the listener
+  // closes over the query its results belong to.
   useEffect(() => {
     if (!searchAddon) {
       return
     }
-    setMatches(null)
     const subscription = searchAddon.onDidChangeResults(({ resultIndex, resultCount }) => {
-      setMatches({ index: resultIndex, count: resultCount })
+      setMatches({
+        addon: searchAddon,
+        query: requestQuery,
+        index: resultIndex,
+        count: resultCount
+      })
     })
     return () => subscription.dispose()
-  }, [searchAddon])
+  }, [searchAddon, requestQuery])
 
   useEffect(() => {
     // Keep the ref in sync so the keyboard handler (Cmd+G / Cmd+Shift+G)
@@ -95,8 +124,6 @@ export default function TerminalSearch({
 
     if (!isOpen || !requestQuery) {
       clearTerminalSearch(searchAddon)
-      // Clearing fires no results event, so the stale count has to go with it.
-      setMatches(null)
       return
     }
     if (searchAddon) {
@@ -143,14 +170,14 @@ export default function TerminalSearch({
         className="min-w-0 flex-1 border-none bg-transparent text-sm text-white outline-none placeholder:text-zinc-500"
       />
 
-      {requestQuery && matches ? (
+      {requestQuery && currentMatches ? (
         <span
           data-terminal-search-match-count
           className={`shrink-0 text-xs tabular-nums ${
-            matches.count === 0 ? 'text-red-400' : 'text-zinc-400'
+            currentMatches.count === 0 ? 'text-red-400' : 'text-zinc-400'
           }`}
         >
-          {`${matches.count === 0 ? 0 : matches.index + 1}/${matches.count}`}
+          {formatMatchCount(currentMatches)}
         </span>
       ) : null}
 
