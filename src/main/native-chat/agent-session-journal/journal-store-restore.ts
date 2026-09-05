@@ -41,7 +41,7 @@ export function restoreJournalStore(
     adopt: host.adopt,
     appendDisclosure: (identity, body, fence) =>
       host.journal().appendItem(identity, body, { fence }),
-    replaceEpoch: (items, fence) => host.journal().replaceEpochItems('legacy_import', fence, items),
+    replaceState: (state) => collaborators.epochController.replaceState(state),
     sessionId: host.identity.sessionId,
     highestFence: () => host.state().highestFence,
     malformedRows: host.malformedRows,

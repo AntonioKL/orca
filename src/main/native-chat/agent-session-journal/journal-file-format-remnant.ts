@@ -1,117 +1,197 @@
-// A journal directory left behind by the pre-SQLite file format, and the replay
-// that brings it back.
-//
-// Not `journal-legacy-import.ts`, which reads the PROVIDER's own transcript (a
-// Codex rollout, a Claude session file). This is Orca's own journal — the
-// `log.jsonl` the SQLite move stopped reading. The move changed the substrate,
-// not the rows: every line is still a `JournalRow`, so `parseJournalRow`, the
-// `v` upcast chain and the reducer all read it unchanged, and a restore is
-// parse, fold, replace. Measured on real pre-move logs: 1119 of 1119 rows.
-//
-// A session found beside a remnant it cannot replay says so instead, because an
-// empty chat that stays silent is indistinguishable from one created seconds ago.
-
-import { existsSync } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import {
-  agentJournalItemKey,
-  parseAgentJournalItemKey
-} from '../../../shared/agent-session-journal-item-key'
+import { createInterface } from 'node:readline'
+import { agentJournalItemKey } from '../../../shared/agent-session-journal-item-key'
 import type { AgentJournalItemIdentity } from '../../../shared/agent-session-journal-types'
-import type { JournalReplacementItem } from './journal-epoch-replacement'
-import { applyJournalRow, createJournalReducerState } from './journal-reducer'
-import { parseJournalRow } from './journal-row-schema'
+import { findSequenceGap } from './journal-cursor'
+import {
+  readJournalFileFormatSnapshot,
+  seedJournalFileFormatSnapshot
+} from './journal-file-format-snapshot'
+import {
+  applyJournalRow,
+  createJournalReducerState,
+  type JournalReducerState
+} from './journal-reducer'
+import { parseJournalRow, type JournalRow } from './journal-row-schema'
 
 const FILE_FORMAT_LOG_FILE = 'log.jsonl'
 const FILE_FORMAT_SNAPSHOT_FILE = 'snapshot.json'
-
-/** Bounds on what one open will replay. A remnant past either is disclosed
- *  rather than restored: this read sits in front of the session's first paint. */
 const MAX_REMNANT_BYTES = 64 * 1024 * 1024
+const MAX_REMNANT_ROWS = 200_000
 const MAX_RESTORED_ITEMS = 20_000
 
 export type JournalFileFormatRemnant = {
-  /** The abandoned transcript, named so the history stays reachable by hand. */
   transcriptPath: string
-  /** Only the append-only log replays. A snapshot holds folded reducer state,
-   *  not rows, so it is disclosed and left alone. */
-  kind: 'log' | 'snapshot'
+  logPath: string | null
+  snapshotPath: string | null
+  totalBytes: number
 }
 
-/** The remnant in `journalDir`, or null when the directory never held one. */
-export function findJournalFileFormatRemnant(journalDir: string): JournalFileFormatRemnant | null {
-  const logPath = join(journalDir, FILE_FORMAT_LOG_FILE)
-  if (existsSync(logPath)) {
-    return { transcriptPath: logPath, kind: 'log' }
+export type JournalFileFormatRemnantRead =
+  | { status: 'restored'; state: JournalReducerState }
+  | { status: 'not-replayable' }
+
+export async function findJournalFileFormatRemnant(
+  journalDir: string
+): Promise<JournalFileFormatRemnant | null> {
+  const [log, snapshot] = await Promise.all([
+    fileSize(join(journalDir, FILE_FORMAT_LOG_FILE)),
+    fileSize(join(journalDir, FILE_FORMAT_SNAPSHOT_FILE))
+  ])
+  if (!log && !snapshot) {
+    return null
   }
-  const snapshotPath = join(journalDir, FILE_FORMAT_SNAPSHOT_FILE)
-  return existsSync(snapshotPath) ? { transcriptPath: snapshotPath, kind: 'snapshot' } : null
+  const transcriptPath = snapshot?.path ?? log?.path
+  if (!transcriptPath) {
+    return null
+  }
+  return {
+    transcriptPath,
+    logPath: log?.path ?? null,
+    snapshotPath: snapshot?.path ?? null,
+    totalBytes: (log?.bytes ?? 0) + (snapshot?.bytes ?? 0)
+  }
 }
 
-/** The remnant's live timeline, ready for `replaceEpochItems`. Empty whenever
- *  nothing could be replayed — an unreadable file, a bound, or a log holding no
- *  items — so the caller discloses instead. */
-export async function readJournalFileFormatRemnantItems(
+export async function readJournalFileFormatRemnant(
   remnant: JournalFileFormatRemnant,
   sessionId: string
-): Promise<JournalReplacementItem[]> {
-  if (remnant.kind !== 'log') {
-    return []
+): Promise<JournalFileFormatRemnantRead> {
+  if (remnant.totalBytes > MAX_REMNANT_BYTES) {
+    return { status: 'not-replayable' }
   }
-  const size = await stat(remnant.transcriptPath)
-    .then((stats) => stats.size)
-    .catch(() => null)
-  if (size === null || size > MAX_REMNANT_BYTES) {
-    return []
+  let state: JournalReducerState
+  const snapshot = remnant.snapshotPath
+    ? await readJournalFileFormatSnapshot(remnant.snapshotPath)
+    : null
+  if (snapshot && snapshot.status !== 'valid') {
+    return { status: 'not-replayable' }
   }
-  const contents = await readFile(remnant.transcriptPath, 'utf8').catch(() => null)
-  if (contents === null) {
-    return []
+  const rows = remnant.logPath
+    ? await readLogRows(remnant.logPath)
+    : { status: 'valid' as const, rows: [] }
+  if (rows.status !== 'valid') {
+    return { status: 'not-replayable' }
   }
-  return foldFileFormatRows(contents, sessionId)
+  if (remnant.snapshotPath) {
+    if (!snapshot || snapshot.status !== 'valid') {
+      return { status: 'not-replayable' }
+    }
+    const validSnapshot = snapshot.snapshot
+    state = seedJournalFileFormatSnapshot(sessionId, validSnapshot)
+    const tail = unionRows(validSnapshot.tail, rows.rows, validSnapshot.epoch)
+    const oldest = tail[0]?.seq ?? validSnapshot.compactedThrough + 1
+    if (
+      findSequenceGap(
+        tail.map((row) => row.seq),
+        oldest
+      ) ||
+      oldest > validSnapshot.compactedThrough + 1
+    ) {
+      return { status: 'not-replayable' }
+    }
+    for (const row of tail) {
+      if (row.seq > validSnapshot.compactedThrough) {
+        applyJournalRow(state, row)
+      }
+    }
+  } else {
+    const epoch = rows.rows.at(-1)?.epoch
+    if (!epoch) {
+      return { status: 'not-replayable' }
+    }
+    const liveRows = rows.rows.filter((row) => row.epoch === epoch)
+    const firstSequence = liveRows[0]?.seq
+    if (
+      firstSequence === undefined ||
+      liveRows[0]?.kind !== 'epoch' ||
+      findSequenceGap(
+        liveRows.map((row) => row.seq),
+        firstSequence
+      )
+    ) {
+      return { status: 'not-replayable' }
+    }
+    state = createJournalReducerState(sessionId, epoch)
+    for (const row of liveRows) {
+      applyJournalRow(state, row)
+    }
+  }
+  return state.items.size > MAX_RESTORED_ITEMS || !hasRestorableState(state)
+    ? { status: 'not-replayable' }
+    : { status: 'restored', state }
 }
 
-/** Fold the log the way replay folds a table. `applyJournalRow` ignores epoch
- *  rows — the SQLite replay scopes them with a WHERE clause — so supersession is
- *  this function's job: a later epoch discards everything before it. */
-function foldFileFormatRows(contents: string, sessionId: string): JournalReplacementItem[] {
-  let state = createJournalReducerState(sessionId, '')
-  for (const line of contents.split('\n')) {
-    if (line.trim().length === 0) {
-      continue
-    }
-    const parsed = parseJournalRow(line)
-    // Stop at the first row this build cannot read, exactly as replay does:
-    // everything after it is unanchored.
-    if (!parsed.ok) {
-      break
-    }
-    if (parsed.row.kind === 'epoch') {
-      state = createJournalReducerState(sessionId, parsed.row.epoch)
-    }
-    applyJournalRow(state, parsed.row)
-  }
-  const restored: JournalReplacementItem[] = []
-  for (const item of [...state.items.values()].sort(
-    (left, right) => left.sequence - right.sequence
-  )) {
-    const identity = parseAgentJournalItemKey(item.itemId)
-    // A key that no longer parses cannot be upserted against later, so it is
-    // dropped rather than restored under a fabricated identity.
-    if (!identity) {
-      continue
-    }
-    restored.push({ identity, body: item.body, observedAt: item.observedAt })
-    if (restored.length >= MAX_RESTORED_ITEMS) {
-      break
-    }
-  }
-  return restored
+function hasRestorableState(state: JournalReducerState): boolean {
+  return (
+    state.items.size > 0 ||
+    state.submissions.size > 0 ||
+    state.receipts.size > 0 ||
+    state.aliases.size > 0 ||
+    state.tombstones.size > 0 ||
+    state.appliedSettlementIds.size > 0
+  )
 }
 
-/** One stable identity, so a reopen upserts the same row instead of adding one,
- *  and a later successful restore replaces the row that reported the failure. */
+async function fileSize(path: string): Promise<{ path: string; bytes: number } | null> {
+  try {
+    return { path, bytes: (await stat(path)).size }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null
+    }
+    throw error
+  }
+}
+
+async function readLogRows(
+  path: string
+): Promise<{ status: 'valid'; rows: JournalRow[] } | { status: 'not-replayable' }> {
+  const rows: JournalRow[] = []
+  const input = createReadStream(path, { encoding: 'utf8' })
+  const lines = createInterface({
+    input,
+    crlfDelay: Infinity
+  })
+  try {
+    for await (const line of lines) {
+      if (!line.trim()) {
+        continue
+      }
+      const parsed = parseJournalRow(line)
+      if (!parsed.ok || rows.length >= MAX_REMNANT_ROWS) {
+        return { status: 'not-replayable' }
+      }
+      rows.push(parsed.row)
+    }
+    return { status: 'valid', rows }
+  } finally {
+    lines.close()
+    input.destroy()
+  }
+}
+
+function unionRows(
+  retained: readonly JournalRow[],
+  live: readonly JournalRow[],
+  epoch: string
+): JournalRow[] {
+  const rows = new Map<number, JournalRow>()
+  for (const row of retained) {
+    if (row.epoch === epoch) {
+      rows.set(row.seq, row)
+    }
+  }
+  for (const row of live) {
+    if (row.epoch === epoch) {
+      rows.set(row.seq, row)
+    }
+  }
+  return [...rows.values()].sort((left, right) => left.seq - right.seq)
+}
+
 export const JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_IDENTITY: AgentJournalItemIdentity = {
   provider: 'orca',
   clientMessageId: 'journal-file-format-remnant'
@@ -121,12 +201,21 @@ export const JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_ITEM_ID = agentJournalItemKe
   JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_IDENTITY
 )
 
+export function journalFileFormatRemnantNeedsRetry(state: JournalReducerState): boolean {
+  if (state.submissions.size > 0 || state.items.size !== 1) {
+    return false
+  }
+  const disclosure = state.items.get(JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_ITEM_ID)
+  return (
+    disclosure?.body.kind === 'status' && disclosure.body.text.startsWith("This chat's history")
+  )
+}
+
 export type JournalFileFormatRemnantDisclosure = {
   identity: AgentJournalItemIdentity
   body: { kind: 'status'; text: string }
 }
 
-/** Disclosed when the history came back. */
 export function journalFileFormatRestoredDisclosure(input: {
   restored: number
 }): JournalFileFormatRemnantDisclosure {
@@ -140,7 +229,6 @@ export function journalFileFormatRestoredDisclosure(input: {
   }
 }
 
-/** Disclosed when a session opens empty because its history could not be replayed. */
 export function journalFileFormatRemnantDisclosure(
   remnant: JournalFileFormatRemnant
 ): JournalFileFormatRemnantDisclosure {

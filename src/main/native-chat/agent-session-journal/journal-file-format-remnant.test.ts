@@ -279,7 +279,7 @@ describe('replaying a pre-SQLite log.jsonl', () => {
     expect(transcriptText(journal)).toEqual(['final'])
   })
 
-  it('stops at the first unreadable row and keeps the prefix', async () => {
+  it('does not commit a partial prefix when a row is unreadable', async () => {
     await writeFileFormatLog([
       epochLine('file-era-epoch', 1),
       itemLine({ ordinal: 0, text: 'readable', seq: 2 }),
@@ -289,8 +289,8 @@ describe('replaying a pre-SQLite log.jsonl', () => {
 
     const journal = await open()
 
-    expect(transcriptText(journal)).toEqual(['readable'])
-    expect(disclosureText(journal)).toContain('Restored 1 item')
+    expect(transcriptText(journal)).toEqual([])
+    expect(disclosureText(journal)).toContain('could not read')
   })
 
   it('replays once — a reopen neither re-imports nor doubles the row', async () => {

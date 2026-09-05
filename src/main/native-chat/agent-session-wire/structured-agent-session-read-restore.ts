@@ -48,7 +48,7 @@ export async function restoreStructuredAgentSessionRead(
   // the pre-SQLite format has its history in a `log.jsonl` beside it, and opening
   // the journal replays it. Dropping it here instead would leave the session
   // unpublished, which is also what prunes its tab out of the saved workspace.
-  if (!loaded && !findJournalFileFormatRemnant(journalDir)) {
+  if (!loaded && !(await findJournalFileFormatRemnant(journalDir))) {
     return null
   }
   const journal = await openAgentSessionJournal({

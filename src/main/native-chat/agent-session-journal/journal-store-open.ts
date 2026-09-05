@@ -1,13 +1,15 @@
 import { mkdir } from 'node:fs/promises'
-import type { JournalReplacementItem } from './journal-epoch-replacement'
 import {
   findJournalFileFormatRemnant,
   journalFileFormatRemnantDisclosure,
+  journalFileFormatRemnantNeedsRetry,
   journalFileFormatRestoredDisclosure,
-  readJournalFileFormatRemnantItems
+  readJournalFileFormatRemnant
 } from './journal-file-format-remnant'
 import { FIRST_JOURNAL_SEQUENCE, type JournalLoad } from './journal-open'
+import type { JournalReducerState } from './journal-reducer'
 import { journalRepairDisclosure, type JournalRepairDisclosure } from './journal-repair-disclosure'
+import { JournalFileFormatStateInvalidError } from './journal-state-replacement'
 
 export async function ensureJournalDir(journalDir: string): Promise<void> {
   await mkdir(journalDir, { recursive: true })
@@ -39,8 +41,8 @@ export async function openJournalStoreState(input: {
     body: JournalRepairDisclosure['body'],
     fence: number
   ) => Promise<unknown>
-  /** Rolls a fresh epoch holding the restored timeline, in one transaction. */
-  replaceEpoch: (items: readonly JournalReplacementItem[], fence: number) => Promise<unknown>
+  /** Rolls a fresh epoch holding the complete restored state, in one transaction. */
+  replaceState: (state: JournalReducerState) => Promise<unknown>
   sessionId: string
   highestFence: () => number
   malformedRows: () => number
@@ -75,7 +77,10 @@ export async function openJournalStoreState(input: {
   // this build opened before it disclosed anything — still owes the
   // explanation. Bounded to an epoch holding nothing but its anchor, so a
   // session the user has since written into is never appended to.
-  if (loaded.state.lastSequence <= FIRST_JOURNAL_SEQUENCE) {
+  if (
+    loaded.state.lastSequence <= FIRST_JOURNAL_SEQUENCE ||
+    journalFileFormatRemnantNeedsRetry(loaded.state)
+  ) {
     await restoreFileFormatRemnant(input)
   }
 }
@@ -88,7 +93,7 @@ type FileFormatRemnantHandling = {
     body: JournalRepairDisclosure['body'],
     fence: number
   ) => Promise<unknown>
-  replaceEpoch: (items: readonly JournalReplacementItem[], fence: number) => Promise<unknown>
+  replaceState: (state: JournalReducerState) => Promise<unknown>
   highestFence: () => number
   readOnly: () => boolean
 }
@@ -100,14 +105,23 @@ async function restoreFileFormatRemnant(input: FileFormatRemnantHandling): Promi
   if (input.readOnly()) {
     return
   }
-  const remnant = findJournalFileFormatRemnant(input.journalDir)
+  const remnant = await findJournalFileFormatRemnant(input.journalDir)
   if (!remnant) {
     return
   }
-  const restored = await readJournalFileFormatRemnantItems(remnant, input.sessionId)
-  if (restored.length > 0) {
-    await input.replaceEpoch(restored, input.highestFence())
-    const disclosure = journalFileFormatRestoredDisclosure({ restored: restored.length })
+  const restored = await readJournalFileFormatRemnant(remnant, input.sessionId)
+  if (restored.status === 'restored') {
+    try {
+      await input.replaceState(restored.state)
+    } catch (error) {
+      if (!(error instanceof JournalFileFormatStateInvalidError)) {
+        throw error
+      }
+      const disclosure = journalFileFormatRemnantDisclosure(remnant)
+      await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
+      return
+    }
+    const disclosure = journalFileFormatRestoredDisclosure({ restored: restored.state.items.size })
     await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
     return
   }

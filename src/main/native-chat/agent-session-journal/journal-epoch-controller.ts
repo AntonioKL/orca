@@ -6,6 +6,8 @@ import type Database from '../../sqlite/sync-database'
 import { replaceJournalEpoch, type JournalReplacementItem } from './journal-epoch-replacement'
 import { publishNewEpoch } from './journal-epoch-rollover'
 import type { JournalLoad } from './journal-open'
+import type { JournalReducerState } from './journal-reducer'
+import { replaceJournalEpochState } from './journal-state-replacement'
 import type { AgentJournalEpochReason } from './journal-row-schema'
 import { assertJournalFence, assertJournalWritable } from './journal-write-guards'
 
@@ -68,6 +70,22 @@ export class JournalEpochController {
         reason,
         fence,
         items,
+        now: this.deps.now,
+        mintEpoch: this.deps.mintEpoch,
+        onPublished: this.deps.adopt
+      })
+      return this.deps.cursor()
+    })
+  }
+
+  replaceState(state: JournalReducerState): Promise<AgentJournalCursor> {
+    return this.deps.serialize(async () => {
+      assertJournalWritable(this.deps.readOnly(), this.deps.identity.sessionId)
+      assertJournalFence(state.highestFence, this.deps.highestFence())
+      replaceJournalEpochState({
+        db: this.deps.database().db,
+        identity: this.deps.identity,
+        state,
         now: this.deps.now,
         mintEpoch: this.deps.mintEpoch,
         onPublished: this.deps.adopt
