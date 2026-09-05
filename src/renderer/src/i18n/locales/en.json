@@ -697,7 +697,9 @@
             "catalog": {
               "f8b8ca2711": "Zed",
               "d62b12e98a": "Cursor",
-              "173553f73a": "VS Code"
+              "173553f73a": "VS Code",
+              "1a328cf09d": "Windsurf",
+              "eba1a687fe": "Devin Desktop"
             }
           }
         },
@@ -9595,7 +9597,10 @@
             "sidebar": "sidebar",
             "867dddea41": "pinned",
             "5250cf0e48": "pin",
-            "afa37a34e1": "close"
+            "afa37a34e1": "close",
+            "87ef3e43e3": "windsurf",
+            "2a25e9b6ce": "devin",
+            "8be3b60aa7": "devin desktop"
           }
         },
         "git": {

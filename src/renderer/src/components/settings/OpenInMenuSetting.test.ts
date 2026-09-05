@@ -35,6 +35,33 @@ describe('OpenInMenuSetting presets', () => {
     expect(isOpenInAppPresetAdded([{ command: ' cursor ' }], cursor)).toBe(true)
   })
 
+  it.each([
+    ['windsurf', 'Windsurf', 'windsurf'],
+    ['devin-desktop', 'Devin Desktop', 'devin']
+  ])('creates a stable preset row for %s', (id, label, command) => {
+    expect(createPresetOpenInApplication(requirePreset(id))).toEqual({ id, label, command })
+  })
+
+  it('recognizes an added Windsurf or Devin row so the picker cannot duplicate it', () => {
+    for (const [id, command] of [
+      ['windsurf', ' Windsurf '],
+      ['devin-desktop', 'DEVIN']
+    ]) {
+      const preset = requirePreset(id)
+      expect(isOpenInAppPresetAdded([{ command }], preset)).toBe(true)
+      expect(isOpenInAppPresetAdded([{ command: 'code' }], preset)).toBe(false)
+    }
+  })
+
+  it('keeps every preset command unique and matchable', () => {
+    const commands = getOpenInAppPresets().map((preset) => preset.command)
+    // getOpenInAppPreset matches on a lowercased command, so a preset whose own
+    // command is not lowercase could never resolve its icon.
+    expect(commands).toEqual(commands.map((command) => command.toLowerCase()))
+    expect(new Set(commands).size).toBe(commands.length)
+    expect(new Set(getOpenInAppPresets().map((preset) => preset.id)).size).toBe(commands.length)
+  })
+
   it('keeps the Zed icon visible on dark menus', () => {
     const icon = OpenInApplicationIcon({ application: { command: 'zed' } })
 
