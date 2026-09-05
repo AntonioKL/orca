@@ -182,10 +182,19 @@ export type CodexJournalItem = {
  * A `Map`, not an object — an object index answers `__proto__` with a truthy
  * non-string. Every other action type stays an unclassified `shell` row.
  */
-const COMMAND_ACTION_CLASSES = new Map([
+type CommandActionClass = {
+  name: string
+  keys: readonly string[]
+  /** Stand-in target when Codex classifies the command but sends no field for it. */
+  fallback?: Record<string, string>
+}
+
+const COMMAND_ACTION_CLASSES = new Map<string, CommandActionClass>([
   ['read', { name: 'read', keys: ['path', 'name'] }],
   ['search', { name: 'search', keys: ['query', 'path'] }],
-  ['listFiles', { name: 'list', keys: ['path'] }]
+  // A bare `ls` arrives with `path: null`; its target is the cwd, so say so
+  // rather than leaving the row as a word with no argument.
+  ['listFiles', { name: 'list', keys: ['path'], fallback: { path: '.' } }]
 ])
 
 /** The first classified `commandActions` entry; null leaves the row exactly as
@@ -204,7 +213,7 @@ function commandActionFacts(
     if (classified === undefined) {
       continue
     }
-    const fields: Record<string, string> = {}
+    const fields: Record<string, string> = { ...classified.fallback }
     for (const key of classified.keys) {
       const value = readString(record, key)
       if (value !== null) {

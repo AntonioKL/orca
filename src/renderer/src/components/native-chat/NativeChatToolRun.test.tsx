@@ -213,4 +213,72 @@ describe('NativeChatToolRun', () => {
     expect(container.querySelector('.lucide-check')).toBeInTheDocument()
     expect(container.querySelector('.lucide-circle-alert')).toBeNull()
   })
+
+  it('shows the category glyph beside the word a classified row is named by', () => {
+    const blocks: NativeChatBlock[] = [
+      {
+        type: 'tool-call',
+        name: 'read',
+        input: { command: "sed -n '1,200p' notes.txt", path: 'notes.txt' },
+        state: 'completed'
+      }
+    ]
+
+    const { container } = render(<NativeChatToolRun blocks={blocks} expandSignal />)
+
+    const glyph = container.querySelector('.lucide-eye')
+    expect(glyph).toBeInTheDocument()
+    expect(glyph).toHaveAttribute('aria-hidden')
+    expect(screen.getByText('read')).toBeInTheDocument()
+  })
+
+  it('keeps one glyph for a category while it runs and once it completes', () => {
+    const running: NativeChatBlock[] = [
+      { type: 'tool-call', name: 'search', input: { query: 'beta' }, state: 'running' }
+    ]
+    const { container, rerender } = render(
+      <NativeChatToolRun blocks={running} expandSignal activeTurnIsWorking />
+    )
+
+    expect(container.querySelector('.lucide-search')).toBeInTheDocument()
+    expect(container.querySelector('.lucide-wrench')).toBeNull()
+
+    rerender(
+      <NativeChatToolRun
+        blocks={[
+          { type: 'tool-call', name: 'search', input: { query: 'beta' }, state: 'completed' }
+        ]}
+        expandSignal
+        activeTurnIsWorking={false}
+      />
+    )
+
+    expect(container.querySelector('.lucide-search')).toBeInTheDocument()
+  })
+
+  it('falls back to the terminal glyph rather than an empty slot for an unmodelled row', () => {
+    const blocks: NativeChatBlock[] = [
+      { type: 'tool-call', name: 'apply_patch', input: { command: 'apply' }, state: 'completed' }
+    ]
+
+    const { container } = render(<NativeChatToolRun blocks={blocks} expandSignal />)
+
+    expect(container.querySelector('.lucide-square-terminal')).toBeInTheDocument()
+  })
+
+  it('gives the bare list row a `.` argument instead of a lone word', () => {
+    const blocks: NativeChatBlock[] = [
+      {
+        type: 'tool-call',
+        name: 'list',
+        input: { command: 'ls', cwd: '/repo', path: '.' },
+        state: 'completed'
+      }
+    ]
+
+    const { container } = render(<NativeChatToolRun blocks={blocks} expandSignal />)
+
+    expect(container.querySelector('.lucide-folder')).toBeInTheDocument()
+    expect(screen.getByTitle('.')).toHaveTextContent('.')
+  })
 })

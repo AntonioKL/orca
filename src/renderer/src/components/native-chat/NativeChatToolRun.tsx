@@ -3,6 +3,10 @@ import { Check, ChevronRight, SquareTerminal, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import {
+  NATIVE_CHAT_TOOL_ICON_NAMES,
+  nativeChatToolCategory
+} from '../../../../shared/native-chat-tool-icon'
+import {
   isToolCallBlock,
   isToolResultBlock,
   type NativeChatBlock
@@ -15,6 +19,7 @@ import {
   truncateToolDetail
 } from './native-chat-tool-summary'
 import { NativeChatDiffView } from './NativeChatDiffView'
+import { NATIVE_CHAT_TOOL_GLYPHS, NativeChatToolIcon } from './NativeChatToolIcon'
 
 const COMMAND_TOOL_NAMES = new Set([
   'bash',
@@ -106,6 +111,8 @@ function ToolLine({
         )}
         aria-expanded={hasDetail ? expanded : undefined}
       >
+        {/* Decorative category glyph; the word beside it is the row's name. */}
+        <NativeChatToolIcon rowWord={name} className="text-muted-foreground" />
         <code className="shrink-0 font-mono text-xs font-semibold text-foreground/90 transition-colors group-hover:text-foreground">
           {name}
         </code>
@@ -189,10 +196,17 @@ export function NativeChatToolRun({
   // The turn caret opens the activity group, while each child tool remains
   // collapsed. The global expand toolbar still opens child details together.
   const expandToolLines = expandOverride === undefined ? open : false
-  const ActiveToolIcon =
+  const activeCategory = latestActiveCall ? nativeChatToolCategory(latestActiveCall.name) : null
+  const uncategorizedActiveIcon =
     latestActiveCall && COMMAND_TOOL_NAMES.has(normalizedToolName(latestActiveCall.name))
       ? SquareTerminal
       : Wrench
+  // A classified row keeps its category glyph while it runs, so the icon does not
+  // change when the row settles; anything else keeps the generic tool icon.
+  const ActiveToolIcon =
+    activeCategory === null
+      ? uncategorizedActiveIcon
+      : NATIVE_CHAT_TOOL_GLYPHS[NATIVE_CHAT_TOOL_ICON_NAMES[activeCategory]]
   const fallbackLabel =
     callCount === 1
       ? translate('components.native-chat.tool.countOne', '1 tool call')

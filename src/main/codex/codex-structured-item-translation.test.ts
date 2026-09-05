@@ -265,7 +265,7 @@ describe('codex item bodies', () => {
     })
   })
 
-  it('names a classified listFiles command `list`', () => {
+  it('names a classified listFiles command `list` and stands `.` in for a null path', () => {
     expect(
       codexItemBody({
         type: 'commandExecution',
@@ -279,7 +279,40 @@ describe('codex item bodies', () => {
     ).toEqual({
       kind: 'tool-call',
       name: 'list',
-      input: { command: 'ls', cwd: '/repo' },
+      input: { command: 'ls', cwd: '/repo', path: '.' },
+      state: 'completed'
+    })
+  })
+
+  it('keeps the listed directory when listFiles carries one', () => {
+    expect(
+      codexItemBody({
+        type: 'commandExecution',
+        id: 'item-list-path',
+        command: 'ls src',
+        cwd: '/repo',
+        status: 'completed',
+        exitCode: 0,
+        commandActions: [{ type: 'listFiles', command: 'ls src', path: 'src' }]
+      })
+    ).toMatchObject({ name: 'list', input: { path: 'src' } })
+  })
+
+  it('leaves the other classes without a stand-in target', () => {
+    expect(
+      codexItemBody({
+        type: 'commandExecution',
+        id: 'item-read-null',
+        command: 'cat',
+        cwd: '/repo',
+        status: 'completed',
+        exitCode: 0,
+        commandActions: [{ type: 'read', command: 'cat', path: null, name: null }]
+      })
+    ).toEqual({
+      kind: 'tool-call',
+      name: 'read',
+      input: { command: 'cat', cwd: '/repo' },
       state: 'completed'
     })
   })
