@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS journal_file_imports (
   session_id             TEXT PRIMARY KEY,
   source_fingerprint     TEXT    NOT NULL,
   retains_restored_state INTEGER NOT NULL CHECK (retains_restored_state IN (0, 1)),
+  journal_epoch          TEXT    NOT NULL,
+  journal_sequence       INTEGER NOT NULL,
   attempted_at           INTEGER NOT NULL
 );
 `

@@ -76,6 +76,7 @@ export function replaceJournalEpochState(input: {
       input.identity.sessionId,
       input.sourceFingerprint,
       true,
+      { epoch, sequence: rows.length },
       restoredAt
     )
     for (const row of rows) {

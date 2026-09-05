@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises'
 import {
   findJournalFileFormatRemnant,
+  journalFileFormatConflictDisclosure,
   journalFileFormatRemnantDisclosure,
   journalFileFormatSourceNeedsCheck,
   journalFileFormatSourceWasDisclosed,
@@ -46,7 +47,12 @@ export async function openJournalStoreState(input: {
   /** Rolls a fresh epoch holding the complete restored state, in one transaction. */
   replaceState: (state: JournalReducerState, sourceFingerprint: string) => Promise<unknown>
   importRecord: () => JournalFileImportRecord | null
-  recordImportAttempt: (sourceFingerprint: string, retainsRestoredState: boolean) => void
+  recordImportAttempt: (
+    sourceFingerprint: string,
+    retainsRestoredState: boolean,
+    journalCursor: JournalFileImportRecord['journalCursor']
+  ) => void
+  currentCursor: () => JournalFileImportRecord['journalCursor']
   sessionId: string
   highestFence: () => number
   malformedRows: () => number
@@ -56,7 +62,7 @@ export async function openJournalStoreState(input: {
   const loaded = input.loaded !== undefined ? input.loaded : input.replay()
   if (!loaded) {
     input.start()
-    await restoreFileFormatRemnant(input, null, false)
+    await restoreFileFormatRemnant(input, null, false, false)
     return
   }
   input.adopt(loaded)
@@ -86,11 +92,16 @@ export async function openJournalStoreState(input: {
       ? input.importRecord()
       : null
   const retainsRestoredState = importRecord?.retainsRestoredState ?? false
+  const hasNativeDivergence = Boolean(
+    importRecord?.retainsRestoredState &&
+    (importRecord.journalCursor.epoch !== loaded.state.epoch ||
+      importRecord.journalCursor.sequence !== loaded.state.lastSequence)
+  )
   if (
     loaded.state.lastSequence <= FIRST_JOURNAL_SEQUENCE ||
     journalFileFormatSourceNeedsCheck(loaded.state, retainsRestoredState)
   ) {
-    await restoreFileFormatRemnant(input, importRecord, retainsRestoredState)
+    await restoreFileFormatRemnant(input, importRecord, retainsRestoredState, hasNativeDivergence)
   }
 }
 
@@ -104,17 +115,23 @@ type FileFormatRemnantHandling = {
   ) => Promise<unknown>
   replaceState: (state: JournalReducerState, sourceFingerprint: string) => Promise<unknown>
   importRecord: () => JournalFileImportRecord | null
-  recordImportAttempt: (sourceFingerprint: string, retainsRestoredState: boolean) => void
+  recordImportAttempt: (
+    sourceFingerprint: string,
+    retainsRestoredState: boolean,
+    journalCursor: JournalFileImportRecord['journalCursor']
+  ) => void
+  currentCursor: () => JournalFileImportRecord['journalCursor']
   highestFence: () => number
   readOnly: () => boolean
 }
 
 /** Replays the pre-SQLite files into this journal. Successful state, disclosure,
- *  and source fingerprint land together; failed reads disclose before marking. */
+ *  and source fingerprint land together; unsafe sources disclose before marking. */
 async function restoreFileFormatRemnant(
   input: FileFormatRemnantHandling,
   importRecord: JournalFileImportRecord | null,
-  retainsRestoredState: boolean
+  retainsRestoredState: boolean,
+  hasNativeDivergence: boolean
 ): Promise<void> {
   if (input.readOnly()) {
     return
@@ -124,6 +141,10 @@ async function restoreFileFormatRemnant(
     return
   }
   if (importRecord?.sourceFingerprint === remnant.sourceFingerprint) {
+    return
+  }
+  if (hasNativeDivergence) {
+    await discloseFileFormatConflict(input, remnant)
     return
   }
   const restored = await readJournalFileFormatRemnant(remnant, input.sessionId)
@@ -142,6 +163,15 @@ async function restoreFileFormatRemnant(
   await discloseFileFormatRemnantFailure(input, remnant, retainsRestoredState)
 }
 
+async function discloseFileFormatConflict(
+  input: FileFormatRemnantHandling,
+  remnant: JournalFileFormatRemnant
+): Promise<void> {
+  const disclosure = journalFileFormatConflictDisclosure(remnant)
+  await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
+  input.recordImportAttempt(remnant.sourceFingerprint, true, input.currentCursor())
+}
+
 async function discloseFileFormatRemnantFailure(
   input: FileFormatRemnantHandling,
   remnant: JournalFileFormatRemnant,
@@ -149,5 +179,5 @@ async function discloseFileFormatRemnantFailure(
 ): Promise<void> {
   const disclosure = journalFileFormatRemnantDisclosure(remnant)
   await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
-  input.recordImportAttempt(remnant.sourceFingerprint, retainsRestoredState)
+  input.recordImportAttempt(remnant.sourceFingerprint, retainsRestoredState, input.currentCursor())
 }

@@ -48,14 +48,16 @@ export function restoreJournalStore(
     replaceState: (state, sourceFingerprint) =>
       collaborators.epochController.replaceState(state, sourceFingerprint),
     importRecord: () => readJournalFileImportRecord(host.database().db, host.identity.sessionId),
-    recordImportAttempt: (sourceFingerprint, retainsRestoredState) =>
+    recordImportAttempt: (sourceFingerprint, retainsRestoredState, journalCursor) =>
       recordJournalFileImportAttempt(
         host.database().db,
         host.identity.sessionId,
         sourceFingerprint,
         retainsRestoredState,
+        journalCursor,
         host.now()
       ),
+    currentCursor: host.cursor,
     sessionId: host.identity.sessionId,
     highestFence: () => host.state().highestFence,
     malformedRows: host.malformedRows,

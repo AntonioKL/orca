@@ -22,6 +22,9 @@ const MAX_REMNANT_BYTES = 64 * 1024 * 1024
 const MAX_REMNANT_ROWS = 200_000
 const MAX_RESTORED_ITEMS = 20_000
 const FILE_FORMAT_IMPORT_VERSION = 1
+const RESTORED_DISCLOSURE_PREFIX = 'Restored '
+const UNREADABLE_DISCLOSURE_PREFIX = "This chat's history"
+const CONFLICT_DISCLOSURE_PREFIX = "This chat's older-format history changed"
 
 export type JournalFileFormatRemnant = {
   transcriptPath: string
@@ -225,13 +228,16 @@ export function journalFileFormatSourceNeedsCheck(
   if (disclosure?.body.kind !== 'status') {
     return false
   }
-  if (retainsRestoredState || disclosure.body.text.startsWith('Restored ')) {
+  if (disclosure.body.text.startsWith(CONFLICT_DISCLOSURE_PREFIX)) {
+    return false
+  }
+  if (retainsRestoredState || disclosure.body.text.startsWith(RESTORED_DISCLOSURE_PREFIX)) {
     return true
   }
   return (
     state.submissions.size === 0 &&
     state.items.size === 1 &&
-    disclosure.body.text.startsWith("This chat's history")
+    disclosure.body.text.startsWith(UNREADABLE_DISCLOSURE_PREFIX)
   )
 }
 
@@ -263,6 +269,21 @@ export function journalFileFormatRemnantDisclosure(
       text:
         `This chat's history was saved in an older format that this version could not read, ` +
         `so the session starts empty. The original transcript is still on disk at ` +
+        `${remnant.transcriptPath}`
+    }
+  }
+}
+
+export function journalFileFormatConflictDisclosure(
+  remnant: JournalFileFormatRemnant
+): JournalFileFormatRemnantDisclosure {
+  return {
+    identity: JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_IDENTITY,
+    body: {
+      kind: 'status',
+      text:
+        `${CONFLICT_DISCLOSURE_PREFIX} after newer history was written, so it was not ` +
+        `imported automatically. Both histories were kept; the older transcript is on disk at ` +
         `${remnant.transcriptPath}`
     }
   }

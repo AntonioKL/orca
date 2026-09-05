@@ -1,4 +1,4 @@
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -290,6 +290,79 @@ describe('all-or-nothing migration', () => {
     )
   })
 
+  it('keeps native history when only the restored source metadata changes', async () => {
+    await writeRows([epoch(), item(2, 'legacy:codex:session-1:first', 'first')])
+    const migrated = await open()
+    await migrated.appendItem(
+      { provider: 'codex', threadId: 'thread-1', turnId: 'native', ordinal: 0 },
+      { kind: 'message', role: 'assistant', blocks: [{ type: 'text', text: 'native' }] },
+      { fence: 8 }
+    )
+    await migrated.close()
+    const logPath = join(root, 'log.jsonl')
+    const touchedAt = new Date(Date.now() + 60_000)
+    await utimes(logPath, touchedAt, touchedAt)
+
+    const conflicted = await open()
+    const bodies = conflicted.snapshot().items.map((entry) => entry.body)
+    expect(bodies).toContainEqual(
+      expect.objectContaining({ blocks: [{ type: 'text', text: 'first' }] })
+    )
+    expect(bodies).toContainEqual(
+      expect.objectContaining({ blocks: [{ type: 'text', text: 'native' }] })
+    )
+    expect(bodies).toContainEqual(
+      expect.objectContaining({ kind: 'status', text: expect.stringContaining('Both histories') })
+    )
+    const conflictCursor = conflicted.cursor()
+    await conflicted.close()
+
+    const unchanged = await open()
+    expect(unchanged.cursor()).toEqual(conflictCursor)
+    await unchanged.close()
+    const db = new Database(journalDatabaseFile(root), { readonly: true })
+    try {
+      expect(db.prepare('SELECT count(*) AS total FROM journal_rows').get()).toMatchObject({
+        total: 5
+      })
+    } finally {
+      db.close()
+    }
+  })
+
+  it.each([
+    ['higher', 99],
+    ['stale', 6]
+  ])('refuses a %s-fence rollback source after native history diverges', async (_label, fence) => {
+    await writeRows([epoch(), item(2, 'legacy:codex:session-1:first', 'first')])
+    const migrated = await open()
+    await migrated.appendItem(
+      { provider: 'codex', threadId: 'thread-1', turnId: 'native', ordinal: 0 },
+      { kind: 'message', role: 'assistant', blocks: [{ type: 'text', text: 'native' }] },
+      { fence: 8 }
+    )
+    await migrated.close()
+    const rollback = {
+      ...item(3, 'legacy:codex:session-1:rollback', 'rollback'),
+      fence
+    }
+    const logPath = join(root, 'log.jsonl')
+    await appendFile(logPath, `${JSON.stringify(rollback)}\n`, 'utf8')
+
+    const conflicted = await open()
+    const bodies = conflicted.snapshot().items.map((entry) => entry.body)
+    expect(bodies).toContainEqual(
+      expect.objectContaining({ blocks: [{ type: 'text', text: 'native' }] })
+    )
+    expect(bodies).not.toContainEqual(
+      expect.objectContaining({ blocks: [{ type: 'text', text: 'rollback' }] })
+    )
+    expect(bodies).toContainEqual(
+      expect.objectContaining({ kind: 'status', text: expect.stringContaining(logPath) })
+    )
+    expect(await readFile(logPath, 'utf8')).toContain('rollback')
+  })
+
   it('retries a repaired rollback source while retaining the last successful import', async () => {
     const firstItem = item(2, 'legacy:codex:session-1:first', 'first')
     await writeRows([epoch(), firstItem])
@@ -318,6 +391,38 @@ describe('all-or-nothing migration', () => {
         kind: 'message',
         blocks: [{ type: 'text', text: 'after repair' }]
       })
+    )
+  })
+
+  it('refuses a repaired rollback source after native history advances past its failure', async () => {
+    const firstItem = item(2, 'legacy:codex:session-1:first', 'first')
+    await writeRows([epoch(), firstItem])
+    const migrated = await open()
+    await migrated.close()
+    await appendFile(join(root, 'log.jsonl'), 'not-json\n', 'utf8')
+    const unreadable = await open()
+    await unreadable.appendItem(
+      { provider: 'codex', threadId: 'thread-1', turnId: 'native', ordinal: 0 },
+      { kind: 'message', role: 'assistant', blocks: [{ type: 'text', text: 'native' }] },
+      { fence: 8 }
+    )
+    await unreadable.close()
+    await writeRows([
+      epoch(),
+      firstItem,
+      item(3, 'legacy:codex:session-1:repaired', 'after repair')
+    ])
+
+    const conflicted = await open()
+    const bodies = conflicted.snapshot().items.map((entry) => entry.body)
+    expect(bodies).toContainEqual(
+      expect.objectContaining({ blocks: [{ type: 'text', text: 'native' }] })
+    )
+    expect(bodies).not.toContainEqual(
+      expect.objectContaining({ blocks: [{ type: 'text', text: 'after repair' }] })
+    )
+    expect(bodies).toContainEqual(
+      expect.objectContaining({ kind: 'status', text: expect.stringContaining('Both histories') })
     )
   })
 
