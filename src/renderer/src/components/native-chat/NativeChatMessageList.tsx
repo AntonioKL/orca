@@ -7,7 +7,7 @@ import { orderNativeChatMessages } from './native-chat-message-grouping'
 import { stripNoiseMessages } from './native-chat-noise'
 import { foldToolMessages } from './native-chat-tool-fold'
 import { isNearBottom, shouldShowJumpToLatest, type ScrollGeometry } from './native-chat-autoscroll'
-import { NativeChatMessageRow } from './NativeChatMessageRow'
+import { MessageRow } from './NativeChatMessageRow'
 import { shouldShowNativeChatTypingIndicator } from './native-chat-typing-indicator'
 import { NativeChatWorkingStatus } from './NativeChatWorkingStatus'
 import { useNativeChatTurnStatus } from './use-native-chat-turn-status'
@@ -225,7 +225,7 @@ export function NativeChatMessageList({
                   : undefined
             return (
               <Fragment key={message.id}>
-                <NativeChatMessageRow
+                <MessageRow
                   message={message}
                   expandSignal={expandSignal}
                   // A missing transcript lifecycle is not evidence that the turn

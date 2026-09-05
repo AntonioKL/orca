@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { memo, useCallback, useMemo, useRef } from 'react'
 import CommentMarkdown, {
   type CommentMarkdownLinkClickHandler
 } from '@/components/sidebar/CommentMarkdown'
@@ -7,8 +7,8 @@ import { translate } from '@/i18n/i18n'
 import { subagentGroupBlocks } from '../../../../shared/native-chat-subagent-summary'
 import { isSubagentGroupBlock, type NativeChatMessage } from '../../../../shared/native-chat-types'
 import { splitNativeChatBlocks } from './native-chat-tool-fold'
-import { nativeChatProseToMarkdown } from './native-chat-prose'
 import { NativeChatToolRun } from './NativeChatToolRun'
+import { nativeChatProseToMarkdown } from './native-chat-prose'
 import {
   NativeChatAgentControls,
   NativeChatImageAttachments,
@@ -18,8 +18,10 @@ import type { RuntimeFileOperationArgs } from '@/runtime/runtime-file-client'
 
 /** One message: its prose first, then a collapsible run folding all of the
  *  turn's tool activity. Monochrome per STYLEGUIDE: user prompts read as a
- *  lifted card, assistant prose as body copy, reasoning de-emphasized. */
-export function NativeChatMessageRow({
+ *  lifted card, assistant prose as body copy, reasoning de-emphasized.
+ *  Memoized: a stream frame republishes the whole transcript, but settled rows
+ *  keep their block identity, so only the changed row re-renders. */
+export const MessageRow = memo(function MessageRow({
   message,
   expandSignal,
   activeTurnIsWorking,
@@ -44,21 +46,26 @@ export function NativeChatMessageRow({
   runtimeContext?: RuntimeFileOperationArgs | null
 }): React.JSX.Element | null {
   const rowRef = useRef<HTMLDivElement | null>(null)
-  const split = useMemo(() => splitNativeChatBlocks(message.blocks), [message.blocks])
-  const tools = split.tools
-  const subagentGroups = useMemo(() => subagentGroupBlocks(split.prose), [split.prose])
-  // A spawn-group row carries a plain-text twin so a client without the block
-  // type still reads the roster. This one draws the block, so the twin is
-  // dropped rather than printed beside it.
-  const prose = useMemo(
-    () =>
-      subagentGroups.length === 0
+  // One pass per block set: a streaming turn re-renders this row on every frame, and these
+  // derivations used to re-run each time even though `message.blocks` had not changed.
+  const { hasImages, markdown, prose, subagentGroups, tools } = useMemo(() => {
+    const split = splitNativeChatBlocks(message.blocks)
+    const groups = subagentGroupBlocks(split.prose)
+    // A spawn-group row carries a plain-text twin so a client without the block
+    // type still reads the roster. This one draws the block, so the twin is
+    // dropped rather than printed beside it.
+    const prose =
+      groups.length === 0
         ? split.prose
-        : split.prose.filter((block) => block.type !== 'text' && !isSubagentGroupBlock(block)),
-    [split.prose, subagentGroups.length]
-  )
-  const markdown = nativeChatProseToMarkdown(prose)
-  const hasImages = prose.some((block) => block.type === 'image-ref')
+        : split.prose.filter((block) => block.type !== 'text' && !isSubagentGroupBlock(block))
+    return {
+      tools: split.tools,
+      prose,
+      subagentGroups: groups,
+      markdown: nativeChatProseToMarkdown(prose),
+      hasImages: prose.some((block) => block.type === 'image-ref')
+    }
+  }, [message.blocks])
   const isUser = message.role === 'user'
   const isReasoning = message.role === 'reasoning'
   const isSystem = message.role === 'system'
@@ -152,6 +159,7 @@ export function NativeChatMessageRow({
           className="text-sm"
           onLinkClick={onLinkClick}
           allowFileUriLinks={allowFileUriLinks}
+          linkifyFilePaths={onLinkClick !== undefined}
         />
       ) : null}
       {tools.length > 0 || subagentGroups.length > 0 ? (
@@ -173,4 +181,4 @@ export function NativeChatMessageRow({
       ) : null}
     </div>
   )
-}
+})
