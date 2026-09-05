@@ -44,6 +44,8 @@ export type ClaudeSubagentTaskFrame = {
   /** null when the frame reported no lifecycle status. */
   state: NativeChatSubagentState | null
   backgrounded: boolean
+  /** Any `task_started`, subagent or not. Proof this CLI declares its tasks. */
+  announcement: boolean
   /** `task_started` for a task the roster should show. Only an announcement
    *  creates an entry: an update carries no `task_type`, so honouring one for an
    *  unknown id would roster whatever else shares this channel. */
@@ -106,6 +108,7 @@ export function readClaudeSubagentTaskFrame(
         ? taskState(patch?.status ?? message.status)
         : null,
     backgrounded: message.is_backgrounded === true || patch?.is_backgrounded === true,
+    announcement,
     announcesSubagent: subagent,
     excluded: announcement && !subagent
   }

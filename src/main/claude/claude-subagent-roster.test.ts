@@ -271,20 +271,53 @@ describe('ClaudeSubagentRoster', () => {
   })
 
   describe('label ordinals', () => {
-    it('never re-issues an ordinal a re-labelled row gave up', () => {
+    it('never re-issues an ordinal a removed row gave up', () => {
+      const { roster, roles } = harness()
+      roster.observeSystemFrame(started({ task_id: 'task-1', description: 'Audit' }))
+      roster.observeSystemFrame(started({ task_id: 'task-2', description: 'Audit' }))
+      // task-1 is re-announced as a shell task, so its row goes; reclaiming the
+      // ordinal it held would print a second 'Audit 2' beside the one still shown.
+      roster.observeSystemFrame(
+        system('task_started', { task_id: 'task-1', task_type: 'local_bash' })
+      )
+      roster.observeSystemFrame(started({ task_id: 'task-3', description: 'Audit' }))
+      expect(roles().map((agent) => agent.label)).toEqual(['Audit 2', 'Audit 3'])
+    })
+  })
+
+  describe('child traffic for an id the CLI never declared', () => {
+    it('creates nothing once the CLI has announced any task at all', () => {
+      const { roster, items } = harness()
+      // A rejected announcement still proves this CLI declares what it spawns.
+      roster.observeSystemFrame(
+        system('task_started', { task_id: 'task-bash', task_type: 'local_bash' })
+      )
+      roster.observeChildActivity('toolu_never_announced')
+      expect(items).toHaveLength(0)
+    })
+
+    it('leaves a grandchild parented inside the sidechain out of the roster', () => {
+      const { roster, roles } = harness()
+      roster.observeSystemFrame(
+        started({ task_id: 'task-1', tool_use_id: 'toolu_1', description: 'Explore' })
+      )
+      roster.observeChildActivity('toolu_1')
+      // A tool the subagent itself ran: never announced, so never excluded either.
+      roster.observeChildActivity('toolu_inner')
+      expect(roles()).toEqual([
+        expect.objectContaining({ id: 'task-1', label: 'Explore', state: 'working' })
+      ])
+    })
+
+    it('still mints the provisional row for a release that announces no task', () => {
       const { roster, roles } = harness()
       roster.observeChildActivity('toolu_1')
-      roster.observeChildActivity('toolu_2')
-      roster.observeChildActivity('toolu_3')
+      // Not an announcement: the fallback path stays open for this release.
       roster.observeSystemFrame(
-        started({ task_id: 'task-2', tool_use_id: 'toolu_2', description: 'Named' })
+        system('task_updated', { task_id: 'task-x', patch: { status: 'running' } })
       )
-      roster.observeChildActivity('toolu_4')
-      expect(
-        roles()
-          .map((agent) => agent.label)
-          .sort()
-      ).toEqual(['Named', 'subagent', 'subagent 3', 'subagent 4'])
+      roster.observeChildActivity('toolu_2')
+      expect(roles().map((agent) => agent.label)).toEqual(['subagent', 'subagent 2'])
     })
   })
 

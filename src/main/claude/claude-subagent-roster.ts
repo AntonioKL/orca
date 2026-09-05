@@ -65,6 +65,10 @@ export class ClaudeSubagentRoster {
    *  from an earlier turn revises that turn's row instead of the live one. */
   private readonly groupIdByEntry = new Map<string, string>()
   private readonly ids = new ClaudeSubagentIds()
+  /** Set by ANY `task_started`, including one the subagent filter rejects. Once
+   *  this CLI has proven it declares its tasks, child traffic for an id it never
+   *  announced is a nested tool or a grandchild, not a subagent. */
+  private announcesTasks = false
   private readonly now: () => number
 
   constructor(private readonly deps: ClaudeSubagentRosterDeps) {
@@ -77,6 +81,7 @@ export class ClaudeSubagentRoster {
     if (!frame) {
       return false
     }
+    this.announcesTasks ||= frame.announcement
     if (frame.excluded) {
       // Child traffic may already have built a provisional row under the tool id;
       // the announcement is the first frame that says it is not a subagent.
@@ -122,6 +127,14 @@ export class ClaudeSubagentRoster {
       return
     }
     if (this.locate(canonical)) {
+      return
+    }
+    if (this.announcesTasks) {
+      // A nested Task, a workflow child, or a grandchild parented to a tool id
+      // inside the sidechain all reach here. This CLI announces what it spawns,
+      // so an id it never declared cannot be a subagent — and a row invented for
+      // one is unlabelled forever and can only ever end `unverifiable`. The
+      // bounded exclusion set cannot cover an id that was never announced.
       return
     }
     this.create(canonical, null, 'working', false)
@@ -178,6 +191,7 @@ export class ClaudeSubagentRoster {
     this.groups.clear()
     this.groupIdByEntry.clear()
     this.ids.clear()
+    this.announcesTasks = false
   }
 
   private sweep(group: RosterGroup | undefined, includeBackgrounded: boolean): void {
