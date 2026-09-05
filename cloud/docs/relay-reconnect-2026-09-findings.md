@@ -933,3 +933,4 @@ Owner: "sure, feel free to drive these." Sequence chosen: Roll 1 first (highest 
 | Monitor dry-run #34 | **Green** 05:17:31Z at gen 126, `436ef827dd`. Run 33946093029. |
 | Batch 2 (run 33946819345) | Dispatched 05:17:43Z: c19,c20,c21,c22, canary authority 33944255902 (c16). |
 | Merged 05:19Z | stablyai/orca #18798 (freshness bar 330 s + two-sample tolerance). Next gate runs at a commit containing it. |
+| Batch 2 cell 1 (c19) | **Succeeded** 05:19–05:32Z. c20 started. |
