@@ -208,6 +208,22 @@ export class OrcaRuntimeWithStopRequestedPtyIds extends OrcaRuntimeWithRuntimeId
       this.deliverPendingMessagesForHandle(mailboxHandle, reservedTypes),
     requestSleepingRecipientWake: (mailboxHandle) =>
       this.requestSleepingRecipientWake(mailboxHandle),
+    submitStatuslessCodexPointer: async (handle, expectedPtyId, prompt, beforeWrite) => {
+      await this.sendTerminalAgentPrompt(handle, prompt, {
+        beforeWrite: async (ptyId) => {
+          await beforeWrite(ptyId)
+          if (
+            ptyId !== expectedPtyId ||
+            !(await this.isTerminalRunningSettledPromptAgent(handle)) ||
+            this.ptysById.get(ptyId)?.foregroundAgent !== 'codex'
+          ) {
+            throw new Error('orchestration_pointer_target_changed')
+          }
+          await beforeWrite(ptyId)
+        },
+        suffixFailureError: 'orchestration_pointer_target_changed'
+      })
+    },
     writePty: (ptyId, data) => this.writeOrchestrationPointerPty(ptyId, data)
   })
 

@@ -6,6 +6,7 @@ import { getOrchestrationMailboxPointerCandidates } from './mailbox-pointer-cand
 import { OrchestrationMailboxStatuslessCodexProofCoordinator } from './mailbox-statusless-codex-proof-coordinator'
 import { isStatuslessIdleProofCurrent } from './mailbox-statusless-idle-proof'
 import { stageOrchestrationMailboxPointer } from './mailbox-pointer-stage'
+import type { SubmitStatuslessCodexPointer } from './mailbox-statusless-codex-submit'
 import {
   OrchestrationMailboxPointerState,
   type OrchestrationMailboxDeliveryFlight,
@@ -31,6 +32,7 @@ type PointerDeliveryDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   /** Ask for an auto-slept recipient to be woken. Optional so hosts that predate
    *  the wake path keep today's silent give-up. */
   requestSleepingRecipientWake?: (mailboxHandle: string) => void
+  submitStatuslessCodexPointer?: SubmitStatuslessCodexPointer
   writePty: (ptyId: string, data: string) => boolean | Promise<boolean>
 }
 
@@ -198,6 +200,9 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
         isLeafPtyProvenAbsent: this.deps.isLeafPtyProvenAbsent,
         ...(this.deps.requestSleepingRecipientWake
           ? { requestSleepingRecipientWake: this.deps.requestSleepingRecipientWake }
+          : {}),
+        ...(this.deps.submitStatuslessCodexPointer
+          ? { submitStatuslessCodexPointer: this.deps.submitStatuslessCodexPointer }
           : {}),
         writePty: this.deps.writePty,
         settle: (settledPtyId, settledFlight) => this.settle(settledPtyId, settledFlight),

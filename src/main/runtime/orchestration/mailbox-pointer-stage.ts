@@ -13,6 +13,10 @@ import type {
   OrchestrationStatuslessIdleProof
 } from './mailbox-pointer-state'
 import { submitOrchestrationMailboxPointer } from './mailbox-pointer-submit'
+import {
+  submitStatuslessCodexMailboxPointer,
+  type SubmitStatuslessCodexPointer
+} from './mailbox-statusless-codex-submit'
 
 /** Delay between the pointer text landing in the composer and the submit keystroke. */
 const POINTER_SUBMIT_DELAY_MS = 500
@@ -28,6 +32,7 @@ type PointerStageDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   getTerminalProcessIncarnation: (terminalHandle: string) => string | null
   isLeafPtyProvenAbsent: (ptyId: string) => Promise<boolean>
   requestSleepingRecipientWake?: (mailboxHandle: string) => void
+  submitStatuslessCodexPointer?: SubmitStatuslessCodexPointer
   writePty: (ptyId: string, data: string) => boolean | Promise<boolean>
   settle: (ptyId: string, flight: OrchestrationMailboxDeliveryFlight) => void
   redrive: (mailboxHandle: string, force?: boolean) => void
@@ -56,6 +61,30 @@ export function stageOrchestrationMailboxPointer<TWaiter extends OrchestrationMe
         deps.getTerminalProcessIncarnation
       ))
   ) {
+    return
+  }
+  if (input.statuslessIdleProof && deps.submitStatuslessCodexPointer) {
+    submitStatuslessCodexMailboxPointer(
+      {
+        mailboxOwner: deps.mailboxOwner,
+        state: deps.state,
+        getDb: deps.getDb,
+        getLeaf: deps.getLeaf,
+        getLeafKey: deps.getLeafKey,
+        getMessageWaiters: deps.getMessageWaiters,
+        getTerminalProcessIncarnation: deps.getTerminalProcessIncarnation,
+        submitStatuslessCodexPointer: deps.submitStatuslessCodexPointer,
+        settle: deps.settle,
+        redrive: deps.redrive
+      },
+      {
+        leaf: input.leaf,
+        mailboxHandle: input.mailboxHandle,
+        unread: input.unread,
+        newestSequence: input.newestSequence,
+        statuslessIdleProof: input.statuslessIdleProof
+      }
+    )
     return
   }
   const flight = deps.state.beginFlight(ptyId)
