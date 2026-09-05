@@ -12888,10 +12888,10 @@
         "internal incident evidence: improve-vps-setup, 2026-08-10"
       ],
       "invariant": "Each message has one stable row ID and authoritative recipient; coordinator-addressed current-delivery inserts are atomically owned by run:<id>. Pointer staging may set delivered_at but never consumes mail. Each Run consumer generation has at most one outstanding Delivery with a fixed ID and fixed message IDs; ordinary checks replay it until an explicit matching acknowledgment marks exactly those rows read. Rebinding fences the old generation, notification types/counts correspond to unread rows retrievable under the same authority, and federation replay imports each stable message identity once without re-waking an already-read duplicate.",
-      "oracle": "Seed status, dispatch, and worker_done rows across direct-handle and canonical Run recipients in an isolated DB. Compare pointer count, RPC and built-CLI check output, direct SQLite rows, unread/peek/all/type filters, concurrent pollers, fixed Delivery IDs, explicit acknowledgment, restart, filtered check --wait, and coordinator remint. Route a 125-row old-handle backlog, inject a commit without notification, and require startup repair. Exercise duplicate Run/Dispatch owners, stale panes, 50-row pages, cancellation, lifecycle fencing, and absent PTYs. Drop a federation ACK, reconnect/restart v1/v2 peers, and require stable import plus no duplicate read-row wake. Hold a healthy SSH write past five seconds but below the 60-second settlement deadline, then distinguish pre-write refusal from in-flight loss: only refusal permits redrive; loss preserves the durable write-attempted reservation and restart emits no duplicate pointer. Install the production PTY controller and verify that it routes settled writes through the owning provider.",
+      "oracle": "Seed status, dispatch, and worker_done rows across direct-handle and canonical Run recipients in an isolated DB. Compare pointer count, RPC and built-CLI check output, direct SQLite rows, unread/peek/all/type filters, concurrent pollers, fixed Delivery IDs, explicit acknowledgment, restart, filtered check --wait, and coordinator remint. Route a 125-row old-handle backlog, inject a commit without notification, and require startup repair. Exercise duplicate Run/Dispatch owners, stale panes, 50-row pages, cancellation, lifecycle fencing, and absent PTYs. Drop a federation ACK, reconnect/restart v1/v2 peers, and require stable import plus no duplicate read-row wake. Hold a healthy SSH write past five seconds but below the 60-second settlement deadline, then distinguish the three settlement outcomes end to end: only a proven refusal releases the reservation and drains a delivery parked behind the watermark; a dropped in-flight settlement must surface as unverifiable with bytes handed to the transport, preserve the durable write-attempted reservation, and emit no duplicate pointer after restart; a settled write that throws mid-pointer is unverifiable, not a refusal; and an Enter whose settlement is lost stays at enter-attempted so restart emits no second Enter. Install the production PTY controller and verify that it routes settled writes through the owning provider and refuses before any byte when the routed provider cannot settle. Census every production PTY provider class and reject a settlement synthesized from the fire-and-forget write.",
       "commands": [
         "pnpm run build:cli && pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration-message-delivery-identity.test.ts --reporter=dot --testTimeout=5000",
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration-mailbox-routing-races.test.ts src/main/runtime/orchestration-mailbox-notification-consistency.test.ts src/main/runtime/orchestration-mailbox-detached-routing.test.ts src/main/runtime/orchestration-mailbox-transport-settlement.test.ts src/main/ipc/pty-controller-ownership-routing.test.ts src/main/runtime/orchestration/run-coordinator-handle-migration.test.ts src/main/runtime/orchestration/orchestration-run-delivery-db.test.ts src/main/runtime/orchestration/orchestration-worker-dispatch-db.test.ts src/main/runtime/orchestration/formatter.test.ts src/main/providers/ssh-pty-provider.test.ts src/main/providers/ssh-pty-write.test.ts src/main/daemon/client.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/daemon/degraded-daemon-pty-provider.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration-mailbox-routing-races.test.ts src/main/runtime/orchestration-mailbox-notification-consistency.test.ts src/main/runtime/orchestration-mailbox-detached-routing.test.ts src/main/runtime/orchestration-mailbox-transport-settlement.test.ts src/main/ipc/pty-controller-ownership-routing.test.ts src/main/runtime/orchestration/run-coordinator-handle-migration.test.ts src/main/runtime/orchestration/orchestration-run-delivery-db.test.ts src/main/runtime/orchestration/orchestration-worker-dispatch-db.test.ts src/main/runtime/orchestration/formatter.test.ts src/main/providers/ssh-pty-provider.test.ts src/main/providers/ssh-pty-write.test.ts src/main/providers/settled-pty-writer-census.test.ts src/main/runtime/orchestration/mailbox-pointer-stage.test.ts src/main/daemon/client.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/daemon/degraded-daemon-pty-provider.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/terminal-send-stale-leaf-liveness.test.ts src/main/runtime/rpc/methods/orchestration/runs/runs.test.ts src/main/runtime/rpc/methods/orchestration/messaging/send.test.ts src/main/runtime/rpc/methods/orchestration/messaging/check.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration/federation-sync.test.ts src/main/runtime/rpc/methods/orchestration/federation/federation.test.ts src/main/runtime/rpc/methods/orchestration/federation/federation-lifecycle-settlement.test.ts --reporter=dot"
       ],
@@ -12908,6 +12908,8 @@
         "src/main/runtime/orchestration/formatter.test.ts",
         "src/main/providers/ssh-pty-provider.test.ts",
         "src/main/providers/ssh-pty-write.test.ts",
+        "src/main/providers/settled-pty-writer-census.test.ts",
+        "src/main/runtime/orchestration/mailbox-pointer-stage.test.ts",
         "src/main/daemon/client.test.ts",
         "src/main/daemon/daemon-pty-router.test.ts",
         "src/main/daemon/degraded-daemon-pty-provider.test.ts",
@@ -12998,13 +13000,36 @@
         {
           "file": "src/main/runtime/orchestration-mailbox-transport-settlement.test.ts",
           "assertions": [
-            "a rejected pointer transport stays undelivered and becomes restart-retryable"
+            "a refused pointer transport releases its reservation, stays undelivered, and becomes restart-retryable",
+            "a dropped in-flight SSH settlement reaches the stager as unverifiable with bytes handed to the transport and emits no duplicate pointer after restart",
+            "a settled write that throws mid-pointer preserves the write-attempted reservation",
+            "an Enter whose settlement is lost stays at enter-attempted and restart emits no second Enter"
+          ]
+        },
+        {
+          "file": "src/main/runtime/orchestration/mailbox-pointer-stage.test.ts",
+          "assertions": [
+            "a refused pointer write drains a delivery parked behind its watermark"
+          ]
+        },
+        {
+          "file": "src/main/providers/settled-pty-writer-census.test.ts",
+          "assertions": [
+            "every production IPtyProvider class exposes a settled writer",
+            "no settled writer synthesizes its settlement from the fire-and-forget write"
+          ]
+        },
+        {
+          "file": "src/main/ipc/pty-controller-ownership-routing.test.ts",
+          "assertions": [
+            "the installed controller preserves provider uncertainty instead of flattening it",
+            "a routed provider that cannot settle is refused before any byte reaches its write"
           ]
         },
         {
           "file": "src/main/daemon/client.test.ts",
           "assertions": [
-            "an asynchronous daemon socket write failure settles as rejected",
+            "an asynchronous daemon socket write failure settles as unverifiable, never as a proven refusal",
             "a wedged daemon socket write disconnects at its bounded settlement deadline"
           ]
         },
@@ -13030,10 +13055,19 @@
       ],
       "evidenceRuns": [
         {
+          "date": "2026-09-05",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration-mailbox-routing-races.test.ts src/main/runtime/orchestration-mailbox-notification-consistency.test.ts src/main/runtime/orchestration-mailbox-detached-routing.test.ts src/main/runtime/orchestration-mailbox-transport-settlement.test.ts src/main/ipc/pty-controller-ownership-routing.test.ts src/main/runtime/orchestration/run-coordinator-handle-migration.test.ts src/main/runtime/orchestration/orchestration-run-delivery-db.test.ts src/main/runtime/orchestration/orchestration-worker-dispatch-db.test.ts src/main/runtime/orchestration/formatter.test.ts src/main/providers/ssh-pty-provider.test.ts src/main/providers/ssh-pty-write.test.ts src/main/providers/settled-pty-writer-census.test.ts src/main/runtime/orchestration/mailbox-pointer-stage.test.ts src/main/daemon/client.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/daemon/degraded-daemon-pty-provider.test.ts",
+          "result": "passed",
+          "durationSeconds": 4.73,
+          "summary": "267 tests passed after the pointer-write path moved to the three-valued WriteSettlement union. New coverage: a dropped in-flight SSH settlement reaches the stager as unverifiable with bytes handed to the transport, a settled write that throws mid-pointer preserves the write-attempted reservation, an Enter whose settlement is lost stays at enter-attempted with no second Enter after restart, a refusal releases the reservation and drains a delivery parked behind its watermark, the production controller refuses before any byte when the routed provider cannot settle, and a census pins the five production IPtyProvider classes and rejects a settlement synthesized from the fire-and-forget write. Each new assertion was verified red against the pre-fix shape."
+        },
+        {
           "date": "2026-08-13",
           "runner": "local",
           "platform": "macos",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration-mailbox-routing-races.test.ts src/main/runtime/orchestration-mailbox-notification-consistency.test.ts src/main/runtime/orchestration-mailbox-detached-routing.test.ts src/main/runtime/orchestration-mailbox-transport-settlement.test.ts src/main/ipc/pty-controller-ownership-routing.test.ts src/main/runtime/orchestration/run-coordinator-handle-migration.test.ts src/main/runtime/orchestration/orchestration-run-delivery-db.test.ts src/main/runtime/orchestration/orchestration-worker-dispatch-db.test.ts src/main/runtime/orchestration/formatter.test.ts src/main/providers/ssh-pty-provider.test.ts src/main/providers/ssh-pty-write.test.ts src/main/daemon/client.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/daemon/degraded-daemon-pty-provider.test.ts",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration-mailbox-routing-races.test.ts src/main/runtime/orchestration-mailbox-notification-consistency.test.ts src/main/runtime/orchestration-mailbox-detached-routing.test.ts src/main/runtime/orchestration-mailbox-transport-settlement.test.ts src/main/ipc/pty-controller-ownership-routing.test.ts src/main/runtime/orchestration/run-coordinator-handle-migration.test.ts src/main/runtime/orchestration/orchestration-run-delivery-db.test.ts src/main/runtime/orchestration/orchestration-worker-dispatch-db.test.ts src/main/runtime/orchestration/formatter.test.ts src/main/providers/ssh-pty-provider.test.ts src/main/providers/ssh-pty-write.test.ts src/main/providers/settled-pty-writer-census.test.ts src/main/runtime/orchestration/mailbox-pointer-stage.test.ts src/main/daemon/client.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/daemon/degraded-daemon-pty-provider.test.ts",
           "result": "passed",
           "durationSeconds": 8.22,
           "summary": "245 tests passed across mailbox identity, durable coordinator-handle migration, insertion-time canonicalization, duplicate-free 51-row ownership branch caps, unrestricted reservation merging, direct and Dispatch pointer suppression, persisted reconciliation, 50-row paging and filtered waits, cross-PTY serialization, lifecycle fencing, bounded daemon and SSH transport settlement, outstanding Deliveries, reminted Dispatch ownership, acknowledgment, cancellation, and bounded pane lookup."

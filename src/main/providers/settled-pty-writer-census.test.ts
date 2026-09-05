@@ -47,7 +47,11 @@ function declaredProviderFiles(): string[] {
     cwd: REPO_ROOT,
     encoding: 'utf8'
   })
-  return output.split('\n').filter(Boolean).sort()
+  // Tests may name the clause while pinning it; only production declarations count.
+  return output
+    .split('\n')
+    .filter((file) => file && !file.endsWith('.test.ts'))
+    .sort()
 }
 
 function settledWriterBody(file: string): string {

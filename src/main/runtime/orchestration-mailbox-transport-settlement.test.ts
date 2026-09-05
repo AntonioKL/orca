@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs'
 import {
   WRITE_ACCEPTED,
   writeRefused,
+  writeUnverifiable,
   type WriteSettlement
 } from '../../shared/pty-write-settlement'
 import { tmpdir } from 'node:os'
@@ -18,7 +19,10 @@ import {
 } from './orchestration-mailbox-notification-test-harness'
 import { SshChannelMultiplexer } from '../ssh/ssh-channel-multiplexer'
 import { writeToSshPtyWithSettlement } from '../providers/ssh-pty-write'
-import { MAILBOX_POINTER_WRITE_ATTEMPTED } from './orchestration/db/messages/mailbox-pointer-enter-state'
+import {
+  MAILBOX_POINTER_ENTER_ATTEMPTED,
+  MAILBOX_POINTER_WRITE_ATTEMPTED
+} from './orchestration/db/messages/mailbox-pointer-enter-state'
 
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => tmpdir()), isPackaged: false },
@@ -161,4 +165,45 @@ describe('orchestration mailbox transport settlement', () => {
     expect(db.getMessageById(message.id)?.read).toBe(0)
     db.close()
   })
+
+  it('does not replay Enter after its settlement is lost', async () => {
+    vi.useFakeTimers()
+    const db = createDatabase('orca-mailbox-ambiguous-enter-')
+    const first = createRuntime(db)
+    const observedWrite = vi.fn((_ptyId: string, _data: string) => true)
+    first.runtime.setPtyController({
+      write: observedWrite,
+      writeWithSettlement: (ptyId: string, data: string) => {
+        observedWrite(ptyId, data)
+        return Promise.resolve(
+          data === '\r' ? writeUnverifiable('transport_settlement_lost', true) : WRITE_ACCEPTED
+        )
+      },
+      kill: vi.fn(),
+      getForegroundProcess: async () => null
+    })
+    const run = createBoundRun(db, 'Ambiguous Enter Run')
+    const message = insertDirectRunMessage(db, run.id, 'Submit exactly once')
+
+    await driveToLiveIdle(first.runtime)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(enterCount(observedWrite)).toBe(1)
+    // Unproven submission: not settled as delivered, and not rolled back to a resendable state.
+    expect(db.getMessageById(message.id)).toMatchObject({
+      delivered_at: null,
+      pointer_enter_pending: MAILBOX_POINTER_ENTER_ATTEMPTED
+    })
+
+    const restarted = createRuntime(db)
+    await driveToLiveIdle(restarted.runtime)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(enterCount(restarted.write)).toBe(0)
+    expect(pointerCount(restarted.write)).toBe(0)
+    expect(db.getMessageById(message.id)?.read).toBe(0)
+    db.close()
+  })
 })
+
+function enterCount(write: ReturnType<typeof vi.fn>): number {
+  return write.mock.calls.filter(([, payload]) => payload === '\r').length
+}
