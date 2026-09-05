@@ -226,11 +226,12 @@ export function NativeChatToolRun({
     () => (open ? buildEditCards(blocks) : NO_EDIT_CARDS),
     [open, blocks]
   )
-  // The header is named by the run's latest tool in both states, so its glyph is
-  // chosen once and does not change when that tool settles. State rides on the
-  // trailing mark instead — a leading glyph that flipped to a check would read as
-  // the row changing identity.
-  const headerCall = latestActiveCall ?? blocks.findLast(isToolCallBlock) ?? null
+  // Only the settled header reads this; the live one names `latestActiveCall`.
+  // Those are the same call except under out-of-order completion, where the
+  // header re-names on settle to the run's last tool. The glyph is fixed for
+  // whichever tool the header names, so state rides on the trailing mark — a
+  // leading glyph that flipped to a check would read as a change of identity.
+  const settledHeaderCall = blocks.findLast(isToolCallBlock) ?? null
   const fallbackLabel =
     callCount === 1
       ? translate('components.native-chat.tool.countOne', NATIVE_CHAT_TOOL_ACTIVITY_COPY.countOne)
@@ -275,8 +276,11 @@ export function NativeChatToolRun({
           className="group flex min-h-6 w-full items-center gap-1.5 py-0.5 text-left"
           aria-expanded={open}
         >
-          {structuredActivityUi && headerCall ? (
-            <NativeChatToolIcon rowWord={headerCall.name} className="text-muted-foreground" />
+          {structuredActivityUi && settledHeaderCall ? (
+            <NativeChatToolIcon
+              rowWord={settledHeaderCall.name}
+              className="text-muted-foreground"
+            />
           ) : null}
           <span className="shrink-0 font-mono text-[11px] font-bold text-muted-foreground transition-colors group-hover:text-foreground/80">
             {callCount}×

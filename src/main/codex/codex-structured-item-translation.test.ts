@@ -197,24 +197,24 @@ describe('codex item bodies', () => {
   })
 
   it('names a classified read command by its class and keeps the raw command', () => {
-    expect(
-      codexItemBody({
-        type: 'commandExecution',
-        id: 'item-read',
-        command: "sed -n '1,200p' notes.txt",
-        cwd: '/repo',
-        status: 'completed',
-        exitCode: 0,
-        commandActions: [
-          {
-            type: 'read',
-            command: "sed -n '1,200p' notes.txt",
-            name: 'notes.txt',
-            path: '/repo/notes.txt'
-          }
-        ]
-      })
-    ).toEqual({
+    const body = codexItemBody({
+      type: 'commandExecution',
+      id: 'item-read',
+      command: "sed -n '1,200p' notes.txt",
+      cwd: '/repo',
+      status: 'completed',
+      exitCode: 0,
+      commandActions: [
+        {
+          type: 'read',
+          command: "sed -n '1,200p' notes.txt",
+          name: 'notes.txt',
+          path: '/repo/notes.txt'
+        }
+      ]
+    })
+
+    expect(body).toEqual({
       kind: 'tool-call',
       name: 'read',
       // `name` is the target's basename, which `path` already carries and no
@@ -222,6 +222,11 @@ describe('codex item bodies', () => {
       input: { command: "sed -n '1,200p' notes.txt", cwd: '/repo', path: '/repo/notes.txt' },
       state: 'completed'
     })
+    // `read` is the one class that keeps `path`, so its row stays a tappable
+    // file on mobile — the other half of the rule `list`/`search` obey below.
+    const display = createToolInputDisplay(body?.kind === 'tool-call' ? body.input : null)
+    expect(display.filePath).toBe('/repo/notes.txt')
+    expect(display.label).toBe('/repo/notes.txt')
   })
 
   it('carries a classified search query so the row labels by term, not scan root', () => {
