@@ -101,20 +101,28 @@ export async function observeBrowserLoadingSurface(
           rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
         }
       })
-      const screenshot = await page.screenshot({ path: outputPath(`${phase}.png`), scale: 'css' })
-      const png = PNG.sync.read(screenshot)
-      const samples = [0.08, 0.92].flatMap((x) =>
-        [0.08, 0.85, 0.92].map((y) => {
-          const offset =
-            (Math.floor(state.rect.y + state.rect.height * y) * png.width +
-              Math.floor(state.rect.x + state.rect.width * x)) *
-            4
-          return [...png.data.subarray(offset, offset + 3)]
-        })
-      )
       const target =
         expected === 'white' ? [255, 255, 255] : state.theme.match(/\d+/g)!.slice(0, 3).map(Number)
-      const pixelPass = samples.every((rgb) => rgb.every((c, i) => Math.abs(c - target[i]) <= 2))
+      let samples: number[][] = []
+      const sampleSurface = async (): Promise<boolean> => {
+        const screenshot = await page.screenshot({ path: outputPath(`${phase}.png`), scale: 'css' })
+        const png = PNG.sync.read(screenshot)
+        samples = [0.08, 0.92].flatMap((x) =>
+          [0.08, 0.85, 0.92].map((y) => {
+            const offset =
+              (Math.floor(state.rect.y + state.rect.height * y) * png.width +
+                Math.floor(state.rect.x + state.rect.width * x)) *
+              4
+            return [...png.data.subarray(offset, offset + 3)]
+          })
+        )
+        return samples.every((rgb) => rgb.every((c, i) => Math.abs(c - target[i]) <= 2))
+      }
+      let pixelPass = await sampleSurface()
+      if (expected === 'white' && !pixelPass) {
+        // Loading can stop before the compositor presents the recovered guest's first frame.
+        await expect.poll(async () => (pixelPass = await sampleSurface())).toBe(true)
+      }
       const statePass =
         expected === 'theme'
           ? state.background === state.theme ||
