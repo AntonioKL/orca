@@ -347,10 +347,10 @@ describe('startStructuredAgentLaunch', () => {
     expect(toast.error).not.toHaveBeenCalled()
   })
 
-  it('tells the user a terminal opened instead when a definitive refusal falls back', async () => {
+  it('does not claim a terminal opened when a definitive refusal fallback only settled', async () => {
     const worktreeId = 'wt-refused-fallback-toast'
     const intent = launchIntent(worktreeId)
-    const fallback = vi.fn()
+    const fallback = vi.fn().mockResolvedValue({ delivered: false, failureNotified: true })
     mocks.createIntent.mockReturnValueOnce(intent)
     mocks.launch.mockRejectedValue(new StructuredAgentSessionCreateRefusalError('refused'))
 
@@ -361,13 +361,11 @@ describe('startStructuredAgentLaunch', () => {
     )
     await flushLaunchSettlement()
 
-    // Why: the fallback worked, so this is not an error — but a silent swap is indistinguishable
-    // from the bug where the wrong surface opens.
     expect(toast.error).not.toHaveBeenCalled()
     expect(toast.message).toHaveBeenCalledWith(
-      'Opened a Codex terminal instead',
+      "Structured chat isn't available",
       expect.objectContaining({
-        description: "Structured chat isn't available for this workspace."
+        description: 'Orca tried to open a Codex terminal instead.'
       })
     )
   })

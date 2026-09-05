@@ -17060,8 +17060,8 @@
         "retry": "Retry",
         "details": "Details"
       },
-      "structuredSessionFellBackToTerminal": "Opened a {{value0}} terminal instead",
-      "structuredSessionFellBackToTerminalDescription": "Structured chat isn't available for this workspace.",
+      "structuredSessionFellBackToTerminal": "Structured chat isn't available",
+      "structuredSessionFellBackToTerminalDescription": "Orca tried to open a {{value0}} terminal instead.",
       "structuredSessionLaunchFailedDescription": "Orca could not open a structured {{value0}} chat. See the logs for details."
     },
     "tab": {

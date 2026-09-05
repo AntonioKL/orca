@@ -165,18 +165,17 @@ function trackLaunchFailureToast(state: StructuredLaunchState): void {
       error instanceof StructuredAgentSessionCreateRefusalError &&
       (await state.callers.refusalSettlement.promise.catch(() => false))
     ) {
-      // Why: the fallback worked, so nothing failed — but silently swapping the requested chat for
-      // a terminal is indistinguishable from a bug. Say what happened, at message severity.
+      // Why: the callback proves the fallback was attempted, not that its terminal became visible.
       toast.message(
         translate(
           'components.native-chat.structuredSessionFellBackToTerminal',
-          'Opened a {{value0}} terminal instead',
-          { value0: agentLabel }
+          "Structured chat isn't available"
         ),
         {
           description: translate(
             'components.native-chat.structuredSessionFellBackToTerminalDescription',
-            "Structured chat isn't available for this workspace."
+            'Orca tried to open a {{value0}} terminal instead.',
+            { value0: agentLabel }
           )
         }
       )
