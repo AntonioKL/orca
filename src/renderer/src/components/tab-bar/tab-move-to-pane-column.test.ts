@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAppStore } from '../../store'
 import type { Tab } from '../../../../shared/tab-types'
-import { canMoveTabToNewPaneColumn, moveTabToNewPaneColumn } from './tab-move-to-pane-column'
+import {
+  canMoveTabToNewPaneColumn,
+  getActiveTabForPaneColumnMove,
+  moveActiveTabToNewPaneColumn,
+  moveTabToNewPaneColumn
+} from './tab-move-to-pane-column'
 
 const WT = 'wt-1'
 
@@ -114,5 +119,47 @@ describe('tab-move-to-pane-column', () => {
       moveTabToNewPaneColumn({ unifiedTabId: 'tab-b', groupId: 'group-1', direction: 'right' })
     ).toBe(false)
     expect(mocks.mirrorWebRuntimeTabMove).not.toHaveBeenCalled()
+  })
+})
+
+describe('moveActiveTabToNewPaneColumn', () => {
+  beforeEach(() => {
+    useAppStore.setState({ activeGroupIdByWorktree: { [WT]: 'group-1' } })
+  })
+
+  it('resolves the active tab of the active group', () => {
+    expect(getActiveTabForPaneColumnMove(useAppStore.getState(), WT)).toEqual({
+      unifiedTabId: 'tab-a',
+      groupId: 'group-1'
+    })
+  })
+
+  it('moves the active tab in the requested direction', () => {
+    const dropUnifiedTab = vi.fn(() => true)
+    useAppStore.setState({ dropUnifiedTab } as Partial<ReturnType<typeof useAppStore.getState>>)
+
+    expect(moveActiveTabToNewPaneColumn('down', WT)).toBe(true)
+    expect(dropUnifiedTab).toHaveBeenCalledWith('tab-a', {
+      groupId: 'group-1',
+      splitDirection: 'down'
+    })
+  })
+
+  it('does nothing without a worktree, an active group, or a movable tab', () => {
+    expect(getActiveTabForPaneColumnMove(useAppStore.getState(), null)).toBeNull()
+    expect(moveActiveTabToNewPaneColumn('down', null)).toBe(false)
+
+    useAppStore.setState({ activeGroupIdByWorktree: {} })
+    expect(getActiveTabForPaneColumnMove(useAppStore.getState(), WT)).toBeNull()
+    expect(moveActiveTabToNewPaneColumn('down', WT)).toBe(false)
+
+    // A lone tab in its group is an unmovable layout, same as the menu case.
+    useAppStore.setState({
+      activeGroupIdByWorktree: { [WT]: 'group-1' },
+      groupsByWorktree: {
+        [WT]: [{ id: 'group-1', worktreeId: WT, activeTabId: 'tab-a', tabOrder: ['tab-a'] }]
+      }
+    })
+    expect(moveActiveTabToNewPaneColumn('down', WT)).toBe(false)
   })
 })
