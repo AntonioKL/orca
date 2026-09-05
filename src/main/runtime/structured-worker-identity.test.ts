@@ -203,7 +203,7 @@ describe('structured workers stay outside the PTY-only fail-closed paths', () =>
       hostScope: { kind: 'local', hostId: 'local' }
     })
     try {
-      const env = structuredWorkerChildIdentityEnv(SESSION_ID)
+      const env = structuredWorkerChildIdentityEnv(SESSION_ID, {})
       // Registered, so this is a populated env — not the empty one an unregistered session gets,
       // which would satisfy the pane-key assertion for the wrong reason.
       expect(env.ORCA_TERMINAL_HANDLE).toBe(handle)

@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import Database from '../../../../sqlite/sync-database'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { OrchestrationDb } from '../orchestration-db'
 import { SCHEMA_VERSION } from '../contract-constants'
 
@@ -22,8 +25,21 @@ function seedLegacyDatabase(path: string): void {
 }
 
 describe('structured pointer schema migration', () => {
+  // Why a real temp dir and a teardown: `$TMPDIR` is unset on Windows CI, so the interpolated
+  // `/tmp/...` opened as `SQLITE_CANTOPEN`, and nothing removed the file on the platforms where it
+  // did open.
+  const tempRoots: string[] = []
+
+  afterEach(() => {
+    while (tempRoots.length > 0) {
+      rmSync(tempRoots.pop() as string, { recursive: true, force: true })
+    }
+  })
+
   it('admits the structured archive kind and keeps existing rows', () => {
-    const path = `${process.env.TMPDIR ?? '/tmp'}/orca-structured-migration-${process.pid}-${Date.now()}.db`
+    const root = mkdtempSync(join(tmpdir(), 'orca-structured-migration-'))
+    tempRoots.push(root)
+    const path = join(root, 'orchestration.db')
     seedLegacyDatabase(path)
     const db = new OrchestrationDb(path)
     try {

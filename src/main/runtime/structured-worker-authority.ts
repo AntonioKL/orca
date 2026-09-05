@@ -79,8 +79,14 @@ export type StructuredWorkerObservation = {
   reason?: string
 }
 
+/**
+ * Only the session id is needed: the durable agent-session record is the authority, and it
+ * outlives both the in-memory identity registry and this process. Callers that hold nothing but a
+ * process incarnation therefore do not have to resolve a registry entry first — after `forget`
+ * there is none, and gating on one answers `unverifiable` forever.
+ */
 export function observeStructuredWorker(
-  identity: StructuredWorkerIdentity
+  identity: Pick<StructuredWorkerIdentity, 'sessionId'>
 ): StructuredWorkerObservation {
   const host = getStructuredAgentSessionHost()
   if (!host) {

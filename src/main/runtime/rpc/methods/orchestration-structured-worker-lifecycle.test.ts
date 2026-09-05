@@ -46,6 +46,8 @@ function installHost(options: {
   deathEvidence?: unknown
   record?: unknown
   close?: () => Promise<void>
+  setSessionTabVisibility?: () => Promise<void>
+  historyThrows?: boolean
 }) {
   const record =
     options.record === undefined
@@ -63,16 +65,18 @@ function installHost(options: {
   hostRef.current = {
     deps: { store: { getRecord: () => record } },
     hasSession: () => (closed ? false : (options.hasSession ?? true)),
-    setSessionTabVisibility: async () => {},
+    setSessionTabVisibility: options.setSessionTabVisibility ?? (async () => {}),
     close:
       options.close ??
       (async () => {
         closed = true
       }),
-    history: () => ({
-      ok: true,
-      page: { items: options.items ?? ITEMS, hasOlder: false }
-    })
+    history: () => {
+      if (options.historyThrows) {
+        throw new Error('agent_session_not_attached')
+      }
+      return { ok: true, page: { items: options.items ?? ITEMS, hasOlder: false } }
+    }
   }
 }
 
@@ -137,6 +141,22 @@ describe('structured worker stop', () => {
     installHost({ hasSession: true, close: async () => {} })
     const result = await stopStructuredWorker(IDENTITY, 'd1')
     expect(result.stopped).toBe(false)
+  })
+
+  it('claims no close when the tab-visibility step threw before one was issued', async () => {
+    // `closeAttempted` is what the receipt turns into `processAction: 'closed_agent_terminal'`.
+    // Reporting it here would claim a close for a child that is still running.
+    const close = vi.fn(async () => {})
+    installHost({
+      close,
+      setSessionTabVisibility: async () => {
+        throw new Error('the durable tab index is wedged')
+      }
+    })
+    const result = await stopStructuredWorker(IDENTITY, 'd1')
+    expect(result.stopped).toBe(false)
+    expect(result.closeAttempted).toBe(false)
+    expect(close).not.toHaveBeenCalled()
   })
 
   it('retains when the host is not installed, and claims no close', async () => {
@@ -348,5 +368,37 @@ describe('structured worker output', () => {
         cursor: first.cursor
       })
     ).toThrow(/source changed/i)
+  })
+})
+
+describe('archiving a structured worker whose journal cannot be read', () => {
+  beforeEach(() => {
+    hostRef.current = null
+  })
+
+  it('settles with an empty, warned archive once the session is PROVEN gone', () => {
+    // Closing the worker's chat tab is a routine user action: it evicts the child and detaches the
+    // journal permanently. Throwing archive_failed there wedged release on evidence that could
+    // never arrive, leaving worker-abandon as the only way out.
+    installHost({
+      historyThrows: true,
+      claimStatus: 'released',
+      deathEvidence: { kind: 'exit-observed', detail: 'surface released', observedAt: 1 }
+    })
+    const archive = captureStructuredWorkerArchive(IDENTITY, 'claude')
+    expect(archive.messages).toEqual([])
+    expect(archive.processIncarnation).toBe(IDENTITY.processIncarnation)
+    expect(archive.warnings).toContain(
+      'The structured session was already closed, so its journal could not be preserved.'
+    )
+  })
+
+  it('still retains when the journal is unreadable but nothing proves the child is gone', () => {
+    installHost({ historyThrows: true })
+    expect(() => captureStructuredWorkerArchive(IDENTITY, 'claude')).toThrow(/retained/)
+  })
+
+  it('still retains when there is no host to look with', () => {
+    expect(() => captureStructuredWorkerArchive(IDENTITY, 'claude')).toThrow(/retained/)
   })
 })

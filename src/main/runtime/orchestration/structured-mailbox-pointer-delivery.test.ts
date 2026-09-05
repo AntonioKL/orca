@@ -301,3 +301,94 @@ describe('an adopted pane is redirected through its native owner', () => {
     expect(markAsDelivered).not.toHaveBeenCalled()
   })
 })
+
+describe('forgetting one settled worker', () => {
+  /** Two workers, each mid-turn and so each parked on its OWN session's journal edge. */
+  function twoWorkerHarness() {
+    let resolves = true
+    let journal = runningJournal()
+    const sessionByMailbox: Record<string, string> = {
+      'dispatch:d1': 'session-1',
+      'dispatch:d2': 'session-2'
+    }
+    const send: StructuredMailboxPointerHost['send'] = vi.fn(async () => ({
+      kind: 'sent' as const,
+      state: 'accepted' as const
+    }))
+    const db = {
+      getDispatchContextById: () => ({ run_id: 'run_1' }),
+      hasOutstandingRunDelivery: () => false,
+      getUndeliveredUnreadMessages: () => [{ id: 'm1', type: 'status', sequence: 3 }],
+      markAsDelivered: vi.fn(),
+      getStructuredPointerOperation: () => undefined,
+      putStructuredPointerOperation: () => {},
+      deleteStructuredPointerOperation: () => {}
+    }
+    const delivery = new OrchestrationStructuredMailboxPointerDelivery({
+      getDb: () => db as never,
+      getMessageWaiters: () => undefined,
+      resolveStructuredTarget: (mailboxHandle) => {
+        const sessionId = sessionByMailbox[mailboxHandle]
+        return resolves && sessionId
+          ? { sessionId, dispatchId: mailboxHandle.slice('dispatch:'.length) }
+          : null
+      },
+      host: {
+        readGateFacts: () => structuredSessionGateFacts(journal),
+        currentFence: () => 4,
+        send
+      }
+    })
+    return {
+      delivery,
+      send: vi.mocked(send),
+      goIdle: () => {
+        journal = idleJournal()
+      },
+      stopResolving: () => {
+        resolves = false
+      },
+      resumeResolving: () => {
+        resolves = true
+      }
+    }
+  }
+
+  it("keeps a sibling worker's wake-up edge when the target cannot be resolved", async () => {
+    // The bug: `forgetSession` re-resolved every parked mailbox and pruned the ones that answered
+    // null. A momentarily null DB reference or a session mid-teardown made that EVERY worker, so
+    // the sibling's mail stayed durable but lost the edge that would have woken it.
+    const { delivery, send, goIdle, stopResolving, resumeResolving } = twoWorkerHarness()
+    delivery.deliverForHandle('dispatch:d1')
+    delivery.deliverForHandle('dispatch:d2')
+    await flush()
+    expect(send).not.toHaveBeenCalled()
+
+    stopResolving()
+    delivery.forgetSession('session-1')
+    resumeResolving()
+
+    goIdle()
+    delivery.onJournalActivity('session-2')
+    await flush()
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(send.mock.calls[0]![0].sessionId).toBe('session-2')
+  })
+
+  it('still drops what the settled worker itself had parked', async () => {
+    const { delivery, send, goIdle, stopResolving } = twoWorkerHarness()
+    delivery.deliverForHandle('dispatch:d1')
+    await flush()
+    expect(send).not.toHaveBeenCalled()
+
+    // Settlement forgets the identity, so the target no longer resolves — which is exactly why
+    // the recorded session id, not a re-resolution, has to be the test.
+    stopResolving()
+    delivery.forgetSession('session-1')
+
+    goIdle()
+    delivery.onJournalActivity('session-1')
+    await flush()
+    expect(send).not.toHaveBeenCalled()
+  })
+})

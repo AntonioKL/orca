@@ -85,13 +85,18 @@ export async function stopStructuredWorker(
       reason: 'The structured agent-session host is not installed; no session was closed.'
     }
   }
+  // Set only once the close is actually issued: `setSessionTabVisibility` throwing first leaves a
+  // running child, and a receipt that still said `closed_agent_terminal` for it would be the
+  // close-that-never-happened this flag exists to rule out.
+  let closeAttempted = false
   try {
     await host.setSessionTabVisibility?.(identity.sessionId, false)
+    closeAttempted = true
     await host.close(identity.sessionId)
   } catch (error) {
     return {
       stopped: false,
-      closeAttempted: true,
+      closeAttempted,
       reason: error instanceof Error ? error.message : String(error)
     }
   }
@@ -203,18 +208,42 @@ export function captureStructuredWorkerArchive(
 ): WorkerStructuredJournalArchive {
   const host = getStructuredAgentSessionHost()
   const page = host ? tryReadJournalPage(host, identity.sessionId) : null
-  if (!page) {
+  if (page) {
+    return buildStructuredJournalArchive({
+      agent,
+      processIncarnation: identity.processIncarnation,
+      items: page.items,
+      hasOlder: page.hasOlder
+    })
+  }
+  // An unreadable journal is `archive_failed`, and release retains the worker so the evidence can
+  // still be preserved later — the same contract the PTY path keeps. It holds only while the
+  // evidence might still arrive. A session PROVEN gone detaches its journal for good, and closing
+  // the worker's chat tab is a routine user action that does exactly that, so throwing there wedges
+  // release on evidence that can never come and leaves `worker-abandon` as the only exit.
+  //
+  // `exited` is the only verdict that qualifies: it needs a released lease WITH death evidence.
+  // `unverifiable` — no host installed, a lease handed to a TUI owner — means we could not look,
+  // and retaining is still right.
+  if (observeStructuredWorker(identity).status !== 'exited') {
     throw new OrchestrationError(
       'archive_failed',
       'Output could not be preserved for this structured worker; the session was retained.'
     )
   }
-  return buildStructuredJournalArchive({
+  const empty = buildStructuredJournalArchive({
     agent,
     processIncarnation: identity.processIncarnation,
-    items: page.items,
-    hasOlder: page.hasOlder
+    items: [],
+    hasOlder: false
   })
+  return {
+    ...empty,
+    warnings: [
+      ...empty.warnings,
+      'The structured session was already closed, so its journal could not be preserved.'
+    ]
+  }
 }
 
 export function readArchivedStructuredJournal(args: {

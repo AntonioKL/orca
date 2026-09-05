@@ -32,6 +32,7 @@ import { failWorkerStartWithReceipt } from './orchestration-worker-start-receipt
 import { prepareLocalWorkerStart } from './orchestration-worker-start-validation'
 import { resolveDispatchCreator } from './orchestration-dispatch-creator'
 import {
+  discardStructuredWorkerSession,
   releaseStructuredWorkerSession,
   sendStructuredWorkerPreamble
 } from './orchestration-structured-worker-session'
@@ -287,8 +288,14 @@ export async function startLocalWorker(args: {
       ...(terminalRevealWarning ? { warning: terminalRevealWarning } : {})
     }
   } catch (error) {
-    // A start that never reached ready leaves no settlement to release the hold later.
+    // A start that never reached ready leaves no settlement to release the hold later, and its
+    // session was already published as a chat tab — without the discard the failed start strands a
+    // dead "Claude Chat"/"Codex Chat" tab that the durable restore index republishes on every app
+    // launch. Both halves are best-effort by construction so neither can replace the real error.
     releaseStructuredWorkerSession(started.dispatch.id, runtime)
+    if (structuredSession) {
+      await discardStructuredWorkerSession(structuredSession.identity.sessionId, runtime)
+    }
     return failWorkerStartWithReceipt({
       db,
       runId: run.id,

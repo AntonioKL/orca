@@ -33,7 +33,7 @@ const SESSION = 'session-1'
 const HANDLE = 'structworker_11111111-1111-4111-a111-111111111111'
 const HOST_SCOPE = { kind: 'local', hostId: 'local' } as const
 
-function installHost(options: { closeThrows?: boolean } = {}) {
+function installHost(options: { closeThrows?: boolean; lease?: Record<string, unknown> } = {}) {
   let attached = true
   const setSessionTabVisibility = vi.fn(async () => {})
   const close = vi.fn(async () => {
@@ -53,7 +53,7 @@ function installHost(options: { closeThrows?: boolean } = {}) {
       store: {
         getRecord: () => ({
           location: { executionHostId: 'local', wslDistro: null },
-          lease: {
+          lease: options.lease ?? {
             runtimeKind: 'native',
             claimStatus: 'live',
             deathEvidence: null,
@@ -223,6 +223,70 @@ describe('structured worker release retires the chat tab', () => {
     ).resolves.toMatchObject({ state: 'released' })
 
     expect(await structuredTabIds(runtime)).toEqual([])
+  })
+
+  it('settles rather than wedging when the user already closed the worker chat tab', async () => {
+    // Closing the tab evicts the child and detaches the journal for good. Throwing archive_failed
+    // there retained the worker forever on evidence that could never arrive, and `worker-abandon`
+    // was the only way out of a release the coordinator had every right to complete.
+    installHost({
+      lease: {
+        runtimeKind: 'native',
+        claimStatus: 'released',
+        deathEvidence: { kind: 'exit-observed', detail: 'surface released', observedAt: 1 },
+        runtimeFence: 2
+      }
+    })
+    const identity = registerIdentity()
+    const resource = {
+      id: 'resource-2',
+      terminal_handle: HANDLE,
+      host_scope: JSON.stringify(HOST_SCOPE),
+      archive_source: null,
+      archive_status: null,
+      ownership_state: 'owned',
+      release_state: 'requested'
+    } as unknown as WorkerTerminalResourceRow
+    let stored: { kind?: string; content?: string } = {}
+    const db = {
+      getWorkerDispatch: () => ({
+        agent_terminal_handle: HANDLE,
+        created_at: '2026-09-05 00:00:00'
+      }),
+      getDispatchContextById: () => null,
+      isDispatchProcessCurrent: (args: { paneKey: string; processIncarnation: string }) =>
+        args.paneKey === identity.paneKey &&
+        args.processIncarnation === identity.processIncarnation,
+      workerTerminalResourceHasIdentityConflict: () => false,
+      // No archive yet: the capture is what release has to get past.
+      getWorkerTerminalArchive: () => undefined,
+      commitWorkerTerminalArchiveForRelease: (args: { kind?: string; content?: string }) => {
+        stored = args
+        return { ...resource, release_state: 'releasing' }
+      },
+      settleWorkerTerminalRelease: () => ({ ...resource, release_state: 'released' }),
+      markWorkerTerminalReleaseUnknown: (_id: string, error: string) => ({
+        ...resource,
+        release_state: 'unknown',
+        release_error: error
+      })
+    } as unknown as OrchestrationDb
+
+    await expect(
+      completeWorkerTerminalRelease({
+        runtime: {
+          ensureStructuredAgentSessionHost: async () => {},
+          notifyMessageArrived: vi.fn(),
+          forgetStructuredSessionMail: vi.fn(),
+          retireStructuredAgentSessionTabFromSnapshot: vi.fn()
+        } as unknown as OrcaRuntimeService,
+        db,
+        dispatchId: 'd2',
+        resource
+      })
+    ).resolves.toMatchObject({ state: 'released', processAction: 'closed_agent_terminal' })
+    expect(stored.kind).toBe('structured_journal')
+    expect(stored.content).toContain('could not be preserved')
   })
 })
 

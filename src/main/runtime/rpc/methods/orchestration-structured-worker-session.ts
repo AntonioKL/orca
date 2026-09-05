@@ -151,7 +151,7 @@ export async function createStructuredWorkerSession(args: {
     // that no dispatch owns and that nothing else in the runtime will ever retire.
     structuredWorkerIdentities.forget(identity.handle)
     if (structuredCreateMayHaveCommitted(created)) {
-      await discardCreatedSession(sessionId, args.runtime)
+      await discardStructuredWorkerSession(sessionId, args.runtime)
     }
     throw error
   }
@@ -180,8 +180,13 @@ function structuredCreateMayHaveCommitted(
  * start published from the live snapshot. All three are no-ops for a session that was never
  * attached, which is why a non-definitive refusal can reach here unconditionally. A close that
  * threw leaves the tab alone: the child may still be running, and the tab is the way to reach it.
+ *
+ * Exported because a start can also fail AFTER `createStructuredWorkerSession` returned — on the
+ * authority gate, or on the preamble turn — and that is the fourth settlement path. Dropping only
+ * the hold there left one dead "Claude Chat"/"Codex Chat" tab per failed start, durably restored
+ * on every subsequent app launch.
  */
-async function discardCreatedSession(
+export async function discardStructuredWorkerSession(
   sessionId: string,
   runtime: Pick<OrcaRuntimeService, 'retireStructuredAgentSessionTabFromSnapshot'>
 ): Promise<void> {

@@ -38,6 +38,11 @@ export type StructuredPointerTarget = {
   refusal?: AgentSessionPtyWriteRefusal
 }
 
+type ParkedPointerDelivery = {
+  sessionId: string
+  reservedTypes: ReadonlySet<string> | undefined
+}
+
 export type StructuredPointerSendOutcome =
   | { kind: 'sent'; state: StructuredDispatchState }
   | { kind: 'unattached' }
@@ -80,8 +85,16 @@ export class OrchestrationStructuredMailboxPointerDelivery<
   TWaiter extends OrchestrationMessageWaiter
 > {
   private readonly inFlight = new Set<string>()
-  /** Mailboxes whose retry must wait for the session's next journal edge. */
-  private readonly parkedUntilJournalEdge = new Map<string, ReadonlySet<string> | undefined>()
+  /**
+   * Mailboxes whose retry must wait for the session's next journal edge, each remembering the
+   * session it is parked ON.
+   *
+   * Recorded rather than re-resolved: `resolveStructuredTarget` answers null whenever the runtime
+   * cannot look — a momentarily null DB reference, a session mid-teardown — and pruning on that
+   * absence dropped every OTHER worker's parked entry too, silently costing them their wake-up
+   * edge until the next explicit check.
+   */
+  private readonly parkedUntilJournalEdge = new Map<string, ParkedPointerDelivery>()
 
   constructor(private readonly deps: StructuredPointerDeliveryDependencies<TWaiter>) {}
 
@@ -99,26 +112,31 @@ export class OrchestrationStructuredMailboxPointerDelivery<
   /** The session's journal moved — a turn settled, or a re-attach replayed it; retry what is
    *  parked on that edge. */
   onJournalActivity(sessionId: string): void {
-    for (const [mailboxHandle, reservedTypes] of Array.from(this.parkedUntilJournalEdge)) {
-      const target = this.deps.resolveStructuredTarget(mailboxHandle)
-      if (target?.sessionId !== sessionId) {
+    for (const [mailboxHandle, parked] of Array.from(this.parkedUntilJournalEdge)) {
+      if (parked.sessionId !== sessionId) {
         continue
       }
       this.parkedUntilJournalEdge.delete(mailboxHandle)
-      void this.deliver(mailboxHandle, target, reservedTypes).catch(() => undefined)
+      const target = this.deps.resolveStructuredTarget(mailboxHandle)
+      if (target?.sessionId !== sessionId) {
+        // The mailbox moved off this session (or cannot be resolved right now); its own edge or an
+        // explicit check is what retries it, not this session's journal.
+        continue
+      }
+      void this.deliver(mailboxHandle, target, parked.reservedTypes).catch(() => undefined)
     }
   }
 
   /**
-   * The worker settled; drop what it had parked.
+   * The worker settled; drop what IT had parked, and nothing else.
    *
-   * Also prunes entries whose target no longer resolves at all: after settlement the identity is
-   * forgotten, so those can never be matched by session id again and would otherwise be immortal.
+   * The recorded session id is the whole test. Settlement forgets the worker's identity, so
+   * re-resolving the target here would answer null for exactly the entries this is meant to
+   * prune — and null for every sibling the runtime momentarily cannot resolve either.
    */
   forgetSession(sessionId: string): void {
-    for (const [mailboxHandle] of Array.from(this.parkedUntilJournalEdge)) {
-      const target = this.deps.resolveStructuredTarget(mailboxHandle)
-      if (!target || target.sessionId === sessionId) {
+    for (const [mailboxHandle, parked] of Array.from(this.parkedUntilJournalEdge)) {
+      if (parked.sessionId === sessionId) {
         this.parkedUntilJournalEdge.delete(mailboxHandle)
       }
     }
@@ -231,7 +249,7 @@ export class OrchestrationStructuredMailboxPointerDelivery<
   ): void {
     this.deps.onRetain?.({ mailboxHandle, sessionId, reason })
     if (retainWaitsForJournalEdge(reason)) {
-      this.parkedUntilJournalEdge.set(mailboxHandle, reservedTypes)
+      this.parkedUntilJournalEdge.set(mailboxHandle, { sessionId, reservedTypes })
     }
   }
 }
