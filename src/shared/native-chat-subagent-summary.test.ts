@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isSubagentGroupFallbackText,
   isTerminalSubagentState,
   normalizeSubagentState,
   subagentGroupFallbackText,
@@ -148,5 +149,42 @@ describe('subagentGroupFallbackText', () => {
     expect(subagentGroupFallbackText([agent({ id: 'a', state: 'completed' })])).toBe(
       'Ran 1 subagent'
     )
+  })
+})
+
+// Both readers decide "the twin is already printing" with this, so a false
+// positive silently eats a message's real prose and a false negative prints the
+// roster twice. The shape must outlive a byte compare: a roster from a newer
+// build names a state this build never produces.
+describe('isSubagentGroupFallbackText', () => {
+  it('recognizes every sentence the producer writes, including an unknown state', () => {
+    expect(isSubagentGroupFallbackText(subagentGroupFallbackText([agent({})]))).toBe(true)
+    expect(
+      isSubagentGroupFallbackText(
+        subagentGroupFallbackText([agent({ id: 'a' }), agent({ id: 'b', state: 'failed' })])
+      )
+    ).toBe(true)
+    expect(
+      isSubagentGroupFallbackText(
+        subagentGroupFallbackText([agent({ id: 'a', state: 'completed' })])
+      )
+    ).toBe(true)
+    // Not reproducible here: this build normalizes `cancelled` to `unverifiable`.
+    expect(isSubagentGroupFallbackText('Ran 2 subagents (1 cancelled)')).toBe(true)
+    expect(isSubagentGroupFallbackText('Kicked off 4 subagents — 2 working (1 timed-out)')).toBe(
+      true
+    )
+  })
+
+  it('leaves prose that merely mentions subagents alone', () => {
+    for (const prose of [
+      'Handing the audit to two children.',
+      'I kicked off 2 subagents to look at this',
+      'Ran 2 subagents and then cleaned up',
+      'Ran 2 subagents (1 failed) — see below',
+      'Ran two subagents'
+    ]) {
+      expect(isSubagentGroupFallbackText(prose)).toBe(false)
+    }
   })
 })
