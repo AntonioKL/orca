@@ -94,6 +94,31 @@ describe('registerPtyHandlers', () => {
     unregisterSshPtyProvider(connectionId)
     clearProviderPtyState(ptyId)
   })
+  it('routes settled pointer writes through the installed SSH controller and preserves uncertainty', async () => {
+    const connectionId = 'ssh-settled'
+    const ptyId = `ssh:${connectionId}@@remote-pty`
+    const provider = {
+      ...createAgentClaimProvider({}),
+      writeWithSettlement: vi.fn().mockRejectedValue(new Error('connection lost after write'))
+    }
+    registerSshPtyProvider(connectionId, provider as never)
+    setPtyOwnership(ptyId, connectionId)
+    const controller = registerAgentClaimController() as unknown as {
+      writeWithSettlement: (id: string, data: string) => Promise<boolean>
+    }
+    try {
+      expect(controller.writeWithSettlement).toBeTypeOf('function')
+      await expect(controller.writeWithSettlement(ptyId, 'pointer')).rejects.toThrow(
+        'connection lost after write'
+      )
+      expect(provider.writeWithSettlement).toHaveBeenCalledWith(ptyId, 'pointer')
+      expect(provider.write).not.toHaveBeenCalled()
+    } finally {
+      unregisterSshPtyProvider(connectionId)
+      clearProviderPtyState(ptyId)
+    }
+  })
+
   it('preserves a provider write refusal for callers that gate follow-up input', () => {
     const provider = createAgentClaimProvider({})
     provider.write.mockReturnValue(false)

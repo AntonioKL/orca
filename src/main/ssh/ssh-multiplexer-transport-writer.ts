@@ -1,7 +1,9 @@
 import { HEADER_LENGTH, MAX_MESSAGE_SIZE } from './relay-protocol'
 import { SshMultiplexerWriterLaneScheduler } from './ssh-multiplexer-writer-lane-scheduler'
 
-export type MultiplexerWriteSettlement = { ok: true } | { ok: false; error: Error }
+export type MultiplexerWriteSettlement =
+  | { ok: true }
+  | { ok: false; error: Error; writeAttempted?: boolean }
 
 export type MultiplexerTransport = {
   write: (data: Buffer, onSettled?: (result: MultiplexerWriteSettlement) => void) => boolean | void
@@ -237,6 +239,9 @@ export class SshMultiplexerTransportWriter {
       return
     }
     entry.settled = true
+    // A transport failure after write started cannot prove the peer received no bytes.
+    const settlement =
+      !result.ok && this.inFlight.has(entry) ? { ...result, writeAttempted: true } : result
     this.inFlight.delete(entry)
     this.settleOnDrain.delete(entry)
     if (entry.lane === 'ordinary') {
@@ -249,7 +254,7 @@ export class SshMultiplexerTransportWriter {
     if (entry.lane === 'liveness') {
       this.livenessOutstanding = false
     }
-    entry.onSettled(result)
+    entry.onSettled(settlement)
   }
 
   private setSaturated(saturated: boolean): void {

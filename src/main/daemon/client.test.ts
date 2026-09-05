@@ -737,7 +737,7 @@ describe('DaemonClient', () => {
 
       await expect(
         client.notifyWithSettlement('write', { sessionId: 'session-1', data: 'hello' })
-      ).resolves.toBe(false)
+      ).rejects.toThrow('Daemon notification delivery is unverifiable')
       expect(client.isConnected()).toBe(false)
     })
 
@@ -754,9 +754,12 @@ describe('DaemonClient', () => {
         { sessionId: 'session-1', data: 'hello' },
         5000
       )
+      const rejected = expect(pending).rejects.toThrow(
+        'Daemon notification delivery is unverifiable'
+      )
       await vi.advanceTimersByTimeAsync(5000)
 
-      await expect(pending).resolves.toBe(false)
+      await rejected
       expect(client.isConnected()).toBe(false)
     })
   })

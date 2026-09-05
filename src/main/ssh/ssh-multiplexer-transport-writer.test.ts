@@ -182,7 +182,7 @@ describe('SshMultiplexerTransportWriter', () => {
     harness.callbacks[0]({ ok: true })
 
     expect(first).toHaveBeenCalledOnce()
-    expect(first).toHaveBeenCalledWith({ ok: false, error })
+    expect(first).toHaveBeenCalledWith({ ok: false, error, writeAttempted: true })
     expect(queued).toHaveBeenCalledWith({ ok: false, error })
     expect(failed).toHaveBeenCalledWith(error)
     expect(harness.removeDrain).toHaveBeenCalledOnce()
@@ -204,6 +204,7 @@ describe('SshMultiplexerTransportWriter', () => {
     })
     expect(retained).toHaveBeenCalledWith({
       ok: false,
+      writeAttempted: true,
       error: expect.objectContaining({ message: expect.stringContaining('bounded capacity') })
     })
     expect(failed).toHaveBeenCalledOnce()
@@ -277,6 +278,7 @@ describe('SshMultiplexerTransportWriter', () => {
     expect(writer.enqueue(Buffer.from('data'), 'ordinary', settled)).toBe(true)
     expect(settled).toHaveBeenCalledWith({
       ok: false,
+      writeAttempted: true,
       error: expect.objectContaining({ message: expect.stringContaining('without drain support') })
     })
     expect(failed).toHaveBeenCalledOnce()

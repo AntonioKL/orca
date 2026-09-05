@@ -52,7 +52,7 @@ export class OrcaRuntimeWithWriteOrchestrationPointerPty extends OrcaRuntimeWith
         })
       }
       return (
-        this.ptyController?.writeWithSettlement?.(ptyId, data).catch(() => false) ??
+        this.ptyController?.writeWithSettlement?.(ptyId, data) ??
         this.ptyController?.write(ptyId, data) ??
         false
       )

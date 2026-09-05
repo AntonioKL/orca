@@ -47,7 +47,7 @@ describe('SshChannelMultiplexer notification settlement', () => {
     const settled = vi.fn()
 
     mux.notifyWithSettlement('pty.ackData', { acknowledgements: [] }, settled)
-    expect(settled).toHaveBeenCalledWith({ ok: false, error })
+    expect(settled).toHaveBeenCalledWith({ ok: false, error, writeAttempted: true })
     expect(mux.isDisposed()).toBe(true)
   })
 
@@ -86,6 +86,7 @@ describe('SshChannelMultiplexer notification settlement', () => {
 
     expect(settled).toHaveBeenCalledWith({
       ok: false,
+      writeAttempted: true,
       error: expect.objectContaining({ code: 'DISPOSED' })
     })
     expect(close).toHaveBeenCalledOnce()

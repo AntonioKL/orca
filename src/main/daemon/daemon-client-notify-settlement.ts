@@ -19,7 +19,7 @@ export async function writeNotifyWithSettlement(
   } catch {
     return false
   }
-  return await new Promise<boolean>((resolve) => {
+  return await new Promise<boolean>((resolve, reject) => {
     let settled = false
     const settle = (accepted: boolean): void => {
       if (settled) {
@@ -27,7 +27,11 @@ export async function writeNotifyWithSettlement(
       }
       settled = true
       clearTimeout(timer)
-      resolve(accepted)
+      if (accepted) {
+        resolve(true)
+      } else {
+        reject(new Error('Daemon notification delivery is unverifiable'))
+      }
     }
     const rejectAndDisconnect = (): void => {
       onUndeliverable()

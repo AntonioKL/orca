@@ -1,6 +1,9 @@
 import type { SshChannelMultiplexer } from '../ssh/ssh-channel-multiplexer'
 import { encodeJsonRpcFrame, TIMEOUT_MS } from '../ssh/relay-protocol'
-import { MULTIPLEXER_ORDINARY_QUEUE_MAX_BYTES } from '../ssh/ssh-multiplexer-transport-writer'
+import {
+  MULTIPLEXER_ORDINARY_QUEUE_MAX_BYTES,
+  type MultiplexerWriteSettlement
+} from '../ssh/ssh-multiplexer-transport-writer'
 
 // Allow ordinary-lane backpressure to clear well beyond the mux health window.
 export const SSH_PTY_WRITE_SETTLEMENT_TIMEOUT_MS = TIMEOUT_MS * 3
@@ -35,6 +38,7 @@ export function writeToSshPty(
   return !mux.isDisposed()
 }
 
+/** False proves transport refusal before writing; rejection leaves delivery unverifiable. */
 export function writeToSshPtyWithSettlement(
   mux: SshChannelMultiplexer,
   relayPtyId: string,
@@ -48,21 +52,30 @@ export function writeToSshPtyWithSettlement(
   } catch {
     return Promise.resolve(false)
   }
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let settled = false
-    const finish = (accepted: boolean): void => {
+    const finish = (accepted: boolean, error?: Error): void => {
       if (settled) {
         return
       }
       settled = true
       clearTimeout(timer)
-      resolve(accepted)
+      if (error) {
+        reject(error)
+      } else {
+        resolve(accepted)
+      }
     }
     const timer = setTimeout(() => {
       mux.dispose('connection_lost')
-      finish(false)
+      finish(false, new Error('SSH PTY write settlement is unverifiable'))
     }, SSH_PTY_WRITE_SETTLEMENT_TIMEOUT_MS)
     timer.unref?.()
-    mux.notifyWithSettlement('pty.data', { id: relayPtyId, data }, (result) => finish(result.ok))
+    mux.notifyWithSettlement(
+      'pty.data',
+      { id: relayPtyId, data },
+      (result: MultiplexerWriteSettlement) =>
+        finish(result.ok, !result.ok && result.writeAttempted ? result.error : undefined)
+    )
   })
 }

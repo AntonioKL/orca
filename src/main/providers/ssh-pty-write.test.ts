@@ -100,11 +100,12 @@ describe('SSH PTY writes', () => {
     const provider = new SshPtyProvider('conn-1', mux as never)
     const pending = provider.writeWithSettlement('ssh:conn-1@@pty-1', 'pointer')
 
+    const rejected = expect(pending).rejects.toThrow('SSH PTY write settlement is unverifiable')
     await vi.advanceTimersByTimeAsync(SSH_PTY_WRITE_SETTLEMENT_TIMEOUT_MS - 1)
     expect(mux.dispose).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
 
-    await expect(pending).resolves.toBe(false)
+    await rejected
     expect(mux.dispose).toHaveBeenCalledWith('connection_lost')
   })
 

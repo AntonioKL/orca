@@ -14,7 +14,19 @@ export function writePtyFromRuntimeController(
   deps: PtyRuntimeControllerDeps,
   ptyId: string,
   data: string
-): boolean {
+): boolean
+export function writePtyFromRuntimeController(
+  deps: PtyRuntimeControllerDeps,
+  ptyId: string,
+  data: string,
+  options: { waitForSettlement: true }
+): boolean | Promise<boolean>
+export function writePtyFromRuntimeController(
+  deps: PtyRuntimeControllerDeps,
+  ptyId: string,
+  data: string,
+  options?: { waitForSettlement: true }
+): boolean | Promise<boolean> {
   // Why: the backstop for every runtime write path — query replies, followups, deliveries —
   // so a caller that forgets the typed gate still cannot reach a provider.
   const admission = agentSessionPtyWriteGate.admit(ptyId)
@@ -23,7 +35,11 @@ export function writePtyFromRuntimeController(
     return false
   }
   try {
-    return getProviderForPty(ptyId).write(ptyId, data) !== false
+    const provider = getProviderForPty(ptyId)
+    if (options?.waitForSettlement && provider.writeWithSettlement) {
+      return provider.writeWithSettlement(ptyId, data)
+    }
+    return provider.write(ptyId, data) !== false
   } catch {
     return false
   }

@@ -78,6 +78,13 @@ export function stageOrchestrationMailboxPointer<TWaiter extends OrchestrationMe
   args.state.setWatermark(args.mailboxHandle, args.newestSequence, ptyId, args.leafKey)
   const finishPointerWrite = (accepted: boolean): void =>
     finishPointerWriteAndStageEnter(args, ptyId, flight, expectedTarget, accepted)
+  const preserveAmbiguousWrite = (): void => {
+    if (!args.state.isCurrentFlight(ptyId, flight)) {
+      return
+    }
+    args.state.deactivateWatermark(args.mailboxHandle, args.newestSequence, ptyId)
+    args.settle(ptyId, flight)
+  }
   try {
     const writeResult = args.deps.writePty(
       ptyId,
@@ -91,11 +98,9 @@ export function stageOrchestrationMailboxPointer<TWaiter extends OrchestrationMe
       finishPointerWrite(writeResult)
       return
     }
-    void writeResult
-      .then(finishPointerWrite, () => finishPointerWrite(false))
-      .catch(() => undefined)
+    void writeResult.then(finishPointerWrite, preserveAmbiguousWrite).catch(() => undefined)
   } catch {
-    finishPointerWrite(false)
+    preserveAmbiguousWrite()
   }
 }
 
