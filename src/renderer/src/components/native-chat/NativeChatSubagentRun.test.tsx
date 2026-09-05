@@ -232,6 +232,43 @@ describe('NativeChatToolRun with a spawn group', () => {
     expect(screen.queryByText('1 tool call')).toBeNull()
   })
 
+  // Every settled turn sits here by default: the list passes
+  // `expandOverride={expandedTurnIds.has(turnKey)}` — false until the reader
+  // opens that turn — and `activeTurnIsWorking={false}`. The completed-turn
+  // guard above bailed before the roster branch, so the one row this feature
+  // exists to draw vanished the moment its turn finished, and the message row
+  // that kept itself alive for it rendered an empty ghost bubble.
+  it('keeps the roster visible on a completed turn whose activity is collapsed', () => {
+    render(
+      <NativeChatToolRun
+        blocks={[]}
+        subagentGroups={[group([{ id: 'a', label: 'read', state: 'completed' }])]}
+        expandSignal={false}
+        expandOverride={false}
+        activeTurnIsWorking={false}
+      />
+    )
+
+    expect(screen.getByText('Ran 1 subagent')).toBeInTheDocument()
+  })
+
+  // The roster-only branch returns a `mt-3` wrapper whenever it has rows, so a
+  // group that draws nothing must not count as one — that wrapper would be the
+  // empty bubble with a margin that the message row refuses to emit.
+  it('draws nothing at all for a spawn group that carries no children', () => {
+    const { container } = render(
+      <NativeChatToolRun
+        blocks={[]}
+        subagentGroups={[group([])]}
+        expandSignal={false}
+        expandOverride={false}
+        activeTurnIsWorking={false}
+      />
+    )
+
+    expect(container).toBeEmptyDOMElement()
+  })
+
   it('renders the roster alongside the tool activity of its turn', () => {
     render(
       <NativeChatToolRun

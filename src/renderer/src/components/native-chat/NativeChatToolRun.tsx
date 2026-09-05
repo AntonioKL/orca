@@ -210,13 +210,18 @@ export function NativeChatToolRun({
   // Re-sync when the global toolbar toggle flips.
   useEffect(() => setOpen(expandOverride ?? expandSignal), [expandOverride, expandSignal])
 
-  const subagentRows = subagentGroups.map((group) => (
-    <NativeChatSubagentRun
-      key={group.groupId}
-      block={group}
-      activeTurnIsWorking={activeTurnIsWorking}
-    />
-  ))
+  // Childless groups are dropped so `subagentRows.length` stays an honest test of
+  // "something will draw": the roster-only branch below returns a margin-bearing
+  // wrapper on the strength of it, and a group with no children renders null.
+  const subagentRows = subagentGroups
+    .filter((group) => group.agents.length > 0)
+    .map((group) => (
+      <NativeChatSubagentRun
+        key={group.groupId}
+        block={group}
+        activeTurnIsWorking={activeTurnIsWorking}
+      />
+    ))
   const callCount = countToolCalls(blocks) || blocks.length
   const summary = summarizeToolRun(blocks)
   const latestActiveCall = structuredActivityUi
@@ -241,6 +246,19 @@ export function NativeChatToolRun({
           value0: callCount
         })
 
+  // A roster with no tool calls beside it is the whole run: rendering the tool
+  // header too would announce "1 tool call" for activity that has none.
+  //
+  // Ordered BEFORE the completed-turn guard below on purpose. That guard hides
+  // TOOL activity behind the turn-status disclosure, and a roster row has none
+  // to hide: it is the compact summary this row exists to leave behind. Bailing
+  // there instead dropped it from every settled turn — the default state of the
+  // whole transcript — and left the caller, which counts a spawn group as
+  // renderable, drawing the empty bubble it explicitly guards against.
+  if (blocks.length === 0) {
+    return subagentRows.length > 0 ? <div className="mt-3">{subagentRows}</div> : null
+  }
+
   // Completed turn activity belongs behind the turn-status disclosure. Keeping
   // the grouped row visible here made a failed child command look like the
   // whole response was still running (or had failed) even while collapsed.
@@ -251,12 +269,6 @@ export function NativeChatToolRun({
     activeTurnIsWorking === false
   ) {
     return null
-  }
-
-  // A roster with no tool calls beside it is the whole run: rendering the tool
-  // header too would announce "1 tool call" for activity that has none.
-  if (blocks.length === 0) {
-    return subagentRows.length > 0 ? <div className="mt-3">{subagentRows}</div> : null
   }
 
   return (
