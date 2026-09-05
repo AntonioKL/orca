@@ -7,15 +7,18 @@ import type {
 } from '../../../shared/agent-session-journal-types'
 import { isAdmissibleAgentJournalMessageBody } from '../../../shared/agent-session-journal-schemas'
 import type Database from '../../sqlite/sync-database'
-import { JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_ITEM_ID } from './journal-file-format-remnant'
-import { clearJournalFileImportAttempt } from './journal-file-import-marker'
+import {
+  JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_ITEM_ID,
+  journalFileFormatRestoredDisclosure
+} from './journal-file-format-remnant'
+import { recordJournalFileImportAttempt } from './journal-file-import-marker'
 import { clearJournalRepairMarker } from './journal-repair-marker'
 import {
   applyJournalRow,
   createJournalReducerState,
   type JournalReducerState
 } from './journal-reducer'
-import { journalRowBase } from './journal-row-builders'
+import { buildJournalItemRow, journalRowBase } from './journal-row-builders'
 import {
   deleteAllJournalRows,
   insertJournalRow,
@@ -42,6 +45,7 @@ export function replaceJournalEpochState(input: {
   db: Database.Database
   identity: AgentSessionJournalIdentity
   state: JournalReducerState
+  sourceFingerprint: string
   now: () => number
   mintEpoch: () => string
   onPublished: (loaded: JournalLoad) => void
@@ -50,12 +54,30 @@ export function replaceJournalEpochState(input: {
   const rows = materializeStateRows(input.identity, input.state, epoch, input.now)
   const restored = replayReplacementRows(input.identity.sessionId, epoch, rows)
   assertEquivalentState(input.state, restored)
+  const restoredAt = input.now()
+  const disclosure = journalFileFormatRestoredDisclosure({ restored: restored.items.size })
+  const disclosureRow = buildJournalItemRow({
+    state: restored,
+    identity: disclosure.identity,
+    body: disclosure.body,
+    seq: rows.length + 1,
+    fence: restored.highestFence,
+    ts: restoredAt
+  })
+  rows.push(disclosureRow)
+  applyJournalRow(restored, disclosureRow)
 
   input.db.exec('BEGIN IMMEDIATE')
   try {
     deleteAllJournalRows(input.db)
     clearJournalRepairMarker(input.db, input.identity.sessionId)
-    clearJournalFileImportAttempt(input.db, input.identity.sessionId)
+    recordJournalFileImportAttempt(
+      input.db,
+      input.identity.sessionId,
+      input.sourceFingerprint,
+      true,
+      restoredAt
+    )
     for (const row of rows) {
       insertJournalRow(input.db, input.identity.sessionId, row)
     }
@@ -190,8 +212,8 @@ function appendSettlementRows(
     rows.push({
       kind: 'lifecycle-batch',
       settlementId,
-      // The disclosure appended immediately after replacement removes this
-      // zero-revision marker while each settlement identity remains durable.
+      // The disclosure row added to the replacement removes this zero-revision
+      // marker while each settlement identity remains durable.
       mutations: [
         {
           kind: 'tombstone',

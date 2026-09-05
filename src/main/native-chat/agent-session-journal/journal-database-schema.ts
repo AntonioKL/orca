@@ -8,7 +8,7 @@
 
 /** DB shape version, carried in `PRAGMA user_version`. Independent of the row
  *  body version (`JournalRow.v`): a newer build can change either alone.
- *  v2 added repair markers; v3 added failed file-import fingerprints. */
+ *  v2 added repair markers; v3 added file-import fingerprints. */
 export const JOURNAL_DB_SCHEMA_VERSION = 3
 
 export function createJournalTablesSql(): string {
@@ -33,9 +33,10 @@ CREATE TABLE IF NOT EXISTS journal_repairs (
   repaired_at  INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS journal_file_imports (
-  session_id         TEXT PRIMARY KEY,
-  source_fingerprint TEXT    NOT NULL,
-  attempted_at       INTEGER NOT NULL
+  session_id             TEXT PRIMARY KEY,
+  source_fingerprint     TEXT    NOT NULL,
+  retains_restored_state INTEGER NOT NULL CHECK (retains_restored_state IN (0, 1)),
+  attempted_at           INTEGER NOT NULL
 );
 `
 }

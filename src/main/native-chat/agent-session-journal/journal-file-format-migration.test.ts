@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -238,7 +238,7 @@ describe('all-or-nothing migration', () => {
     const db = new Database(journalDatabaseFile(root), { readonly: true })
     try {
       expect(db.prepare('SELECT count(*) AS total FROM journal_file_imports').get()).toMatchObject({
-        total: 0
+        total: 1
       })
     } finally {
       db.close()
@@ -259,6 +259,82 @@ describe('all-or-nothing migration', () => {
     try {
       expect(db.prepare('SELECT count(*) AS total FROM journal_rows').get()).toMatchObject({
         total: 2
+      })
+      expect(db.prepare('SELECT count(*) AS total FROM journal_file_imports').get()).toMatchObject({
+        total: 1
+      })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('imports rows appended by a rollback-era build after a successful migration', async () => {
+    await writeRows([epoch(), item(2, 'legacy:codex:session-1:first', 'first')])
+    const migrated = await open()
+    const migratedCursor = migrated.cursor()
+    await migrated.close()
+    await appendFile(
+      join(root, 'log.jsonl'),
+      `${JSON.stringify(item(3, 'legacy:codex:session-1:rollback', 'after rollback'))}\n`,
+      'utf8'
+    )
+
+    const reupgraded = await open()
+
+    expect(reupgraded.cursor()).not.toEqual(migratedCursor)
+    expect(reupgraded.snapshot().items.map((entry) => entry.body)).toContainEqual(
+      expect.objectContaining({
+        kind: 'message',
+        blocks: [{ type: 'text', text: 'after rollback' }]
+      })
+    )
+  })
+
+  it('retries a repaired rollback source while retaining the last successful import', async () => {
+    const firstItem = item(2, 'legacy:codex:session-1:first', 'first')
+    await writeRows([epoch(), firstItem])
+    const migrated = await open()
+    await migrated.close()
+    await appendFile(join(root, 'log.jsonl'), 'not-json\n', 'utf8')
+
+    const unreadable = await open()
+    expect(unreadable.snapshot().items.map((entry) => entry.body)).toContainEqual(
+      expect.objectContaining({
+        kind: 'message',
+        blocks: [{ type: 'text', text: 'first' }]
+      })
+    )
+    await unreadable.close()
+    await writeRows([
+      epoch(),
+      firstItem,
+      item(3, 'legacy:codex:session-1:repaired', 'after repair')
+    ])
+
+    const repaired = await open()
+
+    expect(repaired.snapshot().items.map((entry) => entry.body)).toContainEqual(
+      expect.objectContaining({
+        kind: 'message',
+        blocks: [{ type: 'text', text: 'after repair' }]
+      })
+    )
+  })
+
+  it('does not reparse or rewrite an unchanged successfully imported remnant', async () => {
+    await writeRows([epoch(), item(2, 'legacy:codex:session-1:first', 'first')])
+    const first = await open()
+    const firstCursor = first.cursor()
+    await first.close()
+
+    const second = await open()
+    expect(second.cursor()).toEqual(firstCursor)
+    await second.close()
+
+    const db = new Database(journalDatabaseFile(root), { readonly: true })
+    try {
+      expect(db.prepare('SELECT count(*) AS total FROM journal_rows').get()).toMatchObject({
+        total: 3
       })
       expect(db.prepare('SELECT count(*) AS total FROM journal_file_imports').get()).toMatchObject({
         total: 1

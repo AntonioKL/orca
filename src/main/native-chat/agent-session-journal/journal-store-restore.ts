@@ -8,7 +8,7 @@
 
 import type { JournalEpochController } from './journal-epoch-controller'
 import {
-  journalFileImportWasAttempted,
+  readJournalFileImportRecord,
   recordJournalFileImportAttempt
 } from './journal-file-import-marker'
 import { replayJournal } from './journal-open'
@@ -45,14 +45,15 @@ export function restoreJournalStore(
     adopt: host.adopt,
     appendDisclosure: (identity, body, fence) =>
       host.journal().appendItem(identity, body, { fence }),
-    replaceState: (state) => collaborators.epochController.replaceState(state),
-    importWasAttempted: (sourceFingerprint) =>
-      journalFileImportWasAttempted(host.database().db, host.identity.sessionId, sourceFingerprint),
-    recordImportAttempt: (sourceFingerprint) =>
+    replaceState: (state, sourceFingerprint) =>
+      collaborators.epochController.replaceState(state, sourceFingerprint),
+    importRecord: () => readJournalFileImportRecord(host.database().db, host.identity.sessionId),
+    recordImportAttempt: (sourceFingerprint, retainsRestoredState) =>
       recordJournalFileImportAttempt(
         host.database().db,
         host.identity.sessionId,
         sourceFingerprint,
+        retainsRestoredState,
         host.now()
       ),
     sessionId: host.identity.sessionId,

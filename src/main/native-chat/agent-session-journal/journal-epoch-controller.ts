@@ -78,7 +78,7 @@ export class JournalEpochController {
     })
   }
 
-  replaceState(state: JournalReducerState): Promise<AgentJournalCursor> {
+  replaceState(state: JournalReducerState, sourceFingerprint: string): Promise<AgentJournalCursor> {
     return this.deps.serialize(async () => {
       assertJournalWritable(this.deps.readOnly(), this.deps.identity.sessionId)
       assertJournalFence(state.highestFence, this.deps.highestFence())
@@ -86,6 +86,7 @@ export class JournalEpochController {
         db: this.deps.database().db,
         identity: this.deps.identity,
         state,
+        sourceFingerprint,
         now: this.deps.now,
         mintEpoch: this.deps.mintEpoch,
         onPublished: this.deps.adopt

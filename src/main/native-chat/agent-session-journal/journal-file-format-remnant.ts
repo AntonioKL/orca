@@ -213,13 +213,25 @@ export const JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_ITEM_ID = agentJournalItemKe
   JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_IDENTITY
 )
 
-export function journalFileFormatRemnantNeedsRetry(state: JournalReducerState): boolean {
-  if (state.submissions.size > 0 || state.items.size !== 1) {
+export function journalFileFormatSourceWasDisclosed(state: JournalReducerState): boolean {
+  return state.items.has(JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_ITEM_ID)
+}
+
+export function journalFileFormatSourceNeedsCheck(
+  state: JournalReducerState,
+  retainsRestoredState: boolean
+): boolean {
+  const disclosure = state.items.get(JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_ITEM_ID)
+  if (disclosure?.body.kind !== 'status') {
     return false
   }
-  const disclosure = state.items.get(JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_ITEM_ID)
+  if (retainsRestoredState || disclosure.body.text.startsWith('Restored ')) {
+    return true
+  }
   return (
-    disclosure?.body.kind === 'status' && disclosure.body.text.startsWith("This chat's history")
+    state.submissions.size === 0 &&
+    state.items.size === 1 &&
+    disclosure.body.text.startsWith("This chat's history")
   )
 }
 
