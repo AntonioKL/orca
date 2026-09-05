@@ -104,8 +104,13 @@ describe('native chat tool icons', () => {
   })
 
   it('keeps the terminal glyph for a row that really ran a command', () => {
-    for (const name of ['shell', 'bash', 'run_terminal_cmd']) {
+    // `exec` and `local_shell` are how the Codex rollout transcript names a
+    // shell call; `native-chat-edit-normalize` already calls the three command
+    // tools by those words, so a wrench on one would deny a command that ran.
+    for (const name of ['shell', 'bash', 'run_terminal_cmd', 'exec', 'local_shell']) {
+      expect(nativeChatToolCategory(name)).toBe('unknown')
       expect(nativeChatToolIconName(name)).toBe('square-terminal')
+      expect(isShellActivityToolRow(name)).toBe(true)
     }
   })
 

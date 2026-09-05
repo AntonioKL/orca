@@ -65,6 +65,11 @@ const CATEGORY_BY_ROW_WORD = new Map<string, NativeChatToolCategory>([
   ['read', 'read'],
   ['search', 'search'],
   ['list', 'listFiles'],
+  // Codex's rollout-transcript names for a shell call, which the activity set
+  // below does not carry: `isCommandToolName` also picks the running row's copy,
+  // and this vocabulary only picks a glyph.
+  ['exec', 'unknown'],
+  ['local_shell', 'unknown'],
   // Every Codex file change projects as a `Diff` call, and the edit set below
   // names the tools that carry the edit in their input, not that projection.
   ['diff', 'fileChange'],
