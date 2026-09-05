@@ -26,6 +26,16 @@ const result = {
 } as CreateWorktreeResult
 
 describe('retained composer worktree creation', () => {
+  it('retains a remote blank checkout whose terminal starts on activation', async () => {
+    const create = vi.fn(async () => ({ worktree: result.worktree }))
+    const controller = createRetainedWorktreeCreation(create)
+    const remoteRequest = request({ startup: undefined })
+    expect(controller.start(remoteRequest, 'ssh:owner')).toBe(true)
+    expect(await controller.take(remoteRequest, 'ssh:owner')).toEqual({ worktree: result.worktree })
+    expect(create).toHaveBeenCalledOnce()
+    expect(create.mock.calls[0]).toEqual([expect.objectContaining({ agent: null })])
+  })
+
   it('joins an unfinished create once, retaining its exact workspace and terminal result', async () => {
     let finish!: (value: CreateWorktreeResult) => void
     const create = vi.fn(() => new Promise<CreateWorktreeResult>((resolve) => (finish = resolve)))

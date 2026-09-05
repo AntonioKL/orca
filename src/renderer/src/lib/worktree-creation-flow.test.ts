@@ -486,22 +486,27 @@ describe('staged background worktree creation', () => {
     expect(store.setSidebarOpen).not.toHaveBeenCalled()
   })
 
-  it.each([false, true])(
-    'activates a completed workspace synchronously (keep composer: %s)',
-    (keepComposer) => {
+  it.each([
+    [false, true],
+    [true, true],
+    [false, false],
+    [true, false]
+  ])(
+    'activates a completed workspace synchronously (keep composer: %s, shell prepared: %s)',
+    (keepComposer, backendSpawned) => {
       const retained = {
         worktree: { id: 'wt-ready', repoId: 'repo-1', path: '/workspace/ready' },
-        startupTerminal: { tabId: 'ready-tab', spawned: true }
+        startupTerminal: backendSpawned ? { tabId: 'ready-tab', spawned: true } : undefined
       } as CreateWorktreeResult
 
       runBackgroundWorktreeCreation(
-        makeRequest({ startup: { command: '' }, suppressTerminalFocusOnCompletion: keepComposer }),
+        makeRequest({ suppressTerminalFocusOnCompletion: keepComposer }),
         retained
       )
 
       expect(activateAndRevealWorktree).toHaveBeenCalledWith('wt-ready', {
         sidebarRevealBehavior: 'auto',
-        backendStartupTerminalSpawned: true
+        ...(backendSpawned ? { backendStartupTerminalSpawned: true } : { startup: { command: '' } })
       })
       expect(store.createWorktree).not.toHaveBeenCalled()
       expect(store.pendingWorktreeCreations['creation-1']).toBeUndefined()
