@@ -1,5 +1,6 @@
+import { build } from 'esbuild'
 import { describe, expect, it } from 'vitest'
-import { PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS } from '../../../../shared/process-table-snapshot-reader'
+import { PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS } from '../../../../shared/process-table-snapshot-timing'
 import { POLL_TIER_INTERVAL_MS } from './agent-completion-poll-cadence'
 import { nextCadenceInspectionDelayMs } from './agent-completion-poll-interval'
 
@@ -13,6 +14,18 @@ describe('nextCadenceInspectionDelayMs', () => {
       alignToSharedGrid: true,
       now
     })
+
+  it('keeps its production import graph browser-only', async () => {
+    await expect(
+      build({
+        bundle: true,
+        entryPoints: [`${import.meta.dirname}/agent-completion-poll-interval.ts`],
+        logLevel: 'silent',
+        platform: 'browser',
+        write: false
+      })
+    ).resolves.toMatchObject({ errors: [] })
+  })
 
   it('walks panes that scheduled at different moments onto one shared deadline', () => {
     // Why this matters: the inspection queue collapses shared-observation tasks enqueued in the
