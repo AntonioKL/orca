@@ -16964,6 +16964,7 @@
         "deletedFile": "Deleted file",
         "renamedFile": "Renamed file",
         "copyDiff": "Copy diff",
+        "diffGap": "Lines not shown",
         "diffTruncated": "Diff truncated"
       },
       "providerFrame": {

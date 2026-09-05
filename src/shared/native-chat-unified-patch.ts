@@ -1,5 +1,5 @@
 import { isFileHeaderPair } from './native-chat-diff'
-import { splitEditContent, type NativeChatEditLine } from './native-chat-edit-model'
+import { pushEditGap, splitEditContent, type NativeChatEditLine } from './native-chat-edit-model'
 
 const HUNK_RANGES = /^@@+ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/
 /** Structural lines that open a file section, so any hunk before them has ended.
@@ -18,31 +18,34 @@ export type UnifiedPatchLines = {
 }
 
 /** Parses unified patch text, keeping the `@@` ranges as per-row line numbers.
- *  Codex writes hunk headers whose `@@` is a bare context anchor with no
- *  ranges; those rows are emitted without numbers rather than numbered from 1,
- *  because a wrong number reads as authoritative. */
-export function editLinesFromUnifiedPatch(text: string): UnifiedPatchLines | null {
+ *  A hunk header whose `@@` is a bare context anchor with no ranges leaves its
+ *  rows unnumbered rather than numbered from 1, because a wrong number reads as
+ *  authoritative.
+ *
+ *  `implicitFirstHunk` opens the body as a hunk of unknown position, for the
+ *  patch dialect whose first chunk may carry no header at all. */
+export function editLinesFromUnifiedPatch(
+  text: string,
+  options?: { implicitFirstHunk?: boolean }
+): UnifiedPatchLines | null {
   const source = splitEditContent(text)
   const rows = source.lines
   const lines: NativeChatEditLine[] = []
   let oldNo: number | null = null
   let newNo: number | null = null
-  let sawHunk = false
+  let sawHunk = options?.implicitFirstHunk === true
   let ranged = true
-  let inHunk = false
+  let inHunk = sawHunk
 
   for (let index = 0; index < rows.length; index += 1) {
     const raw = rows[index] ?? ''
     if (raw.startsWith('@@')) {
       const match = HUNK_RANGES.exec(raw)
-      if (match) {
-        oldNo = Number(match[1])
-        newNo = Number(match[3])
-      } else {
-        oldNo = null
-        newNo = null
-        ranged = false
-      }
+      oldNo = match ? Number(match[1]) : null
+      newNo = match ? Number(match[3]) : null
+      // Successive hunks are separate regions of the file; concatenated with no
+      // break the gutter jumps and the reader sees one continuous block.
+      pushEditGap(lines)
       sawHunk = true
       inHunk = true
       continue
@@ -63,6 +66,9 @@ export function editLinesFromUnifiedPatch(text: string): UnifiedPatchLines | nul
     if (!inHunk) {
       continue
     }
+    // Read off the rows rather than the header, so a body that opened with no
+    // header is reported as unlocatable just like a rangeless `@@`.
+    ranged &&= oldNo !== null || newNo !== null
     if (raw.startsWith('+')) {
       lines.push({
         kind: 'add',

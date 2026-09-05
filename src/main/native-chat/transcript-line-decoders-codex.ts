@@ -202,11 +202,27 @@ function codexTurnItemBlocks(content: unknown): NativeChatBlock[] {
   return blocks
 }
 
+/** A call's arguments arrive as a string holding JSON, so decode them once here
+ *  rather than leaving every consumer to unescape the payload for itself. The
+ *  transcript is untrusted, so anything that is not a JSON object stays exactly
+ *  as it arrived. */
 function codexCallInput(payload: Record<string, unknown>): unknown {
-  if (payload.arguments !== undefined) {
-    return payload.arguments
+  const args = payload.arguments
+  if (args !== undefined) {
+    return typeof args === 'string' ? (parsedJsonObject(args) ?? args) : args
   }
   return payload.input ?? payload.action ?? null
+}
+
+function parsedJsonObject(value: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
 }
 
 function codexToolResult(output: unknown): NativeChatBlock {

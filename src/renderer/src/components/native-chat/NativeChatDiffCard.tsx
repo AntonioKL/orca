@@ -40,11 +40,29 @@ function baseName(path: string): string {
 
 function patchText(file: NativeChatEditFile): string {
   return file.lines
+    .filter((line) => line.kind !== 'gap')
     .map((line) => `${line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '}${line.text}`)
     .join('\n')
 }
 
+/** The break between two regions of the file, quiet enough not to read as a
+ *  row of content but present enough that the gutter's jump is accounted for. */
+function DiffGapRow(): React.JSX.Element {
+  return (
+    <div
+      role="separator"
+      aria-label={translate('components.native-chat.tool.diffGap', 'Lines not shown')}
+      className="select-none border-y border-border/60 bg-accent/30 py-0.5 text-center text-muted-foreground"
+    >
+      ⋯
+    </div>
+  )
+}
+
 function DiffRow({ line, gutterWidth }: { line: NativeChatEditLine; gutterWidth: number }) {
+  if (line.kind === 'gap') {
+    return <DiffGapRow />
+  }
   return (
     <div
       className={cn(
@@ -89,7 +107,8 @@ function DiffRow({ line, gutterWidth }: { line: NativeChatEditLine; gutterWidth:
 /** Inline card for one file an agent edited: verb header, path with change
  *  counts, and the unified rows. The gutter is blank when the provider gave no
  *  resolved ranges, because a snippet-relative number would read as a file
- *  position. */
+ *  position. A change reported with no body — a delete names the file and
+ *  nothing else — keeps the header rows and offers no empty disclosure. */
 export function NativeChatDiffCard({
   file,
   initiallyExpanded = false
@@ -98,6 +117,7 @@ export function NativeChatDiffCard({
   initiallyExpanded?: boolean
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(initiallyExpanded)
+  const hasBody = file.lines.length > 0
   const widest = file.lineNumbersKnown
     ? file.lines.reduce((max, line) => Math.max(max, unifiedLineNumber(line) ?? 0), 0)
     : 0
@@ -107,20 +127,25 @@ export function NativeChatDiffCard({
     <div className="my-1 overflow-hidden rounded-md border border-border">
       <button
         type="button"
-        onClick={() => setExpanded((value) => !value)}
-        className="group flex w-full items-center gap-1.5 px-2 py-1 text-left hover:bg-accent/30"
-        aria-expanded={expanded}
+        onClick={() => hasBody && setExpanded((value) => !value)}
+        className={cn(
+          'group flex w-full items-center gap-1.5 px-2 py-1 text-left',
+          hasBody ? 'cursor-pointer hover:bg-accent/30' : 'cursor-default'
+        )}
+        aria-expanded={hasBody ? expanded : undefined}
       >
         <VerbIcon kind={file.changeKind} />
         <span className="shrink-0 text-[11px] text-muted-foreground group-hover:text-foreground/80">
           {verbLabel(file)}
         </span>
-        <ChevronRight
-          className={cn(
-            'size-3.5 shrink-0 text-muted-foreground transition-transform',
-            expanded && 'rotate-90'
-          )}
-        />
+        {hasBody ? (
+          <ChevronRight
+            className={cn(
+              'size-3.5 shrink-0 text-muted-foreground transition-transform',
+              expanded && 'rotate-90'
+            )}
+          />
+        ) : null}
       </button>
       <div className="flex items-center gap-1.5 border-t border-border bg-accent/40 px-2 py-1">
         {file.oldPath ? (
@@ -144,7 +169,7 @@ export function NativeChatDiffCard({
           className="ml-auto shrink-0"
         />
       </div>
-      {expanded ? (
+      {hasBody && expanded ? (
         // Focusable so the rows can be scrolled from the keyboard.
         <div
           tabIndex={0}

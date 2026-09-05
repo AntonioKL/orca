@@ -5,15 +5,17 @@ const BEGIN = '*** Begin Patch'
 const END = '*** End Patch'
 const FILE_HEADER = /^\*\*\* (Add|Update|Delete) File: (.+)$/
 const MOVE_HEADER = /^\*\*\* Move to: (.+)$/
+/** Envelope structure that carries no file content of its own. */
+const CONTROL_LINE = /^\*\*\* (?:End of File|Environment ID:)/
 
-/** Codex sends `apply_patch` as source for its `exec` tool, so the envelope
- *  arrives inside a JavaScript string literal. Recover the envelope text. */
+/** The envelope reaches a tool call as one of its argument values, either whole
+ *  or as an element of the argument vector the agent runs. Recover its text. */
 export function unwrapBeginPatch(input: unknown): string | null {
   const source =
     typeof input === 'string'
       ? input
       : typeof input === 'object' && input !== null
-        ? firstStringField(input as Record<string, unknown>)
+        ? envelopeArgument(input as Record<string, unknown>)
         : null
   if (!source) {
     return null
@@ -29,29 +31,26 @@ export function unwrapBeginPatch(input: unknown): string | null {
     // render as file content the agent never wrote.
     return null
   }
-  const region = source.slice(start, end + END.length)
-  // A region with no real newlines is still a single-line string literal.
-  return region.includes('\n') ? region : decodeStringLiteral(region)
+  return source.slice(start, end + END.length)
 }
 
-function firstStringField(record: Record<string, unknown>): string | null {
-  for (const key of ['input', 'command', 'patch', 'arguments', 'script']) {
-    const value = record[key]
+/** Any argument value may hold the envelope, including one word of an argument
+ *  vector, so look at the values rather than guessing at key names. */
+function envelopeArgument(record: Record<string, unknown>): string | null {
+  for (const value of Object.values(record)) {
     if (typeof value === 'string' && value.includes(BEGIN)) {
       return value
     }
+    if (Array.isArray(value)) {
+      const word = value.find(
+        (entry): entry is string => typeof entry === 'string' && entry.includes(BEGIN)
+      )
+      if (word) {
+        return word
+      }
+    }
   }
   return null
-}
-
-function decodeStringLiteral(value: string): string {
-  return value.replace(/\\(u[0-9a-fA-F]{4}|.)/g, (_match, escape: string) => {
-    if (escape.startsWith('u')) {
-      return String.fromCharCode(Number.parseInt(escape.slice(1), 16))
-    }
-    const known: Record<string, string> = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', v: '\v' }
-    return known[escape] ?? escape
-  })
 }
 
 /** Splits a `*** Begin Patch` envelope into one entry per file it touches. */
@@ -60,7 +59,9 @@ export function editFilesFromBeginPatch(envelope: string): NativeChatEditFile[] 
   let movePath: string | null = null
   const moves = new Map<number, string>()
 
-  for (const raw of envelope.split('\n')) {
+  // Split on both newline forms once, so every marker below can be matched
+  // exactly rather than each pattern having to tolerate a trailing `\r`.
+  for (const raw of envelope.split(/\r?\n/)) {
     const header = FILE_HEADER.exec(raw)
     if (header) {
       sections.push({
@@ -76,7 +77,7 @@ export function editFilesFromBeginPatch(envelope: string): NativeChatEditFile[] 
       moves.set(sections.length - 1, movePath)
       continue
     }
-    if (raw === BEGIN || raw === END || sections.length === 0) {
+    if (raw === BEGIN || raw === END || CONTROL_LINE.test(raw) || sections.length === 0) {
       continue
     }
     sections.at(-1)!.body.push(raw)
@@ -103,7 +104,10 @@ export function editFilesFromBeginPatch(envelope: string): NativeChatEditFile[] 
         })
       ]
     }
-    const parsed = editLinesFromUnifiedPatch(body)
+    // The first chunk of an update may carry no hunk header at all, and a file
+    // whose body cannot be read as a hunk would otherwise vanish from a
+    // multi-file envelope with nothing to say it was dropped.
+    const parsed = editLinesFromUnifiedPatch(body, { implicitFirstHunk: true })
     if (!parsed) {
       return []
     }

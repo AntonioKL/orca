@@ -246,10 +246,11 @@ describe('readNativeChatTranscript (codex)', () => {
     expect(roles).toEqual(['user', 'reasoning', 'assistant', 'tool', 'assistant'])
 
     const call = result.messages.find((m) => m.blocks[0]?.type === 'tool-call')
+    // The argument payload is decoded once here rather than by every consumer.
     expect(call?.blocks[0]).toEqual({
       type: 'tool-call',
       name: 'shell',
-      input: '{"command":["bash","-lc","make"]}'
+      input: { command: ['bash', '-lc', 'make'] }
     })
 
     const toolResult = result.messages.find((m) => m.blocks[0]?.type === 'tool-result')

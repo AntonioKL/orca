@@ -1,6 +1,8 @@
 /** One rendered diff row. Numbers are per side: a removed row has no new-side
- *  number and an added row has no old-side number. */
-export type NativeChatEditLineKind = 'context' | 'add' | 'del'
+ *  number and an added row has no old-side number. `gap` marks the break
+ *  between two regions of the file, which are otherwise concatenated and read
+ *  as one continuous block even as the gutter jumps hundreds of lines. */
+export type NativeChatEditLineKind = 'context' | 'add' | 'del' | 'gap'
 
 export type NativeChatEditLine = {
   kind: NativeChatEditLineKind
@@ -51,6 +53,19 @@ export function splitEditContent(content: string): EditContentLines {
   return { lines, truncated }
 }
 
+/** The break between two regions of a file. Carries no text and no position. */
+export function editGapLine(): NativeChatEditLine {
+  return { kind: 'gap', text: '', oldLineNumber: null, newLineNumber: null }
+}
+
+/** Appends a gap when rows already exist, so the break never opens a diff or
+ *  doubles up behind an empty region. */
+export function pushEditGap(lines: NativeChatEditLine[]): void {
+  if (lines.length > 0 && lines.at(-1)?.kind !== 'gap') {
+    lines.push(editGapLine())
+  }
+}
+
 /** Unified line numbering: a removed row is located on the old side, everything
  *  else on the new side. One column, so a replaced line repeats its number. */
 export function unifiedLineNumber(line: NativeChatEditLine): number | null {
@@ -66,12 +81,19 @@ export function finalizeEditFile(
   const overLineCap = input.lines.length > MAX_EDIT_LINES
   const truncated = overLineCap || input.truncated === true
   const capped = overLineCap ? input.lines.slice(0, MAX_EDIT_LINES) : input.lines
+  // A gap marks a break between regions, so one at the end marks nothing. The
+  // row cap can leave one behind even when the source did not.
+  let end = capped.length
+  while (end > 0 && capped[end - 1]?.kind === 'gap') {
+    end -= 1
+  }
+  const trimmed = end === capped.length ? capped : capped.slice(0, end)
   // Without resolved ranges the numbers locate a row inside a snippet; dropping
   // them keeps a plausible-looking wrong position out of the gutter, the copy
   // text, and the row keys.
   const lines = input.lineNumbersKnown
-    ? capped
-    : capped.map((line) => ({ ...line, oldLineNumber: null, newLineNumber: null }))
+    ? trimmed
+    : trimmed.map((line) => ({ ...line, oldLineNumber: null, newLineNumber: null }))
   let added = 0
   let removed = 0
   for (const line of lines) {

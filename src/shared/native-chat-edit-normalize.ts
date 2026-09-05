@@ -2,6 +2,7 @@ import { editFilesFromBeginPatch, unwrapBeginPatch } from './native-chat-begin-p
 import { editLinesFromContents } from './native-chat-edit-lcs'
 import {
   finalizeEditFile,
+  pushEditGap,
   type NativeChatEditFile,
   type NativeChatEditLine
 } from './native-chat-edit-model'
@@ -37,6 +38,9 @@ function text(value: unknown): string | null {
 function linesFromEditPatch(patch: NativeChatEditPatch): NativeChatEditLine[] {
   const lines: NativeChatEditLine[] = []
   for (const hunk of patch.hunks) {
+    // Hunks are separate regions of the file; run together the gutter jumps
+    // from one to the next with nothing marking the skipped span.
+    pushEditGap(lines)
     let oldNo = hunk.oldStart
     let newNo = hunk.newStart
     for (const raw of hunk.lines) {
@@ -89,6 +93,8 @@ function multiEditFiles(input: Record<string, unknown>, path: string): NativeCha
     if (oldString === null && newString === null) {
       continue
     }
+    // Each entry is its own snippet, so it starts a new region.
+    pushEditGap(lines)
     const diffed = editLinesFromContents(oldString ?? '', newString ?? '')
     lines.push(...diffed.lines)
     truncated ||= diffed.truncated

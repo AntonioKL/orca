@@ -247,4 +247,37 @@ describe('Codex transcript history modes', () => {
       blocks: [{ type: 'tool-result', output: 'ok' }]
     })
   })
+
+  it('decodes a call argument payload once, so consumers see real values', () => {
+    const call = decodeCodexTranscriptLine(
+      JSON.stringify({
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          id: 'call-2',
+          name: 'shell',
+          arguments: JSON.stringify({ command: ['bash', '-lc', 'echo one\necho two'] })
+        }
+      }),
+      'fallback-args'
+    )
+
+    expect(call?.blocks[0]).toMatchObject({
+      type: 'tool-call',
+      name: 'shell',
+      input: { command: ['bash', '-lc', 'echo one\necho two'] }
+    })
+  })
+
+  it('leaves an argument payload that is not an object exactly as it arrived', () => {
+    const call = decodeCodexTranscriptLine(
+      JSON.stringify({
+        type: 'response_item',
+        payload: { type: 'function_call', id: 'call-3', name: 'shell', arguments: '{ not json' }
+      }),
+      'fallback-bad-args'
+    )
+
+    expect(call?.blocks[0]).toMatchObject({ type: 'tool-call', input: '{ not json' })
+  })
 })

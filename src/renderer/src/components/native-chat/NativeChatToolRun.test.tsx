@@ -137,6 +137,51 @@ describe('NativeChatToolRun', () => {
     expect(screen.getByText('was').closest('div')?.textContent).toBe('-was')
   })
 
+  it('separates two regions of a file so the gutter jump is accounted for', () => {
+    const blocks: NativeChatBlock[] = [
+      {
+        type: 'tool-call',
+        name: 'Edit',
+        input: { file_path: '/repo/a.ts' },
+        state: 'completed'
+      },
+      {
+        type: 'tool-result',
+        output: 'ok',
+        editPatch: {
+          filePath: '/repo/a.ts',
+          hunks: [
+            { oldStart: 42, oldLines: 1, newStart: 42, newLines: 1, lines: ['-was', '+now'] },
+            { oldStart: 310, oldLines: 1, newStart: 310, newLines: 1, lines: ['-old', '+new'] }
+          ]
+        }
+      }
+    ]
+
+    render(<NativeChatToolRun blocks={blocks} expandSignal />)
+
+    const separators = screen.getAllByRole('separator')
+    expect(separators).toHaveLength(1)
+    expect(separators[0]).toHaveAccessibleName('Lines not shown')
+  })
+
+  it('offers no empty body for a delete, which names the file and nothing else', () => {
+    const blocks: NativeChatBlock[] = [
+      {
+        type: 'tool-call',
+        name: 'apply_patch',
+        input: { input: '*** Begin Patch\n*** Delete File: gone.ts\n*** End Patch' },
+        state: 'completed'
+      }
+    ]
+
+    render(<NativeChatToolRun blocks={blocks} expandSignal />)
+
+    expect(screen.getByTitle('gone.ts')).toBeInTheDocument()
+    // The header states the change; there is no body behind a disclosure.
+    expect(screen.getByText('Deleted file').closest('button')).not.toHaveAttribute('aria-expanded')
+  })
+
   it('keeps a grouped active run to one stable row showing only the latest tool', () => {
     const blocks: NativeChatBlock[] = [
       { type: 'tool-call', name: 'shell', input: { command: 'date' }, state: 'completed' },

@@ -69,15 +69,38 @@ describe('editLinesFromUnifiedPatch', () => {
     const body = `@@ -1,1 +1,1 @@\n${'+x\n'.repeat(MAX_EDIT_CHARS)}`
     expect(editLinesFromUnifiedPatch(body)?.truncated).toBe(true)
   })
+
+  it('marks the break between hunks, and only between them', () => {
+    const parsed = editLinesFromUnifiedPatch(
+      '@@ -40,2 +40,2 @@\n keep\n-was\n@@ -310,2 +310,2 @@\n+now\n tail'
+    )
+    expect(parsed?.lines.map((line) => [line.kind, unifiedLineNumber(line)])).toEqual([
+      ['context', 40],
+      ['del', 41],
+      ['gap', null],
+      ['add', 310],
+      ['context', 311]
+    ])
+  })
+
+  it('reads a body that opens with no hunk header as an unlocatable hunk', () => {
+    const parsed = editLinesFromUnifiedPatch('-was\n+now', { implicitFirstHunk: true })
+    expect(parsed?.lines.map((line) => line.kind)).toEqual(['del', 'add'])
+    expect(parsed?.lineNumbersKnown).toBe(false)
+    // Without the option the same body is not a patch at all.
+    expect(editLinesFromUnifiedPatch('-was\n+now')).toBeNull()
+  })
 })
 
 describe('unwrapBeginPatch', () => {
-  it('recovers an envelope escaped inside a JavaScript string literal', () => {
-    const source =
-      'const patch = "*** Begin Patch\\n*** Update File: a.ts\\n@@\\n-x\\n+y\\n*** End Patch"'
-    expect(unwrapBeginPatch(source)).toBe(
-      '*** Begin Patch\n*** Update File: a.ts\n@@\n-x\n+y\n*** End Patch'
-    )
+  it('recovers an envelope carried in one word of an argument vector', () => {
+    const envelope = '*** Begin Patch\n*** Update File: a.ts\n@@\n-x\n+y\n*** End Patch'
+    expect(
+      unwrapBeginPatch({
+        command: ['bash', '-lc', `apply_patch <<'EOF'\n${envelope}\nEOF`],
+        workdir: '/repo'
+      })
+    ).toBe(envelope)
   })
 
   it('leaves an already-decoded envelope alone', () => {
@@ -97,11 +120,16 @@ describe('unwrapBeginPatch', () => {
 })
 
 describe('editFilesFromToolPair', () => {
-  it('renders a Codex exec apply_patch, which previously produced no diff', () => {
+  it('renders an apply_patch run through a command tool, which produced no diff', () => {
     const files = editFilesFromToolPair({
       name: 'exec',
-      input:
-        'const patch = "*** Begin Patch\\n*** Update File: src/a.ts\\n@@\\n ctx\\n-was\\n+now\\n*** End Patch"'
+      input: {
+        command: [
+          'bash',
+          '-lc',
+          '*** Begin Patch\n*** Update File: src/a.ts\n@@\n ctx\n-was\n+now\n*** End Patch'
+        ]
+      }
     })
     expect(files).toHaveLength(1)
     expect(files?.[0]?.path).toBe('src/a.ts')
@@ -120,6 +148,75 @@ describe('editFilesFromToolPair', () => {
     expect(files?.[0]?.changeKind).toBe('added')
     expect(files?.[0]?.lineNumbersKnown).toBe(true)
     expect(gutter(files)).toEqual([1, 2])
+  })
+
+  it('keeps a file whose update body carries no hunk header', () => {
+    const files = editFilesFromToolPair({
+      name: 'apply_patch',
+      input: {
+        input:
+          '*** Begin Patch\n*** Update File: first.ts\n ctx\n-was\n+now\n*** Update File: second.ts\n@@ -1,1 +1,1 @@\n-a\n+b\n*** End Patch'
+      }
+    })
+    expect(files?.map((file) => file.path)).toEqual(['first.ts', 'second.ts'])
+    expect(files?.[0]?.lines.map((line) => line.kind)).toEqual(['context', 'del', 'add'])
+    expect(files?.[0]?.lineNumbersKnown).toBe(false)
+  })
+
+  it('does not render envelope control lines as file content', () => {
+    const files = editFilesFromToolPair({
+      name: 'apply_patch',
+      input: {
+        input:
+          '*** Begin Patch\n*** Environment ID: abc123\n*** Update File: a.ts\n@@\n-was\n+now\n*** End of File\n*** End Patch'
+      }
+    })
+    expect(files?.[0]?.lines.map((line) => line.text)).toEqual(['was', 'now'])
+  })
+
+  it('reports a delete that names the file and carries no body', () => {
+    const files = editFilesFromToolPair({
+      name: 'apply_patch',
+      input: { input: '*** Begin Patch\n*** Delete File: gone.ts\n*** End Patch' }
+    })
+    expect(files).toHaveLength(1)
+    expect(files?.[0]?.changeKind).toBe('deleted')
+    expect(files?.[0]?.path).toBe('gone.ts')
+    expect(files?.[0]?.lines).toEqual([])
+  })
+
+  it('reads a CRLF envelope, whose markers otherwise match nothing', () => {
+    const files = editFilesFromToolPair({
+      name: 'apply_patch',
+      input: {
+        input:
+          '*** Begin Patch\r\n*** Update File: a.ts\r\n@@ -1,2 +1,2 @@\r\n-was\r\n+now\r\n*** End Patch'
+      }
+    })
+    expect(files).toHaveLength(1)
+    expect(files?.[0]?.path).toBe('a.ts')
+    expect(files?.[0]?.lines.map((line) => line.text)).toEqual(['was', 'now'])
+  })
+
+  it('marks the break between resolved hunks that sit far apart', () => {
+    const files = editFilesFromToolPair({
+      name: 'Edit',
+      input: { file_path: '/repo/a.ts' },
+      result: {
+        editPatch: {
+          filePath: '/repo/a.ts',
+          hunks: [
+            { oldStart: 42, oldLines: 1, newStart: 42, newLines: 1, lines: ['-was', '+now'] },
+            { oldStart: 310, oldLines: 1, newStart: 310, newLines: 1, lines: ['-old', '+new'] }
+          ]
+        }
+      }
+    })
+    expect(files?.[0]?.lines.map((line) => line.kind)).toEqual(['del', 'add', 'gap', 'del', 'add'])
+    // A break marks nothing at either end, and counts no change of its own.
+    expect(files?.[0]?.added).toBe(2)
+    expect(files?.[0]?.removed).toBe(2)
+    expect(gutter(files)).toEqual([42, 42, null, 310, 310])
   })
 
   it('reads a move header as a rename', () => {
@@ -207,7 +304,14 @@ describe('editFilesFromToolPair', () => {
     })
     expect(files).toHaveLength(1)
     expect(files?.[0]?.path).toBe('/repo/a.ts')
-    expect(files?.[0]?.lines.map((line) => line.text)).toEqual(['was', 'now', 'gone', 'kept'])
+    // Each entry is its own region, so a break separates them.
+    expect(files?.[0]?.lines.map((line) => [line.kind, line.text])).toEqual([
+      ['del', 'was'],
+      ['add', 'now'],
+      ['gap', ''],
+      ['del', 'gone'],
+      ['add', 'kept']
+    ])
     expect(files?.[0]?.added).toBe(2)
     expect(files?.[0]?.removed).toBe(2)
   })
