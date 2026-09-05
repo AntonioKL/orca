@@ -84,8 +84,7 @@ function getManagedScript(
             // Why: Devin and Grok read .claude hooks by default; skip Orca's managed hook under
             // either so status posts stay attributed to the agent that actually owns the pane.
             `if not "%DEVIN_PROJECT_DIR%"=="" goto :${WINDOWS_HOOK_STDIN_DRAIN_LABEL}`,
-            `if not "%GROK_HOOK_EVENT%"=="" goto :${WINDOWS_HOOK_STDIN_DRAIN_LABEL}`,
-            `if not "%GROK_SESSION_ID%"=="" goto :${WINDOWS_HOOK_STDIN_DRAIN_LABEL}`
+            `if not "%GROK_HOOK_EVENT%"=="" goto :${WINDOWS_HOOK_STDIN_DRAIN_LABEL}`
           ]
         : []),
       // Why: use curl.exe to avoid an extra PowerShell startup per hook.
@@ -106,7 +105,9 @@ function getManagedScript(
       ? [
           // Why: Devin and Grok read .claude hooks by default; skip Orca's managed hook under
           // either so status posts stay attributed to the agent that actually owns the pane.
-          'if [ -n "$DEVIN_PROJECT_DIR" ] || [ -n "$GROK_HOOK_EVENT" ] || [ -n "$GROK_SESSION_ID" ]; then',
+          // GROK_HOOK_EVENT only: Grok sets it in every hook process, and it is absent from a
+          // plain shell, so this cannot silence a real Claude pane.
+          'if [ -n "$DEVIN_PROJECT_DIR" ] || [ -n "$GROK_HOOK_EVENT" ]; then',
           '  exit 0',
           'fi'
         ]
