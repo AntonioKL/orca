@@ -97,7 +97,8 @@ export function readClaudeSubagentTaskFrame(
     label:
       claudeTaskDescription(message.description) ??
       claudeTaskDescription(patch?.description) ??
-      (announcement ? claudeText(message.subagent_type) : null),
+      // Bounded like a description: the roster stores whatever this returns.
+      (announcement ? (claudeTaskDescription(message.subagent_type) ?? null) : null),
     // A notification or progress ping is not a lifecycle verdict: latching one
     // terminal would settle a child that is still running.
     state:

@@ -35,7 +35,8 @@ type TrackedEntry = {
   /** The only signal separating a child that dies with its turn from one told to
    *  outlive it. A turn-end sweep must leave a backgrounded child alone. */
   backgrounded: boolean
-  /** Label before its ordinal suffix, so a re-label releases the right counter. */
+  /** Label before its ordinal suffix, so a later announcement can tell a
+   *  provisional row from one that already carries the provider's own name. */
   labelBase: string
 }
 
@@ -44,7 +45,8 @@ type RosterGroup = {
   identity: AgentJournalItemIdentity
   /** Insertion order is the display order; the map holds the state. */
   entries: Map<string, TrackedEntry>
-  /** Times each label has been claimed, so a repeat gets an ordinal suffix. */
+  /** High-water mark of claims per label, so a repeat gets an ordinal suffix.
+   *  It never decreases: re-issuing an ordinal would print two identical rows. */
   labelCounts: Map<string, number>
   /** Last body written, so an idempotent replay writes no new revision. */
   lastSerialized: string | null
@@ -150,8 +152,14 @@ export class ClaudeSubagentRoster {
    * lost, which is NOT evidence the child exited. A backgrounded child was
    * explicitly told to outlive the turn and is left alone.
    */
-  settleTurn(): void {
-    this.sweep(this.groups.get(this.deps.currentGroupKey() ?? OUTSIDE_TURN), false)
+  settleTurn(groupKey: string | null): void {
+    const ending = groupKey ?? OUTSIDE_TURN
+    this.sweep(this.groups.get(ending), false)
+    if (ending !== OUTSIDE_TURN) {
+      // Children Claude reported before any turn key existed sit here, and no
+      // turn will ever name this group, so every turn end sweeps it too.
+      this.sweep(this.groups.get(OUTSIDE_TURN), false)
+    }
   }
 
   /** The provider is gone. Nothing more will arrive for any child, backgrounded
@@ -163,6 +171,10 @@ export class ClaudeSubagentRoster {
   }
 
   dispose(): void {
+    // Teardown paths reach here without an `ended` event, so a row still
+    // reporting `working` would have nothing left to revise it. A session that
+    // did settle first leaves every child terminal, so this writes nothing.
+    this.settleSession()
     this.groups.clear()
     this.groupIdByEntry.clear()
     this.ids.clear()
@@ -243,7 +255,6 @@ export class ClaudeSubagentRoster {
       tracked.labelBase === UNLABELLED_AGENT &&
       change.label !== UNLABELLED_AGENT
     ) {
-      this.releaseLabel(group, tracked.labelBase)
       next.labelBase = change.label
       next.entry.label = this.claimLabel(group, change.label)
     }
@@ -285,7 +296,6 @@ export class ClaudeSubagentRoster {
       return
     }
     located.group.entries.delete(id)
-    this.releaseLabel(located.group, located.tracked.labelBase)
     this.groupIdByEntry.delete(id)
     this.write(located.group)
   }
@@ -316,7 +326,11 @@ export class ClaudeSubagentRoster {
       if (oldest.done || oldest.value === groupId) {
         break
       }
-      for (const id of this.groups.get(oldest.value)?.entries.keys() ?? []) {
+      const evicted = this.groups.get(oldest.value)
+      // Once the group leaves the map nothing can reach its children again —
+      // not even a session sweep — so contact is lost here.
+      this.sweep(evicted, true)
+      for (const id of evicted?.entries.keys() ?? []) {
         this.groupIdByEntry.delete(id)
       }
       this.groups.delete(oldest.value)
@@ -332,13 +346,6 @@ export class ClaudeSubagentRoster {
     return seen === 0 ? base : `${base} ${seen + 1}`
   }
 
-  private releaseLabel(group: RosterGroup, base: string): void {
-    const seen = group.labelCounts.get(base) ?? 0
-    if (seen > 0) {
-      group.labelCounts.set(base, seen - 1)
-    }
-  }
-
   private write(group: RosterGroup): void {
     const agents = [...group.entries.values()].map((tracked) => tracked.entry)
     const options = { coalescingKey: `claude-subagents:${group.groupId}` }
@@ -348,7 +355,7 @@ export class ClaudeSubagentRoster {
       if (group.lastSerialized !== null) {
         group.lastSerialized = null
         this.deps.sink.appendTombstone(group.identity, options)
-        this.deps.sink.publish(options)
+        this.deps.sink.publish()
       }
       return
     }
@@ -360,6 +367,8 @@ export class ClaudeSubagentRoster {
     }
     group.lastSerialized = serialized
     this.deps.sink.appendItem(group.identity, body, options)
-    this.deps.sink.publish(options)
+    // Publish keeps the sink's own coalescing slot: sharing the row's key makes
+    // each queued publish evict the append it was meant to flush.
+    this.deps.sink.publish()
   }
 }

@@ -7,10 +7,30 @@ import type {
   NativeChatSubagentEntry,
   NativeChatSubagentGroupBlock
 } from '../../shared/native-chat-types'
-import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
+import type { AgentSessionJournal } from '../native-chat/agent-session-journal/journal-store'
+import {
+  createDeferredStructuredAgentSessionEventSink,
+  type StructuredAgentSessionEventSink
+} from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import { ClaudeSubagentRoster } from './claude-subagent-roster'
 
-function harness(groupKey: string | null = 'claude-session:turn-1') {
+const TURN_1 = 'claude-session:turn-1'
+
+function agentsOf(body: AgentJournalItemBody | undefined): NativeChatSubagentEntry[] {
+  if (!body || body.kind !== 'message') {
+    return []
+  }
+  const block = body.blocks.find(
+    (candidate): candidate is NativeChatSubagentGroupBlock => candidate.type === 'subagent-group'
+  )
+  return block ? block.agents : []
+}
+
+function isGroupRow(identity: AgentJournalItemIdentity, groupId: string): boolean {
+  return identity.provider === 'orca' && identity.clientMessageId === `claude-subagents:${groupId}`
+}
+
+function harness(groupKey: string | null = TURN_1) {
   const items: { identity: AgentJournalItemIdentity; body: AgentJournalItemBody }[] = []
   const tombstones: AgentJournalItemIdentity[] = []
   const sink: StructuredAgentSessionEventSink = {
@@ -19,22 +39,27 @@ function harness(groupKey: string | null = 'claude-session:turn-1') {
     publish: vi.fn()
   }
   let clock = 1_000
+  let key = groupKey
   const roster = new ClaudeSubagentRoster({
     sink,
-    currentGroupKey: () => groupKey,
+    currentGroupKey: () => key,
     now: () => (clock += 1)
   })
-  const roles = (): NativeChatSubagentEntry[] => {
-    const body = items.at(-1)?.body
-    if (!body || body.kind !== 'message') {
-      return []
+  const roles = (): NativeChatSubagentEntry[] => agentsOf(items.at(-1)?.body)
+  /** The last row written for one group, so a test can read a row that is no
+   *  longer the newest one. */
+  const rolesIn = (groupId: string): NativeChatSubagentEntry[] =>
+    agentsOf(items.findLast((item) => isGroupRow(item.identity, groupId))?.body)
+  return {
+    roster,
+    items,
+    tombstones,
+    roles,
+    rolesIn,
+    setGroupKey: (next: string | null) => {
+      key = next
     }
-    const block = body.blocks.find(
-      (candidate): candidate is NativeChatSubagentGroupBlock => candidate.type === 'subagent-group'
-    )
-    return block ? block.agents : []
   }
-  return { roster, items, tombstones, roles }
 }
 
 function system(subtype: string, fields: Record<string, unknown>): Record<string, unknown> {
@@ -186,7 +211,7 @@ describe('ClaudeSubagentRoster', () => {
       roster.observeSystemFrame(
         started({ task_id: 'task-bg', description: 'Background', is_backgrounded: true })
       )
-      roster.settleTurn()
+      roster.settleTurn(TURN_1)
       expect(roles()).toEqual([
         expect.objectContaining({ label: 'Foreground', state: 'unverifiable' }),
         expect.objectContaining({ label: 'Background', state: 'working' })
@@ -199,7 +224,7 @@ describe('ClaudeSubagentRoster', () => {
       roster.observeSystemFrame(
         system('task_updated', { task_id: 'task-1', patch: { status: 'completed' } })
       )
-      roster.settleTurn()
+      roster.settleTurn(TURN_1)
       expect(roles()).toEqual([expect.objectContaining({ state: 'completed' })])
     })
 
@@ -208,7 +233,7 @@ describe('ClaudeSubagentRoster', () => {
       roster.observeSystemFrame(
         started({ task_id: 'task-bg', description: 'Background', is_backgrounded: true })
       )
-      roster.settleTurn()
+      roster.settleTurn(TURN_1)
       roster.settleSession()
       expect(roles()).toEqual([expect.objectContaining({ state: 'unverifiable' })])
     })
@@ -245,6 +270,54 @@ describe('ClaudeSubagentRoster', () => {
     })
   })
 
+  describe('label ordinals', () => {
+    it('never re-issues an ordinal a re-labelled row gave up', () => {
+      const { roster, roles } = harness()
+      roster.observeChildActivity('toolu_1')
+      roster.observeChildActivity('toolu_2')
+      roster.observeChildActivity('toolu_3')
+      roster.observeSystemFrame(
+        started({ task_id: 'task-2', tool_use_id: 'toolu_2', description: 'Named' })
+      )
+      roster.observeChildActivity('toolu_4')
+      expect(
+        roles()
+          .map((agent) => agent.label)
+          .sort()
+      ).toEqual(['Named', 'subagent', 'subagent 3', 'subagent 4'])
+    })
+  })
+
+  describe('groups that no later event can reach', () => {
+    it('loses contact with a group evicted past the bound', () => {
+      const { roster, rolesIn, setGroupKey } = harness('turn-0')
+      for (let index = 0; index < 33; index += 1) {
+        setGroupKey(`turn-${index}`)
+        roster.observeSystemFrame(started({ task_id: `task-${index}`, description: 'Audit' }))
+      }
+      expect(rolesIn('turn-0')).toEqual([expect.objectContaining({ state: 'unverifiable' })])
+      expect(rolesIn('turn-32')).toEqual([expect.objectContaining({ state: 'working' })])
+    })
+
+    it('loses contact with a live child when the translator is disposed without an end', () => {
+      const { roster, roles } = harness()
+      roster.observeSystemFrame(
+        started({ task_id: 'task-bg', description: 'Background', is_backgrounded: true })
+      )
+      roster.dispose()
+      expect(roles()).toEqual([expect.objectContaining({ state: 'unverifiable' })])
+    })
+
+    it('writes nothing on dispose when the session already settled', () => {
+      const { roster, items } = harness()
+      roster.observeSystemFrame(started({ task_id: 'task-1', description: 'Audit' }))
+      roster.settleSession()
+      const written = items.length
+      roster.dispose()
+      expect(items).toHaveLength(written)
+    })
+  })
+
   it('groups children outside any turn under their own row', () => {
     const { roster, items } = harness(null)
     roster.observeSystemFrame(started({ task_id: 'task-1', description: 'Audit' }))
@@ -252,5 +325,69 @@ describe('ClaudeSubagentRoster', () => {
       provider: 'orca',
       clientMessageId: 'claude-subagents:outside-turn'
     })
+  })
+})
+
+describe('ClaudeSubagentRoster — the turn that is ending', () => {
+  it('sweeps children rostered before any turn key existed', () => {
+    const { roster, rolesIn, setGroupKey } = harness(null)
+    roster.observeSystemFrame(started({ task_id: 'task-early', description: 'Early' }))
+    setGroupKey(TURN_1)
+    roster.observeSystemFrame(started({ task_id: 'task-turn', description: 'In turn' }))
+    roster.settleTurn(TURN_1)
+    expect(rolesIn('outside-turn')).toEqual([expect.objectContaining({ state: 'unverifiable' })])
+    expect(rolesIn(TURN_1)).toEqual([expect.objectContaining({ state: 'unverifiable' })])
+  })
+
+  it('sweeps the turn that ended, not whichever turn is live now', () => {
+    const { roster, rolesIn, setGroupKey } = harness()
+    roster.observeSystemFrame(started({ task_id: 'task-1', description: 'First turn' }))
+    setGroupKey('claude-session:turn-2')
+    roster.observeSystemFrame(started({ task_id: 'task-2', description: 'Second turn' }))
+    // Turn 1's result lands after turn 2 has already begun.
+    roster.settleTurn(TURN_1)
+    expect(rolesIn(TURN_1)).toEqual([expect.objectContaining({ state: 'unverifiable' })])
+    expect(rolesIn('claude-session:turn-2')).toEqual([
+      expect.objectContaining({ state: 'working' })
+    ])
+  })
+})
+
+describe('ClaudeSubagentRoster — through the real sink queue', () => {
+  it('lands every revision, not just the one that was already in flight', async () => {
+    const appended: AgentJournalItemBody[] = []
+    let published = 0
+    const journal = {
+      appendItem: async (_identity: AgentJournalItemIdentity, body: AgentJournalItemBody) => {
+        appended.push(body)
+        return { cursor: { epoch: 'e', sequence: appended.length } }
+      },
+      appendTombstone: async () => ({ epoch: 'e', sequence: 0 })
+    } as unknown as AgentSessionJournal
+    const deferred = createDeferredStructuredAgentSessionEventSink()
+    deferred.bind({
+      journal,
+      fence: 1,
+      publish: () => {
+        published += 1
+      }
+    })
+    const roster = new ClaudeSubagentRoster({ sink: deferred.sink, currentGroupKey: () => TURN_1 })
+
+    // The first append is in flight while the rest are submitted, so a publish
+    // sharing the row's coalescing key would evict them.
+    roster.observeSystemFrame(started({ task_id: 'task-1', description: 'One' }))
+    roster.observeSystemFrame(started({ task_id: 'task-2', description: 'Two' }))
+    roster.observeSystemFrame(
+      system('task_updated', { task_id: 'task-1', patch: { status: 'completed' } })
+    )
+    const drained = await deferred.drained()
+
+    expect(drained).toEqual({ ok: true })
+    expect(agentsOf(appended.at(-1))).toEqual([
+      expect.objectContaining({ id: 'task-1', label: 'One', state: 'completed' }),
+      expect.objectContaining({ id: 'task-2', label: 'Two', state: 'working' })
+    ])
+    expect(published).toBeGreaterThan(0)
   })
 })

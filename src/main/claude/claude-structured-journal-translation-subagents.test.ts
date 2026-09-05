@@ -10,9 +10,11 @@ import type {
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import { createClaudeJournalTranslator } from './claude-structured-journal-translation'
 
-const GROUP_IDENTITY: AgentJournalItemIdentity = {
-  provider: 'orca',
-  clientMessageId: 'claude-subagents:claude-session:user-1'
+const GROUP_ITEM_ID = 'claude-subagents:claude-session:user-1'
+
+/** The union's other arms carry no client message id, so reading one narrows. */
+function orcaClientMessageId(identity: AgentJournalItemIdentity): string | null {
+  return identity.provider === 'orca' ? identity.clientMessageId : null
 }
 
 function harness() {
@@ -24,7 +26,21 @@ function harness() {
   }
   const translator = createClaudeJournalTranslator({ sink, fallbackIdPrefix: 'test' })
   const groupRows = () =>
-    items.filter((item) => item.identity.clientMessageId === GROUP_IDENTITY.clientMessageId)
+    items.filter((item) => orcaClientMessageId(item.identity) === GROUP_ITEM_ID)
+  /** The last roster row written for one turn, so a test can read a turn that is
+   *  no longer the live one. */
+  const rosterOf = (turnUuid: string): NativeChatSubagentEntry[] => {
+    const body = items.findLast(
+      (item) => orcaClientMessageId(item.identity) === `claude-subagents:claude-session:${turnUuid}`
+    )?.body
+    if (!body || body.kind !== 'message') {
+      return []
+    }
+    const block = body.blocks.find(
+      (candidate): candidate is NativeChatSubagentGroupBlock => candidate.type === 'subagent-group'
+    )
+    return block ? block.agents : []
+  }
   const roster = (): NativeChatSubagentEntry[] => {
     const body = groupRows().at(-1)?.body
     if (!body || body.kind !== 'message') {
@@ -37,9 +53,9 @@ function harness() {
   }
   const fallbackRows = (): AgentJournalItemBody[] =>
     items
-      .filter((item) => String(item.identity.clientMessageId ?? '').startsWith('provider-frame:'))
+      .filter((item) => (orcaClientMessageId(item.identity) ?? '').startsWith('provider-frame:'))
       .map((item) => item.body)
-  return { translator, groupRows, roster, fallbackRows }
+  return { translator, groupRows, roster, rosterOf, fallbackRows }
 }
 
 function userTurn(uuid: string) {
@@ -185,5 +201,29 @@ describe('claude journal translation — subagents', () => {
     expect(roster()).toEqual([
       expect.objectContaining({ id: 'toolu_1', label: 'subagent', state: 'working' })
     ])
+  })
+
+  it('settles the turn a new turn superseded, and leaves the new one running', () => {
+    const { translator, rosterOf } = harness()
+    translator.handle(userTurn('user-1'))
+    translator.handle(
+      systemFrame('task_started', {
+        task_id: 'task-1',
+        task_type: 'local_agent',
+        description: 'First turn'
+      })
+    )
+    // A second turn starts with no result frame for the first: the first turn
+    // ends here, and nothing else will ever name its group again.
+    translator.handle(userTurn('user-2'))
+    translator.handle(
+      systemFrame('task_started', {
+        task_id: 'task-2',
+        task_type: 'local_agent',
+        description: 'Second turn'
+      })
+    )
+    expect(rosterOf('user-1')).toEqual([expect.objectContaining({ state: 'unverifiable' })])
+    expect(rosterOf('user-2')).toEqual([expect.objectContaining({ state: 'working' })])
   })
 })

@@ -148,7 +148,13 @@ export function buildJournalItemRow(input: {
 }): JournalItemRow {
   const itemId = agentJournalItemKey(input.identity)
   const resolved = input.state.aliases.get(itemId) ?? itemId
-  const revision = (input.state.items.get(resolved)?.revision ?? 0) + 1
+  // A tombstoned row keeps its revision in `tombstones`, and the reducer drops
+  // any item at or below it — so a re-add has to outrank the tombstone too.
+  const revision =
+    Math.max(
+      input.state.items.get(resolved)?.revision ?? 0,
+      input.state.tombstones.get(resolved) ?? 0
+    ) + 1
   return {
     kind: 'item',
     itemId,

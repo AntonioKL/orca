@@ -89,13 +89,15 @@ export function createClaudeJournalTranslator(
   const promptItems = new Map<string, AgentJournalItemIdentity[]>()
   const streamedBlocks = createClaudeStreamedBlockRegistry()
   let currentTurn: { sessionId: string; turnId: string } | null = null
+  const groupKeyOf = (turn: { sessionId: string; turnId: string } | null): string | null =>
+    turn ? `${turn.sessionId}:${turn.turnId}` : null
   const providerFallback = createClaudeProviderFrameFallback(
     deps.sink,
     deps.fallbackIdPrefix ?? 'acquisition'
   )
   const subagents = new ClaudeSubagentRoster({
     sink: deps.sink,
-    currentGroupKey: () => (currentTurn ? `${currentTurn.sessionId}:${currentTurn.turnId}` : null)
+    currentGroupKey: () => groupKeyOf(currentTurn)
   })
   const streamedText = createClaudeStreamedTextCheckpoints({
     ...(deps.coalesceMs === undefined ? {} : { coalesceMs: deps.coalesceMs }),
@@ -202,6 +204,9 @@ export function createClaudeJournalTranslator(
       message.parent_tool_use_id === null
     ) {
       if (currentTurn) {
+        // A new turn starting is the only end the previous one gets when its
+        // result never arrives; settling it later would sweep THIS turn.
+        subagents.settleTurn(groupKeyOf(currentTurn))
         publishLifecycle(currentTurn.sessionId, currentTurn.turnId, false)
       }
       currentTurn = { sessionId: envelope.sessionId, turnId: envelope.uuid }
@@ -264,7 +269,7 @@ export function createClaudeJournalTranslator(
       } else if (event.type === 'message' && event.message.type === 'result') {
         // The turn is over however it ended, so a foreground child still
         // reported as working will never be settled by an event.
-        subagents.settleTurn()
+        subagents.settleTurn(groupKeyOf(currentTurn))
         if (currentTurn) {
           publishLifecycle(currentTurn.sessionId, currentTurn.turnId, false)
           currentTurn = null
