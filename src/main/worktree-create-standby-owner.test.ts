@@ -61,3 +61,38 @@ it('releases on hide and does not poison later work after a failed preparation',
   owner.close()
   expect(release).toHaveBeenCalledOnce()
 })
+
+it('replenishes a consumed standby once and ignores its stale notifications', async () => {
+  const owner = createWorktreeStandbyOwner()
+  const callbacks: (() => void)[] = []
+  const releases = [vi.fn(), vi.fn()]
+  const prepare = vi.fn(async (consumed: () => void) => {
+    callbacks.push(consumed)
+    return releases[callbacks.length - 1]
+  })
+  await owner.set(prepare)
+  callbacks[0]()
+  callbacks[0]()
+  await vi.waitFor(() => expect(prepare).toHaveBeenCalledTimes(2))
+  expect(releases[0]).toHaveBeenCalledOnce()
+  owner.close()
+  callbacks[1]()
+  await Promise.resolve()
+  expect(prepare).toHaveBeenCalledTimes(2)
+  expect(releases[1]).toHaveBeenCalledOnce()
+})
+
+it('does not replenish an old target after switching or hiding', async () => {
+  const owner = createWorktreeStandbyOwner()
+  let consumed!: () => void
+  const prepare = vi.fn(async (callback: () => void) => {
+    consumed = callback
+    return vi.fn()
+  })
+  await owner.set(prepare)
+  await owner.set()
+  consumed()
+  await Promise.resolve()
+  expect(prepare).toHaveBeenCalledOnce()
+  owner.close()
+})

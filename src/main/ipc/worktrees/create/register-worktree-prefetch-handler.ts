@@ -53,9 +53,11 @@ export function registerWorktreePrefetchHandler(context: WorktreeIpcContext): ()
       }
       await owner.controller.set(
         args.repoId
-          ? async () => {
+          ? async (onConsumed) => {
               const repo = store.getRepo(args.repoId!)
-              return repo ? retainWorktreeCreateStandby(store, repo, args.baseBranch) : () => {}
+              return repo
+                ? retainWorktreeCreateStandby(store, repo, args.baseBranch, onConsumed)
+                : () => {}
             }
           : undefined
       )

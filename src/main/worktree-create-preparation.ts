@@ -13,6 +13,7 @@ import {
   _resetPreparationPoolForTests,
   findPreparation,
   holdPreparation,
+  completePreparationClaim,
   hasPendingPreparations,
   listPreparations,
   startPreparation,
@@ -127,13 +128,14 @@ export async function prepareWorktreeCreateForRepo(
 export async function retainWorktreeCreateForRepo(
   store: Store,
   repo: Repo,
-  baseBranch: string
+  baseBranch: string,
+  onConsumed?: () => void
 ): Promise<() => void> {
   const entry = await getOrStartPreparationForRepo(store, repo, baseBranch)
   if (!entry) {
     return () => {}
   }
-  const release = holdPreparation(entry)
+  const release = holdPreparation(entry, onConsumed)
   try {
     await entry.ready
     return release
@@ -279,6 +281,7 @@ export async function consumePreparedWorktreeCreate(
       : await finalize()
     // Consuming the only prepared checkout leaves the next create cold. Re-arm for a user who is
     // creating in a burst; the TTL and the preparation limit still bound an unused replacement.
+    completePreparationClaim(entry)
     rearmPreparation(entry, args.baseBranch, claim.canonicalBase)
     return { status: 'hit', retargeted: claim.retargeted, result }
   } catch (error) {

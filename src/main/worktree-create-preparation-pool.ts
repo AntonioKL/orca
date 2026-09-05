@@ -144,20 +144,38 @@ export function takePreparation(entry: PreparationEntry): void {
   clearTimeout(entry.expiration)
 }
 
+const preparationConsumers = new WeakMap<PreparationEntry, Set<() => void>>()
+
+export function completePreparationClaim(entry: PreparationEntry): void {
+  const consumers = preparationConsumers.get(entry)
+  preparationConsumers.delete(entry)
+  for (const consumed of consumers ?? []) {
+    queueMicrotask(consumed)
+  }
+}
+
 const preparationHolds = new WeakMap<PreparationEntry, number>()
 
-export function holdPreparation(entry: PreparationEntry): () => void {
+export function holdPreparation(entry: PreparationEntry, onConsumed?: () => void): () => void {
   if (preparations.get(entry.key) !== entry) {
     return () => {}
   }
   clearTimeout(entry.expiration)
   preparationHolds.set(entry, (preparationHolds.get(entry) ?? 0) + 1)
+  if (onConsumed) {
+    const consumers = preparationConsumers.get(entry) ?? new Set<() => void>()
+    consumers.add(onConsumed)
+    preparationConsumers.set(entry, consumers)
+  }
   let released = false
   return () => {
     if (released) {
       return
     }
     released = true
+    if (onConsumed) {
+      preparationConsumers.get(entry)?.delete(onConsumed)
+    }
     const remaining = (preparationHolds.get(entry) ?? 1) - 1
     preparationHolds.set(entry, remaining)
     if (remaining === 0 && preparations.get(entry.key) === entry) {

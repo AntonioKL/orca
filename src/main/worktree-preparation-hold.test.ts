@@ -18,6 +18,7 @@ import {
   startPreparation,
   listPreparations,
   holdPreparation,
+  completePreparationClaim,
   takePreparation,
   _resetPreparationPoolForTests,
   WORKTREE_CREATE_PREPARATION_TTL_MS as ttl,
@@ -83,4 +84,30 @@ it('preserves the pool limit even if every entry is held', async () => {
   await vi.advanceTimersByTimeAsync(0)
   expect(mocks.discard).toHaveBeenCalledOnce()
   releases.forEach((release) => release())
+})
+
+it('notifies once only after successful finalization, not when checkout is claimed', async () => {
+  await startPreparation(args)
+  const entry = listPreparations()[0]
+  const consumed = vi.fn()
+  const release = holdPreparation(entry, consumed)
+  takePreparation(entry)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(consumed).not.toHaveBeenCalled()
+  completePreparationClaim(entry)
+  completePreparationClaim(entry)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(consumed).toHaveBeenCalledOnce()
+  release()
+})
+
+it('does not notify a released holder', async () => {
+  await startPreparation(args)
+  const entry = listPreparations()[0]
+  const consumed = vi.fn()
+  holdPreparation(entry, consumed)()
+  takePreparation(entry)
+  completePreparationClaim(entry)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(consumed).not.toHaveBeenCalled()
 })

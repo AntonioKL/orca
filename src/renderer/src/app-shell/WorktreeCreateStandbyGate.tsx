@@ -63,7 +63,7 @@ function standbyIdentity(state: StandbyState): string | null {
 }
 
 export function WorktreeCreateStandbyGate({ enabled }: { enabled: boolean }): null {
-  // After Create, the pool's burst policy owns replenishment; unrelated workspace changes stay quiet.
+  // The host replenishes consumed standbys; unrelated workspace changes stay quiet.
   const inputs = useAppStore(
     useShallow((state): StandbyState => ({
       repos: state.repos,

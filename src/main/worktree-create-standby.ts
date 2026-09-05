@@ -47,8 +47,9 @@ export async function prepareWorktreeCreateStandby(
 export async function retainWorktreeCreateStandby(
   store: Store,
   repo: Repo,
-  requestedBaseBranch?: string
+  requestedBaseBranch?: string,
+  onConsumed?: () => void
 ): Promise<() => void> {
   const base = await resolveStandbyBase(store, repo, requestedBaseBranch)
-  return base ? retainWorktreeCreateForRepo(store, repo, base) : () => {}
+  return base ? retainWorktreeCreateForRepo(store, repo, base, onConsumed) : () => {}
 }

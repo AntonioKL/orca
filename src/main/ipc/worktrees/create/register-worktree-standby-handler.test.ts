@@ -67,7 +67,12 @@ it.each(['destroy', 'crash', 'reload', 'register cleanup'] as const)(
       ([name]) => name === 'worktrees:setCreateStandby'
     )![1]
     await handler({ sender }, { repoId: 'repo', baseBranch: 'chosen' })
-    expect(mocks.retain).toHaveBeenCalledExactlyOnceWith(context.store, repo, 'chosen')
+    expect(mocks.retain).toHaveBeenCalledExactlyOnceWith(
+      context.store,
+      repo,
+      'chosen',
+      expect.any(Function)
+    )
     if (action === 'destroy') {
       sender.emit('destroyed')
     } else {

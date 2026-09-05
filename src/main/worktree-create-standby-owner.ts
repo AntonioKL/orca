@@ -6,8 +6,8 @@ export function createWorktreeStandbyOwner() {
   let closed = false
   let release: ReleaseStandby | undefined
 
-  return {
-    set(prepare?: () => Promise<ReleaseStandby>): Promise<void> {
+  const owner = {
+    set(prepare?: (onConsumed: () => void) => Promise<ReleaseStandby>): Promise<void> {
       const current = ++revision
       release?.()
       release = undefined
@@ -19,7 +19,11 @@ export function createWorktreeStandbyOwner() {
           return
         }
         try {
-          const prepared = await prepare()
+          const prepared = await prepare(() => {
+            if (!closed && revision === current) {
+              void owner.set(prepare)
+            }
+          })
           if (closed || revision !== current) {
             prepared()
           } else {
@@ -39,4 +43,5 @@ export function createWorktreeStandbyOwner() {
       release = undefined
     }
   }
+  return owner
 }
