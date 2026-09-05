@@ -22,15 +22,20 @@
       "providers": ["daemon", "local", "wsl", "ssh", "remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["daemon"],
-      "coverageNotes": "Actual Session and TerminalHost contracts run on macOS. Windows and WSL argv branches are mocked. Daemon v37 preparation and release run over authenticated control sockets; older daemon preparation and unsupported direct/SSH providers fail closed. No composer caller enables this yet; native PTYs and other provider release paths remain unverified.",
+      "coverageNotes": "Actual Session and TerminalHost contracts run on macOS. Windows and WSL argv branches are mocked. Daemon v37 preparation and release run over authenticated control sockets; older daemon preparation and unsupported direct/SSH providers fail closed. Runtime background terminal creation now forwards deferral with fresh-owner admission; the multi-daemon router releases on the exact retained owner. An ad hoc native macOS zsh PTY check verified profile-before-release and one stand-in command execution. No composer caller enables this yet; real-agent readiness, rendered latency, and other provider release paths remain unverified.",
       "motivatingLinks": ["docs/reference/worktree-create-retained-drafts.md"],
       "invariant": "Shell readiness cannot authorize deferred agent execution. Only the same operation and terminal incarnation may release once. Manual input retires an unreleased command; exit or termination prevents a queued command from reaching the subprocess. Ambiguous writes are never replayed.",
       "oracle": "Record actual Session subprocess writes while emitting readiness, advancing its timeout, reattaching clients, injecting query replies and manual input, terminating, and throwing after writing bytes. Require no command before release, at most one after it, and no write from wrong identity or after teardown.",
       "commands": [
+        "pnpm test src/main/runtime/orca-runtime-deferred-startup-create.test.ts src/main/runtime/cli-terminal-create-host-session-binding.test.ts src/main/runtime/orca-runtime-terminal-cwd.test.ts src/main/ipc/pty/runtime/deferred-startup.test.ts src/main/daemon/daemon-deferred-startup-router.test.ts",
+        "pnpm test src/main/daemon/daemon-deferred-startup-router.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/ipc/pty/runtime/deferred-startup.test.ts src/main/runtime/orca-runtime-deferred-startup-create.test.ts",
         "pnpm test src/main/daemon/daemon-deferred-startup-protocol.test.ts src/main/daemon/daemon-protocol-version.test.ts src/main/daemon/daemon-foreground-confirmation-protocol.test.ts src/main/daemon/daemon-pty-adapter-protocol-compatibility.test.ts src/main/providers/local-pty-provider-shell-readiness.test.ts src/main/providers/ssh-pty-deferred-startup.test.ts",
         "pnpm test src/main/daemon/session-deferred-startup.test.ts src/main/daemon/terminal-host-startup.test.ts src/main/daemon/session.test.ts src/main/daemon/terminal-host-agent-session.test.ts src/main/daemon/pty-subprocess-windows-shell-launch.test.ts src/main/daemon/pty-subprocess-wsl-launch.test.ts src/main/daemon/pty-subprocess-managed-agent-env.test.ts"
       ],
       "testFiles": [
+        "src/main/daemon/daemon-deferred-startup-router.test.ts",
+        "src/main/ipc/pty/runtime/deferred-startup.test.ts",
+        "src/main/runtime/orca-runtime-deferred-startup-create.test.ts",
         "src/main/daemon/daemon-deferred-startup-protocol.test.ts",
         "src/main/providers/ssh-pty-deferred-startup.test.ts",
         "src/main/daemon/session-deferred-startup.test.ts",
@@ -51,6 +56,15 @@
         }
       ],
       "evidenceRuns": [
+        {
+          "date": "2026-09-05",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm test src/main/runtime/orca-runtime-deferred-startup-create.test.ts src/main/runtime/cli-terminal-create-host-session-binding.test.ts src/main/runtime/orca-runtime-terminal-cwd.test.ts src/main/ipc/pty/runtime/deferred-startup.test.ts src/main/daemon/daemon-deferred-startup-router.test.ts",
+          "result": "passed",
+          "durationSeconds": 4.19,
+          "summary": "29 tests across five suites passed. Runtime create forwards the held command without release, rejects unsupported or existing owners, and preserves terminal identity. Authenticated socket tests cover mixed daemon versions and retained-owner rediscovery. Native PTY ad hoc evidence is separate from these mocked-subprocess suites."
+        },
         {
           "date": "2026-09-05",
           "runner": "local",

@@ -20,6 +20,7 @@ import type { WorkerTerminalHostScope } from './orchestration/worker-terminal-pr
 
 export type TerminalCreateOptions = {
   command?: string
+  deferredStartupOperationId?: string
   claudeAgentTeamsSourceCommand?: string
   cwd?: string
   env?: Record<string, string>

@@ -85,6 +85,7 @@ export type RuntimePtySpawnArgs = {
   rows: number
   cwd?: string
   command?: string
+  deferredStartupOperationId?: string
   launchAgent?: TuiAgent
   commandDelivery?: 'renderer' | 'provider'
   startupCommandDelivery?: StartupCommandDelivery

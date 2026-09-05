@@ -1,3 +1,4 @@
+import { assertFreshDeferredStartup } from './deferred-startup'
 import type { AgentSessionClaimedSpawnResult } from '../../../../shared/agent-session-host-authority'
 import { isTerminalLeafId, makePaneKey } from '../../../../shared/stable-pane-id'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
@@ -49,6 +50,7 @@ export async function spawnPtyFromRuntimeController(
   deps: PtyRuntimeControllerDeps,
   args: RuntimePtySpawnArgs
 ) {
+  assertFreshDeferredStartup(args)
   const ctx = createRuntimePtySpawnState(deps, args)
   if (!args.adoptedStablePane) {
     const leafId =
@@ -71,6 +73,10 @@ export async function spawnPtyFromRuntimeController(
           args.connectionId
         )
       : null
+    assertFreshDeferredStartup(
+      args,
+      existingOwner || (ownerKey && paneSpawnReservationsByOwnerKey.has(ownerKey))
+    )
     if (ownerKey && !existingOwner && !paneSpawnReservationsByOwnerKey.has(ownerKey)) {
       ctx.paneSpawnReservationKey = ownerKey
       ctx.paneSpawnReservation = reservePaneSpawn(ownerKey)

@@ -1,3 +1,4 @@
+import { assertFreshDeferredStartup, providerSupportsDeferredStartup } from './deferred-startup'
 import type { IPtyProvider, PtySpawnResult } from '../../../providers/types'
 import { LocalPtyProvider } from '../../../providers/local-pty-provider'
 import { makePaneKey, isTerminalLeafId } from '../../../../shared/stable-pane-id'
@@ -34,11 +35,21 @@ export async function buildRuntimePtySpawnOptions(
   (PtySpawnResult & { stablePaneOwner?: { handle: string; tabId: string; leafId: string } }) | null
 > {
   const args = ctx.args
+  assertFreshDeferredStartup(args, ctx.preAdoptedStablePane)
+  if (
+    args.deferredStartupOperationId !== undefined &&
+    !providerSupportsDeferredStartup(ctx.provider)
+  ) {
+    throw new Error('deferred_startup_unavailable')
+  }
 
   const authEnvToDelete = ctx.claudeAuth?.stripAuthEnv
     ? [...CLAUDE_AUTH_ENV_VARS, 'ANTHROPIC_CUSTOM_HEADERS']
     : undefined
   ctx.spawnOptions = {
+    ...(args.deferredStartupOperationId !== undefined
+      ? { deferredStartupOperationId: args.deferredStartupOperationId }
+      : {}),
     cols: args.cols,
     rows: args.rows,
     cwd: ctx.cwd,
@@ -197,6 +208,7 @@ export async function buildRuntimePtySpawnOptions(
     const existingPaneSpawn = ctx.spawnIdentityPaneKey
       ? paneSpawnReservationsByOwnerKey.get(resolvedPaneSpawnReservationKey!)
       : undefined
+    assertFreshDeferredStartup(args, existingPaneSpawn)
     if (existingPaneSpawn) {
       const concurrentResult = await existingPaneSpawn.promise
       const concurrentOwner = resolveStablePaneOwner(

@@ -1,3 +1,4 @@
+import { assertFreshDeferredStartup } from './deferred-startup'
 import type { PtySpawnResult } from '../../../providers/types'
 import { ptyIncarnationById, deletePtyOwnership } from '../provider/ownership-state'
 import { ptySizes } from '../delivery/visibility-state'
@@ -40,6 +41,7 @@ export async function executeRuntimePtySpawn(ctx: RuntimePtySpawnState): Promise
             args.worktreeId,
             args.connectionId
           )
+    assertFreshDeferredStartup(args, stablePaneOwnerCandidate)
     const expectedPtyId =
       stablePaneOwnerCandidate?.ptyId ?? ctx.effectiveSessionAppId ?? ctx.sessionId
     if (expectedPtyId) {
@@ -137,14 +139,17 @@ export async function executeRuntimePtySpawn(ctx: RuntimePtySpawnState): Promise
             owner: stablePaneOwnerCandidate,
             worktreeId: args.worktreeId,
             connectionId: args.connectionId,
-            resolveOwner: () =>
-              resolveStablePaneOwner(
+            resolveOwner: () => {
+              const owner = resolveStablePaneOwner(
                 ctx.deps.runtime,
                 ctx.deps.store,
                 ctx.spawnIdentityPaneKey,
                 args.worktreeId,
                 args.connectionId
-              ),
+              )
+              assertFreshDeferredStartup(args, owner)
+              return owner
+            },
             onFreshSpawn: ctx.reportPtySpawnCommitted
           })
       ctx.result = stablePaneSpawn.result

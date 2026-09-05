@@ -12,6 +12,7 @@ import type { PtyProcessInspection } from '../providers/pty-process-inspection'
 import { shouldHandoffDaemonHistory } from './daemon-history-handoff'
 import type { DaemonPtyRouterDataEvent, DaemonPtyRouterExitEvent } from './daemon-pty-router-events'
 import { DaemonSessionOwnerResolver } from './daemon-session-owner-resolution'
+import type { StartupCommandReleaseResult } from '../../shared/deferred-startup-release'
 
 export class DaemonPtyRouter implements IPtyProvider {
   private current: DaemonPtyAdapter
@@ -71,6 +72,26 @@ export class DaemonPtyRouter implements IPtyProvider {
   supportsAgentSessionCreateOperations(): boolean {
     // Fresh sessions always route to the current daemon; legacy adapters only retain old IDs.
     return this.current.supportsAgentSessionCreateOperations()
+  }
+
+  supportsDeferredStartupCommands(): boolean {
+    return this.current.supportsDeferredStartupCommands()
+  }
+
+  async releaseStartupCommand(
+    id: string,
+    expectedIncarnationId: string,
+    operationId: string
+  ): Promise<StartupCommandReleaseResult> {
+    let owner = this.sessionAdapters.get(id)
+    if (!owner) {
+      const resolution = await this.ownerResolver.resolve(id, expectedIncarnationId, true)
+      if (resolution.kind !== 'owner') {
+        return resolution.kind === 'unknown' ? 'unverifiable' : 'unavailable'
+      }
+      owner = resolution.provider
+    }
+    return owner.releaseStartupCommand(id, expectedIncarnationId, operationId)
   }
 
   async attach(id: string): ReturnType<IPtyProvider['attach']> {

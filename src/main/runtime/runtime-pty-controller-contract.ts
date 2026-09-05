@@ -1,3 +1,4 @@
+import type { StartupCommandReleaseResult } from '../../shared/deferred-startup-release'
 import type {
   AgentSessionClaimedSpawnResult,
   AgentSessionExecutionClaim,
@@ -13,6 +14,12 @@ import type { PtyProviderBufferSnapshot, PtyProcessInfo, PtySpawnResult } from '
 import type { PtyProcessInspection } from '../providers/pty-process-inspection'
 
 export type RuntimePtyController = {
+  supportsDeferredStartupCommands?(connectionId?: string | null): Promise<boolean>
+  releaseStartupCommand?(
+    ptyId: string,
+    expectedIncarnationId: string,
+    operationId: string
+  ): Promise<StartupCommandReleaseResult>
   claimStablePaneCreate?(args: {
     worktreeId: string
     connectionId: string | null
@@ -44,6 +51,7 @@ export type RuntimePtyController = {
     rows: number
     cwd?: string
     command?: string
+    deferredStartupOperationId?: string
     launchAgent?: TuiAgent
     commandDelivery?: 'renderer' | 'provider'
     startupCommandDelivery?: WorktreeStartupLaunch['startupCommandDelivery']

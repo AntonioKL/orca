@@ -3,6 +3,8 @@ import { OrcaRuntimeWithTerminalCreateDeduplication } from './orca-runtime-termi
 import * as dependencies from './orca-runtime-create-terminal-dependencies'
 import { createDesktopTerminal } from './orca-runtime-create-terminal-desktop'
 import { buildRuntimeAgentTeamsLaunchPlan } from './orca-runtime-agent-teams-launch-plan'
+import * as startup from './runtime-deferred-startup-admission'
+import { allocateRuntimeTerminalPane } from './runtime-terminal-create-pane'
 import { createPtySpawnCommitReporter } from './orca-runtime-report-pty-spawn-commit'
 
 export class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTerminalCreateDeduplication {
@@ -10,9 +12,7 @@ export class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTerminalCreate
     worktreeSelector?: string,
     opts: dependencies.TerminalCreateOptions = {}
   ): Promise<dependencies.RuntimeTerminalCreate> {
-    if (opts.startupAgent && worktreeSelector === undefined) {
-      throw new Error(`startupAgent ${opts.startupAgent} requires a workspace selector.`)
-    }
+    startup.assertTerminalCreate(worktreeSelector, opts)
     const presentation = dependencies.resolveTerminalPresentation(opts)
     const requiresRendererFocus = opts.presentation === 'focused' || opts.focus === true
     const availableAuthoritativeWindow = this.getAvailableAuthoritativeWindow()
@@ -27,21 +27,14 @@ export class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTerminalCreate
         throw new Error('runtime_unavailable')
       }
       const workspace = await this.resolveTerminalWorkspaceLaunchScope(worktreeSelector)
+      await startup.assertDeferredProvider(opts, this.ptyController, workspace.connectionId)
       const launchOpts = await this.resolveAgentTerminalCreateOptions(workspace, opts)
       const reportPtySpawnCommitted = createPtySpawnCommitReporter(launchOpts.onPtySpawnCommitted)
       const cwd =
         this.resolveWorkspaceTerminalStartupCwd(workspace, launchOpts.cwd) ?? workspace.path
       let preAllocatedHandle =
         launchOpts.preAllocatedHandle ?? this.createPreAllocatedTerminalHandle()
-      const hintedTabId = launchOpts.tabId?.trim()
-      const canAdoptPaneIdentity =
-        hintedTabId !== undefined &&
-        dependencies.isValidHostTerminalTabId(hintedTabId) &&
-        launchOpts.leafId !== undefined &&
-        dependencies.isTerminalLeafId(launchOpts.leafId)
-      let tabId = canAdoptPaneIdentity ? (hintedTabId as string) : dependencies.randomUUID()
-      let leafId = canAdoptPaneIdentity ? (launchOpts.leafId as string) : dependencies.randomUUID()
-      let paneKey = dependencies.makePaneKey(tabId, leafId)
+      let { tabId, leafId, paneKey } = allocateRuntimeTerminalPane(launchOpts)
       const claimedStablePaneCreate = this.ptyController.claimStablePaneCreate?.({
         worktreeId: workspace.id,
         connectionId: workspace.connectionId,
@@ -60,16 +53,19 @@ export class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTerminalCreate
         if (launchOpts.signal?.aborted) {
           throw new Error('client_disconnected')
         }
-        const adoptedBeforeLaunch = await this.ptyController.adoptStablePane?.({
-          cols: 120,
-          rows: 40,
-          cwd,
-          connectionId: workspace.connectionId,
-          worktreeId: workspace.id,
-          preAllocatedHandle,
-          tabId,
-          leafId
-        })
+        const adoptedBeforeLaunch =
+          launchOpts.deferredStartupOperationId !== undefined
+            ? null
+            : await this.ptyController.adoptStablePane?.({
+                cols: 120,
+                rows: 40,
+                cwd,
+                connectionId: workspace.connectionId,
+                worktreeId: workspace.id,
+                preAllocatedHandle,
+                tabId,
+                leafId
+              })
         const launchToken = launchOpts.launchConfig
           ? (launchOpts.launchToken ?? dependencies.randomUUID())
           : undefined
@@ -133,6 +129,9 @@ export class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTerminalCreate
               : (agentTeamsPlan?.command ?? launchOpts.command),
             launchAgent: launchOpts.launchAgent,
             commandDelivery: 'provider',
+            ...(launchOpts.deferredStartupOperationId !== undefined
+              ? { deferredStartupOperationId: launchOpts.deferredStartupOperationId }
+              : {}),
             startupCommandDelivery: launchOpts.startupCommandDelivery,
             env,
             envToDelete: dependencies.mergeTerminalEnvDeletionKeys(

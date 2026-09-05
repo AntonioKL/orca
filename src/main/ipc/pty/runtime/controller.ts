@@ -1,3 +1,7 @@
+import {
+  releaseStartupFromRuntimeController,
+  supportsDeferredStartupFromRuntimeController
+} from './deferred-startup'
 import { makePaneKey } from '../../../../shared/stable-pane-id'
 import { claimRuntimePaneCreate, makePaneSpawnReservationKey } from '../pane/spawn-reservation'
 import type { PtyRuntimeControllerDeps } from './controller-deps'
@@ -43,6 +47,8 @@ export function installPtyRuntimeController(deps: PtyRuntimeControllerDeps): voi
       const ownerKey = makePaneSpawnReservationKey(args.worktreeId, args.connectionId, paneKey)
       return ownerKey ? claimRuntimePaneCreate(ownerKey) : () => {}
     },
+    supportsDeferredStartupCommands: supportsDeferredStartupFromRuntimeController,
+    releaseStartupCommand: releaseStartupFromRuntimeController,
     adoptStablePane,
     spawn: async (args) => spawnPtyFromRuntimeController(deps, args),
     write: (ptyId, data) => writePtyFromRuntimeController(deps, ptyId, data),
