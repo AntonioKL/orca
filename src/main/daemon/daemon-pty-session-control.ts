@@ -11,11 +11,20 @@ import { SessionNotFoundError, type ListSessionsResult } from './types'
 import { resolveSafePtyDefaultCwd } from '../providers/pty-default-cwd'
 import type { PtySpawnResult } from '../providers/types'
 import { PtyWriteUnavailableError } from '../providers/pty-write-unavailable-error'
+import { releaseDaemonStartupCommand } from './daemon-startup-command-release'
 export const LIVENESS_PROBE_TIMEOUT_MS = 2_000
 
 const MAX_TOMBSTONES = 1000
 
 export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
+  releaseStartupCommand(id: string, expectedIncarnationId: string, operationId: string) {
+    return releaseDaemonStartupCommand(
+      this.client,
+      this.supportsDeferredStartupCommands(),
+      () => this.ensureConnected(),
+      { sessionId: id, expectedIncarnationId, operationId }
+    )
+  }
   async attach(id: string): Promise<Pick<PtySpawnResult, 'providerSequence'> | void> {
     await this.ensureConnected()
     if (!this.canDelegateBackgroundToDaemon) {

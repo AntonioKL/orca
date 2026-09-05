@@ -159,6 +159,13 @@ describe('LocalPtyProvider', () => {
   })
 
   describe('spawn', () => {
+    it('rejects deferred launch before the direct provider can execute a command', async () => {
+      await expect(
+        provider.spawn({ cols: 80, rows: 24, command: 'codex', deferredStartupOperationId: 'op' })
+      ).rejects.toThrow('does not support deferred')
+      expect(spawnMock).not.toHaveBeenCalled()
+    })
+
     it('delegates markerless Codex startup to the shell wrapper without a PTY write', async () => {
       process.env.SHELL = '/bin/zsh'
       const command = "codex '--dangerously-bypass-approvals-and-sandbox'"

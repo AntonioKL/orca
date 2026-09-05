@@ -62,6 +62,9 @@ export class LocalPtyProvider implements IPtyProvider {
    * Windows launches can pre-deliver startup commands in argv, so the stdin fallback only runs when needed.
    */
   spawn(args: PtySpawnOptions): Promise<PtySpawnResult> {
+    if (args.deferredStartupOperationId !== undefined) {
+      return Promise.reject(new Error('Local PTY does not support deferred startup commands'))
+    }
     return spawnLocalPty(args, () => this.opts)
   }
 

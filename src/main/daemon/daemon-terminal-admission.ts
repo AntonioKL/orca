@@ -69,6 +69,15 @@ export class DaemonTerminalAdmission {
     let spawnPreparation: PendingPtySpawnPreparation | null = null
     try {
       if (
+        payload.deferredStartupOperationId !== undefined &&
+        (typeof payload.deferredStartupOperationId !== 'string' ||
+          !payload.deferredStartupOperationId ||
+          typeof payload.command !== 'string' ||
+          !payload.command)
+      ) {
+        throw new Error('Deferred startup requires an operation identity and command')
+      }
+      if (
         payload.agentSessionEnsure !== undefined &&
         (!isAgentSessionExecutionClaim(payload.agentSessionEnsure.claim) ||
           !isAgentSessionSurfaceBinding(payload.agentSessionEnsure.surface))
@@ -101,6 +110,9 @@ export class DaemonTerminalAdmission {
         env: payload.env,
         envToDelete: payload.envToDelete,
         command: payload.command,
+        ...(payload.deferredStartupOperationId
+          ? { deferredStartupOperationId: payload.deferredStartupOperationId }
+          : {}),
         startupCommandDelivery: payload.startupCommandDelivery,
         ...(attachOnly ? { attachOnly: true } : {}),
         ...(isTuiAgent(payload.launchAgent) ? { launchAgent: payload.launchAgent } : {}),

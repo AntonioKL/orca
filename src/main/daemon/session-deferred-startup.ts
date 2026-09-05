@@ -1,14 +1,10 @@
+import type { StartupCommandReleaseResult } from '../../shared/deferred-startup-release'
+export type { StartupCommandReleaseResult } from '../../shared/deferred-startup-release'
+
 export type DeferredSessionStartup = {
   operationId: string
   submission: string
 }
-
-export type StartupCommandReleaseResult =
-  | 'accepted'
-  | 'unverifiable'
-  | 'retired'
-  | 'identity-mismatch'
-  | 'unavailable'
 
 /** Keeps Create authorization separate from the shell readiness timeout. */
 export class SessionDeferredStartup {

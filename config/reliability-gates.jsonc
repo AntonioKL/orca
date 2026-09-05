@@ -22,14 +22,17 @@
       "providers": ["daemon", "local", "wsl", "ssh", "remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["daemon"],
-      "coverageNotes": "Actual Session and TerminalHost contracts run on macOS. Windows and WSL argv branches are mocked. No renderer or wire caller enables deferred startup yet; direct local, remote, and other native platform release paths remain unimplemented.",
+      "coverageNotes": "Actual Session and TerminalHost contracts run on macOS. Windows and WSL argv branches are mocked. Daemon v37 preparation and release run over authenticated control sockets; older daemon preparation and unsupported direct/SSH providers fail closed. No composer caller enables this yet; native PTYs and other provider release paths remain unverified.",
       "motivatingLinks": ["docs/reference/worktree-create-retained-drafts.md"],
       "invariant": "Shell readiness cannot authorize deferred agent execution. Only the same operation and terminal incarnation may release once. Manual input retires an unreleased command; exit or termination prevents a queued command from reaching the subprocess. Ambiguous writes are never replayed.",
       "oracle": "Record actual Session subprocess writes while emitting readiness, advancing its timeout, reattaching clients, injecting query replies and manual input, terminating, and throwing after writing bytes. Require no command before release, at most one after it, and no write from wrong identity or after teardown.",
       "commands": [
+        "pnpm test src/main/daemon/daemon-deferred-startup-protocol.test.ts src/main/daemon/daemon-protocol-version.test.ts src/main/daemon/daemon-foreground-confirmation-protocol.test.ts src/main/daemon/daemon-pty-adapter-protocol-compatibility.test.ts src/main/providers/local-pty-provider-shell-readiness.test.ts src/main/providers/ssh-pty-deferred-startup.test.ts",
         "pnpm test src/main/daemon/session-deferred-startup.test.ts src/main/daemon/terminal-host-startup.test.ts src/main/daemon/session.test.ts src/main/daemon/terminal-host-agent-session.test.ts src/main/daemon/pty-subprocess-windows-shell-launch.test.ts src/main/daemon/pty-subprocess-wsl-launch.test.ts src/main/daemon/pty-subprocess-managed-agent-env.test.ts"
       ],
       "testFiles": [
+        "src/main/daemon/daemon-deferred-startup-protocol.test.ts",
+        "src/main/providers/ssh-pty-deferred-startup.test.ts",
         "src/main/daemon/session-deferred-startup.test.ts",
         "src/main/daemon/terminal-host-startup.test.ts",
         "src/main/daemon/session.test.ts",
@@ -48,6 +51,15 @@
         }
       ],
       "evidenceRuns": [
+        {
+          "date": "2026-09-05",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm test src/main/daemon/daemon-deferred-startup-protocol.test.ts src/main/daemon/daemon-protocol-version.test.ts src/main/daemon/daemon-foreground-confirmation-protocol.test.ts src/main/daemon/daemon-pty-adapter-protocol-compatibility.test.ts src/main/providers/local-pty-provider-shell-readiness.test.ts src/main/providers/ssh-pty-deferred-startup.test.ts",
+          "result": "passed",
+          "durationSeconds": 1.47,
+          "summary": "57 tests across six suites passed. Authenticated daemon sockets prove held startup, once-only release, an unacknowledged release retried on a new connection, identity rejection, manual retirement, malformed requests, and preserved ordinary creation on older daemons. Native subprocesses mocked."
+        },
         {
           "date": "2026-09-05",
           "runner": "local",
@@ -80,7 +92,7 @@
         "Meet manifest CI and soak policy."
       ],
       "knownGaps": [
-        "No wire capability or renderer caller; this is an internal prerequisite.",
+        "Daemon capability negotiation and release are implemented; no composer caller or remote release yet.",
         "No live shell-profile or selected-agent readiness timing for deferred launch.",
         "Direct local provider and SSH/remote release parity remain unimplemented."
       ],

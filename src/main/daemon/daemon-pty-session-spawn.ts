@@ -26,6 +26,9 @@ import { addWslEnvKeys } from '../wsl-env'
 
 export abstract class DaemonPtySessionSpawn extends DaemonPtySpawnResult {
   async spawn(opts: PtySpawnOptions): Promise<PtySpawnResult> {
+    if (opts.deferredStartupOperationId !== undefined && !this.supportsDeferredStartupCommands()) {
+      throw new Error('Daemon does not support deferred startup commands')
+    }
     const spawnOpts = this.withHistoryIsolation(opts)
     const sessionId = spawnOpts.sessionId ?? mintPtySessionId(spawnOpts.worktreeId)
     const operation: PendingDaemonSpawnOperation = {

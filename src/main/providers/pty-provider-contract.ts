@@ -12,6 +12,7 @@ import type {
 import type { PtyProcessInfo } from './pty-process-info'
 import type { TerminalExitCause } from '../../shared/terminal-exit-cause'
 import type { TerminalOwner } from '../../shared/terminal-owner'
+import type { StartupCommandReleaseResult } from '../../shared/deferred-startup-release'
 
 export type {
   PtyBackgroundStreamEvent,
@@ -53,6 +54,7 @@ export type PtySpawnOptions = {
   /** Main-validated home provenance for an automatic Codex session resume. */
   codexHomePathOverride?: { value: string | null }
   command?: string
+  deferredStartupOperationId?: string
   commandDelivery?: 'renderer' | 'provider'
   startupCommandDelivery?: StartupCommandDelivery
   /** Minimal allowlisted launch ownership preserved by daemon reattach. */
@@ -135,6 +137,12 @@ export type IPtyProvider = {
   providesAgentSessionOwnerListings?: (ptyId: string) => boolean
   /** Whether fresh structured creates can replay one spawn across a lost relay response. */
   supportsAgentSessionCreateOperations?: (options?: PtyProbeOptions) => boolean | Promise<boolean>
+  supportsDeferredStartupCommands?: () => boolean
+  releaseStartupCommand?: (
+    id: string,
+    expectedIncarnationId: string,
+    operationId: string
+  ) => Promise<StartupCommandReleaseResult>
   attach(id: string): Promise<Pick<PtySpawnResult, 'providerSequence'> | void>
   hasPty?: (id: string) => boolean
   /** Exact provider readback: false only when the provider answered that the PTY is absent. */

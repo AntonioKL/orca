@@ -114,6 +114,9 @@ export abstract class DaemonPtySpawnRequest extends DaemonPtyRuntimeState {
         env: context.attachOnly ? undefined : opts.env,
         envToDelete: context.attachOnly ? undefined : opts.envToDelete,
         command: context.attachOnly ? undefined : opts.command,
+        ...(!context.attachOnly && opts.deferredStartupOperationId !== undefined
+          ? { deferredStartupOperationId: opts.deferredStartupOperationId }
+          : {}),
         startupCommandDelivery: context.attachOnly ? undefined : opts.startupCommandDelivery,
         launchAgent: context.attachOnly ? undefined : opts.launchAgent,
         ...(context.attachOnly && !context.emulateLegacyAttachOnly ? { attachOnly: true } : {}),

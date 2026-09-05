@@ -12,6 +12,7 @@ import type { DaemonTerminalAdmission } from './daemon-terminal-admission'
 import type { TerminalHistorySeedTransferRegistry } from './terminal-history-seed-transfer-registry'
 import type { TerminalHost } from './terminal-host'
 import { SessionNotFoundError, type DaemonRequest } from './types'
+import { validateStartupRelease } from './deferred-startup-protocol'
 
 type DaemonRequestRouterOptions = {
   host: TerminalHost
@@ -57,6 +58,15 @@ export class DaemonRequestRouter {
         return {}
       case 'createOrAttach':
         return this.options.admission.createOrAttach(clientId, request)
+      case 'releaseStartupCommand':
+        validateStartupRelease(request.payload)
+        return {
+          result: this.options.host.releaseStartupCommand(
+            request.payload.sessionId,
+            request.payload.expectedIncarnationId,
+            request.payload.operationId
+          )
+        }
       case 'cancelCreateOrAttach':
         return {
           canceled: this.options.preparations.cancel(request.payload.sessionId, {

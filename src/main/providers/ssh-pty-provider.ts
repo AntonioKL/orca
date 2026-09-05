@@ -121,6 +121,9 @@ export class SshPtyProvider implements IPtyProvider {
   }
 
   async spawn(opts: PtySpawnOptions): Promise<PtySpawnResult> {
+    if (opts.deferredStartupOperationId !== undefined) {
+      throw new Error('SSH PTY does not support deferred startup commands')
+    }
     return await spawnWithTerminalRuntimeRepair<SshPtyProvider, PtySpawnResult>({
       attempt: () => this.spawnWithoutTerminalRuntimeRepair(opts),
       recover: this.recoverFromTerminalUnavailable,
