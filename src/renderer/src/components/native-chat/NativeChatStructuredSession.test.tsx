@@ -202,7 +202,6 @@ describe('NativeChatStructuredSession', () => {
           sessionId="session-parity"
           target={{ kind: 'local' }}
           agent={agent}
-          allowFileUriLinks
         />
       )
 
