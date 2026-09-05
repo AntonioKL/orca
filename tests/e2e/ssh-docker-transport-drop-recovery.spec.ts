@@ -4,6 +4,7 @@ import type { ElectronApplication, Page } from '@playwright/test'
 import { test, expect } from './helpers/orca-app'
 import { DEFAULT_LOCAL_ORCA_PROFILE_ID } from '../../src/shared/orca-profiles'
 import { sshRemotePtyLeaseAllowsReattach, type SshRemotePtyLease } from '../../src/shared/ssh-types'
+import { toRelaySshPtyId } from '../../src/shared/ssh-pty-id'
 import { ensureTerminalVisible, waitForActiveWorktree, waitForSessionReady } from './helpers/store'
 import {
   execInTerminal,
@@ -374,21 +375,21 @@ test.describe('SSH transport drop recovery', () => {
           })
           .not.toBe(previousPtyId)
         const ptyId = await waitForActivePanePtyId(orcaPage, 120_000)
-        const marker = `LEASE_GEN_${generation}_${Date.now()}`
-        await execInTerminal(orcaPage, ptyId, `printf '%s\\n' ${marker}`)
+        const markerSuffix = `${generation}_${Date.now()}`
+        const marker = `LEASE_GEN_${markerSuffix}`
+        await execInTerminal(orcaPage, ptyId, `printf 'LEASE_GEN_%s\\n' ${markerSuffix}`)
         await waitForTerminalOutput(orcaPage, marker, 60_000)
 
         try {
           await expect
-            .poll(() => readReattachablePtyIds(userDataDir, remote.targetId).length, {
+            .poll(() => readReattachablePtyIds(userDataDir, remote.targetId), {
               timeout: 60_000
             })
-            .toBe(1)
+            .toEqual([toRelaySshPtyId(remote.targetId, ptyId)])
         } catch (error) {
-          // Why re-thrown with the rows: the count alone cannot say WHICH predecessor stayed
-          // reattachable, and the user-data dir is torn down before the report is read.
+          // Preserve lease ownership diagnostics before the user-data directory is removed.
           throw new Error(
-            `reattachable lease count never settled at 1 in generation ${generation}; leases: ${describeSshLeases(userDataDir, remote.targetId)}`,
+            `reattachable leases never settled at the active PTY ${ptyId} in generation ${generation}; leases: ${describeSshLeases(userDataDir, remote.targetId)}`,
             { cause: error }
           )
         }
