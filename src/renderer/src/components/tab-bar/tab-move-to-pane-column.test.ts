@@ -18,53 +18,57 @@ vi.mock('./web-runtime-tab-move-mirror', () => ({
   mirrorWebRuntimeTabMove: mocks.mirrorWebRuntimeTabMove
 }))
 
+function seedTwoTabGroup(): void {
+  useAppStore.setState({
+    activeWorktreeId: WT,
+    groupsByWorktree: {
+      [WT]: [
+        {
+          id: 'group-1',
+          worktreeId: WT,
+          activeTabId: 'tab-a',
+          tabOrder: ['tab-a', 'tab-b']
+        }
+      ]
+    },
+    unifiedTabsByWorktree: {
+      [WT]: [
+        {
+          id: 'tab-a',
+          groupId: 'group-1',
+          worktreeId: WT,
+          contentType: 'terminal',
+          entityId: 'term-a',
+          label: 'A',
+          customLabel: null,
+          color: null,
+          sortOrder: 0,
+          createdAt: 0
+        } satisfies Tab,
+        {
+          id: 'tab-b',
+          groupId: 'group-1',
+          worktreeId: WT,
+          contentType: 'terminal',
+          entityId: 'term-b',
+          label: 'B',
+          customLabel: null,
+          color: null,
+          sortOrder: 1,
+          createdAt: 1
+        } satisfies Tab
+      ]
+    },
+    layoutByWorktree: {
+      [WT]: { type: 'leaf', groupId: 'group-1' }
+    }
+  })
+}
+
 describe('tab-move-to-pane-column', () => {
   beforeEach(() => {
     mocks.mirrorWebRuntimeTabMove.mockReset()
-    useAppStore.setState({
-      activeWorktreeId: WT,
-      groupsByWorktree: {
-        [WT]: [
-          {
-            id: 'group-1',
-            worktreeId: WT,
-            activeTabId: 'tab-a',
-            tabOrder: ['tab-a', 'tab-b']
-          }
-        ]
-      },
-      unifiedTabsByWorktree: {
-        [WT]: [
-          {
-            id: 'tab-a',
-            groupId: 'group-1',
-            worktreeId: WT,
-            contentType: 'terminal',
-            entityId: 'term-a',
-            label: 'A',
-            customLabel: null,
-            color: null,
-            sortOrder: 0,
-            createdAt: 0
-          } satisfies Tab,
-          {
-            id: 'tab-b',
-            groupId: 'group-1',
-            worktreeId: WT,
-            contentType: 'terminal',
-            entityId: 'term-b',
-            label: 'B',
-            customLabel: null,
-            color: null,
-            sortOrder: 1,
-            createdAt: 1
-          } satisfies Tab
-        ]
-      },
-      layoutByWorktree: {
-        [WT]: { type: 'leaf', groupId: 'group-1' }
-      }
-    })
+    seedTwoTabGroup()
   })
 
   it('allows moving when the source group has more than one tab', () => {
@@ -124,6 +128,10 @@ describe('tab-move-to-pane-column', () => {
 
 describe('moveActiveTabToNewPaneColumn', () => {
   beforeEach(() => {
+    mocks.mirrorWebRuntimeTabMove.mockReset()
+    // Why seed here too: a sibling describe's beforeEach does not run for this
+    // block, so relying on it left these cases failing under a -t filter.
+    seedTwoTabGroup()
     useAppStore.setState({ activeGroupIdByWorktree: { [WT]: 'group-1' } })
   })
 
