@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
     setState: (state: Record<string, unknown>) => void
   },
   subscribeStatus: vi.fn(),
+  subscribeTranscript: vi.fn(),
   supportsCapability: vi.fn(),
   unsubscribe: vi.fn()
 }))
@@ -85,7 +86,7 @@ vi.mock('@/runtime/runtime-rpc-client', async (importOriginal) => ({
 
 vi.mock('@/runtime/structured-agent-session-client', () => ({
   callStructuredAgentSession: vi.fn(),
-  subscribeStructuredAgentSession: vi.fn(),
+  subscribeStructuredAgentSession: mocks.subscribeTranscript,
   subscribeStructuredAgentSessionStatus: mocks.subscribeStatus
 }))
 
@@ -188,6 +189,7 @@ describe('StructuredAgentSessionStatusBridge', () => {
     render(<StructuredAgentSessionStatusBridge />)
     await waitFor(() => expect(mocks.subscribeStatus).toHaveBeenCalledOnce())
     expect(feed().target).toEqual({ kind: 'local' })
+    expect(mocks.subscribeTranscript).not.toHaveBeenCalled()
 
     act(() => feed().emit({ type: 'snapshot', sessions: [summary()] }))
 
@@ -206,7 +208,10 @@ describe('StructuredAgentSessionStatusBridge', () => {
     ])
   })
 
-  it('settles a hidden session on the host status alone', async () => {
+  // Hiddenness is the host's side of this: see structured-agent-session-subscribers.test.ts,
+  // which drives an unsubscribed journal through the feed. Here the transport is a mock, so
+  // only the summary-to-store mapping is under test.
+  it('maps each host status onto the sidebar agent state', async () => {
     render(<StructuredAgentSessionStatusBridge />)
     await waitFor(() => expect(mocks.subscribeStatus).toHaveBeenCalledOnce())
     act(() => feed().emit({ type: 'snapshot', sessions: [summary()] }))

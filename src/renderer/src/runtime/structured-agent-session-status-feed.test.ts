@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentSessionStatusEvent } from '../../../shared/agent-session-wire'
+import type {
+  AgentSessionStatusEvent,
+  AgentSessionStatusSummary
+} from '../../../shared/agent-session-wire'
 import { AGENT_SESSION_STATUS_FEED_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 
 const mocks = vi.hoisted(() => ({
@@ -23,6 +26,20 @@ import {
 
 const REMOTE = { kind: 'environment', environmentId: 'env-1' } as const
 const LOCAL = { kind: 'local' } as const
+
+function summary(
+  sessionId: string,
+  status: AgentSessionStatusSummary['status'] = 'idle'
+): AgentSessionStatusSummary {
+  return {
+    sessionId,
+    workspaceId: 'wt-1',
+    agent: 'codex',
+    status,
+    latestPrompt: 'hello',
+    updatedAt: 1
+  }
+}
 
 /** The event callback the feed handed to the most recent subscription. */
 function hostEmit(index = 0): (event: AgentSessionStatusEvent) => void {
@@ -90,6 +107,22 @@ describe('structured agent session status feed', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(mocks.supportsCapability).not.toHaveBeenCalled()
     expect(mocks.subscribeStatus).toHaveBeenCalledOnce()
+  })
+
+  it('merges a snapshot over the cached rows instead of retracting them', async () => {
+    const feed = getStructuredAgentSessionStatusFeed(LOCAL)
+    feed.activate()
+    await vi.advanceTimersByTimeAsync(0)
+    hostEmit()({ type: 'snapshot', sessions: [summary('session-1'), summary('session-2')] })
+    expect([...feed.getSnapshot().keys()]).toEqual(['session-1', 'session-2'])
+
+    // A restarted host restores its readable sessions after the stream reopens.
+    hostEmit()({ type: 'snapshot', sessions: [] })
+    expect([...feed.getSnapshot().keys()]).toEqual(['session-1', 'session-2'])
+
+    hostEmit()({ type: 'snapshot', sessions: [summary('session-1', 'working')] })
+    expect(feed.getSnapshot().get('session-1')?.status).toBe('working')
+    expect(feed.getSnapshot().get('session-2')?.status).toBe('idle')
   })
 
   it('stops a pending reconnect when the feeds are reset between tests', async () => {

@@ -147,23 +147,22 @@ export function projectStructuredAgentSessionStatus(
   return activeStructuredAgentSessionTurnId(items) ? 'working' : 'idle'
 }
 
-/** The newest user prompt, bounded the way every other producer of AgentStatusEntry.prompt
- *  bounds it: session lists render a one-line preview, and this one also travels the wire. */
+/** The newest user prompt, as the sidebar quotes it. */
 export function latestStructuredAgentSessionPrompt(
   items: readonly AgentJournalRenderItem[]
 ): string {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const body = items[index]?.body
     if (body?.kind === 'message' && body.role === 'user') {
-      return normalizePromptField(
-        body.blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n')
-      )
+      return body.blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n')
     }
   }
   return ''
 }
 
-/** One projection shared by host and client: null status means "no turn yet", not idle. */
+/** One projection shared by host and client: null status means "no turn yet", not idle.
+ *  The prompt is bounded to the same preview every other agent-status row carries — a send
+ *  admits 256 KB, and one status frame carries every retained session at once. */
 export function projectStructuredAgentSessionStatusSummary(
   items: readonly AgentJournalRenderItem[]
 ): { status: StructuredAgentSessionProjectedStatus | null; latestPrompt: string } {
@@ -172,7 +171,7 @@ export function projectStructuredAgentSessionStatusSummary(
   }
   return {
     status: projectStructuredAgentSessionStatus(items),
-    latestPrompt: latestStructuredAgentSessionPrompt(items)
+    latestPrompt: normalizePromptField(latestStructuredAgentSessionPrompt(items))
   }
 }
 

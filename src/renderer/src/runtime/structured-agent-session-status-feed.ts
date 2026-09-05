@@ -2,7 +2,7 @@
 //
 // The feed is a read-only mirror: the host projects each session's status from its journal and
 // this owner keeps the latest summary per session while anyone is looking. Losing the stream
-// keeps the cached summaries and reconnects; a fresh snapshot then replaces them wholesale.
+// keeps the cached summaries and reconnects; a fresh snapshot merges over them.
 // Which sessions are listed is the tab map's decision, so the feed never retracts a summary.
 
 import type {
@@ -56,7 +56,13 @@ function createOwner(target: RuntimeClientTarget): OwnedStatusFeed {
   const applyEvent = (event: AgentSessionStatusEvent): void => {
     if (event.type === 'snapshot') {
       reconnectAttempt = 0
-      setSnapshot(new Map(event.sessions.map((session) => [session.sessionId, session])))
+      // Merged, not replaced: a restarted host restores its readable sessions asynchronously, so
+      // the first snapshot can be empty and dropping those rows flickers every one to no-status.
+      const next = new Map(snapshot)
+      for (const session of event.sessions) {
+        next.set(session.sessionId, session)
+      }
+      setSnapshot(next)
       return
     }
     if (event.type === 'status') {
