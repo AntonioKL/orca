@@ -76,14 +76,25 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
  * Refused rather than ignored: silently starting a terminal worker under a structured request
  * would hand the coordinator a worker of a different kind than it asked for.
  */
-function assertStructuredWorkerStartSupported(params: {
+export function assertStructuredWorkerStartSupported(params: {
   structured?: boolean
   on?: string
   terminal?: string
   worktree?: string
+  model?: string
+  effort?: string
 }): void {
   if (!params.structured) {
     return
+  }
+  if (params.model || params.effort) {
+    // Structured session creation takes no launch preferences, so accepting these would run the
+    // worker on the workspace default while the start receipt's `launch.effective` reported the
+    // model that was asked for. Refused for the same reason `--terminal` refuses them.
+    throw new OrchestrationError(
+      'invalid_argument',
+      '--model and --effort cannot be applied to a structured worker; its session uses the workspace default.'
+    )
   }
   if (params.on) {
     throw new OrchestrationError(

@@ -10,8 +10,13 @@ vi.mock('./structured-agent-session-create', () => ({
   createStructuredAgentSessionForWorktree: (...args: unknown[]) => createSpy(...args)
 }))
 
-const { createStructuredWorkerSession, releaseStructuredWorkerSession, structuredWorkerHoldId } =
-  await import('./orchestration-structured-worker-session')
+const {
+  createStructuredWorkerSession,
+  releaseStructuredWorkerSession,
+  sendStructuredWorkerPreamble,
+  structuredWorkerHoldId
+} = await import('./orchestration-structured-worker-session')
+const { isUnknownWorkerStartOutcome } = await import('./orchestration-worker-topology')
 const { structuredWorkerIdentities } = await import('../../structured-worker-identity')
 const { structuredWorkerChildIdentityEnv } =
   await import('../../structured-worker-child-identity-env')
@@ -214,5 +219,47 @@ describe('structured worker session hold', () => {
         onJournalActivity: () => {}
       })
     ).rejects.toThrow(/local execution host/)
+  })
+})
+
+describe('structured worker dispatch preamble', () => {
+  function hostWithSubmission(submission: Record<string, unknown>) {
+    return {
+      deps: { store: { getRecord: () => ({ lease: { runtimeFence: 7 } }) } },
+      send: async () => ({ ok: true, value: { clientMessageId: 'c1', submission } })
+    } as never
+  }
+
+  const send = (host: never) =>
+    sendStructuredWorkerPreamble({ host, sessionId: 's1', dispatchId: 'd1', preamble: 'spec' })
+
+  it('reports the preamble delivered only on an accepted submission', async () => {
+    await expect(
+      send(hostWithSubmission({ dispatchState: 'accepted', reason: null }))
+    ).resolves.toBeUndefined()
+  })
+
+  it('never claims delivery for a submission the provider never acknowledged', async () => {
+    // `dispatchSafely` turns ANY thrown adapter call — provider child dead, transport dropped —
+    // into `unknown`, and `performSend` still returns ok. Reporting that as `dispatch_input:
+    // accepted` marks the worker ready with no task, and the coordinator blocks in
+    // `check --wait --types worker_done` until it times out.
+    for (const dispatchState of ['unknown', 'pending'] as const) {
+      const error = await send(
+        hostWithSubmission({ dispatchState, reason: 'provider child exited' })
+      ).catch((thrown: unknown) => thrown)
+      expect((error as { code?: string }).code).toBe('operation_unknown')
+      // The wiring, not just the throw: this is the code that makes the start receipt
+      // `outcome_unknown` with the worker-show / worker-abandon recovery commands.
+      expect(isUnknownWorkerStartOutcome(error, 'dispatch_input')).toBe(true)
+    }
+  })
+
+  it('keeps a rejected preamble a proven failure rather than an unknown one', async () => {
+    const error = await send(
+      hostWithSubmission({ dispatchState: 'rejected', reason: 'fence moved' })
+    ).catch((thrown: unknown) => thrown)
+    expect((error as Error).message).toMatch(/rejected: fence moved/)
+    expect(isUnknownWorkerStartOutcome(error, 'dispatch_input')).toBe(false)
   })
 })

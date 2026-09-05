@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import { isTerminalLeafId, parsePaneKey } from '../../shared/stable-pane-id'
 import { structuredAgentSessionPaneKey } from '../../shared/structured-agent-session-projection'
 import { selectExactWorkerProviderSession } from './orchestration/worker-provider-session'
+import { structuredWorkerChildIdentityEnv } from './structured-worker-child-identity-env'
 import {
   StructuredWorkerIdentityRegistry,
   isStructuredWorkerHandle,
@@ -10,6 +11,7 @@ import {
   sessionIdFromStructuredWorkerIncarnation,
   structuredWorkerHostScope,
   structuredWorkerPaneKeyBelongsToSession,
+  structuredWorkerIdentities,
   structuredWorkerProcessIncarnation,
   structuredWorkerRecordIsCurrent
 } from './structured-worker-identity'
@@ -185,9 +187,31 @@ describe('structured worker identity registry', () => {
 })
 
 describe('structured workers stay outside the PTY-only fail-closed paths', () => {
-  it('never selects an exact provider session', () => {
-    // Fail-closed because a structured session emits no hook agent status. It stays closed only
-    // while ORCA_PANE_KEY is absent from the structured child's environment.
+  it('keeps the selector shut by never letting a structured pane key reach a hook status', () => {
+    // The selector matches on pane key, so it is fail-closed for a structured worker only while
+    // ORCA_PANE_KEY is absent from its child's environment. That absence IS the guard: put the key
+    // back and the first assertion below is what an attacker gets.
+    // The PROCESS registry, because that is the one the spawn path reads.
+    const handle = mintStructuredWorkerHandle()
+    structuredWorkerIdentities.register({
+      handle,
+      sessionId: SESSION_ID,
+      agent: 'claude',
+      paneKey: mintStructuredWorkerPaneKey(SESSION_ID),
+      processIncarnation: structuredWorkerProcessIncarnation(SESSION_ID),
+      worktreeId: 'wt_1',
+      hostScope: { kind: 'local', hostId: 'local' }
+    })
+    try {
+      const env = structuredWorkerChildIdentityEnv(SESSION_ID)
+      // Registered, so this is a populated env — not the empty one an unregistered session gets,
+      // which would satisfy the pane-key assertion for the wrong reason.
+      expect(env.ORCA_TERMINAL_HANDLE).toBe(handle)
+      expect(Object.keys(env)).not.toContain('ORCA_PANE_KEY')
+    } finally {
+      structuredWorkerIdentities.forget(handle)
+    }
+
     const paneKey = mintStructuredWorkerPaneKey(SESSION_ID)
     expect(
       selectExactWorkerProviderSession({
