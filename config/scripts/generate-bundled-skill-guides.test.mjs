@@ -206,7 +206,29 @@ describe('bundled skill guide generator', () => {
       expect(guide.aliases).toEqual(GUIDE_ALIASES[guide.name])
       if (guide.name !== 'orchestration') {
         expect(guide.fullMarkdown).toBe(source)
+        expect(guide.references).toEqual([])
         continue
+      }
+      // Why: the per-reference selector serves these verbatim, so an entry that
+      // drifts from the file on disk ships a stale reference to every agent.
+      expect(guide.references.map((reference) => reference.name)).toEqual(
+        ORCHESTRATION_REFERENCES.map((reference) => reference.replace(/\.md$/u, ''))
+      )
+      for (const reference of guide.references) {
+        expect(reference.markdown).toBe(
+          normalizeMarkdown(
+            await readFile(
+              path.join(
+                projectDir,
+                'skill-guides',
+                'orchestration',
+                'references',
+                `${reference.name}.md`
+              ),
+              'utf8'
+            )
+          )
+        )
       }
       expect(guide.fullMarkdown).not.toBe(guide.markdown)
       expect(guide.fullMarkdown.length).toBeGreaterThan(guide.markdown.length)
