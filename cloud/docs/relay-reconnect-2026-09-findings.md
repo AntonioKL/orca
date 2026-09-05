@@ -947,3 +947,5 @@ Owner: "sure, feel free to drive these." Sequence chosen: Roll 1 first (highest 
 | Batch 3 cell 2 (c25) | **Succeeded** 07:18–07:31Z. c26 started. |
 | Batch 3 complete (run 33951468008) | **All three succeeded** 07:03–07:44Z: c24, c25, c26 on `519f4914`, selector **gen 142**. Fleet at ~1 230 controls, 23 cells, refresh 401s at baseline. **Zero `container die`** during the batch (no boot race on c24–c26). **All 20 US serving cells now on new images** (c7 `85bf6799`; c8–c10, c13–c16, c19–c26 `519f4914`). Remaining on `5aedbca5`: c27, c28, c29 (asia-east2, probe hard cap 3000 ms). |
 | Monitor dry-run #37 | Dispatched 07:48Z at gen 142, run 33953555224 (`4c5077d57a`). On green the chain dispatches the c27 canary (first Asia cell). |
+| Monitor dry-run #37 result | **Green** 08:04:24Z at gen 142, `4c5077d57a`. |
+| c27 `canary-apply` (run 33954264945) | Dispatched 08:04Z, first Asia cell (asia-east2-a). On success it seals the authority for batch 4 (c28,c29). |
