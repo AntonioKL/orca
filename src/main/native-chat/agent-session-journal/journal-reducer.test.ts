@@ -434,4 +434,27 @@ describe('re-adding a tombstoned row', () => {
     )
     expect(renderJournalState(state).items.map((item) => item.body)).toEqual([text('second')])
   })
+
+  // The item builder outranks the tombstone; the tombstone builder can only stay
+  // correct because `upsertItem` clears the tombstone whenever a re-add wins.
+  // That invariant lives in the reducer, so pin it here: without it a second
+  // removal would build a revision that loses to the first tombstone.
+  it('removes the row again after it was re-added', () => {
+    const identity: AgentJournalItemIdentity = { provider: 'orca', clientMessageId: 'roster' }
+    const itemId = agentJournalItemKey(identity)
+    const state = createJournalReducerState('session-1', EPOCH)
+    applyJournalRow(
+      state,
+      buildJournalItemRow({ state, identity, body: text('first'), seq: 1, fence: 1, ts: 1_001 })
+    )
+    applyJournalRow(state, buildJournalTombstoneRow({ state, itemId, seq: 2, fence: 1, ts: 1_002 }))
+    applyJournalRow(
+      state,
+      buildJournalItemRow({ state, identity, body: text('second'), seq: 3, fence: 1, ts: 1_003 })
+    )
+    expect(state.tombstones.get(itemId)).toBeUndefined()
+
+    applyJournalRow(state, buildJournalTombstoneRow({ state, itemId, seq: 4, fence: 1, ts: 1_004 }))
+    expect(renderJournalState(state).items).toEqual([])
+  })
 })

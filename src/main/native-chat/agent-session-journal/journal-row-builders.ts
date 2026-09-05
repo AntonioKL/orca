@@ -176,7 +176,15 @@ export function buildJournalTombstoneRow(input: {
   return {
     kind: 'tombstone',
     itemId: input.itemId,
-    revision: (input.state.items.get(resolved)?.revision ?? 0) + 1,
+    // Symmetric with the item builder: `upsertItem` clearing the tombstone on a
+    // re-add is what keeps the two maps disjoint, and that invariant lives in the
+    // reducer. Outranking both here means a repeat removal cannot be dropped as a
+    // stale revision if it ever stops holding.
+    revision:
+      Math.max(
+        input.state.items.get(resolved)?.revision ?? 0,
+        input.state.tombstones.get(resolved) ?? 0
+      ) + 1,
     ...journalRowBase(input.state.epoch, input.seq, input.fence, input.ts)
   }
 }
