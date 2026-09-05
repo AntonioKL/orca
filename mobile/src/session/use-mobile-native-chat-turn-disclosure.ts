@@ -6,6 +6,10 @@ import {
   type NativeChatTurnStatus
 } from './use-mobile-native-chat-turn-status'
 
+const EMPTY_TURN_IDS: ReadonlySet<string> = new Set()
+const EMPTY_TURN_KEYS: readonly undefined[] = []
+const MAX_EXPANDED_TURNS = 128
+
 export type MobileNativeChatTurnRow = {
   turnStatus: NativeChatTurnStatus | null
   turnExpanded: boolean
@@ -19,11 +23,14 @@ export type MobileNativeChatTurnRow = {
 export function useMobileNativeChatTurnDisclosure({
   messages,
   enabled,
-  isWorking
+  isWorking,
+  scopeKey
 }: {
   messages: readonly NativeChatMessage[]
   enabled: boolean
   isWorking: boolean
+  /** Host/worktree/tab identity for timing and disclosure isolation. */
+  scopeKey: string
 }): {
   active: NativeChatTurnStatus | null
   /** True when the live turn has no user message to hang its status row under. */
@@ -32,37 +39,66 @@ export function useMobileNativeChatTurnDisclosure({
 } {
   const turnStatuses = useMobileNativeChatTurnStatus({
     messages,
-    isWorking: enabled && isWorking
+    enabled,
+    isWorking,
+    scopeKey
   })
-  const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<string>>(() => new Set())
-  const toggleExpandedTurn = useCallback((turnKey: string) => {
-    setExpandedTurnIds((current) => {
-      const next = new Set(current)
-      if (!next.delete(turnKey)) {
-        next.add(turnKey)
-      }
-      return next
-    })
-  }, [])
+  const [expandedTurns, setExpandedTurns] = useState<{
+    scopeKey: string
+    turnIds: ReadonlySet<string>
+  }>(() => ({ scopeKey, turnIds: new Set() }))
+  const expandedTurnIds =
+    expandedTurns.scopeKey === scopeKey ? expandedTurns.turnIds : EMPTY_TURN_IDS
+  const toggleExpandedTurn = useCallback(
+    (turnKey: string) => {
+      setExpandedTurns((current) => {
+        const next = new Set(current.scopeKey === scopeKey ? current.turnIds : [])
+        if (!next.delete(turnKey)) {
+          if (next.size >= MAX_EXPANDED_TURNS) {
+            const oldest = next.values().next().value
+            if (oldest) {
+              next.delete(oldest)
+            }
+          }
+          next.add(turnKey)
+        }
+        return { scopeKey, turnIds: next }
+      })
+    },
+    [scopeKey]
+  )
   // Why: a fresh closure per row per render defeats the message row's memo, and a
   // streaming turn re-renders the list ~20x/s. One stable handler per turn instead.
-  const toggleHandlers = useRef(new Map<string, () => void>())
+  const toggleHandlers = useRef<{
+    scopeKey: string
+    byTurn: Map<string, () => void>
+  }>({ scopeKey, byTurn: new Map() })
   const toggleHandlerFor = useCallback(
     (turnKey: string): (() => void) => {
-      const existing = toggleHandlers.current.get(turnKey)
+      if (toggleHandlers.current.scopeKey !== scopeKey) {
+        toggleHandlers.current = { scopeKey, byTurn: new Map() }
+      }
+      const existing = toggleHandlers.current.byTurn.get(turnKey)
       if (existing) {
         return existing
       }
       const handler = (): void => toggleExpandedTurn(turnKey)
-      toggleHandlers.current.set(turnKey, handler)
+      toggleHandlers.current.byTurn.set(turnKey, handler)
       return handler
     },
-    [toggleExpandedTurn]
+    [scopeKey, toggleExpandedTurn]
   )
 
   // Resolve each row's turn boundary once — a findLast per row is quadratic on a
   // long transcript.
   const turnKeys = useMemo(() => {
+    if (toggleHandlers.current.scopeKey !== scopeKey) {
+      toggleHandlers.current = { scopeKey, byTurn: new Map() }
+    }
+    if (!enabled) {
+      toggleHandlers.current.byTurn.clear()
+      return EMPTY_TURN_KEYS
+    }
     let turnKey: string | undefined
     const keys = messages.map((message) => {
       if (message.role === 'user') {
@@ -72,14 +108,14 @@ export function useMobileNativeChatTurnDisclosure({
     })
     // Drop handlers for turns that left the transcript so a long session does not
     // retain a closure per turn forever.
-    const live = new Set(keys)
-    for (const key of toggleHandlers.current.keys()) {
+    const live = new Set(keys.filter((key): key is string => key !== undefined))
+    for (const key of toggleHandlers.current.byTurn.keys()) {
       if (!live.has(key)) {
-        toggleHandlers.current.delete(key)
+        toggleHandlers.current.byTurn.delete(key)
       }
     }
     return keys
-  }, [messages])
+  }, [enabled, messages, scopeKey])
 
   const { active, activeTurnKey, completedByTurn } = turnStatuses
   const resolveRow = useCallback(
@@ -100,10 +136,12 @@ export function useMobileNativeChatTurnDisclosure({
         // every other row keeps their props identity-stable.
         onToggleTurn:
           turnKey && turnStatus?.workedSeconds != null ? toggleHandlerFor(turnKey) : undefined,
-        // A missing turn boundary is not evidence the turn ended; the session's
-        // own working state stays authoritative.
+        // With no user boundary at all, the session's working state stays authoritative.
         activeTurnIsWorking:
-          enabled && (turnKey === undefined || turnKey === activeTurnKey) && isWorking
+          enabled &&
+          isWorking &&
+          (turnKey === activeTurnKey ||
+            (turnKey === undefined && activeTurnKey === MOBILE_UNANCHORED_TURN_KEY))
       }
     },
     [

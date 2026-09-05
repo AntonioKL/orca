@@ -72,6 +72,9 @@ type Overrides = {
   inputLockReason?: 'disconnected' | 'waiting' | null
   onSend?: (text: string) => Promise<boolean>
   pending?: Parameters<typeof MobileNativeChatView>[0]['pending']
+  structuredActivityUi?: boolean
+  agentWorking?: boolean
+  sendSurfaceId?: string
 }
 
 function assistantTurn(id: string, text: string): NativeChatMessage {
@@ -300,6 +303,53 @@ describe('MobileNativeChatView', () => {
       await render({ messages: folded, folded, structuredActivityUi: true, agentWorking: true })
       expect(rowProps('a1').turnStatus).toBeNull()
       // The assistant row still belongs to the live turn, so its tool row stays visible.
+      expect(rowProps('a1').activeTurnIsWorking).toBe(true)
+    })
+
+    it('does not carry a running turn clock across chat surfaces', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.setSystemTime(1_000)
+        const firstTab = [userTurn('u1', 'first')]
+        await render({
+          messages: firstTab,
+          folded: firstTab,
+          structuredActivityUi: true,
+          agentWorking: true,
+          sendSurfaceId: 'host\0worktree\0tab-a'
+        })
+        expect(rowProps('u1').turnStatus).toMatchObject({ startedAt: 1_000 })
+
+        vi.setSystemTime(12_000)
+        const secondTab = [userTurn('u2', 'second')]
+        await update({
+          messages: secondTab,
+          folded: secondTab,
+          structuredActivityUi: true,
+          agentWorking: true,
+          sendSurfaceId: 'host\0worktree\0tab-b'
+        })
+
+        expect(rowProps('u2').turnStatus).toMatchObject({ startedAt: 12_000 })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('does not treat pre-user history as part of the live turn', async () => {
+      const history = [
+        assistantTurn('a0', 'before the first prompt'),
+        userTurn('u1', 'go'),
+        assistantTurn('a1', 'working')
+      ]
+      await render({
+        messages: history,
+        folded: history,
+        structuredActivityUi: true,
+        agentWorking: true
+      })
+
+      expect(rowProps('a0').activeTurnIsWorking).toBe(false)
       expect(rowProps('a1').activeTurnIsWorking).toBe(true)
     })
   })

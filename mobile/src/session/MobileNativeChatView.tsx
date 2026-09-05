@@ -261,7 +261,8 @@ export function MobileNativeChatView({
   const turns = useMobileNativeChatTurnDisclosure({
     messages: data,
     enabled: structuredActivityUi,
-    isWorking: agentWorking === true
+    isWorking: agentWorking === true,
+    scopeKey: sendSurfaceId
   })
 
   const renderItem = useCallback(
