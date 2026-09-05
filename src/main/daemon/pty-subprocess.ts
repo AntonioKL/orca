@@ -24,6 +24,8 @@ export type PtySubprocessOptions = {
   env?: Record<string, string>
   envToDelete?: string[]
   command?: string
+  /** Preserve command-derived environment while the owner holds command delivery. */
+  deferStartupCommand?: boolean
   startupCommandDelivery?: StartupCommandDelivery
   launchAgent?: TuiAgent
   /** Explicit shell executable path/basename requested by the renderer. */

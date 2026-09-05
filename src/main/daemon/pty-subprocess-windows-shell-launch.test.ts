@@ -207,70 +207,127 @@ describe('createPtySubprocess', () => {
     expect(isPwshAvailableMock).not.toHaveBeenCalled()
   })
 
-  it('ignores the PowerShell implementation setting for cmd.exe on Windows', async () => {
-    const proc = mockPtyProcess()
-    spawnMock.mockReturnValue(proc)
-    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+  it.each([false, true])(
+    'preserves cmd preflight when deferred=%s',
+    async (deferStartupCommand) => {
+      const proc = mockPtyProcess()
+      spawnMock.mockReturnValue(proc)
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')
 
-    Object.defineProperty(process, 'platform', { value: 'win32' })
-    isPwshAvailableMock.mockReturnValue(true)
+      Object.defineProperty(process, 'platform', { value: 'win32' })
+      isPwshAvailableMock.mockReturnValue(true)
 
-    try {
-      await createPtySubprocess({
-        sessionId: 'test',
-        cols: 80,
-        rows: 24,
-        shellOverride: 'cmd.exe',
-        terminalWindowsPowerShellImplementation: 'pwsh.exe',
-        env: { ORCA_CODEX_LAUNCH_PREFLIGHT: CODEX_LAUNCH_PREFLIGHT }
-      })
-    } finally {
-      if (platform) {
-        Object.defineProperty(process, 'platform', platform)
+      try {
+        await createPtySubprocess({
+          sessionId: 'test',
+          cols: 80,
+          rows: 24,
+          shellOverride: 'cmd.exe',
+          terminalWindowsPowerShellImplementation: 'pwsh.exe',
+          command: 'codex DEFERRED_AGENT_MARKER',
+          deferStartupCommand,
+          env: { ORCA_CODEX_LAUNCH_PREFLIGHT: CODEX_LAUNCH_PREFLIGHT }
+        })
+      } finally {
+        if (platform) {
+          Object.defineProperty(process, 'platform', platform)
+        }
+      }
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        'cmd.exe',
+        [
+          '/K',
+          `chcp 65001 > nul & if defined ORCA_CODEX_LAUNCH_PREFLIGHT call %ORCA_CODEX_LAUNCH_PREFLIGHT_CMD_QUOTE%%ORCA_CODEX_LAUNCH_PREFLIGHT%%ORCA_CODEX_LAUNCH_PREFLIGHT_CMD_QUOTE% agent hooks prepare-codex > nul 2>&1${
+            deferStartupCommand ? '' : ' & codex DEFERRED_AGENT_MARKER'
+          }`
+        ],
+        expect.objectContaining({
+          env: expect.objectContaining({ ORCA_CODEX_LAUNCH_PREFLIGHT_CMD_QUOTE: '"' })
+        })
+      )
+    }
+  )
+
+  it.each([false, true])(
+    'holds PowerShell startup argv only when deferred=%s',
+    async (deferStartupCommand) => {
+      const proc = mockPtyProcess()
+      spawnMock.mockReturnValue(proc)
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+
+      Object.defineProperty(process, 'platform', { value: 'win32' })
+
+      let handle: Awaited<ReturnType<typeof createPtySubprocess>>
+      try {
+        handle = await createPtySubprocess({
+          sessionId: 'test',
+          cols: 80,
+          rows: 24,
+          cwd: 'C:\\repo\\orca',
+          shellOverride: 'powershell.exe',
+          command: "& 'codex' '--no-alt-screen'",
+          deferStartupCommand
+        })
+      } finally {
+        if (platform) {
+          Object.defineProperty(process, 'platform', platform)
+        }
+      }
+
+      const lastCall = spawnMock.mock.calls.at(-1)!
+      const encoded = String(lastCall[1][3])
+      const command = Buffer.from(encoded, 'base64').toString('utf16le')
+      expect(command.includes("& 'codex' '--no-alt-screen'")).toBe(!deferStartupCommand)
+      expect(Boolean(handle!.startupCommandDeliveredInShellArgs)).toBe(!deferStartupCommand)
+    }
+  )
+
+  it.each([1, 2])(
+    'withholds deferred startup through %s failed Windows shells',
+    async (failures) => {
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+      Object.defineProperty(process, 'platform', { value: 'win32' })
+      isPwshAvailableMock.mockReturnValue(true)
+      const proc = mockPtyProcess()
+      for (let index = 0; index < failures; index++) {
+        spawnMock.mockImplementationOnce(() => {
+          throw new Error('shell unavailable')
+        })
+      }
+      spawnMock.mockReturnValue(proc)
+      try {
+        const handle = await createPtySubprocess({
+          sessionId: 'deferred-fallback',
+          cols: 80,
+          rows: 24,
+          cwd: 'C:\\repo\\orca',
+          shellOverride: 'pwsh.exe',
+          command: 'codex DEFERRED_AGENT_MARKER',
+          deferStartupCommand: true,
+          launchAgent: 'codex',
+          env: { AGENT_TEST_VALUE: 'preserved' }
+        })
+        expect(spawnMock).toHaveBeenCalledTimes(failures + 1)
+        for (const [, argv, options] of spawnMock.mock.calls) {
+          const encodedIndex = argv.indexOf('-EncodedCommand')
+          const payload =
+            encodedIndex === -1
+              ? argv.join(' ')
+              : Buffer.from(argv[encodedIndex + 1], 'base64').toString('utf16le')
+          expect(payload).not.toContain('DEFERRED_AGENT_MARKER')
+          expect(options.env.AGENT_TEST_VALUE).toBe('preserved')
+        }
+        expect(handle.startupCommandDeliveredInShellArgs).not.toBe(true)
+        expect(proc.write).not.toHaveBeenCalled()
+        handle.dispose()
+      } finally {
+        if (platform) {
+          Object.defineProperty(process, 'platform', platform)
+        }
       }
     }
-
-    expect(spawnMock).toHaveBeenCalledWith(
-      'cmd.exe',
-      [
-        '/K',
-        'chcp 65001 > nul & if defined ORCA_CODEX_LAUNCH_PREFLIGHT call %ORCA_CODEX_LAUNCH_PREFLIGHT_CMD_QUOTE%%ORCA_CODEX_LAUNCH_PREFLIGHT%%ORCA_CODEX_LAUNCH_PREFLIGHT_CMD_QUOTE% agent hooks prepare-codex > nul 2>&1'
-      ],
-      expect.objectContaining({
-        env: expect.objectContaining({ ORCA_CODEX_LAUNCH_PREFLIGHT_CMD_QUOTE: '"' })
-      })
-    )
-  })
-
-  it('embeds short PowerShell startup commands in the Windows shell launch', async () => {
-    const proc = mockPtyProcess()
-    spawnMock.mockReturnValue(proc)
-    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
-
-    Object.defineProperty(process, 'platform', { value: 'win32' })
-
-    let handle: Awaited<ReturnType<typeof createPtySubprocess>>
-    try {
-      handle = await createPtySubprocess({
-        sessionId: 'test',
-        cols: 80,
-        rows: 24,
-        cwd: 'C:\\repo\\orca',
-        shellOverride: 'powershell.exe',
-        command: "& 'codex' '--no-alt-screen'"
-      })
-    } finally {
-      if (platform) {
-        Object.defineProperty(process, 'platform', platform)
-      }
-    }
-
-    const lastCall = spawnMock.mock.calls.at(-1)!
-    const encoded = String(lastCall[1][3])
-    const command = Buffer.from(encoded, 'base64').toString('utf16le')
-    expect(command.trimEnd().endsWith("& 'codex' '--no-alt-screen'")).toBe(true)
-    expect(handle!.startupCommandDeliveredInShellArgs).toBe(true)
-  })
+  )
 
   it('keeps oversized Windows startup commands on PTY stdin delivery', async () => {
     const proc = mockPtyProcess()

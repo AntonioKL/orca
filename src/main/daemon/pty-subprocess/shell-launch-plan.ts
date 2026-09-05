@@ -60,6 +60,7 @@ export function createPtyShellLaunchPlan(
   let startupCommandDeliveredInShellArgs = false
   let windowsFallbackAttempts: WindowsShellSpawnAttempt[] = []
   const startupAgentRecognition = recognizeAgentProcessFromCommandLine(opts.command)
+  const argvStartupCommand = opts.deferStartupCommand ? undefined : opts.command
   const requestedCwd = opts.cwd || resolveSafePtyDefaultCwd()
   if (opts.command && startupAgentRecognition) {
     assertSafeAgentStartupCwd(requestedCwd, opts.command)
@@ -107,7 +108,7 @@ export function createPtyShellLaunchPlan(
       cwd: spawnCwd,
       defaultCwd: resolveSafePtyDefaultCwd(),
       wslContext: resolvedWslContext,
-      startupCommand: opts.command
+      startupCommand: argvStartupCommand
     })
     const primaryAttempt = windowsFallbackAttempts[0]
     if (primaryAttempt) {
@@ -122,7 +123,7 @@ export function createPtyShellLaunchPlan(
         spawnCwd,
         resolveSafePtyDefaultCwd(),
         resolvedWslContext,
-        opts.command,
+        argvStartupCommand,
         env.ORCA_CODEX_LAUNCH_PREFLIGHT
       )
       shellArgs = resolved.shellArgs
@@ -150,7 +151,7 @@ export function createPtyShellLaunchPlan(
               requestedCwd,
               resolveSafePtyDefaultCwd(),
               { distro: codexHomeWslInfo.distro },
-              opts.command,
+              argvStartupCommand,
               env.ORCA_CODEX_LAUNCH_PREFLIGHT
             )
             shellArgs = resolved.shellArgs

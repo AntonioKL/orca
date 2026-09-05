@@ -261,33 +261,37 @@ describe('createPtySubprocess', () => {
     expect(lastCall[2].env.ORCA_SHELL_FEATURES).not.toContain('ready')
   })
 
-  it('enables readiness and shell identity for plain Codex startup', async () => {
-    const proc = mockPtyProcess()
-    spawnMock.mockReturnValue(proc)
-    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
-    Object.defineProperty(process, 'platform', { value: 'linux' })
+  it.each([false, true])(
+    'preserves Codex readiness and identity when deferred=%s',
+    async (deferStartupCommand) => {
+      const proc = mockPtyProcess()
+      spawnMock.mockReturnValue(proc)
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+      Object.defineProperty(process, 'platform', { value: 'linux' })
 
-    try {
-      await createPtySubprocess({
-        sessionId: 'test',
-        cols: 80,
-        rows: 24,
-        cwd: '/repo',
-        command: 'codex',
-        env: { SHELL: '/bin/zsh' }
-      })
-    } finally {
-      if (platform) {
-        Object.defineProperty(process, 'platform', platform)
+      try {
+        await createPtySubprocess({
+          sessionId: 'test',
+          cols: 80,
+          rows: 24,
+          cwd: '/repo',
+          command: 'codex',
+          deferStartupCommand,
+          env: { SHELL: '/bin/zsh' }
+        })
+      } finally {
+        if (platform) {
+          Object.defineProperty(process, 'platform', platform)
+        }
       }
-    }
 
-    const lastCall = spawnMock.mock.calls.at(-1)!
-    expect(lastCall[1]).toEqual(['-l'])
-    expect(lastCall[2].env.ZDOTDIR).toMatch(ZSH_SHELL_READY_DIR)
-    expect(lastCall[2].env.ORCA_SHELL_FEATURES).toContain('ready')
-    expect(lastCall[2].env.ORCA_SHELL_FEATURES).toContain('identity')
-  })
+      const lastCall = spawnMock.mock.calls.at(-1)!
+      expect(lastCall[1]).toEqual(['-l'])
+      expect(lastCall[2].env.ZDOTDIR).toMatch(ZSH_SHELL_READY_DIR)
+      expect(lastCall[2].env.ORCA_SHELL_FEATURES).toContain('ready')
+      expect(lastCall[2].env.ORCA_SHELL_FEATURES).toContain('identity')
+    }
+  )
 
   it('uses shell-ready wrapper for delivery-hinted Codex startup commands', async () => {
     const proc = mockPtyProcess()
