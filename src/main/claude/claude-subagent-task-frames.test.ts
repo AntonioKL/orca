@@ -61,6 +61,14 @@ describe('readClaudeSubagentTaskFrame', () => {
       }
     })
 
+    it('caps a subagent_type label the way a description is capped', () => {
+      const frame = readClaudeSubagentTaskFrame(
+        system('task_started', { task_id: 'task-1', subagent_type: 'a'.repeat(900) })
+      )
+      // The roster stores this label verbatim, so nothing downstream bounds it.
+      expect(frame?.label).toHaveLength(512)
+    })
+
     it('falls back to subagent_type only when the release sends no task_type', () => {
       expect(
         readClaudeSubagentTaskFrame(
