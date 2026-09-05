@@ -39,6 +39,7 @@ Three buckets. "Merged" means the code is on `main` and nothing in production ha
 6. Paging channel for auth alerts (5.2): needs the destination from you.
 
 **Open code follow-ups (no gate, nobody assigned)**
+- Same-cap job's verify step uses bare `curl --fail-with-body` against the just-rolled cell; one 503 at the LB warm-up edge failed c8 canary #2 (run 33935407461) after the transition verifier had already passed. Needs a bounded retry, same rule as #18723/#18740.
 - `verify-mutation` in `cloud-deploy-relay-production.yml`, the multi-target workflow, and the capacity workflow still binds to an exact commit; same exposure #18754 fixed for the same-cap and rehome paths.
 - The root oxlint config ignores `cloud/**`, so `check:code-quality:changed` never inspects relay-ops or the cloud dev scripts; typecheck + vitest is the only gate there.
 - Monitor bars that froze on non-health today: `directorInstancesMin: 5` with `latest-sum` (one-minute instance recycle), `endpointLatencyMs: 2000` on a US-runner probe to asia-east2, `cloudDataMaxAgeMs: 180000` vs Cloud Monitoring publish lag up to 255 s. Recalibrate with a week of data.
