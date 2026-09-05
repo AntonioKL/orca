@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  copyFileSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
@@ -71,7 +79,8 @@ describe.skipIf(!POSIX)('exportLocalNodeHeadersPrefix', () => {
       '#define NODE_MAJOR_VERSION 1\n#define NODE_MINOR_VERSION 0\n#define NODE_PATCH_VERSION 0\n'
     )
     const copied = join(prefix, 'bin', 'node')
-    spawnSync('cp', [process.execPath, copied])
+    copyFileSync(process.execPath, copied)
+    chmodSync(copied, 0o755)
     const { nodedir, pkgNodedir, marker } = runPrefix(copied)
     expect(nodedir).toBe('')
     expect(pkgNodedir).toBe('')
@@ -83,7 +92,8 @@ describe.skipIf(!POSIX)('exportLocalNodeHeadersPrefix', () => {
     roots.push(root)
     const copied = join(root, 'bin', 'node')
     mkdirSync(dirname(copied), { recursive: true })
-    spawnSync('cp', [process.execPath, copied])
+    copyFileSync(process.execPath, copied)
+    chmodSync(copied, 0o755)
     const { nodedir } = runPrefix(copied)
     expect(nodedir).toBe('')
   })
@@ -104,18 +114,20 @@ describe.skipIf(!POSIX)('exportLocalNodeHeadersPrefix', () => {
     roots.push(root)
     const copied = join(root, 'bin', 'node')
     mkdirSync(dirname(copied), { recursive: true })
-    spawnSync('cp', [process.execPath, copied])
-    const script = `${exportLocalNodeHeadersPrefix(copied)}printf '%s|%s' "$npm_config_nodedir" "$npm_package_config_node_gyp_nodedir"`
+    copyFileSync(process.execPath, copied)
+    chmodSync(copied, 0o755)
+    const script = `${exportLocalNodeHeadersPrefix(copied)}printf '%s|%s|%s' "$npm_config_nodedir" "$NPM_CONFIG_NODEDIR" "$npm_package_config_node_gyp_nodedir"`
     const result = spawnSync('/bin/sh', ['-c', script], {
       encoding: 'utf8',
       env: {
         ...process.env,
         npm_config_nodedir: '/usr/stale-headers',
+        NPM_CONFIG_NODEDIR: '/usr/stale-headers',
         npm_package_config_node_gyp_nodedir: '/usr/stale-headers'
       }
     })
     expect(result.status).toBe(0)
-    expect(result.stdout.split('\n').at(-1)).toBe('|')
+    expect(result.stdout.split('\n').at(-1)).toBe('||')
   })
 
   it('does not fail the command line when node itself cannot run', () => {
@@ -127,6 +139,21 @@ describe.skipIf(!POSIX)('exportLocalNodeHeadersPrefix', () => {
 })
 
 describe('localNodeHeadersFromOutput', () => {
+  it('reads the host answer, not the copy of the marker echo quoted in an exec-failure head', () => {
+    // The real shape: execCommand quotes the whole command line, prefix included, before the output.
+    const command = `export PATH='/usr/local/bin':$PATH && cd '/root/.orca-remote/relay-x' && ${exportLocalNodeHeadersPrefix('/usr/local/bin/node')}npm install node-pty 2>&1`
+    const failed = (hostOutput: string): string =>
+      `Command "${command}" failed (exit 1): ${hostOutput}`
+    expect(
+      localNodeHeadersFromOutput(failed('ORCA-NODE-HEADERS:none\ngyp ERR! configure error'))
+    ).toBeNull()
+    expect(
+      localNodeHeadersFromOutput(failed('ORCA-NODE-HEADERS:/usr/local\ngyp ERR! configure error'))
+    ).toBe('/usr/local')
+    // No host output at all after the head: the command copy alone must not count as a marker.
+    expect(localNodeHeadersFromOutput(failed(''))).toBeUndefined()
+  })
+
   it('distinguishes an exported dir, an explicit none, and no marker at all', () => {
     expect(localNodeHeadersFromOutput('x\nORCA-NODE-HEADERS:/usr/local\ngyp ERR!')).toBe(
       '/usr/local'

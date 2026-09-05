@@ -49,11 +49,14 @@ export const LOCAL_NODE_HEADERS_MARKER_PREFIX = 'ORCA-NODE-HEADERS:'
  */
 export function exportLocalNodeHeadersPrefix(nodePath: string): string {
   const probe = `${shellEscape(nodePath)} -e ${shellEscape(LOCAL_NODE_HEADERS_PROBE_JS)} 2>/dev/null`
-  // Why the unset: a remote profile can already carry a nodedir (a stale distro header dir, an old
-  // ~/.npmrc). Left alone it would bypass the version check above and build a wrong-ABI binding.
+  // Why the unset: a remote profile can already export a nodedir (a stale distro header dir), in
+  // either case npm accepts. Left alone it would bypass the version check above and build a
+  // wrong-ABI binding. Deliberately env only: a `nodedir=` in ~/.npmrc is not reachable from here
+  // -- npm ignores an empty env override, and a CLI `--nodedir=` would also override the good
+  // export -- so an npmrc setting stays the operator's, as it was before this prefix existed.
   return (
     `${NODEDIR_SHELL_VAR}=$(${probe}); ` +
-    `unset npm_config_nodedir npm_package_config_node_gyp_nodedir; ` +
+    `unset npm_config_nodedir NPM_CONFIG_NODEDIR npm_package_config_node_gyp_nodedir; ` +
     `if [ -n "$${NODEDIR_SHELL_VAR}" ]; then ` +
     `export npm_config_nodedir="$${NODEDIR_SHELL_VAR}" npm_package_config_node_gyp_nodedir="$${NODEDIR_SHELL_VAR}"; ` +
     `fi; ` +
@@ -66,9 +69,15 @@ export function exportLocalNodeHeadersPrefix(nodePath: string): string {
  * marker is absent (output truncated, or the command never reached the prefix).
  */
 export function localNodeHeadersFromOutput(output: string): string | null | undefined {
-  // Why not line-anchored: a failed exec's message prepends `Command "..." failed (exit N): ` to
-  // the first output line, and the marker is that line.
-  for (const line of output.split(/\r?\n/)) {
+  // Why the head is stripped first: a failed exec's message is `Command "<command>" failed
+  // (exit N): <output>`, and <command> quotes this prefix verbatim -- including the marker's
+  // `echo`. Scanning from the start would match that copy and return `${ORCA_NODE_HEADERS_DIR:-
+  // none}"...` as a "dir". Only what follows the head is the host's answer.
+  const head = output.match(EXEC_FAILURE_HEAD_RE)
+  const hostOutput = head ? output.slice(head[0].length) : output
+  // First match, not last: the host's own line comes first, and later lines are npm/gyp output
+  // that must not be able to spoof it.
+  for (const line of hostOutput.split(/\r?\n/)) {
     const at = line.indexOf(LOCAL_NODE_HEADERS_MARKER_PREFIX)
     if (at === -1) {
       continue
@@ -78,3 +87,6 @@ export function localNodeHeadersFromOutput(output: string): string | null | unde
   }
   return undefined
 }
+
+/** `Command "<anything, quotes included>" failed (exit N): ` -- see ssh-relay-exec-command.ts. */
+const EXEC_FAILURE_HEAD_RE = /^Command "[\s\S]*?" failed \(exit -?\d+\): /

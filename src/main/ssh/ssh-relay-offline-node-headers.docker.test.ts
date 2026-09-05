@@ -176,5 +176,29 @@ describe.skipIf(!RUN_REVIEW_ORACLE)(
         await connection.disconnect()
       }
     }, 600_000)
+
+    it('names the missing-local-headers cause, not an Orca defect, when the host ships no headers', async () => {
+      // Same offline host, headers removed and the relay uninstalled so the deploy compiles again.
+      // This is the shape a review found misreported: the exec-failure message quotes the whole
+      // command (marker echo included) ahead of the output, and the parser must not read that copy.
+      const activeFixture = fixture as TargetFixture
+      dockerExec(
+        activeFixture,
+        'rm -rf /usr/local/include/node /root/.orca-remote /root/.cache/node-gyp'
+      )
+      const connection = createConnection(activeFixture)
+      await connection.connect()
+      try {
+        const error = await deployAndLaunchRelay(connection, undefined, 60).catch((e: Error) => e)
+        expect(error).toBeInstanceOf(Error)
+        const message = (error as Error).message
+        console.log(`[offline-node-headers] ${NODE_IMAGE} no-headers: ${message.split('\n')[0]}`)
+        expect(message).toContain('no local headers matching its own version')
+        expect(message).not.toContain('Orca defect')
+        expect(message).toContain('ECONNREFUSED')
+      } finally {
+        await connection.disconnect()
+      }
+    }, 600_000)
   }
 )

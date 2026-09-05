@@ -177,20 +177,26 @@ describe('installNativeDeps staged uploads', () => {
     }
   })
 
+  // What execCommand actually rejects with: the whole command line (marker echo included) quoted
+  // ahead of the host's output. A fixture that omits the command hides the marker-parsing bug.
+  function rejectNpmInstallLikeExecCommand(hostOutput: string): void {
+    vi.mocked(execCommand).mockImplementationOnce(async (_conn, command) => {
+      throw new Error(`Command "${command}" failed (exit 1): ${hostOutput}`)
+    })
+  }
+  const HEADERS_REFUSED =
+    'npm error gyp http fetch GET https://nodejs.org/download/release/v24.12.0/node-v24.12.0-headers.tar.gz attempt 1 failed with ECONNREFUSED\nnpm error gyp ERR! configure error'
+
   it('names the fix when node-gyp cannot download headers and the host ships none (STA-6674)', async () => {
     const conn = makeMockConnection(sftpCapture)
-    feed(
-      makeExecResponses({
-        npmInstall: {
-          reject:
-            'Command "npm install" failed (exit 1): npm error gyp http fetch GET https://nodejs.org/download/release/v24.12.0/node-v24.12.0-headers.tar.gz attempt 1 failed with ECONNREFUSED\nnpm error gyp ERR! configure error'
-        }
-      })
-    )
+    feed(makeStagedFirstInstallExecPrefix())
+    rejectNpmInstallLikeExecCommand(`ORCA-NODE-HEADERS:none\n${HEADERS_REFUSED}`)
+    feed(['']) // clean stage root
 
     const error = await deployAndLaunchRelay(conn).catch((e: Error) => e)
     expect((error as Error).message).toContain('could not download the Node.js headers')
     expect((error as Error).message).toContain('no local headers matching its own version')
+    expect((error as Error).message).not.toContain('Orca defect')
     expect((error as Error).message).toContain('ECONNREFUSED')
     // A full toolchain: the toolchain probe must not run, and this is not a "build tools" error.
     expect((error as Error).message).not.toContain('build tools')
@@ -201,14 +207,9 @@ describe('installNativeDeps staged uploads', () => {
   it('reports an Orca defect when headers were exported but node-gyp downloaded anyway', async () => {
     // The marker says the export happened; a download after it means node-gyp never read the env.
     const conn = makeMockConnection(sftpCapture)
-    feed(
-      makeExecResponses({
-        npmInstall: {
-          reject:
-            'Command "npm install" failed (exit 1): ORCA-NODE-HEADERS:/usr/local\nnpm error gyp http fetch GET https://nodejs.org/download/release/v24.12.0/node-v24.12.0-headers.tar.gz attempt 1 failed with ECONNREFUSED\nnpm error gyp ERR! configure error'
-        }
-      })
-    )
+    feed(makeStagedFirstInstallExecPrefix())
+    rejectNpmInstallLikeExecCommand(`ORCA-NODE-HEADERS:/usr/local\n${HEADERS_REFUSED}`)
+    feed(['']) // clean stage root
 
     const error = await deployAndLaunchRelay(conn).catch((e: Error) => e)
     expect((error as Error).message).toContain('/usr/local/include/node')
