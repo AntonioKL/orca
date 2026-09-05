@@ -923,3 +923,4 @@ Owner: "sure, feel free to drive these." Sequence chosen: Roll 1 first (highest 
 | Merged 03:14Z | stablyai/orca #18778: `--retry-freshness` on every same-cap wave including the first, and the retry loop now stops before the next wait would push evidence past the wave's age bound (it was checked only at entry before). Twin carve-out in the capacity job filed as a follow-up. |
 | Batch 1 cell 1 (c10) | **Succeeded** 03:14–03:27Z (preflight, drain, apply, verify, restore). c13 started 03:27Z. |
 | Batch 1 cell 2 (c13) | **Succeeded** 03:27–03:38Z. c14 started 03:38Z. |
+| Batch 1 cell 3 (c14) | **Succeeded** 03:38–03:50Z. c15 started 03:50Z. |
