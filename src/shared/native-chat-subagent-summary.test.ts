@@ -133,7 +133,7 @@ describe('subagentGroupFallbackText', () => {
         agent({ id: 'b', state: 'working' }),
         agent({ id: 'c', state: 'failed' })
       ])
-    ).toBe('Kicked off 3 subagents — 2 working (1 failed)')
+    ).toBe('Kicked off 3 subagents (1 failed)')
     expect(
       subagentGroupFallbackText([
         agent({ id: 'a', state: 'completed' }),
@@ -142,9 +142,32 @@ describe('subagentGroupFallbackText', () => {
     ).toBe('Ran 2 subagents (1 stopped)')
   })
 
+  // The sentence is frozen into a durable journal row and replayed on every
+  // reconnect, to clients that draw no roster block and reconcile nothing. It
+  // may therefore only state what a dead process still makes true: the group was
+  // spawned, and whatever outcome had already latched. `Kicked off` vs `Ran`
+  // reports whether an outcome was recorded yet, which is a write-time fact —
+  // saying `Ran` while children were in flight would assert they exited.
+  it('makes no liveness claim a replayed row could not still justify', () => {
+    const inFlight = subagentGroupFallbackText([
+      agent({ id: 'a', state: 'working' }),
+      agent({ id: 'b', state: 'working' }),
+      agent({ id: 'c', state: 'completed' })
+    ])
+
+    expect(inFlight).toBe('Kicked off 3 subagents')
+    expect(inFlight).not.toMatch(/\bworking\b/)
+    expect(
+      subagentGroupFallbackText([
+        agent({ id: 'a', state: 'working' }),
+        agent({ id: 'b', state: 'unverifiable' })
+      ])
+    ).toBe('Kicked off 2 subagents (1 unverifiable)')
+  })
+
   it('stays quiet when nothing has gone wrong', () => {
     expect(subagentGroupFallbackText([agent({ id: 'a', state: 'working' })])).toBe(
-      'Kicked off 1 subagent — 1 working'
+      'Kicked off 1 subagent'
     )
     expect(subagentGroupFallbackText([agent({ id: 'a', state: 'completed' })])).toBe(
       'Ran 1 subagent'
@@ -174,6 +197,21 @@ describe('isSubagentGroupFallbackText', () => {
     expect(isSubagentGroupFallbackText('Kicked off 4 subagents — 2 working (1 timed-out)')).toBe(
       true
     )
+  })
+
+  // Journals written before the twin dropped its live count still hold the old
+  // sentence, and those rows replay forever. A pattern that stopped matching
+  // them would print every one of those rosters twice — once as the block, once
+  // as prose the reader meant to drop.
+  it('still recognizes the legacy twin already frozen into existing journals', () => {
+    for (const legacy of [
+      'Kicked off 1 subagent — 1 working',
+      'Kicked off 4 subagents — 2 working',
+      'Kicked off 4 subagents — 2 working (1 failed)',
+      'Kicked off 4 subagents — 2 working (1 timed-out)'
+    ]) {
+      expect(isSubagentGroupFallbackText(legacy)).toBe(true)
+    }
   })
 
   it('leaves prose that merely mentions subagents alone', () => {

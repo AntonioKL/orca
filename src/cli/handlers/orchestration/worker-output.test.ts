@@ -42,6 +42,31 @@ function occurrences(haystack: string, needle: string): number {
 }
 
 describe('formatWorkerRead', () => {
+  // The replay case this row is durable for: SQLite-backed, re-sent on every
+  // reconnect, and read here by a client that draws no roster block, runs no
+  // reconciliation, and cannot re-check whether those children still exist. A
+  // sentence frozen mid-flight outlives the process that wrote it, so it must
+  // not keep asserting a liveness only that process could have observed —
+  // `docs/reference/ssh-execution-boundary.md` calls that loss of contact
+  // reported as a live state.
+  it('replays a mid-flight roster row without claiming a child is still working', () => {
+    const midFlight: readonly NativeChatSubagentEntry[] = [
+      { id: 'child-1', label: 'read', state: 'working' },
+      { id: 'child-2', label: 'search', state: 'working' },
+      { id: 'child-3', label: 'edit', state: 'failed' }
+    ]
+
+    const output = formatWorkerRead(
+      transcriptRead([
+        { type: 'text', text: subagentGroupFallbackText(midFlight) },
+        { type: 'subagent-group', groupId: 'thread:turn-1', agents: [...midFlight] }
+      ])
+    )
+
+    expect(output).toBe('[assistant] Kicked off 3 subagents (1 failed)')
+    expect(output).not.toMatch(/\bworking\b/)
+  })
+
   // The body `codexSubagentGroupBody` actually writes: the plain-text twin, then
   // the block it stands in for. The twin exists for clients that cannot draw the
   // block, so a client printing the block must not print the twin beside it —

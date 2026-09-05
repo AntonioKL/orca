@@ -71,9 +71,14 @@ export function codexSubagentPathSegments(agentPath: string | null): string[] {
   return agentPath === null ? [] : agentPath.split('/').filter((part) => part.length > 0)
 }
 
-/** The one agent path that is the parent turn itself. Matched literally, as
- *  Codex does: `/morpheus` is also a single-segment path but IS a child. */
-const CODEX_ROOT_AGENT_PATH = '/root'
+/** The one path segment that names the parent turn itself rather than a child.
+ *  Compared after the same normalization the label uses, not against the raw
+ *  string: `/root/` and `/root//` are the same node as `/root`, and a check that
+ *  disagreed with `codexSubagentPathSegments` would let one path be both the
+ *  turn and a child of it — a phantom row labelled `root` inflating the group.
+ *  Only this segment is the root; `/morpheus` is single-segment too but IS a
+ *  child. */
+const CODEX_ROOT_AGENT_SEGMENT = 'root'
 
 /**
  * Whether an activity item describes the ROOT of the agent tree rather than a
@@ -85,12 +90,16 @@ const CODEX_ROOT_AGENT_PATH = '/root'
  * self-correcting.
  */
 export function isCodexRootAgentActivity(activity: CodexSubagentActivity): boolean {
-  return activity.agentPath === CODEX_ROOT_AGENT_PATH
+  const segments = codexSubagentPathSegments(activity.agentPath)
+  return segments.length === 1 && segments[0] === CODEX_ROOT_AGENT_SEGMENT
 }
 
-/** Row label: the agent path's trailing segment. */
+/** Row label: the agent path's trailing segment. A segment with nothing visible
+ *  in it survives the empty-segment filter but would draw a nameless row, so it
+ *  reads as no label and the caller's placeholder takes over. */
 export function codexSubagentLabel(activity: CodexSubagentActivity): string | null {
-  return codexSubagentPathSegments(activity.agentPath).at(-1) ?? null
+  const trailing = codexSubagentPathSegments(activity.agentPath).at(-1)
+  return trailing !== undefined && trailing.trim().length > 0 ? trailing : null
 }
 
 export type CodexThreadTokenTotal = { threadId: string; totalTokens: number }

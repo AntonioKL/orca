@@ -4,7 +4,8 @@
 // "N working" means: the producer uses the same terminal predicate the renderer
 // does, so a state that reads terminal here latches terminal there. Mobile has
 // no roster renderer — it shows only the write-time-frozen fallback sentence,
-// which is why that sentence is built from this same summary.
+// which is why that sentence is built from this same summary, and why the
+// sentence itself may claim nothing that a later reader cannot still verify.
 
 import {
   isSubagentGroupBlock,
@@ -128,24 +129,44 @@ export function subagentGroupBlocks(
 }
 
 /** Plain-text stand-in for the roster, frozen into the journal at write time for
- *  clients without the block type. It carries the adverse count too: a reader
- *  that only ever sees this sentence must not be told a failing fan-out is fine. */
+ *  clients without the block type.
+ *
+ *  It states only what stays true once the writing process is gone: the group was
+ *  spawned, and whatever outcome had already latched. It deliberately carries NO
+ *  live count. The row is durable and replayed on every reconnect, and the
+ *  clients that read this sentence instead of the block reconcile nothing and
+ *  cannot re-check the children — so a frozen `N working` would go on asserting
+ *  a liveness only the dead process could have observed. That is the collapse
+ *  `docs/reference/ssh-execution-boundary.md` forbids: loss of contact is not
+ *  evidence of a live state. Liveness stays with the structured block, whose
+ *  reader can settle a stale `working` to `unverifiable`.
+ *
+ *  `Kicked off` vs `Ran` is kept, and is not a liveness claim: it reports
+ *  whether an outcome had been recorded when the row was written. Saying `Ran`
+ *  while children were in flight would assert they exited, which is the same
+ *  error in the other direction.
+ *
+ *  The adverse count stays: a reader that only ever sees this sentence must not
+ *  be told a failing fan-out is fine. */
 export function subagentGroupFallbackText(agents: readonly NativeChatSubagentEntry[]): string {
   const { total, working, adverseState, adverseCount } = summarizeSubagentGroup(agents)
   const noun = total === 1 ? 'subagent' : 'subagents'
   const adverse = adverseState === null ? '' : ` (${adverseCount} ${adverseState})`
-  return working > 0
-    ? `Kicked off ${total} ${noun} — ${working} working${adverse}`
-    : `Ran ${total} ${noun}${adverse}`
+  return `${working > 0 ? 'Kicked off' : 'Ran'} ${total} ${noun}${adverse}`
 }
 
 /** Whether `text` is a roster block's frozen twin rather than ordinary prose.
  *  Shape-matched, not recomputed: a roster written by a newer build can hold a
  *  state this build normalizes to `unverifiable`, so its twin never equals the
  *  sentence recomputed here — and a byte compare would then print the roster
- *  twice. Keep in sync with `subagentGroupFallbackText`. */
+ *  twice.
+ *
+ *  The `— N working` clause is LEGACY: journals written before the twin dropped
+ *  its live count still hold it, and those rows replay forever. Dropping it from
+ *  the pattern would print every one of them twice. Keep in sync with
+ *  `subagentGroupFallbackText`, and keep the legacy branch. */
 const SUBAGENT_GROUP_FALLBACK_PATTERN =
-  /^(?:Kicked off \d+ subagents? — \d+ working|Ran \d+ subagents?)(?: \(\d+ [a-z][a-z-]*\))?$/
+  /^(?:Kicked off \d+ subagents?(?: — \d+ working)?|Ran \d+ subagents?)(?: \(\d+ [a-z][a-z-]*\))?$/
 
 export function isSubagentGroupFallbackText(text: string): boolean {
   return SUBAGENT_GROUP_FALLBACK_PATTERN.test(text)

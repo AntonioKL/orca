@@ -151,6 +151,41 @@ describe('CodexSubagentRoster', () => {
     expect(agents()).toMatchObject([{ id: 'child-m', label: 'morpheus', state: 'working' }])
   })
 
+  // `codexSubagentPathSegments` already defines what a path means for the label,
+  // and the root check has to agree with it: a path that normalizes to the same
+  // node must classify the same way, or one string is both the turn itself and a
+  // child of it — a phantom row labelled `root` inflating the group by one.
+  it('reads a root path with a trailing or doubled separator as the turn itself', () => {
+    for (const agentPath of ['/root/', '/root//', '//root']) {
+      const { roster, appended } = createHarness()
+
+      deliver(roster, activity({ kind: 'started', agentThreadId: THREAD, agentPath }))
+
+      expect(appended).toEqual([])
+    }
+  })
+
+  it('keeps a doubled separator inside a child path off the label', () => {
+    const { roster, agents } = createHarness()
+
+    deliver(
+      roster,
+      activity({ kind: 'started', agentThreadId: 'child-1', agentPath: '/root//read/' })
+    )
+
+    expect(agents()).toMatchObject([{ id: 'child-1', label: 'read' }])
+  })
+
+  // An all-whitespace trailing segment survives the empty-segment filter and
+  // would draw a row with no visible name at all.
+  it('falls back to the placeholder when the trailing segment has nothing to show', () => {
+    const { roster, agents } = createHarness()
+
+    deliver(roster, activity({ kind: 'started', agentThreadId: 'child-1', agentPath: '/root/   ' }))
+
+    expect(agents()).toMatchObject([{ id: 'child-1', label: 'subagent' }])
+  })
+
   it('ignores the root node so a turn is not its own subagent', () => {
     const { roster, appended } = createHarness()
 
@@ -176,7 +211,7 @@ describe('CodexSubagentRoster', () => {
     ])
     expect(
       body?.kind === 'message' && body.blocks[0]?.type === 'text' ? body.blocks[0].text : ''
-    ).toBe('Kicked off 1 subagent — 1 working')
+    ).toBe('Kicked off 1 subagent')
   })
 
   it('keys the durable identity by the parent turn so a revision lands on one row', () => {
