@@ -5,6 +5,8 @@ import React, { forwardRef, useImperativeHandle } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentJournalRenderItem } from '../../../../shared/agent-session-journal-types'
 import { decodeAgentSessionQuestionAnswers } from '../../../../shared/agent-session-question-answer'
+import { structuredAgentSessionPaneKey } from '../../../../shared/structured-agent-session-projection'
+import { useAppStore } from '@/store'
 import type { NativeChatQuestionCardProps } from './NativeChatQuestionCard'
 
 const mocks = vi.hoisted(() => ({
@@ -155,6 +157,7 @@ describe('NativeChatStructuredSession', () => {
     mocks.handlePasteEvent.mockReset()
     mocks.pasteFromClipboard.mockReset()
     mocks.submissions = []
+    useAppStore.setState({ agentStatusByPaneKey: {}, agentStatusEpoch: 0 })
   })
 
   it('routes app-menu paste into the structured composer', () => {
@@ -210,6 +213,49 @@ describe('NativeChatStructuredSession', () => {
 
       expect(mocks.messageListProps?.showTurnStatus).toBe(true)
       expect(mocks.messageListProps?.runtimeContext).not.toBeUndefined()
+    }
+  )
+
+  it.each(['codex', 'claude'] as const)(
+    'mounts the monitoring row on the structured %s path',
+    (agent) => {
+      const tabId = `structured-tab-monitoring-${agent}`
+      const sessionId = `session-monitoring-${agent}`
+      const paneKey = structuredAgentSessionPaneKey(tabId, sessionId)
+      const now = Date.now()
+      useAppStore.setState({
+        agentStatusByPaneKey: {
+          [paneKey]: {
+            paneKey,
+            agentType: agent,
+            state: 'working',
+            workingMode: 'monitoring',
+            prompt: 'Monitor background tasks',
+            updatedAt: now,
+            stateStartedAt: now,
+            stateHistory: []
+          }
+        },
+        agentStatusEpoch: 1
+      })
+
+      render(
+        <NativeChatStructuredSession
+          isVisible
+          tabId={tabId}
+          sessionId={sessionId}
+          target={{ kind: 'local' }}
+          agent={agent}
+          allowFileUriLinks
+        />
+      )
+
+      expect(screen.getByRole('status').textContent).toBe('Monitoring background tasks')
+      expect(
+        document
+          .querySelector('[data-native-chat-root="true"]')
+          ?.getAttribute('data-native-chat-monitoring')
+      ).toBe('true')
     }
   )
 
