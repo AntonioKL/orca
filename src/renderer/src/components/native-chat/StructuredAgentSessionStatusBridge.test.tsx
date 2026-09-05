@@ -7,6 +7,7 @@ import type {
   AgentSessionStatusSummary
 } from '../../../../shared/agent-session-wire'
 import type { Tab } from '../../../../shared/tab-types'
+import type * as RuntimeRpcClientModule from '@/runtime/runtime-rpc-client'
 
 const mocks = vi.hoisted(() => ({
   removeAgentStatus: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
     setState: (state: Record<string, unknown>) => void
   },
   subscribeStatus: vi.fn(),
+  supportsCapability: vi.fn(),
   unsubscribe: vi.fn()
 }))
 
@@ -74,6 +76,11 @@ vi.mock('@/store', async () => {
 vi.mock('@/lib/worktree-runtime-owner', () => ({
   getRuntimeEnvironmentIdForWorktree: (state: { testRuntimeOwner?: string | null }) =>
     state.testRuntimeOwner ?? null
+}))
+
+vi.mock('@/runtime/runtime-rpc-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof RuntimeRpcClientModule>()),
+  runtimeEnvironmentSupportsCapability: mocks.supportsCapability
 }))
 
 vi.mock('@/runtime/structured-agent-session-client', () => ({
@@ -136,6 +143,7 @@ describe('StructuredAgentSessionStatusBridge', () => {
     vi.clearAllMocks()
     resetStructuredAgentSessionStatusFeedsForTests()
     mocks.subscribeStatus.mockResolvedValue({ unsubscribe: mocks.unsubscribe })
+    mocks.supportsCapability.mockResolvedValue(true)
     mocks.store?.setState({
       agentStatusByPaneKey: {},
       testRuntimeOwner: null,

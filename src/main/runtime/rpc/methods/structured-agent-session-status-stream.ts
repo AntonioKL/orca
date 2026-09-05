@@ -5,6 +5,7 @@
 
 import { defineStreamingMethod, type RpcAnyMethod, type RpcContext } from '../core'
 import { requireStructuredHost as requireHost } from './structured-agent-session-gate'
+import { structuredAgentSessionStatusSubscriptionId } from './structured-agent-session-subscription-id'
 
 /** Ties a stream to both ends that can close it — the runtime's subscription registry and the
  *  transport abort — so either one runs `onClose` exactly once. */
@@ -46,7 +47,7 @@ export const STRUCTURED_AGENT_SESSION_STATUS_METHODS: RpcAnyMethod[] = [
     params: null,
     handler: async (_params, ctx, emit) => {
       const host = requireHost(ctx)
-      const subscriptionId = `agentSession.status:${ctx.connectionId ?? 'local'}:${ctx.requestId ?? 'default'}`
+      const subscriptionId = structuredAgentSessionStatusSubscriptionId(ctx)
       let dispose = (): void => {}
       const stream = bindStructuredAgentSessionStream(ctx, subscriptionId, () => dispose())
       if (stream.isClosed()) {

@@ -54,10 +54,12 @@ export class StructuredAgentSessionStatusFeed {
 
   /** Opens with every session this host has projected, live ones re-read, then only changes. */
   subscribe(subscriber: StructuredAgentSessionStatusSubscriber): () => void {
-    this.subscribers.set(subscriber.id, subscriber)
-    for (const [sessionId, session] of this.deps.sessions) {
-      this.published.set(sessionId, this.summaryFor(sessionId, session, session.journal))
+    // Re-project before registering: a change found here has to reach the subscribers that
+    // already read the old value, and the arriving one carries it in its snapshot instead.
+    for (const [sessionId] of this.deps.sessions) {
+      this.publish(sessionId)
     }
+    this.subscribers.set(subscriber.id, subscriber)
     this.emit(subscriber, { type: 'snapshot', sessions: [...this.published.values()] })
     return () => this.unsubscribe(subscriber.id)
   }

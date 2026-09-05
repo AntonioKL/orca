@@ -26,6 +26,10 @@ import {
   STRUCTURED_AGENT_SESSION_STATUS_METHODS
 } from './structured-agent-session-status-stream'
 import {
+  structuredAgentSessionSubscriptionBase as subscriptionBaseFor,
+  structuredAgentSessionSubscriptionId as subscriptionIdFor
+} from './structured-agent-session-subscription-id'
+import {
   AttachParams,
   CancelParams,
   CreateParams,
@@ -40,15 +44,6 @@ import {
   SubscribeParams,
   UnsubscribeParams
 } from './structured-agent-session-schemas'
-
-const SUBSCRIPTION_PREFIX = 'agentSession'
-
-function subscriptionIdFor(ctx: RpcContext, sessionId: string): string {
-  const base = `${SUBSCRIPTION_PREFIX}:${ctx.connectionId ?? 'local'}:${sessionId}`
-  // Shared control multiplexes several streams over one socket; the frame id
-  // keeps one subscriber from evicting another on the same session.
-  return ctx.requestId ? `${base}:${ctx.requestId}` : base
-}
 
 /**
  * The attach-shaped entries take the location from the client instead of resolving it from a
@@ -261,8 +256,7 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
     params: UnsubscribeParams,
     handler: async (params, ctx) => {
       requireHost(ctx)
-      const connection = ctx.connectionId ?? 'local'
-      const base = `${SUBSCRIPTION_PREFIX}:${connection}:${params.sessionId}`
+      const base = subscriptionBaseFor(ctx, params.sessionId)
       if (params.subscriptionId) {
         ctx.runtime.cleanupSubscription(`${base}:${params.subscriptionId}`)
         return { unsubscribed: true }

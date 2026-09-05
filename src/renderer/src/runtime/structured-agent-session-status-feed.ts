@@ -9,7 +9,11 @@ import type {
   AgentSessionStatusEvent,
   AgentSessionStatusSummary
 } from '../../../shared/agent-session-wire'
-import type { RuntimeClientTarget } from './runtime-rpc-client'
+import { AGENT_SESSION_STATUS_FEED_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
+import {
+  runtimeEnvironmentSupportsCapability,
+  type RuntimeClientTarget
+} from './runtime-rpc-client'
 import { subscribeStructuredAgentSessionStatus } from './structured-agent-session-client'
 
 export type StructuredAgentSessionStatusSnapshot = ReadonlyMap<string, AgentSessionStatusSummary>
@@ -22,13 +26,16 @@ export type StructuredAgentSessionStatusFeedOwner = {
 
 const RECONNECT_MAX_DELAY_MS = 5_000
 
-const owners = new Map<string, StructuredAgentSessionStatusFeedOwner>()
+/** `stop` is the map's own teardown, not part of the owner contract callers hold. */
+type OwnedStatusFeed = StructuredAgentSessionStatusFeedOwner & { stop: () => void }
+
+const owners = new Map<string, OwnedStatusFeed>()
 
 export function structuredAgentSessionStatusFeedKey(target: RuntimeClientTarget): string {
   return target.kind === 'local' ? 'local' : `environment:${target.environmentId}`
 }
 
-function createOwner(target: RuntimeClientTarget): StructuredAgentSessionStatusFeedOwner {
+function createOwner(target: RuntimeClientTarget): OwnedStatusFeed {
   let snapshot: StructuredAgentSessionStatusSnapshot = new Map()
   const listeners = new Set<() => void>()
   const activations = new Set<symbol>()
@@ -83,9 +90,7 @@ function createOwner(target: RuntimeClientTarget): StructuredAgentSessionStatusF
       }
     }, delay)
   }
-  open = (): void => {
-    const candidate = ++generation
-    dropHandle()
+  const subscribeToHost = (candidate: number): void => {
     void subscribeStructuredAgentSessionStatus(
       target,
       (event) => {
@@ -121,6 +126,31 @@ function createOwner(target: RuntimeClientTarget): StructuredAgentSessionStatusF
       })
       .catch(() => scheduleReconnect(candidate))
   }
+  open = (): void => {
+    const candidate = ++generation
+    dropHandle()
+    if (target.kind !== 'environment') {
+      // A local host is this build; only a remote one can predate the method.
+      subscribeToHost(candidate)
+      return
+    }
+    const environmentId = target.environmentId
+    void runtimeEnvironmentSupportsCapability(
+      environmentId,
+      AGENT_SESSION_STATUS_FEED_RUNTIME_CAPABILITY
+    )
+      .then((supported) => {
+        if (!active(candidate)) {
+          return
+        }
+        // A host without the method is terminal, not a fault: retrying would relay-probe
+        // forever. A failed probe is not an answer, so that path still reconnects.
+        if (supported) {
+          subscribeToHost(candidate)
+        }
+      })
+      .catch(() => scheduleReconnect(candidate))
+  }
   const stop = (): void => {
     generation += 1
     clearReconnect()
@@ -146,7 +176,8 @@ function createOwner(target: RuntimeClientTarget): StructuredAgentSessionStatusF
     subscribe: (listener) => {
       listeners.add(listener)
       return () => listeners.delete(listener)
-    }
+    },
+    stop
   }
 }
 
@@ -163,5 +194,10 @@ export function getStructuredAgentSessionStatusFeed(
 }
 
 export function resetStructuredAgentSessionStatusFeedsForTests(): void {
+  // Dropping the map alone leaves a live subscription and its pending reconnect running
+  // into the next test, where they reopen a stream nothing is holding.
+  for (const owner of owners.values()) {
+    owner.stop()
+  }
   owners.clear()
 }

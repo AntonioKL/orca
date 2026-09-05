@@ -1,3 +1,4 @@
+import { normalizePromptField } from './agent-status-field-normalization'
 import type { AgentJournalRenderItem } from './agent-session-journal-types'
 import type { NativeChatBlock, NativeChatMessage } from './native-chat-types'
 import { sha256 } from './sha256'
@@ -146,14 +147,17 @@ export function projectStructuredAgentSessionStatus(
   return activeStructuredAgentSessionTurnId(items) ? 'working' : 'idle'
 }
 
-/** The newest user prompt, as the sidebar quotes it. */
+/** The newest user prompt, bounded the way every other producer of AgentStatusEntry.prompt
+ *  bounds it: session lists render a one-line preview, and this one also travels the wire. */
 export function latestStructuredAgentSessionPrompt(
   items: readonly AgentJournalRenderItem[]
 ): string {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const body = items[index]?.body
     if (body?.kind === 'message' && body.role === 'user') {
-      return body.blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n')
+      return normalizePromptField(
+        body.blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n')
+      )
     }
   }
   return ''

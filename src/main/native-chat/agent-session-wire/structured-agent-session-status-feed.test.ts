@@ -189,6 +189,36 @@ describe('StructuredAgentSessionStatusFeed', () => {
     ])
   })
 
+  it('tells the sitting subscribers about a change a new subscriber re-projected', async () => {
+    const journal = await openJournal()
+    const { feed, events } = feedFor(new Map([[SESSION, { journal }]]))
+    // Journal appends and the feed's publish are separate queue submissions, so the journal
+    // can already hold the turn when a second client connects and re-projects it.
+    await journal.appendItem(
+      USER_IDENTITY,
+      { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'hello' }] },
+      { fence: 1 }
+    )
+
+    const late: AgentSessionStatusEvent[] = []
+    feed.subscribe({ id: 'list-late', emit: (event) => late.push(event) })
+
+    expect(events.at(-1)).toEqual({
+      type: 'status',
+      session: expect.objectContaining({ status: 'idle', latestPrompt: 'hello' })
+    })
+    // The arriving subscriber reads that same state once, from its snapshot.
+    expect(late).toEqual([
+      {
+        type: 'snapshot',
+        sessions: [expect.objectContaining({ status: 'idle', latestPrompt: 'hello' })]
+      }
+    ])
+    // The cache is not left holding a value nobody was told about.
+    feed.publish(SESSION)
+    expect(events).toHaveLength(2)
+  })
+
   it('ends a closed subscriber and keeps publishing to the rest', async () => {
     const journal = await openJournal()
     const { feed, events, dispose } = feedFor(new Map([[SESSION, { journal }]]))

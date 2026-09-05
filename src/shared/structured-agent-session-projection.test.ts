@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { AGENT_STATUS_MAX_FIELD_LENGTH } from './agent-status-field-normalization'
 import type { AgentJournalRenderItem } from './agent-session-journal-types'
 import { parsePaneKey } from './stable-pane-id'
 import {
@@ -71,12 +72,24 @@ describe('structured agent session status projection', () => {
     })
     expect(projectStructuredAgentSessionStatusSummary([first, second, running])).toEqual({
       status: 'working',
-      latestPrompt: 'second\nline'
+      latestPrompt: 'second line'
     })
     expect(projectStructuredAgentSessionStatusSummary([first, second])).toEqual({
       status: 'idle',
-      latestPrompt: 'second\nline'
+      latestPrompt: 'second line'
     })
+  })
+
+  it('bounds the wire prompt at the shared agent-status preview cap', () => {
+    const pasted = item('pasted', 1, {
+      kind: 'message',
+      role: 'user',
+      blocks: [{ type: 'text', text: 'x'.repeat(AGENT_STATUS_MAX_FIELD_LENGTH * 40) }]
+    })
+
+    expect(projectStructuredAgentSessionStatusSummary([pasted]).latestPrompt).toHaveLength(
+      AGENT_STATUS_MAX_FIELD_LENGTH
+    )
   })
 
   it('creates a deterministic pane identity for status stores', () => {
