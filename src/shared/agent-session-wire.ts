@@ -54,6 +54,18 @@ export type AgentSessionHandoffRequest = {
 
 export type AgentSessionHandoffResult = { status: AgentSessionHandoffStatus }
 
+export type AgentSessionBackgroundTask = {
+  id: string
+  kind: 'agent' | 'workflow' | 'command' | 'monitor' | 'unknown'
+  description?: string
+}
+
+export type AgentSessionBackgroundTaskState = {
+  state: 'monitoring'
+  /** Optional so mixed-version clients can consume state-only hosts. */
+  tasks?: AgentSessionBackgroundTask[]
+}
+
 /** Backward paging is the client's normal read; 40 matches the page size the
  *  mobile list renders without a visible fill-in. */
 export const AGENT_SESSION_HISTORY_DEFAULT_LIMIT = 40
@@ -97,6 +109,8 @@ export type AgentSessionHistoryPage = {
   liveCursor?: AgentJournalCursor
   hasOlder: boolean
   hasNewer: boolean
+  /** Present on hosts that expose provider-owned background task lifecycle. */
+  backgroundTasks?: AgentSessionBackgroundTaskState | null
 }
 
 export type AgentSessionHistoryResult =
@@ -128,6 +142,7 @@ export type AgentSessionSubscribeEvent =
       page: AgentSessionHistoryPage
       fence: number
       handoff?: AgentSessionHandoffStatus
+      backgroundTasks?: AgentSessionBackgroundTaskState | null
     }
   | {
       type: 'batch'
@@ -136,6 +151,7 @@ export type AgentSessionSubscribeEvent =
       /** Added with handoff state so mixed-version cursors retain the ownership fence. */
       fence?: number
       handoff?: AgentSessionHandoffStatus
+      backgroundTasks?: AgentSessionBackgroundTaskState | null
     }
   | {
       type: 'reset'
@@ -144,6 +160,7 @@ export type AgentSessionSubscribeEvent =
       page: AgentSessionHistoryPage
       fence: number
       handoff?: AgentSessionHandoffStatus
+      backgroundTasks?: AgentSessionBackgroundTaskState | null
     }
   | { type: 'end' }
 
