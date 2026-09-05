@@ -32,6 +32,7 @@ import {
   resetPreparationConsumeHistoryForTests
 } from './worktree-create-preparation-burst'
 import { toHostFilesystemPath } from './host-tree-removal'
+import type { WorktreeCreateTimingRecorder } from './worktree-create-timing'
 
 export {
   WORKTREE_CREATE_PREPARATION_LIMIT,
@@ -55,6 +56,7 @@ type ConsumePreparedWorktreeArgs = {
   baseBranch: string
   refreshLocalBaseRef?: boolean
   options?: AddWorktreeOptions
+  timing?: WorktreeCreateTimingRecorder
 }
 
 function canonicalBaseRef(
@@ -168,7 +170,8 @@ async function claimPreparedWorktree(
   const entry = selection.candidate
   takePreparation(entry)
   try {
-    await entry.ready
+    const waitUntilReady = () => entry.ready
+    await (args.timing ? args.timing.time('prepared_checkout_wait', waitUntilReady) : entry.ready)
     return {
       status: 'claimed',
       entry,
@@ -226,15 +229,19 @@ export async function consumePreparedWorktreeCreate(
     await mkdir(toHostFilesystemPath(parentDir), { recursive: true })
     // Finalize resolves the requested base itself and resets the prepared checkout onto that
     // commit, so a retargeted claim is handed over at the requested commit or not at all.
-    const result = await finalizePreparedWorktree(
-      args.repoPath,
-      entry.preparedPath,
-      args.worktreePath,
-      args.branch,
-      args.baseBranch,
-      args.refreshLocalBaseRef,
-      options
-    )
+    const finalize = () =>
+      finalizePreparedWorktree(
+        args.repoPath,
+        entry.preparedPath,
+        args.worktreePath,
+        args.branch,
+        args.baseBranch,
+        args.refreshLocalBaseRef,
+        options
+      )
+    const result = args.timing
+      ? await args.timing.time('prepared_checkout_finalize', finalize)
+      : await finalize()
     // Consuming the only prepared checkout leaves the next create cold. Re-arm for a user who is
     // creating in a burst; the TTL and the preparation limit still bound an unused replacement.
     rearmPreparation(entry, args.baseBranch, claim.canonicalBase)

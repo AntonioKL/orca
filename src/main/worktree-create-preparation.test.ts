@@ -3,6 +3,7 @@ import type { Store } from './persistence'
 import type { Repo } from '../shared/repo-types'
 import { WORKTREE_CREATE_PREPARATION_DIRECTORY } from '../shared/worktree/create-preparation'
 import { resolveWorktreeAddBaseRef } from '../shared/worktree/base-ref'
+import { createWorktreeCreateTimingRecorder } from './worktree-create-timing'
 
 const mocks = vi.hoisted(() => ({
   mkdir: vi.fn(),
@@ -153,6 +154,45 @@ describe('worktree create preparation registry', () => {
     ])
 
     expect(mocks.prepareCheckout).toHaveBeenCalledTimes(1)
+  })
+
+  it('separates an unfinished preparation wait from finalization on a hit', async () => {
+    let now = 0
+    let finishPreparation!: () => void
+    mocks.prepareCheckout.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishPreparation = resolve
+        })
+    )
+    const preparation = prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+    await vi.waitFor(() => expect(finishPreparation).toBeTypeOf('function'))
+    const timing = createWorktreeCreateTimingRecorder(() => now)
+    const time = vi.spyOn(timing, 'time')
+    mocks.finalize.mockImplementationOnce(async () => {
+      now += 25
+      return {}
+    })
+    const creation = consumePreparedWorktreeCreate({
+      repoPath: repo.path,
+      workspaceRoot: '/workspace',
+      worktreePath: '/workspace/final',
+      branch: 'feature',
+      baseBranch: 'origin/main',
+      timing
+    })
+    await vi.waitFor(() =>
+      expect(time).toHaveBeenCalledWith('prepared_checkout_wait', expect.any(Function))
+    )
+    expect(mocks.finalize).not.toHaveBeenCalled()
+    now = 3000
+    finishPreparation()
+    await preparation
+    await expect(creation).resolves.toMatchObject({ status: 'hit' })
+    expect(timing.finish().phases).toEqual([
+      { phase: 'prepared_checkout_wait', startedAtMs: 0, durationMs: 3000 },
+      { phase: 'prepared_checkout_finalize', startedAtMs: 3000, durationMs: 25 }
+    ])
   })
 
   it('does not claim a preparation after the selected base changes to another branch', async () => {

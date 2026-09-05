@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolve } from 'node:path'
 import type { CreateWorktreeResult } from '../../shared/worktree/create-types'
 import { resolveRegisteredWorktreePath } from './registered-worktree-roots-cache'
+import { computeWorkspaceRootAsync } from './worktree-logic'
+import type * as WorktreeLogic from './worktree-logic'
 import {
   listWorktreesMock,
   describeCreatedWorktreeMock,
@@ -11,6 +13,7 @@ import {
   resolveDefaultBaseRefWithLocalGitMock,
   getBranchConflictKindMock,
   getEffectiveHooksMock,
+  getDefaultTabsLaunchMock,
   createSetupRunnerScriptMock,
   getEffectiveHooksFromConfigMock,
   shouldRunSetupForCreateMock,
@@ -78,11 +81,13 @@ vi.mock('../setup-hook-env-vars', async (importOriginal) =>
     (await importOriginal()) as Record<string, unknown>
   )
 )
-vi.mock('./worktree-logic', async (importOriginal) =>
-  (await import('./worktrees-test-module-mocks')).worktreeLogicModuleMock(
-    (await importOriginal()) as Record<string, unknown>
-  )
-)
+vi.mock('./worktree-logic', async (importOriginal) => {
+  const actual = await importOriginal<typeof WorktreeLogic>()
+  return {
+    ...(await import('./worktrees-test-module-mocks')).worktreeLogicModuleMock(actual),
+    computeWorkspaceRootAsync: vi.fn(actual.computeWorkspaceRootAsync)
+  }
+})
 vi.mock('../terminal-history-deletion', async () =>
   (await import('./worktrees-test-module-mocks')).terminalHistoryDeletionModuleMock()
 )
@@ -409,15 +414,23 @@ describe('registerWorktreeHandlers', () => {
       }
     ])
 
-    await handlers['worktrees:create'](null, {
+    const root = Promise.withResolvers<string>()
+    vi.mocked(computeWorkspaceRootAsync).mockReturnValueOnce(root.promise)
+    const create = handlers['worktrees:create'](null, {
       repoId: 'repo-1',
       name: 'feature'
     })
 
-    expect(computeWorktreePathMock).toHaveBeenCalledWith('feature', '/workspace/repo', {
-      nestWorkspaces: false,
-      workspaceDir: '../worktrees'
-    })
+    await vi.waitFor(() => expect(computeWorkspaceRootAsync).toHaveBeenCalled())
+    expect(addWorktreeMock).not.toHaveBeenCalled()
+    root.resolve('/workspace/worktrees')
+    await create
+    expect(computeWorktreePathMock).toHaveBeenCalledWith(
+      'feature',
+      '/workspace/repo',
+      { nestWorkspaces: false, workspaceDir: '../worktrees' },
+      '/workspace/worktrees'
+    )
     expect(addWorktreeMock).toHaveBeenCalledWith(
       '/workspace/repo',
       '../worktrees/feature',
@@ -550,63 +563,128 @@ describe('registerWorktreeHandlers', () => {
     })
   })
 
-  it('creates an additional workspace for folder-mode repos without git worktree add', async () => {
-    const repo = {
-      id: 'repo-folder',
-      path: '/workspace/folder',
-      displayName: 'folder',
-      badgeColor: '#000',
-      addedAt: 0,
-      kind: 'folder' as const
-    }
-    store.getRepo.mockReturnValue(repo)
-    store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => ({
-      displayName: '',
-      comment: '',
-      linkedIssue: null,
-      linkedPR: null,
-      linkedLinearIssue: null,
-      isArchived: false,
-      isUnread: false,
-      isPinned: false,
-      sortOrder: 0,
-      lastActivityAt: 0,
-      ...meta
-    }))
-
-    const result = (await handlers['worktrees:create'](null, {
-      repoId: 'repo-folder',
-      name: 'folder-session',
-      createdWithAgent: 'codex'
-    })) as { worktree: { id: string } }
-
-    expect(addWorktreeMock).not.toHaveBeenCalled()
-    expect(result.worktree).toEqual(
-      expect.objectContaining({
-        id: expect.stringMatching(/^repo-folder::\/workspace\/folder::workspace:[0-9a-f-]{36}$/),
-        repoId: 'repo-folder',
+  it.each([undefined, { command: '' }])(
+    'creates a folder workspace with startup %j',
+    async (startup) => {
+      const repo = {
+        id: 'repo-folder',
         path: '/workspace/folder',
-        displayName: 'folder-session',
-        instanceId: expect.stringMatching(/^[0-9a-f-]{36}$/),
-        createdWithAgent: 'codex'
-      })
-    )
-    expect(mainWindow.webContents.send).toHaveBeenCalledWith('worktrees:changed', {
-      repoId: 'repo-folder'
-    })
-  })
+        displayName: 'folder',
+        badgeColor: '#000',
+        addedAt: 0,
+        kind: 'folder' as const
+      }
+      store.getRepo.mockReturnValue(repo)
+      store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => ({
+        displayName: '',
+        comment: '',
+        linkedIssue: null,
+        linkedPR: null,
+        linkedLinearIssue: null,
+        isArchived: false,
+        isUnread: false,
+        isPinned: false,
+        sortOrder: 0,
+        lastActivityAt: 0,
+        ...meta
+      }))
 
-  it('spawns a startup terminal and setup terminal after local worktree registration', async () => {
-    addWorktreeMock.mockResolvedValue({})
+      const result = (await handlers['worktrees:create'](null, {
+        repoId: 'repo-folder',
+        name: 'folder-session',
+        startup,
+        createdWithAgent: 'codex'
+      })) as { worktree: { id: string } }
+
+      expect(addWorktreeMock).not.toHaveBeenCalled()
+      expect(result.worktree).toEqual(
+        expect.objectContaining({
+          id: expect.stringMatching(/^repo-folder::\/workspace\/folder::workspace:[0-9a-f-]{36}$/),
+          repoId: 'repo-folder',
+          path: '/workspace/folder',
+          displayName: 'folder-session',
+          instanceId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+          createdWithAgent: 'codex'
+        })
+      )
+      expect(mainWindow.webContents.send).toHaveBeenCalledWith('worktrees:changed', {
+        repoId: 'repo-folder'
+      })
+    }
+  )
+
+  function stubStartupWorktreeListing(): void {
     listWorktreesMock.mockResolvedValueOnce([
       {
         path: '/workspace/improve-dashboard',
-        head: 'def',
         branch: 'improve-dashboard',
+        head: 'def',
         isBare: false,
         isMainWorktree: false
       }
     ])
+  }
+
+  it.each(['new-tab', 'split-horizontal', 'split-vertical'] as const)(
+    'starts blank-shell setup exactly once using %s',
+    async (setupScriptLaunchMode) => {
+      stubStartupWorktreeListing()
+      store.getSettings.mockReturnValue({
+        ...(store.getSettings() as object),
+        setupScriptLaunchMode
+      })
+      loadHooksMock.mockReturnValue({ scripts: { setup: 'echo setup' } })
+      getEffectiveHooksFromConfigMock.mockReturnValue({ scripts: { setup: 'echo setup' } })
+      shouldRunSetupForCreateMock.mockReturnValue(true)
+      createSetupRunnerScriptMock.mockReturnValue({
+        runnerScriptPath: '/workspace/repo/.git/orca/setup-runner.sh',
+        envVars: {},
+        waitForAgentStartup: true
+      })
+      const result = (await handlers['worktrees:create'](null, {
+        repoId: 'repo-1',
+        name: 'improve-dashboard',
+        startup: { command: '' }
+      })) as CreateWorktreeResult
+      expect(result.startupTerminal?.spawned).toBe(true)
+      expect(result.setup).toBeUndefined()
+      expect(runtimeStub.createTerminal.mock.calls[0][1]).toMatchObject({
+        command: '',
+        activate: true
+      })
+      if (setupScriptLaunchMode === 'new-tab') {
+        expect(runtimeStub.createTerminal).toHaveBeenCalledTimes(2)
+        expect(runtimeStub.splitTerminal).not.toHaveBeenCalled()
+      } else {
+        expect(runtimeStub.createTerminal).toHaveBeenCalledTimes(1)
+        expect(runtimeStub.splitTerminal).toHaveBeenCalledExactlyOnceWith('term-startup', {
+          direction: setupScriptLaunchMode === 'split-horizontal' ? 'horizontal' : 'vertical',
+          command: 'bash /workspace/repo/.git/orca/setup-runner.sh',
+          env: expect.any(Object),
+          sourceSurfaceVisible: true,
+          activate: false
+        })
+      }
+    }
+  )
+
+  it('defers blank-shell startup to configured default tabs', async () => {
+    stubStartupWorktreeListing()
+    getDefaultTabsLaunchMock.mockReturnValue({ tabs: [{ title: 'Notes' }], runCommands: false })
+    const result = (await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'improve-dashboard',
+      startup: { command: '' }
+    })) as CreateWorktreeResult
+    expect(runtimeStub.createTerminal).not.toHaveBeenCalled()
+    expect(runtimeStub.splitTerminal).not.toHaveBeenCalled()
+    expect(result.startupTerminal).toBeUndefined()
+    expect(result.defaultTabs?.tabs).toEqual([{ title: 'Notes' }])
+  })
+
+  it('spawns a startup terminal and setup terminal after local worktree registration', async () => {
+    addWorktreeMock.mockResolvedValue({})
+    stubStartupWorktreeListing()
     loadHooksMock.mockReturnValue({
       scripts: { setup: 'pnpm install' },
       setupAgentStartupPolicy: 'wait-for-setup'
@@ -614,8 +692,6 @@ describe('registerWorktreeHandlers', () => {
     getEffectiveHooksMock.mockReturnValue({ scripts: { setup: 'pnpm install' } })
     getEffectiveHooksFromConfigMock.mockReturnValue({ scripts: { setup: 'pnpm install' } })
     shouldRunSetupForCreateMock.mockReturnValue(true)
-    expect(createSetupRunnerScriptMock).not.toHaveBeenCalled()
-
     const result = (await handlers['worktrees:create'](null, {
       repoId: 'repo-1',
       name: 'improve-dashboard',
@@ -630,14 +706,7 @@ describe('registerWorktreeHandlers', () => {
           request_kind: 'new'
         }
       }
-    })) as {
-      setup?: unknown
-      startupTerminal?: { spawned: boolean; surface?: string }
-      timing?: {
-        phases: { phase: string }[]
-        preparedCheckout?: { status: string; reason?: string }
-      }
-    }
+    })) as CreateWorktreeResult
     expect(createSetupRunnerScriptMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'repo-1' }),
       '/workspace/improve-dashboard',
@@ -689,6 +758,10 @@ describe('registerWorktreeHandlers', () => {
     expect(setupCommand).toBe('bash /workspace/repo/.git/orca/setup-runner.sh')
     expect(result.setup).toBeUndefined()
     expect(result.startupTerminal).toEqual({ spawned: true, surface: 'visible' })
+    expect(runtimeStub.invalidateWorktreeCatalog).toHaveBeenCalledWith('repo-1')
+    expect(runtimeStub.invalidateWorktreeCatalog.mock.invocationCallOrder[0]).toBeLessThan(
+      runtimeStub.createTerminal.mock.invocationCallOrder[0]
+    )
     expect(result.timing?.phases.map((phase) => phase.phase)).toEqual(
       expect.arrayContaining([
         'git_worktree_add',
@@ -704,15 +777,7 @@ describe('registerWorktreeHandlers', () => {
 
   it('returns the wrapped setup command when startup spawned but setup creation failed', async () => {
     addWorktreeMock.mockResolvedValue({})
-    listWorktreesMock.mockResolvedValueOnce([
-      {
-        path: '/workspace/improve-dashboard',
-        head: 'def',
-        branch: 'improve-dashboard',
-        isBare: false,
-        isMainWorktree: false
-      }
-    ])
+    stubStartupWorktreeListing()
     loadHooksMock.mockReturnValue({ scripts: { setup: 'pnpm install' } })
     getEffectiveHooksMock.mockReturnValue({ scripts: { setup: 'pnpm install' } })
     getEffectiveHooksFromConfigMock.mockReturnValue({ scripts: { setup: 'pnpm install' } })

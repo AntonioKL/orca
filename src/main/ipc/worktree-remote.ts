@@ -87,7 +87,7 @@ import {
   computeValidatedBranchName,
   computeWorktreePath,
   computeRemoteWorktreePath,
-  computeWorkspaceRoot,
+  computeWorkspaceRootAsync,
   ensurePathWithinWorkspace,
   getWorktreeCreationLayout,
   getWorktreePathSettings,
@@ -408,7 +408,7 @@ async function spawnLocalStartupAndSetupTerminals(args: {
 
   let sequencedStartup = startup
   let wrappedSetupCommandStr: string | undefined
-  if (startup && setup?.waitForAgentStartup === true) {
+  if (startup.command.trim() && setup?.waitForAgentStartup === true) {
     const platform = getSetupRunnerCommandPlatformForLaunch(
       setup,
       process.platform === 'win32' ? 'windows' : 'posix'
@@ -490,6 +490,7 @@ async function spawnLocalStartupAndSetupTerminals(args: {
           direction: setupLaunchMode === 'split-horizontal' ? 'horizontal' : 'vertical',
           command: setupCommand,
           env: setup.envVars,
+          sourceSurfaceVisible: startupTerminal?.surface === 'visible',
           activate: false
         })
       } else {
@@ -2444,7 +2445,7 @@ export async function createLocalWorktree(
       emitCreateWorktreeProgress(mainWindow, 'fetching', args.creationId)
     }
   }
-  const workspaceRoot = computeWorkspaceRoot(repo.path, worktreePathSettings)
+  const workspaceRoot = await computeWorkspaceRootAsync(repo.path, worktreePathSettings)
 
   // Why: this validation doesn't depend on remote refs, so it can overlap a required remote-tracking base refresh.
   const primarySetupScript = getEffectiveHooks(repo)?.scripts.setup
@@ -2530,19 +2531,33 @@ export async function createLocalWorktree(
         username,
         localWorktreeGitOptions
       )
-      checkoutExistingBranch = await canCheckoutExistingLocalBranch(
-        repo.path,
-        branchName,
-        baseBranch,
-        localWorktreeGitOptions
-      )
-      if (checkoutExistingBranch && !selectedExistingLocalBranchName) {
-        // Why: suffix retries may need a new path, but an existing-branch checkout must keep the user-selected branch, not a sibling.
-        selectedExistingLocalBranchName = branchName
+      const tryExistingBranch = async (): Promise<boolean> => {
+        checkoutExistingBranch = await canCheckoutExistingLocalBranch(
+          repo.path,
+          branchName,
+          baseBranch,
+          localWorktreeGitOptions
+        )
+        return checkoutExistingBranch
       }
+      // Explicit branch selections retain the adoption-first path.
+      const preferExistingBranch = Boolean(
+        args.branchNameOverride || selectedExistingLocalBranchName
+      )
+      checkoutExistingBranch = preferExistingBranch && (await tryExistingBranch())
       lastBranchConflictKind = checkoutExistingBranch
         ? null
-        : await getBranchConflictKind(repo.path, branchName, baseBranch, localWorktreeGitOptions)
+        : await getBranchConflictKind(
+            repo.path,
+            branchName,
+            baseBranch,
+            localWorktreeGitOptions,
+            preferExistingBranch ? undefined : tryExistingBranch
+          )
+      if (checkoutExistingBranch && !selectedExistingLocalBranchName) {
+        // Path retries must retain the adopted branch.
+        selectedExistingLocalBranchName = branchName
+      }
       const allowedPushTargetRemoteConflict =
         lastBranchConflictKind &&
         isAllowedPushTargetRemoteConflict(lastBranchConflictKind, branchName, args)
@@ -2604,7 +2619,7 @@ export async function createLocalWorktree(
       }
 
       worktreePath = ensurePathWithinWorkspace(
-        computeWorktreePath(effectiveSanitizedName, repo.path, worktreePathSettings),
+        computeWorktreePath(effectiveSanitizedName, repo.path, worktreePathSettings, workspaceRoot),
         workspaceRoot
       )
       if (existsSync(worktreePath)) {
@@ -2694,6 +2709,7 @@ export async function createLocalWorktree(
       (await timing.time('git_worktree_add', async () => {
         if (sparseDirectories.length === 0 && !checkoutExistingBranch) {
           const prepared = await consumePreparedWorktreeCreate({
+            timing,
             repoPath: repo.path,
             workspaceRoot,
             worktreePath,
@@ -3010,6 +3026,8 @@ export async function createLocalWorktree(
     }
   })
 
+  // Startup resolves the new id before lifecycle notifications invalidate runtime caches.
+  runtime?.invalidateWorktreeCatalog?.(repo.id)
   const stagedStartup = await timing.time('spawn_startup_terminal', () =>
     spawnLocalStartupAndSetupTerminals({
       runtime,

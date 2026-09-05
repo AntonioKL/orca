@@ -151,7 +151,11 @@ export async function executeWorktreeCreation(
     // startup, so both halves of the handoff share one renderer-session token.
     preparedRequest.startupPlan.launchToken = createBrowserUuid()
   }
-  const fallbackStartupOpt = buildWorktreeCreationStartupOpt(preparedRequest, backendSpawned)
+  const fallbackStartupOpt = buildWorktreeCreationStartupOpt(
+    preparedRequest,
+    backendSpawned,
+    Boolean(result.defaultTabs?.tabs.length)
+  )
   const startupOpt = structuredLaunch ? undefined : fallbackStartupOpt
 
   if (worktree.path && !structuredLaunch) {

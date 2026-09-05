@@ -66,6 +66,86 @@ beforeEach(() => {
 })
 
 describe('prefetchWorktreeCreateBase local git routing', () => {
+  it('never prepares a local checkout for a folder or SSH repo', async () => {
+    const prepareLocalCheckout = vi.fn()
+    mocks.getSshGitProvider.mockReturnValue({})
+    for (const target of [
+      { ...repo, kind: 'folder' as const },
+      { ...repo, connectionId: 'ssh-1' }
+    ]) {
+      await prefetchWorktreeCreateBase({
+        repo: target,
+        runtime: runtime(),
+        gitOptions: {},
+        prepareLocalCheckout
+      })
+    }
+    expect(prepareLocalCheckout).not.toHaveBeenCalled()
+    expect(mocks.prefetchRemoteWorktreeCreateBase).toHaveBeenCalledOnce()
+  })
+
+  it('overlaps preparation with an outstanding fetch and waits for both', async () => {
+    mocks.resolveRemoteTrackingBase.mockResolvedValue({
+      remote: 'origin',
+      branch: 'main',
+      ref: 'refs/remotes/origin/main',
+      base: 'origin/main'
+    })
+    mocks.hasRemoteTrackingRef.mockResolvedValue(true)
+    let finishFetch!: () => void
+    let finishPreparation!: () => void
+    mocks.getOrStartRemoteTrackingBaseRefresh.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishFetch = resolve
+      })
+    )
+    const prepareLocalCheckout = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishPreparation = resolve
+        })
+    )
+    let settled = false
+    const result = prefetchWorktreeCreateBase({
+      repo,
+      runtime: runtime(),
+      gitOptions: WSL,
+      prepareLocalCheckout
+    })
+    void result.then(() => {
+      settled = true
+    })
+    await vi.waitFor(() => expect(prepareLocalCheckout).toHaveBeenCalledWith('origin/main'))
+    expect(mocks.getOrStartRemoteTrackingBaseRefresh).toHaveBeenCalledOnce()
+    finishFetch()
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    finishPreparation()
+    await expect(result).resolves.toBe('origin/main')
+    expect(prepareLocalCheckout).toHaveBeenCalledOnce()
+  })
+
+  it('prepares a missing local base only after fetch and tolerates preparation failure', async () => {
+    let finishFetch!: () => void
+    mocks.fetchRemoteWithCache.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishFetch = resolve
+      })
+    )
+    const prepareLocalCheckout = vi.fn().mockRejectedValue(new Error('checkout failed'))
+    const result = prefetchWorktreeCreateBase({
+      repo,
+      runtime: runtime(),
+      gitOptions: {},
+      prepareLocalCheckout
+    })
+    await vi.waitFor(() => expect(mocks.fetchRemoteWithCache).toHaveBeenCalledOnce())
+    expect(prepareLocalCheckout).not.toHaveBeenCalled()
+    finishFetch()
+    await expect(result).resolves.toBe('origin/main')
+    expect(prepareLocalCheckout).toHaveBeenCalledOnce()
+  })
+
   it('resolves the default base and its ref probes inside the selected WSL distro', async () => {
     resolveOnly(['refs/remotes/origin/main'])
 

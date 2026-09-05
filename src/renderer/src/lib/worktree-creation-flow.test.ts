@@ -523,11 +523,9 @@ describe('staged background worktree creation', () => {
       startupTerminal: { tabId: 'agent-tab', spawned: true }
     })
 
-    const started = continueBackgroundWorktreeCreation('creation-1', makeRequest(), {
-      revealCreationSurface: false
-    })
+    const request = makeRequest({ startup: { command: '' } })
+    continueBackgroundWorktreeCreation('creation-1', request, { revealCreationSurface: false })
 
-    expect(started).toBe(true)
     await flushAsyncWorktreeCreation()
     expect(activateAndRevealWorktree).not.toHaveBeenCalled()
     expect(ensureWorktreeHasInitialTerminal).toHaveBeenCalledWith(
@@ -637,7 +635,7 @@ describe('staged background worktree creation', () => {
       expect(ensureWorktreeHasInitialTerminal).toHaveBeenCalledWith(
         store,
         'wt-1',
-        undefined,
+        { command: '' },
         undefined,
         { command: 'gh issue view 42' },
         undefined,

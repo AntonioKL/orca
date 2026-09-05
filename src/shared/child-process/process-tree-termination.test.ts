@@ -6,7 +6,11 @@ const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
 
 vi.mock('node:child_process', () => ({ spawn: spawnMock }))
 
-import { forceTerminateProcessTree, signalProcessTree } from './process-tree-termination'
+import {
+  forceTerminateProcessTree,
+  hasExitedPosixProcessGroup,
+  signalProcessTree
+} from './process-tree-termination'
 import { setProcessTreeKillGate, type ProcessTreeKill } from './process-tree-kill-gate'
 
 function mockProcess(pid: number): ChildProcess {
@@ -159,5 +163,36 @@ describe('process-tree-kill breadcrumb seam', () => {
       expect(spawnMock).not.toHaveBeenCalled()
       expect(observed).toEqual([])
     })
+  })
+})
+
+describe('hasExitedPosixProcessGroup', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it.skipIf(process.platform === 'win32').each(['ESRCH', 'EPERM', 'EACCES', undefined])(
+    'only confirms an absent group for probe error %s',
+    (code) => {
+      const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+        throw Object.assign(new Error('probe failed'), { code })
+      })
+      expect(hasExitedPosixProcessGroup(mockProcess(1234))).toBe(code === 'ESRCH')
+      expect(kill).toHaveBeenCalledExactlyOnceWith(-1234, 0)
+      expect(spawnMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')('retains a group with surviving members', () => {
+    vi.spyOn(process, 'kill').mockReturnValue(true)
+    expect(hasExitedPosixProcessGroup(mockProcess(1234))).toBe(false)
+  })
+
+  it('never probes a Windows child or an invalid group id', async () => {
+    const kill = vi.spyOn(process, 'kill')
+    await withWindows(async () => {
+      expect(hasExitedPosixProcessGroup(mockProcess(1234))).toBe(false)
+    })
+    expect(hasExitedPosixProcessGroup(mockProcess(0))).toBe(false)
+    expect(hasExitedPosixProcessGroup(mockProcess(-1))).toBe(false)
+    expect(kill).not.toHaveBeenCalled()
   })
 })

@@ -23,6 +23,7 @@ import {
   gitlabMergeRequestHeadLocalRef,
   reviewHeadRemoteRefComponent
 } from './review-head-tracking-ref'
+import { worktreeCheckoutGitArgs } from './worktree-checkout-config'
 
 const execFileAsync = promisify(execFile)
 const image = process.env.ORCA_GIT_COMPAT_IMAGE
@@ -108,6 +109,75 @@ describeBinaryCompatibility('real Git binary compatibility', () => {
   afterAll(async () => {
     if (repoPath) {
       await rm(repoPath, { recursive: true, force: true })
+    }
+  })
+
+  it('materializes parallel checkouts with a serial fallback before Git 2.32', async () => {
+    await runGit(['worktree', 'add', '--detach', 'parallel-source', 'HEAD'])
+    await Promise.all(
+      Array.from({ length: 16 }, (_, i) =>
+        writeFile(join(repoPath, 'parallel-source', `parallel-${i}.txt`), `file ${i}\n`)
+      )
+    )
+    await runGit(['-C', 'parallel-source', 'add', '.'])
+    await runGit(['-C', 'parallel-source', 'commit', '-qm', 'parallel fixture'])
+    const head = (await runGit(['-C', 'parallel-source', 'rev-parse', 'HEAD'])).stdout.trim()
+    await runGit(['worktree', 'add', '--detach', '--no-checkout', 'parallel-wt', head])
+    try {
+      const result = await runGit(
+        [
+          '-C',
+          'parallel-wt',
+          ...worktreeCheckoutGitArgs({}, 'darwin'),
+          '-c',
+          'checkout.thresholdForParallelism=0',
+          'reset',
+          '--hard',
+          'HEAD'
+        ],
+        { GIT_TRACE2_EVENT: '1' }
+      )
+      expect(result.stderr.includes('checkout--worker')).toBe(supports(2, 32))
+      expect(
+        (await readFile(join(repoPath, 'parallel-wt', 'tracked.txt'), 'utf8')).replaceAll(
+          '\r\n',
+          '\n'
+        )
+      ).toBe('compatibility\n')
+      expect((await runGit(['-C', 'parallel-wt', 'status', '--porcelain'])).stdout).toBe('')
+      await expect(
+        runGit(['config', '--local', '--get', 'checkout.workers'])
+      ).rejects.toMatchObject({ code: 1 })
+    } finally {
+      await runGit(['worktree', 'remove', '--force', 'parallel-wt'])
+      await runGit(['worktree', 'remove', '--force', 'parallel-source'])
+    }
+  })
+
+  it('quietly distinguishes present and absent branch refs', async () => {
+    const head = (await runGit(['rev-parse', 'HEAD'])).stdout.trim()
+    await runGit(['branch', 'quiet-probe-present', head])
+    await expect(
+      runGit(['rev-parse', '--verify', '--quiet', 'refs/heads/quiet-probe-present'])
+    ).resolves.toMatchObject({ stdout: `${head}\n`, stderr: '' })
+    await expect(
+      runGit(['rev-parse', '--verify', '--quiet', 'refs/heads/quiet-probe-absent'])
+    ).rejects.toMatchObject({ code: 1, stdout: '', stderr: '' })
+  })
+
+  it('distinguishes an absent branch from a ref pointing at a missing object', async () => {
+    const missingObject = 'a'.repeat(40)
+    const refPath = join(repoPath, '.git', 'refs', 'heads', 'quiet-probe-dangling')
+    await writeFile(refPath, `${missingObject}\n`)
+    try {
+      await expect(
+        runGit(['rev-parse', '--verify', '--quiet', 'refs/heads/quiet-probe-dangling'])
+      ).resolves.toMatchObject({ stdout: `${missingObject}\n`, stderr: '' })
+      await expect(
+        runGit(['rev-parse', '--verify', '--quiet', 'refs/heads/quiet-probe-dangling^{commit}'])
+      ).rejects.toMatchObject({ code: 1, stdout: '', stderr: '' })
+    } finally {
+      await rm(refPath)
     }
   })
 

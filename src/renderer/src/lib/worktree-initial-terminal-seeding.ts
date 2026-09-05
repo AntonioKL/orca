@@ -53,7 +53,7 @@ export function ensureWorktreeHasInitialTerminal(
   let sequencedStartup = startup
   let wrappedSetupCommandStr: string | undefined
 
-  if (startup && setup?.waitForAgentStartup === true) {
+  if (startup?.command.trim() && setup?.waitForAgentStartup === true) {
     const platform = getSetupRunnerCommandPlatformForLaunch(setup)
     const sequenced = createSequencedSetupAgentCommands({
       runnerScriptPath: setup.runnerScriptPath,

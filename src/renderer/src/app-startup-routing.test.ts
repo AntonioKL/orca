@@ -411,7 +411,11 @@ describe('renderer startup runtime routing', () => {
     const shellSource = readSource(WORKSPACE_SHELL_PATH)
     const layoutSource = readSource(CHROME_LAYOUT_PATH)
 
-    expect(shellSource).toContain("const Terminal = lazy(() => import('../components/Terminal'))")
+    const loaderSource = readSource('src/renderer/src/lib/terminal-component-loader.ts')
+    expect(shellSource).toContain("from '@/lib/terminal-component-loader'")
+    expect(shellSource).toContain('const Terminal = lazy(loadTerminalComponent)')
+    expect(loaderSource).toContain("() => import('../components/Terminal')")
+    expect(loaderSource).not.toContain("from '../components/Terminal'")
     expect(shellSource).not.toContain("from '../components/Terminal'")
     expect(layoutSource).toContain(
       'const canMountTerminalWorkbenchNow = activeWorktreeId !== null || backgroundTerminalMountRequested'
