@@ -163,7 +163,9 @@ describe('orchestration kernel', () => {
     expect(kernel).toContain("`worker-list`'s `projection.liveness` is the fleet verdict")
     expect(kernel).toContain("`worker-show`'s `observation.status` is PTY liveness only")
     expect(kernel).toContain('After three consecutive empty waits')
-    expect(kernel).toContain('`ORCA orchestration worker-list --include-remote --json`')
+    expect(kernel).toContain(
+      '`ORCA orchestration worker-list --run <run_id> --include-remote --json`'
+    )
     expect(kernel).toContain(
       '`projection.attention` categories, `projection.attention.requiresAction`, and literal `projection.nextAction` argv'
     )
@@ -214,7 +216,9 @@ describe('orchestration kernel', () => {
     )
     expect(kernel).toContain('worker-release --dispatch <dispatch_id>')
     expect(kernel).toContain('check --ack <delivery_id> --wait')
-    expect(squash(kernel)).toContain('`worker-list --terminal-state reclaimable --json`')
+    expect(squash(kernel)).toContain(
+      '`worker-list --run <run_id> --terminal-state reclaimable --json`'
+    )
     expect(squash(kernel)).toContain('do not follow it with `task-update --status completed`')
   })
 
@@ -356,7 +360,9 @@ describe('owned orchestration references', () => {
       'ORCA project setup-existing-folder --project <project_id> --host <host_id> --path <abs_path> --kind folder --json'
     )
     expect(squash(reference)).toContain('and rejects a plain directory')
-    expect(reference).toContain('ORCA orchestration worker-list --include-remote --json')
+    expect(reference).toContain(
+      'ORCA orchestration worker-list --run <run_id> --include-remote --json'
+    )
     expect(squash(reference)).toContain(
       'enumerate remote workers with `--include-remote` or every one of them reads `unverifiable`'
     )
@@ -413,14 +419,16 @@ describe('owned orchestration references', () => {
   it('names worker-list as the enumerating command and the agent-liveness authority', () => {
     const reference = squash(readReference('recovery-and-cleanup.md'))
 
-    expect(reference).toContain('ORCA orchestration worker-list --json')
+    expect(reference).toContain('ORCA orchestration worker-list --run <run_id> --json')
     expect(reference).toContain("`worker-show`'s `observation.status` is PTY liveness only")
     expect(reference).toContain(
       '`projection.attention.categories`, `projection.attention.requiresAction`'
     )
     expect(reference).toContain('`projection.nextAction` argv')
     expect(reference).toContain('the fleet verdict decides')
-    expect(reference).toContain('ORCA orchestration worker-list --include-remote --json')
+    expect(reference).toContain(
+      'ORCA orchestration worker-list --run <run_id> --include-remote --json'
+    )
     expect(reference).toContain('reads `unverifiable` until you enumerate with `--include-remote`')
     expect(reference).toContain('follow `page.nextCursor` with `--cursor <value>`')
   })

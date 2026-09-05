@@ -62,11 +62,13 @@ terminal handle.
 ORCA orchestration worker-show --dispatch <dispatch_id> --json
 ORCA orchestration worker-read --dispatch <dispatch_id> --limit 50 --json
 ORCA orchestration send --to dispatch:<dispatch_id> --subject "Follow-up" --body "<guidance>" --json
-ORCA orchestration worker-list --include-remote --json
+ORCA orchestration worker-list --run <run_id> --include-remote --json
 ```
 
 `worker-list` reads local fleet state only; enumerate remote workers with
-`--include-remote` or every one of them reads `unverifiable`.
+`--include-remote` or every one of them reads `unverifiable`. Scope every list
+with `--run <run_id>`: unscoped, it reports every Dispatch this runtime has
+recorded, and the workers you are waiting on are lost in that history.
 
 ## Execution-host and mixed-version floor
 

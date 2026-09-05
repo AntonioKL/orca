@@ -16,8 +16,8 @@ decision, stop/abandon request, retention request, or uncertain release.
 ## Inspect before acting
 
 ```text
-ORCA orchestration worker-list --json
-ORCA orchestration worker-list --include-remote --json
+ORCA orchestration worker-list --run <run_id> --json
+ORCA orchestration worker-list --run <run_id> --include-remote --json
 ORCA orchestration worker-show --dispatch <dispatch_id> --json
 ORCA orchestration worker-read --dispatch <dispatch_id> --limit 50 --json
 ```
@@ -25,9 +25,23 @@ ORCA orchestration worker-read --dispatch <dispatch_id> --limit 50 --json
 `worker-list` is the enumerating command and the authority on agent liveness:
 each row carries `projection.liveness`, `projection.attention.categories`,
 `projection.attention.requiresAction`, and a literal `projection.nextAction`
-argv to run. `worker-show`'s `observation.status` is PTY liveness only, so a
-`live` terminal whose agent died at a trust prompt still reads `live` there.
-When the two disagree, the fleet verdict decides.
+argv to run. Always scope it with `--run <run_id>`; an unscoped list reports
+every Dispatch this runtime has ever recorded and buries the live ones.
+`worker-show`'s `observation.status` is PTY liveness only, so a `live` terminal
+whose agent died at a trust prompt still reads `live` there.
+
+When the two disagree, the fleet verdict decides — unless the fleet row is
+`unverifiable` for a reason that names a gap on this client rather than a fact
+about the worker. `missing_status` and `host_unavailable` are such gaps: the
+first means this runtime holds no status row, the second that it could not ask
+the execution host at all. Against either, a `worker-show` verdict sourced from
+the execution host is the better evidence and outranks the row. A stale peer
+that simply lacks the fleet-snapshot capability also reports `host_unavailable`
+on the row; the accompanying host warning names `capability_unsupported`, so
+read the warning before treating the row as contact loss.
+
+This never promotes absence. `unverifiable` from either command still authorizes
+nothing — only a positive `live` or `exited` verdict does.
 
 A worker started with `--on <environment>` reads `unverifiable` until you
 enumerate with `--include-remote`, which asks its execution host for the

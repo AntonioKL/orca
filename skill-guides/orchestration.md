@@ -134,17 +134,17 @@ a checkpoint, not a failure. Do not stop, retry, release, or launch a duplicate
 editor without the positive proof `## Outcome` requires.
 
 After three consecutive empty waits, stop waiting blindly and enumerate with
-`ORCA orchestration worker-list --include-remote --json`, acting on each row's
-`projection.attention` categories, `projection.attention.requiresAction`, and
-literal `projection.nextAction` argv. An `inspect` `nextAction` on a `live` row
-with `attention.requiresAction` false is informational, not a command to re-run:
-keep waiting with `check --wait`. Leave the wait only on positive proof the
-agent stopped: `exited` liveness, the worker's own observation of process exit,
-or a transcript whose final agent turn sent no `worker_done`. Then load
-`references/recovery-and-cleanup.md` and choose `worker-stop` or
-`worker-abandon` explicitly. `unverifiable` is absence, including when
-`worker-show` reports `agentWait` null. Absence never authorizes stop, abandon,
-retry, or release; keep waiting or inspect.
+`ORCA orchestration worker-list --run <run_id> --include-remote --json`, acting
+on each row's `projection.attention` categories,
+`projection.attention.requiresAction`, and literal `projection.nextAction` argv.
+An `inspect` `nextAction` on a `live` row with `attention.requiresAction` false
+is informational, not a command to re-run: keep waiting with `check --wait`.
+Leave the wait only on positive proof the agent stopped: `exited` liveness, the
+worker's own observation of process exit, or a transcript whose final agent turn
+sent no `worker_done`. Then load `references/recovery-and-cleanup.md` and choose
+`worker-stop` or `worker-abandon` explicitly. `unverifiable` is absence,
+including when `worker-show` reports `agentWait` null. Absence never authorizes
+stop, abandon, retry, or release; keep waiting or inspect.
 
 `worker-start` is the normal path, composing placement, terminal readiness,
 prompt injection, and supervised resource ownership. `dispatch --inject` leaves
@@ -174,8 +174,8 @@ follow its exact recovery receipt and never substitute `terminal close`.
 
 A valid `worker_done` settles the Task and Dispatch automatically; do not follow
 it with `task-update --status completed`. Enumerate the terminals still owing a
-decision with `worker-list --terminal-state reclaimable --json`, and do not end
-the coordinator turn until it returns none.
+decision with `worker-list --run <run_id> --terminal-state reclaimable --json`,
+and do not end the coordinator turn until it returns none.
 
 ## Conditional references
 
