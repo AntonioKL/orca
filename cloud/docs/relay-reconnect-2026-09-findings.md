@@ -957,3 +957,5 @@ Owner: "sure, feel free to drive these." Sequence chosen: Roll 1 first (highest 
 | Monitor dry-run #39 | **Green** 08:51:28Z at gen 142: independent proof the selector was untouched by both failed c27 attempts. Not used for dispatch (its commit predates #18811). |
 | Merged 08:51Z | stablyai/orca #18811 → main `12e05203a4`. |
 | Monitor dry-run #40 | Dispatched 08:51Z at gen 142 on main `12e05203a4` (contains #18811), run 33956408337. On green the chain dispatches the c27 canary, protocol 0, third attempt. |
+| Monitor dry-run #40 result | **Green** 09:08:03Z at gen 142, `12e05203a4`. |
+| c27 `canary-apply` #3 (run 33957151726) | Dispatched 09:08Z, protocol 0, on main containing #18811. |
