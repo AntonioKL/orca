@@ -11,9 +11,16 @@ const CONTROL_LINE = /^\*\*\* (?:End of File|Environment ID:)/
 /** The envelope reaches a command tool as one of its patch or command
  *  arguments, either whole or as one word of the argument vector it runs.
  *  Recover its text. Callers must gate this on the tool being one that runs a
- *  patch: a file's own contents may quote an envelope. */
-export function unwrapBeginPatch(input: unknown): string | null {
-  const source = envelopeSource(input)
+ *  patch: a file's own contents may quote an envelope.
+ *
+ *  `requireApplyCommand` is for a general command tool, where the envelope
+ *  proves nothing on its own — a command writing documentation quotes one
+ *  without applying it, and the command must say it is applying it. */
+export function unwrapBeginPatch(
+  input: unknown,
+  options?: { requireApplyCommand?: boolean }
+): string | null {
+  const source = envelopeSource(input, options?.requireApplyCommand === true)
   if (!source) {
     return null
   }
@@ -36,18 +43,26 @@ export function unwrapBeginPatch(input: unknown): string | null {
  *  whose own contents quote an envelope would otherwise be read as a patch
  *  against some other file entirely. */
 const ENVELOPE_ARGUMENTS = ['input', 'command', 'patch', 'arguments', 'script'] as const
+/** What a command tool runs to apply an envelope, as opposed to quoting one. */
+const APPLY_COMMAND = 'apply_patch'
 
 /** The call payload may itself be a string holding JSON. Decoding it here, in
  *  the one consumer that needs its structure, keeps every other reader of the
  *  call input seeing exactly what the provider sent. */
-function envelopeSource(input: unknown): string | null {
+function envelopeSource(input: unknown, requireApplyCommand: boolean): string | null {
   if (typeof input === 'string') {
     const record = jsonRecord(input)
-    return record ? envelopeArgument(record) : input
+    return record
+      ? envelopeArgument(record, requireApplyCommand)
+      : applied(input, requireApplyCommand)
   }
   return typeof input === 'object' && input !== null
-    ? envelopeArgument(input as Record<string, unknown>)
+    ? envelopeArgument(input as Record<string, unknown>, requireApplyCommand)
     : null
+}
+
+function applied(value: string, requireApplyCommand: boolean): string | null {
+  return !requireApplyCommand || value.includes(APPLY_COMMAND) ? value : null
 }
 
 function jsonRecord(value: string): Record<string, unknown> | null {
@@ -64,20 +79,26 @@ function jsonRecord(value: string): Record<string, unknown> | null {
   }
 }
 
-/** A command tool's argument is a vector, so the envelope sits one level in. */
-function envelopeArgument(record: Record<string, unknown>): string | null {
+/** A command tool's argument is a vector, so the envelope sits one level in and
+ *  the words that apply it may be a different element than the envelope. */
+function envelopeArgument(
+  record: Record<string, unknown>,
+  requireApplyCommand: boolean
+): string | null {
   for (const key of ENVELOPE_ARGUMENTS) {
     const value = record[key]
-    if (typeof value === 'string' && value.includes(BEGIN)) {
-      return value
+    const words =
+      typeof value === 'string'
+        ? [value]
+        : Array.isArray(value)
+          ? value.filter((entry): entry is string => typeof entry === 'string')
+          : []
+    if (requireApplyCommand && !words.some((word) => word.includes(APPLY_COMMAND))) {
+      continue
     }
-    if (Array.isArray(value)) {
-      const word = value.find(
-        (entry): entry is string => typeof entry === 'string' && entry.includes(BEGIN)
-      )
-      if (word) {
-        return word
-      }
+    const word = words.find((entry) => entry.includes(BEGIN))
+    if (word) {
+      return word
     }
   }
   return null

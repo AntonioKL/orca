@@ -134,7 +134,7 @@ describe('editFilesFromToolPair', () => {
         command: [
           'bash',
           '-lc',
-          '*** Begin Patch\n*** Update File: src/a.ts\n@@\n ctx\n-was\n+now\n*** End Patch'
+          "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: src/a.ts\n@@\n ctx\n-was\n+now\n*** End Patch\nEOF"
         ]
       }
     })
@@ -150,7 +150,8 @@ describe('editFilesFromToolPair', () => {
   it('numbers an added file from 1', () => {
     const files = settledFiles({
       name: 'exec',
-      input: '*** Begin Patch\n*** Add File: new.ts\n+one\n+two\n*** End Patch'
+      input:
+        "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: new.ts\n+one\n+two\n*** End Patch\nEOF"
     })
     expect(files?.[0]?.changeKind).toBe('added')
     expect(files?.[0]?.lineNumbersKnown).toBe(true)
@@ -230,7 +231,7 @@ describe('editFilesFromToolPair', () => {
     const files = settledFiles({
       name: 'exec',
       input:
-        '*** Begin Patch\n*** Update File: old.ts\n*** Move to: new.ts\n@@\n-a\n+b\n*** End Patch'
+        "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: old.ts\n*** Move to: new.ts\n@@\n-a\n+b\n*** End Patch\nEOF"
     })
     expect(files?.[0]?.changeKind).toBe('renamed')
     expect(files?.[0]?.oldPath).toBe('old.ts')
@@ -434,7 +435,10 @@ describe('editFilesFromToolPair', () => {
     const envelope = '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-was\n+now\n*** End Patch'
     const files = settledFiles({
       name: 'shell',
-      input: JSON.stringify({ command: ['bash', '-lc', envelope], workdir: '/repo' })
+      input: JSON.stringify({
+        command: ['bash', '-lc', `apply_patch <<'EOF'\n${envelope}\nEOF`],
+        workdir: '/repo'
+      })
     })
     expect(files?.[0]?.path).toBe('src/a.ts')
     expect(files?.[0]?.added).toBe(1)
@@ -473,6 +477,100 @@ describe('editFilesFromToolPair', () => {
     })
     expect(files?.map((file) => file.path)).toEqual(['first.ts', 'second.ts', 'third.ts'])
     expect(files?.[1]?.lines).toEqual([])
+  })
+
+  it('splits a multi-file patch written without per-file preamble lines', () => {
+    const files = settledFiles({
+      name: 'Diff',
+      input: { path: '/repo/one.ts' },
+      result: {
+        output:
+          '--- a/one.ts\n+++ b/one.ts\n@@ -1,1 +1,1 @@\n-first\n+FIRST\n' +
+          '--- a/two.ts\n+++ b/two.ts\n@@ -10,1 +10,1 @@\n-second\n+SECOND'
+      }
+    })
+    expect(files?.map((file) => file.path)).toEqual(['one.ts', 'two.ts'])
+    expect(gutter(files?.slice(1) ?? null)).toEqual([10, 10])
+  })
+
+  it('refuses a card when the call names a file count instead of a file', () => {
+    expect(
+      settledFiles({
+        name: 'Diff',
+        input: { path: '2 files' },
+        result: { output: '@@\n-a\n+b\n@@\n-c\n+d' }
+      })
+    ).toBeNull()
+  })
+
+  it('reports a clipped patch as truncated instead of rendering its marker', () => {
+    const files = settledFiles({
+      name: 'Diff',
+      input: { path: 'src/a.ts' },
+      result: { output: '@@ -1,3 +1,3 @@\n ctx\n-was\n+now\n… (48210 bytes)' }
+    })
+    expect(files?.[0]?.truncated).toBe(true)
+    expect(files?.[0]?.lines.map((line) => line.text)).toEqual(['ctx', 'was', 'now'])
+  })
+
+  it('reads a move appended to the patch body as a rename, as the other lane does', () => {
+    const files = settledFiles({
+      name: 'Diff',
+      input: { path: 'src/old.ts' },
+      result: { output: '@@ -1,1 +1,1 @@\n-a\n+b\n\nMoved to: src/new.ts' }
+    })
+    expect(files?.[0]?.changeKind).toBe('renamed')
+    expect(files?.[0]?.path).toBe('src/new.ts')
+    expect(files?.[0]?.oldPath).toBe('src/old.ts')
+    expect(files?.[0]?.lines.some((line) => line.text.includes('Moved to'))).toBe(false)
+  })
+
+  it('keeps the header destination for a rename the call names by its old path', () => {
+    const files = settledFiles({
+      name: 'Diff',
+      input: { path: 'old.txt' },
+      result: {
+        output:
+          'diff --git a/old.txt b/new.txt\n--- a/old.txt\n+++ b/new.txt\n@@ -1,1 +1,1 @@\n-a\n+b'
+      }
+    })
+    expect(files?.[0]?.path).toBe('new.txt')
+    expect(files?.[0]?.oldPath).toBe('old.txt')
+  })
+
+  it('does not read a command that only quotes an envelope as an edit', () => {
+    const envelope = '*** Begin Patch\n*** Update File: src/real.ts\n@@\n-a\n+b\n*** End Patch'
+    expect(
+      settledFiles({
+        name: 'shell',
+        input: { command: ['bash', '-lc', `cat > notes.md <<'EOF'\n${envelope}\nEOF`] }
+      })
+    ).toBeNull()
+  })
+
+  it('does not call two compared directories a rename', () => {
+    const files = settledFiles({
+      name: 'Diff',
+      input: {},
+      result: { output: '--- d1/x.ts\n+++ d2/x.ts\n@@ -1,1 +1,1 @@\n-a\n+b' }
+    })
+    expect(files?.[0]?.changeKind).toBe('edited')
+    expect(files?.[0]?.oldPath).toBeNull()
+    expect(files?.[0]?.path).toBe('d2/x.ts')
+  })
+
+  it('lets the call name the file when a preamble precedes the only header', () => {
+    const files = settledFiles({
+      name: 'Diff',
+      input: { path: '/repo/one.ts' },
+      result: {
+        output:
+          'warning: something\ndiff --git a/one.ts b/one.ts\n--- a/one.ts\n+++ b/one.ts\n@@ -1,1 +1,1 @@\n-a\n+b'
+      }
+    })
+    // The preamble is its own nameless section, and must not make this look
+    // like a patch over several files.
+    expect(files?.map((file) => file.path)).toEqual(['/repo/one.ts'])
   })
 
   it('returns null for a tool that did not edit a file', () => {

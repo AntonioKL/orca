@@ -122,6 +122,9 @@ type Section = {
   named: boolean
   /** A `--- `/`+++ ` pair already named this section, so the next one is a new file. */
   hasHeaderPair: boolean
+  /** Only a `diff --git` header states both sides of a move as such. A bare
+   *  pair with differing paths is just as likely two directories compared. */
+  fromGitHeader: boolean
 }
 
 /** Splits patch text into one section per file it touches. Without this a
@@ -143,7 +146,8 @@ export function unifiedPatchSections(text: string): {
       oldPath: null,
       newPath: null,
       named: false,
-      hasHeaderPair: false
+      hasHeaderPair: false,
+      fromGitHeader: false
     }
     sections.push(section)
     return section
@@ -157,12 +161,16 @@ export function unifiedPatchSections(text: string): {
       current.oldPath = paths.oldPath
       current.newPath = paths.newPath
       current.named = true
+      current.fromGitHeader = true
       inHunk = false
       continue
     }
-    // The same rule the parser uses: a header pair is structure only outside a
-    // hunk, where `--- ` would otherwise be a removed line beginning with `--`.
-    if (!inHunk && isFileHeaderPair(rows, index)) {
+    // A header pair is structure outside a hunk. Inside one it is also a file
+    // boundary, but only when a hunk header follows it immediately: a removed
+    // `-- x` over an added `++ y` is never followed by a column-0 `@@`, and
+    // that is what separates the files of a patch written without `diff --git`
+    // headers, where nothing else would end the previous file's hunk.
+    if (isFileHeaderPair(rows, index) && (!inHunk || (rows[index + 2] ?? '').startsWith('@@'))) {
       // The pair names the section a `diff --git` just opened; a second pair in
       // the same section is the next file of a patch written without them.
       if (!current || current.hasHeaderPair) {
@@ -172,6 +180,7 @@ export function unifiedPatchSections(text: string): {
       current.newPath = sourceHeaderPath(rows[index + 1] ?? '')
       current.named = true
       current.hasHeaderPair = true
+      inHunk = false
       index += 1
       continue
     }
@@ -187,10 +196,7 @@ export function unifiedPatchSections(text: string): {
   return {
     sections: sections.map((section) => ({
       path: section.newPath ?? section.oldPath,
-      oldPath:
-        section.oldPath && section.newPath && section.oldPath !== section.newPath
-          ? section.oldPath
-          : null,
+      oldPath: sectionChangeKind(section) === 'renamed' ? section.oldPath : null,
       changeKind: sectionChangeKind(section),
       body: section.rows.join('\n')
     })),
@@ -208,7 +214,12 @@ function sectionChangeKind(section: Section): UnifiedPatchSection['changeKind'] 
   if (section.oldPath === null) {
     return 'added'
   }
-  return section.oldPath === section.newPath ? 'edited' : 'renamed'
+  if (section.oldPath === section.newPath) {
+    return 'edited'
+  }
+  // Differing sides are a move only where the header says so. Bare pairs carry
+  // whatever paths the producer compared, which may be two directories.
+  return section.fromGitHeader ? 'renamed' : 'edited'
 }
 
 /** `--- a/<path>` / `+++ b/<path>`, where the absent side is `/dev/null` and a
