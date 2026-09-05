@@ -21,12 +21,14 @@ const FILE_FORMAT_SNAPSHOT_FILE = 'snapshot.json'
 const MAX_REMNANT_BYTES = 64 * 1024 * 1024
 const MAX_REMNANT_ROWS = 200_000
 const MAX_RESTORED_ITEMS = 20_000
+const FILE_FORMAT_IMPORT_VERSION = 1
 
 export type JournalFileFormatRemnant = {
   transcriptPath: string
   logPath: string | null
   snapshotPath: string | null
   totalBytes: number
+  sourceFingerprint: string
 }
 
 export type JournalFileFormatRemnantRead =
@@ -51,7 +53,10 @@ export async function findJournalFileFormatRemnant(
     transcriptPath,
     logPath: log?.path ?? null,
     snapshotPath: snapshot?.path ?? null,
-    totalBytes: (log?.bytes ?? 0) + (snapshot?.bytes ?? 0)
+    totalBytes: (log?.bytes ?? 0) + (snapshot?.bytes ?? 0),
+    sourceFingerprint:
+      `${FILE_FORMAT_IMPORT_VERSION}|log:${log?.fingerprint ?? 'missing'}` +
+      `|snapshot:${snapshot?.fingerprint ?? 'missing'}`
   }
 }
 
@@ -135,9 +140,16 @@ function hasRestorableState(state: JournalReducerState): boolean {
   )
 }
 
-async function fileSize(path: string): Promise<{ path: string; bytes: number } | null> {
+async function fileSize(
+  path: string
+): Promise<{ path: string; bytes: number; fingerprint: string } | null> {
   try {
-    return { path, bytes: (await stat(path)).size }
+    const stats = await stat(path, { bigint: true })
+    return {
+      path,
+      bytes: Number(stats.size),
+      fingerprint: `${stats.size}:${stats.mtimeNs}`
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return null

@@ -7,6 +7,10 @@
 // the sequence.
 
 import type { JournalEpochController } from './journal-epoch-controller'
+import {
+  journalFileImportWasAttempted,
+  recordJournalFileImportAttempt
+} from './journal-file-import-marker'
 import { replayJournal } from './journal-open'
 import type { JournalStoreHost } from './journal-store-collaborators'
 import { openJournalStoreState } from './journal-store-open'
@@ -42,6 +46,15 @@ export function restoreJournalStore(
     appendDisclosure: (identity, body, fence) =>
       host.journal().appendItem(identity, body, { fence }),
     replaceState: (state) => collaborators.epochController.replaceState(state),
+    importWasAttempted: (sourceFingerprint) =>
+      journalFileImportWasAttempted(host.database().db, host.identity.sessionId, sourceFingerprint),
+    recordImportAttempt: (sourceFingerprint) =>
+      recordJournalFileImportAttempt(
+        host.database().db,
+        host.identity.sessionId,
+        sourceFingerprint,
+        host.now()
+      ),
     sessionId: host.identity.sessionId,
     highestFence: () => host.state().highestFence,
     malformedRows: host.malformedRows,

@@ -4,7 +4,8 @@ import {
   journalFileFormatRemnantDisclosure,
   journalFileFormatRemnantNeedsRetry,
   journalFileFormatRestoredDisclosure,
-  readJournalFileFormatRemnant
+  readJournalFileFormatRemnant,
+  type JournalFileFormatRemnant
 } from './journal-file-format-remnant'
 import { FIRST_JOURNAL_SEQUENCE, type JournalLoad } from './journal-open'
 import type { JournalReducerState } from './journal-reducer'
@@ -43,6 +44,8 @@ export async function openJournalStoreState(input: {
   ) => Promise<unknown>
   /** Rolls a fresh epoch holding the complete restored state, in one transaction. */
   replaceState: (state: JournalReducerState) => Promise<unknown>
+  importWasAttempted: (sourceFingerprint: string) => boolean
+  recordImportAttempt: (sourceFingerprint: string) => void
   sessionId: string
   highestFence: () => number
   malformedRows: () => number
@@ -94,6 +97,8 @@ type FileFormatRemnantHandling = {
     fence: number
   ) => Promise<unknown>
   replaceState: (state: JournalReducerState) => Promise<unknown>
+  importWasAttempted: (sourceFingerprint: string) => boolean
+  recordImportAttempt: (sourceFingerprint: string) => void
   highestFence: () => number
   readOnly: () => boolean
 }
@@ -109,6 +114,9 @@ async function restoreFileFormatRemnant(input: FileFormatRemnantHandling): Promi
   if (!remnant) {
     return
   }
+  if (input.importWasAttempted(remnant.sourceFingerprint)) {
+    return
+  }
   const restored = await readJournalFileFormatRemnant(remnant, input.sessionId)
   if (restored.status === 'restored') {
     try {
@@ -117,14 +125,21 @@ async function restoreFileFormatRemnant(input: FileFormatRemnantHandling): Promi
       if (!(error instanceof JournalFileFormatStateInvalidError)) {
         throw error
       }
-      const disclosure = journalFileFormatRemnantDisclosure(remnant)
-      await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
+      await discloseFileFormatRemnantFailure(input, remnant)
       return
     }
     const disclosure = journalFileFormatRestoredDisclosure({ restored: restored.state.items.size })
     await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
     return
   }
+  await discloseFileFormatRemnantFailure(input, remnant)
+}
+
+async function discloseFileFormatRemnantFailure(
+  input: FileFormatRemnantHandling,
+  remnant: JournalFileFormatRemnant
+): Promise<void> {
   const disclosure = journalFileFormatRemnantDisclosure(remnant)
   await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
+  input.recordImportAttempt(remnant.sourceFingerprint)
 }

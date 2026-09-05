@@ -49,7 +49,7 @@ afterEach(async () => {
 })
 
 describe('journal database open', () => {
-  it('creates both tables and reads back every load-bearing pragma', () => {
+  it('creates every table and reads back every load-bearing pragma', () => {
     const opened = openJournalDatabase(dbPath)
     try {
       const tables = opened.db
@@ -58,6 +58,8 @@ describe('journal database open', () => {
         .map((entry) => (entry as { name: string }).name)
       expect(tables).toContain('journal_rows')
       expect(tables).toContain('journal_sessions')
+      expect(tables).toContain('journal_repairs')
+      expect(tables).toContain('journal_file_imports')
       expect(opened.db.pragma('journal_mode', { simple: true })).toBe('wal')
       expect(journalPragmaNumber(opened.db, 'synchronous')).toBe(2)
       expect(journalPragmaNumber(opened.db, 'busy_timeout')).toBe(JOURNAL_BUSY_TIMEOUT_MS)

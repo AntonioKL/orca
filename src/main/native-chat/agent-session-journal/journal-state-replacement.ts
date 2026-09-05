@@ -8,6 +8,7 @@ import type {
 import { isAdmissibleAgentJournalMessageBody } from '../../../shared/agent-session-journal-schemas'
 import type Database from '../../sqlite/sync-database'
 import { JOURNAL_FILE_FORMAT_REMNANT_DISCLOSURE_ITEM_ID } from './journal-file-format-remnant'
+import { clearJournalFileImportAttempt } from './journal-file-import-marker'
 import { clearJournalRepairMarker } from './journal-repair-marker'
 import {
   applyJournalRow,
@@ -54,6 +55,7 @@ export function replaceJournalEpochState(input: {
   try {
     deleteAllJournalRows(input.db)
     clearJournalRepairMarker(input.db, input.identity.sessionId)
+    clearJournalFileImportAttempt(input.db, input.identity.sessionId)
     for (const row of rows) {
       insertJournalRow(input.db, input.identity.sessionId, row)
     }

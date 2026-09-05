@@ -7,6 +7,8 @@ import {
   agentJournalSubmissionKey
 } from '../../../shared/agent-session-journal-item-key'
 import type { AgentSessionJournalIdentity } from '../../../shared/agent-session-journal-types'
+import Database from '../../sqlite/sync-database'
+import { journalDatabaseFile } from './journal-paths'
 import type { JournalRow } from './journal-row-schema'
 import type { openAgentSessionJournal } from './journal-store-factory'
 import { createTrackedJournalOpener } from './journal-store-test-open'
@@ -231,6 +233,39 @@ describe('all-or-nothing migration', () => {
     const restored = await open()
 
     expect(restored.snapshot().items.some((entry) => entry.body.kind === 'message')).toBe(true)
+    await restored.close()
+
+    const db = new Database(journalDatabaseFile(root), { readonly: true })
+    try {
+      expect(db.prepare('SELECT count(*) AS total FROM journal_file_imports').get()).toMatchObject({
+        total: 0
+      })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('does not rerecord an unchanged non-replayable remnant on every open', async () => {
+    await writeFile(join(root, 'log.jsonl'), `${JSON.stringify(epoch())}\nnot-json\n`, 'utf8')
+    const first = await open()
+    const firstCursor = first.cursor()
+    await first.close()
+
+    const second = await open()
+    expect(second.cursor()).toEqual(firstCursor)
+    await second.close()
+
+    const db = new Database(journalDatabaseFile(root), { readonly: true })
+    try {
+      expect(db.prepare('SELECT count(*) AS total FROM journal_rows').get()).toMatchObject({
+        total: 2
+      })
+      expect(db.prepare('SELECT count(*) AS total FROM journal_file_imports').get()).toMatchObject({
+        total: 1
+      })
+    } finally {
+      db.close()
+    }
   })
 
   it('does not import the prefix before a future-version row', async () => {
