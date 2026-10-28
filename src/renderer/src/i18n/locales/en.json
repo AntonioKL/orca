@@ -642,6 +642,20 @@
       "actionPermissions": {
         "sameAsAgent": "Same as {{agent}}"
       }
+    },
+    "general": {
+      "openInMenu": {
+        "keyword": {
+          "windsurf": "windsurf",
+          "devin": "devin",
+          "devinDesktop": "devin desktop"
+        }
+      }
+    },
+    "openInApp": {
+      "preset": {
+        "devinDesktop": "Devin Desktop"
+      }
     }
   },
   "menu": {
